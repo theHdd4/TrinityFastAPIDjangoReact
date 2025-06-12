@@ -377,7 +377,13 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect }) => {
                                 <p className="text-sm text-gray-400">Configure this atom for your application</p>
                               </div>
                             ) : (
-                              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 w-full">
+                              <div
+                                className={`grid gap-4 w-full ${
+                                  card.atoms.length === 1
+                                    ? 'grid-cols-1'
+                                    : 'grid-cols-1 md:grid-cols-2 lg:grid-cols-3'
+                                }`}
+                              >
                                 {card.atoms.map(atom => (
                                   <Card
                                     key={atom.id}
@@ -482,7 +488,13 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect }) => {
                   <p className="text-sm text-gray-400">Configure this atom for your application</p>
                 </div>
               ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 w-full">
+                <div
+                  className={`grid gap-4 w-full ${
+                    card.atoms.length === 1
+                      ? 'grid-cols-1'
+                      : 'grid-cols-1 md:grid-cols-2 lg:grid-cols-3'
+                  }`}
+                >
                   {card.atoms.map((atom) => (
                     <Card 
                       key={atom.id}
