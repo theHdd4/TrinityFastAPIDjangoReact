@@ -1,0 +1,26 @@
+# Django core
+Django>=4.2,<5.0
+djangorestframework
+django-cors-headers
+
+# Multi-tenancy, permissions & history
+django-tenants
+django-guardian
+django-simple-history
+
+# Celery & Redis
+celery>=5.2,<6.0
+redis
+
+# Databases
+psycopg2-binary   # PostgreSQL driver
+pymongo           # MongoDB driver
+
+# FastAPI for micro-services
+fastapi
+uvicorn[standard]
+
+# Environment
+python-dotenv
+gunicorn
+requests>=2.28.0
