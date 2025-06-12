@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { TEXT_API } from '@/lib/api';
 
 interface TextBoxEditorProps {
@@ -8,6 +8,17 @@ interface TextBoxEditorProps {
 const TextBoxEditor: React.FC<TextBoxEditorProps> = ({ textId }) => {
   const [value, setValue] = useState('');
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    fetch(`${TEXT_API}/text/${textId}`)
+      .then(res => (res.ok ? res.json() : null))
+      .then(data => {
+        if (data && data.spec?.content?.value) {
+          setValue(data.spec.content.value as string);
+        }
+      })
+      .catch(() => {});
+  }, [textId]);
 
   const saveText = async () => {
     setLoading(true);

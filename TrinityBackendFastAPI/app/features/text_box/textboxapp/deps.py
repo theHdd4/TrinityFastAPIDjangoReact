@@ -1,10 +1,12 @@
+import os
 from motor.motor_asyncio import AsyncIOMotorClient
 
-mongo_uri = "mongodb://admin_dev:pass_dev@10.2.1.65:9005"
-mongo_db = "text_saver"
+# Allow overriding the Mongo connection so the service works in Docker
+MONGO_URI = os.getenv("MONGO_URI", "mongodb://mongo:27017/trinity")
+MONGO_DB = os.getenv("MONGO_DB", "trinity")
 
-client = AsyncIOMotorClient(mongo_uri)
-db = client[mongo_db]
+client = AsyncIOMotorClient(MONGO_URI)
+db = client[MONGO_DB]
 
 async def get_texts():
     yield db["texts"]

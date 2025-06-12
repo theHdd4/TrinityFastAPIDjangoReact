@@ -59,15 +59,8 @@ const deriveWorkflowMolecules = (cards: LayoutCard[]): WorkflowMolecule[] => {
 const STORAGE_KEY = 'laboratory-layout-cards';
 
 const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect }) => {
-  const [layoutCards, setLayoutCards] = useState<LayoutCard[]>([
-    {
-      id: 'card-1',
-      atoms: [],
-      isExhibited: false,
-      moleculeId: undefined,
-      moleculeTitle: undefined
-    }
-  ]);
+  // start with an empty canvas; cards will be loaded from saved configuration
+  const [layoutCards, setLayoutCards] = useState<LayoutCard[]>([]);
   const [workflowMolecules, setWorkflowMolecules] = useState<WorkflowMolecule[]>([]);
   const [activeTab, setActiveTab] = useState<string>('');
   const [dragOver, setDragOver] = useState<string | null>(null);

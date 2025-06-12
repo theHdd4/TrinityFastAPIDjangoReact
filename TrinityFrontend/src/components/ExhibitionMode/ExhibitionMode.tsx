@@ -3,6 +3,7 @@ import React, { useEffect } from 'react';
 import { Presentation } from 'lucide-react';
 import Header from '@/components/Header';
 import { useExhibitionStore } from './store/exhibitionStore';
+import TextBoxDisplay from '@/components/AtomList/atoms/text-box/TextBoxDisplay';
 
 const ExhibitionMode = () => {
   const { exhibitedCards, cards, loadSavedConfiguration } = useExhibitionStore();
@@ -57,20 +58,14 @@ const ExhibitionMode = () => {
                     <p className="text-gray-500">No atoms in this card</p>
                   </div>
                 ) : (
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                  <div className="space-y-4">
                     {card.atoms.map((atom) => (
-                      <div 
-                        key={atom.id}
-                        className="p-4 border border-gray-200 bg-gray-50 rounded-lg"
-                      >
-                        <div className="flex items-center mb-3">
-                          <div className={`w-3 h-3 ${atom.color} rounded-full mr-2`}></div>
-                          <h4 className="font-semibold text-gray-900 text-sm">{atom.title}</h4>
-                        </div>
-                        <p className="text-xs text-gray-600 mb-2">{atom.category}</p>
-                        <p className="text-xs text-gray-500">
-                          Exhibited visualization of {atom.title}
-                        </p>
+                      <div key={atom.id} className="p-4 border border-gray-200 bg-gray-50 rounded-lg">
+                        {atom.atomId === 'text-box' ? (
+                          <TextBoxDisplay textId={atom.id} />
+                        ) : (
+                          <div className="text-sm text-gray-500">Unsupported atom</div>
+                        )}
                       </div>
                     ))}
                   </div>
