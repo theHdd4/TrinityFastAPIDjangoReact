@@ -28,8 +28,9 @@ docker-compose up --build
 ```
 
 This starts PostgreSQL, MongoDB, Redis, the Django admin API on `localhost:8000`
-and a FastAPI instance on `localhost:8001`. Once the containers finish
-installing dependencies the FastAPI text service is reachable at
+and a FastAPI instance on `localhost:8001`. CORS is enabled so the React
+frontend served from `localhost:8080` can call the API. Once the containers
+finish installing dependencies the text service is reachable at
 `http://localhost:8001/api/t`.
 
 ## 3. Start the frontend
