@@ -8,6 +8,7 @@ import { useExhibitionStore } from '../../ExhibitionMode/store/exhibitionStore';
 import { atoms as allAtoms } from '@/components/AtomList/data';
 import { molecules } from '@/components/MoleculeList/data';
 import { REGISTRY_API } from '@/lib/api';
+import TextBoxEditor from '@/components/AtomList/atoms/text-box/TextBoxEditor';
 
 interface DroppedAtom {
   id: string;
@@ -403,11 +404,15 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect }) => {
                                       </button>
                                     </div>
 
-                                    <div>
-                                      <h4 className="font-semibold text-gray-900 mb-1 text-sm">{atom.title}</h4>
-                                      <p className="text-xs text-gray-600 mb-2">{atom.category}</p>
-                                      <p className="text-xs text-gray-500">Configure this atom for your application</p>
-                                    </div>
+                                    {atom.atomId === 'text-box' ? (
+                                      <TextBoxEditor textId={atom.id} />
+                                    ) : (
+                                      <div>
+                                        <h4 className="font-semibold text-gray-900 mb-1 text-sm">{atom.title}</h4>
+                                        <p className="text-xs text-gray-600 mb-2">{atom.category}</p>
+                                        <p className="text-xs text-gray-500">Configure this atom for your application</p>
+                                      </div>
+                                    )}
                                   </Card>
                                 ))}
                               </div>
@@ -506,13 +511,17 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect }) => {
                       </div>
                       
                       {/* Atom Content */}
-                      <div>
-                        <h4 className="font-semibold text-gray-900 mb-1 text-sm">{atom.title}</h4>
-                        <p className="text-xs text-gray-600 mb-2">{atom.category}</p>
-                        <p className="text-xs text-gray-500">
-                          Configure this atom for your application
-                        </p>
-                      </div>
+                      {atom.atomId === 'text-box' ? (
+                        <TextBoxEditor textId={atom.id} />
+                      ) : (
+                        <div>
+                          <h4 className="font-semibold text-gray-900 mb-1 text-sm">{atom.title}</h4>
+                          <p className="text-xs text-gray-600 mb-2">{atom.category}</p>
+                          <p className="text-xs text-gray-500">
+                            Configure this atom for your application
+                          </p>
+                        </div>
+                      )}
                     </Card>
                   ))}
                 </div>
