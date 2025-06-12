@@ -1,0 +1,4 @@
+The Docker Compose file under `TrinityBackendDjango/docker-compose.yml` builds the FastAPI container using the same Dockerfile as Django. The container mounts the FastAPI source located in `../TrinityBackendFastAPI` into `/code/TrinityBackendFastAPI` inside the image.
+
+A helper file `apps/fastapi_app.py` inside the Django project adjusts `sys.path` so Python can locate the FastAPI package. Uvicorn then launches with `uvicorn apps.fastapi_app:app`, importing `app` from the FastAPI package (now available through the mount) and serving it on port 8001.
+
