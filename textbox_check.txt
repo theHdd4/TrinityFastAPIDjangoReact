@@ -1,0 +1,7 @@
+To verify that text box edits are stored in MongoDB:
+1. Start the backend with `docker-compose up` from the `TrinityBackendDjango` directory.
+2. Add a Text Box in Laboratory Mode, enter some text and click **Save Text**.
+3. Exec into the Mongo container in another terminal:
+   `docker-compose exec mongo mongosh trinity`
+4. Run `db.texts.find({ textId: '<your_id>' }).pretty()` replacing `<your_id>` with the atom id.
+5. Confirm the `spec.content.value` field reflects your latest saved text.

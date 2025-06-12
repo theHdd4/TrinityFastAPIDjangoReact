@@ -8,6 +8,7 @@ interface TextBoxEditorProps {
 const TextBoxEditor: React.FC<TextBoxEditorProps> = ({ textId }) => {
   const [value, setValue] = useState('');
   const [loading, setLoading] = useState(false);
+  const [exists, setExists] = useState(false);
 
   useEffect(() => {
     fetch(`${TEXT_API}/text/${textId}`)
@@ -15,6 +16,7 @@ const TextBoxEditor: React.FC<TextBoxEditorProps> = ({ textId }) => {
       .then(data => {
         if (data && data.spec?.content?.value) {
           setValue(data.spec.content.value as string);
+          setExists(true);
         }
       })
       .catch(() => {});
@@ -32,11 +34,14 @@ const TextBoxEditor: React.FC<TextBoxEditorProps> = ({ textId }) => {
           content: { format: 'plain', value },
         },
       };
-      await fetch(`${TEXT_API}/text`, {
-        method: 'POST',
+      const url = exists ? `${TEXT_API}/text/${textId}` : `${TEXT_API}/text`;
+      const method = exists ? 'PUT' : 'POST';
+      await fetch(url, {
+        method,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
+      setExists(true);
     } finally {
       setLoading(false);
     }

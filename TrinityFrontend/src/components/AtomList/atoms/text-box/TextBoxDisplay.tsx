@@ -19,7 +19,7 @@ const TextBoxDisplay: React.FC<TextBoxDisplayProps> = ({ textId }) => {
       .catch(() => {});
   }, [textId]);
 
-  return <div className="whitespace-pre-wrap">{content}</div>;
+  return <div className="whitespace-pre-wrap w-full">{content}</div>;
 };
 
 export default TextBoxDisplay;
