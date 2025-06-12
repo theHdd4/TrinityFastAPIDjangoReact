@@ -17,6 +17,8 @@ Docker and Node.js must be installed locally. The Python dependencies listed in
 `TrinityBackendDjango/requirements.txt` (including pandas, motor and
 python-multipart) will be installed inside the containers during the build
 step.
+Set `SIMPLE_TENANT_CREATION=true` in `.env` if your environment cannot run
+database migrations for new tenants.
 
 ## 2. Start the backend containers
 

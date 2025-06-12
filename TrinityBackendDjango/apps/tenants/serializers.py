@@ -64,43 +64,47 @@ class TenantSerializer(serializers.ModelSerializer):
                 if alias != primary_domain and alias != domain:
                     Domain.objects.get_or_create(domain=alias, tenant=tenant, defaults={"is_primary": False})
 
-        try:
-            connection.set_schema_to_public()
-        except Exception:
-            pass
+        # Allow skipping heavy migration logic when running in simple mode
+        simple_mode = os.getenv("SIMPLE_TENANT_CREATION", "false").lower() == "true"
 
-        print("→ Applying tenant migrations for", tenant.schema_name)
-        call_command(
-            "migrate_schemas",
-            "--schema",
-            tenant.schema_name,
-            interactive=False,
-            verbosity=1,
-        )
+        if not simple_mode:
+            try:
+                connection.set_schema_to_public()
+            except Exception:
+                pass
 
-        print("→ Seeding default data")
-        with schema_context(tenant.schema_name):
-            default_apps = [
-                ("Marketing Mix Modeling", "marketing-mix", "Preset: Pre-process + Build"),
-                ("Forecasting Analysis", "forecasting", "Preset: Pre-process + Explore"),
-                ("Promo Effectiveness", "promo-effectiveness", "Preset: Explore + Build"),
-                ("Blank App", "blank", "Start from an empty canvas"),
-            ]
-            for name, slug, desc in default_apps:
-                App.objects.get_or_create(slug=slug, defaults={"name": name, "description": desc})
+            print("→ Applying tenant migrations for", tenant.schema_name)
+            call_command(
+                "migrate_schemas",
+                "--schema",
+                tenant.schema_name,
+                interactive=False,
+                verbosity=1,
+            )
 
-            if seats is not None or project_cap is not None:
-                company = Company.objects.create(tenant=tenant)
-                SubscriptionPlan.objects.create(
-                    company=company,
-                    plan_name="Default",
-                    seats_allowed=seats or 0,
-                    project_cap=project_cap or 0,
-                    renewal_date=timezone.now().date(),
-                )
+            print("→ Seeding default data")
+            with schema_context(tenant.schema_name):
+                default_apps = [
+                    ("Marketing Mix Modeling", "marketing-mix", "Preset: Pre-process + Build"),
+                    ("Forecasting Analysis", "forecasting", "Preset: Pre-process + Explore"),
+                    ("Promo Effectiveness", "promo-effectiveness", "Preset: Explore + Build"),
+                    ("Blank App", "blank", "Start from an empty canvas"),
+                ]
+                for name, slug, desc in default_apps:
+                    App.objects.get_or_create(slug=slug, defaults={"name": name, "description": desc})
 
-            if apps_allowed:
-                TenantConfig.objects.create(tenant=tenant, key="apps_allowed", value=apps_allowed)
+                if seats is not None or project_cap is not None:
+                    company = Company.objects.create(tenant=tenant)
+                    SubscriptionPlan.objects.create(
+                        company=company,
+                        plan_name="Default",
+                        seats_allowed=seats or 0,
+                        project_cap=project_cap or 0,
+                        renewal_date=timezone.now().date(),
+                    )
+
+                if apps_allowed:
+                    TenantConfig.objects.create(tenant=tenant, key="apps_allowed", value=apps_allowed)
 
         print("Tenant creation complete")
         return tenant
