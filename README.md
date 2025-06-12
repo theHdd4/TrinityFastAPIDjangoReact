@@ -24,14 +24,6 @@ docker-compose up --build
 ```
 
 This launches PostgreSQL, MongoDB, Redis, the Django admin API and a FastAPI instance on port `8001`.
-
-To start the feature services (including the Text Box API) run in a separate terminal:
-
-```bash
-cd TrinityBackendFastAPI
-docker-compose -f docker-compose.dev.yml up --build
-```
-
 The text service will be reachable at `http://localhost:8001/api/t`.
 
 ## 3. Start the frontend

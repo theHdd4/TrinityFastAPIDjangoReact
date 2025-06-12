@@ -71,6 +71,7 @@ services:
     command: uvicorn apps.fastapi_app:app --host 0.0.0.0 --port 8001
     volumes:
       - .:/code
+      - ../TrinityBackendFastAPI:/code/TrinityBackendFastAPI
     env_file:
       - .env
     ports:
