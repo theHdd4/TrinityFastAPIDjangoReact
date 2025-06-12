@@ -20,3 +20,4 @@ class TextIn(BaseModel):
     status: Optional[str] = "active"  
     createdAt: Optional[datetime] = None
     updatedAt: Optional[datetime] = None
+

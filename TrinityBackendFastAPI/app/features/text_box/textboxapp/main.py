@@ -7,3 +7,4 @@ app.include_router(api_router, prefix="/api")
 
 # Include the text router under /api/text
 app.include_router(text_router, prefix="/api/t")
+

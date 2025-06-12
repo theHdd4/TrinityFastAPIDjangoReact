@@ -62,3 +62,4 @@ async def delete_text(
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Not found")
     return {"message": "Data deleted successfully"}
+
