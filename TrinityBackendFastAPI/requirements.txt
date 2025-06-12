@@ -3,3 +3,4 @@ uvicorn
 pymongo
 redis
 boto3
+pandas
