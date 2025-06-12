@@ -48,9 +48,9 @@ const TextBoxEditor: React.FC<TextBoxEditorProps> = ({ textId }) => {
   };
 
   return (
-    <div className="space-y-2">
+    <div className="space-y-2 w-full">
       <textarea
-        className="w-full border rounded p-2 text-sm"
+        className="w-full border rounded p-2 text-sm block"
         rows={4}
         value={value}
         onChange={e => setValue(e.target.value)}
