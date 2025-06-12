@@ -369,7 +369,7 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect }) => {
 
                           <div className="flex-1 flex flex-col p-4">
                             {card.atoms.length === 0 ? (
-                              <div className="flex-1 flex flex-col items-center justify-center text-center border-2 border-dashed border-gray-300 rounded-lg min-h-[140px] mx-4 mb-4">
+                              <div className="flex-1 flex flex-col items-center justify-center text-center border-2 border-dashed border-gray-300 rounded-lg min-h-[140px] mb-4">
                                 <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mb-4">
                                   <Grid3X3 className="w-8 h-8 text-gray-400" />
                                 </div>
@@ -377,7 +377,7 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect }) => {
                                 <p className="text-sm text-gray-400">Configure this atom for your application</p>
                               </div>
                             ) : (
-                              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 w-full">
                                 {card.atoms.map(atom => (
                                   <Card
                                     key={atom.id}
@@ -474,7 +474,7 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect }) => {
             {/* Card Content */}
             <div className="flex-1 flex flex-col p-4">
               {card.atoms.length === 0 ? (
-                <div className="flex-1 flex flex-col items-center justify-center text-center border-2 border-dashed border-gray-300 rounded-lg min-h-[140px] mx-4 mb-4">
+                <div className="flex-1 flex flex-col items-center justify-center text-center border-2 border-dashed border-gray-300 rounded-lg min-h-[140px] mb-4">
                   <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mb-4">
                     <Grid3X3 className="w-8 h-8 text-gray-400" />
                   </div>
@@ -482,7 +482,7 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect }) => {
                   <p className="text-sm text-gray-400">Configure this atom for your application</p>
                 </div>
               ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 w-full">
                   {card.atoms.map((atom) => (
                     <Card 
                       key={atom.id}
