@@ -14,8 +14,8 @@ Follow the steps below to run all services together.
 2. Copy `TrinityFrontend/.env.example` to `TrinityFrontend/.env`.
 
 Docker and Node.js must be installed locally. The Python dependencies listed in
-`TrinityBackendDjango/requirements.txt` (including pandas) will be installed
-inside the containers during the build step.
+`TrinityBackendDjango/requirements.txt` (including pandas and motor) will be
+ installed inside the containers during the build step.
 
 ## 2. Start the backend containers
 
@@ -26,9 +26,10 @@ the Docker image and launches all backend services:
 docker-compose up --build
 ```
 
-This starts PostgreSQL, MongoDB, Redis, the Django admin API and a FastAPI
-instance on port `8001`. Once the containers finish installing dependencies the
-FastAPI text service is reachable at `http://localhost:8001/api/t`.
+This starts PostgreSQL, MongoDB, Redis, the Django admin API on `localhost:8000`
+and a FastAPI instance on `localhost:8001`. Once the containers finish
+installing dependencies the FastAPI text service is reachable at
+`http://localhost:8001/api/t`.
 
 ## 3. Start the frontend
 
@@ -55,6 +56,11 @@ which stores it in MongoDB.
    Replace `<ID>` with the `textId` you used. You should receive the stored
    document from MongoDB confirming Django and FastAPI are working together.
 
-2. The FastAPI container also relies on the MinIO client. The required Python package is installed from `TrinityBackendDjango/requirements.txt`.
+2. The FastAPI container also relies on the MinIO client. The required Python
+   packages, including `motor` for MongoDB access, are installed from
+   `TrinityBackendDjango/requirements.txt`.
+
+With these steps the Django orchestration layer, FastAPI features and the
+React frontend are fully connected.
 
 
