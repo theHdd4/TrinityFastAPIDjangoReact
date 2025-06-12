@@ -55,13 +55,15 @@ const TextBoxEditor: React.FC<TextBoxEditorProps> = ({ textId }) => {
         value={value}
         onChange={e => setValue(e.target.value)}
       />
-      <button
-        onClick={saveText}
-        disabled={loading}
-        className="px-3 py-1 bg-blue-600 text-white rounded text-sm disabled:opacity-50"
-      >
-        Save Text
-      </button>
+      <div className="flex justify-end">
+        <button
+          onClick={saveText}
+          disabled={loading}
+          className="px-3 py-1 bg-blue-600 text-white rounded text-sm disabled:opacity-50"
+        >
+          Save Text
+        </button>
+      </div>
     </div>
   );
 };
