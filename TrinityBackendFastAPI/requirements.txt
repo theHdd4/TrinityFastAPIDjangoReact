@@ -5,3 +5,4 @@ redis
 boto3
 pandas
 motor
+python-multipart

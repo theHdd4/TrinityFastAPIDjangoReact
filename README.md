@@ -14,8 +14,9 @@ Follow the steps below to run all services together.
 2. Copy `TrinityFrontend/.env.example` to `TrinityFrontend/.env`.
 
 Docker and Node.js must be installed locally. The Python dependencies listed in
-`TrinityBackendDjango/requirements.txt` (including pandas and motor) will be
- installed inside the containers during the build step.
+`TrinityBackendDjango/requirements.txt` (including pandas, motor and
+python-multipart) will be installed inside the containers during the build
+step.
 
 ## 2. Start the backend containers
 
@@ -57,8 +58,8 @@ which stores it in MongoDB.
    document from MongoDB confirming Django and FastAPI are working together.
 
 2. The FastAPI container also relies on the MinIO client. The required Python
-   packages, including `motor` for MongoDB access, are installed from
-   `TrinityBackendDjango/requirements.txt`.
+   packages, including `motor` for MongoDB access and `python-multipart` for
+   form parsing, are installed from `TrinityBackendDjango/requirements.txt`.
 
 With these steps the Django orchestration layer, FastAPI features and the
 React frontend are fully connected.
