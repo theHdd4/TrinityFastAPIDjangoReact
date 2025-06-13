@@ -100,8 +100,8 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
                   <h4 className="font-medium text-gray-900 mb-3">{selectedAtomId ? 'Atom Identity' : 'Card Settings'}</h4>
                   <div className="space-y-3">
                     <div>
-                      <label className="text-sm text-gray-600 block mb-1">{selectedAtomId ? 'Atom Name' : 'Pipeline Name'}</label>
-                      <Input defaultValue="Untitled Pipeline" className="text-sm" />
+                    <label className="text-sm text-gray-600 block mb-1">{selectedAtomId ? 'Atom Name' : 'Card Name'}</label>
+                    <Input defaultValue="Untitled Card" className="text-sm" />
                     </div>
                     <div>
                       <label className="text-sm text-gray-600 block mb-1">Description</label>
