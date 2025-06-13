@@ -319,7 +319,12 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
     }
   };
 
-  const handleCardClick = (cardId: string, exhibited: boolean) => {
+  const handleCardClick = (
+    e: React.MouseEvent,
+    cardId: string,
+    exhibited: boolean
+  ) => {
+    e.stopPropagation();
     if (onCardSelect) {
       onCardSelect(cardId, exhibited);
     }
@@ -417,10 +422,11 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
                               <Switch
                                 checked={card.isExhibited || false}
                                 onCheckedChange={checked => handleExhibitionToggle(card.id, checked)}
+                                onClick={e => e.stopPropagation()}
                                 className="data-[state=checked]:bg-[#458EE2]"
                               />
                               <button
-                                onClick={() => deleteCard(card.id)}
+                                onClick={e => { e.stopPropagation(); deleteCard(card.id); }}
                                 className="p-1 hover:bg-gray-100 rounded"
                               >
                                 <Trash2 className="w-4 h-4 text-gray-400" />
@@ -512,7 +518,7 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
                 ? 'border-[#458EE2] bg-gradient-to-br from-blue-50 to-blue-100 shadow-lg'
                 : 'border-gray-200 shadow-sm hover:shadow-md'
             }`}
-            onClick={() => handleCardClick(card.id, card.isExhibited)}
+            onClick={(e) => handleCardClick(e, card.id, card.isExhibited)}
             onDragOver={(e) => handleDragOver(e, card.id)}
             onDragLeave={handleDragLeave}
             onDrop={(e) => handleDrop(e, card.id)}
@@ -534,10 +540,11 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
                 <Switch
                   checked={card.isExhibited || false}
                   onCheckedChange={(checked) => handleExhibitionToggle(card.id, checked)}
+                  onClick={e => e.stopPropagation()}
                   className="data-[state=checked]:bg-[#458EE2]"
                 />
                 <button
-                  onClick={() => deleteCard(card.id)}
+                  onClick={e => { e.stopPropagation(); deleteCard(card.id); }}
                   className="p-1 hover:bg-gray-100 rounded"
                 >
                   <Trash2 className="w-4 h-4 text-gray-400" />
