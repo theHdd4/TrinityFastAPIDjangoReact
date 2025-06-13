@@ -9,22 +9,13 @@ import { atoms as allAtoms } from '@/components/AtomList/data';
 import { molecules } from '@/components/MoleculeList/data';
 import { REGISTRY_API, TEXT_API, CARD_API } from '@/lib/api';
 import TextBoxEditor from '@/components/AtomList/atoms/text-box/TextBoxEditor';
+import {
+  useLaboratoryStore,
+  LayoutCard,
+  DroppedAtom,
+  DEFAULT_TEXTBOX_SETTINGS,
+} from '../store/laboratoryStore';
 
-interface DroppedAtom {
-  id: string;
-  atomId: string;
-  title: string;
-  category: string;
-  color: string;
-}
-
-interface LayoutCard {
-  id: string;
-  atoms: DroppedAtom[];
-  isExhibited: boolean;
-  moleculeId?: string;
-  moleculeTitle?: string;
-}
 
 interface WorkflowMolecule {
   moleculeId: string;
@@ -61,8 +52,7 @@ const deriveWorkflowMolecules = (cards: LayoutCard[]): WorkflowMolecule[] => {
 const STORAGE_KEY = 'laboratory-layout-cards';
 
 const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, selectedCardId }) => {
-  // start with an empty canvas; cards will be loaded from saved configuration
-  const [layoutCards, setLayoutCards] = useState<LayoutCard[]>([]);
+  const { cards: layoutCards, setCards: setLayoutCards, updateAtomSettings } = useLaboratoryStore();
   const [workflowMolecules, setWorkflowMolecules] = useState<WorkflowMolecule[]>([]);
   const [activeTab, setActiveTab] = useState<string>('');
   const [dragOver, setDragOver] = useState<string | null>(null);
@@ -235,7 +225,8 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
         atomId: atom.id,
         title: info?.title || atom.title || atom.id,
         category: info?.category || atom.category || 'Atom',
-        color: info?.color || atom.color || 'bg-gray-400'
+        color: info?.color || atom.color || 'bg-gray-400',
+        settings: atom.id === 'text-box' ? { ...DEFAULT_TEXTBOX_SETTINGS } : undefined,
       };
       
       setLayoutCards(prev => 

@@ -8,8 +8,16 @@ class Content(BaseModel):
 
 class Spec(BaseModel):
     content: Content
-    defaultStyle: Optional[dict] = None
-    options: Optional[dict] = None
+    allow_variables: Optional[bool] = False
+    max_chars: Optional[int] = 0
+    text_align: Optional[Literal["left", "center", "right", "justify"]] = "left"
+    font_size: Optional[int] = 14
+    font_family: Optional[str] = "Inter"
+    text_color: Optional[str] = "#000000"
+    headline: Optional[str] = None
+    slide_layout: Optional[Literal["full", "sidebar", "note-callout"]] = "full"
+    transition_effect: Optional[Literal["none", "fade", "typewriter"]] = "none"
+    lock_content: Optional[bool] = False
 
 class TextIn(BaseModel):
     textId: str = Field(..., pattern=r"^[a-z0-9-_]+$")
