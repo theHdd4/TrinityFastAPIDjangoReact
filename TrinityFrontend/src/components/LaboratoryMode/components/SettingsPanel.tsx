@@ -77,11 +77,30 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
             
             <div className="px-4">
               <TabsContent value="settings" className="space-y-4">
+                {selectedAtomId && (
+                  <Card className="p-4">
+                    <h4 className="font-medium text-gray-900 mb-3">Atom Settings</h4>
+                    <div className="space-y-3">
+                      <div>
+                        <label className="text-sm text-gray-600 block mb-1">Atom Name</label>
+                        <Input defaultValue="Data Import" className="text-sm" />
+                      </div>
+                      <div>
+                        <label className="text-sm text-gray-600 block mb-1">Parameters</label>
+                        <div className="space-y-2">
+                          <Input placeholder="file_path" className="text-sm" />
+                          <Input placeholder="delimiter" className="text-sm" />
+                        </div>
+                      </div>
+                    </div>
+                  </Card>
+                )}
+
                 <Card className="p-4">
-                  <h4 className="font-medium text-gray-900 mb-3">{selectedAtomId ? 'Atom Settings' : 'Card Settings'}</h4>
+                  <h4 className="font-medium text-gray-900 mb-3">{selectedAtomId ? 'Atom Identity' : 'Card Settings'}</h4>
                   <div className="space-y-3">
                     <div>
-                      <label className="text-sm text-gray-600 block mb-1">Pipeline Name</label>
+                      <label className="text-sm text-gray-600 block mb-1">{selectedAtomId ? 'Atom Name' : 'Pipeline Name'}</label>
                       <Input defaultValue="Untitled Pipeline" className="text-sm" />
                     </div>
                     <div>
@@ -99,24 +118,6 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
                   </div>
                 </Card>
                 
-                {selectedAtomId && (
-                  <Card className="p-4">
-                  <h4 className="font-medium text-gray-900 mb-3">Atom Parameters</h4>
-                    <div className="space-y-3">
-                      <div>
-                        <label className="text-sm text-gray-600 block mb-1">Atom Name</label>
-                        <Input defaultValue="Data Import" className="text-sm" />
-                      </div>
-                      <div>
-                        <label className="text-sm text-gray-600 block mb-1">Parameters</label>
-                        <div className="space-y-2">
-                          <Input placeholder="file_path" className="text-sm" />
-                          <Input placeholder="delimiter" className="text-sm" />
-                        </div>
-                      </div>
-                    </div>
-                  </Card>
-                )}
               </TabsContent>
               
               <TabsContent value="visual" className="space-y-4">
