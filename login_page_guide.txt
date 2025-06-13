@@ -1,0 +1,4 @@
+1. Place your animated SVG file named `background.svg` in the `TrinityFrontend/public` directory. Files placed here are served from the web root, so the image will be available at `/background.svg`.
+2. Start the frontend dev server with `npm run dev` inside `TrinityFrontend`.
+3. Visit the login page. The left half of the screen now loads the SVG automatically via the `<img src="/background.svg">` element.
+4. To update the animation later, replace `background.svg` with your new file in `TrinityFrontend/public` and refresh the browser.
