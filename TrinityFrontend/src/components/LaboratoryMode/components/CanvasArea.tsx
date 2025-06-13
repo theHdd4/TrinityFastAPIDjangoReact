@@ -7,7 +7,7 @@ import { Plus, Grid3X3, Trash2, Eye } from 'lucide-react';
 import { useExhibitionStore } from '../../ExhibitionMode/store/exhibitionStore';
 import { atoms as allAtoms } from '@/components/AtomList/data';
 import { molecules } from '@/components/MoleculeList/data';
-import { REGISTRY_API, TEXT_API } from '@/lib/api';
+import { REGISTRY_API, TEXT_API, CARD_API } from '@/lib/api';
 import TextBoxEditor from '@/components/AtomList/atoms/text-box/TextBoxEditor';
 
 interface DroppedAtom {
@@ -287,6 +287,11 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect }) => {
           fetch(`${TEXT_API}/text/${atom.id}`, { method: 'DELETE' }).catch(() => {});
         }
       });
+      fetch(`${CARD_API}/cards/archive`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(card)
+      }).catch(() => {});
     }
 
     const current = localStorage.getItem('current-project');

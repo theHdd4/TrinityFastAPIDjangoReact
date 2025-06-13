@@ -10,3 +10,6 @@ db = client[MONGO_DB]
 
 async def get_texts():
     yield db["texts"]
+
+async def get_deleted_cards():
+    yield db["deleted_cards"]
