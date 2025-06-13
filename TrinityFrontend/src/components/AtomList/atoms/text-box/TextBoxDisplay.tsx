@@ -20,6 +20,9 @@ const TextBoxDisplay: React.FC<TextBoxDisplayProps> = ({ textId }) => {
             fontSize: data.spec.font_size,
             fontFamily: data.spec.font_family,
             color: data.spec.text_color,
+            fontWeight: data.spec.bold ? 'bold' : 'normal',
+            fontStyle: data.spec.italics ? 'italic' : 'normal',
+            textDecoration: data.spec.underline ? 'underline' : 'none',
           });
         }
       })

@@ -1,5 +1,5 @@
 
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -23,11 +23,22 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
   selectedCardId,
   cardExhibited,
 }) => {
+  const [tab, setTab] = useState('settings');
   const atom = useLaboratoryStore(state =>
     selectedAtomId ? state.getAtom(selectedAtomId) : undefined
   );
   const updateSettings = useLaboratoryStore(state => state.updateAtomSettings);
   const settings: TextBoxSettings = atom?.settings || { ...DEFAULT_TEXTBOX_SETTINGS };
+
+  useEffect(() => {
+    if (!cardExhibited && tab === 'exhibition') {
+      setTab('settings');
+    }
+  }, [cardExhibited]);
+
+  useEffect(() => {
+    setTab('settings');
+  }, [selectedAtomId, selectedCardId]);
   return (
     <div className={`bg-white border-l border-gray-200 transition-all duration-300 ${
       isCollapsed ? 'w-12' : 'w-80'
@@ -55,12 +66,12 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
       </div>
 
       {!isCollapsed && (
-        <div className="flex-1 overflow-y-auto">
+        <div className="flex-1 overflow-y-auto scrollbar-thin scrollbar-thumb-gray-300">
           {!selectedAtomId && !selectedCardId ? (
             <div className="p-4 text-gray-600 text-sm">Please select a Card/Atom</div>
           ) : (
           <> 
-          <Tabs defaultValue="settings" className="w-full">
+          <Tabs value={tab} onValueChange={setTab} className="w-full">
             <TabsList className="grid w-full grid-cols-3 mx-4 my-4">
               <TabsTrigger value="settings" className="text-xs">
                 <Settings className="w-3 h-3 mr-1" />
@@ -179,11 +190,16 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
                     </div>
                     <div>
                       <label className="text-sm text-gray-600 block mb-1">Font Family</label>
-                      <Input
+                      <select
                         value={settings.font_family}
                         onChange={e => updateSettings(selectedAtomId, { font_family: e.target.value })}
-                        className="text-sm"
-                      />
+                        className="w-full border rounded p-1 text-sm"
+                      >
+                        <option value="Inter">Inter</option>
+                        <option value="Arial">Arial</option>
+                        <option value="Tahoma">Tahoma</option>
+                        <option value="Calibri">Calibri</option>
+                      </select>
                     </div>
                     <div>
                       <label className="text-sm text-gray-600 block mb-1">Text Color</label>
@@ -192,6 +208,26 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
                         value={settings.text_color}
                         onChange={e => updateSettings(selectedAtomId, { text_color: e.target.value })}
                         className="text-sm h-8"
+                      />
+                    </div>
+                    <div className="flex items-center space-x-3">
+                      <label className="text-sm text-gray-600">Bold</label>
+                      <input
+                        type="checkbox"
+                        checked={settings.bold}
+                        onChange={e => updateSettings(selectedAtomId, { bold: e.target.checked })}
+                      />
+                      <label className="text-sm text-gray-600">Italics</label>
+                      <input
+                        type="checkbox"
+                        checked={settings.italics}
+                        onChange={e => updateSettings(selectedAtomId, { italics: e.target.checked })}
+                      />
+                      <label className="text-sm text-gray-600">Underline</label>
+                      <input
+                        type="checkbox"
+                        checked={settings.underline}
+                        onChange={e => updateSettings(selectedAtomId, { underline: e.target.checked })}
                       />
                     </div>
                   </Card>

@@ -9,11 +9,14 @@ class Content(BaseModel):
 class Spec(BaseModel):
     content: Content
     allow_variables: Optional[bool] = False
-    max_chars: Optional[int] = 0
+    max_chars: Optional[int] = 100
     text_align: Optional[Literal["left", "center", "right", "justify"]] = "left"
     font_size: Optional[int] = 14
     font_family: Optional[str] = "Inter"
     text_color: Optional[str] = "#000000"
+    bold: Optional[bool] = False
+    italics: Optional[bool] = False
+    underline: Optional[bool] = False
     headline: Optional[str] = None
     slide_layout: Optional[Literal["full", "sidebar", "note-callout"]] = "full"
     transition_effect: Optional[Literal["none", "fade", "typewriter"]] = "none"

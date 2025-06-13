@@ -10,6 +10,9 @@ export interface TextBoxSettings {
   font_size: number;
   font_family: string;
   text_color: string;
+  bold: boolean;
+  italics: boolean;
+  underline: boolean;
   headline: string;
   slide_layout: 'full' | 'sidebar' | 'note-callout';
   transition_effect: 'none' | 'fade' | 'typewriter';
@@ -20,11 +23,14 @@ export const DEFAULT_TEXTBOX_SETTINGS: TextBoxSettings = {
   format: 'plain',
   content: '',
   allow_variables: false,
-  max_chars: 0,
+  max_chars: 100,
   text_align: 'left',
   font_size: 14,
   font_family: 'Inter',
   text_color: '#000000',
+  bold: false,
+  italics: false,
+  underline: false,
   headline: '',
   slide_layout: 'full',
   transition_effect: 'none',
