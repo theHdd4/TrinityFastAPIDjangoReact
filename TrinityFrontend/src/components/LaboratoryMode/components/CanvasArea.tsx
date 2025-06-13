@@ -230,9 +230,9 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
         settings: atom.id === 'text-box' ? { ...DEFAULT_TEXTBOX_SETTINGS } : undefined,
       };
       
-      setLayoutCards(prev => 
-        prev.map(card => 
-          card.id === cardId 
+      setLayoutCards(
+        layoutCards.map(card =>
+          card.id === cardId
             ? { ...card, atoms: [...card.atoms, newAtom] }
             : card
         )
@@ -249,12 +249,12 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
       moleculeId,
       moleculeTitle: info?.title
     };
-    setLayoutCards(prev => [...prev, newCard]);
+    setLayoutCards([...layoutCards, newCard]);
   };
 
   const removeAtom = (cardId: string, atomId: string) => {
-    setLayoutCards(prev =>
-      prev.map(card =>
+    setLayoutCards(
+      layoutCards.map(card =>
         card.id === cardId
           ? { ...card, atoms: card.atoms.filter(atom => atom.id !== atomId) }
           : card
@@ -323,25 +323,23 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
   };
 
   const handleExhibitionToggle = (cardId: string, isExhibited: boolean) => {
-    setLayoutCards(prev => {
-      const updated = prev.map(card =>
+    const updated = layoutCards.map(card =>
         card.id === cardId ? { ...card, isExhibited } : card
-      );
+    );
 
-      // persist updated layout immediately
-      localStorage.setItem(STORAGE_KEY, safeStringify(updated));
+    // persist updated layout immediately
+    localStorage.setItem(STORAGE_KEY, safeStringify(updated));
 
-      // persist exhibition configuration for direct use in Exhibition mode
-      const exhibitedCards = updated.filter(c => c.isExhibited);
-      const labConfig = {
-        cards: updated,
-        exhibitedCards,
-        timestamp: new Date().toISOString(),
-      };
-      localStorage.setItem('laboratory-config', safeStringify(labConfig));
+    // persist exhibition configuration for direct use in Exhibition mode
+    const exhibitedCards = updated.filter(c => c.isExhibited);
+    const labConfig = {
+      cards: updated,
+      exhibitedCards,
+      timestamp: new Date().toISOString(),
+    };
+    localStorage.setItem('laboratory-config', safeStringify(labConfig));
 
-      return updated;
-    });
+    setLayoutCards(updated);
 
     // keep exhibition store in sync
     updateCard(cardId, { isExhibited });
