@@ -1,4 +1,4 @@
 1. Place your login background video named `background.mp4` inside the `TrinityFrontend/public` directory. Files in this folder are served from the web root, so the video will be available at `/background.mp4`.
 2. Start the frontend dev server with `npm run dev` inside `TrinityFrontend`.
-3. Visit the login page. The left half of the page now plays the video using a `<video>` element referencing `/background.mp4`.
+3. Visit the login page. The video now covers the entire screen as the background while the login form is centered on top. It uses a `<video>` element referencing `/background.mp4`.
 4. When you want to change the animation, replace `background.mp4` with a new MP4 in the same directory and refresh the browser.
