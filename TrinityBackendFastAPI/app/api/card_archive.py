@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from motor.motor_asyncio import AsyncIOMotorCollection
 from datetime import datetime
 
-from app.features.text_box.textboxapp.deps import get_deleted_cards
+from app.features.text_box.deps import get_deleted_cards
 
 router = APIRouter()
 

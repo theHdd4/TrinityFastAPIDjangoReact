@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 from app.features.feature_overview.endpoint import router as feature_overview_router
-from app.features.text_box.textboxapp.routes import router as textbox_router
+from app.features.text_box.routes import router as textbox_router
 from .card_archive import router as card_archive_router
 
 api_router = APIRouter()
