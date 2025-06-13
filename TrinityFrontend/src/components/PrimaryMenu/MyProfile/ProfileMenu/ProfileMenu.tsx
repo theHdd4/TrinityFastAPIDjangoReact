@@ -34,10 +34,10 @@ const ProfileMenu: React.FC = () => {
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-56">
         <UserInfo user={user} profile={profile} />
+        <ProfileInformationItem />
         <UserManagementItem onSelect={() => navigate('/users')} />
         <ClientManagementItem onSelect={() => navigate('/clients')} />
         <BillingPlansItem />
-        <ProfileInformationItem />
         <DropdownMenuSeparator />
         <DropdownMenuItem onSelect={handleLogout}>Sign Out</DropdownMenuItem>
       </DropdownMenuContent>
