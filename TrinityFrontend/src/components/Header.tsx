@@ -126,9 +126,21 @@ const Header = () => {
           <Bell className="w-4 h-4 text-gray-600" />
         </Button>
         
-        <Button variant="ghost" size="sm" className="p-2">
-          <Settings className="w-4 h-4 text-gray-600" />
-        </Button>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="ghost" size="sm" className="p-2">
+              <Settings className="w-4 h-4 text-gray-600" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-56">
+            <DropdownMenuItem disabled>
+              Workspace Preferences
+            </DropdownMenuItem>
+            <DropdownMenuItem disabled>Integrations</DropdownMenuItem>
+            <DropdownMenuItem disabled>API Keys &amp; Webhooks</DropdownMenuItem>
+            <DropdownMenuItem disabled>Privacy / Security</DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
         
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
