@@ -38,6 +38,7 @@ interface WorkflowMolecule {
 interface CanvasAreaProps {
   onAtomSelect?: (atomId: string) => void;
   onCardSelect?: (cardId: string, exhibited: boolean) => void;
+  selectedCardId?: string;
 }
 
 const deriveWorkflowMolecules = (cards: LayoutCard[]): WorkflowMolecule[] => {
@@ -59,7 +60,7 @@ const deriveWorkflowMolecules = (cards: LayoutCard[]): WorkflowMolecule[] => {
 
 const STORAGE_KEY = 'laboratory-layout-cards';
 
-const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect }) => {
+const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, selectedCardId }) => {
   // start with an empty canvas; cards will be loaded from saved configuration
   const [layoutCards, setLayoutCards] = useState<LayoutCard[]>([]);
   const [workflowMolecules, setWorkflowMolecules] = useState<WorkflowMolecule[]>([]);
@@ -347,6 +348,10 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect }) =
 
     // keep exhibition store in sync
     updateCard(cardId, { isExhibited });
+
+    if (onCardSelect && selectedCardId === cardId) {
+      onCardSelect(cardId, isExhibited);
+    }
   };
 
   if (workflowMolecules.length > 0) {

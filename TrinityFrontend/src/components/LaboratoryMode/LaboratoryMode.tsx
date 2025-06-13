@@ -116,8 +116,8 @@ const LaboratoryMode = () => {
         <AtomLibrary onAtomDragStart={handleAtomDragStart} />
 
         {/* Main Canvas Area */}
-        <div className="flex-1 p-6">
-          <CanvasArea onAtomSelect={handleAtomSelect} onCardSelect={handleCardSelect} />
+        <div className="flex-1 p-6" onClick={() => {setSelectedAtomId(undefined); setSelectedCardId(undefined);}}>
+          <CanvasArea onAtomSelect={handleAtomSelect} onCardSelect={handleCardSelect} selectedCardId={selectedCardId} />
         </div>
 
         {/* Settings Panel */}

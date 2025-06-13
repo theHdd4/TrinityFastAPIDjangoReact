@@ -5,7 +5,7 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { ChevronLeft, ChevronRight, Settings, Eye } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Settings, Eye, BarChart2 } from 'lucide-react';
 
 interface SettingsPanelProps {
   isCollapsed: boolean;
@@ -50,6 +50,9 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
 
       {!isCollapsed && (
         <div className="flex-1 overflow-y-auto">
+          {!selectedAtomId && !selectedCardId ? (
+            <div className="p-4 text-gray-600 text-sm">Please select a Card/Atom</div>
+          ) : (
           <Tabs defaultValue="settings" className="w-full">
             <TabsList className="grid w-full grid-cols-3 mx-4 my-4">
               <TabsTrigger value="settings" className="text-xs">
@@ -57,12 +60,12 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 Settings
               </TabsTrigger>
               <TabsTrigger value="visual" className="text-xs">
-                <Eye className="w-3 h-3 mr-1" />
+                <BarChart2 className="w-3 h-3 mr-1" />
                 Visualisation
               </TabsTrigger>
               <TabsTrigger
                 value="exhibition"
-                className="text-xs"
+                className="text-xs mr-2"
                 data-disabled={!cardExhibited}
                 disabled={!cardExhibited}
               >
