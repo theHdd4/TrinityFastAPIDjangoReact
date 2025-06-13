@@ -159,6 +159,7 @@ const Login = () => {
         <div className="text-center mt-8">
           <p className="text-black/50 text-xs">"No one can be told what the Trinity is. You have to see it for yourself"</p>
         </div>
+        </div>
       </div>
     </div>
   );
