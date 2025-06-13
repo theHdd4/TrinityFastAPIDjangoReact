@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { safeStringify } from '@/utils/safeStringify';
-import { Card } from '@/components/ui/card';
+import { Card, Card as AtomBox } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Plus, Grid3X3, Trash2, Eye } from 'lucide-react';
@@ -377,7 +377,7 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect }) => {
                     {layoutCards
                       .filter(card => card.moleculeId === molecule.moleculeId)
                       .map(card => (
-                        <div
+                        <Card
                           key={card.id}
                           className={`w-full min-h-[200px] bg-white rounded-2xl border-2 transition-all duration-300 flex flex-col ${
                             dragOver === card.id
@@ -427,7 +427,7 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect }) => {
                                 }`}
                               >
                                 {card.atoms.map(atom => (
-                                  <Card
+                                  <AtomBox
                                     key={atom.id}
                                     className="p-4 cursor-pointer hover:shadow-lg transition-all duration-200 group border border-gray-200 bg-white"
                                     onClick={() => handleAtomClick(atom.id)}
@@ -454,12 +454,12 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect }) => {
                                         <p className="text-xs text-gray-500">Configure this atom for your application</p>
                                       </div>
                                     )}
-                                  </Card>
+                                  </AtomBox>
                                 ))}
                               </div>
                             )}
                           </div>
-                        </div>
+                        </Card>
                       ))}
 
                     <div className="flex justify-center">
@@ -486,7 +486,7 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect }) => {
       {/* Layout Cards Container */}
       <div className="p-6 space-y-6 w-full">
         {layoutCards.map((card, index) => (
-          <div
+          <Card
             key={card.id}
             className={`w-full min-h-[200px] bg-white rounded-2xl border-2 transition-all duration-300 flex flex-col ${
               dragOver === card.id
@@ -544,7 +544,7 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect }) => {
                   }`}
                 >
                   {card.atoms.map((atom) => (
-                    <Card 
+                    <AtomBox
                       key={atom.id}
                       className="p-4 cursor-pointer hover:shadow-lg transition-all duration-200 group border border-gray-200 bg-white"
                       onClick={() => handleAtomClick(atom.id)}
@@ -575,12 +575,12 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect }) => {
                           </p>
                         </div>
                       )}
-                    </Card>
+                    </AtomBox>
                   ))}
                 </div>
               )}
             </div>
-          </div>
+          </Card>
         ))}
 
         {/* Add New Card Button */}
