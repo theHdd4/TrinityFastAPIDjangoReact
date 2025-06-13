@@ -2,6 +2,7 @@ from rest_framework import viewsets, permissions, status
 from rest_framework.response import Response
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
+from django_tenants.utils import schema_context
 from apps.accounts.views import CsrfExemptSessionAuthentication
 from .models import Tenant, Domain
 from .serializers import TenantSerializer, DomainSerializer
@@ -23,7 +24,10 @@ class TenantViewSet(viewsets.ModelViewSet):
         try:
             serializer.is_valid(raise_exception=True)
             print('Tenant data validated')
-            self.perform_create(serializer)
+            # Ensure the tenant save happens while connected to the public schema
+            # to avoid django-tenants GuardRail exceptions.
+            with schema_context('public'):
+                self.perform_create(serializer)
             print('Tenant instance created')
         except Exception as exc:
             print('Tenant creation failed:', exc)

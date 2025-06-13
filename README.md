@@ -73,6 +73,17 @@ which stores it in MongoDB.
    You should see any companies created during tenant signup along with their
    subscription limits.
 
+If tenant creation returns a **500** error the traceback will appear in the
+backend logs. Run:
+
+```bash
+docker-compose logs web
+```
+
+Common issues are saving the tenant while connected to a tenant schema or using
+a duplicate domain. Ensure the request is sent to the public host (e.g.
+`localhost`) and that the domain is unique.
+
 2. The FastAPI container also relies on the MinIO client. The required Python
    packages, including `motor` for MongoDB access and `python-multipart` for
    form parsing, are installed from `TrinityBackendDjango/requirements.txt`.

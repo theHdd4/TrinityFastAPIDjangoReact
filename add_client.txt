@@ -5,3 +5,14 @@
 5. Enable Django debug logging in `settings.py` by setting `LOGGING` or run the server with `--verbosity 3` to see incoming requests.
 6. Use `curl -v -X POST http://localhost:8000/api/tenants/tenants/ -d '{...}' -H 'Content-Type: application/json'` from the host to test the endpoint directly and inspect the response.
 7. Check browser dev tools for cookies and CSRF tokens if CSRF is enforced; ensure the request includes credentials and the `csrftoken` header.
+8. If a 500 error occurs, run `docker-compose logs web` to view the traceback. 
+   Common causes include:
+   - **Outside public schema**: the request host matched a tenant domain so 
+     `MainTenantMiddleware` switched schemas. Call the endpoint using the 
+     public host (e.g. `localhost`) or wrap the view with `schema_context('public')`.
+   - **Duplicate domain**: the provided domain already exists in `clients_domain`.
+     Delete the existing entry or use a different domain.
+   - **Missing migrations**: if auto schema creation is disabled the tenant 
+     schema might be missing tables. Run `python manage.py migrate_schemas --shared`.
+   Examine the stack trace for the exact exception to fix the issue before
+   retrying from React.
