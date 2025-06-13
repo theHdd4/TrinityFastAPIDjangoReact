@@ -54,8 +54,9 @@ Laboratory mode drag the **Text Box** atom onto the canvas. Enter some text and
 click **Save Text** – the editor will send the payload to the FastAPI backend
 which stores it in MongoDB.
 
-When you delete a card the frontend archives the entire card object to the
-FastAPI endpoint `/api/cards/archive` before removing any associated atoms.
+Use the trash icon next to the **Exhibit the Card** toggle to remove a card.
+When clicked the frontend archives the entire card object to the FastAPI
+endpoint `/api/cards/archive` before deleting any associated atoms.
 Text Box atoms are archived by setting their status to `archived` via
 `DELETE /api/t/text/<id>` so nothing is permanently lost.
 
