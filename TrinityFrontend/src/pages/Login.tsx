@@ -7,7 +7,7 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Eye, EyeOff, User, Lock } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
-import AnimatedLogo from '@/components/AnimatedLogo';
+import AnimatedLogo from '@/components/PrimaryMenu/TrinityAssets/AnimatedLogo';
 import LogoText from '@/components/LogoText';
 
 const Login = () => {
