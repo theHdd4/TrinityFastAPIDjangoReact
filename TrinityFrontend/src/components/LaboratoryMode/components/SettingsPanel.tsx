@@ -155,8 +155,10 @@ data.info()`}
           </div>
           </>
         )}
-      </div>
-    );
+        </div>
+      )}
+    </div>
+  );
   };
 
 export default SettingsPanel;
