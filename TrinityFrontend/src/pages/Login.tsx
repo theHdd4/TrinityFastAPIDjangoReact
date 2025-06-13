@@ -38,19 +38,13 @@ const Login = () => {
   };
 
   return (
-    <div className="min-h-screen flex">
-      {/* Left half with animated SVG */}
-      <div className="w-1/2 hidden md:flex items-center justify-center bg-gray-50">
-        <img
-          src="/background.svg"
-          alt="Login background"
-          className="w-full h-full object-cover"
-        />
-      </div>
-
-      {/* Right half with existing login blocks */}
-      <div className="w-full md:w-1/2 bg-white flex items-center justify-center p-4">
-        <div className="w-full max-w-md space-y-8">
+    <div className="min-h-screen flex items-center justify-center p-4 relative">
+      <img
+        src="/background.svg"
+        alt="Login background"
+        className="absolute inset-0 w-full h-full object-cover -z-10"
+      />
+      <div className="w-full max-w-md space-y-8 shadow-lg">
         {/* Trinity Logo */}
         <div className="flex flex-col items-center space-y-2">
           <AnimatedLogo className="w-20 h-20" />
@@ -61,7 +55,7 @@ const Login = () => {
         </div>
 
 
-        <Card className="bg-trinity-bg-secondary border-gray-300 shadow">
+        <Card className="bg-trinity-bg-secondary border-gray-300 shadow-lg">
           <CardHeader className="text-center pb-4">
             <CardTitle className="text-3xl font-light text-black font-mono">
               Enter the Matrix
@@ -151,9 +145,7 @@ const Login = () => {
         <div className="text-center mt-8">
           <p className="text-black/50 text-xs">"No one can be told what the Trinity is. You have to see it for yourself"</p>
         </div>
-        </div>
       </div>
-      {/* Close main container */}
     </div>
   );
 };
