@@ -406,6 +406,12 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect }) => {
                                 onCheckedChange={checked => handleExhibitionToggle(card.id, checked)}
                                 className="data-[state=checked]:bg-[#458EE2]"
                               />
+                              <button
+                                onClick={() => deleteCard(card.id)}
+                                className="p-1 hover:bg-gray-100 rounded"
+                              >
+                                <Trash2 className="w-4 h-4 text-gray-400" />
+                              </button>
                             </div>
                           </div>
 
