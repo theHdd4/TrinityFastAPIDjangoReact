@@ -56,7 +56,11 @@ class TenantSerializer(serializers.ModelSerializer):
             tenant = Tenant.objects.create(**validated_data)
             print("→ Created tenant", tenant)
             if domain:
-                Domain.objects.create(domain=domain, tenant=tenant, is_primary=True)
+                Domain.objects.get_or_create(
+                    domain=domain,
+                    tenant=tenant,
+                    defaults={"is_primary": True},
+                )
                 print("→ Created primary domain", domain)
 
             primary_domain = os.getenv("PRIMARY_DOMAIN", "localhost")
@@ -65,7 +69,8 @@ class TenantSerializer(serializers.ModelSerializer):
                     Domain.objects.get_or_create(domain=alias, tenant=tenant, defaults={"is_primary": False})
 
         # Allow skipping heavy migration logic when running in simple mode
-        simple_mode = os.getenv("SIMPLE_TENANT_CREATION", "false").lower() == "true"
+        # Default to simple creation to avoid heavy migrations in dev setups
+        simple_mode = os.getenv("SIMPLE_TENANT_CREATION", "true").lower() == "true"
 
         if not simple_mode:
             try:
