@@ -14,6 +14,8 @@ Follow the steps below to run all services together.
 2. Copy `TrinityFrontend/.env.example` to `TrinityFrontend/.env`.
    Ensure `DEBUG=true` in the Django `.env` file so error messages appear if
    tenant creation fails.
+   The frontend `.env` includes `VITE_SUBSCRIPTIONS_API` which should point to
+   the Django subscription endpoints.
 
 Docker and Node.js must be installed locally. The Python dependencies listed in
 `TrinityBackendDjango/requirements.txt` (including pandas, motor and
@@ -61,6 +63,15 @@ which stores it in MongoDB.
 
    Replace `<ID>` with the `textId` you used. You should receive the stored
    document from MongoDB confirming Django and FastAPI are working together.
+
+3. To verify subscription endpoints, run:
+
+   ```bash
+   curl http://localhost:8000/api/subscriptions/companies/
+   ```
+
+   You should see any companies created during tenant signup along with their
+   subscription limits.
 
 2. The FastAPI container also relies on the MinIO client. The required Python
    packages, including `motor` for MongoDB access and `python-multipart` for

@@ -9,3 +9,7 @@ export const TENANTS_API =
 
 export const TEXT_API =
   import.meta.env.VITE_TEXT_API || 'http://localhost:8001/api/t';
+
+export const SUBSCRIPTIONS_API =
+  import.meta.env.VITE_SUBSCRIPTIONS_API ||
+  'http://localhost:8000/api/subscriptions';
