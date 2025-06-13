@@ -53,6 +53,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
           {!selectedAtomId && !selectedCardId ? (
             <div className="p-4 text-gray-600 text-sm">Please select a Card/Atom</div>
           ) : (
+          <> 
           <Tabs defaultValue="settings" className="w-full">
             <TabsList className="grid w-full grid-cols-3 mx-4 my-4">
               <TabsTrigger value="settings" className="text-xs">
@@ -141,7 +142,7 @@ data.info()`}
               </TabsContent>
             </div>
           </Tabs>
-          
+
           <div className="p-4 border-t border-gray-200 mt-4">
             <Card className="p-3">
               <h4 className="font-medium text-gray-900 mb-2 text-sm">Execution Log</h4>
@@ -152,10 +153,10 @@ data.info()`}
               </div>
             </Card>
           </div>
-        </div>
-      )}
-    </div>
-  );
-};
+          </>
+        )}
+      </div>
+    );
+  };
 
 export default SettingsPanel;
