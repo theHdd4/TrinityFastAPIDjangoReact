@@ -1,4 +1,4 @@
-1. Place your animated SVG file named `background.svg` in the `TrinityFrontend/public` directory. Files placed here are served from the web root, so the image will be available at `/background.svg`.
+1. Place your login background video named `background.mp4` inside the `TrinityFrontend/public` directory. Files in this folder are served from the web root, so the video will be available at `/background.mp4`.
 2. Start the frontend dev server with `npm run dev` inside `TrinityFrontend`.
-3. Visit the login page. The entire screen now uses the SVG as its background via the `<img src="/background.svg">` element.
-4. To update the animation later, replace `background.svg` with your new file in `TrinityFrontend/public` and refresh the browser.
+3. Visit the login page. The left half of the page now plays the video using a `<video>` element referencing `/background.mp4`.
+4. When you want to change the animation, replace `background.mp4` with a new MP4 in the same directory and refresh the browser.

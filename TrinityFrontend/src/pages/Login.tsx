@@ -38,21 +38,35 @@ const Login = () => {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-4 relative">
-      <img
-        src="/background.svg"
-        alt="Login background"
-        className="absolute inset-0 w-full h-full object-cover -z-10"
-      />
-      <div className="w-full max-w-md space-y-8 shadow-lg">
-        {/* Trinity Logo */}
-        <div className="flex flex-col items-center space-y-2">
-          <AnimatedLogo className="w-20 h-20" />
-          <TrinityAssets.LogoText
-            className="items-center"
-            titleClassName="text-4xl text-black"
-          />
-        </div>
+    <div className="min-h-screen grid grid-cols-1 md:grid-cols-2">
+      {/* Left half with animated video */}
+      <div className="relative hidden md:block">
+        <video
+          className="absolute inset-0 w-full h-full object-cover"
+          autoPlay
+          loop
+          muted
+          playsInline
+        >
+          <source src="/background.mp4" type="video/mp4" />
+        </video>
+      </div>
+
+      {/* Right half with login form */}
+      <div className="flex items-center justify-center p-4 bg-transparent">
+        <div className="w-full max-w-md space-y-8 shadow-lg">
+          {/* Trinity Logo */}
+          <div className="flex flex-col items-center space-y-2 text-white">
+            <AnimatedLogo className="w-20 h-20 drop-shadow-[0_0_10px_rgba(255,255,255,0.8)]" />
+            <div className="flex flex-col items-center">
+              <h1 className="text-4xl font-bold tracking-tight leading-none font-mono">
+                Trinity
+              </h1>
+              <span className="text-xs font-light tracking-widest uppercase mt-0.5 font-mono">
+                A Quant Matrix AI Product
+              </span>
+            </div>
+          </div>
 
 
         <Card className="bg-trinity-bg-secondary border-gray-300 shadow-lg">
