@@ -12,6 +12,8 @@ Follow the steps below to run all services together.
 
 1. Copy `TrinityBackendDjango/.env.example` to `TrinityBackendDjango/.env` and adjust values if required.
 2. Copy `TrinityFrontend/.env.example` to `TrinityFrontend/.env`.
+   Ensure `DEBUG=true` in the Django `.env` file so error messages appear if
+   tenant creation fails.
 
 Docker and Node.js must be installed locally. The Python dependencies listed in
 `TrinityBackendDjango/requirements.txt` (including pandas, motor and

@@ -37,6 +37,14 @@ class TenantSerializer(serializers.ModelSerializer):
         """Create a new tenant using the same steps as create_tenant.py."""
         print("TenantSerializer.create called", validated_data)
 
+        # Ensure the connection is on the public schema before saving the
+        # tenant. django-tenants guards against calling save() while another
+        # tenant schema is active which would raise a GuardRailException.
+        try:
+            connection.set_schema_to_public()
+        except Exception:
+            pass
+
         domain = validated_data.pop("domain", None)
         seats = validated_data.pop("seats_allowed", None)
         project_cap = validated_data.pop("project_cap", None)
