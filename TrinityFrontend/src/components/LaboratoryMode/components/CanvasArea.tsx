@@ -132,7 +132,7 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
       }
     } else {
       const storedLayout = localStorage.getItem(STORAGE_KEY);
-      if (storedLayout) {
+      if (storedLayout && storedLayout !== 'undefined') {
         try {
           const raw = JSON.parse(storedLayout);
           initialCards = Array.isArray(raw)
@@ -153,6 +153,7 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
           }
         } catch (e) {
           console.error('Failed to parse stored laboratory layout', e);
+          localStorage.removeItem(STORAGE_KEY);
         }
       } else {
         const current = localStorage.getItem('current-project');
