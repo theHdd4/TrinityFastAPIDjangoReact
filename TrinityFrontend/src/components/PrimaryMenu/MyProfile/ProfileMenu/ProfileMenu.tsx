@@ -14,6 +14,7 @@ import UserInfo from './components/UserInfo';
 import UserManagementItem from './components/UserManagementItem';
 import ClientManagementItem from './components/ClientManagementItem';
 import BillingPlansItem from './components/BillingPlansItem';
+import ProfileInformationItem from './components/ProfileInformationItem';
 
 const ProfileMenu: React.FC = () => {
   const { logout, user, profile } = useAuth();
@@ -36,6 +37,7 @@ const ProfileMenu: React.FC = () => {
         <UserManagementItem onSelect={() => navigate('/users')} />
         <ClientManagementItem onSelect={() => navigate('/clients')} />
         <BillingPlansItem />
+        <ProfileInformationItem />
         <DropdownMenuSeparator />
         <DropdownMenuItem onSelect={handleLogout}>Sign Out</DropdownMenuItem>
       </DropdownMenuContent>

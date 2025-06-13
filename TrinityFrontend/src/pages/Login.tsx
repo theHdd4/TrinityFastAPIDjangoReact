@@ -8,7 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Eye, EyeOff, User, Lock } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import AnimatedLogo from '@/components/PrimaryMenu/TrinityAssets/AnimatedLogo';
-import LogoText from '@/components/LogoText';
+import { TrinityAssets } from '@/components/PrimaryMenu';
 
 const Login = () => {
   const [username, setUsername] = useState('');
@@ -43,7 +43,7 @@ const Login = () => {
         {/* Trinity Logo */}
         <div className="flex flex-col items-center space-y-2">
           <AnimatedLogo className="w-20 h-20" />
-          <LogoText
+          <TrinityAssets.LogoText
             className="items-center"
             titleClassName="text-4xl text-black"
           />

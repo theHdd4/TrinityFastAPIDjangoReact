@@ -40,23 +40,19 @@ const Header = () => {
       <div className="flex items-center space-x-10">
         <Link to="/" className="flex items-center space-x-3 group">
           <TrinityAssets.AnimatedLogo className="w-12 h-12 group-hover:shadow-xl transition-all duration-300" />
-
-          <div className="flex flex-col">
-            <h1 className="text-2xl font-bold bg-gradient-to-r from-black via-gray-800 to-trinity-yellow bg-clip-text text-transparent tracking-tight leading-none font-mono">
-              Trinity
-            </h1>
-            <span className="text-xs font-light text-gray-600 tracking-widest uppercase mt-0.5 font-mono">
-              A Quant Matrix AI Product
-            </span>
-          </div>
+          <TrinityAssets.LogoText />
         </Link>
         
         {!simpleHeader && <Navigation />}
       </div>
 
       <div className="flex items-center space-x-4">
-        <AppIdentity projectName={projectName} onGoBack={handleGoBack} />
-        <Searchbar />
+        {!simpleHeader && (
+          <>
+            <AppIdentity projectName={projectName} onGoBack={handleGoBack} />
+            <Searchbar />
+          </>
+        )}
         <MyProfile.NotificationMenu />
         <MyProfile.SettingsMenu />
         <MyProfile.ProfileMenu />
