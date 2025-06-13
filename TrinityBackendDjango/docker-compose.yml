@@ -68,7 +68,7 @@ services:
 
   fastapi:
     build: .
-    command: uvicorn apps.fastapi_app:app --host 0.0.0.0 --port 8001
+    command: uvicorn apps.orchestration.fastapi_app:app --host 0.0.0.0 --port 8001
     volumes:
       - .:/code
       - ../TrinityBackendFastAPI:/code/TrinityBackendFastAPI

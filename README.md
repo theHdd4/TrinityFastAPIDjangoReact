@@ -34,7 +34,8 @@ docker-compose up --build
 ```
 
 This starts PostgreSQL, MongoDB, Redis, the Django admin API on `localhost:8000`
-and a FastAPI instance on `localhost:8001`. Use `docker-compose logs fastapi` to
+and a FastAPI instance on `localhost:8001`. Uvicorn loads the app from
+`apps/orchestration/fastapi_app.py`. Use `docker-compose logs fastapi` to
 confirm the FastAPI server started successfully. CORS is enabled so the React
 frontend served from `localhost:8080` can call the API. Once the containers
 finish installing dependencies the text service is reachable at

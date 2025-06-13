@@ -7,7 +7,7 @@ import { Plus, Grid3X3, Trash2, Eye } from 'lucide-react';
 import { useExhibitionStore } from '../../ExhibitionMode/store/exhibitionStore';
 import { atoms as allAtoms } from '@/components/AtomList/data';
 import { molecules } from '@/components/MoleculeList/data';
-import { REGISTRY_API } from '@/lib/api';
+import { REGISTRY_API, TEXT_API } from '@/lib/api';
 import TextBoxEditor from '@/components/AtomList/atoms/text-box/TextBoxEditor';
 
 interface DroppedAtom {
@@ -259,13 +259,50 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect }) => {
   };
 
   const removeAtom = (cardId: string, atomId: string) => {
-    setLayoutCards(prev => 
-      prev.map(card => 
-        card.id === cardId 
+    setLayoutCards(prev =>
+      prev.map(card =>
+        card.id === cardId
           ? { ...card, atoms: card.atoms.filter(atom => atom.id !== atomId) }
           : card
       )
     );
+  };
+
+  const deleteCard = async (cardId: string) => {
+    const card = layoutCards.find(c => c.id === cardId);
+    const updated = layoutCards.filter(c => c.id !== cardId);
+    setLayoutCards(updated);
+    localStorage.setItem(STORAGE_KEY, safeStringify(updated));
+    const labConfig = {
+      cards: updated,
+      exhibitedCards: updated.filter(c => c.isExhibited),
+      timestamp: new Date().toISOString(),
+    };
+    localStorage.setItem('laboratory-config', safeStringify(labConfig));
+    setCards(updated);
+
+    if (card) {
+      card.atoms.forEach(atom => {
+        if (atom.atomId === 'text-box') {
+          fetch(`${TEXT_API}/text/${atom.id}`, { method: 'DELETE' }).catch(() => {});
+        }
+      });
+    }
+
+    const current = localStorage.getItem('current-project');
+    if (current) {
+      try {
+        const proj = JSON.parse(current);
+        await fetch(`${REGISTRY_API}/projects/${proj.id}/`, {
+          method: 'PATCH',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ state: { laboratory_config: labConfig } }),
+        });
+      } catch {
+        /* ignore */
+      }
+    }
   };
 
   const handleAtomClick = (atomId: string) => {
@@ -474,6 +511,12 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect }) => {
                   onCheckedChange={(checked) => handleExhibitionToggle(card.id, checked)}
                   className="data-[state=checked]:bg-[#458EE2]"
                 />
+                <button
+                  onClick={() => deleteCard(card.id)}
+                  className="p-1 hover:bg-gray-100 rounded"
+                >
+                  <Trash2 className="w-4 h-4 text-gray-400" />
+                </button>
               </div>
             </div>
 
