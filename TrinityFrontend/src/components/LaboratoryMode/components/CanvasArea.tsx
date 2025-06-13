@@ -37,6 +37,7 @@ interface WorkflowMolecule {
 
 interface CanvasAreaProps {
   onAtomSelect?: (atomId: string) => void;
+  onCardSelect?: (cardId: string, exhibited: boolean) => void;
 }
 
 const deriveWorkflowMolecules = (cards: LayoutCard[]): WorkflowMolecule[] => {
@@ -58,7 +59,7 @@ const deriveWorkflowMolecules = (cards: LayoutCard[]): WorkflowMolecule[] => {
 
 const STORAGE_KEY = 'laboratory-layout-cards';
 
-const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect }) => {
+const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect }) => {
   // start with an empty canvas; cards will be loaded from saved configuration
   const [layoutCards, setLayoutCards] = useState<LayoutCard[]>([]);
   const [workflowMolecules, setWorkflowMolecules] = useState<WorkflowMolecule[]>([]);
@@ -310,9 +311,16 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect }) => {
     }
   };
 
-  const handleAtomClick = (atomId: string) => {
+  const handleAtomClick = (e: React.MouseEvent, atomId: string) => {
+    e.stopPropagation();
     if (onAtomSelect) {
       onAtomSelect(atomId);
+    }
+  };
+
+  const handleCardClick = (cardId: string, exhibited: boolean) => {
+    if (onCardSelect) {
+      onCardSelect(cardId, exhibited);
     }
   };
 
@@ -436,7 +444,7 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect }) => {
                                   <AtomBox
                                     key={atom.id}
                                     className="p-4 cursor-pointer hover:shadow-lg transition-all duration-200 group border border-gray-200 bg-white"
-                                    onClick={() => handleAtomClick(atom.id)}
+                                    onClick={(e) => handleAtomClick(e, atom.id)}
                                   >
                                     <div className="flex items-center justify-between mb-3">
                                       <div className={`w-3 h-3 ${atom.color} rounded-full`}></div>
@@ -499,6 +507,7 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect }) => {
                 ? 'border-[#458EE2] bg-gradient-to-br from-blue-50 to-blue-100 shadow-lg'
                 : 'border-gray-200 shadow-sm hover:shadow-md'
             }`}
+            onClick={() => handleCardClick(card.id, card.isExhibited)}
             onDragOver={(e) => handleDragOver(e, card.id)}
             onDragLeave={handleDragLeave}
             onDrop={(e) => handleDrop(e, card.id)}
@@ -553,7 +562,7 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect }) => {
                     <AtomBox
                       key={atom.id}
                       className="p-4 cursor-pointer hover:shadow-lg transition-all duration-200 group border border-gray-200 bg-white"
-                      onClick={() => handleAtomClick(atom.id)}
+                      onClick={(e) => handleAtomClick(e, atom.id)}
                     >
                       {/* Atom Header */}
                       <div className="flex items-center justify-between mb-3">

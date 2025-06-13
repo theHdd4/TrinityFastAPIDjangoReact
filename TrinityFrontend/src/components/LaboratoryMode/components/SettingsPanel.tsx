@@ -5,18 +5,22 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { ChevronLeft, ChevronRight, Settings, Code, Eye } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Settings, Eye } from 'lucide-react';
 
 interface SettingsPanelProps {
   isCollapsed: boolean;
   onToggle: () => void;
   selectedAtomId?: string;
+  selectedCardId?: string;
+  cardExhibited?: boolean;
 }
 
-const SettingsPanel: React.FC<SettingsPanelProps> = ({ 
-  isCollapsed, 
-  onToggle, 
-  selectedAtomId 
+const SettingsPanel: React.FC<SettingsPanelProps> = ({
+  isCollapsed,
+  onToggle,
+  selectedAtomId,
+  selectedCardId,
+  cardExhibited,
 }) => {
   return (
     <div className={`bg-white border-l border-gray-200 transition-all duration-300 ${
@@ -46,26 +50,31 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
 
       {!isCollapsed && (
         <div className="flex-1 overflow-y-auto">
-          <Tabs defaultValue="general" className="w-full">
+          <Tabs defaultValue="settings" className="w-full">
             <TabsList className="grid w-full grid-cols-3 mx-4 my-4">
-              <TabsTrigger value="general" className="text-xs">
+              <TabsTrigger value="settings" className="text-xs">
                 <Settings className="w-3 h-3 mr-1" />
-                General
+                Settings
               </TabsTrigger>
-              <TabsTrigger value="code" className="text-xs">
-                <Code className="w-3 h-3 mr-1" />
-                Code
-              </TabsTrigger>
-              <TabsTrigger value="preview" className="text-xs">
+              <TabsTrigger value="visual" className="text-xs">
                 <Eye className="w-3 h-3 mr-1" />
-                Preview
+                Visualisation
+              </TabsTrigger>
+              <TabsTrigger
+                value="exhibition"
+                className="text-xs"
+                data-disabled={!cardExhibited}
+                disabled={!cardExhibited}
+              >
+                <Eye className="w-3 h-3 mr-1" />
+                Exhibition
               </TabsTrigger>
             </TabsList>
             
             <div className="px-4">
-              <TabsContent value="general" className="space-y-4">
+              <TabsContent value="settings" className="space-y-4">
                 <Card className="p-4">
-                  <h4 className="font-medium text-gray-900 mb-3">Pipeline Settings</h4>
+                  <h4 className="font-medium text-gray-900 mb-3">{selectedAtomId ? 'Atom Settings' : 'Card Settings'}</h4>
                   <div className="space-y-3">
                     <div>
                       <label className="text-sm text-gray-600 block mb-1">Pipeline Name</label>
@@ -88,7 +97,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 
                 {selectedAtomId && (
                   <Card className="p-4">
-                    <h4 className="font-medium text-gray-900 mb-3">Selected Atom</h4>
+                  <h4 className="font-medium text-gray-900 mb-3">Atom Parameters</h4>
                     <div className="space-y-3">
                       <div>
                         <label className="text-sm text-gray-600 block mb-1">Atom Name</label>
@@ -106,9 +115,9 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 )}
               </TabsContent>
               
-              <TabsContent value="code" className="space-y-4">
+              <TabsContent value="visual" className="space-y-4">
                 <Card className="p-4">
-                  <h4 className="font-medium text-gray-900 mb-3">Generated Code</h4>
+                  <h4 className="font-medium text-gray-900 mb-3">Visualisation</h4>
                   <div className="bg-gray-100 p-3 rounded text-xs font-mono">
                     <pre className="text-gray-700">
 {`import pandas as pd
@@ -119,9 +128,9 @@ data.info()`}
                 </Card>
               </TabsContent>
               
-              <TabsContent value="preview" className="space-y-4">
+              <TabsContent value="exhibition" className="space-y-4">
                 <Card className="p-4">
-                  <h4 className="font-medium text-gray-900 mb-3">Output Preview</h4>
+                  <h4 className="font-medium text-gray-900 mb-3">Exhibition Settings</h4>
                   <div className="bg-gray-50 p-3 rounded text-sm">
                     <p className="text-gray-600">No output yet. Run the pipeline to see results.</p>
                   </div>

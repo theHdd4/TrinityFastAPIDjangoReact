@@ -13,6 +13,8 @@ import { REGISTRY_API } from '@/lib/api';
 
 const LaboratoryMode = () => {
   const [selectedAtomId, setSelectedAtomId] = useState<string>();
+  const [selectedCardId, setSelectedCardId] = useState<string>();
+  const [cardExhibited, setCardExhibited] = useState<boolean>(false);
   const [isSettingsCollapsed, setIsSettingsCollapsed] = useState(false);
   const { toast } = useToast();
   const { cards, setCards } = useExhibitionStore();
@@ -24,6 +26,13 @@ const LaboratoryMode = () => {
 
   const handleAtomSelect = (atomId: string) => {
     setSelectedAtomId(atomId);
+    setSelectedCardId(undefined);
+  };
+
+  const handleCardSelect = (cardId: string, exhibited: boolean) => {
+    setSelectedAtomId(undefined);
+    setSelectedCardId(cardId);
+    setCardExhibited(exhibited);
   };
 
   const toggleSettings = () => {
@@ -108,7 +117,7 @@ const LaboratoryMode = () => {
 
         {/* Main Canvas Area */}
         <div className="flex-1 p-6">
-          <CanvasArea onAtomSelect={handleAtomSelect} />
+          <CanvasArea onAtomSelect={handleAtomSelect} onCardSelect={handleCardSelect} />
         </div>
 
         {/* Settings Panel */}
@@ -116,6 +125,8 @@ const LaboratoryMode = () => {
           isCollapsed={isSettingsCollapsed}
           onToggle={toggleSettings}
           selectedAtomId={selectedAtomId}
+          selectedCardId={selectedCardId}
+          cardExhibited={cardExhibited}
         />
       </div>
     </div>
