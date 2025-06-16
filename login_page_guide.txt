@@ -1,4 +1,4 @@
 1. Place `background.svg` inside the `TrinityFrontend/public` folder. Files there are served at the web root, so the SVG will be reachable at `/background.svg`.
 2. Run `npm run dev` in `TrinityFrontend` (or rebuild the Docker frontend image) to start the app.
-3. Open the login page. The screen is split in two halves: the left shows the animated SVG and the right displays the login form.
+3. Open the login page. The SVG plays behind the centered login form as a full-page background with a subtle drop shadow on the form.
 4. Replace `background.svg` with a new file any time you want to update the animation and refresh the browser.
