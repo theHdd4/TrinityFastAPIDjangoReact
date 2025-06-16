@@ -2,13 +2,14 @@
    The frontend Docker image now includes a custom Nginx config so React routes
    like `/login` work correctly.
 
-2. Update `TrinityBackendDjango/.env` with the following variables so the app works from any IP address:
-   - `ALLOWED_HOSTS=*` to accept requests from any domain or IP.
-   - `FRONTEND_URL=http://10.2.1.242:8080` matching where the React app runs.
-   - `CSRF_TRUSTED_ORIGINS=http://10.2.1.242:8080` so Django accepts login posts from that address.
-   - `ADDITIONAL_DOMAINS=10.2.1.242` to map the backend tenant to that IP. Use your external domain instead when tunnelling through Cloudflare.
+2. Update `TrinityBackendDjango/.env` with the following values so the app works from any IP or domain:
+   - `ALLOWED_HOSTS=*` to accept requests from any domain.
+   - `FRONTEND_URL=http://10.2.1.242:8080` or your external domain.
+   - `CSRF_TRUSTED_ORIGINS=http://10.2.1.242:8080,https://trinity.quantmatrix.ai`
+     so Django accepts login posts from both addresses.
+   - `ADDITIONAL_DOMAINS=10.2.1.242,trinity.quantmatrix.ai` to map the default tenant to each hostname.
 
-3. Rebuild and start the stack. This will also rebuild the frontend image so the
+3. Rebuild and start the stack and re-run `create_tenant.py` to apply the new domain aliases. This will also rebuild the frontend image so the
    custom Nginx config is used:
    ```bash
    cd TrinityBackendDjango
