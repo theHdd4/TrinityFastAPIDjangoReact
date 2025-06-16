@@ -6,7 +6,7 @@
    cd TrinityBackendDjango
    docker-compose up -d --build
    ```
-3. Configure your Cloudflare tunnel to point to the frontend container on port `8080`.
-4. Ensure the backend is reachable from the frontend using the same domain in your `.env` files (e.g. update `FRONTEND_URL`).
-5. After restarting the containers, you should be able to log in and add users or clients from any IP address via the tunneled domain.
+3. Configure your Cloudflare tunnel to point to the frontend container on port `8080` and expose port `8000` for the Django API.
+4. Update `TrinityFrontend/.env` so the `VITE_*` variables (or `VITE_BACKEND_ORIGIN`) use the external domain for the backend. Also set `FRONTEND_URL` in `TrinityBackendDjango/.env` to the same domain.
+5. After rebuilding and restarting the containers you should be able to log in and add users or clients from any IP address via the tunneled domain.
 
