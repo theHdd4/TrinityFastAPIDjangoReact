@@ -1,5 +1,7 @@
 1. Install Docker and Docker Compose on your machine.
 2. Copy `TrinityBackendDjango/.env.example` to `TrinityBackendDjango/.env` and set the variables as needed. Copy `TrinityFrontend/.env.example` to `TrinityFrontend/.env`.
+   When hosting behind a tunnel, set `ALLOWED_HOSTS` to `*` and
+   `CSRF_TRUSTED_ORIGINS` to your external domain (e.g. `https://example.com`).
 3. From the `TrinityBackendDjango` directory run `docker-compose up --build`.
    This command builds the Django, FastAPI and frontend images and starts
    PostgreSQL, MongoDB, Redis and MinIO containers. Named volumes `postgres_data`,

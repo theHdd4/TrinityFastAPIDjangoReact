@@ -1,0 +1,12 @@
+1. Update `TrinityBackendDjango/.env` with the following variables:
+   - `ALLOWED_HOSTS=*` to accept requests from any domain.
+   - `CSRF_TRUSTED_ORIGINS=https://your-domain.com` so Django accepts form posts when proxied through Cloudflare.
+2. Rebuild and start the stack:
+   ```bash
+   cd TrinityBackendDjango
+   docker-compose up -d --build
+   ```
+3. Configure your Cloudflare tunnel to point to the frontend container on port `8080`.
+4. Ensure the backend is reachable from the frontend using the same domain in your `.env` files (e.g. update `FRONTEND_URL`).
+5. After restarting the containers, you should be able to log in and add users or clients from any IP address via the tunneled domain.
+

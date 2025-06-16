@@ -38,7 +38,15 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # ------------------------------------------------------------------
 SECRET_KEY = os.getenv("SECRET_KEY", "change-me-in-production")
 DEBUG = os.getenv("DEBUG", "False") == "True"
-ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS", "localhost").split(",")
+# Allow requests from the provided comma separated list of hosts. Use "*" to
+# allow any host when running behind a proxy or tunnel like Cloudflare.
+ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS", "*").split(",")
+
+# Explicitly trust these origins for CSRF-protected requests such as the login
+# form. When deploying behind Cloudflare or another proxy, add your external
+# domain (e.g. "https://example.com") here so browser POSTs are accepted.
+_trusted = os.getenv("CSRF_TRUSTED_ORIGINS")
+CSRF_TRUSTED_ORIGINS = _trusted.split(",") if _trusted else []
 
 # ------------------------------------------------------------------
 # django-tenants configuration
