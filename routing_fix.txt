@@ -4,8 +4,8 @@
 
 2. Update `TrinityBackendDjango/.env` with the following variables so the app works from any IP address:
    - `ALLOWED_HOSTS=*` to accept requests from any domain or IP.
-   - `FRONTEND_URL=http://<YOUR-IP>:8080` matching where the React app runs.
-   - `CSRF_TRUSTED_ORIGINS=http://<YOUR-IP>:8080` so Django accepts login posts from that address. Use the public domain when tunnelling through Cloudflare.
+   - `FRONTEND_URL=http://10.2.1.242:8080` matching where the React app runs.
+   - `CSRF_TRUSTED_ORIGINS=http://10.2.1.242:8080` so Django accepts login posts from that address. Use the public domain when tunnelling through Cloudflare.
 
 3. Rebuild and start the stack. This will also rebuild the frontend image so the
    custom Nginx config is used:
@@ -13,7 +13,7 @@
    cd TrinityBackendDjango
    docker-compose up -d --build
    ```
-4. Update `TrinityFrontend/.env` so the `VITE_*` variables (or `VITE_BACKEND_ORIGIN`) use `http://<YOUR-IP>:8000` or your Cloudflare domain. Set `FRONTEND_URL` in `TrinityBackendDjango/.env` to the same value.
+4. Update `TrinityFrontend/.env` so the `VITE_*` variables (or `VITE_BACKEND_ORIGIN`) use `http://10.2.1.242:8000` or your Cloudflare domain. Set `FRONTEND_URL` in `TrinityBackendDjango/.env` to the same value.
 
 5. Configure a Cloudflare Tunnel so the app is reachable at `https://trinity.quantmatrix.ai`:
    1. Install the `cloudflared` CLI and authenticate with `cloudflared login`.
@@ -27,6 +27,6 @@
       `http://localhost:8000`.
 
 6. After rebuilding and restarting the containers you can access the app via the
-   IP address or the `trinity.quantmatrix.ai` domain, log in, and manage clients
-   or users without errors.
+   IP address (`http://10.2.1.242:8080`) or the `trinity.quantmatrix.ai` domain,
+   log in, and manage clients or users without errors.
 
