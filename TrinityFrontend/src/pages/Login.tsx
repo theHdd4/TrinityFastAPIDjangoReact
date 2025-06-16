@@ -38,18 +38,19 @@ const Login = () => {
   };
 
   return (
-    <div className="relative min-h-screen flex items-center justify-center p-4">
-      <video
-        className="absolute inset-0 w-full h-full object-cover -z-10"
-        autoPlay
-        loop
-        muted
-        playsInline
-      >
-        <source src="/background.mp4" type="video/mp4" />
-      </video>
+    <div className="min-h-screen grid grid-cols-1 md:grid-cols-2">
+      {/* Left half with animated SVG */}
+      <div className="hidden md:block">
+        <img
+          src="/background.svg"
+          alt="background"
+          className="w-full h-full object-cover"
+        />
+      </div>
 
-      <div className="w-full max-w-md space-y-8 shadow-lg">
+      {/* Right half with login form */}
+      <div className="flex items-center justify-center p-4">
+        <div className="w-full max-w-md space-y-8 shadow-lg">
           {/* Trinity Logo */}
           <div className="flex flex-col items-center space-y-2 text-white">
             <AnimatedLogo className="w-20 h-20 drop-shadow-[0_0_10px_rgba(255,255,255,0.8)]" />
@@ -156,6 +157,7 @@ const Login = () => {
         </div>
       </div>
     </div>
+  </div>
   );
 };
 

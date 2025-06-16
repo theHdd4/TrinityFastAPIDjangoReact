@@ -2,6 +2,8 @@
 2. Copy `TrinityBackendDjango/.env.example` to `TrinityBackendDjango/.env` and set the variables as needed. Copy `TrinityFrontend/.env.example` to `TrinityFrontend/.env`.
    - When hosting behind a tunnel, set `ALLOWED_HOSTS=*` and
      `CSRF_TRUSTED_ORIGINS` to your external domain (e.g. `https://example.com`).
+     Optionally set `CORS_ALLOWED_ORIGINS` to the domain serving the frontend if
+     browsers report CORS errors during login.
    - Update the `VITE_*` variables or `VITE_BACKEND_ORIGIN` in the frontend `.env` file so requests point to your backend domain instead of `localhost`.
 3. From the `TrinityBackendDjango` directory run `docker-compose up --build`.
    This command builds the Django, FastAPI and frontend images and starts

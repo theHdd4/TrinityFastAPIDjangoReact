@@ -49,6 +49,27 @@ _trusted = os.getenv("CSRF_TRUSTED_ORIGINS")
 CSRF_TRUSTED_ORIGINS = _trusted.split(",") if _trusted else []
 
 # ------------------------------------------------------------------
+# CORS configuration
+# ------------------------------------------------------------------
+_cors = os.getenv("CORS_ALLOWED_ORIGINS")
+if _cors:
+    CORS_ALLOWED_ORIGINS = [o.strip() for o in _cors.split(",")]
+    CORS_ALLOW_ALL_ORIGINS = False
+else:
+    CORS_ALLOW_ALL_ORIGINS = True            # wildcard access for dev
+
+CORS_ALLOW_CREDENTIALS = True            # echo origin when cookies/auth supplied
+CORS_ALLOW_HEADERS = list(default_headers) + [
+    "authorization",
+    "content-type",
+    # add any custom front-end headers here
+]
+
+CORS_ALLOW_METHODS = list(default_methods)
+
+CORS_PREFLIGHT_MAX_AGE = 86400            # 24h cache for pre-flight
+
+# ------------------------------------------------------------------
 # django-tenants configuration
 # ------------------------------------------------------------------
 SHARED_APPS = [
@@ -206,21 +227,6 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
 
-# ------------------------------------------------------------------
-# CORS – allow everything (DEV ONLY!)
-# ------------------------------------------------------------------
-CORS_ALLOW_ALL_ORIGINS = True            # wildcard access
-CORS_ALLOW_CREDENTIALS = True            # echo origin when cookies/auth supplied
-
-CORS_ALLOW_HEADERS = list(default_headers) + [
-    "authorization",
-    "content-type",
-    # add any custom front-end headers here
-]
-
-CORS_ALLOW_METHODS = list(default_methods)  # ["DELETE", "GET", "OPTIONS", ...]
-
-CORS_PREFLIGHT_MAX_AGE = 86400            # 24h cache for pre-flight
 
 # ------------------------------------------------------------------
 # Celery
