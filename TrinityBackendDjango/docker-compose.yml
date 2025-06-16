@@ -21,6 +21,8 @@ services:
 
   redis:
     image: redis:7
+    volumes:
+      - redis_data:/data
     networks:
       - trinity-net
 
@@ -83,9 +85,22 @@ services:
     networks:
       - trinity-net
 
+  frontend:
+    build:
+      context: ../TrinityFrontend
+      dockerfile: Dockerfile
+    container_name: trinity-frontend
+    ports:
+      - "8080:80"
+    networks:
+      - trinity-net
+    depends_on:
+      - web
+
 volumes:
   postgres_data:
   mongo_data:
+  redis_data:
 
 networks:
   trinity-net:
