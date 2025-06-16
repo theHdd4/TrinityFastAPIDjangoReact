@@ -26,6 +26,20 @@ services:
     networks:
       - trinity-net
 
+  minio:
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+    environment:
+      MINIO_ROOT_USER: minio
+      MINIO_ROOT_PASSWORD: minio123
+    command: server /data --console-address ":9001"
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    networks:
+      - trinity-net
+
   pgadmin:
     image: dpage/pgadmin4
     environment:
@@ -51,6 +65,7 @@ services:
       - postgres
       - mongo
       - redis
+      - minio
     networks:
       - trinity-net
 
@@ -76,12 +91,17 @@ services:
       - ../TrinityBackendFastAPI:/code/TrinityBackendFastAPI
     env_file:
       - .env
+    environment:
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: minio
+      MINIO_SECRET_KEY: minio123
     ports:
       - "8001:8001"
     depends_on:
       - postgres
       - mongo
       - redis
+      - minio
     networks:
       - trinity-net
 
@@ -101,6 +121,7 @@ volumes:
   postgres_data:
   mongo_data:
   redis_data:
+  minio_data:
 
 networks:
   trinity-net:

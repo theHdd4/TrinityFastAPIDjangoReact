@@ -1,13 +1,15 @@
 1. Install Docker and Docker Compose on your machine.
 2. Copy `TrinityBackendDjango/.env.example` to `TrinityBackendDjango/.env` and set the variables as needed. Copy `TrinityFrontend/.env.example` to `TrinityFrontend/.env`.
 3. From the `TrinityBackendDjango` directory run `docker-compose up --build`.
-   This command builds the Django, FastAPI and new frontend images and starts
-   PostgreSQL, MongoDB and Redis containers. Named volumes `postgres_data`,
-   `mongo_data` and `redis_data` ensure database data persists between restarts.
+   This command builds the Django, FastAPI and frontend images and starts
+   PostgreSQL, MongoDB, Redis and MinIO containers. Named volumes `postgres_data`,
+   `mongo_data`, `redis_data` and `minio_data` ensure data persists between restarts.
 4. Access the services after the build finishes:
    - Frontend: http://localhost:8080
    - Django API: http://localhost:8000
    - FastAPI service: http://localhost:8001
-5. To stop the stack press `Ctrl+C` and run `docker-compose down`. The volumes
-   are preserved so any database or uploaded data remains the next time you run
-   `docker-compose up`.
+   - MinIO console: http://localhost:9001 (API on port 9000)
+5. To stop the stack press `Ctrl+C` and run `docker-compose down`. Because the
+   volumes are named, Docker keeps `postgres_data`, `mongo_data`, `redis_data`
+   and `minio_data` on disk. When you start the stack again with
+   `docker-compose up`, all database records and uploaded files reappear.
