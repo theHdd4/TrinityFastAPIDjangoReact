@@ -5,7 +5,8 @@
 2. Update `TrinityBackendDjango/.env` with the following variables so the app works from any IP address:
    - `ALLOWED_HOSTS=*` to accept requests from any domain or IP.
    - `FRONTEND_URL=http://10.2.1.242:8080` matching where the React app runs.
-   - `CSRF_TRUSTED_ORIGINS=http://10.2.1.242:8080` so Django accepts login posts from that address. Use the public domain when tunnelling through Cloudflare.
+   - `CSRF_TRUSTED_ORIGINS=http://10.2.1.242:8080` so Django accepts login posts from that address.
+   - `ADDITIONAL_DOMAINS=10.2.1.242` to map the backend tenant to that IP. Use your external domain instead when tunnelling through Cloudflare.
 
 3. Rebuild and start the stack. This will also rebuild the frontend image so the
    custom Nginx config is used:

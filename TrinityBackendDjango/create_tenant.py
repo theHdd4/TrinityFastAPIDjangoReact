@@ -69,6 +69,19 @@ def main():
                 )
                 if created:
                     print(f"   → Added alias domain: {alias}")
+
+        # Allow optional extra domains via env var so the app works when
+        # accessed from an IP or external hostname.
+        additional = os.getenv("ADDITIONAL_DOMAINS", "")
+        for host in [h.strip() for h in additional.split(",") if h.strip()]:
+            if host != primary_domain:
+                alias, created = Domain.objects.get_or_create(
+                    domain=host,
+                    tenant=tenant_obj,
+                    defaults={"is_primary": False},
+                )
+                if created:
+                    print(f"   → Added extra domain: {alias}")
     print()
 
     print(f"→ 3) Running TENANT-SCHEMA migrations for '{tenant_schema}'…")
