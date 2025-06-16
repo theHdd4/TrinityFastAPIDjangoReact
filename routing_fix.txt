@@ -1,12 +1,18 @@
-1. Update `TrinityBackendDjango/.env` with the following variables:
-   - `ALLOWED_HOSTS=*` to accept requests from any domain.
-   - `CSRF_TRUSTED_ORIGINS=https://your-domain.com` so Django accepts form posts when proxied through Cloudflare.
-2. Rebuild and start the stack:
+1. Copy `background.mp4` into `TrinityFrontend/public`. The login page now loads this video as the full-screen background.
+
+2. Update `TrinityBackendDjango/.env` with the following variables so the app works from any IP address:
+   - `ALLOWED_HOSTS=*` to accept requests from any domain or IP.
+   - `FRONTEND_URL=http://<YOUR-IP>:8080` matching where the React app runs.
+   - `CSRF_TRUSTED_ORIGINS=http://<YOUR-IP>:8080` so Django accepts login posts from that address. Use the public domain when tunnelling through Cloudflare.
+
+3. Rebuild and start the stack:
    ```bash
    cd TrinityBackendDjango
    docker-compose up -d --build
    ```
-3. Configure your Cloudflare tunnel to point to the frontend container on port `8080` and expose port `8000` for the Django API.
-4. Update `TrinityFrontend/.env` so the `VITE_*` variables (or `VITE_BACKEND_ORIGIN`) use the external domain for the backend. Also set `FRONTEND_URL` in `TrinityBackendDjango/.env` to the same domain.
-5. After rebuilding and restarting the containers you should be able to log in and add users or clients from any IP address via the tunneled domain.
+4. Configure your Cloudflare tunnel to point to the frontend container on port `8080` and expose port `8000` for the Django API.
+
+5. Update `TrinityFrontend/.env` so the `VITE_*` variables (or `VITE_BACKEND_ORIGIN`) use `http://<YOUR-IP>:8000` or your Cloudflare domain. Set `FRONTEND_URL` in `TrinityBackendDjango/.env` to the same value.
+
+6. After rebuilding and restarting the containers you can access the app via the IP address or tunneled domain, log in, and manage clients or users without errors.
 

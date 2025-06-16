@@ -38,11 +38,17 @@ const Login = () => {
   };
 
   return (
-    <div
-      className="min-h-screen bg-cover bg-center flex items-center justify-center p-4"
-      style={{ backgroundImage: "url('/background.svg')" }}
-    >
-      <div className="w-full max-w-md space-y-8 shadow-lg">
+    <div className="min-h-screen flex items-center justify-center p-4 relative">
+      <video
+        autoPlay
+        loop
+        muted
+        playsInline
+        className="absolute inset-0 w-full h-full object-cover"
+      >
+        <source src="/background.mp4" type="video/mp4" />
+      </video>
+      <div className="w-full max-w-md space-y-8 shadow-lg relative z-10">
         {/* Trinity Logo */}
         <div className="flex flex-col items-center space-y-2 text-white">
           <AnimatedLogo className="w-20 h-20 drop-shadow-[0_0_10px_rgba(255,255,255,0.8)]" />
