@@ -1,18 +1,32 @@
 1. Copy `background.mp4` into `TrinityFrontend/public`. The login page now loads this video as the full-screen background.
+   The frontend Docker image now includes a custom Nginx config so React routes
+   like `/login` work correctly.
 
 2. Update `TrinityBackendDjango/.env` with the following variables so the app works from any IP address:
    - `ALLOWED_HOSTS=*` to accept requests from any domain or IP.
    - `FRONTEND_URL=http://<YOUR-IP>:8080` matching where the React app runs.
    - `CSRF_TRUSTED_ORIGINS=http://<YOUR-IP>:8080` so Django accepts login posts from that address. Use the public domain when tunnelling through Cloudflare.
 
-3. Rebuild and start the stack:
+3. Rebuild and start the stack. This will also rebuild the frontend image so the
+   custom Nginx config is used:
    ```bash
    cd TrinityBackendDjango
    docker-compose up -d --build
    ```
-4. Configure your Cloudflare tunnel to point to the frontend container on port `8080` and expose port `8000` for the Django API.
+4. Update `TrinityFrontend/.env` so the `VITE_*` variables (or `VITE_BACKEND_ORIGIN`) use `http://<YOUR-IP>:8000` or your Cloudflare domain. Set `FRONTEND_URL` in `TrinityBackendDjango/.env` to the same value.
 
-5. Update `TrinityFrontend/.env` so the `VITE_*` variables (or `VITE_BACKEND_ORIGIN`) use `http://<YOUR-IP>:8000` or your Cloudflare domain. Set `FRONTEND_URL` in `TrinityBackendDjango/.env` to the same value.
+5. Configure a Cloudflare Tunnel so the app is reachable at `https://trinity.quantmatrix.ai`:
+   1. Install the `cloudflared` CLI and authenticate with `cloudflared login`.
+   2. Create a tunnel and give it a name:
+      `cloudflared tunnel create trinity`
+   3. Map the tunnel to the frontend container:
+      `cloudflared tunnel run trinity --url http://localhost:8080`
+   4. In the Cloudflare dashboard, add a DNS CNAME record for
+      `trinity.quantmatrix.ai` that points to the tunnel.
+   5. Optionally expose the backend by running another tunnel to
+      `http://localhost:8000`.
 
-6. After rebuilding and restarting the containers you can access the app via the IP address or tunneled domain, log in, and manage clients or users without errors.
+6. After rebuilding and restarting the containers you can access the app via the
+   IP address or the `trinity.quantmatrix.ai` domain, log in, and manage clients
+   or users without errors.
 
