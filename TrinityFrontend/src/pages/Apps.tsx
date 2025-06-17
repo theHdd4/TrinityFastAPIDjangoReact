@@ -1,9 +1,7 @@
 
 import React, { useRef, useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Card } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { ArrowLeft, Zap, BarChart3, Target, Plus, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Zap, BarChart3, Target, Plus, ChevronLeft, ChevronRight } from 'lucide-react';
 import Header from '@/components/Header';
 import AppCard from '@/components/AppList/AppCard';
 import { REGISTRY_API } from '@/lib/api';
@@ -124,15 +122,15 @@ const handleAppSelect = async (appId: string) => {
 };
 
   return (
-    <div className="min-h-screen bg-white flex flex-col">
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-gray-100 flex flex-col">
 
       <Header />
 
       <div className="relative z-10 p-8">
         {/* Removed back navigation button per updated routing flow */}
         <div className="mt-4">
-          <h1 className="text-3xl font-light text-black">Choose Your Trinity App</h1>
-          <p className="text-black/60 text-sm">Select an application template to initialize</p>
+          <h1 className="text-3xl font-light text-gray-900">Choose Your Trinity App</h1>
+          <p className="text-gray-600 text-sm">Select an application template to initialize</p>
         </div>
       </div>
 
@@ -166,9 +164,7 @@ const handleAppSelect = async (appId: string) => {
 
           {/* Footer Message */}
           <div className="text-center mt-16">
-            <p className="text-black/50 text-sm">
-              "Choice is an illusion" - But we give you options anyway
-            </p>
+            <p className="text-gray-500 text-sm">"The Matrix has you" - pick your path</p>
           </div>
         </div>
       </div>
