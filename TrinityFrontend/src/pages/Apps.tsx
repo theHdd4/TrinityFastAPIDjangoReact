@@ -1,12 +1,11 @@
 
-import React, { useRef, useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Zap, BarChart3, Target, Plus, ChevronLeft, ChevronRight } from 'lucide-react';
-import Header from '@/components/Header';
-import AppCard from '@/components/AppList/AppCard';
+import { Card } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { BarChart3, Target, Zap, Plus, ArrowRight } from 'lucide-react';
 import { REGISTRY_API } from '@/lib/api';
-import { molecules } from '@/components/MoleculeList/data/molecules';
-import { safeStringify } from '@/utils/safeStringify';
+import { useAuth } from '@/contexts/AuthContext';
 
 interface BackendApp {
   id: number;
@@ -15,16 +14,9 @@ interface BackendApp {
 
 const Apps = () => {
   const navigate = useNavigate();
-  const scrollRef = useRef<HTMLDivElement>(null);
+  const { logout } = useAuth();
   const [appMap, setAppMap] = useState<Record<string, number>>({});
 
-  // Default molecules to preload for each app template
-  const templates: Record<string, string[]> = {
-    'marketing-mix': ['data-pre-process', 'build'],
-    forecasting: ['data-pre-process', 'explore'],
-    'promo-effectiveness': ['explore', 'build'],
-    blank: []
-  };
 
   const loadApps = async () => {
     console.log('Fetching apps from backend...');
@@ -58,36 +50,36 @@ const Apps = () => {
       title: 'Forecasting Analysis',
       description: 'Predict future trends and patterns with advanced time series analysis',
       icon: BarChart3,
-      templates: ['Explore', 'Build'],
-      color: 'bg-trinity-yellow',
-      borderColor: 'border-trinity-yellow/30'
+      color: 'from-green-500 to-teal-600',
+      bgGradient: 'from-green-50 to-teal-50',
+      molecules: ['Explore', 'Build']
     },
     {
       id: 'marketing-mix',
       title: 'Marketing Mix Modeling',
       description: 'Optimize marketing spend allocation across different channels',
       icon: Target,
-      templates: ['Data Pre-Process', 'Explore'],
-      color: 'bg-trinity-yellow',
-      borderColor: 'border-trinity-yellow/30'
+      color: 'from-blue-500 to-purple-600',
+      bgGradient: 'from-blue-50 to-purple-50',
+      molecules: ['Data Pre-Process', 'Explore']
     },
     {
       id: 'promo-effectiveness',
       title: 'Promo Effectiveness',
       description: 'Measure and analyze promotional campaign performance',
       icon: Zap,
-      templates: ['Data Pre-Process', 'Build'],
-      color: 'bg-trinity-yellow',
-      borderColor: 'border-trinity-yellow/30'
+      color: 'from-orange-500 to-red-600',
+      bgGradient: 'from-orange-50 to-red-50',
+      molecules: ['Data Pre-Process', 'Build']
     },
     {
       id: 'blank',
       title: 'Create Blank App',
       description: 'Start from scratch with a clean canvas',
       icon: Plus,
-      templates: [],
-      color: 'bg-trinity-yellow',
-      borderColor: 'border-trinity-yellow/30'
+      color: 'from-gray-500 to-gray-700',
+      bgGradient: 'from-gray-50 to-gray-100',
+      molecules: []
     }
   ];
 
@@ -121,51 +113,96 @@ const handleAppSelect = async (appId: string) => {
   navigate(`/projects?app=${appId}`);
 };
 
+  const handleLogout = () => {
+    logout();
+    navigate('/login');
+  };
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-gray-100 flex flex-col">
-
-      <Header />
-
-      <div className="relative z-10 p-8">
-        {/* Removed back navigation button per updated routing flow */}
-        <div className="mt-4">
-          <h1 className="text-3xl font-light text-gray-900">Choose Your Trinity App</h1>
-          <p className="text-gray-600 text-sm">Select an application template to initialize</p>
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-gray-100">
+      {/* Header */}
+      <div className="bg-white shadow-sm border-b">
+        <div className="max-w-7xl mx-auto px-6 py-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-3">
+              <div className="w-8 h-8 bg-gradient-to-r from-blue-600 to-purple-600 rounded-lg flex items-center justify-center">
+                <div className="w-4 h-4 bg-white rounded-sm" />
+              </div>
+              <h1 className="text-xl font-semibold text-gray-900">Trinity Analytics</h1>
+            </div>
+            <Button
+              variant="outline"
+              onClick={handleLogout}
+              className="text-gray-600 hover:text-gray-900"
+            >
+              Sign Out
+            </Button>
+          </div>
         </div>
       </div>
 
       {/* Main Content */}
-      <div className="relative z-10 flex-1 px-8 pb-8 flex items-center justify-center">
-        <div className="max-w-6xl mx-auto relative">
-          <button
-            type="button"
-            onClick={() => scrollRef.current?.scrollBy({ left: -scrollRef.current!.clientWidth, behavior: 'smooth' })}
-            className="absolute -left-12 top-1/2 -translate-y-1/2 p-3 bg-trinity-yellow text-white rounded-full shadow-lg hover:bg-trinity-yellow/90"
-          >
-            <ChevronLeft className="w-6 h-6" />
-          </button>
-          <button
-            type="button"
-            onClick={() => scrollRef.current?.scrollBy({ left: scrollRef.current!.clientWidth, behavior: 'smooth' })}
-            className="absolute -right-12 top-1/2 -translate-y-1/2 p-3 bg-trinity-yellow text-white rounded-full shadow-lg hover:bg-trinity-yellow/90"
-          >
-            <ChevronRight className="w-6 h-6" />
-          </button>
-          <div ref={scrollRef} className="flex overflow-x-auto space-x-6 pb-4 snap-x snap-mandatory scroll-smooth">
-            {apps.map((app) => (
-              <div key={app.id} className="w-1/2 flex-shrink-0 snap-center">
-                <AppCard
-                  app={app}
-                  onSelect={() => handleAppSelect(app.id)}
-                />
-              </div>
-            ))}
-          </div>
+      <div className="max-w-7xl mx-auto px-6 py-12">
+        <div className="text-center mb-12">
+          <h2 className="text-3xl font-bold text-gray-900 mb-4">Choose Your Analytics Application</h2>
+          <p className="text-lg text-gray-600 max-w-2xl mx-auto">
+            Select the type of analysis you want to perform. Each application comes with pre-configured templates and workflows.
+          </p>
+        </div>
 
-          {/* Footer Message */}
-          <div className="text-center mt-16">
-            <p className="text-gray-500 text-sm">"The Matrix has you" - pick your path</p>
-          </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-8 max-w-5xl mx-auto">
+          {apps.map((app) => {
+            const Icon = app.icon;
+            return (
+              <Card
+                key={app.id}
+                className="group cursor-pointer hover:shadow-lg transition-all duration-300 border-0 bg-white overflow-hidden"
+                onClick={() => handleAppSelect(app.id)}
+              >
+                <div className="p-8">
+                  <div className="flex items-start space-x-4">
+                    <div className={`w-16 h-16 rounded-xl bg-gradient-to-r ${app.color} flex items-center justify-center group-hover:scale-110 transition-transform duration-300 shadow-lg`}>
+                      <Icon className="w-8 h-8 text-white" />
+                    </div>
+
+                    <div className="flex-1 min-w-0">
+                      <h3 className="text-xl font-semibold text-gray-900 mb-2 group-hover:text-gray-700 transition-colors">
+                        {app.title}
+                      </h3>
+                      <p className="text-gray-600 text-sm leading-relaxed mb-4">
+                        {app.description}
+                      </p>
+
+                      {app.molecules.length > 0 && (
+                        <div className="mb-4">
+                          <p className="text-xs font-medium text-gray-500 mb-2">Pre-configured with:</p>
+                          <div className="flex flex-wrap gap-2">
+                            {app.molecules.map((molecule, index) => (
+                              <span
+                                key={index}
+                                className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800"
+                              >
+                                {molecule}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="flex items-center text-sm font-medium text-gray-600 group-hover:text-gray-900 transition-colors">
+                        Select Application
+                        <ArrowRight className="w-4 h-4 ml-2 group-hover:translate-x-1 transition-transform duration-300" />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </Card>
+            );
+          })}
+        </div>
+
+        <div className="text-center mt-16">
+          <p className="text-gray-500 text-sm">"The Matrix has you" - pick your path</p>
         </div>
       </div>
     </div>
