@@ -95,114 +95,32 @@ const Apps = () => {
 
 
 const handleAppSelect = async (appId: string) => {
-  const template = apps.find((app) => app.id === appId);
-  if (!template) return;
-  const name = template.title;
-  console.log('App selected', appId);
-
   // Ensure we have a mapping from slug to backend ID
   let backendId = appMap[appId];
   if (!backendId) {
     try {
       const res = await fetch(`${REGISTRY_API}/apps/`, { credentials: 'include' });
-      console.log('Lookup apps response', res.status);
       if (res.ok) {
         const data: BackendApp[] = await res.json();
-        console.log('Fetched apps', data);
         const map: Record<string, number> = {};
         data.forEach((a) => {
           map[a.slug] = a.id;
         });
         setAppMap(map);
         backendId = map[appId];
-        console.log('Mapped', appId, '->', backendId);
-      } else {
-        const text = await res.text();
-        console.log('Failed to fetch apps for mapping:', text);
       }
-    } catch (err) {
-      console.log('App map fetch error', err);
+    } catch {
+      /* ignore */
     }
   }
+
   if (!backendId) return;
 
-  const slug = name.toLowerCase().replace(/\s+/g, '-') + '-' + Date.now();
-  try {
-    const res = await fetch(`${REGISTRY_API}/projects/`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify({
-        name,
-        slug,
-        description: `New ${name} project`,
-        app: backendId,
-      }),
-    });
-    console.log('Create project status', res.status);
-    if (res.ok) {
-      const project = await res.json();
-      console.log('Created project', project);
-      localStorage.setItem('current-project', JSON.stringify(project));
-      const ids = templates[appId] || [];
-      let layout: any[] = [];
-      if (ids.length > 0) {
-        const timestamp = Date.now();
-        layout = ids
-          .map((id, index) => {
-            const info = molecules.find(m => m.id === id);
-            if (!info) return null;
-            const selectedAtoms: Record<string, boolean> = {};
-            info.atoms.forEach((atom, aIdx) => {
-              // Default select the first two atoms
-              selectedAtoms[atom] = aIdx < 2;
-            });
-            return {
-              id: `${id}-${timestamp}-${index}`,
-              type: info.type,
-              title: info.title,
-              subtitle: info.subtitle,
-              tag: info.tag,
-              atoms: info.atoms,
-              position: { x: 100 + index * 250, y: 100 },
-              connections: [],
-              selectedAtoms,
-              atomOrder: [...info.atoms]
-            };
-          })
-          .filter(Boolean) as any[];
-
-        // Connect molecules sequentially in the given order
-        for (let i = 0; i < layout.length - 1; i++) {
-          layout[i].connections.push({ target: layout[i + 1].id });
-        }
-
-        localStorage.setItem('workflow-canvas-molecules', safeStringify(layout));
-      } else {
-        localStorage.removeItem('workflow-canvas-molecules');
-      }
-
-      // Persist initial workflow layout on the server
-      try {
-        const patchRes = await fetch(`${REGISTRY_API}/projects/${project.id}/`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'include',
-          body: JSON.stringify({ state: { workflow_canvas: layout } })
-        });
-        console.log('Saved layout status', patchRes.status);
-      } catch {
-        console.log('Failed to save layout');
-      }
-
-      navigate('/workflow');
-    } else {
-      const text = await res.text();
-      console.log('Project create error body:', text);
-    }
-  } catch (err) {
-    console.log('Project create error', err);
-  }
+  localStorage.setItem(
+    'current-app',
+    JSON.stringify({ id: backendId, slug: appId })
+  );
+  navigate(`/projects?app=${appId}`);
 };
 
   return (
@@ -213,7 +131,19 @@ const handleAppSelect = async (appId: string) => {
       <div className="relative z-10 p-8">
         <Button
           variant="ghost"
-          onClick={() => navigate('/projects')}
+          onClick={() => {
+            const stored = localStorage.getItem('current-app');
+            if (stored) {
+              try {
+                const obj = JSON.parse(stored);
+                navigate(`/projects?app=${obj.slug}`);
+              } catch {
+                navigate('/projects');
+              }
+            } else {
+              navigate('/projects');
+            }
+          }}
           className="text-black hover:bg-trinity-yellow/10"
         >
           <ArrowLeft className="w-4 h-4 mr-2" />

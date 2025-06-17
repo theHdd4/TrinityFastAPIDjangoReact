@@ -32,9 +32,21 @@ class ProjectViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         user = self.request.user
-        if user.is_staff:
-            return self.queryset
-        return self.queryset.filter(owner=user)
+        qs = self.queryset
+
+        # Restrict to projects owned by the user unless admin
+        if not user.is_staff:
+            qs = qs.filter(owner=user)
+
+        # Optional filtering by app via query parameter
+        app_param = self.request.query_params.get("app")
+        if app_param:
+            if app_param.isdigit():
+                qs = qs.filter(app__id=app_param)
+            else:
+                qs = qs.filter(app__slug=app_param)
+
+        return qs
 
     def perform_create(self, serializer):
         serializer.save(owner=self.request.user)

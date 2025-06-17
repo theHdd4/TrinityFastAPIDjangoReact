@@ -28,7 +28,7 @@ const Login = () => {
 
     const success = await login(username, password);
     if (success) {
-      navigate('/projects');
+      navigate('/apps');
     } else {
       setError('Invalid credentials.');
       console.log('Login failed for', username);

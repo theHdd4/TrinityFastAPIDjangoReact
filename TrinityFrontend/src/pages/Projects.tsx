@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { Card } from '@/components/ui/card';
 import {
   AlertDialog,
@@ -16,6 +16,7 @@ import { Plus, FolderOpen, Calendar, Pencil, Trash2 } from 'lucide-react';
 import Header from '@/components/Header';
 import { REGISTRY_API } from '@/lib/api';
 import { safeStringify } from '@/utils/safeStringify';
+import { molecules } from '@/components/MoleculeList/data/molecules';
 
 interface Project {
   id: number;
@@ -28,14 +29,25 @@ interface Project {
   lastModified?: Date;
 }
 
+// Default molecules to preload for each app template
+const templates: Record<string, string[]> = {
+  'marketing-mix': ['data-pre-process', 'build'],
+  forecasting: ['data-pre-process', 'explore'],
+  'promo-effectiveness': ['explore', 'build'],
+  blank: []
+};
+
 const Projects = () => {
   const [projects, setProjects] = useState<Project[]>([]);
+  const [currentApp, setCurrentApp] = useState<{ id: number; slug: string } | null>(null);
   const navigate = useNavigate();
+  const location = useLocation();
   const inputRef = useRef<HTMLInputElement | null>(null);
 
-  const loadProjects = async () => {
+  const loadProjects = React.useCallback(async () => {
+    if (!currentApp) return;
     try {
-      const res = await fetch(`${REGISTRY_API}/projects/`, { credentials: 'include' });
+      const res = await fetch(`${REGISTRY_API}/projects/?app=${currentApp.id}`, { credentials: 'include' });
       if (res.ok) {
         const data = await res.json();
         const parsed = data.map((p: Project) => ({
@@ -47,15 +59,123 @@ const Projects = () => {
     } catch {
       /* ignore */
     }
-  };
+  }, [currentApp]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const slug = params.get('app');
+    const stored = localStorage.getItem('current-app');
+    if (stored) {
+      try {
+        const obj = JSON.parse(stored);
+        if (!slug || slug === obj.slug) {
+          setCurrentApp(obj);
+          return;
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+
+    if (slug) {
+      // fetch mapping to id
+      (async () => {
+        try {
+          const res = await fetch(`${REGISTRY_API}/apps/`, { credentials: 'include' });
+          if (res.ok) {
+            const apps: { id: number; slug: string }[] = await res.json();
+            const match = apps.find(a => a.slug === slug);
+            if (match) {
+              const obj = { id: match.id, slug: match.slug };
+              localStorage.setItem('current-app', JSON.stringify(obj));
+              setCurrentApp(obj);
+            }
+          }
+        } catch {
+          /* ignore */
+        }
+      })();
+    }
+  }, [location.search]);
 
   useEffect(() => {
     loadProjects();
-  }, []);
+  }, [loadProjects]);
 
-  const createNewProject = () => {
-    // Navigate to apps selection page
-    navigate('/apps');
+  const createNewProject = async () => {
+    if (!currentApp) return;
+
+    const name = `${currentApp.slug} project`;
+    const slug = `${currentApp.slug}-${Date.now()}`;
+
+    try {
+      const res = await fetch(`${REGISTRY_API}/projects/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          name,
+          slug,
+          description: `New ${currentApp.slug} project`,
+          app: currentApp.id,
+        }),
+      });
+      if (res.ok) {
+        const project = await res.json();
+        localStorage.setItem('current-project', JSON.stringify(project));
+
+        const ids = templates[currentApp.slug] || [];
+        let layout: any[] = [];
+        if (ids.length > 0) {
+          const timestamp = Date.now();
+          layout = ids
+            .map((id, index) => {
+              const info = molecules.find(m => m.id === id);
+              if (!info) return null;
+              const selectedAtoms: Record<string, boolean> = {};
+              info.atoms.forEach((atom, aIdx) => {
+                selectedAtoms[atom] = aIdx < 2;
+              });
+              return {
+                id: `${id}-${timestamp}-${index}`,
+                type: info.type,
+                title: info.title,
+                subtitle: info.subtitle,
+                tag: info.tag,
+                atoms: info.atoms,
+                position: { x: 100 + index * 250, y: 100 },
+                connections: [],
+                selectedAtoms,
+                atomOrder: [...info.atoms]
+              };
+            })
+            .filter(Boolean) as any[];
+
+          for (let i = 0; i < layout.length - 1; i++) {
+            layout[i].connections.push({ target: layout[i + 1].id });
+          }
+
+          localStorage.setItem('workflow-canvas-molecules', safeStringify(layout));
+        } else {
+          localStorage.removeItem('workflow-canvas-molecules');
+        }
+
+        try {
+          await fetch(`${REGISTRY_API}/projects/${project.id}/`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({ state: { workflow_canvas: layout } })
+          });
+        } catch {
+          /* ignore */
+        }
+
+        navigate('/workflow');
+      }
+    } catch {
+      /* ignore */
+    }
   };
 
   const openProject = async (project: Project) => {
@@ -147,7 +267,9 @@ const Projects = () => {
       <Header />
 
       <div className="relative z-10 p-8">
-        <h1 className="text-3xl font-light text-black">Trinity Projects</h1>
+        <h1 className="text-3xl font-light text-black">
+          Trinity Projects{currentApp ? ` - ${currentApp.slug}` : ''}
+        </h1>
         <p className="text-black/60 text-sm">Access your quantum matrices</p>
       </div>
 
