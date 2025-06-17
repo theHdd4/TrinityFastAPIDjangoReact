@@ -72,7 +72,9 @@ def main():
 
         # Allow optional extra domains via env var so the app works when
         # accessed from an IP or external hostname.
-        additional = os.getenv("ADDITIONAL_DOMAINS", "")
+        additional = os.getenv("ADDITIONAL_DOMAINS")
+        if not additional:
+            additional = os.getenv("HOST_IP", "")
         for host in [h.strip() for h in additional.split(",") if h.strip()]:
             if host != primary_domain:
                 alias, created = Domain.objects.get_or_create(

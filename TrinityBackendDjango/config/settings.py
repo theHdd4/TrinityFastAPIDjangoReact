@@ -36,6 +36,8 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # ------------------------------------------------------------------
 # Security
 # ------------------------------------------------------------------
+HOST_IP = os.getenv("HOST_IP", "10.2.1.242")
+FRONTEND_URL = os.getenv("FRONTEND_URL", f"http://{HOST_IP}:8080")
 SECRET_KEY = os.getenv("SECRET_KEY", "change-me-in-production")
 DEBUG = os.getenv("DEBUG", "False") == "True"
 # Allow requests from the provided comma separated list of hosts. Use "*" to
@@ -45,8 +47,9 @@ ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS", "*").split(",")
 # Explicitly trust these origins for CSRF-protected requests such as the login
 # form. When deploying behind Cloudflare or another proxy, add your external
 # domain (e.g. "https://example.com") here so browser POSTs are accepted.
-_trusted = os.getenv("CSRF_TRUSTED_ORIGINS")
+_trusted = os.getenv("CSRF_TRUSTED_ORIGINS", FRONTEND_URL)
 CSRF_TRUSTED_ORIGINS = _trusted.split(",") if _trusted else []
+ADDITIONAL_DOMAINS = os.getenv("ADDITIONAL_DOMAINS", HOST_IP)
 
 # ------------------------------------------------------------------
 # CORS configuration

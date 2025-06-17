@@ -31,3 +31,16 @@
    IP address (`http://10.2.1.242:8080`) or the `trinity.quantmatrix.ai` domain,
    log in, and manage clients or users without errors.
 
+7. **Running on a new host IP**
+   1. Edit `TrinityBackendDjango/.env` and set `HOST_IP` to the machine's IP
+      address. Leave `FRONTEND_URL`, `CSRF_TRUSTED_ORIGINS` and
+      `ADDITIONAL_DOMAINS` blank so Django derives them from `HOST_IP`.
+   2. Edit `TrinityFrontend/.env` and set `VITE_HOST_IP` to the same value.
+   3. If MongoDB runs elsewhere, set `OVERVIEW_MONGO_URI` in the backend `.env`
+      to the correct connection string.
+   4. Update `TrinityFrontend/nginx.conf` if you need a custom `server_name`.
+      The bundled config already rewrites unknown routes to `index.html` so the
+      React router works.
+   5. Rebuild the containers with `docker-compose up -d --build` and access the
+      app at `http://<HOST_IP>:8080`.
+

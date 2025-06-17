@@ -1,7 +1,12 @@
 from motor.motor_asyncio import AsyncIOMotorClient
-# from .config import settings
+import os
 
-client = AsyncIOMotorClient("mongodb://admin_dev:pass_dev@10.2.1.65:9005/?authSource=admin")
+MONGO_URI = os.getenv(
+    "OVERVIEW_MONGO_URI",
+    "mongodb://admin_dev:pass_dev@10.2.1.65:9005/?authSource=admin",
+)
+
+client = AsyncIOMotorClient(MONGO_URI)
 db = client["feature_overview_db"]
 
 async def get_unique_dataframe_results_collection():

@@ -1,8 +1,11 @@
+const hostIp = import.meta.env.VITE_HOST_IP;
 const backendOrigin =
   import.meta.env.VITE_BACKEND_ORIGIN ||
-  (typeof window !== 'undefined'
-    ? window.location.origin
-    : 'http://localhost:8000');
+  (hostIp
+    ? `http://${hostIp}:8000`
+    : typeof window !== 'undefined'
+      ? window.location.origin.replace(/:8080$/, ':8000')
+      : 'http://localhost:8000');
 
 export const ACCOUNTS_API =
   import.meta.env.VITE_ACCOUNTS_API || `${backendOrigin}/api/accounts`;
