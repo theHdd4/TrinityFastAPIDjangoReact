@@ -6,6 +6,8 @@ import {
   Plus,
   FolderOpen,
   Calendar,
+  Pencil,
+  Trash,
   Target,
   BarChart3,
   Zap
@@ -39,6 +41,8 @@ const Projects = () => {
   const [projects, setProjects] = useState<Project[]>([]);
   const [appId, setAppId] = useState<number | null>(null);
   const [appSlug, setAppSlug] = useState<string>('');
+  const [editId, setEditId] = useState<number | null>(null);
+  const [editName, setEditName] = useState('');
 
   const getAppDetails = () => {
     switch (appSlug) {
@@ -213,6 +217,53 @@ const Projects = () => {
     }
   };
 
+  const startRename = (project: Project, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setEditId(project.id);
+    setEditName(project.name);
+  };
+
+  const submitRename = async () => {
+    if (!editId) return;
+    try {
+      const res = await fetch(`${REGISTRY_API}/projects/${editId}/`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ name: editName })
+      });
+      if (res.ok) {
+        const updated = await res.json();
+        setProjects(prev =>
+          prev.map(p =>
+            p.id === updated.id
+              ? { ...p, name: updated.name, lastModified: new Date(updated.updated_at) }
+              : p
+          )
+        );
+      }
+    } catch {
+      /* ignore */
+    }
+    setEditId(null);
+  };
+
+  const deleteProject = async (id: number, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!window.confirm('Delete this project?')) return;
+    try {
+      const res = await fetch(`${REGISTRY_API}/projects/${id}/`, {
+        method: 'DELETE',
+        credentials: 'include'
+      });
+      if (res.ok || res.status === 204) {
+        setProjects(prev => prev.filter(p => p.id !== id));
+      }
+    } catch {
+      /* ignore */
+    }
+  };
+
   const openProject = async (project: Project) => {
     localStorage.setItem('current-project', JSON.stringify(project));
     try {
@@ -286,13 +337,35 @@ const Projects = () => {
                   <div className="w-12 h-12 rounded-lg bg-gradient-to-r from-gray-100 to-gray-200 flex items-center justify-center group-hover:from-gray-200 group-hover:to-gray-300 transition-all duration-300">
                     <FolderOpen className="w-6 h-6 text-gray-600" />
                   </div>
-                  <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                  <div className="flex items-center space-x-2">
+                    <button onClick={(e) => startRename(project, e)} className="p-1" title="Rename">
+                      <Pencil className="w-4 h-4 text-gray-500 hover:text-gray-700" />
+                    </button>
+                    <button onClick={(e) => deleteProject(project.id, e)} className="p-1" title="Delete">
+                      <Trash className="w-4 h-4 text-gray-500 hover:text-red-600" />
+                    </button>
+                  </div>
                 </div>
 
                 <div className="flex-1">
-                  <h3 className="text-lg font-semibold text-gray-900 mb-2 group-hover:text-gray-700 transition-colors duration-300">
-                    {project.name}
-                  </h3>
+                  {editId === project.id ? (
+                    <input
+                      className="border rounded px-2 py-1 text-sm w-full mb-2"
+                      value={editName}
+                      autoFocus
+                      onChange={(e) => setEditName(e.target.value)}
+                      onBlur={submitRename}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') submitRename();
+                        e.stopPropagation();
+                      }}
+                      onClick={(e) => e.stopPropagation()}
+                    />
+                  ) : (
+                    <h3 className="text-lg font-semibold text-gray-900 mb-2 group-hover:text-gray-700 transition-colors duration-300">
+                      {project.name}
+                    </h3>
+                  )}
                   <p className="text-sm text-gray-600 mb-4 line-clamp-2">{project.description}</p>
                 </div>
 
