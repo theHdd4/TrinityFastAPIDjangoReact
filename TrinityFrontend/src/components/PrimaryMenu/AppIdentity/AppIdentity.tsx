@@ -15,7 +15,7 @@ const AppIdentity: React.FC<AppIdentityProps> = ({ projectName, onGoBack }) => (
           type="button"
           onClick={onGoBack}
           className="p-2 text-black"
-          title="Go back to app menu"
+          title="Go back to projects menu"
         >
           <BackToAppsIcon className="w-5 h-5" />
         </button>
