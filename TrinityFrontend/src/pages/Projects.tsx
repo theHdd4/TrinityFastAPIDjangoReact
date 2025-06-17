@@ -1,23 +1,20 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
+import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import {
-  AlertDialog,
-  AlertDialogTrigger,
-  AlertDialogContent,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogCancel,
-  AlertDialogAction,
-} from '@/components/ui/alert-dialog';
-import { Plus, FolderOpen, Calendar, Pencil, Trash2, ArrowLeft } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+  Plus,
+  FolderOpen,
+  Calendar,
+  ArrowLeft,
+  Target,
+  BarChart3,
+  Zap
+} from 'lucide-react';
 import Header from '@/components/Header';
 import { REGISTRY_API } from '@/lib/api';
-import { safeStringify } from '@/utils/safeStringify';
 import { molecules } from '@/components/MoleculeList/data/molecules';
+import { safeStringify } from '@/utils/safeStringify';
 
 interface Project {
   id: number;
@@ -25,12 +22,11 @@ interface Project {
   slug: string;
   description: string;
   app: number;
-  state?: Record<string, unknown> | null;
   updated_at: string;
+  state?: Record<string, unknown> | null;
   lastModified?: Date;
 }
 
-// Default molecules to preload for each app template
 const templates: Record<string, string[]> = {
   'marketing-mix': ['data-pre-process', 'build'],
   forecasting: ['data-pre-process', 'explore'],
@@ -39,16 +35,61 @@ const templates: Record<string, string[]> = {
 };
 
 const Projects = () => {
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [currentApp, setCurrentApp] = useState<{ id: number; slug: string } | null>(null);
   const navigate = useNavigate();
   const location = useLocation();
-  const inputRef = useRef<HTMLInputElement | null>(null);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [appId, setAppId] = useState<number | null>(null);
+  const [appSlug, setAppSlug] = useState<string>('');
 
-  const loadProjects = React.useCallback(async () => {
-    if (!currentApp) return;
+  const getAppDetails = () => {
+    switch (appSlug) {
+      case 'marketing-mix':
+        return {
+          title: 'Marketing Mix Modeling',
+          description: 'Optimize marketing spend allocation across different channels',
+          icon: Target,
+          color: 'from-blue-500 to-purple-600'
+        };
+      case 'forecasting':
+        return {
+          title: 'Forecasting Analysis',
+          description: 'Predict future trends and patterns with advanced modeling',
+          icon: BarChart3,
+          color: 'from-green-500 to-teal-600'
+        };
+      case 'promo-effectiveness':
+        return {
+          title: 'Promo Effectiveness',
+          description: 'Measure promotional campaign performance and ROI',
+          icon: Zap,
+          color: 'from-orange-500 to-red-600'
+        };
+      case 'blank':
+        return {
+          title: 'Blank App',
+          description: 'Custom analysis workflow from scratch',
+          icon: Plus,
+          color: 'from-gray-500 to-gray-700'
+        };
+      default:
+        return {
+          title: 'Projects',
+          description: 'Manage your analytics projects',
+          icon: FolderOpen,
+          color: 'from-blue-500 to-purple-600'
+        };
+    }
+  };
+
+  const appDetails = getAppDetails();
+  const Icon = appDetails.icon;
+
+  const loadProjects = useCallback(async () => {
+    if (!appId) return;
     try {
-      const res = await fetch(`${REGISTRY_API}/projects/?app=${currentApp.id}`, { credentials: 'include' });
+      const res = await fetch(`${REGISTRY_API}/projects/?app=${appId}`, {
+        credentials: 'include'
+      });
       if (res.ok) {
         const data = await res.json();
         const parsed = data.map((p: Project) => ({
@@ -60,7 +101,7 @@ const Projects = () => {
     } catch {
       /* ignore */
     }
-  }, [currentApp]);
+  }, [appId]);
 
   useEffect(() => {
     const params = new URLSearchParams(location.search);
@@ -70,7 +111,8 @@ const Projects = () => {
       try {
         const obj = JSON.parse(stored);
         if (!slug || slug === obj.slug) {
-          setCurrentApp(obj);
+          setAppId(obj.id);
+          setAppSlug(obj.slug);
           return;
         }
       } catch {
@@ -79,7 +121,6 @@ const Projects = () => {
     }
 
     if (slug) {
-      // fetch mapping to id
       (async () => {
         try {
           const res = await fetch(`${REGISTRY_API}/apps/`, { credentials: 'include' });
@@ -87,9 +128,9 @@ const Projects = () => {
             const apps: { id: number; slug: string }[] = await res.json();
             const match = apps.find(a => a.slug === slug);
             if (match) {
-              const obj = { id: match.id, slug: match.slug };
-              localStorage.setItem('current-app', JSON.stringify(obj));
-              setCurrentApp(obj);
+              localStorage.setItem('current-app', JSON.stringify({ id: match.id, slug: match.slug }));
+              setAppId(match.id);
+              setAppSlug(match.slug);
             }
           }
         } catch {
@@ -104,28 +145,22 @@ const Projects = () => {
   }, [loadProjects]);
 
   const createNewProject = async () => {
-    if (!currentApp) return;
-
-    const name = `${currentApp.slug} project`;
-    const slug = `${currentApp.slug}-${Date.now()}`;
+    if (!appId || !appSlug) return;
+    const name = `${appSlug} project`;
+    const slug = `${appSlug}-${Date.now()}`;
 
     try {
       const res = await fetch(`${REGISTRY_API}/projects/`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({
-          name,
-          slug,
-          description: `New ${currentApp.slug} project`,
-          app: currentApp.id,
-        }),
+        body: JSON.stringify({ name, slug, description: `New ${appSlug} project`, app: appId })
       });
       if (res.ok) {
         const project = await res.json();
         localStorage.setItem('current-project', JSON.stringify(project));
 
-        const ids = templates[currentApp.slug] || [];
+        const ids = templates[appSlug] || [];
         let layout: any[] = [];
         if (ids.length > 0) {
           const timestamp = Date.now();
@@ -182,35 +217,21 @@ const Projects = () => {
   const openProject = async (project: Project) => {
     localStorage.setItem('current-project', JSON.stringify(project));
     try {
-      const res = await fetch(`${REGISTRY_API}/projects/${project.id}/`, {
-        credentials: 'include'
-      });
+      const res = await fetch(`${REGISTRY_API}/projects/${project.id}/`, { credentials: 'include' });
       if (res.ok) {
         const data = await res.json();
         if (data.state && data.state.workflow_canvas) {
-          localStorage.setItem(
-            'workflow-canvas-molecules',
-            safeStringify(data.state.workflow_canvas)
-          );
+          localStorage.setItem('workflow-canvas-molecules', safeStringify(data.state.workflow_canvas));
         } else {
           localStorage.removeItem('workflow-canvas-molecules');
         }
         if (data.state && data.state.workflow_selected_atoms) {
-          localStorage.setItem(
-            'workflow-selected-atoms',
-            safeStringify(data.state.workflow_selected_atoms)
-          );
+          localStorage.setItem('workflow-selected-atoms', safeStringify(data.state.workflow_selected_atoms));
         }
         if (data.state && data.state.laboratory_config) {
-          localStorage.setItem(
-            'laboratory-config',
-            safeStringify(data.state.laboratory_config)
-          );
+          localStorage.setItem('laboratory-config', safeStringify(data.state.laboratory_config));
           if (data.state.laboratory_config.cards) {
-            localStorage.setItem(
-              'laboratory-layout-cards',
-              safeStringify(data.state.laboratory_config.cards)
-            );
+            localStorage.setItem('laboratory-layout-cards', safeStringify(data.state.laboratory_config.cards));
           }
         }
       }
@@ -220,194 +241,118 @@ const Projects = () => {
     navigate('/workflow');
   };
 
-  const [editingId, setEditingId] = useState<number | null>(null);
-  const [editingName, setEditingName] = useState('');
-  const [deleteId, setDeleteId] = useState<number | null>(null);
-
-  const startRename = (e: React.MouseEvent, project: Project) => {
-    e.stopPropagation();
-    setEditingId(project.id);
-    setEditingName(project.name);
-    setTimeout(() => inputRef.current?.focus(), 0);
-  };
-
-  const saveRename = async () => {
-    if (!editingId) return;
-    const trimmed = editingName.trim();
-    if (!trimmed) {
-      setEditingId(null);
-      return;
-    }
-    try {
-      await fetch(`${REGISTRY_API}/projects/${editingId}/`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ name: trimmed, slug: trimmed.toLowerCase().replace(/\s+/g, '-') }),
-      });
-      await loadProjects();
-    } catch {
-      /* ignore */
-    }
-    setEditingId(null);
-  };
-
-  const deleteProject = async (id: number) => {
-    try {
-      await fetch(`${REGISTRY_API}/projects/${id}/`, { method: 'DELETE', credentials: 'include' });
-      await loadProjects();
-    } catch {
-      /* ignore */
-    }
-    setDeleteId(null);
+  const goBackToApps = () => {
+    localStorage.removeItem('current-app');
+    navigate('/apps');
   };
 
   return (
-    <div className="min-h-screen bg-white flex flex-col">
-
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-gray-100">
       <Header />
 
-      <div className="relative z-10 p-8">
-        <Button
-          variant="ghost"
-          onClick={() => navigate('/apps')}
-          className="text-black hover:bg-trinity-yellow/10"
-        >
-          <ArrowLeft className="w-4 h-4 mr-2" />
-          Back to Apps
-        </Button>
-        <h1 className="text-3xl font-light text-black">
-          Trinity Projects{currentApp ? ` - ${currentApp.slug}` : ''}
-        </h1>
-        <p className="text-black/60 text-sm">Access your quantum matrices</p>
+      {/* Header */}
+      <div className="bg-white shadow-sm border-b">
+        <div className="max-w-7xl mx-auto px-6 py-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-4">
+              <Button variant="ghost" onClick={goBackToApps} className="text-gray-600 hover:text-gray-900">
+                <ArrowLeft className="w-4 h-4 mr-2" />
+                Back to Apps
+              </Button>
+
+              <div className="flex items-center space-x-3">
+                <div className={`w-10 h-10 rounded-lg bg-gradient-to-r ${appDetails.color} flex items-center justify-center shadow-md`}>
+                  <Icon className="w-5 h-5 text-white" />
+                </div>
+                <div>
+                  <h1 className="text-xl font-semibold text-gray-900">{appDetails.title}</h1>
+                  <p className="text-sm text-gray-600">{appDetails.description}</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* Main Content */}
-      <div className="relative z-10 flex-1 px-8 pb-8">
-        <div className="max-w-6xl mx-auto">
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-            {/* Create New Project Card */}
+      <div className="max-w-7xl mx-auto px-6 py-12">
+        <div className="mb-8">
+          <h2 className="text-2xl font-bold text-gray-900 mb-2">Your Projects</h2>
+          <p className="text-gray-600">
+            {projects.length === 0
+              ? `Create your first ${appDetails.title.toLowerCase()} project to get started`
+              : `Manage and access your ${appDetails.title.toLowerCase()} projects`}
+          </p>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+          {/* Create New Project Card */}
+          <Card
+            className="group cursor-pointer hover:shadow-lg transition-all duration-300 border-2 border-dashed border-gray-200 hover:border-gray-300 bg-white"
+            onClick={createNewProject}
+          >
+            <div className="p-6 flex flex-col items-center justify-center h-48 space-y-4">
+              <div className="w-16 h-16 rounded-full border-2 border-dashed border-gray-300 flex items-center justify-center group-hover:border-gray-400 group-hover:bg-gray-50 transition-all duration-300">
+                <Plus className="w-8 h-8 text-gray-400 group-hover:text-gray-600 transition-colors duration-300" />
+              </div>
+              <div className="text-center">
+                <h3 className="text-lg font-medium text-gray-900 mb-1">Create New Project</h3>
+                <p className="text-sm text-gray-500">Start a new analysis</p>
+              </div>
+            </div>
+          </Card>
+
+          {/* Existing Projects */}
+          {projects.map((project) => (
             <Card
-              className="bg-trinity-bg-secondary border-gray-300 hover:border-trinity-yellow transition-all duration-300 cursor-pointer hover:shadow"
-              onClick={createNewProject}
+              key={project.id}
+              className="group cursor-pointer hover:shadow-lg transition-all duration-300 border-0 bg-white overflow-hidden"
+              onClick={() => openProject(project)}
             >
-              <div className="p-6 flex flex-col items-center justify-center h-48 space-y-4">
-                <div className="w-16 h-16 rounded-full border-2 border-dashed border-trinity-yellow/40 flex items-center justify-center group-hover:border-trinity-yellow group-hover:bg-trinity-yellow/5 transition-all duration-300">
-                  <Plus className="w-8 h-8 text-trinity-yellow/60 group-hover:text-trinity-yellow transition-colors duration-300" />
+              <div className="p-6 flex flex-col h-48">
+                <div className="flex items-start justify-between mb-4">
+                  <div className="w-12 h-12 rounded-lg bg-gradient-to-r from-gray-100 to-gray-200 flex items-center justify-center group-hover:from-gray-200 group-hover:to-gray-300 transition-all duration-300">
+                    <FolderOpen className="w-6 h-6 text-gray-600" />
+                  </div>
+                  <div className="w-2 h-2 bg-green-500 rounded-full"></div>
                 </div>
-                <div className="text-center">
-                  <h3 className="text-black font-medium">Create New Project</h3>
-                  <p className="text-black/50 text-sm mt-1">Initialize new matrix</p>
+
+                <div className="flex-1">
+                  <h3 className="text-lg font-semibold text-gray-900 mb-2 group-hover:text-gray-700 transition-colors duration-300">
+                    {project.name}
+                  </h3>
+                  <p className="text-sm text-gray-600 mb-4 line-clamp-2">{project.description}</p>
+                </div>
+
+                <div className="flex items-center space-x-2 text-gray-400 text-xs">
+                  <Calendar className="w-3 h-3" />
+                  <span>Modified {project.lastModified?.toLocaleDateString()}</span>
                 </div>
               </div>
             </Card>
+          ))}
+        </div>
 
-            {/* Existing Projects */}
-            {projects.map((project) => (
-              <Card
-                key={project.id}
-                className="bg-trinity-bg-secondary border-gray-300 hover:border-trinity-yellow transition-all duration-300 cursor-pointer hover:shadow"
-                onClick={() => openProject(project)}
-              >
-                <div className="p-6 flex flex-col h-48">
-                  <div className="flex items-start justify-between mb-4">
-                    <div className="flex items-center space-x-2">
-                      <div className="w-10 h-10 rounded-lg bg-trinity-yellow/10 flex items-center justify-center group-hover:bg-trinity-yellow/20 transition-colors duration-300">
-                        <FolderOpen className="w-5 h-5 text-trinity-yellow" />
-                      </div>
-                      <button
-                        type="button"
-                        onClick={(e) => startRename(e, project)}
-                        className="text-black/50 hover:text-black"
-                        title="Rename project"
-                      >
-                        <Pencil className="w-4 h-4" />
-                      </button>
-                      <AlertDialog
-                        open={deleteId === project.id}
-                        onOpenChange={(open) => {
-                          if (!open) setDeleteId(null);
-                        }}
-                      >
-                        <AlertDialogTrigger asChild>
-                          <button
-                            type="button"
-                            className="p-1 text-red-500 hover:text-red-700"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setDeleteId(project.id);
-                            }}
-                            title="Delete project"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        </AlertDialogTrigger>
-                        <AlertDialogContent>
-                          <AlertDialogHeader>
-                            <AlertDialogTitle>Delete project?</AlertDialogTitle>
-                            <AlertDialogDescription>
-                              This action cannot be undone.
-                            </AlertDialogDescription>
-                          </AlertDialogHeader>
-                          <AlertDialogFooter>
-                            <AlertDialogCancel>Cancel</AlertDialogCancel>
-                            <AlertDialogAction
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                deleteProject(project.id);
-                              }}
-                            >
-                              Delete
-                            </AlertDialogAction>
-                          </AlertDialogFooter>
-                        </AlertDialogContent>
-                      </AlertDialog>
-                    </div>
-                    <div className="flex items-center space-x-2">
-                      <div className="w-2 h-2 bg-trinity-green rounded-full animate-pulse opacity-60"></div>
-                    </div>
-                  </div>
-                  
-                  <div className="flex-1">
-                    {editingId === project.id ? (
-                      <input
-                        ref={inputRef}
-                        value={editingName}
-                        onChange={(e) => setEditingName(e.target.value)}
-                        onBlur={saveRename}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') {
-                            e.preventDefault();
-                            saveRename();
-                          }
-                        }}
-                        className="w-full border border-gray-300 rounded px-2 py-1 text-sm text-black"
-                      />
-                    ) : (
-                      <h3 className="text-black font-medium mb-2 group-hover:text-black/80 transition-colors duration-300">
-                        {project.name}
-                      </h3>
-                    )}
-                    <p className="text-black/50 text-xs mb-4 line-clamp-2">
-                      {project.description}
-                    </p>
-                  </div>
-
-                  <div className="flex items-center space-x-2 text-black/40 text-xs">
-                    <Calendar className="w-3 h-3" />
-                    <span>{project.lastModified.toLocaleDateString()}</span>
-                  </div>
-                </div>
-              </Card>
-            ))}
-          </div>
-
-          {/* Footer Message */}
+        {/* Empty State */}
+        {projects.length === 0 && (
           <div className="text-center mt-16">
-            <p className="text-black/50 text-sm">
-              "The Matrix has you..." - Begin your first project
+            <div className="w-24 h-24 rounded-full bg-gray-100 flex items-center justify-center mx-auto mb-6">
+              <Icon className="w-12 h-12 text-gray-400" />
+            </div>
+            <h3 className="text-lg font-medium text-gray-900 mb-2">No projects yet</h3>
+            <p className="text-gray-500 mb-6">
+              Create your first {appDetails.title.toLowerCase()} project to start analyzing your data.
             </p>
+            <Button onClick={createNewProject} className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white">
+              <Plus className="w-4 h-4 mr-2" />
+              Create Your First Project
+            </Button>
           </div>
+        )}
+
+        {/* Footer Message */}
+        <div className="text-center mt-16">
+          <p className="text-gray-500 text-sm">"The Matrix has you..." - Begin your first project</p>
         </div>
       </div>
     </div>
