@@ -129,26 +129,7 @@ const handleAppSelect = async (appId: string) => {
       <Header />
 
       <div className="relative z-10 p-8">
-        <Button
-          variant="ghost"
-          onClick={() => {
-            const stored = localStorage.getItem('current-app');
-            if (stored) {
-              try {
-                const obj = JSON.parse(stored);
-                navigate(`/projects?app=${obj.slug}`);
-              } catch {
-                navigate('/projects');
-              }
-            } else {
-              navigate('/projects');
-            }
-          }}
-          className="text-black hover:bg-trinity-yellow/10"
-        >
-          <ArrowLeft className="w-4 h-4 mr-2" />
-          Back to Projects
-        </Button>
+        {/* Removed back navigation button per updated routing flow */}
         <div className="mt-4">
           <h1 className="text-3xl font-light text-black">Choose Your Trinity App</h1>
           <p className="text-black/60 text-sm">Select an application template to initialize</p>

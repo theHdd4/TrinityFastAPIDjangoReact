@@ -12,7 +12,8 @@ import {
   AlertDialogCancel,
   AlertDialogAction,
 } from '@/components/ui/alert-dialog';
-import { Plus, FolderOpen, Calendar, Pencil, Trash2 } from 'lucide-react';
+import { Plus, FolderOpen, Calendar, Pencil, Trash2, ArrowLeft } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 import Header from '@/components/Header';
 import { REGISTRY_API } from '@/lib/api';
 import { safeStringify } from '@/utils/safeStringify';
@@ -267,6 +268,14 @@ const Projects = () => {
       <Header />
 
       <div className="relative z-10 p-8">
+        <Button
+          variant="ghost"
+          onClick={() => navigate('/apps')}
+          className="text-black hover:bg-trinity-yellow/10"
+        >
+          <ArrowLeft className="w-4 h-4 mr-2" />
+          Back to Apps
+        </Button>
         <h1 className="text-3xl font-light text-black">
           Trinity Projects{currentApp ? ` - ${currentApp.slug}` : ''}
         </h1>
