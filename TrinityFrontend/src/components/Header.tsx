@@ -15,7 +15,7 @@ const Header = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const [projectName, setProjectName] = useState<string | null>(null);
-  const [appInfo, setAppInfo] = useState<{ title: string; Icon: any } | null>(null);
+  const [appInfo, setAppInfo] = useState<{ title: string; Icon: any; color: string } | null>(null);
 
   useEffect(() => {
     const saved = localStorage.getItem('current-project');
@@ -35,16 +35,28 @@ const Header = () => {
           const { slug } = JSON.parse(appStr);
           switch (slug) {
             case 'marketing-mix':
-              setAppInfo({ title: 'Marketing Mix Modeling', Icon: Target });
+              setAppInfo({
+                title: 'Marketing Mix Modeling',
+                Icon: Target,
+                color: 'from-blue-500 to-purple-600'
+              });
               break;
             case 'forecasting':
-              setAppInfo({ title: 'Forecasting Analysis', Icon: BarChart3 });
+              setAppInfo({
+                title: 'Forecasting Analysis',
+                Icon: BarChart3,
+                color: 'from-green-500 to-teal-600'
+              });
               break;
             case 'promo-effectiveness':
-              setAppInfo({ title: 'Promo Effectiveness', Icon: Zap });
+              setAppInfo({
+                title: 'Promo Effectiveness',
+                Icon: Zap,
+                color: 'from-orange-500 to-red-600'
+              });
               break;
             case 'blank':
-              setAppInfo({ title: 'Blank App', Icon: Plus });
+              setAppInfo({ title: 'Blank App', Icon: Plus, color: 'from-gray-500 to-gray-700' });
               break;
             default:
               setAppInfo(null);
@@ -86,15 +98,22 @@ const Header = () => {
           </>
         )}
 
-        {isProjects && appInfo && (() => { const IconComp = appInfo.Icon; return (
-          <>
-            <span className="text-sm text-gray-600 text-right">{appInfo.title}</span>
-            <IconComp className="w-5 h-5 text-gray-600" />
-            <button type="button" onClick={handleGoBack} className="p-2" title="Back to Apps">
-              <TrinityAssets.BackToAppsIcon className="w-5 h-5" />
-            </button>
-          </>
-        ); })()}
+        {isProjects && appInfo && (() => {
+          const IconComp = appInfo.Icon;
+          return (
+            <div className="flex items-center space-x-2">
+              <div
+                className={`w-8 h-8 rounded-lg bg-gradient-to-r ${appInfo.color} flex items-center justify-center shadow-md`}
+              >
+                <IconComp className="w-4 h-4 text-white" />
+              </div>
+              <span className="text-sm font-medium text-gray-800">{appInfo.title}</span>
+              <button type="button" onClick={handleGoBack} className="p-2" title="Back to Apps">
+                <TrinityAssets.BackToAppsIcon className="w-5 h-5" />
+              </button>
+            </div>
+          );
+        })()}
 
         <MyProfile.NotificationMenu />
         <MyProfile.SettingsMenu />
