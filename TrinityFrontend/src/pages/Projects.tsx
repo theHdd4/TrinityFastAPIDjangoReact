@@ -6,7 +6,6 @@ import {
   Plus,
   FolderOpen,
   Calendar,
-  ArrowLeft,
   Target,
   BarChart3,
   Zap
@@ -241,38 +240,11 @@ const Projects = () => {
     navigate('/workflow');
   };
 
-  const goBackToApps = () => {
-    localStorage.removeItem('current-app');
-    navigate('/apps');
-  };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-gray-100">
       <Header />
 
-      {/* Header */}
-      <div className="bg-white shadow-sm border-b">
-        <div className="max-w-7xl mx-auto px-6 py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-4">
-              <Button variant="ghost" onClick={goBackToApps} className="text-gray-600 hover:text-gray-900">
-                <ArrowLeft className="w-4 h-4 mr-2" />
-                Back to Apps
-              </Button>
-
-              <div className="flex items-center space-x-3">
-                <div className={`w-10 h-10 rounded-lg bg-gradient-to-r ${appDetails.color} flex items-center justify-center shadow-md`}>
-                  <Icon className="w-5 h-5 text-white" />
-                </div>
-                <div>
-                  <h1 className="text-xl font-semibold text-gray-900">{appDetails.title}</h1>
-                  <p className="text-sm text-gray-600">{appDetails.description}</p>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
 
       {/* Main Content */}
       <div className="max-w-7xl mx-auto px-6 py-12">
