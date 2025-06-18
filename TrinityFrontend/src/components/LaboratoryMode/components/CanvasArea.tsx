@@ -9,6 +9,7 @@ import { atoms as allAtoms } from '@/components/AtomList/data';
 import { molecules } from '@/components/MoleculeList/data';
 import { REGISTRY_API, TEXT_API, CARD_API } from '@/lib/api';
 import TextBoxEditor from '@/components/AtomList/atoms/text-box/TextBoxEditor';
+import DataUploadAtom from '@/components/AtomList/atoms/data-upload-validate/DataUploadAtom';
 import {
   useLaboratoryStore,
   LayoutCard,
@@ -462,6 +463,8 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
 
                                     {atom.atomId === 'text-box' ? (
                                       <TextBoxEditor textId={atom.id} />
+                                    ) : atom.atomId === 'data-upload-validate' ? (
+                                      <DataUploadAtom />
                                     ) : (
                                       <div>
                                         <h4 className="font-semibold text-gray-900 mb-1 text-sm">{atom.title}</h4>
@@ -583,6 +586,8 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
                       {/* Atom Content */}
                       {atom.atomId === 'text-box' ? (
                         <TextBoxEditor textId={atom.id} />
+                      ) : atom.atomId === 'data-upload-validate' ? (
+                        <DataUploadAtom />
                       ) : (
                         <div>
                           <h4 className="font-semibold text-gray-900 mb-1 text-sm">{atom.title}</h4>
