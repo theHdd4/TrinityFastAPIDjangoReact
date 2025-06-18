@@ -1,0 +1,43 @@
+The `TrinityBackendFastAPI/app/features/data_upload_validate` package implements the backend API used by the Data Upload & Validate atom.
+
+Folder structure
+----------------
+- **endpoint.py** – FastAPI router that exposes the validation routes under `/api/data-upload-validate`.
+- **app/** – Contains the validation service implementation:
+  - `main.py` – Stand‑alone FastAPI app (used when running this module directly). It loads the router, enables CORS, and defines the root endpoint.
+  - `routes.py` – Collection of API endpoints. It defines operations to create a validator atom, classify columns, define business dimensions, assign identifiers, upload files to MinIO, and perform validations using different validator engines.
+  - `database.py` – Helper utilities for MongoDB. It handles connecting to the database (via `MONGO_URI`), saving and retrieving validator atom configurations, column classifications, business dimensions, validation logs and custom validation configs.
+  - `schemas.py` – Pydantic models used by the API responses (validator creation, column classification, validation results, etc.).
+  - `validator_dispatcher.py` – Simple dispatcher that selects the correct validator class based on the validator_atom id.
+  - `validators/` – Contains individual validator implementations:
+    - `base.py` – Minimal checks for required columns and types.
+    - `promo.py` – Validation logic for promo intensity data.
+    - `mmm.py` – Validation logic for marketing mix modeling data.
+    - `category_forecasting.py` – Validation rules for category forecasting.
+    - `custom_validator.py` – Enhanced validation utilities that combine schema checks with custom conditions stored in MongoDB.
+
+Key behaviour
+-------------
+1. **Creating a validator atom** (`POST /create_new`)
+   - Accepts uploaded CSV/XLSX files and builds schemas describing column names and data types.
+   - Saves the configuration to a JSON file and into MongoDB.
+   - Keeps the configuration in memory for later requests.
+
+2. **Classifying columns** (`POST /classify_columns`)
+   - Uses heuristics and optional user overrides to assign columns as identifiers or measures.
+   - Stores classifications in MongoDB and in memory.
+
+3. **Defining business dimensions and assigning identifiers**
+   - Allows the client to specify dimension definitions and which identifiers belong to each dimension.
+   - Saves these mappings to MongoDB.
+
+4. **Configuring validation rules**
+   - Clients can store custom validation conditions (e.g., greater_than, contains) and date frequency expectations per column.
+   - Stored in MongoDB via `save_validation_config_to_mongo`.
+
+5. **Running validations** (`POST /validate_*` endpoints)
+   - Uses the dispatcher to select the appropriate validator (base, promo, MMM…) or `custom_validator` for advanced checks.
+   - Generates a report summarizing successes, warnings, errors, and condition failures.
+   - Validation logs and uploaded files can optionally be stored to MongoDB/MinIO.
+
+The module relies heavily on MongoDB to persist all validator-related metadata, enabling the frontend to retrieve and resume validation sessions. When combined with the `DataUploadAtom` component in the React frontend, users can upload datasets, classify columns, define dimensions and run validations through this API.
