@@ -3,7 +3,7 @@ import os
 
 MONGO_URI = os.getenv(
     "OVERVIEW_MONGO_URI",
-    "mongodb://admin_dev:pass_dev@10.2.1.65:9005/?authSource=admin",
+    os.getenv("MONGO_URI", "mongodb://mongo:27017/trinity"),
 )
 
 client = AsyncIOMotorClient(MONGO_URI)

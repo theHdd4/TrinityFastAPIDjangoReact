@@ -3,9 +3,10 @@
 from pymongo import MongoClient
 from datetime import datetime
 import logging
+import os
 
 # MongoDB Configuration
-MONGODB_URL = "mongodb://admin_dev:pass_dev@10.2.1.65:9005/?authSource=admin"
+MONGODB_URL = os.getenv("MONGO_URI", "mongodb://mongo:27017/trinity")
 DATABASE_NAME = "validator_atoms_db"
 
 # Collection Names

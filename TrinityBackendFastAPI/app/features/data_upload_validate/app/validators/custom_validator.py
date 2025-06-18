@@ -3,7 +3,7 @@
 import pandas as pd
 import re
 from typing import List, Dict, Any
-from app.features.data_upload_validate.Validate_Atom.app.database import get_validation_config_from_mongo
+from app.features.data_upload_validate.app.database import get_validation_config_from_mongo
 
 
 def perform_enhanced_validation(files_data: List[tuple], validator_data: Dict[str, Any]) -> Dict[str, Any]:

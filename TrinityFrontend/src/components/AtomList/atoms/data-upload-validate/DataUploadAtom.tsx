@@ -3,25 +3,7 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { VALIDATE_API } from '@/lib/api';
 
-type ValidationStatus = 'success' | 'warning' | 'error';
 
-interface ValidationItem {
-  id: number;
-  label: string;
-  status: ValidationStatus;
-}
-
-const VALIDATIONS: ValidationItem[] = [
-  { id: 1, label: 'Validation 1', status: 'success' },
-  { id: 2, label: 'Validation 2', status: 'success' },
-  { id: 3, label: 'Validation 3', status: 'success' },
-  { id: 4, label: 'Validation 4', status: 'success' },
-  { id: 5, label: 'Validation 5', status: 'warning' },
-  { id: 6, label: 'Validation 6', status: 'warning' },
-  { id: 7, label: 'Validation 7', status: 'warning' },
-  { id: 8, label: 'Validation 8', status: 'error' },
-  { id: 9, label: 'Validation 9', status: 'error' }
-];
 
 const DataUploadAtom: React.FC = () => {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -29,6 +11,11 @@ const DataUploadAtom: React.FC = () => {
   const [fileName, setFileName] = useState<string | null>(null);
   const [showTable, setShowTable] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [result, setResult] = useState<{
+    status?: string;
+    message?: string;
+  } | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
@@ -41,18 +28,25 @@ const DataUploadAtom: React.FC = () => {
   const handleValidate = async () => {
     if (!file) return;
     setUploading(true);
+    setError(null);
+    setResult(null);
     try {
       const form = new FormData();
       form.append('validator_atom_id', 'demo-validator');
       form.append('files', file);
       form.append('file_keys', JSON.stringify(['data']));
 
-      await fetch(`${VALIDATE_API}/create_new`, {
+      const res = await fetch(`${VALIDATE_API}/create_new`, {
         method: 'POST',
-        body: form
+        body: form,
       });
-    } catch {
-      /* ignore errors in demo */
+      if (!res.ok) {
+        throw new Error('Validation request failed');
+      }
+      const data = await res.json();
+      setResult(data);
+    } catch (err: any) {
+      setError(err.message);
     } finally {
       setUploading(false);
     }
@@ -85,34 +79,14 @@ const DataUploadAtom: React.FC = () => {
         </Button>
       </Card>
 
-      {fileName && (
-        <>
-          <div className="font-semibold">Validation Report</div>
-          <div className="flex flex-wrap gap-2">
-            {VALIDATIONS.map(({ id, label, status }) => (
-              <div key={id} className="flex items-center gap-1 border rounded px-2 py-1 text-xs">
-                <span
-                  className={
-                    status === 'success'
-                      ? 'text-green-600'
-                      : status === 'warning'
-                      ? 'text-yellow-600'
-                      : 'text-red-600'
-                  }
-                >
-                  ●
-                </span>
-                <span>{label}</span>
-                <span className="opacity-70">
-                  {status === 'success' ? '*Successful' : status === 'warning' ? '*Autofixed' : '*Unsuccessful'}
-                </span>
-              </div>
-            ))}
-          </div>
-          <div className="text-xs mt-2">
-            <span className="font-bold">Note :</span> *Include the Mandatory Columns
-          </div>
-        </>
+      {result && (
+        <div className="space-y-1 text-sm">
+          <div className="font-semibold">{result.status ?? 'success'}</div>
+          <div>{result.message}</div>
+        </div>
+      )}
+      {error && (
+        <div className="text-sm text-red-600">{error}</div>
       )}
 
       {fileName && (

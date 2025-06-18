@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from .Validate_Atom.app.routes import router as validate_atom_router
+from .app.routes import router as validate_atom_router
 
 router = APIRouter()
 
