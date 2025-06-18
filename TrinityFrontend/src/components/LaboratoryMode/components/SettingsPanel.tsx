@@ -6,7 +6,16 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ChevronLeft, ChevronRight, Settings, Eye, BarChart2 } from 'lucide-react';
-import { useLaboratoryStore, TextBoxSettings, DEFAULT_TEXTBOX_SETTINGS } from '../store/laboratoryStore';
+import {
+  useLaboratoryStore,
+  TextBoxSettings,
+  DEFAULT_TEXTBOX_SETTINGS,
+  DataUploadSettings,
+  DEFAULT_DATAUPLOAD_SETTINGS
+} from '../store/laboratoryStore';
+import SettingsTab from '@/components/AtomList/atoms/data-upload-validate/components/SettingsTab';
+import VisualisationTab from '@/components/AtomList/atoms/data-upload-validate/components/VisualisationTab';
+import ExhibitionTab from '@/components/AtomList/atoms/data-upload-validate/components/ExhibitionTab';
 
 interface SettingsPanelProps {
   isCollapsed: boolean;
@@ -28,7 +37,11 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
     selectedAtomId ? state.getAtom(selectedAtomId) : undefined
   );
   const updateSettings = useLaboratoryStore(state => state.updateAtomSettings);
-  const settings: TextBoxSettings = atom?.settings || { ...DEFAULT_TEXTBOX_SETTINGS };
+  const settings: TextBoxSettings | DataUploadSettings =
+    atom?.settings ||
+    (atom?.atomId === 'data-upload-validate'
+      ? { ...DEFAULT_DATAUPLOAD_SETTINGS }
+      : { ...DEFAULT_TEXTBOX_SETTINGS });
 
   useEffect(() => {
     if (!cardExhibited && tab === 'exhibition') {
@@ -94,13 +107,13 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
             
             <div className="px-4">
               <TabsContent value="settings" className="space-y-4">
-                {selectedAtomId && (
+                {selectedAtomId && atom?.atomId === 'text-box' && (
                   <Card className="p-4 space-y-3">
                     <h4 className="font-medium text-gray-900 mb-3">Atom Settings</h4>
                     <div>
                       <label className="text-sm text-gray-600 block mb-1">Format</label>
                       <select
-                        value={settings.format}
+                        value={(settings as TextBoxSettings).format}
                         onChange={e => updateSettings(selectedAtomId, { format: e.target.value as TextBoxSettings['format'] })}
                         className="w-full border rounded p-1 text-sm"
                       >
@@ -113,7 +126,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
                     <div>
                       <label className="text-sm text-gray-600 block mb-1">Default Content</label>
                       <Input
-                        value={settings.content}
+                        value={(settings as TextBoxSettings).content}
                         onChange={e => updateSettings(selectedAtomId, { content: e.target.value })}
                         className="text-sm"
                       />
@@ -121,7 +134,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
                     <div className="flex items-center space-x-2">
                       <input
                         type="checkbox"
-                        checked={settings.allow_variables}
+                        checked={(settings as TextBoxSettings).allow_variables}
                         onChange={e => updateSettings(selectedAtomId, { allow_variables: e.target.checked })}
                       />
                       <label className="text-sm text-gray-600">Allow variables</label>
@@ -130,11 +143,21 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
                       <label className="text-sm text-gray-600 block mb-1">Max Characters</label>
                       <Input
                         type="number"
-                        value={settings.max_chars}
+                        value={(settings as TextBoxSettings).max_chars}
                         onChange={e => updateSettings(selectedAtomId, { max_chars: parseInt(e.target.value) || 0 })}
                         className="text-sm"
                       />
                     </div>
+                  </Card>
+                )}
+
+                {selectedAtomId && atom?.atomId === 'data-upload-validate' && (
+                  <Card className="p-4 space-y-3">
+                    <SettingsTab
+                      settings={settings as DataUploadSettings}
+                      uploadedFiles={(settings as DataUploadSettings).uploadedFiles}
+                      onSettingsChange={s => updateSettings(selectedAtomId, s)}
+                    />
                   </Card>
                 )}
 
@@ -163,7 +186,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
               </TabsContent>
               
               <TabsContent value="visual" className="space-y-4">
-                {selectedAtomId && (
+                {selectedAtomId && atom?.atomId === 'text-box' && (
                   <Card className="p-4 space-y-3">
                     <h4 className="font-medium text-gray-900 mb-3">Visualisation</h4>
                     <div>
@@ -232,10 +255,15 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
                     </div>
                   </Card>
                 )}
+                {selectedAtomId && atom?.atomId === 'data-upload-validate' && (
+                  <Card className="p-4 space-y-3">
+                    <VisualisationTab />
+                  </Card>
+                )}
               </TabsContent>
-              
+
               <TabsContent value="exhibition" className="space-y-4">
-                {selectedAtomId && cardExhibited && (
+                {selectedAtomId && atom?.atomId === 'text-box' && cardExhibited && (
                   <Card className="p-4 space-y-3">
                     <h4 className="font-medium text-gray-900 mb-3">Exhibition Settings</h4>
                     <div>
@@ -278,6 +306,11 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
                       />
                       <label className="text-sm text-gray-600">Lock content</label>
                     </div>
+                  </Card>
+                )}
+                {selectedAtomId && atom?.atomId === 'data-upload-validate' && cardExhibited && (
+                  <Card className="p-4 space-y-3">
+                    <ExhibitionTab />
                   </Card>
                 )}
               </TabsContent>

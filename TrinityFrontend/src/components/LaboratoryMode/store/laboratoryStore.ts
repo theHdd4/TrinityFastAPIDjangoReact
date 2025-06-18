@@ -37,13 +37,33 @@ export const DEFAULT_TEXTBOX_SETTINGS: TextBoxSettings = {
   lock_content: false,
 };
 
+export interface DataUploadSettings {
+  masterFile: string;
+  fileValidation: boolean;
+  columnConfig: Record<string, unknown>;
+  frequency: string;
+  dimensions: Record<string, unknown>;
+  measures: Record<string, unknown>;
+  uploadedFiles: string[];
+}
+
+export const DEFAULT_DATAUPLOAD_SETTINGS: DataUploadSettings = {
+  masterFile: '',
+  fileValidation: true,
+  columnConfig: {},
+  frequency: 'monthly',
+  dimensions: {},
+  measures: {},
+  uploadedFiles: []
+};
+
 export interface DroppedAtom {
   id: string;
   atomId: string;
   title: string;
   category: string;
   color: string;
-  settings?: TextBoxSettings;
+  settings?: any;
 }
 
 export interface LayoutCard {
@@ -57,7 +77,7 @@ export interface LayoutCard {
 interface LaboratoryStore {
   cards: LayoutCard[];
   setCards: (cards: LayoutCard[]) => void;
-  updateAtomSettings: (atomId: string, settings: Partial<TextBoxSettings>) => void;
+  updateAtomSettings: (atomId: string, settings: any) => void;
   getAtom: (atomId: string) => DroppedAtom | undefined;
 }
 
@@ -73,7 +93,7 @@ export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
     const updatedCards = get().cards.map(card => ({
       ...card,
       atoms: card.atoms.map(a =>
-        a.id === atomId ? { ...a, settings: { ...DEFAULT_TEXTBOX_SETTINGS, ...a.settings, ...settings } } : a
+        a.id === atomId ? { ...a, settings: { ...(a.settings || {}), ...settings } } : a
       )
     }));
     localStorage.setItem(STORAGE_KEY, safeStringify(updatedCards));

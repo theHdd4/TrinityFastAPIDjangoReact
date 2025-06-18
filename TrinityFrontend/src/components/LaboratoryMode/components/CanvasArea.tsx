@@ -9,12 +9,13 @@ import { atoms as allAtoms } from '@/components/AtomList/data';
 import { molecules } from '@/components/MoleculeList/data';
 import { REGISTRY_API, TEXT_API, CARD_API } from '@/lib/api';
 import TextBoxEditor from '@/components/AtomList/atoms/text-box/TextBoxEditor';
-import DataUploadAtom from '@/components/AtomList/atoms/data-upload-validate/DataUploadAtom';
+import DataUploadValidateAtom from '@/components/AtomList/atoms/data-upload-validate/DataUploadValidateAtom';
 import {
   useLaboratoryStore,
   LayoutCard,
   DroppedAtom,
   DEFAULT_TEXTBOX_SETTINGS,
+  DEFAULT_DATAUPLOAD_SETTINGS,
 } from '../store/laboratoryStore';
 
 
@@ -228,7 +229,12 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
         title: info?.title || atom.title || atom.id,
         category: info?.category || atom.category || 'Atom',
         color: info?.color || atom.color || 'bg-gray-400',
-        settings: atom.id === 'text-box' ? { ...DEFAULT_TEXTBOX_SETTINGS } : undefined,
+        settings:
+          atom.id === 'text-box'
+            ? { ...DEFAULT_TEXTBOX_SETTINGS }
+            : atom.id === 'data-upload-validate'
+            ? { ...DEFAULT_DATAUPLOAD_SETTINGS }
+            : undefined,
       };
       
       setLayoutCards(
@@ -464,7 +470,7 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
                                     {atom.atomId === 'text-box' ? (
                                       <TextBoxEditor textId={atom.id} />
                                     ) : atom.atomId === 'data-upload-validate' ? (
-                                      <DataUploadAtom />
+                                      <DataUploadValidateAtom atomId={atom.id} />
                                     ) : (
                                       <div>
                                         <h4 className="font-semibold text-gray-900 mb-1 text-sm">{atom.title}</h4>
@@ -587,7 +593,7 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
                       {atom.atomId === 'text-box' ? (
                         <TextBoxEditor textId={atom.id} />
                       ) : atom.atomId === 'data-upload-validate' ? (
-                        <DataUploadAtom />
+                        <DataUploadValidateAtom atomId={atom.id} />
                       ) : (
                         <div>
                           <h4 className="font-semibold text-gray-900 mb-1 text-sm">{atom.title}</h4>
