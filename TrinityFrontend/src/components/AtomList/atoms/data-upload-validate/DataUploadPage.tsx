@@ -1,7 +1,48 @@
 import React, { useRef, useState } from 'react';
-import { Button } from '@/components/ui/button';
-import { Card } from '@/components/ui/card';
+import {
+  Box,
+  Button,
+  Chip,
+  Divider,
+  Grid,
+  IconButton,
+  Paper,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableRow,
+  Typography,
+  useMediaQuery,
+  useTheme,
+} from '@mui/material';
+import CloudUploadIcon from '@mui/icons-material/CloudUpload';
+import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import WarningAmberIcon from '@mui/icons-material/WarningAmber';
+import CancelIcon from '@mui/icons-material/Cancel';
+import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
 import { VALIDATE_API } from '@/lib/api';
+
+// Validation status types
+type ValidationStatus = 'success' | 'warning' | 'error';
+
+interface ValidationItem {
+  id: number;
+  label: string;
+  status: ValidationStatus;
+}
+
+const VALIDATIONS: ValidationItem[] = [
+  { id: 1, label: 'Validation 1', status: 'success' },
+  { id: 2, label: 'Validation 2', status: 'success' },
+  { id: 3, label: 'Validation 3', status: 'success' },
+  { id: 4, label: 'Validation 4', status: 'success' },
+  { id: 5, label: 'Validation 5', status: 'warning' },
+  { id: 6, label: 'Validation 6', status: 'warning' },
+  { id: 7, label: 'Validation 7', status: 'warning' },
+  { id: 8, label: 'Validation 8', status: 'error' },
+  { id: 9, label: 'Validation 9', status: 'error' },
+];
 
 const ATOMS = [
   'Data Upload',
@@ -10,7 +51,7 @@ const ATOMS = [
   'Atom #',
   'Atom #',
   'Feature Overview',
-  'Promo Price Estimation'
+  'Promo Price Estimation',
 ];
 
 const STEPS = [
@@ -20,20 +61,23 @@ const STEPS = [
   'Build',
   'Evaluate',
   'Plan',
-  'Report'
+  'Report',
 ];
 
 const SUB_STEPS = [
   'Data Upload',
   'Feature Overview',
   'Base Price Detection',
-  'Promo Price Estimation'
+  'Promo Price Estimation',
 ];
 
 const DataUploadPage: React.FC = () => {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const [file, setFile] = useState<File | null>(null);
+  const theme = useTheme();
+  const isSmDown = useMediaQuery(theme.breakpoints.down('md'));
+
   const [fileName, setFileName] = useState<string | null>(null);
+  const [file, setFile] = useState<File | null>(null);
   const [showTable, setShowTable] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [result, setResult] = useState<{ status?: string; message?: string } | null>(null);
@@ -50,21 +94,18 @@ const DataUploadPage: React.FC = () => {
   const handleValidate = async () => {
     if (!file) return;
     setUploading(true);
-    setError(null);
     setResult(null);
+    setError(null);
     try {
       const form = new FormData();
       form.append('validator_atom_id', 'demo-validator');
       form.append('files', file);
       form.append('file_keys', JSON.stringify(['data']));
-
       const res = await fetch(`${VALIDATE_API}/create_new`, {
         method: 'POST',
         body: form,
       });
-      if (!res.ok) {
-        throw new Error('Validation request failed');
-      }
+      if (!res.ok) throw new Error('Validation request failed');
       const data = await res.json();
       setResult(data);
     } catch (err: any) {
@@ -75,50 +116,105 @@ const DataUploadPage: React.FC = () => {
   };
 
   return (
-    <div className="grid md:grid-cols-[220px_1fr] h-screen overflow-hidden bg-background">
-      {/* Left palette */}
-      <div className="border-r border-muted p-4 space-y-2 overflow-y-auto hidden md:block">
+    <Grid container sx={{ height: '100vh', overflow: 'hidden' }}>
+      {/* Left-hand atoms palette */}
+      <Grid
+        item
+        xs={12}
+        md={2.5}
+        sx={{
+          borderRight: 1,
+          borderColor: 'divider',
+          bgcolor: '#f5f5f5',
+          p: 2,
+          overflowY: 'auto',
+        }}
+      >
         {ATOMS.map((atom) => (
-          <div
+          <Paper
             key={atom}
-            className="h-10 flex items-center justify-center bg-muted text-sm font-semibold rounded-md cursor-grab"
+            elevation={1}
+            sx={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              height: 48,
+              mb: 1.5,
+              bgcolor: '#dfe1e5',
+              cursor: 'grab',
+              typography: 'body2',
+              fontWeight: 600,
+            }}
           >
             {atom}
-          </div>
+          </Paper>
         ))}
-        <div className="my-4 border-t" />
-        <div className="text-xs font-semibold">Select a File for Analysis</div>
-        <div className="mt-1 p-2 border rounded bg-white text-xs whitespace-nowrap overflow-x-auto">
+
+        <Divider sx={{ my: 2 }} />
+
+        {/* Mock “Select a file” dropdown */}
+        <Typography variant="caption" fontWeight={600}>
+          Select a File for Analysis
+        </Typography>
+        <Paper
+          elevation={0}
+          sx={{
+            mt: 1,
+            p: 1,
+            bgcolor: '#fff',
+            border: 1,
+            borderColor: 'divider',
+            typography: 'caption',
+            overflowX: 'auto',
+          }}
+        >
           {fileName ?? '––'}
-        </div>
-      </div>
+        </Paper>
+      </Grid>
 
       {/* Main content */}
-      <div className="p-4 md:p-8 overflow-y-auto">
-        <div className="flex flex-wrap gap-2 mb-4">
+      <Grid item xs={12} md={9.5} sx={{ p: isSmDown ? 2 : 4, overflowY: 'auto' }}>
+        {/* Step navigation */}
+        <Box sx={{ mb: 3, display: 'flex', flexWrap: 'wrap', gap: 1 }}>
           {STEPS.map((step) => (
-            <span
+            <Chip
               key={step}
-              className={`px-2 py-1 text-xs font-semibold rounded border ${step === 'Pre-Process' ? 'bg-primary text-primary-foreground' : 'bg-background'}`}
-            >
-              {step}
-            </span>
+              label={step}
+              variant={step === 'Pre-Process' ? 'filled' : 'outlined'}
+              color={step === 'Pre-Process' ? 'primary' : 'default'}
+              sx={{ fontWeight: 600 }}
+            />
           ))}
-        </div>
+        </Box>
 
-        <div className="flex flex-wrap gap-2 mb-6">
+        {/* Sub-step chips */}
+        <Box sx={{ mb: 4, display: 'flex', flexWrap: 'wrap', gap: 1 }}>
           {SUB_STEPS.map((sub) => (
-            <span
+            <Chip
               key={sub}
-              className={`px-2 py-1 text-xs rounded border ${sub === 'Data Upload' ? 'bg-secondary text-secondary-foreground' : 'bg-background'}`}
-            >
-              {sub}
-            </span>
+              label={sub}
+              variant={sub === 'Data Upload' ? 'filled' : 'outlined'}
+              color={sub === 'Data Upload' ? 'secondary' : 'default'}
+              sx={{ fontWeight: 500 }}
+            />
           ))}
-        </div>
+        </Box>
 
-        <Card className="max-w-lg p-4 space-y-2">
-          <div className="font-semibold">Upload Your Data</div>
+        {/* Upload control */}
+        <Paper
+          elevation={1}
+          sx={{
+            p: 3,
+            maxWidth: 480,
+            bgcolor: '#fafafa',
+            border: 1,
+            borderColor: 'divider',
+          }}
+        >
+          <Typography fontWeight={600} mb={1}>
+            Upload Your Data
+          </Typography>
+
           <input
             type="file"
             accept=".csv,.xlsx"
@@ -126,76 +222,161 @@ const DataUploadPage: React.FC = () => {
             ref={fileInputRef}
             onChange={handleFileSelect}
           />
-          <Button onClick={() => fileInputRef.current?.click()} className="w-full">
+
+          <Button
+            variant="contained"
+            startIcon={<CloudUploadIcon />}
+            onClick={() => fileInputRef.current?.click()}
+            fullWidth
+          >
             {fileName ? 'Replace File' : 'Upload a CSV/XLSX'}
           </Button>
+
           {fileName && (
-            <div className="mt-1 p-2 border rounded text-xs bg-white">{fileName}</div>
+            <Box
+              mt={1}
+              p={1}
+              border={1}
+              borderColor="divider"
+              borderRadius={1}
+              bgcolor="#fff"
+              typography="caption"
+            >
+              {fileName}
+            </Box>
           )}
-          <Button
-            variant="outline"
-            disabled={!file || uploading}
-            onClick={handleValidate}
-            className="w-full"
-          >
-            Validate Data
-          </Button>
-        </Card>
 
-        {result && (
-          <div className="mt-8 space-y-1 text-sm">
-            <div className="font-semibold">{result.status ?? 'success'}</div>
-            <div>{result.message}</div>
-          </div>
-        )}
-        {error && (
-          <div className="mt-4 text-sm text-red-600">{error}</div>
-        )}
+          <Box mt={2}>
+            <Button
+              variant="outlined"
+              fullWidth
+              disabled={!fileName || uploading}
+              onClick={handleValidate}
+            >
+              Validate Data
+            </Button>
+          </Box>
+        </Paper>
 
+        {/* Validation report */}
         {fileName && (
-          <div className="mt-8">
-            <Button variant="outline" onClick={() => setShowTable(true)} className="mb-2">
+          <>
+            <Typography mt={4} mb={1} fontWeight={600}>
+              Validation Report
+            </Typography>
+            <Grid container spacing={1}>
+              {VALIDATIONS.map(({ id, label, status }) => {
+                const icon =
+                  status === 'success' ? (
+                    <CheckCircleIcon color="success" fontSize="small" />
+                  ) : status === 'warning' ? (
+                    <WarningAmberIcon color="warning" fontSize="small" />
+                  ) : (
+                    <CancelIcon color="error" fontSize="small" />
+                  );
+
+                const footnote =
+                  status === 'success'
+                    ? '*Successful'
+                    : status === 'warning'
+                    ? '*Autofixed'
+                    : '*Unsuccessful';
+
+                return (
+                  <Grid item key={id}>
+                    <Paper
+                      elevation={0}
+                      sx={{
+                        px: 2,
+                        py: 1,
+                        border: 1,
+                        borderColor: 'divider',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 0.5,
+                      }}
+                    >
+                      {icon}
+                      <Typography fontSize="0.825rem">{label}</Typography>
+                      <Typography
+                        variant="caption"
+                        sx={{ ml: 0.5, opacity: 0.7 }}
+                      >
+                        {footnote}
+                      </Typography>
+                    </Paper>
+                  </Grid>
+                );
+              })}
+            </Grid>
+
+            {/* Note */}
+            <Box mt={2}>
+              <Typography variant="subtitle2" fontWeight={700}>
+                Note :
+              </Typography>
+              <Typography variant="caption">
+                *Include the Mandatory Columns
+              </Typography>
+            </Box>
+          </>
+        )}
+
+        {/* Data overview */}
+        {fileName && (
+          <Box mt={4}>
+            <Button
+              variant="outlined"
+              onClick={() => setShowTable(true)}
+              sx={{ mb: 2 }}
+            >
               Data Overview
             </Button>
+
             {showTable && (
-              <div>
-                <div className="font-semibold mb-2">Data Overview</div>
-                <div className="overflow-auto">
-                  <table className="min-w-[720px] text-sm border">
-                    <thead>
-                      <tr>
-                        {Array.from({ length: 9 }).map((_, i) => (
-                          <th key={i} className="border px-2 py-1 text-center font-semibold">
-                            Column {i + 1}
-                          </th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {Array.from({ length: 8 }).map((_, r) => (
-                        <tr key={r}>
-                          {Array.from({ length: 9 }).map((__, c) => (
-                            <td key={c} className="border px-2 py-1" />
-                          ))}
-                        </tr>
+              <Box>
+                <Typography fontWeight={600} mb={1}>
+                  Data Overview
+                </Typography>
+                <Table size="small" sx={{ minWidth: 720 }}>
+                  <TableHead>
+                    <TableRow>
+                      {Array.from({ length: 9 }, (_, i) => (
+                        <TableCell key={i} align="center" sx={{ fontWeight: 600 }}>
+                          Column {i + 1}
+                        </TableCell>
                       ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {Array.from({ length: 8 }).map((_, r) => (
+                      <TableRow key={r}>
+                        {Array.from({ length: 9 }).map((__, c) => (
+                          <TableCell key={c} />
+                        ))}
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </Box>
             )}
-          </div>
+          </Box>
         )}
 
+        {/* Proceed button */}
         {fileName && (
-          <div className="mt-8 flex justify-end">
-            <Button>
+          <Box mt={4} display="flex" justifyContent="flex-end">
+            <Button
+              variant="contained"
+              endIcon={<ArrowForwardIcon />}
+              onClick={() => {}}
+            >
               Proceed to Feature Overview
             </Button>
-          </div>
+          </Box>
         )}
-      </div>
-    </div>
+      </Grid>
+    </Grid>
   );
 };
 
