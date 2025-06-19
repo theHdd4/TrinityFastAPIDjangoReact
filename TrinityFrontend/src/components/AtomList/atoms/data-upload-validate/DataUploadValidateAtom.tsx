@@ -163,7 +163,7 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
           </div>
         </div>
 
-        <div className="flex-1 p-6 bg-gray-50">
+        <div className="flex-1 p-6 bg-gray-50 overflow-y-auto scrollbar-thin scrollbar-thumb-gray-300">
           <div className="flex h-full space-x-6">
             <div className="flex-1">
               <Card className="h-full flex flex-col shadow-sm border-0 bg-white">
