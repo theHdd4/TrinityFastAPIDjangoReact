@@ -312,8 +312,9 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
           </div>
           </>
         )}
-        </div>
-      )}
+        </>
+      </div>
+    )}
     </div>
   );
   };
