@@ -20,7 +20,7 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
   };
 
   return (
-    <div className="w-full h-full flex flex-col space-y-4">
+    <div className="w-full h-full flex flex-col space-y-4 overflow-y-auto scrollbar-thin scrollbar-thumb-gray-300 pr-2">
       <div className="flex items-center space-x-3">
         <div className="w-8 h-8 bg-gray-100 rounded-lg flex items-center justify-center">
           <Database className="w-4 h-4 text-black" />
