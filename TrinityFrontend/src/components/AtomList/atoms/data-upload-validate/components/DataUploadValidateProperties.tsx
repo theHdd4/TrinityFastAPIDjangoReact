@@ -127,7 +127,7 @@ const DataUploadValidateProperties: React.FC = () => {
   };
 
   return (
-    <div className="w-80 bg-white border-l border-gray-200 flex flex-col">
+    <div className="w-80 h-full bg-white border-l border-gray-200 flex flex-col">
       <div className="p-3 border-b border-gray-200">
         <h3 className="font-semibold text-gray-900 flex items-center space-x-2">
           <Settings className="w-4 h-4" />

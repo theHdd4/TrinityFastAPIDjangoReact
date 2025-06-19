@@ -51,9 +51,11 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
     setTab('settings');
   }, [selectedAtomId, selectedCardId]);
   return (
-    <div className={`bg-white border-l border-gray-200 transition-all duration-300 ${
-      isCollapsed ? 'w-12' : 'w-80'
-    }`}>
+    <div
+      className={`bg-white border-l border-gray-200 transition-all duration-300 flex flex-col h-full ${
+        isCollapsed ? 'w-12' : 'w-80'
+      }`}
+    >
       {/* Toggle Button */}
       <div className="p-3 border-b border-gray-200 flex items-center justify-between">
         {!isCollapsed && (
