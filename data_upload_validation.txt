@@ -35,6 +35,17 @@ Endpoints
 The frontend uses `VALIDATE_API` from `src/lib/api.ts` to resolve the base URL
 for these endpoints.
 
+Identifier and measure selection
+-------------------------------
+The Dimension tab in the properties panel lists categorical columns as
+**Identifiers** and numerical columns as **Measures**. Users may select multiple
+columns in each list. When **Save Configuration** is pressed the selections are
+sent to `POST /api/data-upload-validate/classify_columns` together with the
+validator id and file key. The backend stores the result in MongoDB so that a
+subsequent call to `GET /api/data-upload-validate/get_validator_config/<id>`
+returns the saved identifiers and measures. No identifiers or measures are
+selected by default.
+
 Column selection for validations
 -------------------------------
 When a master file is chosen, the frontend requests the validator configuration

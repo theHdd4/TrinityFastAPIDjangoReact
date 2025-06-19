@@ -48,6 +48,7 @@ export interface DataUploadSettings {
   validatorId?: string;
   requiredFiles?: string[];
   validations?: Record<string, any>;
+  classification?: Record<string, { identifiers: string[]; measures: string[] }>;
 }
 
 export const DEFAULT_DATAUPLOAD_SETTINGS: DataUploadSettings = {
@@ -60,7 +61,8 @@ export const DEFAULT_DATAUPLOAD_SETTINGS: DataUploadSettings = {
   uploadedFiles: [],
   validatorId: undefined,
   requiredFiles: [],
-  validations: {}
+  validations: {},
+  classification: {}
 };
 
 export interface DroppedAtom {

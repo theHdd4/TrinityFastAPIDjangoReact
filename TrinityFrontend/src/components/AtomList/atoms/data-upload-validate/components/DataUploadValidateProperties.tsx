@@ -12,6 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
+import { Checkbox } from '@/components/ui/checkbox';
 import { VALIDATE_API } from '@/lib/api';
 import {
   useLaboratoryStore,
@@ -64,6 +65,10 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
 
   const [numericalColumns, setNumericalColumns] = useState<string[]>([]);
   const [dateColumns, setDateColumns] = useState<string[]>([]);
+  const [categoricalColumns, setCategoricalColumns] = useState<string[]>([]);
+  const [continuousColumns, setContinuousColumns] = useState<string[]>([]);
+  const [selectedIdentifiers, setSelectedIdentifiers] = useState<string[]>([]);
+  const [selectedMeasures, setSelectedMeasures] = useState<string[]>([]);
 
   const periodicityOptions = [
     { value: 'daily', label: 'Daily' },
@@ -71,35 +76,6 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
     { value: 'monthly', label: 'Monthly' }
   ];
 
-  const dimensions = [
-    'Brand',
-    'Category',
-    'Region',
-    'Channel',
-    'Season',
-    'Customer_Segment',
-    'Product_Type',
-    'Price_Tier',
-    'Market',
-    'Distribution',
-    'Segment',
-    'SKU'
-  ];
-
-  const measures = [
-    'Volume_Sales',
-    'Value_Sales',
-    'Revenue',
-    'Profit',
-    'Units_Sold',
-    'Market_Share',
-    'Price',
-    'Cost',
-    'Margin',
-    'Discount',
-    'Promotion_Lift',
-    'Base_Sales'
-  ];
 
   const handleMasterFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files) return;
@@ -140,6 +116,11 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
       .then(cfg => {
         const types = cfg.column_types?.[selectedMasterFile] || {};
         setColumnDataTypes(types);
+        if (cfg.classification?.[selectedMasterFile]) {
+          const cls = cfg.classification[selectedMasterFile];
+          setSelectedIdentifiers(cls.identifiers || []);
+          setSelectedMeasures(cls.measures || []);
+        }
       })
       .catch(() => {
         setColumnDataTypes({});
@@ -153,8 +134,13 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
     const dates = Object.entries(columnDataTypes)
       .filter(([, t]) => t === 'date')
       .map(([c]) => c);
+    const cats = Object.entries(columnDataTypes)
+      .filter(([, t]) => !['integer', 'numeric', 'date'].includes(t))
+      .map(([c]) => c);
     setNumericalColumns(nums);
     setDateColumns(dates);
+    setContinuousColumns(nums);
+    setCategoricalColumns(cats);
   }, [columnDataTypes]);
 
   useEffect(() => {
@@ -171,6 +157,15 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
     } else {
       setRangeValidations([{ id: Date.now(), column: '', min: '', max: '' }]);
       setPeriodicityValidations([{ id: Date.now(), column: '', periodicity: '' }]);
+    }
+
+    if (selectedMasterFile && settings.classification?.[selectedMasterFile]) {
+      const cls = settings.classification[selectedMasterFile];
+      setSelectedIdentifiers(cls.identifiers);
+      setSelectedMeasures(cls.measures);
+    } else {
+      setSelectedIdentifiers([]);
+      setSelectedMeasures([]);
     }
   }, [selectedMasterFile]);
 
@@ -237,6 +232,14 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
       })
     });
 
+    const classifyForm = new FormData();
+    classifyForm.append('validator_atom_id', validatorId);
+    classifyForm.append('file_key', selectedMasterFile);
+    classifyForm.append('identifiers', JSON.stringify(selectedIdentifiers));
+    classifyForm.append('measures', JSON.stringify(selectedMeasures));
+    classifyForm.append('unclassified', JSON.stringify([]));
+    await fetch(`${VALIDATE_API}/classify_columns`, { method: 'POST', body: classifyForm });
+
     const newValidations = {
       ...(settings.validations || {}),
       [selectedMasterFile]: {
@@ -244,10 +247,18 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
         periodicities: periodicityValidations
       }
     };
+    const newClassification = {
+      ...(settings.classification || {}),
+      [selectedMasterFile]: {
+        identifiers: selectedIdentifiers,
+        measures: selectedMeasures
+      }
+    };
     updateSettings(atomId, {
       validatorId,
       requiredFiles: allAvailableFiles.map(f => f.name),
-      validations: newValidations
+      validations: newValidations,
+      classification: newClassification
     });
   };
 
@@ -501,14 +512,19 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
                     <div>
                       <label className="text-sm font-medium text-gray-700 block mb-3">Identifiers</label>
                       <div className="grid grid-cols-2 gap-2">
-                        {dimensions.map((dim, index) => (
-                          <Badge
-                            key={index}
-                            variant="outline"
-                            className="text-xs justify-center py-1 bg-white border-gray-300 hover:bg-blue-50 hover:border-blue-300 cursor-pointer transition-colors"
-                          >
-                            {dim}
-                          </Badge>
+                        {categoricalColumns.map(col => (
+                          <label key={col} className="flex items-center space-x-2 text-xs">
+                            <Checkbox
+                              checked={selectedIdentifiers.includes(col)}
+                              onCheckedChange={val => {
+                                const checked = Boolean(val);
+                                setSelectedIdentifiers(prev =>
+                                  checked ? [...prev, col] : prev.filter(c => c !== col)
+                                );
+                              }}
+                            />
+                            <span>{col}</span>
+                          </label>
                         ))}
                       </div>
                     </div>
@@ -516,14 +532,19 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
                     <div>
                       <label className="text-sm font-medium text-gray-700 block mb-3">Measures</label>
                       <div className="grid grid-cols-2 gap-2">
-                        {measures.map((measure, index) => (
-                          <Badge
-                            key={index}
-                            variant="outline"
-                            className="text-xs justify-center py-1 bg-white border-gray-300 hover:bg-green-50 hover:border-green-300 cursor-pointer transition-colors"
-                          >
-                            {measure}
-                          </Badge>
+                        {continuousColumns.map(col => (
+                          <label key={col} className="flex items-center space-x-2 text-xs">
+                            <Checkbox
+                              checked={selectedMeasures.includes(col)}
+                              onCheckedChange={val => {
+                                const checked = Boolean(val);
+                                setSelectedMeasures(prev =>
+                                  checked ? [...prev, col] : prev.filter(c => c !== col)
+                                );
+                              }}
+                            />
+                            <span>{col}</span>
+                          </label>
                         ))}
                       </div>
                     </div>
