@@ -13,16 +13,28 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { VALIDATE_API } from '@/lib/api';
+import {
+  useLaboratoryStore,
+  DataUploadSettings,
+  DEFAULT_DATAUPLOAD_SETTINGS
+} from '@/components/LaboratoryMode/store/laboratoryStore';
 
-const DataUploadValidateProperties: React.FC = () => {
-  const [allAvailableFiles, setAllAvailableFiles] = useState<{ name: string; source: string }[]>([]);
+interface Props {
+  atomId: string;
+}
+const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
+  const atom = useLaboratoryStore(state => state.getAtom(atomId));
+  const updateSettings = useLaboratoryStore(state => state.updateAtomSettings);
+  const settings: DataUploadSettings =
+    (atom?.settings as DataUploadSettings) || { ...DEFAULT_DATAUPLOAD_SETTINGS };
+  const [allAvailableFiles, setAllAvailableFiles] = useState<{ name: string; source: string }[]>(
+    settings.requiredFiles?.map(name => ({ name, source: 'upload' })) || []
+  );
   const [selectedMasterFile, setSelectedMasterFile] = useState<string>('');
-  const [validatorId, setValidatorId] = useState<string>('');
-  const [columnDataTypes, setColumnDataTypes] = useState<Record<string, string>>({
-    Column1: 'string',
-    Column2: 'number',
-    Column3: 'date'
-  });
+  const [validatorId, setValidatorId] = useState<string>(settings.validatorId || '');
+  const [columnDataTypes, setColumnDataTypes] = useState<Record<string, string>>(
+    {}
+  );
   const dataTypeOptions = [
     { value: 'string', label: 'String' },
     { value: 'number', label: 'Number' },
@@ -109,6 +121,11 @@ const DataUploadValidateProperties: React.FC = () => {
         const firstKey = Object.keys(cfg.column_types)[0];
         setColumnDataTypes(cfg.column_types[firstKey] || {});
       }
+      updateSettings(atomId, {
+        validatorId: id,
+        requiredFiles: keys,
+        validations: settings.validations || {}
+      });
     }
   };
 
@@ -177,6 +194,19 @@ const DataUploadValidateProperties: React.FC = () => {
         column_conditions: columnConditions,
         column_frequencies: columnFrequencies
       })
+    });
+
+    const newValidations = {
+      ...(settings.validations || {}),
+      [selectedMasterFile]: {
+        ranges: rangeValidations,
+        periodicities: periodicityValidations
+      }
+    };
+    updateSettings(atomId, {
+      validatorId,
+      requiredFiles: allAvailableFiles.map(f => f.name),
+      validations: newValidations
     });
   };
 

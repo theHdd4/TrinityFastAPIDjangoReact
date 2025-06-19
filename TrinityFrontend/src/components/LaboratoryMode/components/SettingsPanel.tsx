@@ -83,7 +83,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
           {!selectedAtomId && !selectedCardId ? (
             <div className="p-4 text-gray-600 text-sm">Please select a Card/Atom</div>
           ) : selectedAtomId && atom?.atomId === 'data-upload-validate' ? (
-            <DataUploadValidateProperties />
+            <DataUploadValidateProperties atomId={selectedAtomId} />
           ) : (
           <>
           <Tabs value={tab} onValueChange={setTab} className="w-full">

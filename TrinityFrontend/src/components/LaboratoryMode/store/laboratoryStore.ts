@@ -45,6 +45,9 @@ export interface DataUploadSettings {
   dimensions: Record<string, unknown>;
   measures: Record<string, unknown>;
   uploadedFiles: string[];
+  validatorId?: string;
+  requiredFiles?: string[];
+  validations?: Record<string, any>;
 }
 
 export const DEFAULT_DATAUPLOAD_SETTINGS: DataUploadSettings = {
@@ -54,7 +57,10 @@ export const DEFAULT_DATAUPLOAD_SETTINGS: DataUploadSettings = {
   frequency: 'monthly',
   dimensions: {},
   measures: {},
-  uploadedFiles: []
+  uploadedFiles: [],
+  validatorId: undefined,
+  requiredFiles: [],
+  validations: {}
 };
 
 export interface DroppedAtom {

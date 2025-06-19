@@ -22,6 +22,7 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
   const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
   const [isDragOver, setIsDragOver] = useState(false);
   const [openSections, setOpenSections] = useState<string[]>(['setting1', 'fileValidation']);
+  const [openFile, setOpenFile] = useState<string | null>(null);
 
   const handleFileUpload = (files: File[]) => {
     setUploadedFiles((prev) => [...prev, ...files]);
@@ -58,28 +59,20 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
     );
   };
 
-  const uploadedFilesList = [
-    { name: 'DQ_Market_Brand_Category', type: 'Sales Data', size: '2.5 MB', status: 'uploaded' },
-    { name: 'RPI_L0', type: 'RPI Data', size: '1.8 MB', status: 'uploaded' },
-    { name: 'SKU_Margin', type: 'Margin File', size: '3.2 MB', status: 'uploaded' },
-    { name: 'Media_data', type: 'Media Data', size: '1.1 MB', status: 'uploaded' },
-    ...uploadedFiles.map((file) => ({
-      name: file.name,
-      type: 'User Upload',
-      size: `${(file.size / 1024 / 1024).toFixed(1)} MB`,
-      status: 'uploaded',
-    })),
-  ];
+  const uploadedFilesList = uploadedFiles.map(file => ({
+    name: file.name,
+    type: 'User Upload',
+    size: `${(file.size / 1024 / 1024).toFixed(1)} MB`,
+    status: 'uploaded'
+  }));
 
-  const requiredFiles = [
-    { name: 'Sales Data', status: 'uploaded', required: true },
-    { name: 'Margine_File', status: 'pending', required: true },
-    { name: 'RPI_Data', status: 'pending', required: true },
-    { name: 'Required Data', status: 'pending', required: false },
-    { name: 'Required Data', status: 'pending', required: false },
-    { name: 'Required Data', status: 'pending', required: false },
-    { name: 'Required Data', status: 'pending', required: false },
-  ];
+  type FileInfo = { name: string; status: string; required: boolean; validations: any };
+  const requiredFiles: FileInfo[] = (settings.requiredFiles || []).map(name => ({
+    name,
+    required: true,
+    status: settings.uploadedFiles?.includes(name) ? 'uploaded' : 'pending',
+    validations: settings.validations?.[name] || { ranges: [], periodicities: [] }
+  }));
 
   const getStatusIcon = (status: string, required: boolean) => {
     if (status === 'uploaded') return <Check className="w-4 h-4 text-green-500" />;
@@ -236,19 +229,40 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
 
                 <div className="p-4 space-y-3 overflow-y-auto h-[calc(100%-80px)]">
                   {requiredFiles.map((file, index) => (
-                    <div key={index} className="flex items-center justify-between p-3 border border-gray-200 rounded-lg hover:border-gray-300 hover:bg-gray-50 transition-all duration-200">
-                      <div className="flex items-center space-x-3">
-                        <div className="flex-shrink-0">{getStatusIcon(file.status, file.required)}</div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium text-gray-900">{file.name}</p>
-                          {file.required && (
-                            <Badge variant="outline" className="text-xs bg-orange-50 text-orange-700 border-orange-200 mt-1">
-                              Required
-                            </Badge>
-                          )}
+                    <div key={index} className="border border-gray-200 rounded-lg" >
+                      <div
+                        className="flex items-center justify-between p-3 hover:border-gray-300 hover:bg-gray-50 cursor-pointer"
+                        onClick={() => setOpenFile(openFile === file.name ? null : file.name)}
+                      >
+                        <div className="flex items-center space-x-3">
+                          <div className="flex-shrink-0">{getStatusIcon(file.status, file.required)}</div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium text-gray-900">{file.name}</p>
+                            {file.required && (
+                              <Badge variant="outline" className="text-xs bg-orange-50 text-orange-700 border-orange-200 mt-1">
+                                Required
+                              </Badge>
+                            )}
+                          </div>
                         </div>
+                        <Info className="w-4 h-4 text-gray-400" />
                       </div>
-                      <Info className="w-4 h-4 text-gray-400" />
+                      {openFile === file.name && (
+                        <div className="p-3 border-t border-gray-200 overflow-x-auto">
+                          <div className="flex space-x-2">
+                            {file.validations.ranges.map((r: any, i: number) => (
+                              <Badge key={i} variant="outline" className="text-xs">
+                                {r.column}: {r.min}-{r.max}
+                              </Badge>
+                            ))}
+                            {file.validations.periodicities.map((p: any, i: number) => (
+                              <Badge key={`p-${i}`} variant="outline" className="text-xs">
+                                {p.column}: {p.periodicity}
+                              </Badge>
+                            ))}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
