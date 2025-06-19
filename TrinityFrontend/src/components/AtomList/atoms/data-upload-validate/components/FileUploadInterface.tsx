@@ -87,7 +87,7 @@ const FileUploadInterface: React.FC<FileUploadInterfaceProps> = ({
   };
 
   return (
-    <div className="flex h-full space-x-6">
+    <div className="flex h-full space-x-6 overflow-y-auto scrollbar-thin scrollbar-thumb-gray-300 pr-2">
       {/* Upload Area */}
       <div className="flex-1">
         <Card className="h-full flex flex-col shadow-sm border-0 bg-gradient-to-br from-gray-50 to-white">
@@ -96,7 +96,7 @@ const FileUploadInterface: React.FC<FileUploadInterfaceProps> = ({
             <p className="text-sm text-gray-600">Drag and drop files or browse to upload your data</p>
           </div>
 
-          <div className="flex-1 flex items-center justify-center p-8">
+          <div className="flex-1 flex items-center justify-center p-8 overflow-y-auto scrollbar-thin scrollbar-thumb-gray-300">
             <div
               className={`w-full max-w-lg text-center transition-all duration-300 ${
                 isDragOver ? 'transform scale-105' : 'transform scale-100'
@@ -209,7 +209,7 @@ const FileUploadInterface: React.FC<FileUploadInterfaceProps> = ({
             <p className="text-xs text-gray-600 mt-1">Upload these files for complete data validation</p>
           </div>
 
-          <div className="p-4 space-y-3 overflow-y-auto h-[calc(100%-80px)]">
+          <div className="p-4 space-y-3 overflow-y-auto h-[calc(100%-80px)] scrollbar-thin scrollbar-thumb-gray-300">
             {requiredFiles.map((file, index) => (
               <div
                 key={index}
