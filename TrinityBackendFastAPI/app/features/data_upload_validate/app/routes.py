@@ -1869,6 +1869,23 @@ async def delete_validator_atom(validator_atom_id: str):
     }
 
 
+# GET: GET_VALIDATOR_CONFIG - return validator setup with MongoDB details
+@router.get("/get_validator_config/{validator_atom_id}")
+async def get_validator_config(validator_atom_id: str):
+    """Retrieve stored validator atom configuration along with any
+    classification or dimension information."""
+
+    validator_data = get_validator_atom_from_mongo(validator_atom_id)
+    if not validator_data:
+        validator_data = get_validator_from_memory_or_disk(validator_atom_id)
+
+    if not validator_data:
+        raise HTTPException(status_code=404, detail=f"Validator atom '{validator_atom_id}' not found")
+
+    extra = load_all_non_validation_data(validator_atom_id)
+    return {**validator_data, **extra}
+
+
 ############################prebuild
 
 # # ✅ UPDATED: Complete MMM Validation Endpoint with MinIO Upload

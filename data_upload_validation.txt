@@ -1,0 +1,36 @@
+The Data Upload & Validate atom connects the React frontend under
+`TrinityFrontend/src/components/AtomList/atoms/data-upload-validate`
+with the FastAPI service in
+`TrinityBackendFastAPI/app/features/data_upload_validate`.
+
+User flow
+---------
+1. In the atom property panel the user uploads master/template files.
+   The component posts the files to `POST /api/data-upload-validate/create_new`
+   which returns the generated validator id. Column types are fetched from
+   `GET /api/data-upload-validate/get_validator_config/<id>`.
+2. After selecting a master file the user can modify data types, value ranges
+   and frequency requirements. Clicking **Save Configuration** sends
+   `POST /api/data-upload-validate/update_column_types` followed by
+   `POST /api/data-upload-validate/configure_validation_config` to persist the
+   validation rules.
+3. Required master files appear in the UI. When data files are uploaded the
+   **Validate Files** action posts the files to `POST /api/data-upload-validate/validate`.
+   Each file response is displayed as success or failure.
+
+Endpoints
+---------
+- `POST /api/data-upload-validate/create_new` – create validator from master files.
+- `GET  /api/data-upload-validate/get_validator_config/{validator_id}` – return
+  stored schemas, column types and saved metadata.
+- `POST /api/data-upload-validate/update_column_types` – update detected column
+  types for a file key.
+- `POST /api/data-upload-validate/configure_validation_config` – store custom
+  conditions and date frequency checks.
+- `POST /api/data-upload-validate/validate` – validate uploaded files using the
+  configured rules.
+- `DELETE /api/data-upload-validate/delete_validator_atom/{validator_id}` –
+  remove a validator and all associated metadata.
+
+The frontend uses `VALIDATE_API` from `src/lib/api.ts` to resolve the base URL
+for these endpoints.

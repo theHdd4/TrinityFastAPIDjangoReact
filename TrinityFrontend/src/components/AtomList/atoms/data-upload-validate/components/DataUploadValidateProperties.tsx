@@ -12,10 +12,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
+import { VALIDATE_API } from '@/lib/api';
 
 const DataUploadValidateProperties: React.FC = () => {
   const [allAvailableFiles, setAllAvailableFiles] = useState<{ name: string; source: string }[]>([]);
   const [selectedMasterFile, setSelectedMasterFile] = useState<string>('');
+  const [validatorId, setValidatorId] = useState<string>('');
   const [columnDataTypes, setColumnDataTypes] = useState<Record<string, string>>({
     Column1: 'string',
     Column2: 'number',
@@ -87,10 +89,26 @@ const DataUploadValidateProperties: React.FC = () => {
     'Base_Sales'
   ];
 
-  const handleMasterFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files) {
-      const files = Array.from(e.target.files).map(f => ({ name: f.name, source: 'upload' }));
-      setAllAvailableFiles(prev => [...prev, ...files]);
+  const handleMasterFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!e.target.files) return;
+    const files = Array.from(e.target.files);
+    const id = `validator-${Date.now()}`;
+    const form = new FormData();
+    form.append('validator_atom_id', id);
+    files.forEach(f => form.append('files', f));
+    const keys = files.map((_, i) => `file${i}`);
+    form.append('file_keys', JSON.stringify(keys));
+
+    const res = await fetch(`${VALIDATE_API}/create_new`, { method: 'POST', body: form });
+    if (res.ok) {
+      setValidatorId(id);
+      setAllAvailableFiles(keys.map(k => ({ name: k, source: 'upload' })));
+      setSelectedMasterFile(keys[0]);
+      const cfg = await fetch(`${VALIDATE_API}/get_validator_config/${id}`).then(r => r.json());
+      if (cfg.column_types) {
+        const firstKey = Object.keys(cfg.column_types)[0];
+        setColumnDataTypes(cfg.column_types[firstKey] || {});
+      }
     }
   };
 
@@ -124,6 +142,42 @@ const DataUploadValidateProperties: React.FC = () => {
     value: string
   ) => {
     setPeriodicityValidations(prev => prev.map(p => (p.id === id ? { ...p, [key]: value } : p)));
+  };
+
+  const handleSaveConfiguration = async () => {
+    if (!validatorId || !selectedMasterFile) return;
+
+    const typeForm = new FormData();
+    typeForm.append('validator_atom_id', validatorId);
+    typeForm.append('file_key', selectedMasterFile);
+    typeForm.append('column_types', JSON.stringify(columnDataTypes));
+    await fetch(`${VALIDATE_API}/update_column_types`, { method: 'POST', body: typeForm });
+
+    const columnConditions: Record<string, any[]> = {};
+    rangeValidations.forEach(r => {
+      if (r.column) {
+        columnConditions[r.column] = [
+          { operator: 'greater_than_or_equal', value: r.min, error_message: 'min check' },
+          { operator: 'less_than_or_equal', value: r.max, error_message: 'max check' }
+        ];
+      }
+    });
+
+    const columnFrequencies: Record<string, string> = {};
+    periodicityValidations.forEach(p => {
+      if (p.column && p.periodicity) columnFrequencies[p.column] = p.periodicity;
+    });
+
+    await fetch(`${VALIDATE_API}/configure_validation_config`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        validator_atom_id: validatorId,
+        file_key: selectedMasterFile,
+        column_conditions: columnConditions,
+        column_frequencies: columnFrequencies
+      })
+    });
   };
 
   return (
@@ -413,7 +467,7 @@ const DataUploadValidateProperties: React.FC = () => {
             </div>
 
             <div className="p-4 border-t border-gray-200 mt-4">
-              <Button className="w-full bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white shadow-lg">
+              <Button onClick={handleSaveConfiguration} className="w-full bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white shadow-lg">
                 Save Configuration
               </Button>
             </div>

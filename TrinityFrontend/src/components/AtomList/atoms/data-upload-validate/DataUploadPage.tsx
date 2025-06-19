@@ -101,7 +101,7 @@ const DataUploadPage: React.FC = () => {
       form.append('validator_atom_id', 'demo-validator');
       form.append('files', file);
       form.append('file_keys', JSON.stringify(['data']));
-      const res = await fetch(`${VALIDATE_API}/create_new`, {
+      const res = await fetch(`${VALIDATE_API}/validate`, {
         method: 'POST',
         body: form,
       });

@@ -57,7 +57,7 @@ const FileUploadInterface: React.FC<FileUploadInterfaceProps> = ({
       form.append('validator_atom_id', 'demo-validator');
       uploadedFiles.forEach((f) => form.append('files', f));
       form.append('file_keys', JSON.stringify(['data']));
-      const res = await fetch(`${VALIDATE_API}/create_new`, {
+      const res = await fetch(`${VALIDATE_API}/validate`, {
         method: 'POST',
         body: form,
       });
