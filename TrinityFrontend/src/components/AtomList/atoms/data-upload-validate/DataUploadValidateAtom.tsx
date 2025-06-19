@@ -20,15 +20,15 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
   };
 
   return (
-    <div className="w-full h-full bg-gradient-to-br from-gray-50 via-white to-gray-50 rounded-xl border border-gray-200 shadow-lg overflow-hidden flex flex-col">
-      <div className="bg-gradient-to-r from-blue-500 to-blue-600 text-white p-4 flex-shrink-0">
+    <div className="w-full h-full flex flex-col overflow-hidden">
+      <div className="p-4 border-b border-gray-200 flex-shrink-0 bg-white">
         <div className="flex items-center space-x-3">
-          <div className="w-10 h-10 bg-white/20 rounded-lg flex items-center justify-center backdrop-blur-sm">
-            <Database className="w-5 h-5" />
+          <div className="w-10 h-10 bg-gray-100 rounded-lg flex items-center justify-center">
+            <Database className="w-5 h-5 text-black" />
           </div>
           <div>
-            <h2 className="text-lg font-semibold">Data Upload & Validate</h2>
-            <p className="text-blue-100 text-sm">Upload and validate data with automatic type detection</p>
+            <h2 className="text-lg font-semibold text-black">Data Upload & Validate</h2>
+            <p className="text-xs text-gray-600">Upload and validate data with automatic type detection</p>
           </div>
         </div>
       </div>
