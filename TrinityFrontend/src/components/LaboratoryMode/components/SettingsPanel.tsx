@@ -13,9 +13,7 @@ import {
   DataUploadSettings,
   DEFAULT_DATAUPLOAD_SETTINGS
 } from '../store/laboratoryStore';
-import SettingsTab from '@/components/AtomList/atoms/data-upload-validate/components/SettingsTab';
-import VisualisationTab from '@/components/AtomList/atoms/data-upload-validate/components/VisualisationTab';
-import ExhibitionTab from '@/components/AtomList/atoms/data-upload-validate/components/ExhibitionTab';
+import DataUploadValidateProperties from '@/components/AtomList/atoms/data-upload-validate/components/DataUploadValidateProperties';
 
 interface SettingsPanelProps {
   isCollapsed: boolean;
@@ -84,28 +82,32 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
             <div className="p-4 text-gray-600 text-sm">Please select a Card/Atom</div>
           ) : (
           <> 
-          <Tabs value={tab} onValueChange={setTab} className="w-full">
-            <TabsList className="grid w-full grid-cols-3 mx-4 my-4">
-              <TabsTrigger value="settings" className="text-xs">
-                <Settings className="w-3 h-3 mr-1" />
-                Settings
-              </TabsTrigger>
-              <TabsTrigger value="visual" className="text-xs">
-                <BarChart2 className="w-3 h-3 mr-1" />
-                Visualisation
-              </TabsTrigger>
-              <TabsTrigger
-                value="exhibition"
-                className="text-xs mr-2"
-                data-disabled={!cardExhibited}
-                disabled={!cardExhibited}
-              >
-                <Eye className="w-3 h-3 mr-1" />
-                Exhibition
-              </TabsTrigger>
-            </TabsList>
-            
-            <div className="px-4">
+          {selectedAtomId && atom?.atomId === 'data-upload-validate' ? (
+            <DataUploadValidateProperties />
+          ) : (
+            <>
+            <Tabs value={tab} onValueChange={setTab} className="w-full">
+              <TabsList className="grid w-full grid-cols-3 mx-4 my-4">
+                <TabsTrigger value="settings" className="text-xs">
+                  <Settings className="w-3 h-3 mr-1" />
+                  Settings
+                </TabsTrigger>
+                <TabsTrigger value="visual" className="text-xs">
+                  <BarChart2 className="w-3 h-3 mr-1" />
+                  Visualisation
+                </TabsTrigger>
+                <TabsTrigger
+                  value="exhibition"
+                  className="text-xs mr-2"
+                  data-disabled={!cardExhibited}
+                  disabled={!cardExhibited}
+                >
+                  <Eye className="w-3 h-3 mr-1" />
+                  Exhibition
+                </TabsTrigger>
+              </TabsList>
+
+              <div className="px-4">
               <TabsContent value="settings" className="space-y-4">
                 {selectedAtomId && atom?.atomId === 'text-box' && (
                   <Card className="p-4 space-y-3">
@@ -151,15 +153,6 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
                   </Card>
                 )}
 
-                {selectedAtomId && atom?.atomId === 'data-upload-validate' && (
-                  <Card className="p-4 space-y-3">
-                    <SettingsTab
-                      settings={settings as DataUploadSettings}
-                      uploadedFiles={(settings as DataUploadSettings).uploadedFiles}
-                      onSettingsChange={s => updateSettings(selectedAtomId, s)}
-                    />
-                  </Card>
-                )}
 
                 <Card className="p-4">
                   <h4 className="font-medium text-gray-900 mb-3">{selectedAtomId ? 'Atom Identity' : 'Card Settings'}</h4>
@@ -255,11 +248,6 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
                     </div>
                   </Card>
                 )}
-                {selectedAtomId && atom?.atomId === 'data-upload-validate' && (
-                  <Card className="p-4 space-y-3">
-                    <VisualisationTab />
-                  </Card>
-                )}
               </TabsContent>
 
               <TabsContent value="exhibition" className="space-y-4">
@@ -306,11 +294,6 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
                       />
                       <label className="text-sm text-gray-600">Lock content</label>
                     </div>
-                  </Card>
-                )}
-                {selectedAtomId && atom?.atomId === 'data-upload-validate' && cardExhibited && (
-                  <Card className="p-4 space-y-3">
-                    <ExhibitionTab />
                   </Card>
                 )}
               </TabsContent>
