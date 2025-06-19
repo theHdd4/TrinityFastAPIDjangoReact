@@ -20,6 +20,8 @@ build/
 *.exe
 
 # Virtual environments
+C:\Users\Quant Matrix\Downloads\OneDrive - QuantMatrix AI Solutions\TrinityFastAPIDjangoReactTrinityAI/Agent_fetch_atom/agentic/
+
 venv/
 env/
 ENV/
