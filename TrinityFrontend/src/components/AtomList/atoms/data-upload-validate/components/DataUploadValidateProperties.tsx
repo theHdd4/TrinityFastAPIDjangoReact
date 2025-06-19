@@ -86,7 +86,8 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
           validatorId,
           requiredFiles: files,
           validations: cfg.validations || {},
-          classification: cfg.classification || {}
+          classification: cfg.classification || {},
+          columnConfig: cfg.column_types || {}
         });
 
         if (cfg.column_types && files.length > 0) {
@@ -126,7 +127,8 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
       updateSettings(atomId, {
         validatorId: id,
         requiredFiles: keys,
-        validations: settings.validations || {}
+        validations: settings.validations || {},
+        columnConfig: cfg.column_types || {}
       });
     }
   };
@@ -142,6 +144,12 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
       .then(cfg => {
         const types = cfg.column_types?.[selectedMasterFile] || {};
         setColumnDataTypes(types);
+        updateSettings(atomId, {
+          columnConfig: {
+            ...(settings.columnConfig || {}),
+            [selectedMasterFile]: types
+          }
+        });
         if (cfg.classification?.[selectedMasterFile]) {
           const cls = cfg.classification[selectedMasterFile];
           setSelectedIdentifiers(cls.identifiers || []);
@@ -284,7 +292,11 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
       validatorId,
       requiredFiles: allAvailableFiles.map(f => f.name),
       validations: newValidations,
-      classification: newClassification
+      classification: newClassification,
+      columnConfig: {
+        ...(settings.columnConfig || {}),
+        [selectedMasterFile]: columnDataTypes
+      }
     });
   };
 

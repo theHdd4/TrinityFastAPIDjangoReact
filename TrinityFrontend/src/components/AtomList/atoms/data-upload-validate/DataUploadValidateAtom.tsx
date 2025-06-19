@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Database, FileText, Info, Check, AlertCircle, Upload, Settings, BarChart3, Eye, ChevronDown, Plus } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Database, FileText, Info, Check, AlertCircle, Upload, Settings, BarChart3, Eye, ChevronDown, Plus, Pencil } from 'lucide-react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { useLaboratoryStore, DEFAULT_DATAUPLOAD_SETTINGS, DataUploadSettings } from '@/components/LaboratoryMode/store/laboratoryStore';
+import { VALIDATE_API } from '@/lib/api';
 
 interface Props {
   atomId: string;
@@ -23,10 +24,22 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
   const [isDragOver, setIsDragOver] = useState(false);
   const [openSections, setOpenSections] = useState<string[]>(['setting1', 'fileValidation']);
   const [openFile, setOpenFile] = useState<string | null>(null);
+  const [renameTarget, setRenameTarget] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState('');
+  const [fileAssignments, setFileAssignments] = useState<Record<string, string>>(settings.fileMappings || {});
+  const [validationResults, setValidationResults] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    setFileAssignments(settings.fileMappings || {});
+  }, [settings.fileMappings]);
 
   const handleFileUpload = (files: File[]) => {
     setUploadedFiles((prev) => [...prev, ...files]);
-    updateSettings(atomId, { uploadedFiles: [...(settings.uploadedFiles || []), ...files.map((f) => f.name)] });
+    updateSettings(atomId, {
+      uploadedFiles: [...(settings.uploadedFiles || []), ...files.map((f) => f.name)],
+      fileMappings: { ...fileAssignments, ...Object.fromEntries(files.map(f => [f.name, settings.requiredFiles?.[0] || ''])) }
+    });
+    setFileAssignments(prev => ({ ...prev, ...Object.fromEntries(files.map(f => [f.name, settings.requiredFiles?.[0] || ''])) }));
   };
 
   const handleDrop = (e: React.DragEvent) => {
@@ -59,11 +72,40 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
     );
   };
 
+  const startRename = (name: string) => {
+    setRenameTarget(name);
+    setRenameValue(name);
+  };
+
+  const commitRename = (oldName: string) => {
+    if (!renameValue.trim()) {
+      setRenameTarget(null);
+      return;
+    }
+    const newName = renameValue.trim();
+    const newRequired = (settings.requiredFiles || []).map(n => (n === oldName ? newName : n));
+    const newValidations: Record<string, any> = {};
+    Object.entries(settings.validations || {}).forEach(([k, v]) => {
+      newValidations[k === oldName ? newName : k] = v;
+    });
+    const newColumnConfig: Record<string, Record<string, string>> = {};
+    Object.entries(settings.columnConfig || {}).forEach(([k, v]) => {
+      newColumnConfig[k === oldName ? newName : k] = v as Record<string, string>;
+    });
+    updateSettings(atomId, {
+      requiredFiles: newRequired,
+      validations: newValidations,
+      columnConfig: newColumnConfig
+    });
+    if (openFile === oldName) setOpenFile(newName);
+    setRenameTarget(null);
+  };
+
   const uploadedFilesList = uploadedFiles.map(file => ({
     name: file.name,
     type: 'User Upload',
     size: `${(file.size / 1024 / 1024).toFixed(1)} MB`,
-    status: 'uploaded'
+    status: validationResults[file.name] || 'pending'
   }));
 
   type FileInfo = { name: string; status: string; required: boolean; validations: any };
@@ -78,6 +120,32 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
     if (status === 'uploaded') return <Check className="w-4 h-4 text-green-500" />;
     if (required) return <AlertCircle className="w-4 h-4 text-orange-500" />;
     return <Info className="w-4 h-4 text-gray-400" />;
+  };
+
+  const handleAssignmentChange = (fileName: string, value: string) => {
+    const newAssignments = { ...fileAssignments, [fileName]: value };
+    setFileAssignments(newAssignments);
+    updateSettings(atomId, { fileMappings: newAssignments });
+  };
+
+  const handleValidateFiles = async () => {
+    if (!settings.validatorId) return;
+    const form = new FormData();
+    form.append('validator_atom_id', settings.validatorId);
+    uploadedFiles.forEach(f => form.append('files', f));
+    const keys = uploadedFiles.map(f => fileAssignments[f.name] || '');
+    form.append('file_keys', JSON.stringify(keys));
+    const res = await fetch(`${VALIDATE_API}/validate`, { method: 'POST', body: form });
+    if (res.ok) {
+      const data = await res.json();
+      const results: Record<string, string> = {};
+      keys.forEach((k, idx) => {
+        const fileName = uploadedFiles[idx].name;
+        const status = data.file_results?.[k]?.status === 'passed' ? 'success' : 'failure';
+        results[fileName] = status === 'success' ? 'File Validation Success' : 'File Validation Failure';
+      });
+      setValidationResults(results);
+    }
   };
 
   const dimensions = [
@@ -172,24 +240,29 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
                         <FileText className="w-5 h-5 text-blue-500" />
                         <div>
                           <p className="text-sm font-medium text-gray-900">{file.name}</p>
-                          <p className="text-xs text-gray-600">
-                            {file.type} • {file.size}
-                          </p>
+                          <p className="text-xs text-gray-600">{file.type} • {file.size}</p>
+                          {validationResults[file.name] && (
+                            <p
+                              className={`text-xs mt-1 ${
+                                validationResults[file.name].includes('Success') ? 'text-green-600' : 'text-red-600'
+                              }`}
+                            >
+                              {validationResults[file.name]}
+                            </p>
+                          )}
                         </div>
                       </div>
                       <div className="flex items-center space-x-3">
-                        <Select defaultValue="sales">
+                        <Select value={fileAssignments[file.name] || ''} onValueChange={val => handleAssignmentChange(file.name, val)}>
                           <SelectTrigger className="w-32 h-8 text-xs">
-                            <SelectValue />
+                            <SelectValue placeholder="Select" />
                           </SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="sales">Sales Data</SelectItem>
-                            <SelectItem value="rpi">RPI Data</SelectItem>
-                            <SelectItem value="margin">Margin File</SelectItem>
-                            <SelectItem value="media">Media Data</SelectItem>
+                            {(settings.requiredFiles || []).map(req => (
+                              <SelectItem key={req} value={req}>{req}</SelectItem>
+                            ))}
                           </SelectContent>
                         </Select>
-                        <Check className="w-4 h-4 text-green-500" />
                       </div>
                     </div>
                   ))}
@@ -207,15 +280,20 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
                     </div>
 
                     <input type="file" multiple accept=".csv,.xlsx,.xls,.json" onChange={handleFileSelect} className="hidden" id="file-upload" />
-                    <label htmlFor="file-upload">
-                      <Button asChild className="cursor-pointer">
-                        <span>Browse</span>
-                      </Button>
-                    </label>
-                  </div>
+                  <label htmlFor="file-upload">
+                    <Button asChild className="cursor-pointer">
+                      <span>Browse</span>
+                    </Button>
+                  </label>
                 </div>
-              </Card>
-            </div>
+                {uploadedFiles.length > 0 && (
+                  <Button className="w-full mt-4" onClick={handleValidateFiles}>
+                    Validate Files
+                  </Button>
+                )}
+              </div>
+            </Card>
+          </div>
 
             <div className="w-80">
               <Card className="h-full shadow-sm border-0 bg-white">
@@ -228,43 +306,60 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
                 </div>
 
                 <div className="p-4 space-y-3 overflow-y-auto h-[calc(100%-80px)]">
-                  {requiredFiles.map((file, index) => (
-                    <div key={index} className="border border-gray-200 rounded-lg" >
-                      <div
-                        className="flex items-center justify-between p-3 hover:border-gray-300 hover:bg-gray-50 cursor-pointer"
-                        onClick={() => setOpenFile(openFile === file.name ? null : file.name)}
-                      >
-                        <div className="flex items-center space-x-3">
-                          <div className="flex-shrink-0">{getStatusIcon(file.status, file.required)}</div>
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm font-medium text-gray-900">{file.name}</p>
-                            {file.required && (
-                              <Badge variant="outline" className="text-xs bg-orange-50 text-orange-700 border-orange-200 mt-1">
-                                Required
-                              </Badge>
-                            )}
+                  {requiredFiles.map((file, index) => {
+                    const types = (settings.columnConfig || {})[file.name] || {};
+                    return (
+                      <div key={index} className="border border-gray-200 rounded-lg">
+                        <div className="flex items-center justify-between p-3 hover:border-gray-300 hover:bg-gray-50">
+                          <div className="flex items-center space-x-3">
+                            <div className="flex-shrink-0">{getStatusIcon(file.status, file.required)}</div>
+                            <div className="flex-1 min-w-0">
+                              {renameTarget === file.name ? (
+                                <Input
+                                  value={renameValue}
+                                  onChange={e => setRenameValue(e.target.value)}
+                                  onBlur={() => commitRename(file.name)}
+                                  className="h-6 text-xs"
+                                />
+                              ) : (
+                                <p className="text-sm font-medium text-gray-900">{file.name}</p>
+                              )}
+                              {file.required && (
+                                <Badge variant="outline" className="text-xs bg-orange-50 text-orange-700 border-orange-200 mt-1">
+                                  Required
+                                </Badge>
+                              )}
+                            </div>
+                          </div>
+                          <div className="flex items-center space-x-2">
+                            <Pencil className="w-4 h-4 text-gray-400 cursor-pointer" onClick={() => startRename(file.name)} />
+                            <Info className="w-4 h-4 text-gray-400 cursor-pointer" onClick={() => setOpenFile(openFile === file.name ? null : file.name)} />
                           </div>
                         </div>
-                        <Info className="w-4 h-4 text-gray-400" />
+                        {openFile === file.name && (
+                          <div className="p-3 border-t border-gray-200 overflow-x-auto">
+                            <div className="flex space-x-2">
+                              {Object.entries(types).map(([col, dt]) => (
+                                <Badge key={col} variant="outline" className="text-xs">
+                                  {col}: {dt}
+                                </Badge>
+                              ))}
+                              {file.validations.ranges.map((r: any, i: number) => (
+                                <Badge key={`r-${i}`} variant="outline" className="text-xs">
+                                  {r.column}: {r.min}-{r.max}
+                                </Badge>
+                              ))}
+                              {file.validations.periodicities.map((p: any, i: number) => (
+                                <Badge key={`p-${i}`} variant="outline" className="text-xs">
+                                  {p.column}: {p.periodicity}
+                                </Badge>
+                              ))}
+                            </div>
+                          </div>
+                        )}
                       </div>
-                      {openFile === file.name && (
-                        <div className="p-3 border-t border-gray-200 overflow-x-auto">
-                          <div className="flex space-x-2">
-                            {file.validations.ranges.map((r: any, i: number) => (
-                              <Badge key={i} variant="outline" className="text-xs">
-                                {r.column}: {r.min}-{r.max}
-                              </Badge>
-                            ))}
-                            {file.validations.periodicities.map((p: any, i: number) => (
-                              <Badge key={`p-${i}`} variant="outline" className="text-xs">
-                                {p.column}: {p.periodicity}
-                              </Badge>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </Card>
             </div>

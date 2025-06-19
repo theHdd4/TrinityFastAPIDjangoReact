@@ -72,3 +72,13 @@ information from `/get_validator_config/{validator_id}` whenever the atom is
 rendered so the configuration is restored even after the UI collapses or the
 page reloads.
 
+Atom UI Details
+---------------
+* Required file entries now include a rename button and an info button. Clicking
+  the pencil icon lets you rename the display name for a file. The info button
+  reveals all configured validations in a horizontal scroll list showing column
+  types, range checks and periodicity rules.
+* Each uploaded file row has a dropdown listing the required files. This mapping
+  determines which template to use when the **Validate Files** button is
+  pressed. Validation statuses are shown under each uploaded file name.
+
