@@ -358,7 +358,7 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
 
   if (workflowMolecules.length > 0) {
     return (
-      <div className="h-full bg-gradient-to-br from-gray-50 to-gray-100 rounded-xl border border-gray-200 shadow-sm overflow-auto">
+      <div className="h-full bg-gradient-to-br from-gray-50 to-gray-100 rounded-xl border border-gray-200 shadow-sm">
         <div className="p-6">
           <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
             <div className="mb-6 bg-white rounded-lg border border-gray-200 p-1 shadow-sm">
@@ -506,7 +506,7 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
   }
 
   return (
-    <div className="h-full w-full bg-gradient-to-br from-gray-50 to-gray-100 rounded-xl border border-gray-200 shadow-sm overflow-auto">
+    <div className="h-full w-full bg-gradient-to-br from-gray-50 to-gray-100 rounded-xl border border-gray-200 shadow-sm">
       {/* Layout Cards Container */}
       <div className="p-6 space-y-6 w-full">
         {layoutCards.map((card, index) => (
