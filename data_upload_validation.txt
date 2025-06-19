@@ -9,6 +9,8 @@ User flow
    The component posts the files to `POST /api/data-upload-validate/create_new`
    which returns the generated validator id. Column types are fetched from
    `GET /api/data-upload-validate/get_validator_config/<id>`.
+   Uploaded file names are preserved as the `file_keys` so the required files
+   list displays the original names instead of numbered placeholders.
 2. After selecting a master file the user can modify data types, value ranges
    and frequency requirements. Clicking **Save Configuration** sends
    `POST /api/data-upload-validate/update_column_types` followed by
@@ -17,6 +19,10 @@ User flow
 3. Required master files appear in the UI. When data files are uploaded the
    **Validate Files** action posts the files to `POST /api/data-upload-validate/validate`.
    Each file response is displayed as success or failure.
+4. Whenever the atom is reopened, the properties panel fetches the saved
+   configuration using `GET /api/data-upload-validate/get_validator_config/<id>`
+   so validations and column classifications persist. These settings are stored
+   in MongoDB under the `validator_atoms` and `validation_config` collections.
 
 Endpoints
 ---------
@@ -57,4 +63,12 @@ separate API to filter columns was considered but would simply duplicate the
 existing information and add an extra network request. Keeping the filtering in
 the frontend avoids additional backend complexity and works as long as the
 column types are already part of the configuration response.
+
+Persistence
+-----------
+Validator settings (required file names, column types, validations and column
+classifications) are saved in MongoDB. The properties panel reads this
+information from `/get_validator_config/{validator_id}` whenever the atom is
+rendered so the configuration is restored even after the UI collapses or the
+page reloads.
 

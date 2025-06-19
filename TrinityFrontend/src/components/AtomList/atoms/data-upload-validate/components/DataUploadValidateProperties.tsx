@@ -70,6 +70,32 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
   const [selectedIdentifiers, setSelectedIdentifiers] = useState<string[]>([]);
   const [selectedMeasures, setSelectedMeasures] = useState<string[]>([]);
 
+  // Load existing configuration if validator id already present
+  useEffect(() => {
+    if (!validatorId) return;
+    fetch(`${VALIDATE_API}/get_validator_config/${validatorId}`)
+      .then(res => res.json())
+      .then(cfg => {
+        const files = cfg.file_keys || [];
+        if (files.length > 0) {
+          setAllAvailableFiles(files.map((f: string) => ({ name: f, source: 'upload' })));
+          if (!selectedMasterFile) setSelectedMasterFile(files[0]);
+        }
+
+        updateSettings(atomId, {
+          validatorId,
+          requiredFiles: files,
+          validations: cfg.validations || {},
+          classification: cfg.classification || {}
+        });
+
+        if (cfg.column_types && files.length > 0) {
+          setColumnDataTypes(cfg.column_types[files[0]] || {});
+        }
+      })
+      .catch(() => {});
+  }, []);
+
   const periodicityOptions = [
     { value: 'daily', label: 'Daily' },
     { value: 'weekly', label: 'Weekly' },
@@ -84,7 +110,7 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
     const form = new FormData();
     form.append('validator_atom_id', id);
     files.forEach(f => form.append('files', f));
-    const keys = files.map((_, i) => `file${i}`);
+    const keys = files.map(f => f.name);
     form.append('file_keys', JSON.stringify(keys));
 
     const res = await fetch(`${VALIDATE_API}/create_new`, { method: 'POST', body: form });
