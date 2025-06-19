@@ -34,3 +34,16 @@ Endpoints
 
 The frontend uses `VALIDATE_API` from `src/lib/api.ts` to resolve the base URL
 for these endpoints.
+
+Column selection for validations
+-------------------------------
+When a master file is chosen, the frontend requests the validator configuration
+and extracts the detected `column_types` for that file. Numerical columns
+(`integer` or `numeric`) populate the dropdown for range checks while `date`
+columns are used for periodicity selection.  This logic runs on the client using
+the data returned by `/get_validator_config/{validator_id}`. Implementing a
+separate API to filter columns was considered but would simply duplicate the
+existing information and add an extra network request. Keeping the filtering in
+the frontend avoids additional backend complexity and works as long as the
+column types are already part of the configuration response.
+

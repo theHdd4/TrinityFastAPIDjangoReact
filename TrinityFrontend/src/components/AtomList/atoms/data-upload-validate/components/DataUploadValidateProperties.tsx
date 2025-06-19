@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Settings,
   Upload,
@@ -62,8 +62,8 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
     { id: 1, column: '', periodicity: '' }
   ]);
 
-  const numericalColumns = ['Column1', 'Column2'];
-  const dateColumns = ['Column3'];
+  const [numericalColumns, setNumericalColumns] = useState<string[]>([]);
+  const [dateColumns, setDateColumns] = useState<string[]>([]);
 
   const periodicityOptions = [
     { value: 'daily', label: 'Daily' },
@@ -132,6 +132,47 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
   const handleDataTypeChange = (column: string, value: string) => {
     setColumnDataTypes(prev => ({ ...prev, [column]: value }));
   };
+
+  useEffect(() => {
+    if (!validatorId || !selectedMasterFile) return;
+    fetch(`${VALIDATE_API}/get_validator_config/${validatorId}`)
+      .then(res => res.json())
+      .then(cfg => {
+        const types = cfg.column_types?.[selectedMasterFile] || {};
+        setColumnDataTypes(types);
+      })
+      .catch(() => {
+        setColumnDataTypes({});
+      });
+  }, [validatorId, selectedMasterFile]);
+
+  useEffect(() => {
+    const nums = Object.entries(columnDataTypes)
+      .filter(([, t]) => t === 'integer' || t === 'numeric')
+      .map(([c]) => c);
+    const dates = Object.entries(columnDataTypes)
+      .filter(([, t]) => t === 'date')
+      .map(([c]) => c);
+    setNumericalColumns(nums);
+    setDateColumns(dates);
+  }, [columnDataTypes]);
+
+  useEffect(() => {
+    if (selectedMasterFile && settings.validations?.[selectedMasterFile]) {
+      const val = settings.validations[selectedMasterFile];
+      setRangeValidations(
+        val.ranges.length > 0 ? val.ranges : [{ id: Date.now(), column: '', min: '', max: '' }]
+      );
+      setPeriodicityValidations(
+        val.periodicities.length > 0
+          ? val.periodicities
+          : [{ id: Date.now(), column: '', periodicity: '' }]
+      );
+    } else {
+      setRangeValidations([{ id: Date.now(), column: '', min: '', max: '' }]);
+      setPeriodicityValidations([{ id: Date.now(), column: '', periodicity: '' }]);
+    }
+  }, [selectedMasterFile]);
 
   const addRangeValidation = () => {
     setRangeValidations(prev => [...prev, { id: Date.now(), column: '', min: '', max: '' }]);
