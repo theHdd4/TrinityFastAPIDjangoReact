@@ -11,7 +11,7 @@ import {
   TextBoxSettings,
   DEFAULT_TEXTBOX_SETTINGS,
   DataUploadSettings,
-  DEFAULT_DATAUPLOAD_SETTINGS
+  DEFAULT_DATAUPLOAD_SETTINGS,
 } from '../store/laboratoryStore';
 import DataUploadValidateProperties from '@/components/AtomList/atoms/data-upload-validate/components/DataUploadValidateProperties';
 
@@ -80,42 +80,40 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
         <div className="flex-1 overflow-y-auto scrollbar-thin scrollbar-thumb-gray-300">
           {!selectedAtomId && !selectedCardId ? (
             <div className="p-4 text-gray-600 text-sm">Please select a Card/Atom</div>
-          ) : (
-          <> 
-          {selectedAtomId && atom?.atomId === 'data-upload-validate' ? (
+          ) : selectedAtomId && atom?.atomId === 'data-upload-validate' ? (
             <DataUploadValidateProperties />
           ) : (
-            <>
-            <Tabs value={tab} onValueChange={setTab} className="w-full">
-              <TabsList className="grid w-full grid-cols-3 mx-4 my-4">
-                <TabsTrigger value="settings" className="text-xs">
-                  <Settings className="w-3 h-3 mr-1" />
-                  Settings
-                </TabsTrigger>
-                <TabsTrigger value="visual" className="text-xs">
-                  <BarChart2 className="w-3 h-3 mr-1" />
-                  Visualisation
-                </TabsTrigger>
-                <TabsTrigger
-                  value="exhibition"
-                  className="text-xs mr-2"
-                  data-disabled={!cardExhibited}
-                  disabled={!cardExhibited}
-                >
-                  <Eye className="w-3 h-3 mr-1" />
-                  Exhibition
-                </TabsTrigger>
-              </TabsList>
-
-              <div className="px-4">
+          <>
+          <Tabs value={tab} onValueChange={setTab} className="w-full">
+            <TabsList className="grid w-full grid-cols-3 mx-4 my-4">
+              <TabsTrigger value="settings" className="text-xs">
+                <Settings className="w-3 h-3 mr-1" />
+                Settings
+              </TabsTrigger>
+              <TabsTrigger value="visual" className="text-xs">
+                <BarChart2 className="w-3 h-3 mr-1" />
+                Visualisation
+              </TabsTrigger>
+              <TabsTrigger
+                value="exhibition"
+                className="text-xs mr-2"
+                data-disabled={!cardExhibited}
+                disabled={!cardExhibited}
+              >
+                <Eye className="w-3 h-3 mr-1" />
+                Exhibition
+              </TabsTrigger>
+            </TabsList>
+            
+            <div className="px-4">
               <TabsContent value="settings" className="space-y-4">
-                {selectedAtomId && atom?.atomId === 'text-box' && (
+                {selectedAtomId && (
                   <Card className="p-4 space-y-3">
                     <h4 className="font-medium text-gray-900 mb-3">Atom Settings</h4>
                     <div>
                       <label className="text-sm text-gray-600 block mb-1">Format</label>
                       <select
-                        value={(settings as TextBoxSettings).format}
+                        value={settings.format}
                         onChange={e => updateSettings(selectedAtomId, { format: e.target.value as TextBoxSettings['format'] })}
                         className="w-full border rounded p-1 text-sm"
                       >
@@ -128,7 +126,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
                     <div>
                       <label className="text-sm text-gray-600 block mb-1">Default Content</label>
                       <Input
-                        value={(settings as TextBoxSettings).content}
+                        value={settings.content}
                         onChange={e => updateSettings(selectedAtomId, { content: e.target.value })}
                         className="text-sm"
                       />
@@ -136,7 +134,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
                     <div className="flex items-center space-x-2">
                       <input
                         type="checkbox"
-                        checked={(settings as TextBoxSettings).allow_variables}
+                        checked={settings.allow_variables}
                         onChange={e => updateSettings(selectedAtomId, { allow_variables: e.target.checked })}
                       />
                       <label className="text-sm text-gray-600">Allow variables</label>
@@ -145,14 +143,13 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
                       <label className="text-sm text-gray-600 block mb-1">Max Characters</label>
                       <Input
                         type="number"
-                        value={(settings as TextBoxSettings).max_chars}
+                        value={settings.max_chars}
                         onChange={e => updateSettings(selectedAtomId, { max_chars: parseInt(e.target.value) || 0 })}
                         className="text-sm"
                       />
                     </div>
                   </Card>
                 )}
-
 
                 <Card className="p-4">
                   <h4 className="font-medium text-gray-900 mb-3">{selectedAtomId ? 'Atom Identity' : 'Card Settings'}</h4>
@@ -179,7 +176,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
               </TabsContent>
               
               <TabsContent value="visual" className="space-y-4">
-                {selectedAtomId && atom?.atomId === 'text-box' && (
+                {selectedAtomId && (
                   <Card className="p-4 space-y-3">
                     <h4 className="font-medium text-gray-900 mb-3">Visualisation</h4>
                     <div>
@@ -249,9 +246,9 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
                   </Card>
                 )}
               </TabsContent>
-
+              
               <TabsContent value="exhibition" className="space-y-4">
-                {selectedAtomId && atom?.atomId === 'text-box' && cardExhibited && (
+                {selectedAtomId && cardExhibited && (
                   <Card className="p-4 space-y-3">
                     <h4 className="font-medium text-gray-900 mb-3">Exhibition Settings</h4>
                     <div>
@@ -312,9 +309,8 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
           </div>
           </>
         )}
-        </>
-      </div>
-    )}
+        </div>
+      )}
     </div>
   );
   };
