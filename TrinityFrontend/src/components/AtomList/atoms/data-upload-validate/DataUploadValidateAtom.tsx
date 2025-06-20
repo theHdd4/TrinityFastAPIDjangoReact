@@ -105,6 +105,23 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
     setRenameTarget(null);
   };
 
+  const handleDeleteFile = (name: string) => {
+    setUploadedFiles(prev => prev.filter(f => f.name !== name));
+    const newUploads = (settings.uploadedFiles || []).filter(n => n !== name);
+    const { [name]: _, ...restAssignments } = fileAssignments;
+    setFileAssignments(restAssignments);
+    updateSettings(atomId, { uploadedFiles: newUploads, fileMappings: restAssignments });
+    setValidationResults(prev => {
+      const { [name]: _, ...rest } = prev;
+      return rest;
+    });
+    setValidationDetails(prev => {
+      const { [name]: _, ...rest } = prev;
+      return rest;
+    });
+    if (openValidatedFile === name) setOpenValidatedFile(null);
+  };
+
   const uploadedFilesList = uploadedFiles.map(file => ({
     name: file.name,
     type: 'User Upload',
@@ -309,6 +326,7 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
                 onValidateFiles={handleValidateFiles}
                 isDragOver={isDragOver}
                 requiredOptions={settings.requiredFiles || []}
+                onDeleteFile={handleDeleteFile}
               />
             </div>
 

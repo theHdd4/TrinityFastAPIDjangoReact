@@ -53,7 +53,7 @@ The React implementation of the Data Upload & Validate atom lives under `Trinity
 
 File Validation Status
 ----------------------
-After validation, each file row shows a status string like "File Validation Success" or "File Validation Failure". Clicking this text toggles the detailed results. The click handler is in `UploadSection.tsx` lines 63–68:
+After validation, each file row shows a status string like "File Validation Success" or "File Validation Failure". Clicking this text toggles the detailed results. The click handler is in `UploadSection.tsx` lines 72–78:
 
 ```
 {validationResults[file.name] && (
@@ -67,7 +67,7 @@ After validation, each file row shows a status string like "File Validation Succ
 )}
 ```
 
-The `openValidatedFile` state controlling this toggle is declared in `DataUploadValidateAtom.tsx` line 34 and passed to `UploadSection` at lines 296–312:
+The `openValidatedFile` state controlling this toggle is declared in `DataUploadValidateAtom.tsx` line 34 and passed to `UploadSection` at lines 312–330. Because only one file name is stored at a time, opening one validation list automatically closes any previously opened one:
 
 ```
 const [openValidatedFile, setOpenValidatedFile] = useState<string | null>(null);
@@ -82,4 +82,8 @@ const [openValidatedFile, setOpenValidatedFile] = useState<string | null>(null);
 
 Validation Units Checked
 -----------------------
-The list of validations shown for each file when the status text is clicked is rendered in `UploadSection.tsx` lines 86–100. The validation cards sit in a container with `overflow-x-auto` and the inner `<div className="flex space-x-2 w-max max-w-[480px]">` (line 89) restricts the visible width to roughly three cards, so extra checks scroll horizontally without stretching the uploaded files section.
+The list of validations shown for each file when the status text is clicked is rendered in `UploadSection.tsx` lines 95–107. The validation cards sit in a container with `overflow-x-auto` and the inner `<div className="flex space-x-2 w-max max-w-[480px]">` (line 98) restricts the visible width to roughly three cards, so extra checks scroll horizontally without stretching the uploaded files section.
+
+Deleting an Uploaded File
+-------------------------
+Each uploaded file row has a delete icon positioned at its top right. Clicking this icon removes the file from the list using the `handleDeleteFile` function declared in `DataUploadValidateAtom.tsx` lines 108–123. The icon button lives in `UploadSection.tsx` lines 60–65.

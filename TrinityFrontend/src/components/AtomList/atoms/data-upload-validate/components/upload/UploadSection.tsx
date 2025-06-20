@@ -1,5 +1,5 @@
 import React from 'react';
-import { FileText, Upload } from 'lucide-react';
+import { FileText, Upload, Trash2 } from 'lucide-react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -27,6 +27,7 @@ interface UploadSectionProps {
   onValidateFiles: () => void;
   isDragOver: boolean;
   requiredOptions: string[];
+  onDeleteFile: (name: string) => void;
 }
 
 const UploadSection: React.FC<UploadSectionProps> = ({
@@ -44,7 +45,8 @@ const UploadSection: React.FC<UploadSectionProps> = ({
   onFileSelect,
   onValidateFiles,
   isDragOver,
-  requiredOptions
+  requiredOptions,
+  onDeleteFile
 }) => (
   <Card className="h-full flex flex-col shadow-sm border-0 bg-white">
     <div className="p-4 border-b border-gray-100">
@@ -53,8 +55,15 @@ const UploadSection: React.FC<UploadSectionProps> = ({
     </div>
     <div className="flex-1 p-4 space-y-3 overflow-y-auto overflow-x-hidden">
       {files.map((file, index) => (
-        <div key={index}>
-          <div className="flex items-center justify-between p-3 border border-gray-200 rounded-lg bg-white hover:bg-gray-50 transition-colors w-full min-w-0">
+        <div key={index} className="relative">
+          <button
+            onClick={() => onDeleteFile(file.name)}
+            className="absolute top-2 right-2 p-1"
+            title="Delete"
+          >
+            <Trash2 className="w-4 h-4 text-gray-400 hover:text-red-600" />
+          </button>
+          <div className="flex items-center justify-between p-3 pr-8 border border-gray-200 rounded-lg bg-white hover:bg-gray-50 transition-colors w-full min-w-0">
             <div className="flex items-center space-x-3 flex-1 min-w-0">
               <FileText className="w-5 h-5 text-blue-500" />
               <div>
