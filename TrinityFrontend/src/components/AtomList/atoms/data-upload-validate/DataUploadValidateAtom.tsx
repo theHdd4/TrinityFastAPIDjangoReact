@@ -154,6 +154,25 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
         const failures = fileRes.condition_failures || [];
         const errors = fileRes.errors || [];
         const fileDetails: any[] = [];
+
+        const missingCount = fileRes.mandatory_columns_missing || 0;
+        const missingMsg = errors.find((e: string) =>
+          e.toLowerCase().startsWith('missing mandatory columns')
+        );
+        const missingCols = missingMsg
+          ? missingMsg
+              .split(':')[1]
+              .replace(/[[\]']/g, '')
+              .split(',')
+              .map(c => c.trim())
+              .filter(Boolean)
+          : [];
+        fileDetails.push({
+          name: 'required columns',
+          column: missingCols.join(', '),
+          desc: 'all mandatory columns present',
+          status: missingCount > 0 ? 'Failed' : 'Passed'
+        });
         units.forEach((u: any) => {
           let desc = '';
           if (u.validation_type === 'datatype') desc = u.expected;
@@ -178,10 +197,10 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
             name: u.validation_type,
             column: u.column,
             desc,
-          status: failed ? 'Failed' : 'Passed',
+            status: failed ? 'Failed' : 'Passed'
+          });
         });
-      });
-      fileDetails.sort((a, b) => (a.status === 'Failed' && b.status !== 'Failed' ? -1 : b.status === 'Failed' && a.status !== 'Failed' ? 1 : 0));
+        fileDetails.sort((a, b) => (a.status === 'Failed' && b.status !== 'Failed' ? -1 : b.status === 'Failed' && a.status !== 'Failed' ? 1 : 0));
       details[fileName] = fileDetails;
 
         const isSuccess = fileDetails.every(d => d.status === 'Passed');
@@ -316,8 +335,8 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
                       </div>
                         {openValidatedFile === file.name && validationDetails[file.name] && (
                           <div className="mt-2 border-t border-gray-200 pt-2 w-full">
-                            <div className="overflow-x-auto">
-                              <div className="flex space-x-2 whitespace-nowrap max-w-[480px]">
+                            <div className="w-full overflow-x-auto scrollbar-thin scrollbar-thumb-gray-300">
+                              <div className="flex space-x-2 w-max">
                                 {validationDetails[file.name].map((v, i) => (
                                   <div
                                     key={i}
@@ -413,26 +432,28 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
                           </div>
                         </div>
                           {openFile === file.name && (
-                            <div className="p-3 border-t border-gray-200 overflow-x-auto">
-                              <div className="flex space-x-2 whitespace-nowrap max-w-[480px]">
-                              {Object.entries(types).map(([col, dt]) => (
-                                <Badge key={col} variant="outline" className="text-xs">
-                                  {col}: {dt}
-                                </Badge>
-                              ))}
-                              {file.validations.ranges.map((r: any, i: number) => (
-                                <Badge key={`r-${i}`} variant="outline" className="text-xs">
-                                  {r.column}: {r.min}-{r.max}
-                                </Badge>
-                              ))}
-                              {file.validations.periodicities.map((p: any, i: number) => (
-                                <Badge key={`p-${i}`} variant="outline" className="text-xs">
-                                  {p.column}: {p.periodicity}
-                                </Badge>
-                              ))}
+                            <div className="p-3 border-t border-gray-200">
+                              <div className="w-full overflow-x-auto scrollbar-thin scrollbar-thumb-gray-300">
+                                <div className="flex space-x-2 w-max">
+                                {Object.entries(types).map(([col, dt]) => (
+                                  <Badge key={col} variant="outline" className="text-xs">
+                                    {col}: {dt}
+                                  </Badge>
+                                ))}
+                                {file.validations.ranges.map((r: any, i: number) => (
+                                  <Badge key={`r-${i}`} variant="outline" className="text-xs">
+                                    {r.column}: {r.min}-{r.max}
+                                  </Badge>
+                                ))}
+                                {file.validations.periodicities.map((p: any, i: number) => (
+                                  <Badge key={`p-${i}`} variant="outline" className="text-xs">
+                                    {p.column}: {p.periodicity}
+                                  </Badge>
+                                ))}
+                                </div>
+                              </div>
                             </div>
-                          </div>
-                        )}
+                          )}
                       </div>
                     );
                   })}
