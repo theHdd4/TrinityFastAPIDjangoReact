@@ -72,6 +72,20 @@ information from `/get_validator_config/{validator_id}` whenever the atom is
 rendered so the configuration is restored even after the UI collapses or the
 page reloads.
 
+Validation units
+----------------
+Whenever column types or value rules are saved, the backend flattens them into
+"validation units" stored in the `validation_units` MongoDB collection. Each
+unit represents a single check:
+
+* **datatype** – `{column, validation_type: 'datatype', expected}`
+* **range** – `{column, validation_type: 'range', min, max}`
+* **periodicity** – `{column, validation_type: 'periodicity', periodicity}`
+
+The `/get_validator_config` endpoint now returns these units under
+`validations`. The frontend converts them back into range and periodicity lists
+so existing UI elements continue to work.
+
 Atom UI Details
 ---------------
 * Required file entries now include a rename button and an info button. Clicking

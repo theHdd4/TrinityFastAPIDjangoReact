@@ -15,7 +15,8 @@ COLLECTIONS = {
     "COLUMN_CLASSIFICATIONS": "column_classifications", 
     "BUSINESS_DIMENSIONS": "business_dimensions_with_assignments",
     "VALIDATION_LOGS": "validation_logs",
-    "VALIDATION_CONFIG": "validation_config"
+    "VALIDATION_CONFIG": "validation_config",
+    "VALIDATION_UNITS": "validation_units"
 }
 
 # Initialize MongoDB client with timeout
@@ -369,7 +370,54 @@ def get_validation_config_from_mongo(validator_atom_id: str, file_key: str):
         document_id = f"{validator_atom_id}_{file_key}_validation_config"
         result = db[COLLECTIONS["VALIDATION_CONFIG"]].find_one({"_id": document_id})
         return result
-        
+
     except Exception as e:
         logging.error(f"MongoDB read error for validation config: {e}")
+        return None
+
+
+def save_validation_units_to_mongo(validator_atom_id: str, file_key: str, units: list):
+    """Save flattened validation units for a file key"""
+    if not check_mongodb_connection():
+        return {"status": "error", "error": "MongoDB not connected"}
+
+    try:
+        document_id = f"{validator_atom_id}_{file_key}_validation_units"
+        document = {
+            "_id": document_id,
+            "validator_atom_id": validator_atom_id,
+            "file_key": file_key,
+            "created_at": datetime.utcnow(),
+            "updated_at": datetime.utcnow(),
+            "validations": units,
+            "total_validations": len(units),
+        }
+
+        result = db[COLLECTIONS["VALIDATION_UNITS"]].replace_one(
+            {"_id": document_id}, document, upsert=True
+        )
+
+        return {
+            "status": "success",
+            "mongo_id": document_id,
+            "operation": "inserted" if result.upserted_id else "updated",
+            "collection": COLLECTIONS["VALIDATION_UNITS"],
+        }
+
+    except Exception as e:
+        logging.error(f"MongoDB save error for validation units: {e}")
+        return {"status": "error", "error": str(e)}
+
+
+def get_validation_units_from_mongo(validator_atom_id: str, file_key: str):
+    """Retrieve validation units for a file key"""
+    if not check_mongodb_connection():
+        return None
+
+    try:
+        document_id = f"{validator_atom_id}_{file_key}_validation_units"
+        return db[COLLECTIONS["VALIDATION_UNITS"]].find_one({"_id": document_id})
+
+    except Exception as e:
+        logging.error(f"MongoDB read error for validation units: {e}")
         return None

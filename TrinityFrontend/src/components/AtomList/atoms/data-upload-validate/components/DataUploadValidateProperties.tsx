@@ -82,10 +82,23 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
           if (!selectedMasterFile) setSelectedMasterFile(files[0]);
         }
 
+        const parsedValidations: Record<string, any> = {};
+        if (cfg.validations) {
+          Object.entries(cfg.validations).forEach(([k, list]: any) => {
+            const ranges = (list as any[])
+              .filter(v => v.validation_type === 'range')
+              .map(v => ({ id: Date.now() + Math.random(), column: v.column, min: v.min || '', max: v.max || '' }));
+            const periodicities = (list as any[])
+              .filter(v => v.validation_type === 'periodicity')
+              .map(v => ({ id: Date.now() + Math.random(), column: v.column, periodicity: v.periodicity || '' }));
+            parsedValidations[k] = { ranges, periodicities };
+          });
+        }
+
         updateSettings(atomId, {
           validatorId,
           requiredFiles: files,
-          validations: cfg.validations || {},
+          validations: parsedValidations,
           classification: cfg.classification || {},
           columnConfig: cfg.column_types || {}
         });
@@ -154,6 +167,21 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
           const cls = cfg.classification[selectedMasterFile];
           setSelectedIdentifiers(cls.identifiers || []);
           setSelectedMeasures(cls.measures || []);
+        }
+        if (cfg.validations?.[selectedMasterFile]) {
+          const list = cfg.validations[selectedMasterFile] as any[];
+          const ranges = list
+            .filter(v => v.validation_type === 'range')
+            .map(v => ({ id: Date.now() + Math.random(), column: v.column, min: v.min || '', max: v.max || '' }));
+          const periodicities = list
+            .filter(v => v.validation_type === 'periodicity')
+            .map(v => ({ id: Date.now() + Math.random(), column: v.column, periodicity: v.periodicity || '' }));
+          updateSettings(atomId, {
+            validations: {
+              ...(settings.validations || {}),
+              [selectedMasterFile]: { ranges, periodicities }
+            }
+          });
         }
       })
       .catch(() => {

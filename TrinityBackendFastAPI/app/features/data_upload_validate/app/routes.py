@@ -54,7 +54,14 @@ from app.features.data_upload_validate.app.schemas import ConfigureValidationCon
 from app.features.data_upload_validate.app.database import save_classification_to_mongo
 from app.features.data_upload_validate.app.database import save_classification_to_mongo, get_validator_atom_from_mongo, update_validator_atom_in_mongo
 
-from app.features.data_upload_validate.app.database import save_business_dimensions_to_mongo, get_business_dimensions_from_mongo, get_business_dimensions_from_mongo,get_classification_from_mongo ,update_business_dimensions_assignments_in_mongo
+from app.features.data_upload_validate.app.database import (
+    save_business_dimensions_to_mongo,
+    get_business_dimensions_from_mongo,
+    get_classification_from_mongo,
+    update_business_dimensions_assignments_in_mongo,
+    save_validation_units_to_mongo,
+    get_validation_units_from_mongo,
+)
 
 
 
@@ -947,6 +954,23 @@ async def update_column_types(
     }
     mongo_result = update_validator_atom_in_mongo(validator_atom_id, mongo_update_data)
 
+    # Save datatype validation units
+    datatype_units = [
+        {"column": col, "validation_type": "datatype", "expected": typ}
+        for col, typ in current_column_types.items()
+    ]
+    existing_units = get_validation_units_from_mongo(validator_atom_id, file_key)
+    other_units = []
+    if existing_units and "validations" in existing_units:
+        other_units = [
+            u for u in existing_units["validations"] if u.get("validation_type") != "datatype"
+        ]
+    save_validation_units_to_mongo(
+        validator_atom_id,
+        file_key,
+        other_units + datatype_units,
+    )
+
     # Optional: Log MongoDB result
     if mongo_result["status"] == "success":
         print(f"✅ Validator atom updated in MongoDB")
@@ -1640,6 +1664,48 @@ async def configure_validation_config(request: Request):
 
     mongo_result = save_validation_config_to_mongo(validator_atom_id, file_key, config_data)
 
+    # Build validation units and save
+    range_units = []
+    for col, conds in column_conditions.items():
+        min_val = None
+        max_val = None
+        for cond in conds:
+            op = cond.get("operator")
+            if op in ["greater_than_or_equal", "greater_than"]:
+                min_val = cond.get("value")
+            elif op in ["less_than_or_equal", "less_than"]:
+                max_val = cond.get("value")
+        if min_val is not None or max_val is not None:
+            range_units.append({
+                "column": col,
+                "validation_type": "range",
+                "min": min_val,
+                "max": max_val,
+            })
+
+    periodicity_units = [
+        {
+            "column": col,
+            "validation_type": "periodicity",
+            "periodicity": freq,
+        }
+        for col, freq in column_frequencies.items()
+    ]
+
+    existing_units = get_validation_units_from_mongo(validator_atom_id, file_key)
+    other_units = []
+    if existing_units and "validations" in existing_units:
+        other_units = [
+            u
+            for u in existing_units["validations"]
+            if u.get("validation_type") not in ["range", "periodicity"]
+        ]
+    save_validation_units_to_mongo(
+        validator_atom_id,
+        file_key,
+        other_units + range_units + periodicity_units,
+    )
+
     message = f"Validation config configured successfully for file key '{file_key}' with {total_conditions} conditions"
     if column_frequencies:
         message += f" and frequencies specified for columns: {list(column_frequencies.keys())}"
@@ -1883,7 +1949,14 @@ async def get_validator_config(validator_atom_id: str):
         raise HTTPException(status_code=404, detail=f"Validator atom '{validator_atom_id}' not found")
 
     extra = load_all_non_validation_data(validator_atom_id)
-    return {**validator_data, **extra}
+
+    validations = {}
+    for key in validator_data.get("file_keys", []):
+        units = get_validation_units_from_mongo(validator_atom_id, key)
+        if units:
+            validations[key] = units.get("validations", [])
+
+    return {**validator_data, **extra, "validations": validations}
 
 
 ############################prebuild
