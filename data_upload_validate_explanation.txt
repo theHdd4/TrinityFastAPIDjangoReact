@@ -87,3 +87,16 @@ The list of validations shown for each file when the status text is clicked is r
 Deleting an Uploaded File
 -------------------------
 Each uploaded file row has a delete icon positioned at its top right. Clicking this icon removes the file from the list using the `handleDeleteFile` function declared in `DataUploadValidateAtom.tsx` lines 108–123. The icon button lives in `UploadSection.tsx` lines 60–65.
+
+Data Type Validation
+--------------------
+Data type rules saved in the properties panel are fetched from the backend in
+`DataUploadValidateProperties.tsx` lines 88–117. When **Save Configuration** is
+pressed, the chosen types are posted back at lines 287–295 so the backend stores
+them as validation units.
+
+During validation the frontend compares the results from `/validate` against
+these units. The check for datatype failures lives in
+`DataUploadValidateAtom.tsx` lines 207–215 where error messages or automatic
+corrections mentioning a column mark the validation as failed. This ensures the
+UI reports mismatches accurately in the Uploaded Files section.

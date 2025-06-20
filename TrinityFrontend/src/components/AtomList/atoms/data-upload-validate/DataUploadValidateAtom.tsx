@@ -205,7 +205,14 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
 
           let failed = false;
           if (u.validation_type === 'datatype') {
-            failed = errors.some((e: string) => e.includes(`Column '${u.column}'`));
+            const col = u.column.toLowerCase();
+            failed =
+              errors.some((e: string) =>
+                e.toLowerCase().includes(`column '${col}'`)
+              ) ||
+              (fileRes.auto_corrections || []).some((c: string) =>
+                c.toLowerCase().includes(`column '${col}'`)
+              );
           } else if (u.validation_type === 'periodicity') {
             failed = failures.some((f: any) => f.column === u.column && f.operator === 'date_frequency');
           } else if (u.validation_type === 'range') {
