@@ -149,8 +149,6 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
       keys.forEach((k, idx) => {
         const fileName = uploadedFiles[idx].name;
         const fileRes = data.file_validation_results?.[k] || {};
-        const status = fileRes.status === 'passed' ? 'success' : 'failure';
-        results[fileName] = status === 'success' ? 'File Validation Success' : 'File Validation Failure';
 
         const units = cfg.validations?.[k] || [];
         const failures = fileRes.condition_failures || [];
@@ -180,11 +178,14 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
             name: u.validation_type,
             column: u.column,
             desc,
-            status: failed ? 'Failed' : 'Passed',
-          });
+          status: failed ? 'Failed' : 'Passed',
         });
-        fileDetails.sort((a, b) => (a.status === 'Failed' && b.status !== 'Failed' ? -1 : b.status === 'Failed' && a.status !== 'Failed' ? 1 : 0));
-        details[fileName] = fileDetails;
+      });
+      fileDetails.sort((a, b) => (a.status === 'Failed' && b.status !== 'Failed' ? -1 : b.status === 'Failed' && a.status !== 'Failed' ? 1 : 0));
+      details[fileName] = fileDetails;
+
+        const isSuccess = fileDetails.every(d => d.status === 'Passed');
+        results[fileName] = isSuccess ? 'File Validation Success' : 'File Validation Failure';
       });
 
       setValidationResults(results);
@@ -314,8 +315,8 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
                         </div>
                       </div>
                       {openValidatedFile === file.name && validationDetails[file.name] && (
-                        <div className="mt-2 border-t border-gray-200 pt-2 w-full">
-                          <div className="flex space-x-2 w-full overflow-x-auto">
+                        <div className="mt-2 border-t border-gray-200 pt-2 w-full overflow-x-auto">
+                          <div className="flex space-x-2 w-max">
                             {validationDetails[file.name].map((v, i) => (
                               <div
                                 key={i}
