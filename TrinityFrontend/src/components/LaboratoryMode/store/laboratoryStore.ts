@@ -40,11 +40,16 @@ export const DEFAULT_TEXTBOX_SETTINGS: TextBoxSettings = {
 export interface DataUploadSettings {
   masterFile: string;
   fileValidation: boolean;
-  columnConfig: Record<string, unknown>;
+  columnConfig: Record<string, Record<string, string>>;
   frequency: string;
   dimensions: Record<string, unknown>;
   measures: Record<string, unknown>;
   uploadedFiles: string[];
+  validatorId?: string;
+  requiredFiles?: string[];
+  validations?: Record<string, any>;
+  classification?: Record<string, { identifiers: string[]; measures: string[] }>;
+  fileMappings?: Record<string, string>;
 }
 
 export const DEFAULT_DATAUPLOAD_SETTINGS: DataUploadSettings = {
@@ -54,7 +59,12 @@ export const DEFAULT_DATAUPLOAD_SETTINGS: DataUploadSettings = {
   frequency: 'monthly',
   dimensions: {},
   measures: {},
-  uploadedFiles: []
+  uploadedFiles: [],
+  validatorId: undefined,
+  requiredFiles: [],
+  validations: {},
+  classification: {},
+  fileMappings: {}
 };
 
 export interface DroppedAtom {

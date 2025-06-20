@@ -150,20 +150,7 @@ def perform_enhanced_validation(files_data: List[tuple], validator_data: Dict[st
 
 
         
-        # ✅ CHECK 3: Additional data quality checks
-        data_quality_warnings = []
-        for col in uploaded_columns:
-            if col in expected_columns:
-                null_count = df[col].isna().sum()
-                if null_count > 0:
-                    data_quality_warnings.append(f"Column '{col}' has {null_count} null/empty values")
-                
-                if any(id_keyword in col.lower() for id_keyword in ['id', 'code', 'key']):
-                    duplicate_count = df[col].duplicated().sum()
-                    if duplicate_count > 0:
-                        data_quality_warnings.append(f"Column '{col}' has {duplicate_count} duplicate values")
-        
-        file_warnings.extend(data_quality_warnings)
+
         
         # ✅ UPDATED: Determine file status (include condition failures)
         if file_errors:

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Settings,
   Upload,
@@ -12,18 +12,34 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
+import { Checkbox } from '@/components/ui/checkbox';
+import { VALIDATE_API } from '@/lib/api';
+import {
+  useLaboratoryStore,
+  DataUploadSettings,
+  DEFAULT_DATAUPLOAD_SETTINGS
+} from '@/components/LaboratoryMode/store/laboratoryStore';
 
-const DataUploadValidateProperties: React.FC = () => {
-  const [allAvailableFiles, setAllAvailableFiles] = useState<{ name: string; source: string }[]>([]);
+interface Props {
+  atomId: string;
+}
+const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
+  const atom = useLaboratoryStore(state => state.getAtom(atomId));
+  const updateSettings = useLaboratoryStore(state => state.updateAtomSettings);
+  const settings: DataUploadSettings =
+    (atom?.settings as DataUploadSettings) || { ...DEFAULT_DATAUPLOAD_SETTINGS };
+  const [allAvailableFiles, setAllAvailableFiles] = useState<{ name: string; source: string }[]>(
+    settings.requiredFiles?.map(name => ({ name, source: 'upload' })) || []
+  );
   const [selectedMasterFile, setSelectedMasterFile] = useState<string>('');
-  const [columnDataTypes, setColumnDataTypes] = useState<Record<string, string>>({
-    Column1: 'string',
-    Column2: 'number',
-    Column3: 'date'
-  });
+  const [validatorId, setValidatorId] = useState<string>(settings.validatorId || '');
+  const [columnDataTypes, setColumnDataTypes] = useState<Record<string, string>>(
+    {}
+  );
   const dataTypeOptions = [
-    { value: 'string', label: 'String' },
+    { value: 'not_defined', label: 'Not defined' },
     { value: 'number', label: 'Number' },
+    { value: 'string', label: 'String' },
     { value: 'date', label: 'Date' }
   ];
 
@@ -48,8 +64,59 @@ const DataUploadValidateProperties: React.FC = () => {
     { id: 1, column: '', periodicity: '' }
   ]);
 
-  const numericalColumns = ['Column1', 'Column2'];
-  const dateColumns = ['Column3'];
+  const [numericalColumns, setNumericalColumns] = useState<string[]>([]);
+  const [dateColumns, setDateColumns] = useState<string[]>([]);
+  const [categoricalColumns, setCategoricalColumns] = useState<string[]>([]);
+  const [continuousColumns, setContinuousColumns] = useState<string[]>([]);
+  const [selectedIdentifiers, setSelectedIdentifiers] = useState<string[]>([]);
+  const [selectedMeasures, setSelectedMeasures] = useState<string[]>([]);
+
+  // Load existing configuration if validator id already present
+  useEffect(() => {
+    if (!validatorId) return;
+    fetch(`${VALIDATE_API}/get_validator_config/${validatorId}`)
+      .then(res => res.json())
+      .then(cfg => {
+        const files = cfg.file_keys || [];
+        if (files.length > 0) {
+          setAllAvailableFiles(files.map((f: string) => ({ name: f, source: 'upload' })));
+          if (!selectedMasterFile) setSelectedMasterFile(files[0]);
+        }
+
+        const parsedValidations: Record<string, any> = {};
+        if (cfg.validations) {
+          Object.entries(cfg.validations).forEach(([k, list]: any) => {
+            const ranges = (list as any[])
+              .filter(v => v.validation_type === 'range')
+              .map(v => ({ id: Date.now() + Math.random(), column: v.column, min: v.min || '', max: v.max || '' }));
+            const periodicities = (list as any[])
+              .filter(v => v.validation_type === 'periodicity')
+              .map(v => ({ id: Date.now() + Math.random(), column: v.column, periodicity: v.periodicity || '' }));
+            parsedValidations[k] = { ranges, periodicities };
+          });
+        }
+
+        updateSettings(atomId, {
+          validatorId,
+          requiredFiles: files,
+          validations: parsedValidations,
+          classification: cfg.classification || {},
+          columnConfig: cfg.column_types || {}
+        });
+
+        if (files.length > 0) {
+          const firstKey = files[0];
+          const schemaCols = cfg.schemas?.[firstKey]?.columns || [];
+          const saved = cfg.column_types?.[firstKey] || {};
+          const merged: Record<string, string> = {};
+          schemaCols.forEach((c: any) => {
+            merged[c.column] = saved[c.column] || 'not_defined';
+          });
+          setColumnDataTypes(merged);
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   const periodicityOptions = [
     { value: 'daily', label: 'Daily' },
@@ -57,46 +124,134 @@ const DataUploadValidateProperties: React.FC = () => {
     { value: 'monthly', label: 'Monthly' }
   ];
 
-  const dimensions = [
-    'Brand',
-    'Category',
-    'Region',
-    'Channel',
-    'Season',
-    'Customer_Segment',
-    'Product_Type',
-    'Price_Tier',
-    'Market',
-    'Distribution',
-    'Segment',
-    'SKU'
-  ];
 
-  const measures = [
-    'Volume_Sales',
-    'Value_Sales',
-    'Revenue',
-    'Profit',
-    'Units_Sold',
-    'Market_Share',
-    'Price',
-    'Cost',
-    'Margin',
-    'Discount',
-    'Promotion_Lift',
-    'Base_Sales'
-  ];
+  const handleMasterFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!e.target.files) return;
+    const files = Array.from(e.target.files);
+    const id = `validator-${Date.now()}`;
+    const form = new FormData();
+    form.append('validator_atom_id', id);
+    files.forEach(f => form.append('files', f));
+    const keys = files.map(f => f.name);
+    form.append('file_keys', JSON.stringify(keys));
 
-  const handleMasterFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files) {
-      const files = Array.from(e.target.files).map(f => ({ name: f.name, source: 'upload' }));
-      setAllAvailableFiles(prev => [...prev, ...files]);
+    const res = await fetch(`${VALIDATE_API}/create_new`, { method: 'POST', body: form });
+    if (res.ok) {
+      setValidatorId(id);
+      setAllAvailableFiles(keys.map(k => ({ name: k, source: 'upload' })));
+      setSelectedMasterFile(keys[0]);
+      const cfg = await fetch(`${VALIDATE_API}/get_validator_config/${id}`).then(r => r.json());
+      const defaultTypes: Record<string, string> = {};
+      const firstKey = keys[0];
+      if (cfg.schemas && cfg.schemas[firstKey]) {
+        cfg.schemas[firstKey].columns.forEach((c: any) => {
+          defaultTypes[c.column] = 'not_defined';
+        });
+      }
+      if (cfg.column_types && cfg.column_types[firstKey]) {
+        Object.entries(cfg.column_types[firstKey]).forEach(([col, typ]) => {
+          defaultTypes[col] = typ as string;
+        });
+      }
+      setColumnDataTypes(defaultTypes);
+      updateSettings(atomId, {
+        validatorId: id,
+        requiredFiles: keys,
+        validations: settings.validations || {},
+        columnConfig: { [firstKey]: defaultTypes }
+      });
     }
   };
 
   const handleDataTypeChange = (column: string, value: string) => {
     setColumnDataTypes(prev => ({ ...prev, [column]: value }));
   };
+
+  useEffect(() => {
+    if (!validatorId || !selectedMasterFile) return;
+    fetch(`${VALIDATE_API}/get_validator_config/${validatorId}`)
+      .then(res => res.json())
+      .then(cfg => {
+        const schemaCols = cfg.schemas?.[selectedMasterFile]?.columns || [];
+        const saved = cfg.column_types?.[selectedMasterFile] || {};
+        const merged: Record<string, string> = {};
+        schemaCols.forEach((c: any) => {
+          merged[c.column] = saved[c.column] || 'not_defined';
+        });
+        setColumnDataTypes(merged);
+        updateSettings(atomId, {
+          columnConfig: {
+            ...(settings.columnConfig || {}),
+            [selectedMasterFile]: merged
+          }
+        });
+        if (cfg.classification?.[selectedMasterFile]) {
+          const cls = cfg.classification[selectedMasterFile];
+          setSelectedIdentifiers(cls.identifiers || []);
+          setSelectedMeasures(cls.measures || []);
+        }
+        if (cfg.validations?.[selectedMasterFile]) {
+          const list = cfg.validations[selectedMasterFile] as any[];
+          const ranges = list
+            .filter(v => v.validation_type === 'range')
+            .map(v => ({ id: Date.now() + Math.random(), column: v.column, min: v.min || '', max: v.max || '' }));
+          const periodicities = list
+            .filter(v => v.validation_type === 'periodicity')
+            .map(v => ({ id: Date.now() + Math.random(), column: v.column, periodicity: v.periodicity || '' }));
+          updateSettings(atomId, {
+            validations: {
+              ...(settings.validations || {}),
+              [selectedMasterFile]: { ranges, periodicities }
+            }
+          });
+        }
+      })
+      .catch(() => {
+        setColumnDataTypes({});
+      });
+  }, [validatorId, selectedMasterFile]);
+
+  useEffect(() => {
+    const nums = Object.entries(columnDataTypes)
+      .filter(([, t]) => t === 'integer' || t === 'numeric')
+      .map(([c]) => c);
+    const dates = Object.entries(columnDataTypes)
+      .filter(([, t]) => t === 'date')
+      .map(([c]) => c);
+    const cats = Object.entries(columnDataTypes)
+      .filter(([, t]) => !['integer', 'numeric', 'date'].includes(t))
+      .map(([c]) => c);
+    setNumericalColumns(nums);
+    setDateColumns(dates);
+    setContinuousColumns(nums);
+    setCategoricalColumns(cats);
+  }, [columnDataTypes]);
+
+  useEffect(() => {
+    if (selectedMasterFile && settings.validations?.[selectedMasterFile]) {
+      const val = settings.validations[selectedMasterFile];
+      setRangeValidations(
+        val.ranges.length > 0 ? val.ranges : [{ id: Date.now(), column: '', min: '', max: '' }]
+      );
+      setPeriodicityValidations(
+        val.periodicities.length > 0
+          ? val.periodicities
+          : [{ id: Date.now(), column: '', periodicity: '' }]
+      );
+    } else {
+      setRangeValidations([{ id: Date.now(), column: '', min: '', max: '' }]);
+      setPeriodicityValidations([{ id: Date.now(), column: '', periodicity: '' }]);
+    }
+
+    if (selectedMasterFile && settings.classification?.[selectedMasterFile]) {
+      const cls = settings.classification[selectedMasterFile];
+      setSelectedIdentifiers(cls.identifiers);
+      setSelectedMeasures(cls.measures);
+    } else {
+      setSelectedIdentifiers([]);
+      setSelectedMeasures([]);
+    }
+  }, [selectedMasterFile]);
 
   const addRangeValidation = () => {
     setRangeValidations(prev => [...prev, { id: Date.now(), column: '', min: '', max: '' }]);
@@ -126,6 +281,84 @@ const DataUploadValidateProperties: React.FC = () => {
     setPeriodicityValidations(prev => prev.map(p => (p.id === id ? { ...p, [key]: value } : p)));
   };
 
+  const handleSaveConfiguration = async () => {
+    if (!validatorId || !selectedMasterFile) return;
+
+    const definedTypes: Record<string, string> = {};
+    Object.entries(columnDataTypes).forEach(([col, typ]) => {
+      if (typ && typ !== 'not_defined') definedTypes[col] = typ;
+    });
+    const typeForm = new FormData();
+    typeForm.append('validator_atom_id', validatorId);
+    typeForm.append('file_key', selectedMasterFile);
+    typeForm.append('column_types', JSON.stringify(definedTypes));
+    await fetch(`${VALIDATE_API}/update_column_types`, { method: 'POST', body: typeForm });
+
+    const columnConditions: Record<string, any[]> = {};
+    rangeValidations.forEach(r => {
+      if (!r.column) return;
+      const conds: any[] = [];
+      if (r.min !== '') {
+        conds.push({ operator: 'greater_than_or_equal', value: r.min, error_message: 'min check' });
+      }
+      if (r.max !== '') {
+        conds.push({ operator: 'less_than_or_equal', value: r.max, error_message: 'max check' });
+      }
+      if (conds.length > 0) columnConditions[r.column] = conds;
+    });
+
+    const columnFrequencies: Record<string, string> = {};
+    periodicityValidations.forEach(p => {
+      if (p.column && p.periodicity) columnFrequencies[p.column] = p.periodicity;
+    });
+
+    await fetch(`${VALIDATE_API}/configure_validation_config`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        validator_atom_id: validatorId,
+        file_key: selectedMasterFile,
+        column_conditions: columnConditions,
+        column_frequencies: columnFrequencies
+      })
+    });
+
+    const classifyForm = new FormData();
+    classifyForm.append('validator_atom_id', validatorId);
+    classifyForm.append('file_key', selectedMasterFile);
+    classifyForm.append('identifiers', JSON.stringify(selectedIdentifiers));
+    classifyForm.append('measures', JSON.stringify(selectedMeasures));
+    classifyForm.append('unclassified', JSON.stringify([]));
+    await fetch(`${VALIDATE_API}/classify_columns`, { method: 'POST', body: classifyForm });
+
+    const savedRanges = rangeValidations.filter(r => r.column && (r.min !== '' || r.max !== ''));
+    const savedPeriods = periodicityValidations.filter(p => p.column && p.periodicity);
+    const newValidations = {
+      ...(settings.validations || {}),
+      [selectedMasterFile]: {
+        ranges: savedRanges,
+        periodicities: savedPeriods
+      }
+    };
+    const newClassification = {
+      ...(settings.classification || {}),
+      [selectedMasterFile]: {
+        identifiers: selectedIdentifiers,
+        measures: selectedMeasures
+      }
+    };
+    updateSettings(atomId, {
+      validatorId,
+      requiredFiles: allAvailableFiles.map(f => f.name),
+      validations: newValidations,
+      classification: newClassification,
+      columnConfig: {
+        ...(settings.columnConfig || {}),
+        [selectedMasterFile]: columnDataTypes
+      }
+    });
+  };
+
   return (
     <div className="w-80 h-full bg-white border-l border-gray-200 flex flex-col">
       <div className="p-3 border-b border-gray-200">
@@ -135,7 +368,7 @@ const DataUploadValidateProperties: React.FC = () => {
         </h3>
       </div>
 
-      <div className="flex-1 overflow-y-auto scrollbar-thin scrollbar-thumb-gray-300">
+      <div className="flex-1 overflow-y-auto overflow-x-hidden scrollbar-thin scrollbar-thumb-gray-300">
         {/* Master File Upload Section */}
         <div className="p-4 border-b border-gray-200 bg-gray-50">
           <div className="space-y-4">
@@ -376,14 +609,19 @@ const DataUploadValidateProperties: React.FC = () => {
                     <div>
                       <label className="text-sm font-medium text-gray-700 block mb-3">Identifiers</label>
                       <div className="grid grid-cols-2 gap-2">
-                        {dimensions.map((dim, index) => (
-                          <Badge
-                            key={index}
-                            variant="outline"
-                            className="text-xs justify-center py-1 bg-white border-gray-300 hover:bg-blue-50 hover:border-blue-300 cursor-pointer transition-colors"
-                          >
-                            {dim}
-                          </Badge>
+                        {categoricalColumns.map(col => (
+                          <label key={col} className="flex items-center space-x-2 text-xs">
+                            <Checkbox
+                              checked={selectedIdentifiers.includes(col)}
+                              onCheckedChange={val => {
+                                const checked = Boolean(val);
+                                setSelectedIdentifiers(prev =>
+                                  checked ? [...prev, col] : prev.filter(c => c !== col)
+                                );
+                              }}
+                            />
+                            <span>{col}</span>
+                          </label>
                         ))}
                       </div>
                     </div>
@@ -391,14 +629,19 @@ const DataUploadValidateProperties: React.FC = () => {
                     <div>
                       <label className="text-sm font-medium text-gray-700 block mb-3">Measures</label>
                       <div className="grid grid-cols-2 gap-2">
-                        {measures.map((measure, index) => (
-                          <Badge
-                            key={index}
-                            variant="outline"
-                            className="text-xs justify-center py-1 bg-white border-gray-300 hover:bg-green-50 hover:border-green-300 cursor-pointer transition-colors"
-                          >
-                            {measure}
-                          </Badge>
+                        {continuousColumns.map(col => (
+                          <label key={col} className="flex items-center space-x-2 text-xs">
+                            <Checkbox
+                              checked={selectedMeasures.includes(col)}
+                              onCheckedChange={val => {
+                                const checked = Boolean(val);
+                                setSelectedMeasures(prev =>
+                                  checked ? [...prev, col] : prev.filter(c => c !== col)
+                                );
+                              }}
+                            />
+                            <span>{col}</span>
+                          </label>
                         ))}
                       </div>
                     </div>
@@ -413,7 +656,7 @@ const DataUploadValidateProperties: React.FC = () => {
             </div>
 
             <div className="p-4 border-t border-gray-200 mt-4">
-              <Button className="w-full bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white shadow-lg">
+              <Button onClick={handleSaveConfiguration} className="w-full bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white shadow-lg">
                 Save Configuration
               </Button>
             </div>

@@ -54,7 +54,14 @@ from app.features.data_upload_validate.app.schemas import ConfigureValidationCon
 from app.features.data_upload_validate.app.database import save_classification_to_mongo
 from app.features.data_upload_validate.app.database import save_classification_to_mongo, get_validator_atom_from_mongo, update_validator_atom_in_mongo
 
-from app.features.data_upload_validate.app.database import save_business_dimensions_to_mongo, get_business_dimensions_from_mongo, get_business_dimensions_from_mongo,get_classification_from_mongo ,update_business_dimensions_assignments_in_mongo
+from app.features.data_upload_validate.app.database import (
+    save_business_dimensions_to_mongo,
+    get_business_dimensions_from_mongo,
+    get_classification_from_mongo,
+    update_business_dimensions_assignments_in_mongo,
+    save_validation_units_to_mongo,
+    get_validation_units_from_mongo,
+)
 
 
 
@@ -860,7 +867,7 @@ async def update_column_types(
     """
     # Parse column_types JSON
     try:
-        new_column_types = json.loads(column_types)
+        submitted_column_types = json.loads(column_types)
     except json.JSONDecodeError:
         raise HTTPException(status_code=400, detail="Invalid JSON format for column_types")
 
@@ -881,8 +888,8 @@ async def update_column_types(
     current_schema = validator_data["schemas"][file_key]
     available_columns = [col["column"] for col in current_schema.get("columns", [])]
 
-    # Validate that all columns in new_column_types exist in the schema
-    invalid_columns = [col for col in new_column_types.keys() if col not in available_columns]
+    # Validate that all columns in submitted_column_types exist in the schema
+    invalid_columns = [col for col in submitted_column_types.keys() if col not in available_columns]
     if invalid_columns:
         raise HTTPException(
             status_code=400, 
@@ -890,17 +897,23 @@ async def update_column_types(
         )
 
     # Validate column type values
-    valid_types = ["string", "integer", "numeric", "date", "boolean"]
-    invalid_types = {col: typ for col, typ in new_column_types.items() if typ not in valid_types}
+    valid_types = ["string", "integer", "numeric", "date", "boolean", "number"]
+    invalid_types = {col: typ for col, typ in submitted_column_types.items() if typ not in valid_types and typ not in ["", None, "not_defined"]}
     if invalid_types:
         raise HTTPException(
             status_code=400,
             detail=f"Invalid column types: {invalid_types}. Valid types: {valid_types}"
         )
 
-    # Update column_types in memory
+    # Normalize and update column_types in memory
     current_column_types = extraction_results[validator_atom_id]["column_types"].get(file_key, {})
-    current_column_types.update(new_column_types)
+    for col in available_columns:
+        val = submitted_column_types.get(col)
+        if val in ["", None, "not_defined"]:
+            current_column_types.pop(col, None)
+        else:
+            normalized = "numeric" if val == "number" else val
+            current_column_types[col] = normalized
     extraction_results[validator_atom_id]["column_types"][file_key] = current_column_types
 
     # Also update in schemas for consistency
@@ -910,8 +923,9 @@ async def update_column_types(
     updated_columns = []
     for col_info in current_schema["columns"]:
         col_name = col_info["column"]
-        if col_name in new_column_types:
-            col_info["type"] = new_column_types[col_name]
+        if col_name in submitted_column_types and submitted_column_types.get(col_name) not in ["", None, "not_defined"]:
+            normalized = "numeric" if submitted_column_types[col_name] == "number" else submitted_column_types[col_name]
+            col_info["type"] = normalized
         updated_columns.append(col_info)
     
     extraction_results[validator_atom_id]["schemas"][file_key]["columns"] = updated_columns
@@ -947,6 +961,23 @@ async def update_column_types(
     }
     mongo_result = update_validator_atom_in_mongo(validator_atom_id, mongo_update_data)
 
+    # Save datatype validation units
+    datatype_units = [
+        {"column": col, "validation_type": "datatype", "expected": typ}
+        for col, typ in current_column_types.items()
+    ]
+    existing_units = get_validation_units_from_mongo(validator_atom_id, file_key)
+    other_units = []
+    if existing_units and "validations" in existing_units:
+        other_units = [
+            u for u in existing_units["validations"] if u.get("validation_type") != "datatype"
+        ]
+    save_validation_units_to_mongo(
+        validator_atom_id,
+        file_key,
+        other_units + datatype_units,
+    )
+
     # Optional: Log MongoDB result
     if mongo_result["status"] == "success":
         print(f"✅ Validator atom updated in MongoDB")
@@ -958,9 +989,9 @@ async def update_column_types(
         "message": "Column types updated successfully",
         "validator_atom_id": validator_atom_id,
         "file_key": file_key,
-        "updated_column_types": new_column_types,
+        "updated_column_types": submitted_column_types,
         "current_all_column_types": current_column_types,
-        "updated_columns_count": len(new_column_types),
+        "updated_columns_count": len([c for c in submitted_column_types.values() if c not in ["", None, "not_defined"]]),
         # ✅ ADD: MongoDB update status
         "mongodb_update": {
             "status": mongo_result["status"],
@@ -1564,7 +1595,7 @@ async def configure_validation_config(request: Request):
         raise HTTPException(status_code=400, detail="validator_atom_id is required")
     if not file_key:
         raise HTTPException(status_code=400, detail="file_key is required")
-    if not column_conditions:
+    if column_conditions is None:
         raise HTTPException(status_code=400, detail="column_conditions is required")
 
     if not isinstance(column_conditions, dict):
@@ -1639,6 +1670,48 @@ async def configure_validation_config(request: Request):
     }
 
     mongo_result = save_validation_config_to_mongo(validator_atom_id, file_key, config_data)
+
+    # Build validation units and save
+    range_units = []
+    for col, conds in column_conditions.items():
+        min_val = None
+        max_val = None
+        for cond in conds:
+            op = cond.get("operator")
+            if op in ["greater_than_or_equal", "greater_than"]:
+                min_val = cond.get("value")
+            elif op in ["less_than_or_equal", "less_than"]:
+                max_val = cond.get("value")
+        if (min_val not in [None, ""] or max_val not in [None, ""]):
+            range_units.append({
+                "column": col,
+                "validation_type": "range",
+                "min": min_val,
+                "max": max_val,
+            })
+
+    periodicity_units = [
+        {
+            "column": col,
+            "validation_type": "periodicity",
+            "periodicity": freq,
+        }
+        for col, freq in column_frequencies.items()
+    ]
+
+    existing_units = get_validation_units_from_mongo(validator_atom_id, file_key)
+    other_units = []
+    if existing_units and "validations" in existing_units:
+        other_units = [
+            u
+            for u in existing_units["validations"]
+            if u.get("validation_type") not in ["range", "periodicity"]
+        ]
+    save_validation_units_to_mongo(
+        validator_atom_id,
+        file_key,
+        other_units + range_units + periodicity_units,
+    )
 
     message = f"Validation config configured successfully for file key '{file_key}' with {total_conditions} conditions"
     if column_frequencies:
@@ -1867,6 +1940,30 @@ async def delete_validator_atom(validator_atom_id: str):
             "total_files_deleted": len([f for f in deleted_files if f != "memory_cleared"])
         }
     }
+
+
+# GET: GET_VALIDATOR_CONFIG - return validator setup with MongoDB details
+@router.get("/get_validator_config/{validator_atom_id}")
+async def get_validator_config(validator_atom_id: str):
+    """Retrieve stored validator atom configuration along with any
+    classification or dimension information."""
+
+    validator_data = get_validator_atom_from_mongo(validator_atom_id)
+    if not validator_data:
+        validator_data = get_validator_from_memory_or_disk(validator_atom_id)
+
+    if not validator_data:
+        raise HTTPException(status_code=404, detail=f"Validator atom '{validator_atom_id}' not found")
+
+    extra = load_all_non_validation_data(validator_atom_id)
+
+    validations = {}
+    for key in validator_data.get("file_keys", []):
+        units = get_validation_units_from_mongo(validator_atom_id, key)
+        if units:
+            validations[key] = units.get("validations", [])
+
+    return {**validator_data, **extra, "validations": validations}
 
 
 ############################prebuild
