@@ -28,7 +28,9 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 const API_BASE = ACCOUNTS_API;
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [isAuthenticated, setIsAuthenticated] = useState(
+    () => localStorage.getItem('isAuthenticated') === 'true'
+  );
   const [user, setUser] = useState<UserInfo | null>(null);
   const [profile, setProfile] = useState<ProfileInfo | null>(null);
 
@@ -45,28 +47,25 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   useEffect(() => {
-    const authState = localStorage.getItem('isAuthenticated');
-    if (authState === 'true') {
+    if (isAuthenticated) {
       console.log('Checking existing session');
       fetch(`${API_BASE}/users/me/`, { credentials: 'include' })
         .then(async (res) => {
           if (res.ok) {
             const data = await res.json();
             setUser(data);
-            setIsAuthenticated(true);
             await loadProfile();
-          } else {
+          } else if (res.status === 401) {
             setIsAuthenticated(false);
             localStorage.removeItem('isAuthenticated');
             console.log('Session check failed', res.status);
           }
         })
         .catch((err) => {
-          setIsAuthenticated(false);
           console.log('Session check error', err);
         });
     }
-  }, []);
+  }, [isAuthenticated]);
 
   const login = async (username: string, password: string) => {
     console.log('Attempting login for', username);
