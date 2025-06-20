@@ -28,6 +28,8 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
   const [renameValue, setRenameValue] = useState('');
   const [fileAssignments, setFileAssignments] = useState<Record<string, string>>(settings.fileMappings || {});
   const [validationResults, setValidationResults] = useState<Record<string, string>>({});
+  const [validationDetails, setValidationDetails] = useState<Record<string, any[]>>({});
+  const [openValidatedFile, setOpenValidatedFile] = useState<string | null>(null);
 
   useEffect(() => {
     setFileAssignments(settings.fileMappings || {});
@@ -138,13 +140,55 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
     const res = await fetch(`${VALIDATE_API}/validate`, { method: 'POST', body: form });
     if (res.ok) {
       const data = await res.json();
+      const cfgRes = await fetch(`${VALIDATE_API}/get_validator_config/${settings.validatorId}`);
+      const cfg = cfgRes.ok ? await cfgRes.json() : { validations: {} };
+
       const results: Record<string, string> = {};
+      const details: Record<string, any[]> = {};
+
       keys.forEach((k, idx) => {
         const fileName = uploadedFiles[idx].name;
-        const status = data.file_results?.[k]?.status === 'passed' ? 'success' : 'failure';
+        const fileRes = data.file_validation_results?.[k] || {};
+        const status = fileRes.status === 'passed' ? 'success' : 'failure';
         results[fileName] = status === 'success' ? 'File Validation Success' : 'File Validation Failure';
+
+        const units = cfg.validations?.[k] || [];
+        const failures = fileRes.condition_failures || [];
+        const errors = fileRes.errors || [];
+        const fileDetails: any[] = [];
+        units.forEach((u: any) => {
+          let desc = '';
+          if (u.validation_type === 'datatype') desc = u.expected;
+          if (u.validation_type === 'range') {
+            const parts = [] as string[];
+            if (u.min !== undefined && u.min !== '' && u.min !== null) parts.push(`>= ${u.min}`);
+            if (u.max !== undefined && u.max !== '' && u.max !== null) parts.push(`<= ${u.max}`);
+            desc = parts.join(' ');
+          }
+          if (u.validation_type === 'periodicity') desc = u.periodicity;
+
+          let failed = false;
+          if (u.validation_type === 'datatype') {
+            failed = errors.some((e: string) => e.includes(`Column '${u.column}'`));
+          } else if (u.validation_type === 'periodicity') {
+            failed = failures.some((f: any) => f.column === u.column && f.operator === 'date_frequency');
+          } else if (u.validation_type === 'range') {
+            failed = failures.some((f: any) => f.column === u.column && f.operator !== 'date_frequency');
+          }
+
+          fileDetails.push({
+            name: u.validation_type,
+            column: u.column,
+            desc,
+            status: failed ? 'Failed' : 'Passed',
+          });
+        });
+        fileDetails.sort((a, b) => (a.status === 'Failed' && b.status !== 'Failed' ? -1 : b.status === 'Failed' && a.status !== 'Failed' ? 1 : 0));
+        details[fileName] = fileDetails;
       });
+
       setValidationResults(results);
+      setValidationDetails(details);
     }
   };
 
@@ -243,7 +287,10 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
                           <p className="text-xs text-gray-600">{file.type} • {file.size}</p>
                           {validationResults[file.name] && (
                             <p
-                              className={`text-xs mt-1 ${
+                              onClick={() =>
+                                setOpenValidatedFile(openValidatedFile === file.name ? null : file.name)
+                              }
+                              className={`text-xs mt-1 cursor-pointer ${
                                 validationResults[file.name].includes('Success') ? 'text-green-600' : 'text-red-600'
                               }`}
                             >
@@ -265,6 +312,24 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
                         </Select>
                       </div>
                     </div>
+                    {openValidatedFile === file.name && validationDetails[file.name] && (
+                      <div className="mt-2 border-t border-gray-200 pt-2 overflow-x-auto">
+                        <div className="flex space-x-2 w-max">
+                          {validationDetails[file.name].map((v, i) => (
+                            <div
+                              key={i}
+                              className="border border-gray-200 rounded p-2 min-w-[150px] flex-shrink-0"
+                            >
+                              <p className="text-xs font-semibold mb-1">{v.name}</p>
+                              <p className="text-xs mb-1">
+                                {v.column} - {v.desc}
+                              </p>
+                              <p className={`text-xs ${v.status === 'Passed' ? 'text-green-600' : 'text-red-600'}`}>{v.status}</p>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   ))}
 
                   <div
