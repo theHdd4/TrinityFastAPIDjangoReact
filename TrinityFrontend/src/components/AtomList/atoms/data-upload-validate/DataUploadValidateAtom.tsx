@@ -314,25 +314,32 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
                           </Select>
                         </div>
                       </div>
-                      {openValidatedFile === file.name && validationDetails[file.name] && (
-                        <div className="mt-2 border-t border-gray-200 pt-2 w-full">
-                          <div className="overflow-x-auto">
-                            <div className="flex space-x-2 whitespace-nowrap max-w-[480px]">
-                              {validationDetails[file.name].map((v, i) => (
-                                <div
-                                  key={i}
-                                  className="border border-gray-200 rounded p-2 min-w-[150px] flex-shrink-0"
-                                >
-                                <p className="text-xs font-semibold mb-1">{v.name}</p>
-                                <p className="text-xs mb-1">
-                                  {v.column} - {v.desc}
-                                </p>
-                                <p className={`text-xs ${v.status === 'Passed' ? 'text-green-600' : 'text-red-600'}`}>{v.status}</p>
+                        {openValidatedFile === file.name && validationDetails[file.name] && (
+                          <div className="mt-2 border-t border-gray-200 pt-2 w-full">
+                            <div className="overflow-x-auto">
+                              <div className="flex space-x-2 whitespace-nowrap max-w-[480px]">
+                                {validationDetails[file.name].map((v, i) => (
+                                  <div
+                                    key={i}
+                                    className="border border-gray-200 rounded p-2 min-w-[150px] flex-shrink-0"
+                                  >
+                                    <p className="text-xs font-semibold mb-1">{v.name}</p>
+                                    <p className="text-xs mb-1">
+                                      {v.column} - {v.desc}
+                                    </p>
+                                    <p
+                                      className={`text-xs ${
+                                        v.status === 'Passed' ? 'text-green-600' : 'text-red-600'
+                                      }`}
+                                    >
+                                      {v.status}
+                                    </p>
+                                  </div>
+                                ))}
                               </div>
-                            ))}
+                            </div>
                           </div>
-                        </div>
-                      )}
+                        )}
                     </div>
                   ))}
 
@@ -405,9 +412,9 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
                             <Info className="w-4 h-4 text-gray-400 cursor-pointer" onClick={() => setOpenFile(openFile === file.name ? null : file.name)} />
                           </div>
                         </div>
-                        {openFile === file.name && (
-                          <div className="p-3 border-t border-gray-200 overflow-x-auto">
-                            <div className="flex space-x-2 whitespace-nowrap max-w-[480px]">
+                          {openFile === file.name && (
+                            <div className="p-3 border-t border-gray-200 overflow-x-auto">
+                              <div className="flex space-x-2 whitespace-nowrap max-w-[480px]">
                               {Object.entries(types).map(([col, dt]) => (
                                 <Badge key={col} variant="outline" className="text-xs">
                                   {col}: {dt}
