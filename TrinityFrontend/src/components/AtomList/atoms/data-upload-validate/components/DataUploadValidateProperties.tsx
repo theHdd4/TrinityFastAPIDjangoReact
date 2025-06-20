@@ -286,12 +286,12 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
 
     const definedTypes: Record<string, string> = {};
     Object.entries(columnDataTypes).forEach(([col, typ]) => {
-      if (typ) definedTypes[col] = typ;
+      if (typ && typ !== 'not_defined') definedTypes[col] = typ;
     });
     const typeForm = new FormData();
     typeForm.append('validator_atom_id', validatorId);
     typeForm.append('file_key', selectedMasterFile);
-    typeForm.append('column_types', JSON.stringify({ ...columnDataTypes }));
+    typeForm.append('column_types', JSON.stringify(definedTypes));
     await fetch(`${VALIDATE_API}/update_column_types`, { method: 'POST', body: typeForm });
 
     const columnConditions: Record<string, any[]> = {};

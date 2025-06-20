@@ -76,6 +76,12 @@ datatype validation for that column.
 Likewise range or periodicity rules are stored only for rows where a column and
 value have been specified.
 
+Validation scope
+----------------
+Only the validations configured in the properties panel are executed. Generic
+data quality checks like counting nulls or duplicates were removed so that files
+are validated strictly against the chosen data types, ranges and periodicities.
+
 Persistence
 -----------
 Validator settings (required file names, column types, validations and column
