@@ -13,7 +13,7 @@ import {
   DataUploadSettings,
   DEFAULT_DATAUPLOAD_SETTINGS,
 } from '../store/laboratoryStore';
-import DataUploadValidateProperties from '@/components/AtomList/atoms/data-upload-validate/components/DataUploadValidateProperties';
+import DataUploadValidateProperties from '@/components/AtomList/atoms/data-upload-validate/components/properties/DataUploadValidateProperties';
 
 interface SettingsPanelProps {
   isCollapsed: boolean;

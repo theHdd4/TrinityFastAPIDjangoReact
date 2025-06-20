@@ -10,6 +10,8 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { useLaboratoryStore, DEFAULT_DATAUPLOAD_SETTINGS, DataUploadSettings } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { VALIDATE_API } from '@/lib/api';
+import UploadSection from './components/upload/UploadSection';
+import RequiredFilesSection from './components/required-files/RequiredFilesSection';
 
 interface Props {
   atomId: string;
@@ -291,174 +293,38 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
         <div className="flex-1 p-6 bg-gray-50 overflow-y-auto scrollbar-thin scrollbar-thumb-gray-300">
           <div className="flex h-full space-x-6 overflow-hidden">
             <div className="flex-1 min-w-0">
-              <Card className="h-full flex flex-col shadow-sm border-0 bg-white">
-                <div className="p-4 border-b border-gray-100">
-                  <h3 className="text-lg font-semibold text-gray-900 mb-1">Uploaded Files</h3>
-                  <p className="text-sm text-gray-600">Manage your uploaded data files</p>
-                </div>
-
-                <div className="flex-1 p-4 space-y-3 overflow-y-auto overflow-x-hidden">
-                  {uploadedFilesList.map((file, index) => (
-                    <div key={index}>
-                      <div className="flex items-center justify-between p-3 border border-gray-200 rounded-lg bg-white hover:bg-gray-50 transition-colors w-full min-w-0">
-                        <div className="flex items-center space-x-3 flex-1 min-w-0">
-                          <FileText className="w-5 h-5 text-blue-500" />
-                          <div>
-                            <p className="text-sm font-medium text-gray-900">{file.name}</p>
-                            <p className="text-xs text-gray-600">{file.type} • {file.size}</p>
-                            {validationResults[file.name] && (
-                              <p
-                                onClick={() =>
-                                  setOpenValidatedFile(openValidatedFile === file.name ? null : file.name)
-                                }
-                                className={`text-xs mt-1 cursor-pointer ${
-                                  validationResults[file.name].includes('Success') ? 'text-green-600' : 'text-red-600'
-                                }`}
-                              >
-                                {validationResults[file.name]}
-                              </p>
-                            )}
-                          </div>
-                        </div>
-                        <div className="flex items-center space-x-3">
-                          <Select value={fileAssignments[file.name] || ''} onValueChange={val => handleAssignmentChange(file.name, val)}>
-                            <SelectTrigger className="w-32 h-8 text-xs">
-                              <SelectValue placeholder="Select" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {(settings.requiredFiles || []).map(req => (
-                                <SelectItem key={req} value={req}>{req}</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                      </div>
-                        {openValidatedFile === file.name && validationDetails[file.name] && (
-                          <div className="mt-2 border-t border-gray-200 pt-2 w-full">
-                            <div className="w-full overflow-x-auto scrollbar-thin scrollbar-thumb-gray-300">
-                              <div className="flex space-x-2 w-max">
-                                {validationDetails[file.name].map((v, i) => (
-                                  <div
-                                    key={i}
-                                    className="border border-gray-200 rounded p-2 min-w-[150px] flex-shrink-0"
-                                  >
-                                    <p className="text-xs font-semibold mb-1">{v.name}</p>
-                                    <p className="text-xs mb-1">
-                                      {v.column} - {v.desc}
-                                    </p>
-                                    <p
-                                      className={`text-xs ${
-                                        v.status === 'Passed' ? 'text-green-600' : 'text-red-600'
-                                      }`}
-                                    >
-                                      {v.status}
-                                    </p>
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
-                          </div>
-                        )}
-                    </div>
-                  ))}
-
-                  <div
-                    className={`border-2 border-dashed rounded-lg p-8 text-center transition-all duration-300 ${isDragOver ? 'border-blue-400 bg-blue-50' : 'border-gray-300 hover:border-blue-300'}`}
-                    onDrop={handleDrop}
-                    onDragOver={handleDragOver}
-                    onDragLeave={handleDragLeave}
-                  >
-                    <div className="mb-4">
-                      <Upload className={`w-8 h-8 mx-auto mb-2 ${isDragOver ? 'text-blue-600' : 'text-gray-400'}`} />
-                      <p className="text-sm font-medium text-gray-900 mb-1">{isDragOver ? 'Drop files here' : 'Drag and Drop your File'}</p>
-                      <p className="text-xs text-gray-600 mb-4">OR</p>
-                    </div>
-
-                    <input type="file" multiple accept=".csv,.xlsx,.xls,.json" onChange={handleFileSelect} className="hidden" id="file-upload" />
-                  <label htmlFor="file-upload">
-                    <Button asChild className="cursor-pointer">
-                      <span>Browse</span>
-                    </Button>
-                  </label>
-                </div>
-                {uploadedFiles.length > 0 && (
-                  <Button className="w-full mt-4" onClick={handleValidateFiles}>
-                    Validate Files
-                  </Button>
-                )}
-              </div>
-            </Card>
-          </div>
+              <UploadSection
+                uploadedFiles={uploadedFiles}
+                files={uploadedFilesList}
+                validationResults={validationResults}
+                validationDetails={validationDetails}
+                openValidatedFile={openValidatedFile}
+                setOpenValidatedFile={setOpenValidatedFile}
+                fileAssignments={fileAssignments}
+                onAssignmentChange={handleAssignmentChange}
+                onDrop={handleDrop}
+                onDragOver={handleDragOver}
+                onDragLeave={handleDragLeave}
+                onFileSelect={handleFileSelect}
+                onValidateFiles={handleValidateFiles}
+                isDragOver={isDragOver}
+                requiredOptions={settings.requiredFiles || []}
+              />
+            </div>
 
             <div className="w-80">
-              <Card className="h-full shadow-sm border-0 bg-white">
-                <div className="p-4 border-b border-gray-100">
-                  <h4 className="font-semibold text-gray-900 flex items-center space-x-2">
-                    <FileText className="w-4 h-4 text-blue-500" />
-                    <span>Required Files</span>
-                  </h4>
-                  <p className="text-xs text-gray-600 mt-1">Upload these files for complete data validation</p>
-                </div>
-
-                <div className="p-4 space-y-3 overflow-y-auto h-[calc(100%-80px)]">
-                  {requiredFiles.map((file, index) => {
-                    const types = (settings.columnConfig || {})[file.name] || {};
-                    return (
-                      <div key={index} className="border border-gray-200 rounded-lg">
-                        <div className="flex items-center justify-between p-3 hover:border-gray-300 hover:bg-gray-50 w-full min-w-0">
-                          <div className="flex items-center space-x-3 flex-1 min-w-0">
-                            <div className="flex-shrink-0">{getStatusIcon(file.status, file.required)}</div>
-                            <div className="flex-1 min-w-0">
-                              {renameTarget === file.name ? (
-                                <Input
-                                  value={renameValue}
-                                  onChange={e => setRenameValue(e.target.value)}
-                                  onBlur={() => commitRename(file.name)}
-                                  className="h-6 text-xs"
-                                />
-                              ) : (
-                                <p className="text-sm font-medium text-gray-900">{file.name}</p>
-                              )}
-                              {file.required && (
-                                <Badge variant="outline" className="text-xs bg-orange-50 text-orange-700 border-orange-200 mt-1">
-                                  Required
-                                </Badge>
-                              )}
-                            </div>
-                          </div>
-                          <div className="flex items-center space-x-2">
-                            <Pencil className="w-4 h-4 text-gray-400 cursor-pointer" onClick={() => startRename(file.name)} />
-                            <Info className="w-4 h-4 text-gray-400 cursor-pointer" onClick={() => setOpenFile(openFile === file.name ? null : file.name)} />
-                          </div>
-                        </div>
-                          {openFile === file.name && (
-                            <div className="p-3 border-t border-gray-200">
-                              <div className="w-full overflow-x-auto scrollbar-thin scrollbar-thumb-gray-300">
-                                <div className="flex space-x-2 w-max">
-                                {Object.entries(types).map(([col, dt]) => (
-                                  <Badge key={col} variant="outline" className="text-xs">
-                                    {col}: {dt}
-                                  </Badge>
-                                ))}
-                                {file.validations.ranges.map((r: any, i: number) => (
-                                  <Badge key={`r-${i}`} variant="outline" className="text-xs">
-                                    {r.column}: {r.min}-{r.max}
-                                  </Badge>
-                                ))}
-                                {file.validations.periodicities.map((p: any, i: number) => (
-                                  <Badge key={`p-${i}`} variant="outline" className="text-xs">
-                                    {p.column}: {p.periodicity}
-                                  </Badge>
-                                ))}
-                                </div>
-                              </div>
-                            </div>
-                          )}
-                      </div>
-                    );
-                  })}
-                </div>
-              </Card>
+              <RequiredFilesSection
+                files={requiredFiles}
+                columnConfig={settings.columnConfig || {}}
+                renameTarget={renameTarget}
+                renameValue={renameValue}
+                setRenameValue={setRenameValue}
+                startRename={startRename}
+                commitRename={commitRename}
+                openFile={openFile}
+                setOpenFile={setOpenFile}
+                getStatusIcon={getStatusIcon}
+              />
             </div>
           </div>
         </div>
