@@ -281,8 +281,8 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
                 <div className="flex-1 p-4 space-y-3 overflow-y-auto overflow-x-hidden">
                   {uploadedFilesList.map((file, index) => (
                     <div key={index}>
-                      <div className="flex items-center justify-between p-3 border border-gray-200 rounded-lg bg-white hover:bg-gray-50 transition-colors w-full overflow-x-auto">
-                        <div className="flex items-center space-x-3 flex-1 min-w-0 overflow-x-auto">
+                      <div className="flex items-center justify-between p-3 border border-gray-200 rounded-lg bg-white hover:bg-gray-50 transition-colors w-full min-w-0">
+                        <div className="flex items-center space-x-3 flex-1 min-w-0">
                           <FileText className="w-5 h-5 text-blue-500" />
                           <div>
                             <p className="text-sm font-medium text-gray-900">{file.name}</p>
@@ -315,8 +315,8 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
                         </div>
                       </div>
                       {openValidatedFile === file.name && validationDetails[file.name] && (
-                        <div className="mt-2 border-t border-gray-200 pt-2 w-full max-w-full overflow-x-auto">
-                          <div className="flex space-x-2 w-max">
+                        <div className="mt-2 border-t border-gray-200 pt-2 w-full overflow-x-auto">
+                          <div className="flex space-x-2 whitespace-nowrap">
                             {validationDetails[file.name].map((v, i) => (
                               <div
                                 key={i}
@@ -378,8 +378,8 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
                     const types = (settings.columnConfig || {})[file.name] || {};
                     return (
                       <div key={index} className="border border-gray-200 rounded-lg">
-                        <div className="flex items-center justify-between p-3 hover:border-gray-300 hover:bg-gray-50 w-full overflow-x-auto">
-                          <div className="flex items-center space-x-3 flex-1 min-w-0 overflow-x-auto">
+                        <div className="flex items-center justify-between p-3 hover:border-gray-300 hover:bg-gray-50 w-full min-w-0">
+                          <div className="flex items-center space-x-3 flex-1 min-w-0">
                             <div className="flex-shrink-0">{getStatusIcon(file.status, file.required)}</div>
                             <div className="flex-1 min-w-0">
                               {renameTarget === file.name ? (
@@ -406,7 +406,7 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
                         </div>
                         {openFile === file.name && (
                           <div className="p-3 border-t border-gray-200 overflow-x-auto">
-                            <div className="flex space-x-2">
+                            <div className="flex space-x-2 whitespace-nowrap">
                               {Object.entries(types).map(([col, dt]) => (
                                 <Badge key={col} variant="outline" className="text-xs">
                                   {col}: {dt}
