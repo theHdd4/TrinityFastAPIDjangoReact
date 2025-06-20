@@ -279,57 +279,59 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
 
                 <div className="flex-1 p-4 space-y-3 overflow-y-auto">
                   {uploadedFilesList.map((file, index) => (
-                    <div key={index} className="flex items-center justify-between p-3 border border-gray-200 rounded-lg bg-white hover:bg-gray-50 transition-colors">
-                      <div className="flex items-center space-x-3">
-                        <FileText className="w-5 h-5 text-blue-500" />
-                        <div>
-                          <p className="text-sm font-medium text-gray-900">{file.name}</p>
-                          <p className="text-xs text-gray-600">{file.type} • {file.size}</p>
-                          {validationResults[file.name] && (
-                            <p
-                              onClick={() =>
-                                setOpenValidatedFile(openValidatedFile === file.name ? null : file.name)
-                              }
-                              className={`text-xs mt-1 cursor-pointer ${
-                                validationResults[file.name].includes('Success') ? 'text-green-600' : 'text-red-600'
-                              }`}
-                            >
-                              {validationResults[file.name]}
-                            </p>
-                          )}
-                        </div>
-                      </div>
-                      <div className="flex items-center space-x-3">
-                        <Select value={fileAssignments[file.name] || ''} onValueChange={val => handleAssignmentChange(file.name, val)}>
-                          <SelectTrigger className="w-32 h-8 text-xs">
-                            <SelectValue placeholder="Select" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {(settings.requiredFiles || []).map(req => (
-                              <SelectItem key={req} value={req}>{req}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    </div>
-                    {openValidatedFile === file.name && validationDetails[file.name] && (
-                      <div className="mt-2 border-t border-gray-200 pt-2 overflow-x-auto">
-                        <div className="flex space-x-2 w-max">
-                          {validationDetails[file.name].map((v, i) => (
-                            <div
-                              key={i}
-                              className="border border-gray-200 rounded p-2 min-w-[150px] flex-shrink-0"
-                            >
-                              <p className="text-xs font-semibold mb-1">{v.name}</p>
-                              <p className="text-xs mb-1">
-                                {v.column} - {v.desc}
+                    <div key={index}>
+                      <div className="flex items-center justify-between p-3 border border-gray-200 rounded-lg bg-white hover:bg-gray-50 transition-colors">
+                        <div className="flex items-center space-x-3">
+                          <FileText className="w-5 h-5 text-blue-500" />
+                          <div>
+                            <p className="text-sm font-medium text-gray-900">{file.name}</p>
+                            <p className="text-xs text-gray-600">{file.type} • {file.size}</p>
+                            {validationResults[file.name] && (
+                              <p
+                                onClick={() =>
+                                  setOpenValidatedFile(openValidatedFile === file.name ? null : file.name)
+                                }
+                                className={`text-xs mt-1 cursor-pointer ${
+                                  validationResults[file.name].includes('Success') ? 'text-green-600' : 'text-red-600'
+                                }`}
+                              >
+                                {validationResults[file.name]}
                               </p>
-                              <p className={`text-xs ${v.status === 'Passed' ? 'text-green-600' : 'text-red-600'}`}>{v.status}</p>
-                            </div>
-                          ))}
+                            )}
+                          </div>
+                        </div>
+                        <div className="flex items-center space-x-3">
+                          <Select value={fileAssignments[file.name] || ''} onValueChange={val => handleAssignmentChange(file.name, val)}>
+                            <SelectTrigger className="w-32 h-8 text-xs">
+                              <SelectValue placeholder="Select" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {(settings.requiredFiles || []).map(req => (
+                                <SelectItem key={req} value={req}>{req}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
                         </div>
                       </div>
-                    )}
+                      {openValidatedFile === file.name && validationDetails[file.name] && (
+                        <div className="mt-2 border-t border-gray-200 pt-2 overflow-x-auto">
+                          <div className="flex space-x-2 w-max">
+                            {validationDetails[file.name].map((v, i) => (
+                              <div
+                                key={i}
+                                className="border border-gray-200 rounded p-2 min-w-[150px] flex-shrink-0"
+                              >
+                                <p className="text-xs font-semibold mb-1">{v.name}</p>
+                                <p className="text-xs mb-1">
+                                  {v.column} - {v.desc}
+                                </p>
+                                <p className={`text-xs ${v.status === 'Passed' ? 'text-green-600' : 'text-red-600'}`}>{v.status}</p>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   ))}
 
                   <div
