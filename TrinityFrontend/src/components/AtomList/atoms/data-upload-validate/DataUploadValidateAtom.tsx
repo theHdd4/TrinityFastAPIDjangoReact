@@ -270,15 +270,15 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
         </div>
 
         <div className="flex-1 p-6 bg-gray-50 overflow-y-auto scrollbar-thin scrollbar-thumb-gray-300">
-          <div className="flex h-full space-x-6">
-            <div className="flex-1">
+          <div className="flex h-full space-x-6 overflow-hidden">
+            <div className="flex-1 min-w-0">
               <Card className="h-full flex flex-col shadow-sm border-0 bg-white">
                 <div className="p-4 border-b border-gray-100">
                   <h3 className="text-lg font-semibold text-gray-900 mb-1">Uploaded Files</h3>
                   <p className="text-sm text-gray-600">Manage your uploaded data files</p>
                 </div>
 
-                <div className="flex-1 p-4 space-y-3 overflow-y-auto">
+                <div className="flex-1 p-4 space-y-3 overflow-y-auto overflow-x-hidden">
                   {uploadedFilesList.map((file, index) => (
                     <div key={index}>
                       <div className="flex items-center justify-between p-3 border border-gray-200 rounded-lg bg-white hover:bg-gray-50 transition-colors">
@@ -315,7 +315,7 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
                         </div>
                       </div>
                       {openValidatedFile === file.name && validationDetails[file.name] && (
-                        <div className="mt-2 border-t border-gray-200 pt-2 w-full overflow-x-auto">
+                        <div className="mt-2 border-t border-gray-200 pt-2 w-full max-w-full overflow-x-auto">
                           <div className="flex space-x-2 w-max">
                             {validationDetails[file.name].map((v, i) => (
                               <div
