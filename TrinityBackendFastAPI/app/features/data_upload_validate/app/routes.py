@@ -867,7 +867,7 @@ async def update_column_types(
     """
     # Parse column_types JSON
     try:
-        new_column_types = json.loads(column_types)
+        submitted_column_types = json.loads(column_types)
     except json.JSONDecodeError:
         raise HTTPException(status_code=400, detail="Invalid JSON format for column_types")
 
@@ -888,8 +888,8 @@ async def update_column_types(
     current_schema = validator_data["schemas"][file_key]
     available_columns = [col["column"] for col in current_schema.get("columns", [])]
 
-    # Validate that all columns in new_column_types exist in the schema
-    invalid_columns = [col for col in new_column_types.keys() if col not in available_columns]
+    # Validate that all columns in submitted_column_types exist in the schema
+    invalid_columns = [col for col in submitted_column_types.keys() if col not in available_columns]
     if invalid_columns:
         raise HTTPException(
             status_code=400, 
@@ -897,17 +897,23 @@ async def update_column_types(
         )
 
     # Validate column type values
-    valid_types = ["string", "integer", "numeric", "date", "boolean"]
-    invalid_types = {col: typ for col, typ in new_column_types.items() if typ not in valid_types}
+    valid_types = ["string", "integer", "numeric", "date", "boolean", "number"]
+    invalid_types = {col: typ for col, typ in submitted_column_types.items() if typ not in valid_types and typ not in ["", None, "not_defined"]}
     if invalid_types:
         raise HTTPException(
             status_code=400,
             detail=f"Invalid column types: {invalid_types}. Valid types: {valid_types}"
         )
 
-    # Update column_types in memory
+    # Normalize and update column_types in memory
     current_column_types = extraction_results[validator_atom_id]["column_types"].get(file_key, {})
-    current_column_types.update(new_column_types)
+    for col in available_columns:
+        val = submitted_column_types.get(col)
+        if val in ["", None, "not_defined"]:
+            current_column_types.pop(col, None)
+        else:
+            normalized = "numeric" if val == "number" else val
+            current_column_types[col] = normalized
     extraction_results[validator_atom_id]["column_types"][file_key] = current_column_types
 
     # Also update in schemas for consistency
@@ -917,8 +923,9 @@ async def update_column_types(
     updated_columns = []
     for col_info in current_schema["columns"]:
         col_name = col_info["column"]
-        if col_name in new_column_types:
-            col_info["type"] = new_column_types[col_name]
+        if col_name in submitted_column_types and submitted_column_types.get(col_name) not in ["", None, "not_defined"]:
+            normalized = "numeric" if submitted_column_types[col_name] == "number" else submitted_column_types[col_name]
+            col_info["type"] = normalized
         updated_columns.append(col_info)
     
     extraction_results[validator_atom_id]["schemas"][file_key]["columns"] = updated_columns
@@ -982,9 +989,9 @@ async def update_column_types(
         "message": "Column types updated successfully",
         "validator_atom_id": validator_atom_id,
         "file_key": file_key,
-        "updated_column_types": new_column_types,
+        "updated_column_types": submitted_column_types,
         "current_all_column_types": current_column_types,
-        "updated_columns_count": len(new_column_types),
+        "updated_columns_count": len([c for c in submitted_column_types.values() if c not in ["", None, "not_defined"]]),
         # ✅ ADD: MongoDB update status
         "mongodb_update": {
             "status": mongo_result["status"],
@@ -1588,7 +1595,7 @@ async def configure_validation_config(request: Request):
         raise HTTPException(status_code=400, detail="validator_atom_id is required")
     if not file_key:
         raise HTTPException(status_code=400, detail="file_key is required")
-    if not column_conditions:
+    if column_conditions is None:
         raise HTTPException(status_code=400, detail="column_conditions is required")
 
     if not isinstance(column_conditions, dict):
@@ -1675,7 +1682,7 @@ async def configure_validation_config(request: Request):
                 min_val = cond.get("value")
             elif op in ["less_than_or_equal", "less_than"]:
                 max_val = cond.get("value")
-        if min_val is not None or max_val is not None:
+        if (min_val not in [None, ""] or max_val not in [None, ""]):
             range_units.append({
                 "column": col,
                 "validation_type": "range",

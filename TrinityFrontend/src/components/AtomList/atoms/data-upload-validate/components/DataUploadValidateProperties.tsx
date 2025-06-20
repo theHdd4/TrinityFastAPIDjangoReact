@@ -37,8 +37,9 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
     {}
   );
   const dataTypeOptions = [
-    { value: 'string', label: 'String' },
+    { value: '', label: 'Not defined' },
     { value: 'number', label: 'Number' },
+    { value: 'string', label: 'String' },
     { value: 'date', label: 'Date' }
   ];
 
@@ -133,15 +134,24 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
       setAllAvailableFiles(keys.map(k => ({ name: k, source: 'upload' })));
       setSelectedMasterFile(keys[0]);
       const cfg = await fetch(`${VALIDATE_API}/get_validator_config/${id}`).then(r => r.json());
-      if (cfg.column_types) {
-        const firstKey = Object.keys(cfg.column_types)[0];
-        setColumnDataTypes(cfg.column_types[firstKey] || {});
+      let defaultTypes: Record<string, string> = {};
+      const firstKey = keys[0];
+      if (cfg.schemas && cfg.schemas[firstKey]) {
+        cfg.schemas[firstKey].columns.forEach((c: any) => {
+          defaultTypes[c.column] = '';
+        });
       }
+      if (cfg.column_types && cfg.column_types[firstKey]) {
+        Object.entries(cfg.column_types[firstKey]).forEach(([col, typ]) => {
+          defaultTypes[col] = typ as string;
+        });
+      }
+      setColumnDataTypes(defaultTypes);
       updateSettings(atomId, {
         validatorId: id,
         requiredFiles: keys,
         validations: settings.validations || {},
-        columnConfig: cfg.column_types || {}
+        columnConfig: { [firstKey]: defaultTypes }
       });
     }
   };
@@ -155,12 +165,17 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
     fetch(`${VALIDATE_API}/get_validator_config/${validatorId}`)
       .then(res => res.json())
       .then(cfg => {
-        const types = cfg.column_types?.[selectedMasterFile] || {};
-        setColumnDataTypes(types);
+        const schemaCols = cfg.schemas?.[selectedMasterFile]?.columns || [];
+        const saved = cfg.column_types?.[selectedMasterFile] || {};
+        const merged: Record<string, string> = {};
+        schemaCols.forEach((c: any) => {
+          merged[c.column] = saved[c.column] || '';
+        });
+        setColumnDataTypes(merged);
         updateSettings(atomId, {
           columnConfig: {
             ...(settings.columnConfig || {}),
-            [selectedMasterFile]: types
+            [selectedMasterFile]: merged
           }
         });
         if (cfg.classification?.[selectedMasterFile]) {
@@ -262,20 +277,27 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
   const handleSaveConfiguration = async () => {
     if (!validatorId || !selectedMasterFile) return;
 
+    const definedTypes: Record<string, string> = {};
+    Object.entries(columnDataTypes).forEach(([col, typ]) => {
+      if (typ) definedTypes[col] = typ;
+    });
     const typeForm = new FormData();
     typeForm.append('validator_atom_id', validatorId);
     typeForm.append('file_key', selectedMasterFile);
-    typeForm.append('column_types', JSON.stringify(columnDataTypes));
+    typeForm.append('column_types', JSON.stringify({ ...columnDataTypes }));
     await fetch(`${VALIDATE_API}/update_column_types`, { method: 'POST', body: typeForm });
 
     const columnConditions: Record<string, any[]> = {};
     rangeValidations.forEach(r => {
-      if (r.column) {
-        columnConditions[r.column] = [
-          { operator: 'greater_than_or_equal', value: r.min, error_message: 'min check' },
-          { operator: 'less_than_or_equal', value: r.max, error_message: 'max check' }
-        ];
+      if (!r.column) return;
+      const conds: any[] = [];
+      if (r.min !== '') {
+        conds.push({ operator: 'greater_than_or_equal', value: r.min, error_message: 'min check' });
       }
+      if (r.max !== '') {
+        conds.push({ operator: 'less_than_or_equal', value: r.max, error_message: 'max check' });
+      }
+      if (conds.length > 0) columnConditions[r.column] = conds;
     });
 
     const columnFrequencies: Record<string, string> = {};
@@ -302,11 +324,13 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
     classifyForm.append('unclassified', JSON.stringify([]));
     await fetch(`${VALIDATE_API}/classify_columns`, { method: 'POST', body: classifyForm });
 
+    const savedRanges = rangeValidations.filter(r => r.column && (r.min !== '' || r.max !== ''));
+    const savedPeriods = periodicityValidations.filter(p => p.column && p.periodicity);
     const newValidations = {
       ...(settings.validations || {}),
       [selectedMasterFile]: {
-        ranges: rangeValidations,
-        periodicities: periodicityValidations
+        ranges: savedRanges,
+        periodicities: savedPeriods
       }
     };
     const newClassification = {

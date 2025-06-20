@@ -64,6 +64,16 @@ existing information and add an extra network request. Keeping the filtering in
 the frontend avoids additional backend complexity and works as long as the
 column types are already part of the configuration response.
 
+Data type defaults
+------------------
+The Data Types tab now lists four options for each column: **Number**, **String**,
+**Date**, and **Not defined**. When a master file is first uploaded every column
+defaults to **Not defined**. Only columns with a chosen data type are saved back
+to MongoDB and included as datatype validations. Leaving a column as *Not
+defined* removes any existing datatype validation for that column.
+Likewise range or periodicity rules are stored only for rows where a column and
+value have been specified.
+
 Persistence
 -----------
 Validator settings (required file names, column types, validations and column
