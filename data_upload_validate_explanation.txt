@@ -41,3 +41,41 @@ Key behaviour
    - Validation logs and uploaded files can optionally be stored to MongoDB/MinIO.
 
 The module relies heavily on MongoDB to persist all validator-related metadata, enabling the frontend to retrieve and resume validation sessions. When combined with the `DataUploadAtom` component in the React frontend, users can upload datasets, classify columns, define dimensions and run validations through this API.
+
+Frontend structure
+------------------
+The React implementation of the Data Upload & Validate atom lives under `TrinityFrontend/src/components/AtomList/atoms/data-upload-validate`.
+
+- `DataUploadValidateAtom.tsx` – central atom component that orchestrates uploads, settings and validation.
+- `components/upload/UploadSection.tsx` – renders the uploaded files list and the "Validate Files" button.
+- `components/required-files/RequiredFilesSection.tsx` – displays required file settings and validation units.
+- `components/properties/DataUploadValidateProperties.tsx` – properties panel used in laboratory mode.
+
+File Validation Status
+----------------------
+After validation, each file row shows a status string like "File Validation Success" or "File Validation Failure". Clicking this text toggles the detailed results. The click handler is in `UploadSection.tsx` lines 63–68:
+
+```
+{validationResults[file.name] && (
+  <p
+    onClick={() =>
+      setOpenValidatedFile(openValidatedFile === file.name ? null : file.name)}
+    className={`text-xs mt-1 cursor-pointer ${validationResults[file.name].includes('Success') ? 'text-green-600' : 'text-red-600'}`}
+  >
+    {validationResults[file.name]}
+  </p>
+)}
+```
+
+The `openValidatedFile` state controlling this toggle is declared in `DataUploadValidateAtom.tsx` line 34 and passed to `UploadSection` at lines 296–312:
+
+```
+const [openValidatedFile, setOpenValidatedFile] = useState<string | null>(null);
+...
+<UploadSection
+  ...
+  openValidatedFile={openValidatedFile}
+  setOpenValidatedFile={setOpenValidatedFile}
+  ...
+/>
+```
