@@ -86,7 +86,7 @@ const UploadSection: React.FC<UploadSectionProps> = ({
           {openValidatedFile === file.name && validationDetails[file.name] && (
             <div className="mt-2 border-t border-gray-200 pt-2 w-full">
               <div className="w-full overflow-x-auto scrollbar-thin scrollbar-thumb-gray-300">
-                <div className="flex space-x-2 w-max">
+                <div className="flex space-x-2 w-max max-w-[480px]">
                   {validationDetails[file.name].map((v, i) => (
                     <div key={i} className="border border-gray-200 rounded p-2 min-w-[150px] flex-shrink-0">
                       <p className="text-xs font-semibold mb-1">{v.name}</p>
