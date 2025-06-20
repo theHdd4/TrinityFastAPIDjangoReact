@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+pydantic
+wikipedia
+numpy
+langgraph
+sentence-transformers
+scikit-learn
+requests
+pandas
