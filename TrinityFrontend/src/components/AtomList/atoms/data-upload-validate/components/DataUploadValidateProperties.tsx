@@ -37,7 +37,7 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
     {}
   );
   const dataTypeOptions = [
-    { value: '', label: 'Not defined' },
+    { value: 'not_defined', label: 'Not defined' },
     { value: 'number', label: 'Number' },
     { value: 'string', label: 'String' },
     { value: 'date', label: 'Date' }
@@ -104,8 +104,15 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
           columnConfig: cfg.column_types || {}
         });
 
-        if (cfg.column_types && files.length > 0) {
-          setColumnDataTypes(cfg.column_types[files[0]] || {});
+        if (files.length > 0) {
+          const firstKey = files[0];
+          const schemaCols = cfg.schemas?.[firstKey]?.columns || [];
+          const saved = cfg.column_types?.[firstKey] || {};
+          const merged: Record<string, string> = {};
+          schemaCols.forEach((c: any) => {
+            merged[c.column] = saved[c.column] || 'not_defined';
+          });
+          setColumnDataTypes(merged);
         }
       })
       .catch(() => {});
@@ -134,11 +141,11 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
       setAllAvailableFiles(keys.map(k => ({ name: k, source: 'upload' })));
       setSelectedMasterFile(keys[0]);
       const cfg = await fetch(`${VALIDATE_API}/get_validator_config/${id}`).then(r => r.json());
-      let defaultTypes: Record<string, string> = {};
+      const defaultTypes: Record<string, string> = {};
       const firstKey = keys[0];
       if (cfg.schemas && cfg.schemas[firstKey]) {
         cfg.schemas[firstKey].columns.forEach((c: any) => {
-          defaultTypes[c.column] = '';
+          defaultTypes[c.column] = 'not_defined';
         });
       }
       if (cfg.column_types && cfg.column_types[firstKey]) {
@@ -169,7 +176,7 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
         const saved = cfg.column_types?.[selectedMasterFile] || {};
         const merged: Record<string, string> = {};
         schemaCols.forEach((c: any) => {
-          merged[c.column] = saved[c.column] || '';
+          merged[c.column] = saved[c.column] || 'not_defined';
         });
         setColumnDataTypes(merged);
         updateSettings(atomId, {
