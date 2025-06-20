@@ -79,3 +79,7 @@ const [openValidatedFile, setOpenValidatedFile] = useState<string | null>(null);
   ...
 />
 ```
+
+Validation Units Checked
+-----------------------
+The list of validations shown for each file when the status text is clicked is rendered in `UploadSection.tsx` lines 86–99. Each card is placed inside a container with `overflow-x-auto` (line 88) so that if more than three validation units are present they can scroll horizontally without stretching the uploaded files section.
