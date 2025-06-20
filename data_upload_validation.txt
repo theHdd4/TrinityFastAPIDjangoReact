@@ -108,7 +108,9 @@ Atom UI Details
   determines which template to use when the **Validate Files** button is
   pressed. Validation statuses are shown under each uploaded file name.
 * After validation, clicking the status label expands the file row to reveal all
-  validation units checked for that file. Failed checks appear first and the
-  list scrolls horizontally when there are many validations. Each badge shows
-  the validation name, the column and type, and whether it passed or failed.
+  validation units checked for that file. The width of the details section now
+  matches the uploaded file row so the canvas layout is unaffected. Failed
+  checks appear first and the list scrolls horizontally when there are many
+  validations. Each badge shows the validation name, the column and type, and
+  whether it passed or failed.
 

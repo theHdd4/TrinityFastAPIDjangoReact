@@ -314,8 +314,8 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
                         </div>
                       </div>
                       {openValidatedFile === file.name && validationDetails[file.name] && (
-                        <div className="mt-2 border-t border-gray-200 pt-2 overflow-x-auto">
-                          <div className="flex space-x-2 w-max">
+                        <div className="mt-2 border-t border-gray-200 pt-2 w-full">
+                          <div className="flex space-x-2 w-full overflow-x-auto">
                             {validationDetails[file.name].map((v, i) => (
                               <div
                                 key={i}
