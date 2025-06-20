@@ -109,6 +109,11 @@ MINIO_ACCESS_KEY = "admin_dev"  # Update with your credentials
 MINIO_SECRET_KEY = "pass_dev"  # Update with your credentials
 MINIO_BUCKET = "validated-d1"    # Your existing bucket
 
+# Path info for saving uploads
+CLIENT_NAME = os.getenv("CLIENT_NAME", "default_client")
+APP_NAME = os.getenv("APP_NAME", "default_app")
+PROJECT_NAME = os.getenv("PROJECT_NAME", "default_project")
+
 # Initialize MinIO client
 minio_client = Minio(
     endpoint=MINIO_ENDPOINT,
@@ -146,7 +151,7 @@ def upload_to_minio(file_content_bytes: bytes, filename: str, validator_atom_id:
     try:
         # Create unique object name with timestamp
         timestamp = pd.Timestamp.now().strftime("%Y%m%d_%H%M%S")
-        object_name = f"{validator_atom_id}/{file_key}/{timestamp}_{filename}"
+        object_name = f"{CLIENT_NAME}/{APP_NAME}/{PROJECT_NAME}/{timestamp}_{filename}"
         
         # Convert bytes to BytesIO for seek operations
         file_content = io.BytesIO(file_content_bytes)

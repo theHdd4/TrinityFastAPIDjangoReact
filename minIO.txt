@@ -1,0 +1,16 @@
+After running validations, files that pass are uploaded to the MinIO bucket defined in `TrinityBackendFastAPI/app/features/data_upload_validate/app/routes.py`.
+Uploads are organized in the following folder structure:
+
+```
+<client-name>/<app-name>/<project-name>/<timestamp>_<filename>
+```
+
+Client, app and project names come from the environment variables `CLIENT_NAME`, `APP_NAME` and `PROJECT_NAME`. These are set in `.env.dev` for local development and passed to the backend container.
+
+To verify an upload using the MinIO CLI:
+
+```
+mc ls MINIO/validated-d1/my_client/my_app/my_project/
+```
+
+Or open the MinIO web console at `http://<minio-host>:9001` and navigate through the bucket folders.
