@@ -15,7 +15,8 @@ Follow the steps below to run all services together.
    Ensure `DEBUG=true` in the Django `.env` file so error messages appear if
    tenant creation fails.
    The frontend `.env` includes `VITE_SUBSCRIPTIONS_API` which should point to
-   the Django subscription endpoints.
+   the Django subscription endpoints and `VITE_TRINITY_AI_API` for the AI
+   service.
 
 Docker and Node.js must be installed locally. The Python dependencies listed in
 `TrinityBackendDjango/requirements.txt` (including pandas, motor and
@@ -35,11 +36,13 @@ docker-compose up --build
 
 This starts PostgreSQL, MongoDB, Redis, the Django admin API on `localhost:8000`
 and a FastAPI instance on `localhost:8001`. Uvicorn loads the app from
-`apps/orchestration/fastapi_app.py`. Use `docker-compose logs fastapi` to
-confirm the FastAPI server started successfully. CORS is enabled so the React
-frontend served from `localhost:8080` can call the API. Once the containers
-finish installing dependencies the text service is reachable at
-`http://localhost:8001/api/t`.
+`apps/orchestration/fastapi_app.py`. A separate AI service from the `TrinityAI`
+folder runs on `localhost:8002` for chat prompts. Use `docker-compose logs
+fastapi` or `docker-compose logs trinity-ai` to confirm the servers started
+successfully. CORS is enabled so the React frontend served from `localhost:8080`
+can call the APIs. Once the containers finish installing dependencies the text
+service is reachable at `http://localhost:8001/api/t` and Trinity AI at
+`http://localhost:8002/chat`.
 
 ## 3. Start the frontend
 

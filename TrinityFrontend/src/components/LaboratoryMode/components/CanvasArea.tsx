@@ -8,6 +8,7 @@ import { useExhibitionStore } from '../../ExhibitionMode/store/exhibitionStore';
 import { atoms as allAtoms } from '@/components/AtomList/data';
 import { molecules } from '@/components/MoleculeList/data';
 import { REGISTRY_API, TEXT_API, CARD_API } from '@/lib/api';
+import { AIChatBot } from '@/components/TrinityAI';
 import TextBoxEditor from '@/components/AtomList/atoms/text-box/TextBoxEditor';
 import DataUploadValidateAtom from '@/components/AtomList/atoms/data-upload-validate/DataUploadValidateAtom';
 import {
@@ -269,6 +270,31 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
     );
   };
 
+
+  const addAtomByName = (cardId: string, atomName: string) => {
+    const info = allAtoms.find(a => a.id === atomName || a.title.toLowerCase() === atomName.toLowerCase());
+    if (!info) return;
+    const newAtom: DroppedAtom = {
+      id: `${info.id}-${Date.now()}`,
+      atomId: info.id,
+      title: info.title,
+      category: info.category,
+      color: info.color,
+      settings:
+        info.id === 'text-box'
+          ? { ...DEFAULT_TEXTBOX_SETTINGS }
+          : info.id === 'data-upload-validate'
+          ? { ...DEFAULT_DATAUPLOAD_SETTINGS }
+          : undefined,
+    };
+    setLayoutCards(
+      layoutCards.map(card =>
+        card.id === cardId ? { ...card, atoms: [...card.atoms, newAtom] } : card
+      )
+    );
+  };
+
+
   const deleteCard = async (cardId: string) => {
     const card = layoutCards.find(c => c.id === cardId);
     const updated = layoutCards.filter(c => c.id !== cardId);
@@ -391,7 +417,15 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
                   <div className="space-y-6 w-full">
                     {layoutCards
                       .filter(card => card.moleculeId === molecule.moleculeId)
-                      .map(card => (
+                      .map(card => {
+                        const cardTitle = card.moleculeTitle
+                          ? card.atoms.length > 0
+                            ? `${card.moleculeTitle} - ${card.atoms[0].title}`
+                            : card.moleculeTitle
+                          : card.atoms.length > 0
+                            ? card.atoms[0].title
+                            : 'Card';
+                        return (
                         <Card
                           key={card.id}
                           className={`w-full min-h-[200px] bg-white rounded-2xl border-2 transition-all duration-300 flex flex-col ${
@@ -407,12 +441,13 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
                             <div className="flex items-center space-x-2">
                               <Eye className={`w-4 h-4 ${card.isExhibited ? 'text-[#458EE2]' : 'text-gray-400'}`} />
                               <span className="text-sm font-medium text-gray-700">
-                                {card.moleculeTitle ? (
-                                  card.atoms.length > 0
-                                    ? `${card.moleculeTitle} - ${card.atoms[0].title}`
-                                    : card.moleculeTitle
-                                ) : card.atoms.length > 0 ? card.atoms[0].title : 'Card'}
+                                {cardTitle}
                               </span>
+                              <AIChatBot
+                                cardId={card.id}
+                                cardTitle={cardTitle}
+                                onAddAtom={(id, atom) => addAtomByName(id, atom)}
+                              />
                             </div>
                             <div className="flex items-center space-x-2">
                               <span className="text-xs text-gray-500">Exhibit the Card</span>
@@ -484,7 +519,8 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
                             )}
                           </div>
                         </Card>
-                      ))}
+                        );
+                      })}
 
                     <div className="flex justify-center">
                       <button
@@ -509,7 +545,13 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
     <div className="h-full w-full bg-gradient-to-br from-gray-50 to-gray-100 rounded-xl border border-gray-200 shadow-sm overflow-auto">
       {/* Layout Cards Container */}
       <div className="p-6 space-y-6 w-full">
-        {layoutCards.map((card, index) => (
+        {layoutCards.map((card, index) => {
+          const cardTitle = card.moleculeTitle
+            ? (card.atoms.length > 0 ? `${card.moleculeTitle} - ${card.atoms[0].title}` : card.moleculeTitle)
+            : card.atoms.length > 0
+              ? card.atoms[0].title
+              : 'Card';
+          return (
           <Card
             key={card.id}
             className={`w-full min-h-[200px] bg-white rounded-2xl border-2 transition-all duration-300 flex flex-col ${
@@ -527,12 +569,13 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
               <div className="flex items-center space-x-2">
                 <Eye className={`w-4 h-4 ${card.isExhibited ? 'text-[#458EE2]' : 'text-gray-400'}`} />
                 <span className="text-sm font-medium text-gray-700">
-                  {card.moleculeTitle ? (
-                    card.atoms.length > 0
-                      ? `${card.moleculeTitle} - ${card.atoms[0].title}`
-                      : card.moleculeTitle
-                  ) : card.atoms.length > 0 ? card.atoms[0].title : 'Card'}
+                  {cardTitle}
                 </span>
+                <AIChatBot
+                  cardId={card.id}
+                  cardTitle={cardTitle}
+                  onAddAtom={(id, atom) => addAtomByName(id, atom)}
+                />
               </div>
               <div className="flex items-center space-x-2">
                 <span className="text-xs text-gray-500">Exhibit the Card</span>
@@ -609,7 +652,8 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
               )}
             </div>
           </Card>
-        ))}
+          );
+        })}
 
         {/* Add New Card Button */}
         <div className="flex justify-center">

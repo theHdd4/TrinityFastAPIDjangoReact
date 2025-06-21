@@ -1,0 +1,22 @@
+1. Ensure Docker and Node.js are installed on your machine.
+2. Copy `TrinityBackendDjango/.env.example` to `.env` and `TrinityFrontend/.env.example` to `.env`.
+   The frontend `.env` must include `VITE_TRINITY_AI_API=http://localhost:8002` when using docker-compose.
+3. Build and start the backend services from the `TrinityBackendDjango` folder:
+
+   ```bash
+   docker-compose up --build
+   ```
+
+   This launches PostgreSQL, MongoDB, Redis, the Django API, FastAPI utilities and the Trinity AI service on port 8002.
+4. In a separate terminal start the React frontend:
+
+   ```bash
+   cd TrinityFrontend
+   npm install
+   npm run dev
+   ```
+
+   Visit `http://localhost:8080` in your browser.
+5. In Laboratory mode each card now shows a small lightning icon. Click it to open the Trinity AI chat box.
+   Enter a prompt describing the atom you want and press **Send**. The chat box
+   calls the AI service and automatically inserts the returned atom into the card.
