@@ -27,3 +27,6 @@ export const SUBSCRIPTIONS_API =
 
 export const VALIDATE_API =
   import.meta.env.VITE_VALIDATE_API || `${backendOrigin.replace(/:8000$/, ':8001')}/api/data-upload-validate`;
+
+export const TRINITY_AI_API =
+  import.meta.env.VITE_TRINITY_AI_API || backendOrigin.replace(/:8000$/, ':8002');
