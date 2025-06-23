@@ -25,6 +25,7 @@ interface ExhibitionStore {
   toggleCardExhibition: (cardId: string) => void;
   updateCard: (cardId: string, updatedCard: Partial<LayoutCard>) => void;
   setCards: (cards: LayoutCard[]) => void;
+  reset: () => void;
 }
 
 export const useExhibitionStore = create<ExhibitionStore>((set, get) => ({
@@ -107,5 +108,9 @@ export const useExhibitionStore = create<ExhibitionStore>((set, get) => ({
       safeStringify({ cards, exhibitedCards, timestamp: new Date().toISOString() })
     );
     set(newState);
+  },
+  reset: () => {
+    localStorage.removeItem('laboratory-config');
+    set({ cards: [], exhibitedCards: [] });
   }
 }));

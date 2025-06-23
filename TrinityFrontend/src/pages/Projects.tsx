@@ -16,6 +16,8 @@ import Header from '@/components/Header';
 import { REGISTRY_API } from '@/lib/api';
 import { molecules } from '@/components/MoleculeList/data/molecules';
 import { safeStringify } from '@/utils/safeStringify';
+import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
+import { useExhibitionStore } from '@/components/ExhibitionMode/store/exhibitionStore';
 
 interface Project {
   id: number;
@@ -43,6 +45,8 @@ const Projects = () => {
   const [appSlug, setAppSlug] = useState<string>('');
   const [editId, setEditId] = useState<number | null>(null);
   const [editName, setEditName] = useState('');
+  const resetLaboratory = useLaboratoryStore(state => state.reset);
+  const resetExhibition = useExhibitionStore(state => state.reset);
 
   const getAppDetails = () => {
     switch (appSlug) {
@@ -202,6 +206,8 @@ const Projects = () => {
         localStorage.removeItem('workflow-selected-atoms');
         localStorage.removeItem('laboratory-config');
         localStorage.removeItem('laboratory-layout-cards');
+        resetLaboratory();
+        resetExhibition();
 
         try {
           await fetch(`${REGISTRY_API}/projects/${project.id}/`, {
@@ -270,6 +276,8 @@ const Projects = () => {
 
   const openProject = async (project: Project) => {
     localStorage.setItem('current-project', JSON.stringify(project));
+    resetLaboratory();
+    resetExhibition();
     try {
       const res = await fetch(`${REGISTRY_API}/projects/${project.id}/`, { credentials: 'include' });
       if (res.ok) {

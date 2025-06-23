@@ -89,6 +89,7 @@ interface LaboratoryStore {
   setCards: (cards: LayoutCard[]) => void;
   updateAtomSettings: (atomId: string, settings: any) => void;
   getAtom: (atomId: string) => DroppedAtom | undefined;
+  reset: () => void;
 }
 
 const STORAGE_KEY = 'laboratory-layout-cards';
@@ -115,5 +116,9 @@ export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
       if (atom) return atom;
     }
     return undefined;
+  },
+  reset: () => {
+    localStorage.removeItem(STORAGE_KEY);
+    set({ cards: [] });
   }
 }));
