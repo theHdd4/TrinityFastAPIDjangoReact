@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
@@ -36,6 +36,14 @@ const AIChatBot: React.FC<AIChatBotProps> = ({ cardId, cardTitle, onAddAtom, dis
   const [showSuggestions, setShowSuggestions] = useState(true);
   const [isOpen, setIsOpen] = useState(false);
   const [interactionDone, setInteractionDone] = useState(false);
+
+  // Re-enable the prompt if the card becomes empty again
+  useEffect(() => {
+    if (!disabled) {
+      setInteractionDone(false);
+      setShowSuggestions(true);
+    }
+  }, [disabled]);
 
   const handleSendMessage = async () => {
     if (!inputValue.trim()) return;
