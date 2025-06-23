@@ -448,11 +448,13 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
                               <span className="text-sm font-medium text-gray-700">
                                 {cardTitle}
                               </span>
-                              <AIChatBot
-                                cardId={card.id}
-                                cardTitle={cardTitle}
-                                onAddAtom={(id, atom) => addAtomByName(id, atom)}
-                              />
+                              {card.atoms.length === 0 && (
+                                <AIChatBot
+                                  cardId={card.id}
+                                  cardTitle={cardTitle}
+                                  onAddAtom={(id, atom) => addAtomByName(id, atom)}
+                                />
+                              )}
                             </div>
                             <div className="flex items-center space-x-2">
                               <span className="text-xs text-gray-500">Exhibit the Card</span>
@@ -576,11 +578,13 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
                 <span className="text-sm font-medium text-gray-700">
                   {cardTitle}
                 </span>
-                <AIChatBot
-                  cardId={card.id}
-                  cardTitle={cardTitle}
-                  onAddAtom={(id, atom) => addAtomByName(id, atom)}
-                />
+                {card.atoms.length === 0 && (
+                  <AIChatBot
+                    cardId={card.id}
+                    cardTitle={cardTitle}
+                    onAddAtom={(id, atom) => addAtomByName(id, atom)}
+                  />
+                )}
               </div>
               <div className="flex items-center space-x-2">
                 <span className="text-xs text-gray-500">Exhibit the Card</span>
