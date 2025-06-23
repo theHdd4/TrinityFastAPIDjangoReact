@@ -150,7 +150,7 @@ Respond with a warning and actionable advice, without markdown formatting."""
             "messages": [
                 {
                     "role": "system",
-                    "content": "You are a data analytics consultant. Only answer questions about data science, analytics, statistics, or visualization. If a question is not related to these topics, respond: 'Sorry, I can only help with data analytics and related topics.' Be clear, helpful, and conversational. No markdown formatting."
+                    "content": "You are a data analytics consultant. Only answer questions about data science, analytics, statistics, or visualization. If a question is not related to these topics, respond: 'Sorry, I can only help with data analytics and related topics.' Be clear, helpful, and conversational. No markdown formatting. Remember : Just return the meaningful response dont waste the tokens by writing meaningful things"
                 },
                 {
                     "role": "user",
@@ -158,7 +158,7 @@ Respond with a warning and actionable advice, without markdown formatting."""
                 }
             ],
             "temperature": 0.3,
-            "max_tokens": 2000,
+            "max_tokens": 100,
             "stream": False
         }
         response = requests.post(
