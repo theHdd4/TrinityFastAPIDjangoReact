@@ -75,6 +75,10 @@ const Header = () => {
     navigate('/apps');
   };
 
+  const handleRename = (name: string) => {
+    setProjectName(name);
+  };
+
   const isProjects = location.pathname.startsWith('/projects');
   const simpleHeader =
     location.pathname.startsWith('/apps') || isProjects;
@@ -93,7 +97,11 @@ const Header = () => {
       <div className="flex items-center space-x-4">
         {!simpleHeader && (
           <>
-            <AppIdentity projectName={projectName} onGoBack={handleGoBack} />
+            <AppIdentity
+              projectName={projectName}
+              onGoBack={handleGoBack}
+              onRename={handleRename}
+            />
             <Searchbar />
           </>
         )}
