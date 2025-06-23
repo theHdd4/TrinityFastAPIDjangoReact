@@ -29,6 +29,21 @@ const WorkflowMode = () => {
 
   const handleCanvasMoleculesUpdate = useCallback((molecules: any[]) => {
     setCanvasMolecules(molecules);
+
+    const current = localStorage.getItem('current-project');
+    if (current) {
+      try {
+        const proj = JSON.parse(current);
+        fetch(`${REGISTRY_API}/projects/${proj.id}/`, {
+          method: 'PATCH',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ state: { workflow_canvas: molecules } })
+        }).catch(() => {});
+      } catch {
+        /* ignore */
+      }
+    }
   }, []);
 
   const renderWorkflow = async () => {

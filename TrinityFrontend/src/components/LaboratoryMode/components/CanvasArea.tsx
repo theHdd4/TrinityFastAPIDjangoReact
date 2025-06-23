@@ -195,6 +195,28 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
         moleculeTitle: card.moleculeTitle
       }));
       localStorage.setItem(STORAGE_KEY, safeStringify(serializable));
+
+      const labConfig = {
+        cards: serializable,
+        exhibitedCards: serializable.filter(c => c.isExhibited),
+        timestamp: new Date().toISOString()
+      };
+      localStorage.setItem('laboratory-config', safeStringify(labConfig));
+
+      const current = localStorage.getItem('current-project');
+      if (current) {
+        try {
+          const proj = JSON.parse(current);
+          fetch(`${REGISTRY_API}/projects/${proj.id}/`, {
+            method: 'PATCH',
+            credentials: 'include',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ state: { laboratory_config: labConfig } })
+          }).catch(() => {});
+        } catch {
+          /* ignore */
+        }
+      }
     } catch (err) {
       console.error('Failed to persist laboratory layout', err);
     }
