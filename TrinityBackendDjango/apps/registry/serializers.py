@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from django.contrib.auth import get_user_model
-from .models import App, Project, Session
+from .models import App, Project, Session, LaboratoryAction
 
 User = get_user_model()
 
@@ -41,3 +41,10 @@ class SessionSerializer(serializers.ModelSerializer):
         model = Session
         fields = ["id", "project", "user", "context", "created_at", "updated_at"]
         read_only_fields = ["id", "user", "created_at", "updated_at"]
+
+
+class LaboratoryActionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = LaboratoryAction
+        fields = ["id", "project", "user", "state", "created_at"]
+        read_only_fields = ["id", "user", "created_at"]

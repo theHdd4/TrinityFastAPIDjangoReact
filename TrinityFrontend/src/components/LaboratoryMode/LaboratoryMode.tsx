@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { Play, Save, Share2 } from 'lucide-react';
+import { Play, Save, Share2, Undo2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import Header from '@/components/Header';
 import { safeStringify } from '@/utils/safeStringify';
@@ -9,7 +9,8 @@ import AtomLibrary from '@/components/AtomList/AtomLibrary';
 import CanvasArea from './components/CanvasArea';
 import SettingsPanel from './components/SettingsPanel';
 import { useExhibitionStore } from '@/components/ExhibitionMode/store/exhibitionStore';
-import { REGISTRY_API } from '@/lib/api';
+import { REGISTRY_API, LAB_ACTIONS_API } from '@/lib/api';
+import { useLaboratoryStore } from './store/laboratoryStore';
 
 const LaboratoryMode = () => {
   const [selectedAtomId, setSelectedAtomId] = useState<string>();
@@ -18,6 +19,41 @@ const LaboratoryMode = () => {
   const [isSettingsCollapsed, setIsSettingsCollapsed] = useState(false);
   const { toast } = useToast();
   const { cards, setCards } = useExhibitionStore();
+  const setLabCards = useLaboratoryStore(state => state.setCards);
+
+  const handleUndo = async () => {
+    const current = localStorage.getItem('current-project');
+    if (!current) return;
+    try {
+      const proj = JSON.parse(current);
+      const res = await fetch(`${LAB_ACTIONS_API}/?project=${proj.id}`, { credentials: 'include' });
+      if (res.ok) {
+        const data = await res.json();
+        const last = Array.isArray(data) ? data[0] : data.results?.[0];
+        if (last && last.state) {
+          setLabCards(last.state);
+          setCards(last.state);
+          localStorage.setItem('laboratory-layout-cards', safeStringify(last.state));
+          const labConfig = {
+            cards: last.state,
+            exhibitedCards: last.state.filter((c: any) => c.isExhibited),
+            timestamp: new Date().toISOString(),
+          };
+          localStorage.setItem('laboratory-config', safeStringify(labConfig));
+          await fetch(`${REGISTRY_API}/projects/${proj.id}/`, {
+            method: 'PATCH',
+            credentials: 'include',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ state: { laboratory_config: labConfig } }),
+          }).catch(() => {});
+          await fetch(`${LAB_ACTIONS_API}/${last.id}/`, { method: 'DELETE', credentials: 'include' }).catch(() => {});
+          toast({ title: 'Undo', description: 'Last change reverted' });
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+  };
 
   const handleAtomDragStart = (e: React.DragEvent, atomId: string) => {
     const atomData = { id: atomId };
@@ -90,9 +126,18 @@ const LaboratoryMode = () => {
           </div>
           
           <div className="flex items-center space-x-3">
-            <Button 
-              variant="outline" 
-              size="sm" 
+            <Button
+              variant="outline"
+              size="sm"
+              className="border-gray-200 hover:bg-gray-50 text-gray-700 font-medium"
+              onClick={handleUndo}
+            >
+              <Undo2 className="w-4 h-4 mr-2" />
+              Undo
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
               className="border-gray-200 hover:bg-gray-50 text-gray-700 font-medium"
               onClick={handleSave}
             >

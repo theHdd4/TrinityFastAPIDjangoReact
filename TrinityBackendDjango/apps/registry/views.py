@@ -1,7 +1,12 @@
 from rest_framework import viewsets, permissions
 from apps.accounts.views import CsrfExemptSessionAuthentication
-from .models import App, Project, Session
-from .serializers import AppSerializer, ProjectSerializer, SessionSerializer
+from .models import App, Project, Session, LaboratoryAction
+from .serializers import (
+    AppSerializer,
+    ProjectSerializer,
+    SessionSerializer,
+    LaboratoryActionSerializer,
+)
 
 
 class AppViewSet(viewsets.ModelViewSet):
@@ -67,6 +72,26 @@ class SessionViewSet(viewsets.ModelViewSet):
         if user.is_staff:
             return self.queryset
         return self.queryset.filter(user=user)
+
+    def perform_create(self, serializer):
+        serializer.save(user=self.request.user)
+
+
+class LaboratoryActionViewSet(viewsets.ModelViewSet):
+    """Create and list undo snapshots."""
+
+    queryset = LaboratoryAction.objects.select_related("project", "user").all()
+    serializer_class = LaboratoryActionSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    authentication_classes = [CsrfExemptSessionAuthentication]
+
+    def get_queryset(self):
+        user = self.request.user
+        qs = self.queryset.filter(user=user)
+        project_param = self.request.query_params.get("project")
+        if project_param:
+            qs = qs.filter(project__id=project_param)
+        return qs
 
     def perform_create(self, serializer):
         serializer.save(user=self.request.user)

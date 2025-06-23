@@ -76,3 +76,23 @@ class Session(models.Model):
 
     def __str__(self):
         return f"Session {self.id} on {self.project.name}"
+
+
+class LaboratoryAction(models.Model):
+    """Snapshot of lab state for undo functionality."""
+
+    project = models.ForeignKey(
+        Project, on_delete=models.CASCADE, related_name="laboratory_actions"
+    )
+    user = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name="laboratory_actions"
+    )
+    state = models.JSONField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    history = HistoricalRecords()
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"Action on {self.project.name} by {self.user.username}"

@@ -7,7 +7,7 @@ import { Plus, Grid3X3, Trash2, Eye } from 'lucide-react';
 import { useExhibitionStore } from '../../ExhibitionMode/store/exhibitionStore';
 import { atoms as allAtoms } from '@/components/AtomList/data';
 import { molecules } from '@/components/MoleculeList/data';
-import { REGISTRY_API, TEXT_API, CARD_API } from '@/lib/api';
+import { REGISTRY_API, TEXT_API, CARD_API, LAB_ACTIONS_API } from '@/lib/api';
 import { AIChatBot } from '@/components/TrinityAI';
 import TextBoxEditor from '@/components/AtomList/atoms/text-box/TextBoxEditor';
 import DataUploadValidateAtom from '@/components/AtomList/atoms/data-upload-validate/DataUploadValidateAtom';
@@ -59,6 +59,8 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
   const [workflowMolecules, setWorkflowMolecules] = useState<WorkflowMolecule[]>([]);
   const [activeTab, setActiveTab] = useState<string>('');
   const [dragOver, setDragOver] = useState<string | null>(null);
+  const prevLayout = React.useRef<LayoutCard[] | null>(null);
+  const initialLoad = React.useRef(true);
   
   const { updateCard, setCards } = useExhibitionStore();
 
@@ -184,8 +186,29 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
     }
   }, []);
 
-  // Persist layout to localStorage safely
+  // Persist layout to localStorage safely and store undo snapshot
   useEffect(() => {
+    if (initialLoad.current) {
+      prevLayout.current = layoutCards.map(c => ({ ...c, atoms: [...c.atoms] }));
+      initialLoad.current = false;
+    } else if (prevLayout.current) {
+      const current = localStorage.getItem('current-project');
+      if (current) {
+        try {
+          const proj = JSON.parse(current);
+          fetch(`${LAB_ACTIONS_API}/`, {
+            method: 'POST',
+            credentials: 'include',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ project: proj.id, state: prevLayout.current }),
+          }).catch(() => {});
+        } catch {
+          /* ignore */
+        }
+      }
+      prevLayout.current = layoutCards.map(c => ({ ...c, atoms: [...c.atoms] }));
+    }
+
     try {
       const serializable = layoutCards.map(card => ({
         id: card.id,

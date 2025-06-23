@@ -30,3 +30,5 @@ export const VALIDATE_API =
 
 export const TRINITY_AI_API =
   import.meta.env.VITE_TRINITY_AI_API || backendOrigin.replace(/:8000$/, ':8002');
+
+export const LAB_ACTIONS_API = `${REGISTRY_API}/laboratory-actions`;
