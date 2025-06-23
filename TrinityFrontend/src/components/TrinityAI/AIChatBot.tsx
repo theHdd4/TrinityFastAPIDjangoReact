@@ -58,12 +58,26 @@ const AIChatBot: React.FC<AIChatBotProps> = ({ cardId, cardTitle, onAddAtom }) =
       });
       if (res.ok) {
         const data = await res.json();
-        const atomName = data.atom_name || (Array.isArray(data.relevant_atoms) && data.relevant_atoms[0]?.name);
-        const text = data.message || data.response ||
-          `I understand you're looking for "${userMessage.content}". Here are some atoms that might help with that functionality.`;
+        const finalText =
+          data.final_response ||
+          data.message ||
+          data.response ||
+          `I understand you're looking for "${userMessage.content}".`;
+
+        let atomName: string | undefined;
+        if (data.match_type === 'single' && data.atom_status && data.atom_name) {
+          atomName = data.atom_name;
+        }
+
+        let messageText = finalText;
+        if (data.match_type === 'multi' && Array.isArray(data.relevant_atoms)) {
+          const list = data.relevant_atoms.map((a: any) => a.name).join(', ');
+          messageText += `\n\nRecommended atoms: ${list}`;
+        }
+
         const aiMessage: Message = {
           id: (Date.now() + 1).toString(),
-          content: text,
+          content: messageText,
           sender: 'ai',
           timestamp: new Date()
         };

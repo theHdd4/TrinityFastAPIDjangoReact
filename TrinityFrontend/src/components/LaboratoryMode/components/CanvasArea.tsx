@@ -271,8 +271,13 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
   };
 
 
+  const normalizeName = (s: string) => s.toLowerCase().replace(/[\s_-]/g, '');
+
   const addAtomByName = (cardId: string, atomName: string) => {
-    const info = allAtoms.find(a => a.id === atomName || a.title.toLowerCase() === atomName.toLowerCase());
+    const norm = normalizeName(atomName);
+    const info = allAtoms.find(
+      a => normalizeName(a.id) === norm || normalizeName(a.title) === norm
+    );
     if (!info) return;
     const newAtom: DroppedAtom = {
       id: `${info.id}-${Date.now()}`,
