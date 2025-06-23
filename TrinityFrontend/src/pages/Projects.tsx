@@ -198,6 +198,10 @@ const Projects = () => {
         } else {
           localStorage.removeItem('workflow-canvas-molecules');
         }
+        // ensure previous selections don't bleed into a new project
+        localStorage.removeItem('workflow-selected-atoms');
+        localStorage.removeItem('laboratory-config');
+        localStorage.removeItem('laboratory-layout-cards');
 
         try {
           await fetch(`${REGISTRY_API}/projects/${project.id}/`, {
@@ -277,12 +281,19 @@ const Projects = () => {
         }
         if (data.state && data.state.workflow_selected_atoms) {
           localStorage.setItem('workflow-selected-atoms', safeStringify(data.state.workflow_selected_atoms));
+        } else {
+          localStorage.removeItem('workflow-selected-atoms');
         }
         if (data.state && data.state.laboratory_config) {
           localStorage.setItem('laboratory-config', safeStringify(data.state.laboratory_config));
           if (data.state.laboratory_config.cards) {
             localStorage.setItem('laboratory-layout-cards', safeStringify(data.state.laboratory_config.cards));
+          } else {
+            localStorage.removeItem('laboratory-layout-cards');
           }
+        } else {
+          localStorage.removeItem('laboratory-config');
+          localStorage.removeItem('laboratory-layout-cards');
         }
       }
     } catch {
