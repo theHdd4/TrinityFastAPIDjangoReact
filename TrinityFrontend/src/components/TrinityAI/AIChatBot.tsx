@@ -19,9 +19,10 @@ interface AIChatBotProps {
   cardId: string;
   cardTitle: string;
   onAddAtom?: (cardId: string, atomName: string) => void;
+  disabled?: boolean;
 }
 
-const AIChatBot: React.FC<AIChatBotProps> = ({ cardId, cardTitle, onAddAtom }) => {
+const AIChatBot: React.FC<AIChatBotProps> = ({ cardId, cardTitle, onAddAtom, disabled }) => {
   const [messages, setMessages] = useState<Message[]>([
     {
       id: '1',
@@ -34,6 +35,7 @@ const AIChatBot: React.FC<AIChatBotProps> = ({ cardId, cardTitle, onAddAtom }) =
   const [isLoading, setIsLoading] = useState(false);
   const [showSuggestions, setShowSuggestions] = useState(true);
   const [isOpen, setIsOpen] = useState(false);
+  const [interactionDone, setInteractionDone] = useState(false);
 
   const handleSendMessage = async () => {
     if (!inputValue.trim()) return;
@@ -84,6 +86,7 @@ const AIChatBot: React.FC<AIChatBotProps> = ({ cardId, cardTitle, onAddAtom }) =
         setMessages(prev => [...prev, aiMessage]);
         if (atomName && onAddAtom) {
           onAddAtom(cardId, atomName);
+          setInteractionDone(true);
         }
       }
     } catch {
@@ -112,9 +115,12 @@ const AIChatBot: React.FC<AIChatBotProps> = ({ cardId, cardTitle, onAddAtom }) =
   };
 
   return (
-    <Popover open={isOpen} onOpenChange={setIsOpen}>
+    <Popover open={isOpen} onOpenChange={(open) => !disabled && setIsOpen(open)}>
       <PopoverTrigger asChild>
-        <button className="p-1 hover:bg-gray-100 rounded" title="Use Trinity AI">
+        <button
+          className={`p-1 rounded ${disabled ? 'opacity-50 cursor-not-allowed' : 'hover:bg-gray-100'}`}
+          title="Use Trinity AI"
+        >
           <Zap className="w-4 h-4 text-gray-400" />
         </button>
       </PopoverTrigger>
@@ -200,32 +206,34 @@ const AIChatBot: React.FC<AIChatBotProps> = ({ cardId, cardTitle, onAddAtom }) =
         </ScrollArea>
 
         {/* Suggestions Section */}
-        {showSuggestions && messages.length <= 1 && (
+        {showSuggestions && messages.length <= 1 && !interactionDone && (
           <div className="p-4 border-t border-gray-200 max-h-48 overflow-y-auto">
             <ChatSuggestions onSuggestionClick={handleSuggestionClick} />
           </div>
         )}
 
         {/* Chat Input */}
-        <div className="p-4 border-t border-gray-200 bg-white rounded-b-lg">
-          <div className="flex space-x-2">
-            <Textarea
-              value={inputValue}
-              onChange={(e) => setInputValue(e.target.value)}
-              onKeyPress={handleKeyPress}
-              placeholder="Ask AI to..."
-              className="flex-1 min-h-[60px] resize-none border-gray-300 focus:border-blue-500 focus:ring-blue-500"
-              disabled={isLoading}
-            />
-            <Button
-              onClick={handleSendMessage}
-              disabled={!inputValue.trim() || isLoading}
-              className="bg-blue-500 hover:bg-blue-600 text-white self-end h-[60px] px-4"
-            >
-              <Send className="w-4 h-4" />
-            </Button>
+        {!interactionDone && (
+          <div className="p-4 border-t border-gray-200 bg-white rounded-b-lg">
+            <div className="flex space-x-2">
+              <Textarea
+                value={inputValue}
+                onChange={(e) => setInputValue(e.target.value)}
+                onKeyPress={handleKeyPress}
+                placeholder="Ask AI to..."
+                className="flex-1 min-h-[60px] resize-none border-gray-300 focus:border-blue-500 focus:ring-blue-500"
+                disabled={isLoading}
+              />
+              <Button
+                onClick={handleSendMessage}
+                disabled={!inputValue.trim() || isLoading}
+                className="bg-blue-500 hover:bg-blue-600 text-white self-end h-[60px] px-4"
+              >
+                <Send className="w-4 h-4" />
+              </Button>
+            </div>
           </div>
-        </div>
+        )}
       </PopoverContent>
     </Popover>
   );

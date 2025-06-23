@@ -17,6 +17,8 @@
    ```
 
    Visit `http://localhost:8080` in your browser.
-5. In Laboratory mode each card now shows a small lightning icon. Click it to open the Trinity AI chat box.
-   Enter a prompt describing the atom you want and press **Send**. The chat box
-   calls the AI service and automatically inserts the returned atom into the card.
+5. In Laboratory mode each card shows a small lightning icon. Click it to open
+   the Trinity AI chat box and enter a prompt describing the atom you want.
+   When the AI finds a matching atom it is dragged into the card automatically
+   and the lightning icon becomes inactive. Re‑enable it by removing all atoms
+   from the card.
