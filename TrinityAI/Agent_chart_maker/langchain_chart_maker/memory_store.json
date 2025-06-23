@@ -1,0 +1,89 @@
+{
+  "eaa12ec5-f7e3-47a7-9575-9a1e575a9339": {
+    "state": {
+      "traces": [
+        {
+          "y_column": "VOLUME"
+        }
+      ]
+    },
+    "memory": [
+      {
+        "role": "user",
+        "content": "Y col is VOLUME"
+      },
+      {
+        "role": "assistant",
+        "content": "<think>\nOkay, let me try to figure out how to handle this query. The user said, \"Y col is VOLUME.\" From our conversation history, I remember that they initially set up some chart properties but didn't specify any fields yet. Now, their latest message mentions setting the Y column to \"VOLUME.\"\n\nLooking at the rules, I need to extract only the fields explicitly mentioned. In this case, it's the y_column under traces. Since the chart configuration is empty so far, I should create a new trace object and set its y_column to \"VOLUME.\" \n\nI have to make sure not to include any other fields unless specified. Also, since there's no previous context here beyond the initial setup, I don't need to worry about overwriting anything else.\n\nSo, putting it all together, the JSON should only contain the traces array with a single object that has y_column set to \"VOLUME.\" I won't include any other properties like x_column or name because they weren't mentioned. This way, I'm following rule 2 by outputting only new/updated fields and rule 3 by not repeating values from previous context.\n</think>\n\n{\"traces\": [{\"y_column\": \"VOLUME\"}]}"
+      }
+    ]
+  },
+  "abda7f42-82e0-4e6a-bed3-a8a416e33173": {
+    "state": {
+      "x_label": {
+        "text": "Price"
+      }
+    },
+    "memory": [
+      {
+        "role": "user",
+        "content": "x col is price"
+      },
+      {
+        "role": "assistant",
+        "content": "<think>\nAlright, let's figure out how to handle this query. The user said, \"x col is price.\" From previous interactions, I know they're working with a chart configuration.\n\nThe latest message mentions setting the x column to \"price.\" Looking at the schema, there's an x_label field that includes a text property. So, I need to update the x_label.text to \"Price.\"\n\nI should make sure not to include any other fields unless mentioned. Also, since it's the first time, there's nothing in the current context, so no repetition of values.\n\nThe output needs to be a single JSON object with only the new field. No explanations or extra text.\n</think>\n\n{\"x_label\": {\"text\": \"Price\"}}"
+      }
+    ]
+  },
+  "a937ca43-1304-4968-8e56-b328adf476fa": {
+    "state": {
+      "title": {
+        "text": "first chart"
+      }
+    },
+    "memory": [
+      {
+        "role": "user",
+        "content": "rename the chart titile as first chart "
+      },
+      {
+        "role": "assistant",
+        "content": "<think>\nAlright, let me figure out how to respond to this user's query. The user said, \"rename the chart title as first chart.\" I need to extract only the fields mentioned in their latest message.\n\nLooking at the schema reference, the relevant field is under \"title\", specifically the \"text\" property. So, I should update that text to \"first chart\".\n\nI have to make sure my JSON output includes only this new/updated field. Since there are no other mentions, nothing else needs to be included.\n\nAlso, according to rule 3, I shouldn't repeat values from previous context. The user didn't specify any changes beyond renaming the title, so the rest remains as is.\n\nI need to construct a valid JSON object with just the \"title\" field containing the new text.\n</think>\n\n{\"title\":{\"text\":\"first chart\"}}"
+      }
+    ]
+  },
+  "6eb134b3-0920-488c-8f10-f5732383e08b": {
+    "state": {
+      "title": {
+        "text": "first chart"
+      }
+    },
+    "memory": [
+      {
+        "role": "user",
+        "content": "rename the chart titile as first chart "
+      },
+      {
+        "role": "assistant",
+        "content": "<think>\nOkay, I need to help the user by extracting chart properties based on their instruction. The latest message is \"rename the chart titile as first chart\". \n\nFirst, I'll analyze this sentence. They mentioned renaming the title, so the key field here is the title's text. They want it changed to \"first chart\". \n\nLooking at the schema reference, the title has a nested structure with \"text\", \"font_size\", and \"font_color\". Since only the text is being updated, I should create a JSON object that reflects this change.\n\nI also need to follow the rules: extract only mentioned fields, output only new/updated fields without repeating previous values. The user didn't mention any other properties, so my JSON will focus solely on the title's text.\n\nSo the correct structure is {\"title\": {\"text\": \"first chart\"}}. I'll make sure there are no extra characters or explanations as per the instructions.\n</think>\n\n{\"title\": {\"text\": \"first chart\"}}"
+      }
+    ]
+  },
+  "ad36c55e-f2e8-48f0-9923-ef18566eeb1f": {
+    "state": {
+      "title": {
+        "text": "first chart"
+      }
+    },
+    "memory": [
+      {
+        "role": "user",
+        "content": "need to updatethe chart title as first chart"
+      },
+      {
+        "role": "assistant",
+        "content": "<think>\nOkay, I need to help the user update their chart configuration based on their message. Let's see what they said: \"need to updatethe chart title as first chart\". Hmm, it looks like there might be a typo with \"updatethe\" missing a space. But regardless, the main point is about updating the chart title.\n\nLooking at the schema reference provided, I know that the chart configuration includes a \"title\" field which has \"text\", \"font_size\", and \"font_color\". The user specifically mentioned changing the title to \"first chart\". So, I should extract only the fields they've explicitly mentioned. That means updating the \"text\" property under \"title\".\n\nSince there are no other mentions of font size or color, I shouldn't include those unless necessary. According to the rules, I need to output JSON with only new or updated fields and avoid repeating previous values.\n\nI should make sure the JSON is valid and doesn't have any extra text. The response should be minimal, just the \"title\" field with the new text. \n\nSo putting it all together, the JSON object will have the \"title\" key containing a \"text\" value of \"first chart\". That's all that's needed based on the user's request.\n</think>\n\n{\"title\": {\"text\": \"first chart\"}}"
+      }
+    ]
+  }
+}

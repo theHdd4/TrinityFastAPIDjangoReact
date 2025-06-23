@@ -10,8 +10,6 @@ build/
 *.sqlite3
 .env
 .env.*
-
-# Byte-compiled / optimized / DLL files
 *.pyc
 *.pyo
 *.pyd
@@ -19,40 +17,41 @@ build/
 *.lib
 *.exe
 
-# Virtual environments
-C:\Users\Quant Matrix\Downloads\OneDrive - QuantMatrix AI Solutions\TrinityFastAPIDjangoReactTrinityAI/Agent_fetch_atom/agentic/
-
-venv/
+# === Virtual environments ===
+agentic/
 env/
 ENV/
-.venv/
+.agentic/
 .ENV/
 **/Lib/
 **/Scripts/
-agentic/
-# Pip
+
+# === Agentic app ===
+TrinityAI/Agent_fetch_atom/agentic/
+TrinityAI/Agent_fetch_atom/agentic/Lib/
+
+# === Pip ===
 pip-log.txt
 pip-delete-this-directory.txt
 
-# Jupyter Notebooks
+# === Jupyter Notebooks ===
 .ipynb_checkpoints/
 
-# PyInstaller
+# === PyInstaller ===
 *.manifest
 *.spec
 
-# mypy
+# === mypy ===
 .mypy_cache/
 
-# coverage
+# === coverage ===
 .coverage
 htmlcov/
 coverage.xml
 
-# pytest
+# === pytest ===
 .cache/
 nosetests.xml
-coverage.xml
 *.cover
 *.py,cover
 
@@ -60,14 +59,13 @@ coverage.xml
 *.db
 *.sqlite3
 *.pot
-*.pyc
 local_settings.py
 db.sqlite3
 media/
 staticfiles/
 
 # === FastAPI ===
-# Nothing specific, already covered by general Python rules
+# Covered by general Python rules
 
 # === React (Create React App) ===
 node_modules/
@@ -78,7 +76,6 @@ yarn-error.log*
 package-lock.json
 yarn.lock
 .DS_Store
-*.local
 
 # React env files
 .env.local
@@ -98,4 +95,3 @@ yarn.lock
 Thumbs.db
 ehthumbs.db
 Desktop.ini
-.DS_Store
