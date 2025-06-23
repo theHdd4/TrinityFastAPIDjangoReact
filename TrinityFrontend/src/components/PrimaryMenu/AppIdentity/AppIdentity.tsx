@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import BackToAppsIcon from '../TrinityAssets/BackToAppsIcon';
-import { Pencil } from 'lucide-react';
 import { REGISTRY_API } from '@/lib/api';
 
 interface AppIdentityProps {
@@ -64,11 +63,10 @@ const AppIdentity: React.FC<AppIdentityProps> = ({ projectName, onGoBack, onRena
               autoFocus
             />
           ) : (
-            <span>{projectName}</span>
+            <span onClick={startEdit} className="cursor-pointer hover:underline">
+              {projectName}
+            </span>
           )}
-          <button type="button" onClick={startEdit} className="p-1" title="Rename project">
-            <Pencil className="w-4 h-4" />
-          </button>
           <button
             type="button"
             onClick={onGoBack}
