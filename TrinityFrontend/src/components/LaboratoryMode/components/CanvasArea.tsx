@@ -270,17 +270,25 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
     }
   };
 
-  const addNewCard = (moleculeId?: string) => {
-    const info = moleculeId ? molecules.find(m => m.id === moleculeId) : undefined;
-    const newCard: LayoutCard = {
-      id: `card-${Date.now()}`,
-      atoms: [],
-      isExhibited: false,
-      moleculeId,
-      moleculeTitle: info?.title
-    };
-    setLayoutCards([...layoutCards, newCard]);
+const addNewCard = (moleculeId?: string, position?: number) => {
+  const info = moleculeId ? molecules.find(m => m.id === moleculeId) : undefined;
+  const newCard: LayoutCard = {
+    id: `card-${Date.now()}`,
+    atoms: [],
+    isExhibited: false,
+    moleculeId,
+    moleculeTitle: info?.title
   };
+  if (position === undefined || position >= layoutCards.length) {
+    setLayoutCards([...layoutCards, newCard]);
+  } else {
+    setLayoutCards([
+      ...layoutCards.slice(0, position),
+      newCard,
+      ...layoutCards.slice(position)
+    ]);
+  }
+};
 
   const removeAtom = (cardId: string, atomId: string) => {
     setLayoutCards(
@@ -580,8 +588,8 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
               ? card.atoms[0].title
               : 'Card';
           return (
+          <React.Fragment key={card.id}>
           <Card
-            key={card.id}
             className={`w-full min-h-[200px] bg-white rounded-2xl border-2 transition-all duration-300 flex flex-col ${
               dragOver === card.id
                 ? 'border-[#458EE2] bg-gradient-to-br from-blue-50 to-blue-100 shadow-lg'
@@ -681,6 +689,19 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
               )}
             </div>
           </Card>
+          {index < layoutCards.length - 1 && (
+            <div className="flex justify-center my-4">
+              <button
+                onClick={() => addNewCard(undefined, index + 1)}
+                className="flex items-center space-x-2 px-6 py-2 bg-white border-2 border-dashed border-gray-300 rounded-xl hover:border-[#458EE2] hover:bg-blue-50 transition-all duration-200 group"
+                title="Add new card"
+              >
+                <Plus className="w-5 h-5 text-gray-400 group-hover:text-[#458EE2]" />
+                <span className="text-gray-600 group-hover:text-[#458EE2] font-medium">Add a new card</span>
+              </button>
+            </div>
+          )}
+          </React.Fragment>
           );
         })}
 
