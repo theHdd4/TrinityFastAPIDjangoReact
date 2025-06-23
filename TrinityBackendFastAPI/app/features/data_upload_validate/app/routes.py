@@ -387,19 +387,16 @@ async def create_new(
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"Error reading file {file.filename}: {str(e)}")
 
-        # Parse file to DataFrame. Allow any file extension and try both CSV and Excel parsers
+        # Parse file to DataFrame
         try:
             if file.filename.lower().endswith(".csv"):
                 df = pd.read_csv(io.BytesIO(content))
-            else:
-                # Default to Excel parser for all other extensions
+            elif file.filename.lower().endswith(".xlsx"):
                 df = pd.read_excel(io.BytesIO(content))
-        except Exception:
-            try:
-                # Fallback to CSV parser if Excel parsing fails
-                df = pd.read_csv(io.BytesIO(content), engine="python")
-            except Exception as e:
-                raise HTTPException(status_code=400, detail=f"Error parsing file {file.filename}: {str(e)}")
+            else:
+                raise HTTPException(status_code=400, detail="Only CSV and XLSX files supported")
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Error parsing file {file.filename}: {str(e)}")
 
         # ✅ PREPROCESS COLUMN NAMES - Remove spaces but preserve underscores
         df.columns = [preprocess_column_name(col) for col in df.columns]
@@ -1792,32 +1789,28 @@ async def validate(
             content = await file.read()
             file_contents.append((content, file.filename, key))
 
-            # Attempt to parse as CSV or Excel regardless of extension
+            # Only allow CSV and XLSX files
             try:
                 if file.filename.lower().endswith(".csv"):
                     df = pd.read_csv(io.BytesIO(content))
+                elif file.filename.lower().endswith(".xlsx"):
+                    df = pd.read_excel(io.BytesIO(content))
                 else:
-                    df = pd.read_excel(io.BytesIO(content))
-            except Exception:
-                try:
-                    df = pd.read_excel(io.BytesIO(content))
-                except Exception:
-                    try:
-                        df = pd.read_csv(io.BytesIO(content), engine="python")
-                    except Exception as e:
-                        parse_failures[key] = {
-                            "status": "failed",
-                            "errors": [f"Unable to parse file {file.filename}: {str(e)}"],
-                            "warnings": [],
-                            "auto_corrections": [],
-                            "condition_failures": [],
-                            "columns_checked": 0,
-                            "mandatory_columns_missing": 0,
-                            "extra_columns_found": 0,
-                            "data_corrections_applied": 0,
-                            "custom_conditions_failed": 0,
-                        }
-                        continue
+                    raise ValueError("Only CSV and XLSX files supported")
+            except Exception as e:
+                parse_failures[key] = {
+                    "status": "failed",
+                    "errors": [f"Error parsing file {file.filename}: {str(e)}"],
+                    "warnings": [],
+                    "auto_corrections": [],
+                    "condition_failures": [],
+                    "columns_checked": 0,
+                    "mandatory_columns_missing": 0,
+                    "extra_columns_found": 0,
+                    "data_corrections_applied": 0,
+                    "custom_conditions_failed": 0,
+                }
+                continue
 
             # ✅ Preprocess columns (same logic as create_new)
             df.columns = [preprocess_column_name(col) for col in df.columns]
