@@ -561,11 +561,11 @@ const addNewCard = (moleculeId?: string, position?: number) => {
                     <div className="flex justify-center">
                       <button
                         onClick={() => addNewCard(molecule.moleculeId)}
-                        className="flex items-center px-2 py-2 bg-white border-2 border-dashed border-gray-300 rounded-xl hover:border-[#458EE2] hover:bg-blue-50 transition-all duration-200 group"
+                        className="flex items-center px-2 py-2 bg-white border-2 border-dashed border-gray-300 rounded-xl hover:border-[#458EE2] hover:bg-blue-50 transition-all duration-500 ease-in-out group"
                       >
                         <Plus className="w-5 h-5 text-gray-400 group-hover:text-[#458EE2]" />
                         <span
-                          className="max-w-0 overflow-hidden ml-0 group-hover:ml-2 group-hover:max-w-[120px] text-gray-600 group-hover:text-[#458EE2] font-medium whitespace-nowrap transition-all duration-200"
+                          className="max-w-0 overflow-hidden ml-0 group-hover:ml-2 group-hover:max-w-[120px] text-gray-600 group-hover:text-[#458EE2] font-medium whitespace-nowrap transition-all duration-500 ease-in-out"
                         >
                           Add New Card
                         </span>
@@ -697,12 +697,12 @@ const addNewCard = (moleculeId?: string, position?: number) => {
             <div className="flex justify-center my-4">
               <button
                 onClick={() => addNewCard(undefined, index + 1)}
-                className="flex items-center px-2 py-2 bg-white border-2 border-dashed border-gray-300 rounded-xl hover:border-[#458EE2] hover:bg-blue-50 transition-all duration-200 group"
+                className="flex items-center px-2 py-2 bg-white border-2 border-dashed border-gray-300 rounded-xl hover:border-[#458EE2] hover:bg-blue-50 transition-all duration-500 ease-in-out group"
                 title="Add new card"
               >
                 <Plus className="w-5 h-5 text-gray-400 group-hover:text-[#458EE2]" />
                 <span
-                  className="max-w-0 overflow-hidden ml-0 group-hover:ml-2 group-hover:max-w-[120px] text-gray-600 group-hover:text-[#458EE2] font-medium whitespace-nowrap transition-all duration-200"
+                  className="max-w-0 overflow-hidden ml-0 group-hover:ml-2 group-hover:max-w-[120px] text-gray-600 group-hover:text-[#458EE2] font-medium whitespace-nowrap transition-all duration-500 ease-in-out"
                 >
                   Add New Card
                 </span>
@@ -717,11 +717,11 @@ const addNewCard = (moleculeId?: string, position?: number) => {
         <div className="flex justify-center">
           <button
             onClick={() => addNewCard()}
-            className="flex items-center px-2 py-2 bg-white border-2 border-dashed border-gray-300 rounded-xl hover:border-[#458EE2] hover:bg-blue-50 transition-all duration-200 group"
+            className="flex items-center px-2 py-2 bg-white border-2 border-dashed border-gray-300 rounded-xl hover:border-[#458EE2] hover:bg-blue-50 transition-all duration-500 ease-in-out group"
           >
             <Plus className="w-5 h-5 text-gray-400 group-hover:text-[#458EE2]" />
             <span
-              className="max-w-0 overflow-hidden ml-0 group-hover:ml-2 group-hover:max-w-[120px] text-gray-600 group-hover:text-[#458EE2] font-medium whitespace-nowrap transition-all duration-200"
+              className="max-w-0 overflow-hidden ml-0 group-hover:ml-2 group-hover:max-w-[120px] text-gray-600 group-hover:text-[#458EE2] font-medium whitespace-nowrap transition-all duration-500 ease-in-out"
             >
               Add New Card
             </span>
