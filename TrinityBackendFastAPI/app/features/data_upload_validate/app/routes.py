@@ -387,16 +387,19 @@ async def create_new(
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"Error reading file {file.filename}: {str(e)}")
 
-        # Parse file to DataFrame
+        # Parse file to DataFrame. Allow any file extension and try both CSV and Excel parsers
         try:
             if file.filename.lower().endswith(".csv"):
                 df = pd.read_csv(io.BytesIO(content))
-            elif file.filename.lower().endswith(".xlsx"):
-                df = pd.read_excel(io.BytesIO(content))
             else:
-                raise HTTPException(status_code=400, detail="Only CSV and XLSX files supported")
-        except Exception as e:
-            raise HTTPException(status_code=400, detail=f"Error parsing file {file.filename}: {str(e)}")
+                # Default to Excel parser for all other extensions
+                df = pd.read_excel(io.BytesIO(content))
+        except Exception:
+            try:
+                # Fallback to CSV parser if Excel parsing fails
+                df = pd.read_csv(io.BytesIO(content), engine="python")
+            except Exception as e:
+                raise HTTPException(status_code=400, detail=f"Error parsing file {file.filename}: {str(e)}")
 
         # ✅ PREPROCESS COLUMN NAMES - Remove spaces but preserve underscores
         df.columns = [preprocess_column_name(col) for col in df.columns]
@@ -1782,29 +1785,92 @@ async def validate(
     # ✅ Parse files and store content for MinIO
     files_data = []
     file_contents = []
+    parse_failures = {}
     
     for file, key in zip(files, keys):
         try:
             content = await file.read()
             file_contents.append((content, file.filename, key))
-            
-            # Parse file based on extension
-            if file.filename.lower().endswith(".csv"):
-                df = pd.read_csv(io.BytesIO(content))
-            elif file.filename.lower().endswith(".xlsx"):
-                df = pd.read_excel(io.BytesIO(content))
-            else:
-                raise HTTPException(status_code=400, detail="Only CSV and XLSX files supported")
-            
+
+            # Attempt to parse as CSV or Excel regardless of extension
+            try:
+                if file.filename.lower().endswith(".csv"):
+                    df = pd.read_csv(io.BytesIO(content))
+                else:
+                    df = pd.read_excel(io.BytesIO(content))
+            except Exception:
+                try:
+                    df = pd.read_excel(io.BytesIO(content))
+                except Exception:
+                    try:
+                        df = pd.read_csv(io.BytesIO(content), engine="python")
+                    except Exception as e:
+                        parse_failures[key] = {
+                            "status": "failed",
+                            "errors": [f"Unable to parse file {file.filename}: {str(e)}"],
+                            "warnings": [],
+                            "auto_corrections": [],
+                            "condition_failures": [],
+                            "columns_checked": 0,
+                            "mandatory_columns_missing": 0,
+                            "extra_columns_found": 0,
+                            "data_corrections_applied": 0,
+                            "custom_conditions_failed": 0,
+                        }
+                        continue
+
             # ✅ Preprocess columns (same logic as create_new)
             df.columns = [preprocess_column_name(col) for col in df.columns]
             files_data.append((key, df))
-            
+
         except Exception as e:
-            raise HTTPException(status_code=400, detail=f"Error parsing file {file.filename}: {str(e)}")
+            parse_failures[key] = {
+                "status": "failed",
+                "errors": [f"Error reading file {file.filename}: {str(e)}"],
+                "warnings": [],
+                "auto_corrections": [],
+                "condition_failures": [],
+                "columns_checked": 0,
+                "mandatory_columns_missing": 0,
+                "extra_columns_found": 0,
+                "data_corrections_applied": 0,
+                "custom_conditions_failed": 0,
+            }
     
     # ✅ Enhanced validation with auto-correction and custom conditions
     validation_results = perform_enhanced_validation(files_data, validator_data)
+
+    # Merge parse failures into validation results
+    file_results = validation_results.get("file_results", {})
+    file_results.update(parse_failures)
+
+    # Recompute summary including parse failures
+    total_files = len(keys)
+    passed_files = len([r for r in file_results.values() if r["status"] == "passed"])
+    failed_files = len([r for r in file_results.values() if r["status"] == "failed"])
+    files_with_warnings = len([r for r in file_results.values() if r["status"] == "passed_with_warnings"])
+    total_auto_corrections = sum(len(r.get("auto_corrections", [])) for r in file_results.values())
+    total_condition_failures = sum(len(r.get("condition_failures", [])) for r in file_results.values())
+
+    if failed_files:
+        overall_status = "failed"
+    elif files_with_warnings:
+        overall_status = "passed_with_warnings"
+    else:
+        overall_status = "passed"
+
+    validation_results = {
+        "overall_status": overall_status,
+        "file_results": file_results,
+        "summary": {
+            "total_files": total_files,
+            "passed_files": passed_files,
+            "failed_files": failed_files,
+            "files_with_warnings": files_with_warnings,
+            "total_auto_corrections": total_auto_corrections,
+            "total_condition_failures": total_condition_failures,
+        },
+    }
     
     # ✅ MinIO upload: Only if validation passes or passes with warnings
     minio_uploads = []
@@ -2198,13 +2264,20 @@ async def validate_mmm_endpoint(
             content = await file.read()
             file_contents.append((content, file.filename, key))
             
-            # Parse file based on extension
-            if file.filename.lower().endswith(".csv"):
-                df = pd.read_csv(io.BytesIO(content))
-            elif file.filename.lower().endswith(".xlsx"):
-                df = pd.read_excel(io.BytesIO(content))
-            else:
-                raise HTTPException(status_code=400, detail="Only CSV and XLSX files supported")
+            # Parse file based on extension (support any file type)
+            try:
+                if file.filename.lower().endswith(".csv"):
+                    df = pd.read_csv(io.BytesIO(content))
+                else:
+                    df = pd.read_excel(io.BytesIO(content))
+            except Exception:
+                try:
+                    df = pd.read_excel(io.BytesIO(content))
+                except Exception:
+                    try:
+                        df = pd.read_csv(io.BytesIO(content), engine="python")
+                    except Exception as e:
+                        raise HTTPException(status_code=400, detail=f"Error parsing file {file.filename}: {str(e)}")
             
             # ✅ FIXED: Preprocess columns to match MMM validation expectations
             df.columns = [preprocess_column_name(col) for col in df.columns]
@@ -2568,13 +2641,20 @@ async def validate_category_forecasting_endpoint(
     try:
         content = await file.read()
         
-        # Parse file based on extension
-        if file.filename.lower().endswith(".csv"):
-            df = pd.read_csv(io.BytesIO(content))
-        elif file.filename.lower().endswith(".xlsx"):
-            df = pd.read_excel(io.BytesIO(content))
-        else:
-            raise HTTPException(status_code=400, detail="Only CSV and XLSX files supported")
+        # Parse file based on extension (support any file type)
+        try:
+            if file.filename.lower().endswith(".csv"):
+                df = pd.read_csv(io.BytesIO(content))
+            else:
+                df = pd.read_excel(io.BytesIO(content))
+        except Exception:
+            try:
+                df = pd.read_excel(io.BytesIO(content))
+            except Exception:
+                try:
+                    df = pd.read_csv(io.BytesIO(content), engine="python")
+                except Exception as e:
+                    raise HTTPException(status_code=400, detail=f"Error parsing file {file.filename}: {str(e)}")
         
         # Light preprocessing (CF validation handles most column standardization)
         df.columns = [preprocess_column_name(col) for col in df.columns]
@@ -2759,13 +2839,20 @@ async def validate_promo_endpoint(
     try:
         content = await file.read()
         
-        # Parse file based on extension
-        if file.filename.lower().endswith(".csv"):
-            df = pd.read_csv(io.BytesIO(content))
-        elif file.filename.lower().endswith(".xlsx"):
-            df = pd.read_excel(io.BytesIO(content))
-        else:
-            raise HTTPException(status_code=400, detail="Only CSV and XLSX files supported")
+        # Parse file based on extension (support any file type)
+        try:
+            if file.filename.lower().endswith(".csv"):
+                df = pd.read_csv(io.BytesIO(content))
+            else:
+                df = pd.read_excel(io.BytesIO(content))
+        except Exception:
+            try:
+                df = pd.read_excel(io.BytesIO(content))
+            except Exception:
+                try:
+                    df = pd.read_csv(io.BytesIO(content), engine="python")
+                except Exception as e:
+                    raise HTTPException(status_code=400, detail=f"Error parsing file {file.filename}: {str(e)}")
         
         # Light preprocessing (Promo validation handles column standardization)
         df.columns = [preprocess_column_name(col) for col in df.columns]
