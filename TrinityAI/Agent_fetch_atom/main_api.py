@@ -1,6 +1,7 @@
 import uvicorn
 from fastapi import FastAPI
 from fastapi.encoders import jsonable_encoder
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Dict, Any, TypedDict, List, Optional
 import wikipedia
@@ -134,6 +135,15 @@ app = FastAPI(
     title="LangGraph Atom Chatbot API",
     description="API endpoint for LangGraph-powered chatbot",
     version="1.0"
+)
+
+# Enable CORS for browser-based clients
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 @app.post("/chat")
