@@ -99,3 +99,6 @@ Thumbs.db
 ehthumbs.db
 Desktop.ini
 .DS_Store
+
+# Model files
+TrinityAI/Agent_fetch_atom/models/
