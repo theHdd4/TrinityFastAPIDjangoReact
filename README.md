@@ -102,7 +102,10 @@ React frontend are fully connected.
 ## 5. Download the embedding model
 
 Some of the AI helpers require the SentenceTransformers model
-`all-MiniLM-L6-v2`. Run the following command once to download it locally:
+`all-MiniLM-L6-v2`. The provided Dockerfile for `TrinityAI/Agent_fetch_atom`
+runs the download script automatically during the build so the model is
+available when the container starts. If you are running the services outside of
+Docker, execute the following command once to download it locally:
 
 ```bash
 python TrinityAI/Agent_fetch_atom/download_model.py
