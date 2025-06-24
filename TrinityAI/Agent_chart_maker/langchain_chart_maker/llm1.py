@@ -4,6 +4,9 @@ import re
 from chart_rag import get_chart_schema
 
 def extract_first_json(text):
+    """
+    Extracts and parses the first valid JSON object from text using brace counting.
+    """
     start = text.find('{')
     if start == -1:
         raise ValueError("No JSON object found")
@@ -26,42 +29,44 @@ class RAGChartPropertyExtractor:
         self.api_url = api_url
         self.model_name = model_name
         self.bearer_token = bearer_token
-
-    def enhance_query(self, raw_query: str) -> str:
-        prompt = (
-            "You are a memory-augmented assistant that remembers and improves user chart requests. "
-            "Your ONLY job is to correct grammar and spelling in the following chart prompt. "
-            "Do NOT add explanations, reasoning, or extra text. "
-            "Return ONLY the improved prompt as a single sentence, nothing else. "
-            "Remember to keep the user's intent intact.\n"
-            f"Prompt: {raw_query}\n"
-        )
-        payload = {
-            "model": self.model_name,
-            "messages": [{"role": "user", "content": prompt}],
-            "stream": False
-        }
-        headers = {
+        self.headers = {
             "Authorization": f"Bearer {self.bearer_token}",
             "Content-Type": "application/json"
         }
-        try:
-            print(f"[Enhance Query] Sending prompt to LLM: {prompt}")
-            response = requests.post(self.api_url, json=payload, headers=headers, timeout=30)
-            response.raise_for_status()
-            content = response.json().get('message', {}).get('content', '')
-            improved = content.strip().replace("Improved:", "").strip()
-            improved = re.sub(r"<.*?>", "", improved)
-            improved = improved.split('\n')[0].strip()
-            if improved.startswith('"') and improved.endswith('"'):
-                improved = improved[1:-1].strip()
-            print(f"[Enhance Query] Improved prompt: {improved}")
-            return improved if improved else raw_query
-        except Exception as e:
-            print(f"[Enhancement Error] {e}")
-            return raw_query
+
+    def _call_deepseek_r1_minimal(self, raw_query: str) -> str:
+        prompt = f"""Fix spelling and grammar errors or any semantic errors in this query. Return only the improved query:
+
+Query: "{raw_query}"
+
+Enhanced query:"""
+        payload = {
+            "model": self.model_name,
+            "messages": [
+                {"role": "user", "content": prompt}
+            ],
+            "temperature": 0.2,
+            "max_tokens": 80,
+            "stream": False
+        }
+        response = requests.post(
+            self.api_url,
+            json=payload,
+            headers=self.headers,
+            timeout=30
+        )
+        if response.status_code != 200:
+            raise Exception(f"HTTP {response.status_code}: {response.text}")
+        response_data = json.loads(response.text)
+        content = response_data.get('message', {}).get('content', '')
+        if not content:
+            raise Exception("Empty response from DeepSeek R1")
+        return content.strip()
 
     def _format_history(self, memory):
+        """
+        Formats the conversation memory (list of dicts) into a string for the LLM prompt.
+        """
         if not memory:
             return ""
         formatted = []
@@ -70,19 +75,22 @@ class RAGChartPropertyExtractor:
                 formatted.append(f"User: {msg['content']}")
             elif msg["role"] == "assistant":
                 formatted.append(f"Assistant: {msg['content']}")
-        history_str = "\n".join(formatted)
-        print(f"[Format History] Formatted history:\n{history_str}")
-        return history_str
+        return "\n".join(formatted)
 
     def extract_properties(self, user_prompt, chart_type, prev_state=None, memory=None):
         print("\n--- [LLM Extraction Step] ---")
-        enhanced_prompt = self.enhance_query(user_prompt)
+        # Use the robust enhancement method
+        enhanced_prompt = self._call_deepseek_r1_minimal(user_prompt)
         schema = get_chart_schema(chart_type)
         template = schema["template"]
         prev_state_str = json.dumps(prev_state or {}, indent=2)
 
+        # Format conversation memory for the LLM prompt
         history_context = self._format_history(memory)
-        history_section = f"Conversation History:\n{history_context}\n\n" if history_context else ""
+        if history_context:
+            history_section = f"Conversation History:\n{history_context}\n\n"
+        else:
+            history_section = ""
 
         prompt = (
             f"{history_section}"
@@ -109,13 +117,9 @@ class RAGChartPropertyExtractor:
             "messages": [{"role": "user", "content": prompt}],
             "stream": False
         }
-        headers = {
-            "Authorization": f"Bearer {self.bearer_token}",
-            "Content-Type": "application/json"
-        }
         try:
             print(f"[LLM Extraction] Sending prompt to LLM:\n{prompt}")
-            response = requests.post(self.api_url, json=payload, headers=headers, timeout=60)
+            response = requests.post(self.api_url, json=payload, headers=self.headers, timeout=60)
             response.raise_for_status()
             content = response.json().get('message', {}).get('content', '')
             print(f"[LLM Extraction] Raw LLM response:\n{content}")
