@@ -16,12 +16,8 @@ class AtomKnowledgeBase:
         "chartmaker": {
             "display_name": "ChartMaker",
             "description": (
-                "A modular, API-driven pipeline for dynamic data exploration, filtering, and interactive chart creation. "
-                "ChartMaker uses FastAPI, pandas, and Plotly to support a wide range of chart types (bar, line, area, pie, "
-                "histogram, distplot, waterfall, heatmap, subplots) and robust data filtering. It enables users to upload "
-                "CSV/Excel, apply categorical/numerical filters, and generate custom, interactive visualizations for analytics "
-                "workflows. ChartMaker also provides metadata extraction for UI filtering and returns structured API responses "
-                "for frontend integration. This tool is strictly for data analytics and business intelligence use cases."
+                "chartmaker is a powerful tool for creating interactive Plotly charts from business or analytics data. It allows users to explore, filter, and visualize datasets dynamically, generating various chart types like bar, line, area, pie, histogram, and more."
+                "  This atom is strictly for business data visualization and analytics, not for unrelated topics like movies or art."
             ),
             "unique_keywords": [
                 "Plotly", "pandas", "data visualization", "data exploration", "chart", "graph", "plot", "interactive chart",

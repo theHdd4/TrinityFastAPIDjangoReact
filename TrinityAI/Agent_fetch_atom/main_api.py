@@ -1,7 +1,6 @@
 import uvicorn
 from fastapi import FastAPI
 from fastapi.encoders import jsonable_encoder
-from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Dict, Any, TypedDict, List, Optional
 import wikipedia
@@ -137,15 +136,6 @@ app = FastAPI(
     version="1.0"
 )
 
-# Allow the React frontend to call this API from a different origin
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
 @app.post("/chat")
 async def chat_endpoint(request: QueryRequest):
     try:
@@ -172,4 +162,4 @@ async def health():
     return {"domain_status": "ok"}
 
 if __name__ == "__main__":
-    uvicorn.run("main_api:app", host="0.0.0.0", port=8002, reload=True)
+    uvicorn.run("agentic_api:app", host="0.0.0.0", port=8002, reload=True)

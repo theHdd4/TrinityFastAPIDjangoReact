@@ -47,7 +47,7 @@ class LLM2Enhancer:
 The system found the most suitable atom: {atom_name}
 
 Atom Details:
-- Description: {description}
+- Description: {atom_name}
 - Category: {category}
 - Keywords: {', '.join(keywords[:5])}
 """
@@ -56,9 +56,9 @@ Atom Details:
         prompt += """
 Provide a helpful response that:
 1. Confirms this atom matches their need
-2. Explains what this atom does in simple terms
-3. Gives guidance on how to use it effectively
-4. Mentions any prerequisites or tips
+2. Explains what this atom does in simple terms maximum words of entire answer is 60 words
+3. Gives guidance on how to use it effectively 
+
 
 Keep the response conversational and helpful, without markdown formatting."""
         final_response = self._call_llm2(prompt)
@@ -102,6 +102,8 @@ Analyze this situation and provide helpful guidance that:
 3. Suggests if they need multiple atoms in sequence
 4. Provides clear next steps for the user
 5. Offers alternative approaches if needed
+6. Be precise and actionable
+7.dont suggest the libraries only give minimal information about the atom 
 
 Be conversational and helpful, without markdown formatting."""
         final_response = self._call_llm2(prompt)
@@ -150,7 +152,10 @@ Respond with a warning and actionable advice, without markdown formatting."""
             "messages": [
                 {
                     "role": "system",
-                    "content": "You are a data analytics consultant. Only answer questions about data science, analytics, statistics, or visualization. If a question is not related to these topics, respond: 'Sorry, I can only help with data analytics and related topics.' Be clear, helpful, and conversational. No markdown formatting."
+                    "content": "You are a data analytics consultant. Only answer questions about data science, analytics, statistics, or visualization. If a question is not related to these topics, respond: "
+                    "'Sorry, I can only help with data analytics and related topics.' Be clear, helpful, and conversational."
+                    " No markdown formatting. Remember : Just return the meaningful response dont waste the tokens by  writing long paragraphs and not  meaningful things "
+                    "Note: Max words you can use is 100 words"
                 },
                 {
                     "role": "user",
@@ -158,7 +163,7 @@ Respond with a warning and actionable advice, without markdown formatting."""
                 }
             ],
             "temperature": 0.3,
-            "max_tokens": 2000,
+            "max_tokens": 10,
             "stream": False
         }
         response = requests.post(

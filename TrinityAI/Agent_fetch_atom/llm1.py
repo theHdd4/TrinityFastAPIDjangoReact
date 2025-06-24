@@ -13,7 +13,8 @@ class QueryEnhancer:
             "Authorization": f"Bearer {bearer_token}",
             "Content-Type": "application/json"
         }
-        self.embedder = SentenceTransformer('all-MiniLM-L6-v2')
+        self.embedder = SentenceTransformer('./models/all-MiniLM-L6-v2')
+
 
     def enhance_query(self, raw_query: str) -> Dict:
         if not raw_query or not raw_query.strip():
@@ -142,7 +143,7 @@ Enhanced query:"""
     def _llm_domain_reasoning(self, enhanced_query: str) -> Dict:
         prompt = (
             "You are an expert data science assistant. For the following user query, answer strictly in this format:\n"
-            "1. Is this query related to data science, analytics, statistics, or machine learning? (yes/no)\n"
+            "1. Is this query related to data visualisation , creating charts , feature overview , data exploration, data maipulation ,data science, analytics, statistics, or machine learning etc ? (yes/no)\n"
             "2. Briefly explain your reasoning in one sentence, referencing specific words or context from the query. "
             "If you are uncertain, say so and explain why.\n"
             f"Query: \"{enhanced_query}\"\n"
