@@ -99,4 +99,17 @@ a duplicate domain. Ensure the request is sent to the public host (e.g.
 With these steps the Django orchestration layer, FastAPI features and the
 React frontend are fully connected.
 
+## 5. Download the embedding model
+
+Some of the AI helpers require the SentenceTransformers model
+`all-MiniLM-L6-v2`. Run the following command once to download it locally:
+
+```bash
+python TrinityAI/Agent_fetch_atom/download_model.py
+```
+
+The script stores the files under
+`TrinityAI/Agent_fetch_atom/models/all-MiniLM-L6-v2` so future runs can load
+the model without internet access.
+
 
