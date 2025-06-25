@@ -20,6 +20,8 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({ settings 
   const [marketDims, setMarketDims] = useState<string[]>(settings.marketDims || []);
   const [productDims, setProductDims] = useState<string[]>(settings.productDims || []);
   const [skuRows, setSkuRows] = useState<any[]>(settings.skuTable || []);
+  const [showMarketSelect, setShowMarketSelect] = useState(false);
+  const [showProductSelect, setShowProductSelect] = useState(false);
 
   const getDataTypeColor = (type: string) => {
     switch (type.toLowerCase()) {
@@ -95,23 +97,81 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({ settings 
       {settings.hierarchicalView && settings.selectedColumns?.length > 0 && (
         <div className="space-y-4">
           <Card className="p-4 space-y-2">
-            <div className="flex flex-wrap gap-2">
-              {marketDims.map(m => <Badge key={m}>{m}</Badge>)}
-              <Button size="sm" onClick={() => {
-                const avail = settings.selectedColumns.filter((c: string) => !marketDims.includes(c));
-                const next = avail[0];
-                if (next) setMarketDims([...marketDims, next]);
-              }}>+</Button>
+            <div className="flex flex-wrap gap-3 relative">
+              {marketDims.map(m => (
+                <Badge key={m} className="bg-gradient-to-r from-blue-500 to-blue-600 text-white px-4 py-2 font-medium">
+                  {m}
+                </Badge>
+              ))}
+              <div className="relative">
+                <div
+                  className="flex items-center justify-center w-10 h-10 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-full font-bold text-lg shadow-lg cursor-pointer"
+                  onClick={() => setShowMarketSelect(v => !v)}
+                >
+                  +
+                </div>
+                {showMarketSelect && (
+                  <select
+                    className="absolute z-10 mt-2 p-1 border rounded bg-white text-sm"
+                    onChange={e => {
+                      const val = e.target.value;
+                      if (val) {
+                        setMarketDims([...marketDims, val]);
+                        setShowMarketSelect(false);
+                      }
+                    }}
+                  >
+                    <option value="">Select...</option>
+                    {settings.selectedColumns
+                      .filter((c: string) => !marketDims.includes(c) && !productDims.includes(c))
+                      .map((c: string) => (
+                        <option key={c} value={c}>
+                          {c}
+                        </option>
+                      ))}
+                  </select>
+                )}
+              </div>
             </div>
-            <div className="flex flex-wrap gap-2">
-              {productDims.map(p => <Badge key={p}>{p}</Badge>)}
-              <Button size="sm" onClick={() => {
-                const avail = settings.selectedColumns.filter((c: string) => !productDims.includes(c));
-                const next = avail[0];
-                if (next) setProductDims([...productDims, next]);
-              }}>+</Button>
+            <div className="flex flex-wrap gap-3 relative mt-4">
+              {productDims.map(p => (
+                <Badge key={p} className="bg-gradient-to-r from-green-500 to-green-600 text-white px-4 py-2 font-medium">
+                  {p}
+                </Badge>
+              ))}
+              <div className="relative">
+                <div
+                  className="flex items-center justify-center w-10 h-10 bg-gradient-to-r from-green-500 to-green-600 text-white rounded-full font-bold text-lg shadow-lg cursor-pointer"
+                  onClick={() => setShowProductSelect(v => !v)}
+                >
+                  +
+                </div>
+                {showProductSelect && (
+                  <select
+                    className="absolute z-10 mt-2 p-1 border rounded bg-white text-sm"
+                    onChange={e => {
+                      const val = e.target.value;
+                      if (val) {
+                        setProductDims([...productDims, val]);
+                        setShowProductSelect(false);
+                      }
+                    }}
+                  >
+                    <option value="">Select...</option>
+                    {settings.selectedColumns
+                      .filter((c: string) => !productDims.includes(c) && !marketDims.includes(c))
+                      .map((c: string) => (
+                        <option key={c} value={c}>
+                          {c}
+                        </option>
+                      ))}
+                  </select>
+                )}
+              </div>
             </div>
-            <Button onClick={displaySkus} className="mt-2">Display SKUs</Button>
+            <Button onClick={displaySkus} className="mt-4">
+              Display SKUs
+            </Button>
           </Card>
 
           {skuRows.length > 0 && (
