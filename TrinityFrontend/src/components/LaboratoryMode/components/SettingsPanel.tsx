@@ -5,7 +5,7 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { ChevronLeft, ChevronRight, Settings, Eye, BarChart2 } from 'lucide-react';
+import { ChevronRight, Sliders, Eye, BarChart2 } from 'lucide-react';
 import {
   useLaboratoryStore,
   TextBoxSettings,
@@ -60,7 +60,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
       <div className="p-3 border-b border-gray-200 flex items-center justify-between">
         {!isCollapsed && (
           <h3 className="font-semibold text-gray-900 flex items-center space-x-2">
-            <Settings className="w-4 h-4" />
+            <Sliders className="w-4 h-4" />
             <span>Properties</span>
           </h3>
         )}
@@ -71,7 +71,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
           className="p-1 h-8 w-8"
         >
           {isCollapsed ? (
-            <ChevronLeft className="w-4 h-4" />
+            <Sliders className="w-4 h-4" />
           ) : (
             <ChevronRight className="w-4 h-4" />
           )}
@@ -89,7 +89,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
           <Tabs value={tab} onValueChange={setTab} className="w-full">
             <TabsList className="grid w-full grid-cols-3 mx-4 my-4">
               <TabsTrigger value="settings" className="text-xs">
-                <Settings className="w-3 h-3 mr-1" />
+                <Sliders className="w-3 h-3 mr-1" />
                 Settings
               </TabsTrigger>
               <TabsTrigger value="visual" className="text-xs">
