@@ -68,39 +68,55 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({ settings 
   };
 
   return (
-    <div className="w-full h-full p-4 overflow-y-auto space-y-6">
+    <div className="w-full h-full p-6 bg-gradient-to-br from-slate-50 to-blue-50 overflow-y-auto">
       {settings.columnSummary && settings.columnSummary.length > 0 && (
-        <Card className="overflow-hidden">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="text-center">Column</TableHead>
-                <TableHead className="text-center">Type</TableHead>
-                <TableHead className="text-center">Unique</TableHead>
-                <TableHead className="text-center">Samples</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {settings.columnSummary.map((c: ColumnInfo) => (
-                <TableRow key={c.column} className="border-b">
-                  <TableCell className="text-center font-medium">{c.column}</TableCell>
-                  <TableCell className="text-center">
-                    <Badge variant="outline" className={`text-xs ${getDataTypeColor(c.data_type)}`}>{c.data_type}</Badge>
-                  </TableCell>
-                  <TableCell className="text-center">{c.unique_count}</TableCell>
-                  <TableCell className="text-center">
-                    <div className="flex flex-wrap gap-1 justify-center">
-                      {c.unique_values.slice(0,3).map((v,i)=>(
-                        <Badge key={i} variant="outline" className="text-xs">{v}</Badge>
-                      ))}
-                      {c.unique_values.length>3 && <Badge variant="outline" className="text-xs">+{c.unique_values.length-3}</Badge>}
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </Card>
+        <div className="mb-8">
+          <div className="flex items-center mb-6">
+            <div className="w-1 h-8 bg-gradient-to-b from-blue-500 to-blue-600 rounded-full mr-4"></div>
+            <h3 className="text-xl font-bold text-gray-900">Column View</h3>
+          </div>
+
+          <Card className="border-0 shadow-xl bg-white/80 backdrop-blur-sm mb-6 overflow-hidden">
+            <div className="bg-gradient-to-r from-blue-500 to-blue-600 p-1">
+              <div className="bg-white rounded-sm">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="bg-gradient-to-r from-gray-50 to-blue-50 border-b-2 border-blue-100">
+                      <TableHead className="font-bold text-gray-800 text-center py-4">Columns</TableHead>
+                      <TableHead className="font-bold text-gray-800 text-center py-4">Data Type</TableHead>
+                      <TableHead className="font-bold text-gray-800 text-center py-4">Unique Counts</TableHead>
+                      <TableHead className="font-bold text-gray-800 text-center py-4">Unique Values</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {settings.columnSummary.map((c: ColumnInfo) => (
+                      <TableRow key={c.column} className="hover:bg-blue-50/50 transition-all duration-200 border-b border-gray-100">
+                        <TableCell className="font-semibold text-gray-900 text-center py-4">{c.column}</TableCell>
+                        <TableCell className="text-center py-4">
+                          <Badge variant="outline" className={`text-xs font-medium ${getDataTypeColor(c.data_type)} shadow-sm`}>{c.data_type}</Badge>
+                        </TableCell>
+                        <TableCell className="text-gray-700 text-center font-medium py-4">{c.unique_count}</TableCell>
+                        <TableCell className="text-center py-4">
+                          <div className="flex flex-wrap gap-1 justify-center">
+                            {c.unique_values.slice(0,3).map((v,i)=>(
+                              <Badge key={i} variant="outline" className="text-xs bg-gray-50 hover:bg-gray-100 transition-colors">{v}</Badge>
+                            ))}
+                            {c.unique_values.length>3 && (
+                              <Badge variant="outline" className="text-xs bg-orange-50 text-orange-700 border-orange-200">+{c.unique_values.length-3}</Badge>
+                            )}
+                            {c.unique_values.length===0 && (
+                              <span className="text-xs text-gray-500 italic font-medium">Multiple values</span>
+                            )}
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            </div>
+          </Card>
+        </div>
       )}
 
       {settings.hierarchicalView && settings.selectedColumns?.length > 0 && (
