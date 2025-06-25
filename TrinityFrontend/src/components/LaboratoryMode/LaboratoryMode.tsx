@@ -1,13 +1,14 @@
 
 import React, { useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { Play, Save, Share2, Undo2 } from 'lucide-react';
+import { Play, Save, Share2, Undo2, Database } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import Header from '@/components/Header';
 import { safeStringify } from '@/utils/safeStringify';
 import AtomLibrary from '@/components/AtomList/AtomLibrary';
 import CanvasArea from './components/CanvasArea';
 import SettingsPanel from './components/SettingsPanel';
+import SavedDataFramesPanel from './components/SavedDataFramesPanel';
 import { useExhibitionStore } from '@/components/ExhibitionMode/store/exhibitionStore';
 import { REGISTRY_API, LAB_ACTIONS_API } from '@/lib/api';
 import { useLaboratoryStore } from './store/laboratoryStore';
@@ -17,6 +18,7 @@ const LaboratoryMode = () => {
   const [selectedCardId, setSelectedCardId] = useState<string>();
   const [cardExhibited, setCardExhibited] = useState<boolean>(false);
   const [isSettingsCollapsed, setIsSettingsCollapsed] = useState(false);
+  const [showSavedFrames, setShowSavedFrames] = useState(false);
   const { toast } = useToast();
   const { cards, setCards } = useExhibitionStore();
   const setLabCards = useLaboratoryStore(state => state.setCards);
@@ -144,6 +146,15 @@ const LaboratoryMode = () => {
               <Save className="w-4 h-4 mr-2" />
               Save
             </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="border-gray-200 hover:bg-gray-50 text-gray-700 font-medium"
+              onClick={() => setShowSavedFrames(!showSavedFrames)}
+            >
+              <Database className="w-4 h-4 mr-2" />
+              DataFrames
+            </Button>
             <Button variant="outline" size="sm" className="border-gray-200 hover:bg-gray-50 text-gray-700 font-medium">
               <Share2 className="w-4 h-4 mr-2" />
               Share
@@ -173,6 +184,7 @@ const LaboratoryMode = () => {
           selectedCardId={selectedCardId}
           cardExhibited={cardExhibited}
         />
+        <SavedDataFramesPanel isOpen={showSavedFrames} onClose={() => setShowSavedFrames(false)} />
       </div>
     </div>
   );

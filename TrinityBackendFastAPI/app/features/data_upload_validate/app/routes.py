@@ -2906,3 +2906,46 @@ async def validate_promo_endpoint(
 
 # Call this function when the module loads
 load_existing_configs()
+
+
+# --- New endpoints for saving and listing validated dataframes ---
+@router.post("/save_dataframes")
+async def save_dataframes(
+    validator_atom_id: str = Form(...),
+    files: List[UploadFile] = File(...),
+    file_keys: str = Form(...)
+):
+    """Save validated dataframes to MinIO"""
+    try:
+        keys = json.loads(file_keys)
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid JSON format for file_keys")
+    if len(files) != len(keys):
+        raise HTTPException(status_code=400, detail="Number of files must match number of keys")
+
+    uploads = []
+    for file, key in zip(files, keys):
+        content = await file.read()
+        result = upload_to_minio(content, file.filename, validator_atom_id, key)
+        uploads.append({"file_key": key, "filename": file.filename, "minio_upload": result})
+
+    return {"minio_uploads": uploads}
+
+
+@router.get("/list_saved_dataframes")
+async def list_saved_dataframes():
+    """List saved dataframes for the current project"""
+    prefix = f"{CLIENT_NAME}/{APP_NAME}/{PROJECT_NAME}"
+    objects = minio_client.list_objects(MINIO_BUCKET, prefix=prefix, recursive=True)
+    return {"files": [obj.object_name for obj in objects]}
+
+
+@router.get("/download_dataframe")
+async def download_dataframe(object_name: str):
+    """Return a presigned URL to download a dataframe"""
+    try:
+        url = minio_client.presigned_get_object(MINIO_BUCKET, object_name)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"url": url}
+
