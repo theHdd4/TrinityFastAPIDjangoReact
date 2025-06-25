@@ -67,6 +67,20 @@ export const DEFAULT_DATAUPLOAD_SETTINGS: DataUploadSettings = {
   fileMappings: {}
 };
 
+export interface FeatureOverviewSettings {
+  selectedColumns: string[];
+  hierarchicalView: boolean;
+  dataSource: string;
+  filterCriteria: Record<string, unknown>;
+}
+
+export const DEFAULT_FEATURE_OVERVIEW_SETTINGS: FeatureOverviewSettings = {
+  selectedColumns: [],
+  hierarchicalView: true,
+  dataSource: '',
+  filterCriteria: {}
+};
+
 export interface DroppedAtom {
   id: string;
   atomId: string;

@@ -12,8 +12,11 @@ import {
   DEFAULT_TEXTBOX_SETTINGS,
   DataUploadSettings,
   DEFAULT_DATAUPLOAD_SETTINGS,
+  FeatureOverviewSettings,
+  DEFAULT_FEATURE_OVERVIEW_SETTINGS,
 } from '../store/laboratoryStore';
 import DataUploadValidateProperties from '@/components/AtomList/atoms/data-upload-validate/components/properties/DataUploadValidateProperties';
+import FeatureOverviewProperties from '@/components/AtomList/atoms/feature-overview/components/properties/FeatureOverviewProperties';
 
 interface SettingsPanelProps {
   isCollapsed: boolean;
@@ -35,10 +38,12 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
     selectedAtomId ? state.getAtom(selectedAtomId) : undefined
   );
   const updateSettings = useLaboratoryStore(state => state.updateAtomSettings);
-  const settings: TextBoxSettings | DataUploadSettings =
+  const settings: TextBoxSettings | DataUploadSettings | FeatureOverviewSettings =
     atom?.settings ||
     (atom?.atomId === 'data-upload-validate'
       ? { ...DEFAULT_DATAUPLOAD_SETTINGS }
+      : atom?.atomId === 'feature-overview'
+      ? { ...DEFAULT_FEATURE_OVERVIEW_SETTINGS }
       : { ...DEFAULT_TEXTBOX_SETTINGS });
 
   useEffect(() => {
@@ -84,6 +89,8 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
             <div className="p-4 text-gray-600 text-sm">Please select a Card/Atom</div>
           ) : selectedAtomId && atom?.atomId === 'data-upload-validate' ? (
             <DataUploadValidateProperties atomId={selectedAtomId} />
+          ) : selectedAtomId && atom?.atomId === 'feature-overview' ? (
+            <FeatureOverviewProperties atomId={selectedAtomId} />
           ) : (
           <>
           <Tabs value={tab} onValueChange={setTab} className="w-full">
