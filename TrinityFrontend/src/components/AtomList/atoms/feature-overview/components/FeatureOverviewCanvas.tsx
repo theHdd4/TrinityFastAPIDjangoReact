@@ -104,83 +104,107 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({ settings 
 
       {settings.hierarchicalView && settings.selectedColumns?.length > 0 && (
         <div className="space-y-4">
-          <Card className="p-4 space-y-2">
-            <div className="flex flex-wrap gap-3 relative">
-              {marketDims.map(m => (
-                <Badge key={m} className="bg-gradient-to-r from-blue-500 to-blue-600 text-white px-4 py-2 font-medium">
-                  {m}
-                </Badge>
-              ))}
-              <div className="relative">
-                <div
-                  className="flex items-center justify-center w-10 h-10 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-full font-bold text-lg shadow-lg cursor-pointer"
-                  onClick={() => setShowMarketSelect(v => !v)}
-                >
-                  +
-                </div>
-                {showMarketSelect && (
-                  <select
-                    className="absolute z-10 mt-2 p-1 border rounded bg-white text-sm"
-                    onChange={e => {
-                      const val = e.target.value;
-                      if (val) {
-                        setMarketDims([...marketDims, val]);
-                        setShowMarketSelect(false);
-                      }
-                    }}
-                  >
-                    <option value="">Select...</option>
-                    {settings.selectedColumns
-                      .filter((c: string) => !marketDims.includes(c) && !productDims.includes(c))
-                      .map((c: string) => (
-                        <option key={c} value={c}>
-                          {c}
-                        </option>
-                      ))}
-                  </select>
-                )}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+            {/* Market Dimension */}
+            <Card className="border-0 shadow-xl bg-white/90 backdrop-blur-sm overflow-hidden transform hover:scale-105 transition-all duration-300">
+              <div className="bg-gradient-to-r from-blue-500 to-blue-600 p-4">
+                <h4 className="font-bold text-white text-lg flex items-center">
+                  <BarChart3 className="w-5 h-5 mr-2" />
+                  Market Dimension
+                </h4>
               </div>
-            </div>
-            <div className="flex flex-wrap gap-3 relative mt-4">
-              {productDims.map(p => (
-                <Badge key={p} className="bg-gradient-to-r from-green-500 to-green-600 text-white px-4 py-2 font-medium">
-                  {p}
-                </Badge>
-              ))}
-              <div className="relative">
-                <div
-                  className="flex items-center justify-center w-10 h-10 bg-gradient-to-r from-green-500 to-green-600 text-white rounded-full font-bold text-lg shadow-lg cursor-pointer"
-                  onClick={() => setShowProductSelect(v => !v)}
-                >
-                  +
+              <div className="p-6">
+                <div className="flex flex-wrap gap-3">
+                  {marketDims.map(m => (
+                    <Badge key={m} className="bg-gradient-to-r from-blue-500 to-blue-600 text-white px-4 py-2 font-medium">
+                      {m}
+                    </Badge>
+                  ))}
+                  <div className="relative">
+                    <div
+                      className="flex items-center justify-center w-10 h-10 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-full font-bold text-lg shadow-lg cursor-pointer"
+                      onClick={() => setShowMarketSelect(v => !v)}
+                    >
+                      +
+                    </div>
+                    {showMarketSelect && (
+                      <select
+                        className="absolute z-10 mt-2 p-1 border rounded bg-white text-sm"
+                        onChange={e => {
+                          const val = e.target.value;
+                          if (val) {
+                            setMarketDims([...marketDims, val]);
+                            setShowMarketSelect(false);
+                          }
+                        }}
+                      >
+                        <option value="">Select...</option>
+                        {settings.selectedColumns
+                          .filter((c: string) => !marketDims.includes(c) && !productDims.includes(c))
+                          .map((c: string) => (
+                            <option key={c} value={c}>
+                              {c}
+                            </option>
+                          ))}
+                      </select>
+                    )}
+                  </div>
                 </div>
-                {showProductSelect && (
-                  <select
-                    className="absolute z-10 mt-2 p-1 border rounded bg-white text-sm"
-                    onChange={e => {
-                      const val = e.target.value;
-                      if (val) {
-                        setProductDims([...productDims, val]);
-                        setShowProductSelect(false);
-                      }
-                    }}
-                  >
-                    <option value="">Select...</option>
-                    {settings.selectedColumns
-                      .filter((c: string) => !productDims.includes(c) && !marketDims.includes(c))
-                      .map((c: string) => (
-                        <option key={c} value={c}>
-                          {c}
-                        </option>
-                      ))}
-                  </select>
-                )}
               </div>
-            </div>
-            <Button onClick={displaySkus} className="mt-4">
-              Display SKUs
-            </Button>
-          </Card>
+            </Card>
+
+            {/* Product Dimension */}
+            <Card className="border-0 shadow-xl bg-white/90 backdrop-blur-sm overflow-hidden transform hover:scale-105 transition-all duration-300">
+              <div className="bg-gradient-to-r from-green-500 to-green-600 p-4">
+                <h4 className="font-bold text-white text-lg flex items-center">
+                  <TrendingUp className="w-5 h-5 mr-2" />
+                  Product Dimension
+                </h4>
+              </div>
+              <div className="p-6">
+                <div className="flex flex-wrap gap-3">
+                  {productDims.map(p => (
+                    <Badge key={p} className="bg-gradient-to-r from-green-500 to-green-600 text-white px-4 py-2 font-medium">
+                      {p}
+                    </Badge>
+                  ))}
+                  <div className="relative">
+                    <div
+                      className="flex items-center justify-center w-10 h-10 bg-gradient-to-r from-green-500 to-green-600 text-white rounded-full font-bold text-lg shadow-lg cursor-pointer"
+                      onClick={() => setShowProductSelect(v => !v)}
+                    >
+                      +
+                    </div>
+                    {showProductSelect && (
+                      <select
+                        className="absolute z-10 mt-2 p-1 border rounded bg-white text-sm"
+                        onChange={e => {
+                          const val = e.target.value;
+                          if (val) {
+                            setProductDims([...productDims, val]);
+                            setShowProductSelect(false);
+                          }
+                        }}
+                      >
+                        <option value="">Select...</option>
+                        {settings.selectedColumns
+                          .filter((c: string) => !productDims.includes(c) && !marketDims.includes(c))
+                          .map((c: string) => (
+                            <option key={c} value={c}>
+                              {c}
+                            </option>
+                          ))}
+                      </select>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </Card>
+          </div>
+
+          <Button onClick={displaySkus} className="mt-4">
+            Display SKUs
+          </Button>
 
           {skuRows.length > 0 && (
             <Card className="overflow-auto">

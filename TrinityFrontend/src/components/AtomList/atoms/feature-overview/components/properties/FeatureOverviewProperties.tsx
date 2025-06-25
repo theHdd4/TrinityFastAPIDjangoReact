@@ -38,10 +38,10 @@ const FeatureOverviewProperties: React.FC<Props> = ({ atomId }) => {
       </TabsList>
 
       <div className="px-4">
-        <TabsContent value="settings" className="space-y-4">
+        <TabsContent value="settings" className="space-y-4" forceMount>
           <FeatureOverviewSettings settings={settings} onSettingsChange={handleChange} />
         </TabsContent>
-        <TabsContent value="visual" className="space-y-4">
+        <TabsContent value="visual" className="space-y-4" forceMount>
           <FeatureOverviewVisualisation
             numericColumns={(settings.columnSummary || [])
               .filter((c: any) => c.data_type !== 'object' && c.data_type !== 'string')
@@ -50,7 +50,7 @@ const FeatureOverviewProperties: React.FC<Props> = ({ atomId }) => {
             onChange={val => handleChange({ yAxis: val })}
           />
         </TabsContent>
-        <TabsContent value="exhibition" className="space-y-4">
+        <TabsContent value="exhibition" className="space-y-4" forceMount>
           <FeatureOverviewExhibition />
         </TabsContent>
       </div>
