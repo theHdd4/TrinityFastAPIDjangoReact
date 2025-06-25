@@ -1,14 +1,14 @@
 import React, { useEffect, useState } from 'react';
-import { Database, X } from 'lucide-react';
+import { Database, ChevronRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { VALIDATE_API } from '@/lib/api';
 
 interface Props {
   isOpen: boolean;
-  onClose: () => void;
+  onToggle: () => void;
 }
 
-const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onClose }) => {
+const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle }) => {
   const [files, setFiles] = useState<string[]>([]);
 
   useEffect(() => {
@@ -27,7 +27,17 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onClose }) => {
     }
   };
 
-  if (!isOpen) return null;
+  if (!isOpen) {
+    return (
+      <div className="w-12 bg-white border-l border-gray-200 flex flex-col h-full">
+        <div className="p-3 border-b border-gray-200 flex items-center justify-between">
+          <Button variant="ghost" size="sm" onClick={onToggle} className="p-1 h-8 w-8">
+            <Database className="w-4 h-4" />
+          </Button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="w-80 bg-white border-l border-gray-200 flex flex-col h-full">
@@ -36,8 +46,8 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onClose }) => {
           <Database className="w-4 h-4" />
           <span>Saved DataFrames</span>
         </h3>
-        <Button variant="ghost" size="sm" onClick={onClose} className="p-1 h-8 w-8">
-          <X className="w-4 h-4" />
+        <Button variant="ghost" size="sm" onClick={onToggle} className="p-1 h-8 w-8">
+          <ChevronRight className="w-4 h-4" />
         </Button>
       </div>
       <div className="flex-1 overflow-y-auto p-4 space-y-2">

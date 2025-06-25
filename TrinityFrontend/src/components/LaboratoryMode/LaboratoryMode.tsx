@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { Play, Save, Share2, Undo2, Database } from 'lucide-react';
+import { Play, Save, Share2, Undo2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import Header from '@/components/Header';
 import { safeStringify } from '@/utils/safeStringify';
@@ -146,15 +146,6 @@ const LaboratoryMode = () => {
               <Save className="w-4 h-4 mr-2" />
               Save
             </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className="border-gray-200 hover:bg-gray-50 text-gray-700 font-medium"
-              onClick={() => setShowSavedFrames(!showSavedFrames)}
-            >
-              <Database className="w-4 h-4 mr-2" />
-              DataFrames
-            </Button>
             <Button variant="outline" size="sm" className="border-gray-200 hover:bg-gray-50 text-gray-700 font-medium">
               <Share2 className="w-4 h-4 mr-2" />
               Share
@@ -184,7 +175,7 @@ const LaboratoryMode = () => {
           selectedCardId={selectedCardId}
           cardExhibited={cardExhibited}
         />
-        <SavedDataFramesPanel isOpen={showSavedFrames} onClose={() => setShowSavedFrames(false)} />
+        <SavedDataFramesPanel isOpen={showSavedFrames} onToggle={() => setShowSavedFrames(!showSavedFrames)} />
       </div>
     </div>
   );
