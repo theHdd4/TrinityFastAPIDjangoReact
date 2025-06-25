@@ -31,13 +31,21 @@ const FeatureOverviewSettings: React.FC<FeatureOverviewSettingsProps> = ({ setti
   }, []);
 
   const handleFrameChange = async (val: string) => {
-    onSettingsChange({ dataSource: val, selectedColumns: [], columnSummary: [] });
     setSelectedIds([]);
-    const res = await fetch(`${FEATURE_OVERVIEW_API}/column_summary?object_name=${encodeURIComponent(val)}`);
+    const res = await fetch(
+      `${FEATURE_OVERVIEW_API}/column_summary?object_name=${encodeURIComponent(val)}`
+    );
+    let numeric: string[] = [];
+    let summary: ColumnInfo[] = [];
     if (res.ok) {
       const data = await res.json();
-      setColumns(data.summary || []);
+      summary = data.summary || [];
+      setColumns(summary);
+      numeric = summary
+        .filter((c: ColumnInfo) => !['object', 'string'].includes(c.data_type.toLowerCase()))
+        .map(c => c.column);
     }
+    onSettingsChange({ dataSource: val, selectedColumns: [], columnSummary: [], numericColumns: numeric });
   };
 
   const handleReview = () => {

@@ -40,10 +40,11 @@ Endpoints
    so the JSON is serialisable.
 5. **GET `/feature-overview/results`** – returns the last processed feature
    overview summary in the same format.
-6. **GET `/feature-overview/column_summary`** – new endpoint that accepts an
-   `object_name` of a saved dataframe and returns a list of columns with their
-   data types, unique value counts and sample values. It reads the file from
-   MinIO and is used by the frontend to populate the identifiers dropdown.
+6. **GET `/feature-overview/column_summary`** – accepts an `object_name` of a
+   saved dataframe and returns a list of columns with their data types, unique
+   value counts and sample values. It reads the file from MinIO and is used by
+   the frontend to populate the identifiers dropdown. Numeric columns from this
+   summary are also used for the Y‑axis selection in the visualisation tab.
 
 Functioning
 -----------
