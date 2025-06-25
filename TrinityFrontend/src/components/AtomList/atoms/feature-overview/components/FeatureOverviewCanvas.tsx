@@ -4,6 +4,7 @@ import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
 import { VALIDATE_API } from '@/lib/api';
+import { BarChart3, TrendingUp } from 'lucide-react';
 
 interface ColumnInfo {
   column: string;
