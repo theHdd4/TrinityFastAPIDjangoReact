@@ -42,7 +42,13 @@ const FeatureOverviewProperties: React.FC<Props> = ({ atomId }) => {
           <FeatureOverviewSettings settings={settings} onSettingsChange={handleChange} />
         </TabsContent>
         <TabsContent value="visual" className="space-y-4">
-          <FeatureOverviewVisualisation />
+          <FeatureOverviewVisualisation
+            numericColumns={(settings.columnSummary || [])
+              .filter((c: any) => c.data_type !== 'object' && c.data_type !== 'string')
+              .map((c: any) => c.column)}
+            value={settings.yAxis || ''}
+            onChange={val => handleChange({ yAxis: val })}
+          />
         </TabsContent>
         <TabsContent value="exhibition" className="space-y-4">
           <FeatureOverviewExhibition />

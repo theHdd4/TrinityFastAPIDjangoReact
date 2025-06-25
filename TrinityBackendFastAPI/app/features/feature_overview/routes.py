@@ -26,6 +26,36 @@ minio_client = Minio(
 router = APIRouter()
 
 
+@router.get("/column_summary")
+async def column_summary(object_name: str):
+    """Return column summary statistics for a saved dataframe."""
+    try:
+        response = minio_client.get_object("validated-d1", object_name)
+        content = response.read()
+        if object_name.endswith(".csv"):
+            df = pd.read_csv(io.BytesIO(content))
+        elif object_name.endswith((".xls", ".xlsx")):
+            df = pd.read_excel(io.BytesIO(content))
+        else:
+            raise ValueError("Unsupported file format")
+
+        df.columns = df.columns.str.lower()
+        summary = []
+        for col in df.columns:
+            vals = df[col].dropna().unique()
+            summary.append({
+                "column": col,
+                "data_type": str(df[col].dtype),
+                "unique_count": int(len(vals)),
+                "unique_values": vals[:10].tolist(),
+            })
+        return {"summary": summary}
+    except S3Error as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 @router.get("/ping")
 async def ping():
     return {"msg": "Feature overview is alive"}

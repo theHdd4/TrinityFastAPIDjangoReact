@@ -72,13 +72,21 @@ export interface FeatureOverviewSettings {
   hierarchicalView: boolean;
   dataSource: string;
   filterCriteria: Record<string, unknown>;
+  columnSummary?: any[];
+  marketDims?: string[];
+  productDims?: string[];
+  yAxis?: string;
 }
 
 export const DEFAULT_FEATURE_OVERVIEW_SETTINGS: FeatureOverviewSettings = {
   selectedColumns: [],
   hierarchicalView: true,
   dataSource: '',
-  filterCriteria: {}
+  filterCriteria: {},
+  columnSummary: [],
+  marketDims: [],
+  productDims: [],
+  yAxis: ''
 };
 
 export interface DroppedAtom {
