@@ -1,0 +1,83 @@
+The `app/features/feature_overview` package in `TrinityBackendFastAPI` implements
+an API used by the Feature Overview atom on the frontend.
+
+Folder structure
+----------------
+- **endpoint.py** – exposes the router under the `/feature-overview` prefix.
+- **routes.py** – defines the REST endpoints. It loads files from MinIO, runs
+the feature overview analysis and saves results to MongoDB.
+- **feature_overview/** – contains `base.py` with the core pandas logic for
+  computing unique counts, hierarchical summaries and drill‑down statistics.
+- **mongodb_saver.py** – helper functions that serialize pandas DataFrames and
+  persist results in MongoDB.
+- **deps.py** – creates the MongoDB client and yields collections used by the
+  routes. The URI defaults to the `OVERVIEW_MONGO_URI` (or `MONGO_URI`) env var
+  and stores data in the `feature_overview_db` database.
+- **main.py** – a small FastAPI application used for local running/testing that
+  includes the router and enables CORS.
+- **schemas.py** – Pydantic request/response models.
+
+Endpoints
+---------
+`routes.py` registers several operations on the `APIRouter`:
+1. **GET `/feature-overview/ping`** – simple health check returning
+   `{ "msg": "Feature overview is alive" }`.
+2. **POST `/feature-overview/uniquecount`** – accepts `bucket_name`, a list of
+   `object_names`, `validator_atom_id` and `file_key`. It downloads each file
+   from MinIO, concatenates them into a DataFrame, fetches the dimension mapping
+   from MongoDB via `fetch_dimensions_dict`, and executes `run_unique_count`.
+   The resulting unique counts are saved with
+   `save_feature_overview_unique_results` and also stored in memory for retrieval
+   via the results endpoint.
+3. **POST `/feature-overview/summary`** – similar to `uniquecount` but runs the
+   full `run_feature_overview` workflow. Additional form fields allow toggling
+   the hierarchical view (`create_hierarchy`), generating detailed summaries
+   (`create_summary`) and providing a specific dimension combination
+   (`combination`). Results are persisted using
+   `save_feature_overview_results`.
+4. **GET `/feature-overview/unique_dataframe_results`** – returns the last
+   in-memory unique count results. DataFrames are converted to lists of records
+   so the JSON is serialisable.
+5. **GET `/feature-overview/results`** – returns the last processed feature
+   overview summary in the same format.
+
+Functioning
+-----------
+The analysis utilities live in `feature_overview/base.py`.
+
+`run_unique_count(df, input_dims)`
+  - Normalises column names to lowercase and records unique values for each
+    object column.
+  - Stores a table of columns, data types and unique counts in the global
+    `unique_count` dictionary.
+
+`run_feature_overview(df, input_dims, create_hierarchy=True,
+                      selected_combination=None, create_summary=True)`
+  - Clears previous results and converts column names to lowercase.
+  - Filters out common time/value columns from `input_dims`.
+  - When `create_hierarchy` is true it calls `generate_hierarchy_view`, which
+    finds all unique combinations of the requested dimensions. Optional
+    drill-down summaries can be produced for a specific combination.
+  - Outputs (and later persists) the list of dimensions used, any excluded
+    columns, and the computed combinations.
+
+Both functions update the global `output_store` and `unique_count` variables so
+that subsequent `GET /results` or `GET /unique_dataframe_results` calls return
+those values.
+
+Workflow
+--------
+A typical interaction is:
+1. A validator atom has stored dimension assignments in MongoDB. The front-end
+   uploads files to MinIO and then calls `/feature-overview/uniquecount` or
+   `/feature-overview/summary` with the bucket name, list of files, the
+   validator atom ID and the file key referencing that configuration.
+2. The route downloads and merges the files, loads the dimension mapping,
+   performs the feature overview analysis using the functions in `base.py`, and
+   saves both the in-memory results and a MongoDB document for later access.
+3. The UI can subsequently fetch `/results` or `/unique_dataframe_results` to
+   display the analysis output in a table, chart or hierarchical drill-down.
+
+This backend powers the Feature Overview atom in the React application, enabling
+users to explore uploaded datasets and view column summaries or hierarchical
+statistics directly from the analysis results.
