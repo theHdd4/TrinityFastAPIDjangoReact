@@ -23,6 +23,14 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({ settings 
   const [showMarketSelect, setShowMarketSelect] = useState(false);
   const [showProductSelect, setShowProductSelect] = useState(false);
 
+  if (!settings.columnSummary || settings.columnSummary.length === 0) {
+    return (
+      <div className="w-full h-full flex items-center justify-center text-gray-500">
+        Please configure Feature Overview Settings
+      </div>
+    );
+  }
+
   const getDataTypeColor = (type: string) => {
     switch (type.toLowerCase()) {
       case 'string':
