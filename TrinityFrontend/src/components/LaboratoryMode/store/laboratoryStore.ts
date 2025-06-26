@@ -73,6 +73,7 @@ export interface FeatureOverviewSettings {
   dataSource: string;
   filterCriteria: Record<string, unknown>;
   columnSummary?: any[];
+  allColumns?: any[];
   numericColumns?: string[];
   marketDims?: string[];
   productDims?: string[];
@@ -85,6 +86,7 @@ export const DEFAULT_FEATURE_OVERVIEW_SETTINGS: FeatureOverviewSettings = {
   dataSource: '',
   filterCriteria: {},
   columnSummary: [],
+  allColumns: [],
   numericColumns: [],
   marketDims: [],
   productDims: [],

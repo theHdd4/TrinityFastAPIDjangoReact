@@ -1,5 +1,6 @@
 from minio import Minio
 from minio.error import S3Error
+import os
 from fastapi import APIRouter, Form, HTTPException
 from fastapi.responses import JSONResponse, Response
 import pandas as pd
@@ -25,11 +26,15 @@ from .feature_overview.base import run_unique_count,run_feature_overview, output
 
 
 # MinIO client initialization
+MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "minio:9000")
+MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY", "admin_dev")
+MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY", "pass_dev")
+
 minio_client = Minio(
-    "minioapi.quantmatrixai.com",
-    access_key="admin_dev",
-    secret_key="pass_dev",
-    secure=False  # Set to True if using HTTPS
+    MINIO_ENDPOINT,
+    access_key=MINIO_ACCESS_KEY,
+    secret_key=MINIO_SECRET_KEY,
+    secure=False,  # Set to True if using HTTPS
 )
 
 router = APIRouter()
