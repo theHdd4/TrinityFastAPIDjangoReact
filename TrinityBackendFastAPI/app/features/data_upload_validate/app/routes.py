@@ -2975,3 +2975,73 @@ async def download_dataframe(object_name: str):
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+
+@router.delete("/delete_dataframe")
+async def delete_dataframe(object_name: str):
+    """Delete a single saved dataframe"""
+    if not object_name.startswith(OBJECT_PREFIX):
+        raise HTTPException(status_code=400, detail="Invalid object name")
+    try:
+        try:
+            minio_client.remove_object(MINIO_BUCKET, object_name)
+        except S3Error as e:
+            if getattr(e, "code", "") not in {"NoSuchKey", "NoSuchBucket"}:
+                raise
+        redis_client.delete(object_name)
+        return {"deleted": object_name}
+    except S3Error as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.delete("/delete_all_dataframes")
+async def delete_all_dataframes():
+    """Delete all saved dataframes for the current project"""
+    prefix = OBJECT_PREFIX
+    deleted = []
+    try:
+        objects = minio_client.list_objects(MINIO_BUCKET, prefix=prefix, recursive=True)
+        for obj in objects:
+            try:
+                minio_client.remove_object(MINIO_BUCKET, obj.object_name)
+            except S3Error as e:
+                if getattr(e, "code", "") not in {"NoSuchKey", "NoSuchBucket"}:
+                    raise
+            redis_client.delete(obj.object_name)
+            deleted.append(obj.object_name)
+        return {"deleted": deleted}
+    except S3Error as e:
+        if getattr(e, "code", "") == "NoSuchBucket":
+            return {"deleted": []}
+        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/rename_dataframe")
+async def rename_dataframe(object_name: str = Form(...), new_filename: str = Form(...)):
+    """Rename a saved dataframe"""
+    if not object_name.startswith(OBJECT_PREFIX):
+        raise HTTPException(status_code=400, detail="Invalid object name")
+    new_object = f"{OBJECT_PREFIX}{new_filename}"
+    try:
+        minio_client.copy_object(MINIO_BUCKET, new_object, f"/{MINIO_BUCKET}/{object_name}")
+        try:
+            minio_client.remove_object(MINIO_BUCKET, object_name)
+        except S3Error:
+            pass
+        content = redis_client.get(object_name)
+        if content is not None:
+            redis_client.setex(new_object, 3600, content)
+            redis_client.delete(object_name)
+        return {"old_name": object_name, "new_name": new_object}
+    except S3Error as e:
+        code = getattr(e, "code", "")
+        if code in {"NoSuchKey", "NoSuchBucket"}:
+            redis_client.delete(object_name)
+            raise HTTPException(status_code=404, detail="File not found")
+        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
