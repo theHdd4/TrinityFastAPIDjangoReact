@@ -89,6 +89,64 @@ async def cached_dataframe(object_name: str):
         raise HTTPException(status_code=400, detail=str(e))
 
 
+@router.get("/sku_stats")
+async def sku_stats(object_name: str, y_column: str, combination: str):
+    """Return time series and summary for a specific SKU combination."""
+    try:
+        combo = json.loads(combination)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid combination: {e}")
+
+    try:
+        content = redis_client.get(object_name)
+        if content is None:
+            response = minio_client.get_object("validated-d1", object_name)
+            content = response.read()
+            redis_client.setex(object_name, 3600, content)
+
+        if object_name.endswith(".csv"):
+            df = pd.read_csv(io.BytesIO(content))
+        elif object_name.endswith((".xls", ".xlsx")):
+            df = pd.read_excel(io.BytesIO(content))
+        else:
+            raise ValueError("Unsupported file format")
+
+        df.columns = df.columns.str.lower()
+        y_col = y_column.lower()
+        if y_col not in df.columns:
+            raise ValueError("y_column not found")
+
+        date_cols = [c for c in df.columns if "date" in c or "time" in c]
+        if not date_cols:
+            raise ValueError("no date column found")
+        date_col = date_cols[0]
+
+        mask = pd.Series(True, index=df.index)
+        for k, v in combo.items():
+            col = k.lower()
+            if col in df.columns:
+                mask &= df[col] == v
+
+        sub = df.loc[mask, [date_col, y_col]].dropna()
+        sub[date_col] = pd.to_datetime(sub[date_col], errors="coerce")
+        sub = sub.dropna(subset=[date_col]).sort_values(date_col)
+
+        series = [
+            {"date": str(d.date() if hasattr(d, "date") else d), "value": float(val)}
+            for d, val in zip(sub[date_col], sub[y_col])
+        ]
+        summary = {
+            "avg": float(sub[y_col].mean()) if not sub.empty else 0,
+            "min": float(sub[y_col].min()) if not sub.empty else 0,
+            "max": float(sub[y_col].max()) if not sub.empty else 0,
+        }
+        return {"timeseries": series, "summary": summary}
+    except S3Error as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 @router.get("/ping")
 async def ping():
     return {"msg": "Feature overview is alive"}

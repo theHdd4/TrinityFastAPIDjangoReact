@@ -45,6 +45,10 @@ Endpoints
    value counts and sample values. It reads the file from MinIO and is used by
    the frontend to populate the identifiers dropdown. Numeric columns from this
    summary are also used for the Y‑axis selection in the visualisation tab.
+7. **GET `/feature-overview/sku_stats`** – returns a time series and basic
+   statistics for a specific SKU combination. It expects `object_name`, the
+   numeric `y_column`, and a JSON `combination` mapping dimension names to
+   values. Results are cached via Redis for faster retrieval.
 
 Functioning
 -----------

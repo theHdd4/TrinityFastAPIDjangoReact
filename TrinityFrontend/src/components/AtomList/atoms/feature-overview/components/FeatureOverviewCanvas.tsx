@@ -23,6 +23,8 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({ settings 
   const [skuRows, setSkuRows] = useState<any[]>(settings.skuTable || []);
   const [showMarketSelect, setShowMarketSelect] = useState(false);
   const [showProductSelect, setShowProductSelect] = useState(false);
+  const [activeRow, setActiveRow] = useState<number | null>(null);
+  const [statData, setStatData] = useState<{ timeseries: { date: string; value: number }[]; summary: { avg: number; min: number; max: number } } | null>(null);
 
   if (!settings.columnSummary || settings.columnSummary.length === 0) {
     return (
@@ -64,6 +66,24 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({ settings 
     });
     const table = Array.from(combos.values()).map((row, i) => ({ id: i+1, ...row }));
     setSkuRows(table);
+  };
+
+  const viewStats = async (row: any) => {
+    const combo: Record<string, string> = {};
+    [...marketDims, ...productDims].forEach(d => {
+      combo[d] = row[d.toLowerCase()];
+    });
+    const params = new URLSearchParams({
+      object_name: settings.dataSource,
+      y_column: settings.yAxis || '',
+      combination: JSON.stringify(combo)
+    });
+    const res = await fetch(`${FEATURE_OVERVIEW_API}/sku_stats?${params.toString()}`);
+    if (res.ok) {
+      const data = await res.json();
+      setStatData(data);
+      setActiveRow(row.id);
+    }
   };
 
   return (
@@ -242,13 +262,81 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({ settings 
                         <TableCell key={d}>{row[d.toLowerCase()]}</TableCell>
                       ))}
                       <TableCell>
-                        <Button size="sm">View Stat</Button>
+                        <Button size="sm" onClick={() => viewStats(row)}>View Stat</Button>
                       </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
               </Table>
             </Card>
+          )}
+
+          {activeRow && statData && (
+            <div className="grid grid-cols-1 xl:grid-cols-3 gap-8 mt-6">
+              <div className="xl:col-span-2">
+                <Card className="border-0 shadow-xl bg-white/90 backdrop-blur-sm overflow-hidden h-80">
+                  <div className="bg-gradient-to-r from-indigo-500 to-purple-600 p-4">
+                    <h4 className="font-bold text-white text-lg flex items-center">
+                      <TrendingUp className="w-5 h-5 mr-2" />
+                      {settings.yAxis || 'Trend Analysis'}
+                    </h4>
+                  </div>
+                  <div className="p-6 h-full flex items-center justify-center">
+                    <svg width="100%" height="200" viewBox="0 0 400 200" className="mx-auto">
+                      <defs>
+                        <pattern id="grid" width="40" height="20" patternUnits="userSpaceOnUse">
+                          <path d="M 40 0 L 0 0 0 20" fill="none" stroke="#e5e7eb" strokeWidth="0.5" />
+                        </pattern>
+                      </defs>
+                      <rect width="100%" height="100%" fill="url(#grid)" />
+                      {(() => {
+                        const maxV = Math.max(...statData.timeseries.map(t => t.value || 0), 1);
+                        const points = statData.timeseries
+                          .map((p, i) => `${30 + i * 30},${180 - (p.value / maxV) * 140}`)
+                          .join(' ');
+                        return (
+                          <polyline fill="none" stroke="#6366f1" strokeWidth="3" points={points} />
+                        );
+                      })()}
+                    </svg>
+                  </div>
+                </Card>
+              </div>
+              <div className="xl:col-span-1">
+                <Card className="border-0 shadow-xl bg-white/90 backdrop-blur-sm overflow-hidden h-80">
+                  <div className="bg-gradient-to-r from-emerald-500 to-teal-600 p-4">
+                    <h5 className="font-bold text-white text-sm flex items-center">
+                      <BarChart3 className="w-4 h-4 mr-2" />
+                      Statistical Summary
+                    </h5>
+                  </div>
+                  <div className="p-4 overflow-y-auto h-full">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="border-b border-gray-200">
+                          <th className="p-2 text-left">Metric</th>
+                          <th className="p-2">Value</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr className="border-b">
+                          <td className="p-2">Average</td>
+                          <td className="p-2 text-right">{statData.summary.avg?.toFixed(2)}</td>
+                        </tr>
+                        <tr className="border-b">
+                          <td className="p-2">Min</td>
+                          <td className="p-2 text-right">{statData.summary.min?.toFixed(2)}</td>
+                        </tr>
+                        <tr>
+                          <td className="p-2">Max</td>
+                          <td className="p-2 text-right">{statData.summary.max?.toFixed(2)}</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </Card>
+              </div>
+            </div>
           )}
         </div>
       )}
