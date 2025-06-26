@@ -81,7 +81,8 @@ async def column_summary(object_name: str):
             })
         return {"summary": summary}
     except S3Error as e:
-        if getattr(e, "code", "") == "NoSuchKey":
+        error_code = getattr(e, "code", "")
+        if error_code in {"NoSuchKey", "NoSuchBucket"}:
             raise HTTPException(status_code=404, detail="File not found")
         raise HTTPException(status_code=500, detail=str(e))
     except Exception as e:
@@ -99,7 +100,8 @@ async def cached_dataframe(object_name: str):
             redis_client.setex(object_name, 3600, content)
         return Response(content, media_type="text/csv")
     except S3Error as e:
-        if getattr(e, "code", "") == "NoSuchKey":
+        error_code = getattr(e, "code", "")
+        if error_code in {"NoSuchKey", "NoSuchBucket"}:
             raise HTTPException(status_code=404, detail="File not found")
         raise HTTPException(status_code=500, detail=str(e))
     except Exception as e:
@@ -159,7 +161,8 @@ async def sku_stats(object_name: str, y_column: str, combination: str):
         }
         return {"timeseries": series, "summary": summary}
     except S3Error as e:
-        if getattr(e, "code", "") == "NoSuchKey":
+        error_code = getattr(e, "code", "")
+        if error_code in {"NoSuchKey", "NoSuchBucket"}:
             raise HTTPException(status_code=404, detail="File not found")
         raise HTTPException(status_code=500, detail=str(e))
     except Exception as e:
