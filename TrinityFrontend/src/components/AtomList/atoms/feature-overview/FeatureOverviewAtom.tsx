@@ -8,12 +8,13 @@ interface Props {
 
 const FeatureOverviewAtom: React.FC<Props> = ({ atomId }) => {
   const atom = useLaboratoryStore(state => state.getAtom(atomId));
-  const settings: SettingsType = (atom?.settings as SettingsType) || { ...DEFAULT_FEATURE_OVERVIEW_SETTINGS };
+  const settings: SettingsType =
+    (atom?.settings as SettingsType) || { ...DEFAULT_FEATURE_OVERVIEW_SETTINGS };
 
   return (
     <div className="w-full h-full bg-white">
       <div className="h-full flex flex-col">
-        <FeatureOverviewCanvas settings={settings} />
+        <FeatureOverviewCanvas atomId={atomId} settings={settings} />
       </div>
     </div>
   );
