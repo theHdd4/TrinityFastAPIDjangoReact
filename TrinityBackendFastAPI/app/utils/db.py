@@ -1,5 +1,9 @@
 import os
-import asyncpg
+
+try:
+    import asyncpg  # type: ignore
+except ModuleNotFoundError:  # pragma: no cover - optional dependency
+    asyncpg = None
 
 POSTGRES_HOST = os.getenv("POSTGRES_HOST", "postgres")
 POSTGRES_DB = os.getenv("POSTGRES_DB", "trinity_db")
@@ -7,7 +11,19 @@ POSTGRES_USER = os.getenv("POSTGRES_USER", "trinity_user")
 POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD", "trinity_pass")
 
 async def fetch_client_app_project(user_id: int, project_id: int):
-    """Fetch client, app and project names from Postgres."""
+    """Fetch client, app and project names from Postgres.
+
+    If ``asyncpg`` is not installed the function falls back to the environment
+    variables ``CLIENT_NAME``, ``APP_NAME`` and ``PROJECT_NAME`` instead of
+    querying the database.
+    """
+    if asyncpg is None:
+        return (
+            os.getenv("CLIENT_NAME", "default_client"),
+            os.getenv("APP_NAME", "default_app"),
+            os.getenv("PROJECT_NAME", "default_project"),
+        )
+
     conn = await asyncpg.connect(
         host=POSTGRES_HOST,
         user=POSTGRES_USER,
