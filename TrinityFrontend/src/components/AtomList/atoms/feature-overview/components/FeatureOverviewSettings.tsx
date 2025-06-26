@@ -20,7 +20,7 @@ interface ColumnInfo {
 
 const FeatureOverviewSettings: React.FC<FeatureOverviewSettingsProps> = ({ settings, onSettingsChange }) => {
   const [frames, setFrames] = useState<string[]>([]);
-  const [columns, setColumns] = useState<ColumnInfo[]>([]);
+  const [columns, setColumns] = useState<ColumnInfo[]>(settings.columnSummary || []);
   const [selectedIds, setSelectedIds] = useState<string[]>(settings.selectedColumns || []);
 
   useEffect(() => {
@@ -29,6 +29,12 @@ const FeatureOverviewSettings: React.FC<FeatureOverviewSettingsProps> = ({ setti
       .then(d => setFrames(d.files || []))
       .catch(() => setFrames([]));
   }, []);
+
+  // restore dropdown state when settings come from store
+  useEffect(() => {
+    setColumns(settings.columnSummary || []);
+    setSelectedIds(settings.selectedColumns || []);
+  }, [settings.columnSummary, settings.selectedColumns]);
 
   const handleFrameChange = async (val: string) => {
     setSelectedIds([]);
@@ -45,7 +51,12 @@ const FeatureOverviewSettings: React.FC<FeatureOverviewSettingsProps> = ({ setti
         .filter((c: ColumnInfo) => !['object', 'string'].includes(c.data_type.toLowerCase()))
         .map(c => c.column);
     }
-    onSettingsChange({ dataSource: val, selectedColumns: [], columnSummary: [], numericColumns: numeric });
+    onSettingsChange({
+      dataSource: val,
+      selectedColumns: [],
+      columnSummary: summary,
+      numericColumns: numeric,
+    });
   };
 
   const handleReview = () => {
