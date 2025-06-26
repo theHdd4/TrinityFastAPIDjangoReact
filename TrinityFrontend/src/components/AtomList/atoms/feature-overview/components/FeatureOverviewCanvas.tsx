@@ -13,11 +13,15 @@ interface ColumnInfo {
   unique_values: string[];
 }
 
+import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
+
 interface FeatureOverviewCanvasProps {
+  atomId: string;
   settings: any;
 }
 
-const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({ settings }) => {
+const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({ atomId, settings }) => {
+  const updateSettings = useLaboratoryStore(state => state.updateAtomSettings);
   const [marketDims, setMarketDims] = useState<string[]>(settings.marketDims || []);
   const [productDims, setProductDims] = useState<string[]>(settings.productDims || []);
   const [skuRows, setSkuRows] = useState<any[]>(settings.skuTable || []);
@@ -77,6 +81,7 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({ settings 
       });
       const table = Array.from(combos.values()).map((row, i) => ({ id: i + 1, ...row }));
       setSkuRows(table);
+      updateSettings(atomId, { skuTable: table });
     } catch (e: any) {
       setError(e.message || 'Error displaying SKUs');
     }
@@ -194,7 +199,9 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({ settings 
                         onChange={e => {
                           const val = e.target.value;
                           if (val) {
-                            setMarketDims([...marketDims, val]);
+                            const next = [...marketDims, val];
+                            setMarketDims(next);
+                            updateSettings(atomId, { marketDims: next });
                             setShowMarketSelect(false);
                           }
                         }}
@@ -242,7 +249,9 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({ settings 
                         onChange={e => {
                           const val = e.target.value;
                           if (val) {
-                            setProductDims([...productDims, val]);
+                            const next = [...productDims, val];
+                            setProductDims(next);
+                            updateSettings(atomId, { productDims: next });
                             setShowProductSelect(false);
                           }
                         }}

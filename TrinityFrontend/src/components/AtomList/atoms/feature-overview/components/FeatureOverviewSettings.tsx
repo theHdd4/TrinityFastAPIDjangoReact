@@ -106,8 +106,10 @@ const FeatureOverviewSettings: React.FC<FeatureOverviewSettingsProps> = ({ setti
 
       <Card className="p-4 flex items-center justify-between">
         <span className="text-sm font-medium text-gray-700">Open Hierarchical View</span>
-        <Checkbox checked={settings.hierarchicalView} onCheckedChange={val => onSettingsChange({ hierarchicalView: val })}>
-        </Checkbox>
+        <Checkbox
+          checked={settings.hierarchicalView}
+          onCheckedChange={val => onSettingsChange({ hierarchicalView: val })}
+        />
         {settings.hierarchicalView ? <Eye className="w-4 h-4 text-blue-600" /> : <EyeOff className="w-4 h-4 text-gray-400" />}
       </Card>
     </div>
