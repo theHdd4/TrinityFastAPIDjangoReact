@@ -102,6 +102,8 @@ async def health_check():
 from minio import Minio
 from minio.error import S3Error
 from app.features.feature_overview.deps import redis_client
+from app.utils.db import fetch_client_app_project
+import asyncio
 import os
 
 # ✅ MINIO CONFIGURATION - values come from docker-compose/.env
@@ -110,10 +112,30 @@ MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY", "minio")
 MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY", "minio123")
 MINIO_BUCKET = os.getenv("MINIO_BUCKET", "trinity")
 
-# Path info for saving uploads
+# Database driven folder names
+USER_ID = int(os.getenv("USER_ID", "0"))
+PROJECT_ID = int(os.getenv("PROJECT_ID", "0"))
+
 CLIENT_NAME = os.getenv("CLIENT_NAME", "default_client")
 APP_NAME = os.getenv("APP_NAME", "default_app")
 PROJECT_NAME = os.getenv("PROJECT_NAME", "default_project")
+
+def load_names_from_db() -> None:
+    """Lookup client/app/project names from Postgres if ids are provided."""
+    global CLIENT_NAME, APP_NAME, PROJECT_NAME
+    if USER_ID and PROJECT_ID:
+        try:
+            CLIENT_NAME_DB, APP_NAME_DB, PROJECT_NAME_DB = asyncio.run(
+                fetch_client_app_project(USER_ID, PROJECT_ID)
+            )
+            CLIENT_NAME = CLIENT_NAME_DB or CLIENT_NAME
+            APP_NAME = APP_NAME_DB or APP_NAME
+            PROJECT_NAME = PROJECT_NAME_DB or PROJECT_NAME
+        except Exception as exc:
+            print(f"⚠️ Failed to load names from DB: {exc}")
+
+load_names_from_db()
+
 OBJECT_PREFIX = f"{CLIENT_NAME}/{APP_NAME}/{PROJECT_NAME}/"
 
 # Initialize MinIO client
@@ -153,7 +175,7 @@ def upload_to_minio(file_content_bytes: bytes, filename: str, validator_atom_id:
     try:
         # Create unique object name with timestamp
         timestamp = pd.Timestamp.now().strftime("%Y%m%d_%H%M%S")
-        object_name = f"{CLIENT_NAME}/{APP_NAME}/{PROJECT_NAME}/{timestamp}_{filename}"
+        object_name = f"{OBJECT_PREFIX}{timestamp}_{filename}"
         
         # Convert bytes to BytesIO for seek operations
         file_content = io.BytesIO(file_content_bytes)

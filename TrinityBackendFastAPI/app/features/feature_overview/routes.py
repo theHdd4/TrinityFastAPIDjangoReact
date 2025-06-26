@@ -24,6 +24,8 @@ from .mongodb_saver import (
 )
 
 from .feature_overview.base import run_unique_count,run_feature_overview, output_store, unique_count
+from app.utils.db import fetch_client_app_project
+import asyncio
 
 
 # MinIO client initialization
@@ -31,9 +33,29 @@ MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "minio:9000")
 MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY", "admin_dev")
 MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY", "pass_dev")
 MINIO_BUCKET = os.getenv("MINIO_BUCKET", "trinity")
+
+USER_ID = int(os.getenv("USER_ID", "0"))
+PROJECT_ID = int(os.getenv("PROJECT_ID", "0"))
+
 CLIENT_NAME = os.getenv("CLIENT_NAME", "default_client")
 APP_NAME = os.getenv("APP_NAME", "default_app")
 PROJECT_NAME = os.getenv("PROJECT_NAME", "default_project")
+
+def load_names_from_db() -> None:
+    global CLIENT_NAME, APP_NAME, PROJECT_NAME
+    if USER_ID and PROJECT_ID:
+        try:
+            CLIENT_NAME_DB, APP_NAME_DB, PROJECT_NAME_DB = asyncio.run(
+                fetch_client_app_project(USER_ID, PROJECT_ID)
+            )
+            CLIENT_NAME = CLIENT_NAME_DB or CLIENT_NAME
+            APP_NAME = APP_NAME_DB or APP_NAME
+            PROJECT_NAME = PROJECT_NAME_DB or PROJECT_NAME
+        except Exception as exc:
+            print(f"⚠️ Failed to load names from DB: {exc}")
+
+load_names_from_db()
+
 OBJECT_PREFIX = f"{CLIENT_NAME}/{APP_NAME}/{PROJECT_NAME}/"
 
 minio_client = Minio(
