@@ -44,11 +44,16 @@ Endpoints
    saved dataframe and returns a list of columns with their data types, unique
    value counts and sample values. It reads the file from MinIO and is used by
    the frontend to populate the identifiers dropdown. Numeric columns from this
-   summary are also used for the Y‑axis selection in the visualisation tab.
+ summary are also used for the Y‑axis selection in the visualisation tab.
 7. **GET `/feature-overview/sku_stats`** – returns a time series and basic
    statistics for a specific SKU combination. It expects `object_name`, the
    numeric `y_column`, and a JSON `combination` mapping dimension names to
    values. Results are cached via Redis for faster retrieval.
+
+While the existing `/feature-overview/unique_dataframe_results` endpoint
+exposes only column-level unique counts, it does not contain the time-series
+data needed for SKU trend analysis. The dedicated `/sku_stats` endpoint is
+therefore required when plotting SKU statistics.
 
 Functioning
 -----------
