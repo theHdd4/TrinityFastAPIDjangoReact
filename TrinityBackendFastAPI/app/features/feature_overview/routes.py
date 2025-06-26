@@ -38,6 +38,30 @@ minio_client = Minio(
     secure=False,  # Set to True if using HTTPS
 )
 
+
+def fetch_file(object_name: str) -> bytes:
+    """Retrieve file bytes using Redis cache with MinIO fallback."""
+    content = None
+    if redis_client:
+        try:
+            content = redis_client.get(object_name)
+        except Exception:
+            content = None
+    if content is None:
+        try:
+            response = minio_client.get_object(MINIO_BUCKET, object_name)
+            content = response.read()
+        except S3Error as e:
+            if getattr(e, "code", "") == "NoSuchKey":
+                raise HTTPException(status_code=404, detail="File not found")
+            raise HTTPException(status_code=500, detail=str(e))
+        if redis_client:
+            try:
+                redis_client.setex(object_name, 3600, content)
+            except Exception:
+                pass
+    return content
+
 router = APIRouter()
 
 
@@ -45,11 +69,7 @@ router = APIRouter()
 async def column_summary(object_name: str):
     """Return column summary statistics for a saved dataframe."""
     try:
-        content = redis_client.get(object_name)
-        if content is None:
-            response = minio_client.get_object(MINIO_BUCKET, object_name)
-            content = response.read()
-            redis_client.setex(object_name, 3600, content)
+        content = fetch_file(object_name)
         if object_name.endswith(".csv"):
             df = pd.read_csv(io.BytesIO(content))
         elif object_name.endswith((".xls", ".xlsx")):
@@ -68,10 +88,8 @@ async def column_summary(object_name: str):
                 "unique_values": vals[:10].tolist(),
             })
         return {"summary": summary}
-    except S3Error as e:
-        if getattr(e, "code", "") == "NoSuchKey":
-            raise HTTPException(status_code=404, detail="File not found")
-        raise HTTPException(status_code=500, detail=str(e))
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -80,16 +98,10 @@ async def column_summary(object_name: str):
 async def cached_dataframe(object_name: str):
     """Return the raw CSV bytes for a saved dataframe from Redis."""
     try:
-        content = redis_client.get(object_name)
-        if content is None:
-            response = minio_client.get_object(MINIO_BUCKET, object_name)
-            content = response.read()
-            redis_client.setex(object_name, 3600, content)
+        content = fetch_file(object_name)
         return Response(content, media_type="text/csv")
-    except S3Error as e:
-        if getattr(e, "code", "") == "NoSuchKey":
-            raise HTTPException(status_code=404, detail="File not found")
-        raise HTTPException(status_code=500, detail=str(e))
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -103,11 +115,7 @@ async def sku_stats(object_name: str, y_column: str, combination: str):
         raise HTTPException(status_code=400, detail=f"Invalid combination: {e}")
 
     try:
-        content = redis_client.get(object_name)
-        if content is None:
-            response = minio_client.get_object(MINIO_BUCKET, object_name)
-            content = response.read()
-            redis_client.setex(object_name, 3600, content)
+        content = fetch_file(object_name)
 
         if object_name.endswith(".csv"):
             df = pd.read_csv(io.BytesIO(content))
@@ -146,10 +154,8 @@ async def sku_stats(object_name: str, y_column: str, combination: str):
             "max": float(sub[y_col].max()) if not sub.empty else 0,
         }
         return {"timeseries": series, "summary": summary}
-    except S3Error as e:
-        if getattr(e, "code", "") == "NoSuchKey":
-            raise HTTPException(status_code=404, detail="File not found")
-        raise HTTPException(status_code=500, detail=str(e))
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
