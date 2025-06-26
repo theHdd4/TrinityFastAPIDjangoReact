@@ -61,11 +61,13 @@ async def column_summary(object_name: str):
         summary = []
         for col in df.columns:
             vals = df[col].dropna().unique()
+            # Convert to plain Python types for JSON serialisation
+            safe_vals = [str(v) for v in vals[:10]]
             summary.append({
                 "column": col,
                 "data_type": str(df[col].dtype),
                 "unique_count": int(len(vals)),
-                "unique_values": vals[:10].tolist(),
+                "unique_values": safe_vals,
             })
         return {"summary": summary}
     except S3Error as e:
