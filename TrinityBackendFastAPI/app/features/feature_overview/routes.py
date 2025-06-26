@@ -89,6 +89,7 @@ async def column_summary(object_name: str):
     except S3Error as e:
         error_code = getattr(e, "code", "")
         if error_code in {"NoSuchKey", "NoSuchBucket"}:
+            redis_client.delete(object_name)
             raise HTTPException(status_code=404, detail="File not found")
         raise HTTPException(status_code=500, detail=str(e))
     except Exception as e:
@@ -110,6 +111,7 @@ async def cached_dataframe(object_name: str):
     except S3Error as e:
         error_code = getattr(e, "code", "")
         if error_code in {"NoSuchKey", "NoSuchBucket"}:
+            redis_client.delete(object_name)
             raise HTTPException(status_code=404, detail="File not found")
         raise HTTPException(status_code=500, detail=str(e))
     except Exception as e:
@@ -173,6 +175,7 @@ async def sku_stats(object_name: str, y_column: str, combination: str):
     except S3Error as e:
         error_code = getattr(e, "code", "")
         if error_code in {"NoSuchKey", "NoSuchBucket"}:
+            redis_client.delete(object_name)
             raise HTTPException(status_code=404, detail="File not found")
         raise HTTPException(status_code=500, detail=str(e))
     except Exception as e:

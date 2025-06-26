@@ -101,6 +101,7 @@ async def health_check():
 
 from minio import Minio
 from minio.error import S3Error
+from app.features.feature_overview.deps import redis_client
 import os
 
 # ✅ MINIO CONFIGURATION FOR YOUR SERVER
@@ -2946,6 +2947,7 @@ async def list_saved_dataframes():
                 files.append(obj.object_name)
             except S3Error as e:
                 if getattr(e, "code", "") in {"NoSuchKey", "NoSuchBucket"}:
+                    redis_client.delete(obj.object_name)
                     continue
                 raise
         return {"files": files}
@@ -2967,6 +2969,7 @@ async def download_dataframe(object_name: str):
         return {"url": url}
     except S3Error as e:
         if getattr(e, "code", "") in {"NoSuchKey", "NoSuchBucket"}:
+            redis_client.delete(object_name)
             raise HTTPException(status_code=404, detail="File not found")
         raise HTTPException(status_code=500, detail=str(e))
     except Exception as e:

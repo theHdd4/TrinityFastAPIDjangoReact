@@ -19,3 +19,12 @@ mc rm --recursive --force MINIO/<old-bucket-name>
 ```
 
 This clears out unavailable dataframes so they no longer show up in the menu.
+
+Cached copies of deleted files may also exist in Redis. To remove them run:
+
+```bash
+redis-cli --scan --pattern "${CLIENT_NAME}/${APP_NAME}/${PROJECT_NAME}/*" | \
+  xargs -r redis-cli DEL
+```
+
+Replace the environment variables with their actual values if not set.
