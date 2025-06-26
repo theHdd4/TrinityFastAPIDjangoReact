@@ -31,6 +31,10 @@ MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "minio:9000")
 MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY", "admin_dev")
 MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY", "pass_dev")
 MINIO_BUCKET = os.getenv("MINIO_BUCKET", "validated-d1")
+CLIENT_NAME = os.getenv("CLIENT_NAME", "default_client")
+APP_NAME = os.getenv("APP_NAME", "default_app")
+PROJECT_NAME = os.getenv("PROJECT_NAME", "default_project")
+OBJECT_PREFIX = f"{CLIENT_NAME}/{APP_NAME}/{PROJECT_NAME}/"
 
 minio_client = Minio(
     MINIO_ENDPOINT,
@@ -45,6 +49,8 @@ router = APIRouter()
 @router.get("/column_summary")
 async def column_summary(object_name: str):
     """Return column summary statistics for a saved dataframe."""
+    if not object_name.startswith(OBJECT_PREFIX):
+        raise HTTPException(status_code=400, detail="Invalid object name")
     try:
         content = redis_client.get(object_name)
         if content is None:
@@ -92,6 +98,8 @@ async def column_summary(object_name: str):
 @router.get("/cached_dataframe")
 async def cached_dataframe(object_name: str):
     """Return the raw CSV bytes for a saved dataframe from Redis."""
+    if not object_name.startswith(OBJECT_PREFIX):
+        raise HTTPException(status_code=400, detail="Invalid object name")
     try:
         content = redis_client.get(object_name)
         if content is None:
@@ -111,6 +119,8 @@ async def cached_dataframe(object_name: str):
 @router.get("/sku_stats")
 async def sku_stats(object_name: str, y_column: str, combination: str):
     """Return time series and summary for a specific SKU combination."""
+    if not object_name.startswith(OBJECT_PREFIX):
+        raise HTTPException(status_code=400, detail="Invalid object name")
     try:
         combo = json.loads(combination)
     except Exception as e:

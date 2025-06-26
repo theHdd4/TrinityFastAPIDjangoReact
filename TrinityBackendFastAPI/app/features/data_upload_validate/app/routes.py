@@ -113,6 +113,7 @@ MINIO_BUCKET = "validated-d1"    # Your existing bucket
 CLIENT_NAME = os.getenv("CLIENT_NAME", "default_client")
 APP_NAME = os.getenv("APP_NAME", "default_app")
 PROJECT_NAME = os.getenv("PROJECT_NAME", "default_project")
+OBJECT_PREFIX = f"{CLIENT_NAME}/{APP_NAME}/{PROJECT_NAME}/"
 
 # Initialize MinIO client
 minio_client = Minio(
@@ -2935,7 +2936,7 @@ async def save_dataframes(
 @router.get("/list_saved_dataframes")
 async def list_saved_dataframes():
     """List saved dataframes for the current project"""
-    prefix = f"{CLIENT_NAME}/{APP_NAME}/{PROJECT_NAME}"
+    prefix = OBJECT_PREFIX
     try:
         objects = minio_client.list_objects(MINIO_BUCKET, prefix=prefix, recursive=True)
         files = []
@@ -2959,6 +2960,8 @@ async def list_saved_dataframes():
 @router.get("/download_dataframe")
 async def download_dataframe(object_name: str):
     """Return a presigned URL to download a dataframe"""
+    if not object_name.startswith(OBJECT_PREFIX):
+        raise HTTPException(status_code=400, detail="Invalid object name")
     try:
         url = minio_client.presigned_get_object(MINIO_BUCKET, object_name)
         return {"url": url}
