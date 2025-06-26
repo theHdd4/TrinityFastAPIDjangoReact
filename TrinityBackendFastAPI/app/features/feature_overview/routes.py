@@ -61,11 +61,17 @@ async def column_summary(object_name: str):
         df.columns = df.columns.str.lower()
         summary = []
         for col in df.columns:
-            vals = df[col].dropna().unique()
+            column_series = df[col].dropna()
+            try:
+                vals = column_series.unique()
+            except TypeError:
+                vals = column_series.astype(str).unique()
+
             def _serialize(v):
                 if isinstance(v, (pd.Timestamp, datetime, date)):
                     return pd.to_datetime(v).isoformat()
                 return str(v)
+
             safe_vals = [_serialize(v) for v in vals[:10]]
             summary.append({
                 "column": col,
