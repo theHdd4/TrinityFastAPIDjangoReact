@@ -2936,8 +2936,24 @@ async def save_dataframes(
 async def list_saved_dataframes():
     """List saved dataframes for the current project"""
     prefix = f"{CLIENT_NAME}/{APP_NAME}/{PROJECT_NAME}"
-    objects = minio_client.list_objects(MINIO_BUCKET, prefix=prefix, recursive=True)
-    return {"files": [obj.object_name for obj in objects]}
+    try:
+        objects = minio_client.list_objects(MINIO_BUCKET, prefix=prefix, recursive=True)
+        files = []
+        for obj in objects:
+            try:
+                minio_client.stat_object(MINIO_BUCKET, obj.object_name)
+                files.append(obj.object_name)
+            except S3Error as e:
+                if getattr(e, "code", "") in {"NoSuchKey", "NoSuchBucket"}:
+                    continue
+                raise
+        return {"files": files}
+    except S3Error as e:
+        if getattr(e, "code", "") == "NoSuchBucket":
+            return {"files": []}
+        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.get("/download_dataframe")
@@ -2945,7 +2961,11 @@ async def download_dataframe(object_name: str):
     """Return a presigned URL to download a dataframe"""
     try:
         url = minio_client.presigned_get_object(MINIO_BUCKET, object_name)
+        return {"url": url}
+    except S3Error as e:
+        if getattr(e, "code", "") in {"NoSuchKey", "NoSuchBucket"}:
+            raise HTTPException(status_code=404, detail="File not found")
+        raise HTTPException(status_code=500, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
-    return {"url": url}
 
