@@ -19,9 +19,10 @@ Follow the steps below to run all services together.
    service.
 
 Docker and Node.js must be installed locally. The Python dependencies listed in
-`TrinityBackendDjango/requirements.txt` (including pandas, motor and
-python-multipart) will be installed inside the containers during the build
-step.
+`TrinityBackendDjango/requirements.txt` and
+`TrinityBackendFastAPI/requirements.txt` (including pandas, motor,
+`python-multipart` and `asyncpg`) will be installed inside the containers during
+the build step.
 Set `SIMPLE_TENANT_CREATION=true` in `.env` if your environment cannot run
 database migrations for new tenants.
 
