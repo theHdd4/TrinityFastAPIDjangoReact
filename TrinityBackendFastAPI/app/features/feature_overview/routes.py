@@ -6,6 +6,7 @@ from fastapi.responses import JSONResponse, Response
 import pandas as pd
 import io
 import json
+from datetime import date, datetime
 from typing import List
 from fastapi import Depends
 from motor.motor_asyncio import AsyncIOMotorCollection
@@ -61,8 +62,11 @@ async def column_summary(object_name: str):
         summary = []
         for col in df.columns:
             vals = df[col].dropna().unique()
-            # Convert to plain Python types for JSON serialisation
-            safe_vals = [str(v) for v in vals[:10]]
+            def _serialize(v):
+                if isinstance(v, (pd.Timestamp, datetime, date)):
+                    return pd.to_datetime(v).isoformat()
+                return str(v)
+            safe_vals = [_serialize(v) for v in vals[:10]]
             summary.append({
                 "column": col,
                 "data_type": str(df[col].dtype),
