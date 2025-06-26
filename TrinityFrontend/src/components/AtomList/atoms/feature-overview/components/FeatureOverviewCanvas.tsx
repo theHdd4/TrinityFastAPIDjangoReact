@@ -3,7 +3,7 @@ import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
-import { VALIDATE_API } from '@/lib/api';
+import { FEATURE_OVERVIEW_API } from '@/lib/api';
 import { BarChart3, TrendingUp } from 'lucide-react';
 
 interface ColumnInfo {
@@ -46,10 +46,9 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({ settings 
   };
 
   const displaySkus = async () => {
-    const res = await fetch(`${VALIDATE_API}/download_dataframe?object_name=${encodeURIComponent(settings.dataSource)}`);
+    const res = await fetch(`${FEATURE_OVERVIEW_API}/cached_dataframe?object_name=${encodeURIComponent(settings.dataSource)}`);
     if (!res.ok) return;
-    const { url } = await res.json();
-    const text = await fetch(url).then(r => r.text());
+    const text = await res.text();
     const [headerLine, ...rows] = text.trim().split(/\r?\n/);
     const headers = headerLine.split(',');
     const data = rows.map(r => {

@@ -86,3 +86,12 @@ A typical interaction is:
 This backend powers the Feature Overview atom in the React application, enabling
 users to explore uploaded datasets and view column summaries or hierarchical
 statistics directly from the analysis results.
+
+Caching
+-------
+To speed up repeated access to saved dataframes the service now caches files in
+Redis. Endpoints such as `/feature-overview/column_summary` and the new
+`/feature-overview/cached_dataframe` first look for the requested object in
+Redis. If absent the file is fetched from MinIO, stored in Redis with a one hour
+TTL and then processed. This avoids expensive round trips to MinIO when users
+select identifiers or review data multiple times.

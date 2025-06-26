@@ -1,16 +1,25 @@
 from minio import Minio
 from minio.error import S3Error
 from fastapi import APIRouter, Form, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 import pandas as pd
 import io
 import json
 from typing import List
 from fastapi import Depends
 from motor.motor_asyncio import AsyncIOMotorCollection
+from .deps import (
+    get_unique_dataframe_results_collection,
+    get_summary_results_collection,
+    get_validator_atoms_collection,
+    redis_client,
+)
 
-from .deps import get_unique_dataframe_results_collection,get_summary_results_collection,get_validator_atoms_collection
-from .mongodb_saver import save_feature_overview_results,save_feature_overview_unique_results,fetch_dimensions_dict
+from .mongodb_saver import (
+    save_feature_overview_results,
+    save_feature_overview_unique_results,
+    fetch_dimensions_dict,
+)
 
 from .feature_overview.base import run_unique_count,run_feature_overview, output_store, unique_count
 
@@ -30,8 +39,11 @@ router = APIRouter()
 async def column_summary(object_name: str):
     """Return column summary statistics for a saved dataframe."""
     try:
-        response = minio_client.get_object("validated-d1", object_name)
-        content = response.read()
+        content = redis_client.get(object_name)
+        if content is None:
+            response = minio_client.get_object("validated-d1", object_name)
+            content = response.read()
+            redis_client.setex(object_name, 3600, content)
         if object_name.endswith(".csv"):
             df = pd.read_csv(io.BytesIO(content))
         elif object_name.endswith((".xls", ".xlsx")):
@@ -50,6 +62,22 @@ async def column_summary(object_name: str):
                 "unique_values": vals[:10].tolist(),
             })
         return {"summary": summary}
+    except S3Error as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/cached_dataframe")
+async def cached_dataframe(object_name: str):
+    """Return the raw CSV bytes for a saved dataframe from Redis."""
+    try:
+        content = redis_client.get(object_name)
+        if content is None:
+            response = minio_client.get_object("validated-d1", object_name)
+            content = response.read()
+            redis_client.setex(object_name, 3600, content)
+        return Response(content, media_type="text/csv")
     except S3Error as e:
         raise HTTPException(status_code=500, detail=str(e))
     except Exception as e:
