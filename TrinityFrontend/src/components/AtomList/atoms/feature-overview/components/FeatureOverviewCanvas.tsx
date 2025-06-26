@@ -25,11 +25,12 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({ settings 
   const [showProductSelect, setShowProductSelect] = useState(false);
   const [activeRow, setActiveRow] = useState<number | null>(null);
   const [statData, setStatData] = useState<{ timeseries: { date: string; value: number }[]; summary: { avg: number; min: number; max: number } } | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   if (!settings.columnSummary || settings.columnSummary.length === 0) {
     return (
       <div className="w-full h-full flex items-center justify-center text-gray-500">
-        Please configure Feature Overview Settings
+        {error || 'Please configure Feature Overview Settings'}
       </div>
     );
   }
@@ -48,24 +49,37 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({ settings 
   };
 
   const displaySkus = async () => {
-    const res = await fetch(`${FEATURE_OVERVIEW_API}/cached_dataframe?object_name=${encodeURIComponent(settings.dataSource)}`);
-    if (!res.ok) return;
-    const text = await res.text();
-    const [headerLine, ...rows] = text.trim().split(/\r?\n/);
-    const headers = headerLine.split(',');
-    const data = rows.map(r => {
-      const vals = r.split(',');
-      const obj: Record<string,string> = {};
-      headers.forEach((h,i)=>{obj[h.toLowerCase()] = vals[i];});
-      return obj;
-    });
-    const combos = new Map<string, any>();
-    data.forEach(row => {
-      const key = [...marketDims, ...productDims].map(k=>row[k.toLowerCase()]||'').join('||');
-      if (!combos.has(key)) combos.set(key, row);
-    });
-    const table = Array.from(combos.values()).map((row, i) => ({ id: i+1, ...row }));
-    setSkuRows(table);
+    setError(null);
+    try {
+      const res = await fetch(
+        `${FEATURE_OVERVIEW_API}/cached_dataframe?object_name=${encodeURIComponent(settings.dataSource)}`
+      );
+      if (!res.ok) {
+        throw new Error('Failed to load data');
+      }
+      const text = await res.text();
+      const [headerLine, ...rows] = text.trim().split(/\r?\n/);
+      const headers = headerLine.split(',');
+      const data = rows.map(r => {
+        const vals = r.split(',');
+        const obj: Record<string, string> = {};
+        headers.forEach((h, i) => {
+          obj[h.toLowerCase()] = vals[i];
+        });
+        return obj;
+      });
+      const combos = new Map<string, any>();
+      data.forEach(row => {
+        const key = [...marketDims, ...productDims]
+          .map(k => row[k.toLowerCase()] || '')
+          .join('||');
+        if (!combos.has(key)) combos.set(key, row);
+      });
+      const table = Array.from(combos.values()).map((row, i) => ({ id: i + 1, ...row }));
+      setSkuRows(table);
+    } catch (e: any) {
+      setError(e.message || 'Error displaying SKUs');
+    }
   };
 
   const viewStats = async (row: any) => {
@@ -78,16 +92,27 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({ settings 
       y_column: settings.yAxis || '',
       combination: JSON.stringify(combo)
     });
-    const res = await fetch(`${FEATURE_OVERVIEW_API}/sku_stats?${params.toString()}`);
-    if (res.ok) {
+    setError(null);
+    try {
+      const res = await fetch(`${FEATURE_OVERVIEW_API}/sku_stats?${params.toString()}`);
+      if (!res.ok) {
+        throw new Error('Failed to fetch statistics');
+      }
       const data = await res.json();
       setStatData(data);
       setActiveRow(row.id);
+    } catch (e: any) {
+      setError(e.message || 'Error fetching statistics');
     }
   };
 
   return (
     <div className="w-full h-full p-6 bg-gradient-to-br from-slate-50 to-blue-50 overflow-y-auto">
+      {error && (
+        <div className="mb-4 text-sm text-red-600 font-medium" data-testid="fo-error">
+          {error}
+        </div>
+      )}
       {settings.columnSummary && settings.columnSummary.length > 0 && (
         <div className="mb-8">
           <div className="flex items-center mb-6">
@@ -108,7 +133,7 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({ settings 
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {settings.columnSummary.map((c: ColumnInfo) => (
+                    {settings.columnSummary.filter(Boolean).map((c: ColumnInfo) => (
                       <TableRow key={c.column} className="hover:bg-blue-50/50 transition-all duration-200 border-b border-gray-100">
                         <TableCell className="font-semibold text-gray-900 text-center py-4">{c.column}</TableCell>
                         <TableCell className="text-center py-4">
