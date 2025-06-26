@@ -1,4 +1,4 @@
-After running validations, files that pass are uploaded to the MinIO bucket defined by the `MINIO_BUCKET` environment variable. The connection details (`MINIO_ENDPOINT`, `MINIO_ACCESS_KEY` and `MINIO_SECRET_KEY`) are supplied by Docker Compose when the FastAPI service starts.
+After running validations, files that pass are uploaded to the MinIO bucket defined by the `MINIO_BUCKET` environment variable. The connection details (`MINIO_ENDPOINT`, `MINIO_ACCESS_KEY` and `MINIO_SECRET_KEY`) are supplied by Docker Compose when the FastAPI service starts. By default the bucket name is `trinity`.
 Uploads are organized in the following folder structure:
 
 ```
@@ -18,7 +18,7 @@ Each uploaded filename is prefixed with a timestamp so the path is easy to verif
 To verify an upload using the MinIO CLI:
 
 ```
-mc ls MINIO/validated-d1/my_client/my_app/my_project/
+mc ls MINIO/trinity/my_client/my_app/my_project/
 ```
 
 Or open the MinIO web console at `http://<minio-host>:9001` and navigate through the bucket folders.

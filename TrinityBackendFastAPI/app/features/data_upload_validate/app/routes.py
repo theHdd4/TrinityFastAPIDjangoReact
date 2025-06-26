@@ -108,7 +108,7 @@ import os
 MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "minio:9000")
 MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY", "minio")
 MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY", "minio123")
-MINIO_BUCKET = os.getenv("MINIO_BUCKET", "validated-d1")
+MINIO_BUCKET = os.getenv("MINIO_BUCKET", "trinity")
 
 # Path info for saving uploads
 CLIENT_NAME = os.getenv("CLIENT_NAME", "default_client")
@@ -124,21 +124,21 @@ minio_client = Minio(
     secure=False
 )
 
-# Check bucket exists
-def check_minio_bucket():
+# Ensure bucket exists
+def ensure_minio_bucket():
     try:
-        if minio_client.bucket_exists(MINIO_BUCKET):
-            print(f"✅ MinIO bucket '{MINIO_BUCKET}' is accessible")
-            return True
+        if not minio_client.bucket_exists(MINIO_BUCKET):
+            minio_client.make_bucket(MINIO_BUCKET)
+            print(f"📁 Created MinIO bucket '{MINIO_BUCKET}'")
         else:
-            print(f"❌ MinIO bucket '{MINIO_BUCKET}' not found")
-            return False
+            print(f"✅ MinIO bucket '{MINIO_BUCKET}' is accessible")
+        return True
     except Exception as e:
         print(f"⚠️ MinIO connection error: {e}")
         return False
 
 # Test connection on startup
-check_minio_bucket()
+ensure_minio_bucket()
 
 
 

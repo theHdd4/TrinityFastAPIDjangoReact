@@ -30,7 +30,7 @@ from .feature_overview.base import run_unique_count,run_feature_overview, output
 MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "minio:9000")
 MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY", "admin_dev")
 MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY", "pass_dev")
-MINIO_BUCKET = os.getenv("MINIO_BUCKET", "validated-d1")
+MINIO_BUCKET = os.getenv("MINIO_BUCKET", "trinity")
 CLIENT_NAME = os.getenv("CLIENT_NAME", "default_client")
 APP_NAME = os.getenv("APP_NAME", "default_app")
 PROJECT_NAME = os.getenv("PROJECT_NAME", "default_project")
@@ -42,6 +42,19 @@ minio_client = Minio(
     secret_key=MINIO_SECRET_KEY,
     secure=False,  # Set to True if using HTTPS
 )
+
+# Ensure required bucket exists on startup
+def ensure_minio_bucket():
+    try:
+        if not minio_client.bucket_exists(MINIO_BUCKET):
+            minio_client.make_bucket(MINIO_BUCKET)
+            print(f"📁 Created MinIO bucket '{MINIO_BUCKET}' for feature overview")
+        else:
+            print(f"✅ MinIO bucket '{MINIO_BUCKET}' is accessible for feature overview")
+    except Exception as e:
+        print(f"⚠️ MinIO connection error: {e}")
+
+ensure_minio_bucket()
 
 router = APIRouter()
 

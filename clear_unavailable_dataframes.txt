@@ -6,7 +6,7 @@ frontend list. To remove these entries:
 1. Open the MinIO web console (usually `http://localhost:9001`) or use the MinIO
    CLI.
 2. Locate the bucket defined by the `MINIO_BUCKET` environment variable
-   (default `validated-d1`).
+   (default `trinity`).
 3. Delete the missing files or remove the bucket entirely.
 4. Refresh the auxiliary menu in the frontend; the `/list_saved_dataframes`
    endpoint will no longer return the deleted objects.
