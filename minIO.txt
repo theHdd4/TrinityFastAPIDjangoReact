@@ -1,4 +1,4 @@
-After running validations, files that pass are uploaded to the MinIO bucket defined in `TrinityBackendFastAPI/app/features/data_upload_validate/app/routes.py`.
+After running validations, files that pass are uploaded to the MinIO bucket defined by the `MINIO_BUCKET` environment variable. The connection details (`MINIO_ENDPOINT`, `MINIO_ACCESS_KEY` and `MINIO_SECRET_KEY`) are supplied by Docker Compose when the FastAPI service starts.
 Uploads are organized in the following folder structure:
 
 ```
@@ -6,6 +6,14 @@ Uploads are organized in the following folder structure:
 ```
 
 Client, app and project names come from the environment variables `CLIENT_NAME`, `APP_NAME` and `PROJECT_NAME`. These are set in `.env.dev` for local development and passed to the backend container.
+
+Files appear in MinIO under:
+
+```
+<bucket>/<client-name>/<app-name>/<project-name>/
+```
+
+Each uploaded filename is prefixed with a timestamp so the path is easy to verify from the MinIO console.
 
 To verify an upload using the MinIO CLI:
 

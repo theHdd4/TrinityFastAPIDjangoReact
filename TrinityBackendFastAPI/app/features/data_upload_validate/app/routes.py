@@ -104,11 +104,11 @@ from minio.error import S3Error
 from app.features.feature_overview.deps import redis_client
 import os
 
-# ✅ MINIO CONFIGURATION FOR YOUR SERVER
-MINIO_ENDPOINT = "10.2.1.65:9003"
-MINIO_ACCESS_KEY = "admin_dev"  # Update with your credentials
-MINIO_SECRET_KEY = "pass_dev"  # Update with your credentials
-MINIO_BUCKET = "validated-d1"    # Your existing bucket
+# ✅ MINIO CONFIGURATION - values come from docker-compose/.env
+MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "minio:9000")
+MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY", "minio")
+MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY", "minio123")
+MINIO_BUCKET = os.getenv("MINIO_BUCKET", "validated-d1")
 
 # Path info for saving uploads
 CLIENT_NAME = os.getenv("CLIENT_NAME", "default_client")
