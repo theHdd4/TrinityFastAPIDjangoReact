@@ -29,6 +29,7 @@ from .feature_overview.base import run_unique_count,run_feature_overview, output
 MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "minio:9000")
 MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY", "admin_dev")
 MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY", "pass_dev")
+MINIO_BUCKET = os.getenv("MINIO_BUCKET", "validated-d1")
 
 minio_client = Minio(
     MINIO_ENDPOINT,
@@ -46,7 +47,7 @@ async def column_summary(object_name: str):
     try:
         content = redis_client.get(object_name)
         if content is None:
-            response = minio_client.get_object("validated-d1", object_name)
+            response = minio_client.get_object(MINIO_BUCKET, object_name)
             content = response.read()
             redis_client.setex(object_name, 3600, content)
         if object_name.endswith(".csv"):
@@ -68,6 +69,8 @@ async def column_summary(object_name: str):
             })
         return {"summary": summary}
     except S3Error as e:
+        if getattr(e, "code", "") == "NoSuchKey":
+            raise HTTPException(status_code=404, detail="File not found")
         raise HTTPException(status_code=500, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -79,11 +82,13 @@ async def cached_dataframe(object_name: str):
     try:
         content = redis_client.get(object_name)
         if content is None:
-            response = minio_client.get_object("validated-d1", object_name)
+            response = minio_client.get_object(MINIO_BUCKET, object_name)
             content = response.read()
             redis_client.setex(object_name, 3600, content)
         return Response(content, media_type="text/csv")
     except S3Error as e:
+        if getattr(e, "code", "") == "NoSuchKey":
+            raise HTTPException(status_code=404, detail="File not found")
         raise HTTPException(status_code=500, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -100,7 +105,7 @@ async def sku_stats(object_name: str, y_column: str, combination: str):
     try:
         content = redis_client.get(object_name)
         if content is None:
-            response = minio_client.get_object("validated-d1", object_name)
+            response = minio_client.get_object(MINIO_BUCKET, object_name)
             content = response.read()
             redis_client.setex(object_name, 3600, content)
 
@@ -142,6 +147,8 @@ async def sku_stats(object_name: str, y_column: str, combination: str):
         }
         return {"timeseries": series, "summary": summary}
     except S3Error as e:
+        if getattr(e, "code", "") == "NoSuchKey":
+            raise HTTPException(status_code=404, detail="File not found")
         raise HTTPException(status_code=500, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))

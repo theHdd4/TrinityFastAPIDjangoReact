@@ -104,3 +104,6 @@ Redis. Endpoints such as `/feature-overview/column_summary` and the new
 Redis. If absent the file is fetched from MinIO, stored in Redis with a one hour
 TTL and then processed. This avoids expensive round trips to MinIO when users
 select identifiers or review data multiple times.
+The bucket name for these lookups comes from the `MINIO_BUCKET` environment
+variable (defaulting to `validated-d1`). If the requested file does not exist in
+MinIO, the API now responds with HTTP 404 instead of an internal server error.
