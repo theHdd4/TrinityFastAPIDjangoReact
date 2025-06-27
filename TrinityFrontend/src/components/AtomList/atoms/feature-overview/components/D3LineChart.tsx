@@ -29,7 +29,7 @@ const D3LineChart: React.FC<Props> = ({
     const svg = d3.select(ref.current);
     svg.selectAll('*').remove();
 
-    const margin = { top: 50, right: 30, bottom: 70, left: 40 };
+    const margin = { top: 30, right: 30, bottom: 70, left: 40 };
     const innerWidth = width - margin.left - margin.right;
     const innerHeight = height - margin.top - margin.bottom;
 
@@ -47,7 +47,6 @@ const D3LineChart: React.FC<Props> = ({
       .nice()
       .range([innerHeight, 0]);
 
-    svg.style('background', '#fff');
 
     const g = svg
       .append('g')
