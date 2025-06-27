@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Settings, BarChart3, Eye } from 'lucide-react';
 import FeatureOverviewSettings from '../FeatureOverviewSettings';
@@ -16,8 +16,23 @@ const FeatureOverviewProperties: React.FC<Props> = ({ atomId }) => {
   const updateSettings = useLaboratoryStore(state => state.updateAtomSettings);
   const settings: SettingsType = (atom?.settings as SettingsType) || { ...DEFAULT_FEATURE_OVERVIEW_SETTINGS };
 
+  const [pendingY, setPendingY] = useState<string[]>(settings.yAxes || []);
+  const [pendingX, setPendingX] = useState<string>(settings.xAxis || 'date');
+
+  useEffect(() => {
+    setPendingY(settings.yAxes || []);
+  }, [settings.yAxes]);
+
+  useEffect(() => {
+    setPendingX(settings.xAxis || 'date');
+  }, [settings.xAxis]);
+
   const handleChange = (newSettings: Partial<SettingsType>) => {
     updateSettings(atomId, newSettings);
+  };
+
+  const applyVisual = () => {
+    updateSettings(atomId, { yAxes: pendingY, xAxis: pendingX });
   };
 
   return (
@@ -49,10 +64,11 @@ const FeatureOverviewProperties: React.FC<Props> = ({ atomId }) => {
                 .filter((c: any) => c && c.column)
                 .map((c: any) => c.column)
             }
-            yValues={settings.yAxes || []}
-            xValue={settings.xAxis || 'date'}
-            onYChange={val => handleChange({ yAxes: val })}
-            onXChange={val => handleChange({ xAxis: val })}
+            yValues={pendingY}
+            xValue={pendingX}
+            onYChange={setPendingY}
+            onXChange={setPendingX}
+            onApply={applyVisual}
           />
         </TabsContent>
         <TabsContent value="exhibition" className="space-y-4" forceMount>

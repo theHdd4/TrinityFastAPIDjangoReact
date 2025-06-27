@@ -34,7 +34,9 @@ const D3LineChart: React.FC<Props> = ({
     const innerHeight = height - margin.top - margin.bottom;
 
     const parseDate = (d: string) => new Date(d);
-    const dataParsed = data.map(d => ({ date: parseDate(d.date), value: d.value }));
+    const dataParsed = data
+      .map(d => ({ date: parseDate(d.date), value: d.value }))
+      .sort((a, b) => a.date.getTime() - b.date.getTime());
 
     const x = d3
       .scaleTime()

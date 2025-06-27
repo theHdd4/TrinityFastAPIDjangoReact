@@ -69,6 +69,16 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({ settings,
     }
   }, [settings.activeMetric]);
 
+  useEffect(() => {
+    if (settings.activeRow && settings.skuTable) {
+      const row = settings.skuTable.find(r => r.id === settings.activeRow);
+      if (row) {
+        viewStats(row);
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settings.yAxes, settings.xAxis]);
+
   if (!settings.columnSummary || settings.columnSummary.length === 0) {
     return (
       <div className="w-full h-full flex items-center justify-center text-gray-500">

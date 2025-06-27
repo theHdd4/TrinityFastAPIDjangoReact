@@ -1,6 +1,7 @@
 import React from 'react';
 import { Card } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Button } from '@/components/ui/button';
 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
@@ -11,6 +12,7 @@ interface Props {
   xValue: string;
   onYChange: (v: string[]) => void;
   onXChange: (v: string) => void;
+  onApply: () => void;
 }
 const FeatureOverviewVisualisation: React.FC<Props> = ({
   numericColumns,
@@ -19,6 +21,7 @@ const FeatureOverviewVisualisation: React.FC<Props> = ({
   xValue,
   onYChange,
   onXChange,
+  onApply,
 }) => {
   const toggle = (col: string, checked: boolean | "indeterminate") => {
     const isChecked = Boolean(checked);
@@ -59,6 +62,9 @@ const FeatureOverviewVisualisation: React.FC<Props> = ({
           </SelectContent>
         </Select>
       </Card>
+      <Button className="w-full" onClick={onApply}>
+        Update Variables
+      </Button>
     </div>
   );
 };
