@@ -105,6 +105,21 @@ services:
     networks:
       - trinity-net
 
+  flight:
+    build: .
+    command: python -m TrinityBackendFastAPI.app.arrow_flight_server
+    volumes:
+      - .:/code
+      - ../TrinityBackendFastAPI:/code/TrinityBackendFastAPI
+    ports:
+      - "8815:8815"
+    depends_on:
+      - redis
+      - minio
+      - mongo
+    networks:
+      - trinity-net
+
   trinity-ai:
     build:
       context: ../TrinityAI/Agent_fetch_atom

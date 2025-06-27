@@ -27,7 +27,7 @@ This guide describes the benefits these tools introduce, the new functionality t
    - Inside `TrinityBackendFastAPI/app`, create a module `arrow_flight_server` with a class derived from `pyarrow.flight.FlightServerBase`.
    - Implement `do_get`, `do_put` and `list_flights` to serve Arrow Tables stored in MinIO or other storage.
    - Expose a `start_flight_server()` function that launches the server on a configurable port (e.g. 8815).
-   - Update `docker-compose.yml` to start this service alongside the FastAPI container.
+   - Update `TrinityBackendDjango/docker-compose.yml` to start this service alongside the FastAPI container.
 3. **Implement client utilities**
    - Add a helper under `app/utils` to create `pyarrow.flight.FlightClient` instances pointed at the Flight server.
    - Provide async wrappers so atoms can call `client.do_get` and `client.do_put` from their routes or background tasks.
@@ -42,7 +42,7 @@ This guide describes the benefits these tools introduce, the new functionality t
 
 ## Enabling Seamless Data Transfer Across Atoms
 
-1. Launch the Flight server with the backend services (`docker-compose up` after adding the new service).
+1. Launch the Flight server with the backend services using `docker-compose -f TrinityBackendDjango/docker-compose.yml up` after adding the new service.
 2. Each atom obtains a Flight client using the shared utility and requests datasets by a known path or ticket.
 3. Use Arrow Schemas so atoms validate the expected columns before processing.
 4. Because Flight streams data in chunks, atoms can process batches without loading an entire file into memory.
