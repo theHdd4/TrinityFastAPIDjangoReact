@@ -230,16 +230,10 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({ settings,
                       {m}
                     </Badge>
                   ))}
-                  <div className="relative">
-                    <div
-                      className="flex items-center justify-center w-10 h-10 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-full font-bold text-lg shadow-lg cursor-pointer"
-                      onClick={() => setShowMarketSelect(v => !v)}
-                    >
-                      +
-                    </div>
+                  <div className="flex items-center gap-2">
                     {showMarketSelect && (
                       <select
-                        className="absolute z-10 mt-2 p-1 border rounded bg-white text-sm"
+                        className="p-1 border rounded bg-white text-sm"
                         onChange={e => {
                           const val = e.target.value;
                           if (val) {
@@ -260,6 +254,12 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({ settings,
                           ))}
                       </select>
                     )}
+                    <div
+                      className="flex items-center justify-center w-10 h-10 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-full font-bold text-lg shadow-lg cursor-pointer"
+                      onClick={() => setShowMarketSelect(v => !v)}
+                    >
+                      +
+                    </div>
                   </div>
                 </div>
               </div>
@@ -280,16 +280,10 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({ settings,
                       {p}
                     </Badge>
                   ))}
-                  <div className="relative">
-                    <div
-                      className="flex items-center justify-center w-10 h-10 bg-gradient-to-r from-green-500 to-green-600 text-white rounded-full font-bold text-lg shadow-lg cursor-pointer"
-                      onClick={() => setShowProductSelect(v => !v)}
-                    >
-                      +
-                    </div>
+                  <div className="flex items-center gap-2">
                     {showProductSelect && (
                       <select
-                        className="absolute z-10 mt-2 p-1 border rounded bg-white text-sm"
+                        className="p-1 border rounded bg-white text-sm"
                         onChange={e => {
                           const val = e.target.value;
                           if (val) {
@@ -310,6 +304,12 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({ settings,
                           ))}
                       </select>
                     )}
+                    <div
+                      className="flex items-center justify-center w-10 h-10 bg-gradient-to-r from-green-500 to-green-600 text-white rounded-full font-bold text-lg shadow-lg cursor-pointer"
+                      onClick={() => setShowProductSelect(v => !v)}
+                    >
+                      +
+                    </div>
                   </div>
                 </div>
               </div>
