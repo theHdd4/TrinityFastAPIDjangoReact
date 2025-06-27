@@ -78,6 +78,7 @@ export interface FeatureOverviewSettings {
   marketDims?: string[];
   productDims?: string[];
   yAxes?: string[];
+  xAxis?: string;
   skuTable?: any[];
   statDataMap?: Record<string, any>;
   activeMetric?: string;
@@ -95,6 +96,7 @@ export const DEFAULT_FEATURE_OVERVIEW_SETTINGS: FeatureOverviewSettings = {
   marketDims: [],
   productDims: [],
   yAxes: [],
+  xAxis: 'date',
   skuTable: [],
   statDataMap: {},
   activeMetric: '',

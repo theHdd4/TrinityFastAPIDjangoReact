@@ -44,8 +44,11 @@ const FeatureOverviewProperties: React.FC<Props> = ({ atomId }) => {
         <TabsContent value="visual" className="space-y-4" forceMount>
           <FeatureOverviewVisualisation
             numericColumns={settings.numericColumns || []}
-            values={settings.yAxes || []}
-            onChange={val => handleChange({ yAxes: val })}
+            allColumns={(settings.allColumns || []).map((c: any) => c.column)}
+            yValues={settings.yAxes || []}
+            xValue={settings.xAxis || 'date'}
+            onYChange={val => handleChange({ yAxes: val })}
+            onXChange={val => handleChange({ xAxis: val })}
           />
         </TabsContent>
         <TabsContent value="exhibition" className="space-y-4" forceMount>

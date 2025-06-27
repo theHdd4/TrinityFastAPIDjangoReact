@@ -150,7 +150,8 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({ settings,
         const params = new URLSearchParams({
           object_name: settings.dataSource,
           y_column: y,
-          combination: JSON.stringify(combo)
+          combination: JSON.stringify(combo),
+          x_column: settings.xAxis || 'date'
         });
         const res = await fetch(`${FEATURE_OVERVIEW_API}/sku_stats?${params.toString()}`);
         if (!res.ok) {
@@ -399,7 +400,7 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({ settings,
                           data={statDataMap[activeMetric]?.timeseries || []}
                           width={900}
                           height={500}
-                          xLabel="Date"
+                          xLabel={settings.xAxis || 'Date'}
                           yLabel={activeMetric || 'Value'}
                         />
                       </DialogContent>
@@ -409,7 +410,7 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({ settings,
                     <D3LineChart
                       data={statDataMap[activeMetric]?.timeseries || []}
                       height={400}
-                      xLabel="Date"
+                      xLabel={settings.xAxis || 'Date'}
                       yLabel={activeMetric || 'Value'}
                     />
                   </div>

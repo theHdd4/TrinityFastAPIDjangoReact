@@ -154,7 +154,7 @@ async def cached_dataframe(object_name: str):
 
 
 @router.get("/sku_stats")
-async def sku_stats(object_name: str, y_column: str, combination: str):
+async def sku_stats(object_name: str, y_column: str, combination: str, x_column: str = "date"):
     """Return time series and summary for a specific SKU combination."""
     if not object_name.startswith(OBJECT_PREFIX):
         raise HTTPException(status_code=400, detail="Invalid object name")
@@ -182,10 +182,13 @@ async def sku_stats(object_name: str, y_column: str, combination: str):
         if y_col not in df.columns:
             raise ValueError("y_column not found")
 
-        date_cols = [c for c in df.columns if "date" in c or "time" in c]
-        if not date_cols:
-            raise ValueError("no date column found")
-        date_col = date_cols[0]
+        x_col = x_column.lower()
+        if x_col not in df.columns:
+            date_cols = [c for c in df.columns if "date" in c or "time" in c]
+            if not date_cols:
+                raise ValueError("no date column found")
+            x_col = date_cols[0]
+
 
         mask = pd.Series(True, index=df.index)
         for k, v in combo.items():
@@ -193,13 +196,13 @@ async def sku_stats(object_name: str, y_column: str, combination: str):
             if col in df.columns:
                 mask &= df[col] == v
 
-        sub = df.loc[mask, [date_col, y_col]].dropna()
-        sub[date_col] = pd.to_datetime(sub[date_col], errors="coerce")
-        sub = sub.dropna(subset=[date_col]).sort_values(date_col)
+        sub = df.loc[mask, [x_col, y_col]].dropna()
+        sub[x_col] = pd.to_datetime(sub[x_col], errors="coerce")
+        sub = sub.dropna(subset=[x_col]).sort_values(x_col)
 
         series = [
             {"date": str(d.date() if hasattr(d, "date") else d), "value": float(val)}
-            for d, val in zip(sub[date_col], sub[y_col])
+            for d, val in zip(sub[x_col], sub[y_col])
         ]
         summary = {
             "avg": float(sub[y_col].mean()) if not sub.empty else 0,
