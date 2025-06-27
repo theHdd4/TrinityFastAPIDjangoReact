@@ -32,6 +32,17 @@ const FeatureOverviewSettings: React.FC<FeatureOverviewSettingsProps> = ({ setti
       .catch(() => setFrames([]));
   }, []);
 
+  // fetch columns if not already available when reopening properties
+  useEffect(() => {
+    if (
+      settings.dataSource &&
+      (!settings.allColumns || settings.allColumns.length === 0)
+    ) {
+      handleFrameChange(settings.dataSource);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settings.dataSource]);
+
   // restore dropdown state when settings come from store
   useEffect(() => {
     if (settings.allColumns && settings.allColumns.length > 0) {
@@ -47,6 +58,7 @@ const FeatureOverviewSettings: React.FC<FeatureOverviewSettingsProps> = ({ setti
     );
     let numeric: string[] = [];
     let summary: ColumnInfo[] = [];
+    let xField = settings.xAxis || '';
     if (res.ok) {
       const data = await res.json();
       summary = (data.summary || []).filter(Boolean);
@@ -54,6 +66,12 @@ const FeatureOverviewSettings: React.FC<FeatureOverviewSettingsProps> = ({ setti
       numeric = summary
         .filter((c: ColumnInfo) => !['object', 'string'].includes(c.data_type.toLowerCase()))
         .map(c => c.column);
+      const dateLike = summary.find(c => c.column.toLowerCase().includes('date'));
+      if (dateLike) {
+        xField = dateLike.column;
+      } else if (summary.length > 0) {
+        xField = summary[0].column;
+      }
     }
     onSettingsChange({
       dataSource: val,
@@ -61,6 +79,7 @@ const FeatureOverviewSettings: React.FC<FeatureOverviewSettingsProps> = ({ setti
       columnSummary: [],
       allColumns: summary,
       numericColumns: numeric,
+      xAxis: xField,
     });
   };
 
