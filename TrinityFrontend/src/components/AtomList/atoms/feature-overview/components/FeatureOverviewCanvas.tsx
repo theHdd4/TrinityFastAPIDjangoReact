@@ -4,7 +4,12 @@ import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
 import { FEATURE_OVERVIEW_API } from '@/lib/api';
-import { BarChart3, TrendingUp } from 'lucide-react';
+import { BarChart3, TrendingUp, Maximize2 } from 'lucide-react';
+import {
+  Dialog,
+  DialogContent,
+  DialogTrigger,
+} from '@/components/ui/dialog';
 import D3LineChart from './D3LineChart';
 
 interface ColumnInfo {
@@ -352,11 +357,27 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({ settings,
             <div className="grid grid-cols-1 xl:grid-cols-2 gap-8 mt-6">
               <div className="xl:col-span-1">
                 <Card className="border-0 shadow-xl bg-white/90 backdrop-blur-sm overflow-hidden h-80">
-                  <div className="bg-gradient-to-r from-indigo-500 to-purple-600 p-4">
+                  <div className="bg-gradient-to-r from-indigo-500 to-purple-600 p-4 flex items-center justify-between">
                     <h4 className="font-bold text-white text-lg flex items-center">
                       <TrendingUp className="w-5 h-5 mr-2" />
                       {activeMetric || 'Trend Analysis'}
                     </h4>
+                    <Dialog>
+                      <DialogTrigger asChild>
+                        <button type="button" aria-label="Full screen">
+                          <Maximize2 className="w-5 h-5 text-white" />
+                        </button>
+                      </DialogTrigger>
+                      <DialogContent className="max-w-4xl">
+                        <D3LineChart
+                          data={statDataMap[activeMetric]?.timeseries || []}
+                          width={900}
+                          height={500}
+                          xLabel="Date"
+                          yLabel={activeMetric || 'Value'}
+                        />
+                      </DialogContent>
+                    </Dialog>
                   </div>
                   <div className="p-6 h-full flex items-center justify-center">
                     <D3LineChart
