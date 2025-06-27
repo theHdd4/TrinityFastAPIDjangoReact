@@ -312,8 +312,8 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({ settings 
           )}
 
           {activeRow && Object.keys(statDataMap).length > 0 && (
-            <div className="grid grid-cols-1 xl:grid-cols-3 gap-8 mt-6">
-              <div className="xl:col-span-2">
+            <div className="grid grid-cols-1 xl:grid-cols-5 gap-8 mt-6">
+              <div className="xl:col-span-3">
                 <Card className="border-0 shadow-xl bg-white/90 backdrop-blur-sm overflow-hidden h-80">
                   <div className="bg-gradient-to-r from-indigo-500 to-purple-600 p-4">
                     <h4 className="font-bold text-white text-lg flex items-center">
@@ -330,7 +330,7 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({ settings 
                   </div>
                 </Card>
               </div>
-              <div className="xl:col-span-1">
+              <div className="xl:col-span-2">
                 <Card className="border-0 shadow-xl bg-white/90 backdrop-blur-sm overflow-hidden h-80">
                   <div className="bg-gradient-to-r from-emerald-500 to-teal-600 p-4">
                     <h5 className="font-bold text-white text-sm flex items-center">
@@ -339,24 +339,24 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({ settings 
                     </h5>
                   </div>
                   <div className="p-4 overflow-y-auto h-full">
-                    <table className="w-full text-xs">
+                    <table className="min-w-full text-xs whitespace-nowrap">
                       <thead>
                         <tr className="border-b border-gray-200">
-                          <th className="p-2 text-left">Metric</th>
-                          <th className="p-2 text-right">Avg</th>
-                          <th className="p-2 text-right">Min</th>
-                          <th className="p-2 text-right">Max</th>
-                          <th className="p-2 text-right">Action</th>
+                          <th className="p-2 text-left whitespace-nowrap">Metric</th>
+                          <th className="p-2 text-right whitespace-nowrap">Avg</th>
+                          <th className="p-2 text-right whitespace-nowrap">Min</th>
+                          <th className="p-2 text-right whitespace-nowrap">Max</th>
+                          <th className="p-2 text-right whitespace-nowrap">Action</th>
                         </tr>
                       </thead>
                       <tbody>
                         {settings.yAxes?.map(m => (
                           <tr key={m} className="border-b last:border-0">
-                            <td className="p-2">{m}</td>
-                            <td className="p-2 text-right">{statDataMap[m]?.summary.avg?.toFixed(2) ?? '-'}</td>
-                            <td className="p-2 text-right">{statDataMap[m]?.summary.min?.toFixed(2) ?? '-'}</td>
-                            <td className="p-2 text-right">{statDataMap[m]?.summary.max?.toFixed(2) ?? '-'}</td>
-                            <td className="p-2 text-right">
+                            <td className="p-2 whitespace-nowrap">{m}</td>
+                            <td className="p-2 text-right whitespace-nowrap">{statDataMap[m]?.summary.avg?.toFixed(2) ?? '-'}</td>
+                            <td className="p-2 text-right whitespace-nowrap">{statDataMap[m]?.summary.min?.toFixed(2) ?? '-'}</td>
+                            <td className="p-2 text-right whitespace-nowrap">{statDataMap[m]?.summary.max?.toFixed(2) ?? '-'}</td>
+                            <td className="p-2 text-right whitespace-nowrap">
                               <Button size="xs" onClick={() => setActiveMetric(m)}>View</Button>
                             </td>
                           </tr>
