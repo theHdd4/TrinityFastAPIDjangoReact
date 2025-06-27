@@ -356,7 +356,7 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({ settings,
           {activeRow && Object.keys(statDataMap).length > 0 && (
             <div className="grid grid-cols-1 xl:grid-cols-2 gap-8 mt-6">
               <div className="xl:col-span-1">
-                <Card className="border-0 shadow-xl bg-white/90 backdrop-blur-sm overflow-hidden h-80">
+                <Card className="border-0 shadow-xl bg-white/90 backdrop-blur-sm overflow-hidden">
                   <div className="bg-gradient-to-r from-indigo-500 to-purple-600 p-4 flex items-center justify-between">
                     <h4 className="font-bold text-white text-lg flex items-center">
                       <TrendingUp className="w-5 h-5 mr-2" />
@@ -382,7 +382,7 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({ settings,
                   <div className="p-6 h-full flex items-start justify-center">
                     <D3LineChart
                       data={statDataMap[activeMetric]?.timeseries || []}
-                      height={200}
+                      height={400}
                       xLabel="Date"
                       yLabel={activeMetric || 'Value'}
                     />

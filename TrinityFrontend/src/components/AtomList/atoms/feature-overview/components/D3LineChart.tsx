@@ -58,7 +58,23 @@ const D3LineChart: React.FC<Props> = ({
       .call(d3.axisBottom(x).ticks(5));
     xAxis.selectAll('text').style('font-size', '12px');
 
-    const yAxis = g.append('g').call(d3.axisLeft(y).ticks(5));
+    const formatTick = (n: number) => {
+      const abs = Math.abs(n);
+      if (abs >= 1_000_000_000) {
+        return (n / 1_000_000_000).toFixed(2).replace(/\.00$/, '') + 'B';
+      }
+      if (abs >= 1_000_000) {
+        return (n / 1_000_000).toFixed(2).replace(/\.00$/, '') + 'M';
+      }
+      if (abs >= 1_000) {
+        return (n / 1_000).toFixed(2).replace(/\.00$/, '') + 'T';
+      }
+      return n.toFixed(2).replace(/\.00$/, '');
+    };
+
+    const yAxis = g
+      .append('g')
+      .call(d3.axisLeft(y).ticks(5).tickFormat(d => formatTick(d as number)));
     yAxis.selectAll('text').style('font-size', '12px');
 
 
