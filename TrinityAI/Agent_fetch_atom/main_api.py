@@ -2,25 +2,9 @@ import uvicorn
 from fastapi import FastAPI
 from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel
-from typing import Dict, Any, TypedDict, List, Optional
-import wikipedia
+from typing import Dict, Any
 import numpy as np
-from langgraph.graph import StateGraph, END
-
-from llm1 import QueryEnhancer
-from llm2 import LLM2Enhancer
-from rag import RAGRetriever
-
-class AgentState(TypedDict):
-    original_query: str
-    enhanced_query: str
-    rag_results: List[Dict]
-    wikipedia_info: str
-    analysis_result: Dict
-    final_response: str
-    error: Optional[str]
-    step_logs: List[str]
-    domain_reason: str
+from single_llm_processor import SingleLLMProcessor
 
 def convert_numpy(obj):
     if isinstance(obj, dict):
@@ -36,130 +20,118 @@ def convert_numpy(obj):
     else:
         return obj
 
-def initialize_systems_for_api():
+def initialize_single_llm_system():
     try:
-        enhancer = QueryEnhancer(
+        processor = SingleLLMProcessor(
             api_url="http://10.2.1.65:11434/api/chat",
             model_name="deepseek-r1:32b",
             bearer_token="aakash_api_key"
         )
-        llm2_enhancer = LLM2Enhancer(
-            api_url="http://10.2.1.65:11434/api/chat",
-            model_name="deepseek-r1:32b",
-            bearer_token="aakash_api_key"
-        )
-        rag_retriever = RAGRetriever()
-        return enhancer, llm2_enhancer, rag_retriever
+        return processor
     except Exception as e:
         print(f"System initialization error: {e}")
-        return None, None, None
+        return None
 
-enhancer, llm2_enhancer, rag_retriever = initialize_systems_for_api()
-
-def node_query_enhance(state: AgentState) -> AgentState:
-    try:
-        enhance_result = enhancer.enhance_query(state["original_query"])
-        if enhance_result.get("domain_status") == "out_of_domain":
-            return {**state, "analysis_result": enhance_result, "final_response": "", "error": None, "domain_reason": enhance_result.get("domain_reason", "")}
-        return {**state, "enhanced_query": enhance_result.get("enhanced_query", state["original_query"]), "domain_reason": enhance_result.get("domain_reason", "")}
-    except Exception as e:
-        return {**state, "error": f"Enhancement error: {e}", "enhanced_query": state["original_query"], "domain_reason": ""}
-
-def node_rag(state: AgentState) -> AgentState:
-    try:
-        rag_results = rag_retriever.retrieve_relevant_atoms(state["enhanced_query"], top_k=5)
-        return {**state, "rag_results": rag_results}
-    except Exception as e:
-        return {**state, "error": f"RAG error: {e}", "rag_results": []}
-
-def node_wikipedia(state: AgentState) -> AgentState:
-    wiki_info = ""
-    atom_name = None
-    if state.get("rag_results"):
-        atom_name = state["rag_results"][0].get("atom")
-    if atom_name:
-        try:
-            wiki_info = wikipedia.summary(atom_name, sentences=2, auto_suggest=False)
-        except Exception as e:
-            wiki_info = f"(No Wikipedia info found: {e})"
-    return {**state, "wikipedia_info": wiki_info}
-
-def node_llm2(state: AgentState) -> AgentState:
-    try:
-        tools_used = []
-        if state.get("rag_results"):
-            tools_used.append("RAG")
-        if state.get("wikipedia_info"):
-            tools_used.append("Wikipedia")
-        analysis_result = llm2_enhancer.analyze_multi_atom_scenario(
-            state["original_query"],
-            state["enhanced_query"],
-            state["rag_results"],
-            threshold=0.3,
-            wikipedia_info=state.get("wikipedia_info", ""),
-            domain_reason=state.get("domain_reason", "")
-        )
-        analysis_result["tools_used"] = tools_used
-        analysis_result["processing_steps"] = state.get("step_logs", [])
-        return {**state, "analysis_result": analysis_result}
-    except Exception as e:
-        return {**state, "error": f"LLM2 error: {e}", "analysis_result": {}}
-
-def create_langgraph_agent():
-    workflow = StateGraph(AgentState)
-    workflow.add_node("query_enhance", node_query_enhance)
-    workflow.add_node("rag", node_rag)
-    workflow.add_node("wikipedia", node_wikipedia)
-    workflow.add_node("llm2", node_llm2)
-    workflow.set_entry_point("query_enhance")
-    workflow.add_edge("query_enhance", "rag")
-    def rag_to_next(state: AgentState) -> str:
-        if isinstance(state.get("analysis_result"), dict) and state["analysis_result"].get("domain_status") == "out_of_domain":
-            return END
-        if state.get("rag_results") and len(state["rag_results"]) > 0:
-            return "wikipedia"
-        else:
-            return "llm2"
-    workflow.add_conditional_edges("rag", rag_to_next, {"wikipedia": "wikipedia", "llm2": "llm2", END: END})
-    workflow.add_edge("wikipedia", "llm2")
-    workflow.add_edge("llm2", END)
-    return workflow.compile()
-
-app_graph = create_langgraph_agent()
+processor = initialize_single_llm_system()
 
 class QueryRequest(BaseModel):
     query: str
 
 app = FastAPI(
-    title="LangGraph Atom Chatbot API",
-    description="API endpoint for LangGraph-powered chatbot",
-    version="1.0"
+    title="Single LLM Atom Detection API",
+    description="API endpoint using single LLM for domain checking, query enhancement, and atom extraction",
+    version="7.0"
 )
 
 @app.post("/chat")
 async def chat_endpoint(request: QueryRequest):
+    """
+    Process query using single LLM for complete workflow:
+    - Query enhancement and grammar correction
+    - Domain classification (in/out of domain)
+    - Atom/tool extraction and matching
+    - Maintains backward compatible JSON format
+    """
     try:
-        result = app_graph.invoke({
-            "original_query": request.query,
-            "enhanced_query": "",
-            "rag_results": [],
-            "wikipedia_info": "",
-            "analysis_result": {},
-            "final_response": "",
-            "error": None,
-            "step_logs": [],
-            "domain_reason": ""
-        })
-        if isinstance(result.get("analysis_result"), dict) and result["analysis_result"].get("domain_status") == "out_of_domain":
-            return jsonable_encoder(result["analysis_result"])
-        clean_result = convert_numpy(result["analysis_result"])
-        return clean_result
+        print(f"🚀 Single LLM API Request: {request.query}")
+        
+        if not processor:
+            return jsonable_encoder({
+                "domain_status": "in_domain",
+                "llm2_status": "error",
+                "atom_status": False,
+                "match_type": "none",
+                "raw_query": request.query,
+                "enhanced_query": request.query,
+                "final_response": "System not initialized properly",
+                "error": "Processor not available"
+            })
+        
+        # Single LLM processing
+        result = processor.process_query(request.query)
+        
+        print(f"🎯 Single LLM API Response Status: {result.get('domain_status', 'unknown')}")
+        
+        # Clean and return the result
+        clean_result = convert_numpy(result)
+        return jsonable_encoder(clean_result)
+        
     except Exception as e:
-        return {"error": str(e), "domain_status": "failed"}
+        print(f"❌ Single LLM API Error: {e}")
+        error_response = {
+            "domain_status": "in_domain",
+            "llm2_status": "error",
+            "atom_status": False,
+            "match_type": "none",
+            "raw_query": request.query,
+            "enhanced_query": request.query,
+            "final_response": "Technical error occurred. Please try again.",
+            "error": str(e),
+            "tools_used": ["Single_LLM_Direct"],
+            "processing_steps": ["error_handling"]
+        }
+        return jsonable_encoder(error_response)
 
 @app.get("/health")
 async def health():
-    return {"domain_status": "ok"}
+    return {
+        "status": "healthy",
+        "version": "7.0",
+        "features": ["single_llm_processing", "domain_classification", "atom_extraction", "backward_compatible"],
+        "flow": "User Input → Single LLM → Domain Check + Query Enhancement + Atom Extraction",
+        "processing_type": "unified_single_llm"
+    }
+
+@app.get("/debug/{query}")
+async def debug_processing(query: str):
+    """Debug endpoint to see single LLM processing details"""
+    try:
+        if processor:
+            result = processor.process_query(query)
+            return {
+                "raw_query": query,
+                "processing_result": result,
+                "status": "success"
+            }
+        else:
+            return {"error": "Processor not initialized"}
+    except Exception as e:
+        return {"error": str(e)}
+
+@app.get("/atoms")
+async def list_available_atoms():
+    """List all available atoms"""
+    try:
+        if processor:
+            return {
+                "total_atoms": len(processor.valid_atoms),
+                "atoms": processor.valid_atoms,
+                "processing_type": "single_llm"
+            }
+        else:
+            return {"error": "Processor not available"}
+    except Exception as e:
+        return {"error": str(e)}
 
 if __name__ == "__main__":
-    uvicorn.run("agentic_api:app", host="0.0.0.0", port=8002, reload=True)
+    uvicorn.run("main_single_llm:app", host="0.0.0.0", port=8002, reload=True)
