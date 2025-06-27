@@ -103,7 +103,10 @@ const D3LineChart: React.FC<Props> = ({
     // Legend
     const legend = g
       .append('g')
-      .attr('transform', `translate(${innerWidth / 2 - 50}, ${innerHeight + margin.bottom - 30})`);
+      .attr(
+        'transform',
+        `translate(${innerWidth / 2 - 50}, ${innerHeight + margin.bottom - 10})`
+      );
 
     legend
       .append('rect')
