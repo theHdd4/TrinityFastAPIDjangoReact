@@ -29,7 +29,7 @@ const D3LineChart: React.FC<Props> = ({
     const svg = d3.select(ref.current);
     svg.selectAll('*').remove();
 
-    const margin = { top: 10, right: 30, bottom: 80, left: 50 };
+    const margin = { top: 10, right: 30, bottom: 60, left: 50 };
     const innerWidth = width - margin.left - margin.right;
     const innerHeight = height - margin.top - margin.bottom;
 
@@ -57,24 +57,9 @@ const D3LineChart: React.FC<Props> = ({
       .attr('transform', `translate(0,${innerHeight})`)
       .call(d3.axisBottom(x).ticks(5));
     xAxis.selectAll('text').style('font-size', '12px');
-    xAxis
-      .append('text')
-      .attr('fill', '#374151')
-      .attr('x', innerWidth / 2)
-      .attr('y', margin.bottom - 25)
-      .attr('text-anchor', 'middle')
-      .text(xLabel);
 
     const yAxis = g.append('g').call(d3.axisLeft(y).ticks(5));
     yAxis.selectAll('text').style('font-size', '12px');
-    yAxis
-      .append('text')
-      .attr('fill', '#374151')
-      .attr('transform', 'rotate(-90)')
-      .attr('x', -innerHeight / 2)
-      .attr('y', -margin.left + 15)
-      .attr('text-anchor', 'middle')
-      .text(yLabel);
 
 
     const line = d3

@@ -382,6 +382,7 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({ settings,
                   <div className="p-6 h-full flex items-start justify-center">
                     <D3LineChart
                       data={statDataMap[activeMetric]?.timeseries || []}
+                      height={200}
                       xLabel="Date"
                       yLabel={activeMetric || 'Value'}
                     />
