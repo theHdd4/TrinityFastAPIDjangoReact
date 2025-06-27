@@ -16,17 +16,18 @@ interface ColumnInfo {
 
 interface FeatureOverviewCanvasProps {
   settings: any;
+  onUpdateSettings: (s: any) => void;
 }
 
-const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({ settings }) => {
+const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({ settings, onUpdateSettings }) => {
   const [marketDims, setMarketDims] = useState<string[]>(settings.marketDims || []);
   const [productDims, setProductDims] = useState<string[]>(settings.productDims || []);
   const [skuRows, setSkuRows] = useState<any[]>(settings.skuTable || []);
   const [showMarketSelect, setShowMarketSelect] = useState(false);
   const [showProductSelect, setShowProductSelect] = useState(false);
-  const [activeRow, setActiveRow] = useState<number | null>(null);
-  const [statDataMap, setStatDataMap] = useState<Record<string, { timeseries: { date: string; value: number }[]; summary: { avg: number; min: number; max: number } }>>({});
-  const [activeMetric, setActiveMetric] = useState<string>(settings.yAxes?.[0] || '');
+  const [activeRow, setActiveRow] = useState<number | null>(settings.activeRow ?? null);
+  const [statDataMap, setStatDataMap] = useState<Record<string, { timeseries: { date: string; value: number }[]; summary: { avg: number; min: number; max: number } }>>(settings.statDataMap || {});
+  const [activeMetric, setActiveMetric] = useState<string>(settings.activeMetric || settings.yAxes?.[0] || '');
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -36,6 +37,32 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({ settings 
       setActiveMetric('');
     }
   }, [settings.yAxes]);
+
+  useEffect(() => {
+    setMarketDims(settings.marketDims || []);
+  }, [settings.marketDims]);
+
+  useEffect(() => {
+    setProductDims(settings.productDims || []);
+  }, [settings.productDims]);
+
+  useEffect(() => {
+    setSkuRows(settings.skuTable || []);
+  }, [settings.skuTable]);
+
+  useEffect(() => {
+    setStatDataMap(settings.statDataMap || {});
+  }, [settings.statDataMap]);
+
+  useEffect(() => {
+    setActiveRow(settings.activeRow ?? null);
+  }, [settings.activeRow]);
+
+  useEffect(() => {
+    if (settings.activeMetric) {
+      setActiveMetric(settings.activeMetric);
+    }
+  }, [settings.activeMetric]);
 
   if (!settings.columnSummary || settings.columnSummary.length === 0) {
     return (
@@ -87,6 +114,7 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({ settings 
       });
       const table = Array.from(combos.values()).map((row, i) => ({ id: i + 1, ...row }));
       setSkuRows(table);
+      onUpdateSettings({ skuTable: table, marketDims, productDims });
     } catch (e: any) {
       setError(e.message || 'Error displaying SKUs');
     }
@@ -116,6 +144,7 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({ settings 
       setStatDataMap(result);
       setActiveMetric(settings.yAxes[0]);
       setActiveRow(row.id);
+      onUpdateSettings({ statDataMap: result, activeMetric: settings.yAxes[0], activeRow: row.id });
     } catch (e: any) {
       setError(e.message || 'Error fetching statistics');
     }
@@ -209,7 +238,9 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({ settings 
                         onChange={e => {
                           const val = e.target.value;
                           if (val) {
-                            setMarketDims([...marketDims, val]);
+                            const dims = [...marketDims, val];
+                            setMarketDims(dims);
+                            onUpdateSettings({ marketDims: dims });
                             setShowMarketSelect(false);
                           }
                         }}
@@ -257,7 +288,9 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({ settings 
                         onChange={e => {
                           const val = e.target.value;
                           if (val) {
-                            setProductDims([...productDims, val]);
+                            const dims = [...productDims, val];
+                            setProductDims(dims);
+                            onUpdateSettings({ productDims: dims });
                             setShowProductSelect(false);
                           }
                         }}
@@ -357,7 +390,7 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({ settings 
                             <td className="p-2 text-right whitespace-nowrap">{statDataMap[m]?.summary.min?.toFixed(2) ?? '-'}</td>
                             <td className="p-2 text-right whitespace-nowrap">{statDataMap[m]?.summary.max?.toFixed(2) ?? '-'}</td>
                             <td className="p-2 text-right whitespace-nowrap">
-                              <Button size="xs" onClick={() => setActiveMetric(m)}>View</Button>
+                              <Button size="xs" onClick={() => { setActiveMetric(m); onUpdateSettings({ activeMetric: m }); }}>View</Button>
                             </td>
                           </tr>
                         ))}
