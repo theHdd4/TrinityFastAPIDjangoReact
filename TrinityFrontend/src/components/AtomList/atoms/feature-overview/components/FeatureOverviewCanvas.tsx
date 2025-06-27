@@ -372,30 +372,32 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({ settings,
                     </h5>
                   </div>
                   <div className="p-4 overflow-auto h-full">
-                    <table className="min-w-full text-xs whitespace-nowrap">
-                      <thead>
-                        <tr className="border-b border-gray-200">
-                          <th className="p-2 text-left whitespace-nowrap">Metric</th>
+                    <div className="overflow-x-auto">
+                      <table className="min-w-full text-xs whitespace-nowrap">
+                        <thead>
+                          <tr className="border-b border-gray-200">
+                          <th className="p-2 text-left whitespace-nowrap sticky left-0 bg-white z-10">Metric</th>
                           <th className="p-2 text-right whitespace-nowrap">Avg</th>
                           <th className="p-2 text-right whitespace-nowrap">Min</th>
                           <th className="p-2 text-right whitespace-nowrap">Max</th>
                           <th className="p-2 text-right whitespace-nowrap">Action</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {settings.yAxes?.map(m => (
-                          <tr key={m} className="border-b last:border-0">
-                            <td className="p-2 whitespace-nowrap">{m}</td>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {settings.yAxes?.map(m => (
+                            <tr key={m} className="border-b last:border-0">
+                            <td className="p-2 whitespace-nowrap sticky left-0 bg-white z-10">{m}</td>
                             <td className="p-2 text-right whitespace-nowrap">{statDataMap[m]?.summary.avg?.toFixed(2) ?? '-'}</td>
                             <td className="p-2 text-right whitespace-nowrap">{statDataMap[m]?.summary.min?.toFixed(2) ?? '-'}</td>
                             <td className="p-2 text-right whitespace-nowrap">{statDataMap[m]?.summary.max?.toFixed(2) ?? '-'}</td>
                             <td className="p-2 text-right whitespace-nowrap">
-                              <Button size="xs" onClick={() => { setActiveMetric(m); onUpdateSettings({ activeMetric: m }); }}>View</Button>
+                              <Button size="xs" className="text-[10px]" onClick={() => { setActiveMetric(m); onUpdateSettings({ activeMetric: m }); }}>View</Button>
                             </td>
                           </tr>
                         ))}
-                      </tbody>
-                    </table>
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
                 </Card>
               </div>
