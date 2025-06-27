@@ -345,8 +345,8 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({ settings,
           )}
 
           {activeRow && Object.keys(statDataMap).length > 0 && (
-            <div className="grid grid-cols-1 xl:grid-cols-5 gap-8 mt-6">
-              <div className="xl:col-span-3">
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-8 mt-6">
+              <div className="xl:col-span-1">
                 <Card className="border-0 shadow-xl bg-white/90 backdrop-blur-sm overflow-hidden h-80">
                   <div className="bg-gradient-to-r from-indigo-500 to-purple-600 p-4">
                     <h4 className="font-bold text-white text-lg flex items-center">
@@ -363,7 +363,7 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({ settings,
                   </div>
                 </Card>
               </div>
-              <div className="xl:col-span-2">
+              <div className="xl:col-span-1">
                 <Card className="border-0 shadow-xl bg-white/90 backdrop-blur-sm overflow-hidden h-80">
                   <div className="bg-gradient-to-r from-emerald-500 to-teal-600 p-4">
                     <h5 className="font-bold text-white text-sm flex items-center">
@@ -371,7 +371,7 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({ settings,
                       Statistical Summary
                     </h5>
                   </div>
-                  <div className="p-4 overflow-y-auto h-full">
+                  <div className="p-4 overflow-auto h-full">
                     <table className="min-w-full text-xs whitespace-nowrap">
                       <thead>
                         <tr className="border-b border-gray-200">
