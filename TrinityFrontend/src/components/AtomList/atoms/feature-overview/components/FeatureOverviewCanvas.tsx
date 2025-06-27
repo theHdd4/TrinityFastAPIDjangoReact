@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -25,8 +25,17 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({ settings 
   const [showMarketSelect, setShowMarketSelect] = useState(false);
   const [showProductSelect, setShowProductSelect] = useState(false);
   const [activeRow, setActiveRow] = useState<number | null>(null);
-  const [statData, setStatData] = useState<{ timeseries: { date: string; value: number }[]; summary: { avg: number; min: number; max: number } } | null>(null);
+  const [statDataMap, setStatDataMap] = useState<Record<string, { timeseries: { date: string; value: number }[]; summary: { avg: number; min: number; max: number } }>>({});
+  const [activeMetric, setActiveMetric] = useState<string>(settings.yAxes?.[0] || '');
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (settings.yAxes && settings.yAxes.length > 0) {
+      setActiveMetric(prev => (prev && settings.yAxes.includes(prev) ? prev : settings.yAxes[0]));
+    } else {
+      setActiveMetric('');
+    }
+  }, [settings.yAxes]);
 
   if (!settings.columnSummary || settings.columnSummary.length === 0) {
     return (
@@ -88,19 +97,24 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({ settings 
     [...marketDims, ...productDims].forEach(d => {
       combo[d] = row[d.toLowerCase()];
     });
-    const params = new URLSearchParams({
-      object_name: settings.dataSource,
-      y_column: settings.yAxis || '',
-      combination: JSON.stringify(combo)
-    });
+    if (!settings.yAxes || settings.yAxes.length === 0) return;
     setError(null);
     try {
-      const res = await fetch(`${FEATURE_OVERVIEW_API}/sku_stats?${params.toString()}`);
-      if (!res.ok) {
-        throw new Error('Failed to fetch statistics');
+      const result: Record<string, { timeseries: { date: string; value: number }[]; summary: { avg: number; min: number; max: number } }> = {};
+      for (const y of settings.yAxes) {
+        const params = new URLSearchParams({
+          object_name: settings.dataSource,
+          y_column: y,
+          combination: JSON.stringify(combo)
+        });
+        const res = await fetch(`${FEATURE_OVERVIEW_API}/sku_stats?${params.toString()}`);
+        if (!res.ok) {
+          throw new Error('Failed to fetch statistics');
+        }
+        result[y] = await res.json();
       }
-      const data = await res.json();
-      setStatData(data);
+      setStatDataMap(result);
+      setActiveMetric(settings.yAxes[0]);
       setActiveRow(row.id);
     } catch (e: any) {
       setError(e.message || 'Error fetching statistics');
@@ -297,21 +311,21 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({ settings 
             </Card>
           )}
 
-          {activeRow && statData && (
+          {activeRow && Object.keys(statDataMap).length > 0 && (
             <div className="grid grid-cols-1 xl:grid-cols-3 gap-8 mt-6">
               <div className="xl:col-span-2">
                 <Card className="border-0 shadow-xl bg-white/90 backdrop-blur-sm overflow-hidden h-80">
                   <div className="bg-gradient-to-r from-indigo-500 to-purple-600 p-4">
                     <h4 className="font-bold text-white text-lg flex items-center">
                       <TrendingUp className="w-5 h-5 mr-2" />
-                      {settings.yAxis || 'Trend Analysis'}
+                      {activeMetric || 'Trend Analysis'}
                     </h4>
                   </div>
                   <div className="p-6 h-full flex items-center justify-center">
                     <D3LineChart
-                      data={statData.timeseries}
+                      data={statDataMap[activeMetric]?.timeseries || []}
                       xLabel="Date"
-                      yLabel={settings.yAxis || 'Value'}
+                      yLabel={activeMetric || 'Value'}
                     />
                   </div>
                 </Card>
@@ -329,22 +343,24 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({ settings 
                       <thead>
                         <tr className="border-b border-gray-200">
                           <th className="p-2 text-left">Metric</th>
-                          <th className="p-2">Value</th>
+                          <th className="p-2 text-right">Avg</th>
+                          <th className="p-2 text-right">Min</th>
+                          <th className="p-2 text-right">Max</th>
+                          <th className="p-2 text-right">Action</th>
                         </tr>
                       </thead>
                       <tbody>
-                        <tr className="border-b">
-                          <td className="p-2">Average</td>
-                          <td className="p-2 text-right">{statData.summary.avg?.toFixed(2)}</td>
-                        </tr>
-                        <tr className="border-b">
-                          <td className="p-2">Min</td>
-                          <td className="p-2 text-right">{statData.summary.min?.toFixed(2)}</td>
-                        </tr>
-                        <tr>
-                          <td className="p-2">Max</td>
-                          <td className="p-2 text-right">{statData.summary.max?.toFixed(2)}</td>
-                        </tr>
+                        {settings.yAxes?.map(m => (
+                          <tr key={m} className="border-b last:border-0">
+                            <td className="p-2">{m}</td>
+                            <td className="p-2 text-right">{statDataMap[m]?.summary.avg?.toFixed(2) ?? '-'}</td>
+                            <td className="p-2 text-right">{statDataMap[m]?.summary.min?.toFixed(2) ?? '-'}</td>
+                            <td className="p-2 text-right">{statDataMap[m]?.summary.max?.toFixed(2) ?? '-'}</td>
+                            <td className="p-2 text-right">
+                              <Button size="xs" onClick={() => setActiveMetric(m)}>View</Button>
+                            </td>
+                          </tr>
+                        ))}
                       </tbody>
                     </table>
                   </div>

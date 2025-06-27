@@ -77,7 +77,7 @@ export interface FeatureOverviewSettings {
   numericColumns?: string[];
   marketDims?: string[];
   productDims?: string[];
-  yAxis?: string;
+  yAxes?: string[];
 }
 
 export const DEFAULT_FEATURE_OVERVIEW_SETTINGS: FeatureOverviewSettings = {
@@ -90,7 +90,7 @@ export const DEFAULT_FEATURE_OVERVIEW_SETTINGS: FeatureOverviewSettings = {
   numericColumns: [],
   marketDims: [],
   productDims: [],
-  yAxis: ''
+  yAxes: []
 };
 
 export interface DroppedAtom {
