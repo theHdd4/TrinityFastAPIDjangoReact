@@ -47,7 +47,7 @@ const FeatureOverviewSettings: React.FC<FeatureOverviewSettingsProps> = ({ setti
     let summary: ColumnInfo[] = [];
     if (res.ok) {
       const data = await res.json();
-      summary = data.summary || [];
+      summary = (data.summary || []).filter(Boolean);
       setColumns(summary);
       numeric = summary
         .filter((c: ColumnInfo) => !['object', 'string'].includes(c.data_type.toLowerCase()))
@@ -63,7 +63,9 @@ const FeatureOverviewSettings: React.FC<FeatureOverviewSettingsProps> = ({ setti
   };
 
   const handleReview = () => {
-    const summary = columns.filter(c => selectedIds.includes(c.column));
+    const summary = columns
+      .filter(c => c && selectedIds.includes(c.column))
+      .map(c => c);
     onSettingsChange({ selectedColumns: selectedIds, columnSummary: summary });
   };
 
@@ -96,8 +98,10 @@ const FeatureOverviewSettings: React.FC<FeatureOverviewSettingsProps> = ({ setti
             }
             className="w-full border rounded p-1 text-sm h-32"
           >
-            {columns.map(c => (
-              <option key={c.column} value={c.column}>{c.column}</option>
+            {columns.filter(Boolean).map(c => (
+              <option key={c.column} value={c.column}>
+                {c.column}
+              </option>
             ))}
           </select>
           <Button onClick={handleReview} className="mt-3 w-full">Review Data</Button>
