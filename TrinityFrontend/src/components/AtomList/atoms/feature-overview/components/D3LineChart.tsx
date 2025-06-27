@@ -29,7 +29,7 @@ const D3LineChart: React.FC<Props> = ({
     const svg = d3.select(ref.current);
     svg.selectAll('*').remove();
 
-    const margin = { top: 20, right: 30, bottom: 60, left: 40 };
+    const margin = { top: 10, right: 30, bottom: 80, left: 50 };
     const innerWidth = width - margin.left - margin.right;
     const innerHeight = height - margin.top - margin.bottom;
 
@@ -61,7 +61,7 @@ const D3LineChart: React.FC<Props> = ({
       .append('text')
       .attr('fill', '#374151')
       .attr('x', innerWidth / 2)
-      .attr('y', margin.bottom - 5)
+      .attr('y', margin.bottom - 25)
       .attr('text-anchor', 'middle')
       .text(xLabel);
 
@@ -72,7 +72,7 @@ const D3LineChart: React.FC<Props> = ({
       .attr('fill', '#374151')
       .attr('transform', 'rotate(-90)')
       .attr('x', -innerHeight / 2)
-      .attr('y', -margin.left + 12)
+      .attr('y', -margin.left + 15)
       .attr('text-anchor', 'middle')
       .text(yLabel);
 
@@ -102,7 +102,7 @@ const D3LineChart: React.FC<Props> = ({
     // Legend
     const legend = g
       .append('g')
-      .attr('transform', `translate(${width / 2 - 50}, ${innerHeight + 40})`);
+      .attr('transform', `translate(${innerWidth / 2 - 50}, ${innerHeight + margin.bottom - 30})`);
 
     legend
       .append('rect')
