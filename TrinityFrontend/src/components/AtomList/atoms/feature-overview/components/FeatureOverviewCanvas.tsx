@@ -316,13 +316,15 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({ settings,
           </Button>
 
           {skuRows.length > 0 && (
-            <Card className="overflow-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>SR NO.</TableHead>
-                    {[...marketDims, ...productDims].map(d => (
-                      <TableHead key={d}>{d}</TableHead>
+            <Card className="border-0 shadow-xl bg-white/80 backdrop-blur-sm overflow-hidden">
+              <div className="bg-gradient-to-r from-purple-500 to-purple-600 p-1">
+                <div className="bg-white rounded-sm overflow-auto">
+                  <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>SR NO.</TableHead>
+                      {[...marketDims, ...productDims].map(d => (
+                        <TableHead key={d}>{d}</TableHead>
                     ))}
                     <TableHead>View Stat</TableHead>
                   </TableRow>
@@ -340,7 +342,9 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({ settings,
                     </TableRow>
                   ))}
                 </TableBody>
-              </Table>
+                  </Table>
+                </div>
+              </div>
             </Card>
           )}
 
@@ -391,7 +395,15 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({ settings,
                             <td className="p-2 text-right whitespace-nowrap">{statDataMap[m]?.summary.min?.toFixed(2) ?? '-'}</td>
                             <td className="p-2 text-right whitespace-nowrap">{statDataMap[m]?.summary.max?.toFixed(2) ?? '-'}</td>
                             <td className="p-2 text-right whitespace-nowrap">
-                              <Button size="xs" className="text-[10px]" onClick={() => { setActiveMetric(m); onUpdateSettings({ activeMetric: m }); }}>View</Button>
+                              <button
+                                className="text-blue-600 hover:text-blue-800 font-medium underline transition-colors"
+                                onClick={() => {
+                                  setActiveMetric(m);
+                                  onUpdateSettings({ activeMetric: m });
+                                }}
+                              >
+                                View
+                              </button>
                             </td>
                           </tr>
                         ))}
