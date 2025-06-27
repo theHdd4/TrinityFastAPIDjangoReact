@@ -1,0 +1,51 @@
+# Apache Arrow & Arrow Flight Integration Guide
+
+This guide describes the benefits these tools introduce, the new functionality to implement and step-by-step instructions for integrating them into the Trinity platform. Apache Arrow provides an efficient columnar in-memory format while Arrow Flight uses gRPC for high-speed data transfer.
+
+## Capabilities Added
+
+- **Efficient columnar storage** – Dataframes and CSV files can be loaded as Arrow Tables for fast analytics and seamless conversion to/from pandas.
+- **Zero-copy data sharing** – Arrow's memory format lets different components ("atoms") exchange data without serialisation overhead.
+- **High throughput RPC** – Arrow Flight streams large datasets over gRPC using the Arrow binary protocol.
+- **Interoperability** – Arrow data can be consumed by Python, Java and other languages without conversion.
+- **Batch processing** – Columnar batches allow vectorised operations, improving performance for data‑intensive atoms.
+
+## Functionality to Implement
+
+1. **Arrow based dataset management** – Store uploaded CSV files as Arrow files or Parquet in MinIO. Expose helpers that convert pandas DataFrames to Arrow Tables and persist them.
+2. **Arrow Flight service** – Add a small server exposing Flight endpoints for uploading and retrieving Arrow Tables. This allows atoms to request datasets in Arrow format from any backend.
+3. **Client utilities for atoms** – Provide a wrapper around `pyarrow.flight.FlightClient` so atoms can easily fetch or push data using Flight.
+4. **Streaming pipelines** – Enable atoms to stream Arrow batches from one microservice to another instead of sending entire files.
+5. **Schema sharing** – Use Arrow Schemas to describe datasets so each atom knows the column names and types in advance.
+
+## Implementation Steps
+
+1. **Install dependencies**
+   - Add `pyarrow` (which includes Arrow Flight) to `TrinityBackendFastAPI/requirements.txt` and rebuild the Docker images.
+   - Optional: add `pyarrow` to the Django requirements if data processing occurs there as well.
+2. **Create a Flight server**
+   - Inside `TrinityBackendFastAPI/app`, create a module `arrow_flight_server` with a class derived from `pyarrow.flight.FlightServerBase`.
+   - Implement `do_get`, `do_put` and `list_flights` to serve Arrow Tables stored in MinIO or other storage.
+   - Expose a `start_flight_server()` function that launches the server on a configurable port (e.g. 8815).
+   - Update `docker-compose.yml` to start this service alongside the FastAPI container.
+3. **Implement client utilities**
+   - Add a helper under `app/utils` to create `pyarrow.flight.FlightClient` instances pointed at the Flight server.
+   - Provide async wrappers so atoms can call `client.do_get` and `client.do_put` from their routes or background tasks.
+4. **Adapt existing data features**
+   - When a CSV is uploaded, convert it to `pyarrow.Table` and store it in MinIO (e.g. as a `.arrow` or `.parquet` file).
+   - Instead of returning raw CSV data, atoms should request Arrow tables via Flight. This keeps data in columnar form across the pipeline.
+5. **Frontend integration**
+   - If atoms in the React app need to handle large datasets, call a small FastAPI endpoint that proxies Flight data and converts it to JSON only when necessary.
+6. **Testing**
+   - Write unit tests for the Flight server using the `pyarrow.flight` client to fetch sample tables.
+   - Add integration tests to ensure a dataset uploaded through one atom can be retrieved by another via Flight.
+
+## Enabling Seamless Data Transfer Across Atoms
+
+1. Launch the Flight server with the backend services (`docker-compose up` after adding the new service).
+2. Each atom obtains a Flight client using the shared utility and requests datasets by a known path or ticket.
+3. Use Arrow Schemas so atoms validate the expected columns before processing.
+4. Because Flight streams data in chunks, atoms can process batches without loading an entire file into memory.
+5. When an atom finishes processing a table, it can optionally `do_put` the results back to the Flight service for other atoms to consume.
+
+With these steps Apache Arrow provides fast in-memory analytics while Arrow Flight delivers high-throughput RPC endpoints. This integration enables the Trinity platform to move large datasets between atoms efficiently and maintain a consistent columnar format throughout the workflow.
