@@ -5,6 +5,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Button } from '@/components/ui/button';
 import { FEATURE_OVERVIEW_API } from '@/lib/api';
 import { BarChart3, TrendingUp } from 'lucide-react';
+import D3LineChart from './D3LineChart';
 
 interface ColumnInfo {
   column: string;
@@ -307,23 +308,11 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({ settings 
                     </h4>
                   </div>
                   <div className="p-6 h-full flex items-center justify-center">
-                    <svg width="100%" height="200" viewBox="0 0 400 200" className="mx-auto">
-                      <defs>
-                        <pattern id="grid" width="40" height="20" patternUnits="userSpaceOnUse">
-                          <path d="M 40 0 L 0 0 0 20" fill="none" stroke="#e5e7eb" strokeWidth="0.5" />
-                        </pattern>
-                      </defs>
-                      <rect width="100%" height="100%" fill="url(#grid)" />
-                      {(() => {
-                        const maxV = Math.max(...statData.timeseries.map(t => t.value || 0), 1);
-                        const points = statData.timeseries
-                          .map((p, i) => `${30 + i * 30},${180 - (p.value / maxV) * 140}`)
-                          .join(' ');
-                        return (
-                          <polyline fill="none" stroke="#6366f1" strokeWidth="3" points={points} />
-                        );
-                      })()}
-                    </svg>
+                    <D3LineChart
+                      data={statData.timeseries}
+                      xLabel="Date"
+                      yLabel={settings.yAxis || 'Value'}
+                    />
                   </div>
                 </Card>
               </div>
