@@ -17,7 +17,7 @@ interface Props {
 const D3LineChart: React.FC<Props> = ({
   data,
   width = 600,
-  height = 350,
+  height = 400,
   xLabel = 'Date',
   yLabel = 'Value'
 }) => {
@@ -29,7 +29,7 @@ const D3LineChart: React.FC<Props> = ({
     const svg = d3.select(ref.current);
     svg.selectAll('*').remove();
 
-    const margin = { top: 30, right: 30, bottom: 70, left: 40 };
+    const margin = { top: 20, right: 30, bottom: 60, left: 40 };
     const innerWidth = width - margin.left - margin.right;
     const innerHeight = height - margin.top - margin.bottom;
 
@@ -52,9 +52,12 @@ const D3LineChart: React.FC<Props> = ({
       .append('g')
       .attr('transform', `translate(${margin.left},${margin.top})`);
 
-    g.append('g')
+    const xAxis = g
+      .append('g')
       .attr('transform', `translate(0,${innerHeight})`)
-      .call(d3.axisBottom(x).ticks(5))
+      .call(d3.axisBottom(x).ticks(5));
+    xAxis.selectAll('text').style('font-size', '12px');
+    xAxis
       .append('text')
       .attr('fill', '#374151')
       .attr('x', innerWidth / 2)
@@ -62,8 +65,9 @@ const D3LineChart: React.FC<Props> = ({
       .attr('text-anchor', 'middle')
       .text(xLabel);
 
-    g.append('g')
-      .call(d3.axisLeft(y).ticks(5))
+    const yAxis = g.append('g').call(d3.axisLeft(y).ticks(5));
+    yAxis.selectAll('text').style('font-size', '12px');
+    yAxis
       .append('text')
       .attr('fill', '#374151')
       .attr('transform', 'rotate(-90)')
@@ -72,30 +76,6 @@ const D3LineChart: React.FC<Props> = ({
       .attr('text-anchor', 'middle')
       .text(yLabel);
 
-    g.append('g')
-      .attr('class', 'grid')
-      .attr('transform', `translate(0,${innerHeight})`)
-      .call(
-        d3
-          .axisBottom(x)
-          .ticks(5)
-          .tickSize(-innerHeight)
-          .tickFormat(() => '')
-      )
-      .selectAll('line')
-      .attr('stroke', '#e5e7eb');
-
-    g.append('g')
-      .attr('class', 'grid')
-      .call(
-        d3
-          .axisLeft(y)
-          .ticks(5)
-          .tickSize(-innerWidth)
-          .tickFormat(() => '')
-      )
-      .selectAll('line')
-      .attr('stroke', '#e5e7eb');
 
     const line = d3
       .line<{ date: Date; value: number }>()
@@ -105,8 +85,8 @@ const D3LineChart: React.FC<Props> = ({
     g.append('path')
       .datum(dataParsed)
       .attr('fill', 'none')
-      .attr('stroke', '#2F2C7F')
-      .attr('stroke-width', 2.5)
+      .attr('stroke', '#e74c3c')
+      .attr('stroke-width', 4)
       .attr('d', line);
 
     g.selectAll('.dot')
@@ -117,15 +97,34 @@ const D3LineChart: React.FC<Props> = ({
       .attr('cx', d => x(d.date))
       .attr('cy', d => y(d.value))
       .attr('r', 4)
-      .attr('fill', '#2F2C7F');
+      .attr('fill', '#e74c3c');
+
+    // Legend
+    const legend = g
+      .append('g')
+      .attr('transform', `translate(${width / 2 - 50}, ${innerHeight + 40})`);
+
+    legend
+      .append('rect')
+      .attr('width', 14)
+      .attr('height', 14)
+      .attr('fill', '#e74c3c');
+
+    legend
+      .append('text')
+      .attr('x', 20)
+      .attr('y', 12)
+      .style('font-size', '16px')
+      .style('fill', '#000')
+      .text(yLabel);
 
     const focus = g.append('g').style('display', 'none');
-    focus.append('circle').attr('r', 4).attr('fill', '#2F2C7F');
+    focus.append('circle').attr('r', 4).attr('fill', '#e74c3c');
     const tooltip = focus
       .append('text')
       .attr('x', 9)
       .attr('dy', '-0.35em')
-      .attr('font-size', '10px')
+      .attr('font-size', '12px')
       .attr('fill', '#111827');
 
     const bisect = d3.bisector<{ date: Date }>(d => d.date).left;
