@@ -43,8 +43,12 @@ const FeatureOverviewProperties: React.FC<Props> = ({ atomId }) => {
         </TabsContent>
         <TabsContent value="visual" className="space-y-4" forceMount>
           <FeatureOverviewVisualisation
-            numericColumns={settings.numericColumns || []}
-            allColumns={(settings.allColumns || []).map((c: any) => c.column)}
+            numericColumns={(settings.numericColumns || []).filter(Boolean)}
+            allColumns={
+              (settings.allColumns || [])
+                .filter((c: any) => c && c.column)
+                .map((c: any) => c.column)
+            }
             yValues={settings.yAxes || []}
             xValue={settings.xAxis || 'date'}
             onYChange={val => handleChange({ yAxes: val })}

@@ -20,7 +20,9 @@ interface ColumnInfo {
 
 const FeatureOverviewSettings: React.FC<FeatureOverviewSettingsProps> = ({ settings, onSettingsChange }) => {
   const [frames, setFrames] = useState<string[]>([]);
-  const [columns, setColumns] = useState<ColumnInfo[]>(settings.allColumns || []);
+  const [columns, setColumns] = useState<ColumnInfo[]>(
+    (settings.allColumns || []).filter(Boolean)
+  );
   const [selectedIds, setSelectedIds] = useState<string[]>(settings.selectedColumns || []);
 
   useEffect(() => {
@@ -33,7 +35,7 @@ const FeatureOverviewSettings: React.FC<FeatureOverviewSettingsProps> = ({ setti
   // restore dropdown state when settings come from store
   useEffect(() => {
     if (settings.allColumns && settings.allColumns.length > 0) {
-      setColumns(settings.allColumns);
+      setColumns((settings.allColumns || []).filter(Boolean));
     }
     setSelectedIds(settings.selectedColumns || []);
   }, [settings.allColumns, settings.selectedColumns]);
