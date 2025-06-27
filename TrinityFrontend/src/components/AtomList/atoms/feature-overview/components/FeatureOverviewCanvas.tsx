@@ -379,7 +379,7 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({ settings,
                       </DialogContent>
                     </Dialog>
                   </div>
-                  <div className="p-6 h-full flex items-start justify-center overflow-y-auto">
+                  <div className="p-6 h-full flex items-end justify-center overflow-hidden">
                     <D3LineChart
                       data={statDataMap[activeMetric]?.timeseries || []}
                       height={400}
