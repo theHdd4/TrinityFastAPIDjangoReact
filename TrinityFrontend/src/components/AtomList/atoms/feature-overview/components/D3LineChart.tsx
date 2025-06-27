@@ -16,8 +16,8 @@ interface Props {
 
 const D3LineChart: React.FC<Props> = ({
   data,
-  width = 400,
-  height = 200,
+  width = 600,
+  height = 350,
   xLabel = 'Date',
   yLabel = 'Value'
 }) => {
@@ -29,7 +29,7 @@ const D3LineChart: React.FC<Props> = ({
     const svg = d3.select(ref.current);
     svg.selectAll('*').remove();
 
-    const margin = { top: 10, right: 20, bottom: 35, left: 40 };
+    const margin = { top: 50, right: 30, bottom: 70, left: 40 };
     const innerWidth = width - margin.left - margin.right;
     const innerHeight = height - margin.top - margin.bottom;
 
@@ -46,6 +46,8 @@ const D3LineChart: React.FC<Props> = ({
       .domain([0, d3.max(dataParsed, d => d.value) || 1])
       .nice()
       .range([innerHeight, 0]);
+
+    svg.style('background', '#fff');
 
     const g = svg
       .append('g')
@@ -104,12 +106,22 @@ const D3LineChart: React.FC<Props> = ({
     g.append('path')
       .datum(dataParsed)
       .attr('fill', 'none')
-      .attr('stroke', '#6366f1')
-      .attr('stroke-width', 3)
+      .attr('stroke', '#2F2C7F')
+      .attr('stroke-width', 2.5)
       .attr('d', line);
 
+    g.selectAll('.dot')
+      .data(dataParsed)
+      .enter()
+      .append('circle')
+      .attr('class', 'dot')
+      .attr('cx', d => x(d.date))
+      .attr('cy', d => y(d.value))
+      .attr('r', 4)
+      .attr('fill', '#2F2C7F');
+
     const focus = g.append('g').style('display', 'none');
-    focus.append('circle').attr('r', 4).attr('fill', '#6366f1');
+    focus.append('circle').attr('r', 4).attr('fill', '#2F2C7F');
     const tooltip = focus
       .append('text')
       .attr('x', 9)
