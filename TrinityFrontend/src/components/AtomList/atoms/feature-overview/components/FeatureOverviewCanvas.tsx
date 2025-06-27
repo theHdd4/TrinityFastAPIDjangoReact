@@ -4,7 +4,7 @@ import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
 import { FEATURE_OVERVIEW_API } from '@/lib/api';
-import { BarChart3, TrendingUp, Maximize2 } from 'lucide-react';
+import { BarChart3, TrendingUp, Maximize2, X } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -88,6 +88,18 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({ settings,
       default:
         return 'bg-gray-100 text-gray-800 border-gray-200';
     }
+  };
+
+  const removeMarketDim = (dim: string) => {
+    const dims = marketDims.filter(d => d !== dim);
+    setMarketDims(dims);
+    onUpdateSettings({ marketDims: dims });
+  };
+
+  const removeProductDim = (dim: string) => {
+    const dims = productDims.filter(d => d !== dim);
+    setProductDims(dims);
+    onUpdateSettings({ productDims: dims });
   };
 
   const displaySkus = async () => {
@@ -226,8 +238,15 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({ settings,
               <div className="p-6">
                 <div className="flex flex-wrap gap-3">
                   {marketDims.map(m => (
-                    <Badge key={m} className="bg-gradient-to-r from-blue-500 to-blue-600 text-white px-4 py-2 font-medium">
+                    <Badge
+                      key={m}
+                      className="bg-gradient-to-r from-blue-500 to-blue-600 text-white px-4 py-2 font-medium flex items-center gap-1"
+                    >
                       {m}
+                      <X
+                        className="w-3 h-3 cursor-pointer"
+                        onClick={() => removeMarketDim(m)}
+                      />
                     </Badge>
                   ))}
                   <div className="flex items-center gap-2">
@@ -276,8 +295,15 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({ settings,
               <div className="p-6">
                 <div className="flex flex-wrap gap-3">
                   {productDims.map(p => (
-                    <Badge key={p} className="bg-gradient-to-r from-green-500 to-green-600 text-white px-4 py-2 font-medium">
+                    <Badge
+                      key={p}
+                      className="bg-gradient-to-r from-green-500 to-green-600 text-white px-4 py-2 font-medium flex items-center gap-1"
+                    >
                       {p}
+                      <X
+                        className="w-3 h-3 cursor-pointer"
+                        onClick={() => removeProductDim(p)}
+                      />
                     </Badge>
                   ))}
                   <div className="flex items-center gap-2">
