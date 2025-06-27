@@ -49,3 +49,21 @@ This guide describes the benefits these tools introduce, the new functionality t
 5. When an atom finishes processing a table, it can optionally `do_put` the results back to the Flight service for other atoms to consume.
 
 With these steps Apache Arrow provides fast in-memory analytics while Arrow Flight delivers high-throughput RPC endpoints. This integration enables the Trinity platform to move large datasets between atoms efficiently and maintain a consistent columnar format throughout the workflow.
+
+## Updating Existing Atoms
+
+### Data Upload & Validate
+1. Replace the CSV read/write logic in `data_upload_validate` so that uploaded files are parsed into `pyarrow.Table` objects immediately.
+2. Store these tables in MinIO using the `.arrow` or `.parquet` format instead of raw CSV files.
+3. After successful validation, push the validated table to the Flight server using `client.do_put` with a ticket like `validated/<validator_id>`.
+4. Return this ticket to the caller so other atoms can request the table directly from Flight without referencing a CSV file.
+
+### Feature Overview
+1. Modify the endpoints in `feature_overview/routes.py` to fetch tables via `client.do_get` using the ticket produced by the upload atom.
+2. Convert the incoming `pyarrow.Table` to a pandas DataFrame only for in-memory analysis; store any results back to MinIO as Arrow/Parquet.
+3. Optionally publish summary tables to the Flight server so downstream atoms can chain off the feature overview results.
+
+### Automatic Arrow Pipeline
+1. At the end of the Data Upload & Validate workflow call the Feature Overview API internally, passing the Flight ticket rather than a file path.
+2. The Feature Overview atom retrieves the table using Flight, runs its analysis and persists the output automatically.
+3. This removes manual file selection between atoms—the Flight ticket serves as the hand-off point and the orchestrator simply forwards it to the next stage.
