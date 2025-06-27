@@ -3,6 +3,8 @@ from fastapi import APIRouter, HTTPException, File, Form, UploadFile, Query, Req
 from typing import List, Dict, Any
 import json
 import pandas as pd
+import pyarrow as pa
+from app.utils.arrow_client import put_table
 import io
 import os
 from pathlib import Path
@@ -2939,7 +2941,7 @@ async def save_dataframes(
     files: List[UploadFile] = File(...),
     file_keys: str = Form(...)
 ):
-    """Save validated dataframes to MinIO"""
+    """Save validated dataframes to MinIO and Arrow Flight"""
     try:
         keys = json.loads(file_keys)
     except json.JSONDecodeError:
@@ -2950,10 +2952,31 @@ async def save_dataframes(
     uploads = []
     for file, key in zip(files, keys):
         content = await file.read()
-        result = upload_to_minio(content, file.filename, validator_atom_id, key)
-        uploads.append({"file_key": key, "filename": file.filename, "minio_upload": result})
+        df = None
+        try:
+            if file.filename.lower().endswith(".csv"):
+                df = pd.read_csv(io.BytesIO(content))
+            elif file.filename.lower().endswith((".xls", ".xlsx")):
+                df = pd.read_excel(io.BytesIO(content))
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Failed to parse {file.filename}: {e}")
 
-    return {"minio_uploads": uploads}
+        table = pa.Table.from_pandas(df)
+        ticket = f"{validator_atom_id}/{key}"
+        try:
+            put_table(ticket, table)
+        except Exception as e:
+            print(f"Arrow Flight upload failed: {e}")
+
+        result = upload_to_minio(content, file.filename, validator_atom_id, key)
+        uploads.append({
+            "file_key": key,
+            "filename": file.filename,
+            "minio_upload": result,
+            "flight_ticket": ticket,
+        })
+
+    return {"uploads": uploads}
 
 
 @router.get("/list_saved_dataframes")

@@ -116,7 +116,7 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({ settings,
     setError(null);
     try {
       const res = await fetch(
-        `${FEATURE_OVERVIEW_API}/cached_dataframe?object_name=${encodeURIComponent(settings.dataSource)}`
+        `${FEATURE_OVERVIEW_API}/cached_dataframe?object_name=${encodeURIComponent(settings.dataSource)}&use_flight=true`
       );
       if (!res.ok) {
         throw new Error('Failed to load data');
@@ -163,7 +163,7 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({ settings,
           combination: JSON.stringify(combo),
           x_column: settings.xAxis || 'date'
         });
-        const res = await fetch(`${FEATURE_OVERVIEW_API}/sku_stats?${params.toString()}`);
+        const res = await fetch(`${FEATURE_OVERVIEW_API}/sku_stats?${params.toString()}&use_flight=true`);
         if (!res.ok) {
           throw new Error('Failed to fetch statistics');
         }

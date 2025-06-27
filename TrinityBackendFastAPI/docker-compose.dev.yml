@@ -22,6 +22,22 @@ services:
       - .:/app
     restart: unless-stopped
 
+  flight:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: python -m app.arrow_flight_server
+    container_name: dev-flight
+    ports:
+      - "8815:8815"
+    depends_on:
+      - redis
+      - minio
+      - mongodb
+    volumes:
+      - .:/app
+    restart: unless-stopped
+
   redis:
     image: redis:alpine
     container_name: dev-redis

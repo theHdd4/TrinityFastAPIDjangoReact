@@ -5,6 +5,9 @@ from fastapi import APIRouter, Form, HTTPException
 from fastapi.responses import JSONResponse, Response
 import pandas as pd
 import io
+import pyarrow as pa
+import pyarrow.csv as pacsv
+from app.utils.arrow_client import get_table
 import json
 from datetime import date, datetime
 from typing import List
@@ -132,11 +135,17 @@ async def column_summary(object_name: str):
 
 
 @router.get("/cached_dataframe")
-async def cached_dataframe(object_name: str):
+async def cached_dataframe(object_name: str, use_flight: bool = False):
     """Return the raw CSV bytes for a saved dataframe from Redis."""
     if not object_name.startswith(OBJECT_PREFIX):
         raise HTTPException(status_code=400, detail="Invalid object name")
     try:
+        if use_flight:
+            table = get_table(object_name)
+            sink = pa.BufferOutputStream()
+            pacsv.write_csv(table, sink)
+            csv_bytes = sink.getvalue().to_pybytes()
+            return Response(csv_bytes, media_type="text/csv")
         content = redis_client.get(object_name)
         if content is None:
             response = minio_client.get_object(MINIO_BUCKET, object_name)
@@ -154,7 +163,7 @@ async def cached_dataframe(object_name: str):
 
 
 @router.get("/sku_stats")
-async def sku_stats(object_name: str, y_column: str, combination: str, x_column: str = "date"):
+async def sku_stats(object_name: str, y_column: str, combination: str, x_column: str = "date", use_flight: bool = False):
     """Return time series and summary for a specific SKU combination."""
     if not object_name.startswith(OBJECT_PREFIX):
         raise HTTPException(status_code=400, detail="Invalid object name")
@@ -164,18 +173,22 @@ async def sku_stats(object_name: str, y_column: str, combination: str, x_column:
         raise HTTPException(status_code=400, detail=f"Invalid combination: {e}")
 
     try:
-        content = redis_client.get(object_name)
-        if content is None:
-            response = minio_client.get_object(MINIO_BUCKET, object_name)
-            content = response.read()
-            redis_client.setex(object_name, 3600, content)
-
-        if object_name.endswith(".csv"):
-            df = pd.read_csv(io.BytesIO(content))
-        elif object_name.endswith((".xls", ".xlsx")):
-            df = pd.read_excel(io.BytesIO(content))
+        if use_flight:
+            table = get_table(object_name)
+            df = table.to_pandas()
         else:
-            raise ValueError("Unsupported file format")
+            content = redis_client.get(object_name)
+            if content is None:
+                response = minio_client.get_object(MINIO_BUCKET, object_name)
+                content = response.read()
+                redis_client.setex(object_name, 3600, content)
+
+            if object_name.endswith(".csv"):
+                df = pd.read_csv(io.BytesIO(content))
+            elif object_name.endswith((".xls", ".xlsx")):
+                df = pd.read_excel(io.BytesIO(content))
+            else:
+                raise ValueError("Unsupported file format")
 
         df.columns = df.columns.str.lower()
         y_col = y_column.lower()
@@ -235,7 +248,7 @@ async def feature_overview_uniquecountendpoint(
     file_key: str = Form(...),
     results_collection=Depends(get_unique_dataframe_results_collection),
     validator_collection: AsyncIOMotorCollection = Depends(get_validator_atoms_collection),
-   
+    use_flight: bool = Form(False),
 ):
     try:
 
@@ -246,14 +259,18 @@ async def feature_overview_uniquecountendpoint(
 
         dataframes = []
         for object_name in object_names:
-            response = minio_client.get_object(bucket_name, object_name)
-            content = response.read()
-            if object_name.endswith(".csv"):
-                df = pd.read_csv(io.BytesIO(content))
-            elif object_name.endswith((".xls", ".xlsx")):
-                df = pd.read_excel(io.BytesIO(content))
+            if use_flight:
+                table = get_table(object_name)
+                df = table.to_pandas()
             else:
-                raise ValueError(f"Unsupported file format: {object_name}")
+                response = minio_client.get_object(bucket_name, object_name)
+                content = response.read()
+                if object_name.endswith(".csv"):
+                    df = pd.read_csv(io.BytesIO(content))
+                elif object_name.endswith((".xls", ".xlsx")):
+                    df = pd.read_excel(io.BytesIO(content))
+                else:
+                    raise ValueError(f"Unsupported file format: {object_name}")
             df.columns = df.columns.str.lower()
             dataframes.append(df)
 
@@ -296,6 +313,7 @@ async def feature_overview_summaryendpoint(
     create_hierarchy: bool = Form(False),
     create_summary: bool = Form(False),
     combination: str = Form(None),  # Optional specific combo
+    use_flight: bool = Form(False),
     results_collection=Depends(get_summary_results_collection),
     validator_collection: AsyncIOMotorCollection = Depends(get_validator_atoms_collection),
    
@@ -315,14 +333,18 @@ async def feature_overview_summaryendpoint(
 
         dataframes = []
         for object_name in object_names:
-            response = minio_client.get_object(bucket_name, object_name)
-            content = response.read()
-            if object_name.endswith(".csv"):
-                df = pd.read_csv(io.BytesIO(content))
-            elif object_name.endswith((".xls", ".xlsx")):
-                df = pd.read_excel(io.BytesIO(content))
+            if use_flight:
+                table = get_table(object_name)
+                df = table.to_pandas()
             else:
-                raise ValueError(f"Unsupported file format: {object_name}")
+                response = minio_client.get_object(bucket_name, object_name)
+                content = response.read()
+                if object_name.endswith(".csv"):
+                    df = pd.read_csv(io.BytesIO(content))
+                elif object_name.endswith((".xls", ".xlsx")):
+                    df = pd.read_excel(io.BytesIO(content))
+                else:
+                    raise ValueError(f"Unsupported file format: {object_name}")
             df.columns = df.columns.str.lower()
             dataframes.append(df)
 

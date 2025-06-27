@@ -245,7 +245,17 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
     uploadedFiles.forEach(f => form.append('files', f));
     const keys = uploadedFiles.map(f => fileAssignments[f.name] || '');
     form.append('file_keys', JSON.stringify(keys));
-    await fetch(`${VALIDATE_API}/save_dataframes`, { method: 'POST', body: form });
+    const res = await fetch(`${VALIDATE_API}/save_dataframes`, { method: 'POST', body: form });
+    if (res.ok) {
+      const data = await res.json();
+      const tickets: Record<string, string> = {};
+      data.uploads?.forEach((u: any) => {
+        if (u.flight_ticket) tickets[u.filename] = u.flight_ticket;
+      });
+      if (Object.keys(tickets).length > 0) {
+        updateSettings(atomId, { flightTickets: { ...(settings.flightTickets || {}), ...tickets } });
+      }
+    }
   };
 
   const dimensions = [

@@ -54,7 +54,7 @@ const FeatureOverviewSettings: React.FC<FeatureOverviewSettingsProps> = ({ setti
   const handleFrameChange = async (val: string) => {
     setSelectedIds([]);
     const res = await fetch(
-      `${FEATURE_OVERVIEW_API}/column_summary?object_name=${encodeURIComponent(val)}`
+      `${FEATURE_OVERVIEW_API}/column_summary?object_name=${encodeURIComponent(val)}&use_flight=true`
     );
     let numeric: string[] = [];
     let summary: ColumnInfo[] = [];

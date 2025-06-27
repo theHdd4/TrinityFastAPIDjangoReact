@@ -6,4 +6,5 @@ boto3
 pandas
 motor
 python-multipart
+pyarrow
 asyncpg

@@ -50,6 +50,7 @@ export interface DataUploadSettings {
   validations?: Record<string, any>;
   classification?: Record<string, { identifiers: string[]; measures: string[] }>;
   fileMappings?: Record<string, string>;
+  flightTickets?: Record<string, string>;
 }
 
 export const DEFAULT_DATAUPLOAD_SETTINGS: DataUploadSettings = {
@@ -64,7 +65,8 @@ export const DEFAULT_DATAUPLOAD_SETTINGS: DataUploadSettings = {
   requiredFiles: [],
   validations: {},
   classification: {},
-  fileMappings: {}
+  fileMappings: {},
+  flightTickets: {}
 };
 
 export interface FeatureOverviewSettings {
