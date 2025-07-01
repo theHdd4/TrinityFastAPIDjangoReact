@@ -1,0 +1,52 @@
+Apache Arrow and Arrow Flight RPC Integration Guide
+===================================================
+
+This guide describes how Apache Arrow and Arrow Flight RPC can be used in the Trinity platform. Arrow provides an efficient columnar in-memory format for analytics, while Arrow Flight offers a high-speed RPC protocol for transporting Arrow data between services. Together they allow atoms to move large datasets such as CSV files and pandas DataFrames with minimal serialization overhead.
+
+Capabilities Introduced
+-----------------------
+1. **In-memory columnar format** – Data is represented in Arrow tables, enabling zero-copy conversion between pandas, NumPy, and Parquet files.
+2. **Fast RPC transfers** – Arrow Flight streams Arrow tables directly over gRPC, avoiding JSON or CSV serialization when atoms pass data.
+3. **Batch processing** – Large datasets can be chunked and transferred in parallel flights, improving throughput for machine learning pipelines.
+4. **Multi-language support** – Libraries exist for Python, Java, Go and more, so additional atoms can be implemented in other languages and still share data efficiently.
+5. **Interoperability** – Arrow tables can easily be written to and read from Parquet, enabling quick export/import to storage services like MinIO.
+
+Functionalities To Implement
+----------------------------
+1. **Install dependencies** – Add `pyarrow` (and optionally `pandas` if not present) to each Python environment: `TrinityBackendDjango`, `TrinityBackendFastAPI`, `TrinityAI`, and any agent packages.
+2. **Flight server** – Run a Flight RPC server alongside the FastAPI backend so atoms can request or push Arrow tables. The server exposes endpoints for reading and writing datasets.
+3. **Flight client helpers** – Provide utility functions for atoms to upload and download Arrow tables via Flight. Conversions from pandas DataFrames or CSV files should be handled transparently.
+4. **Data contracts** – Define schemas for common datasets (e.g., uploaded CSVs or processed features) to ensure atoms agree on column names and types when exchanging tables.
+5. **Streaming ingestion** – Modify existing upload endpoints to convert incoming CSV files to Arrow tables and store them in-memory or on disk (Parquet) for quick retrieval.
+6. **Distributed processing** – When orchestrating tasks across atoms, pass Arrow table handles (tickets) instead of raw JSON. Downstream atoms retrieve the table from the Flight server and process it directly.
+7. **Clean-up routines** – Implement lifecycle management so temporary Arrow tables are deleted from the Flight server or storage after consumption.
+
+Step-by-Step Implementation
+---------------------------
+1. **Update requirements**
+   - In `TrinityBackendDjango/requirements.txt`, `TrinityBackendFastAPI/requirements.txt`, and agent requirement files add:
+     ```
+     pyarrow>=15.0.0
+     ```
+   - Rebuild Docker containers to install the new dependency.
+2. **Create a Flight server module**
+   - Inside `TrinityBackendFastAPI/app`, add a new module `flight_server.py` containing a `pyarrow.flight.FlightServerBase` subclass. Implement `do_get` and `do_put` for reading and writing Arrow tables.
+   - Launch this server from `main.py` or via a separate process on a dedicated port (e.g., 8815).
+3. **Expose service configuration**
+   - Add environment variables to configure the Flight host and port. Update `docker-compose.dev.yml` so the Flight server runs alongside FastAPI.
+4. **Client helpers**
+   - Create a small library (`utils/arrow_client.py`) wrapping `pyarrow.flight.FlightClient` with methods `upload_dataframe(df, path)` and `download_dataframe(path)`.
+   - Convert DataFrames to Arrow tables using `pyarrow.Table.from_pandas` before uploading.
+5. **Integrate with existing endpoints**
+   - In data upload routes, after validating a CSV, read it into pandas and store via `upload_dataframe`. Return the Flight ticket or path to the caller.
+   - Downstream atoms call `download_dataframe` with the ticket to obtain the dataset without hitting the database or MinIO again.
+6. **Define schemas**
+   - Maintain a list of `pyarrow.schema` objects for each dataset type (raw CSV, aggregated features, etc.) so all atoms use consistent column definitions.
+7. **Testing**
+   - Write unit tests using `pyarrow.flight.connect` to ensure tables round trip correctly through the server.
+8. **Performance tuning**
+   - Benchmark transfers of large CSV files vs. the current JSON approach to verify throughput gains.
+9. **Cleanup and persistence**
+   - Optionally store Arrow tables as Parquet files in MinIO after upload. Provide TTL jobs to purge old data.
+
+Once these steps are implemented, atoms can exchange large datasets through Arrow Flight by passing lightweight tickets instead of entire payloads. This reduces serialization costs and improves scalability when processing complex data pipelines.
