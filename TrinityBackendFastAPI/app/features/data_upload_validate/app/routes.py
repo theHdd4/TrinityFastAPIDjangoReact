@@ -2961,14 +2961,18 @@ async def save_dataframes(
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"Failed to parse {file.filename}: {e}")
 
+        # Upload the original bytes to MinIO first so we know the object name
+        result = upload_to_minio(content, file.filename, validator_atom_id, key)
+
+        # Store the dataframe in Arrow Flight using the same object name
         table = pa.Table.from_pandas(df)
-        ticket = f"{validator_atom_id}/{key}"
+        ticket = result.get("object_name")
         try:
-            put_table(ticket, table)
+            if ticket:
+                put_table(ticket, table)
         except Exception as e:
             print(f"Arrow Flight upload failed: {e}")
 
-        result = upload_to_minio(content, file.filename, validator_atom_id, key)
         uploads.append({
             "file_key": key,
             "filename": file.filename,
