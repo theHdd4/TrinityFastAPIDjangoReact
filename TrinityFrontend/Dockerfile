@@ -2,9 +2,13 @@
 FROM node:20-alpine AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
-RUN npm install
+RUN echo "[frontend] installing dependencies" \
+    && npm install \
+    && echo "[frontend] dependencies installed"
 COPY . .
-RUN npm run build
+RUN echo "[frontend] running build" \
+    && npm run build \
+    && echo "[frontend] build complete"
 
 # Serve the compiled app with Nginx
 FROM nginx:1.25-alpine

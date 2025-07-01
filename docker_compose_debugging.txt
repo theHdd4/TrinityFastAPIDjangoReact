@@ -1,0 +1,31 @@
+If Docker Compose hangs during the `frontend` build with the message
+"resolving provenance for metadata file" you can add more verbose output
+and inspect where it stops.
+
+1. Run the build in plain progress mode:
+   ```
+   DOCKER_BUILDKIT=1 docker compose build frontend --progress=plain
+   ```
+   This prints each command in the Dockerfile so you can see exactly which
+   step is executing.
+
+2. The `TrinityFrontend/Dockerfile` now outputs log messages while installing
+   dependencies and building the app. Look for the `[frontend]` prefix to
+   identify when those steps start and finish. If the build hangs before the
+   "dependencies installed" line, the `npm install` step is likely having
+   trouble (check network connectivity to the npm registry).
+
+3. If the hang occurs after the build completes, try disabling provenance
+   generation by setting the environment variable:
+   ```
+   DOCKER_BUILDKIT=1 docker compose build frontend --progress=plain \
+     --build-arg BUILDKIT_INLINE_CACHE=1 --no-provenance
+   ```
+   This skips the metadata phase which can occasionally stall with some
+   Docker versions.
+
+4. For persistent issues, you can manually run the Dockerfile commands to
+   narrow down the problem:
+   ```
+   docker build -t frontend-test TrinityFrontend --progress=plain --no-cache
+   ```
