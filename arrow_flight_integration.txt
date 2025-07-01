@@ -67,3 +67,8 @@ With these steps Apache Arrow provides fast in-memory analytics while Arrow Flig
 1. At the end of the Data Upload & Validate workflow call the Feature Overview API internally, passing the Flight ticket rather than a file path.
 2. The Feature Overview atom retrieves the table using Flight, runs its analysis and persists the output automatically.
 3. This removes manual file selection between atoms—the Flight ticket serves as the hand-off point and the orchestrator simply forwards it to the next stage.
+
+### Frontend Changes
+1. The Data Upload & Validate atom now stores `flight_ticket` values returned from `/save_dataframes` in its settings.
+2. The Feature Overview atom expects a ticket in `dataSource` and appends `use_flight=true` to API calls so it loads Arrow data via Flight.
+3. When the pipeline is automated, the orchestrator passes the ticket from the upload atom directly into the feature overview atom without user input.
