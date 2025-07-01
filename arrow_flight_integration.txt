@@ -50,3 +50,30 @@ Step-by-Step Implementation
    - Optionally store Arrow tables as Parquet files in MinIO after upload. Provide TTL jobs to purge old data.
 
 Once these steps are implemented, atoms can exchange large datasets through Arrow Flight by passing lightweight tickets instead of entire payloads. This reduces serialization costs and improves scalability when processing complex data pipelines.
+
+Integration Across Atoms
+------------------------
+The two atoms currently implemented—**Data Upload & Validate** and **Feature Overview**—should share datasets using Arrow files and Flight tickets rather than CSVs. The typical flow is:
+
+1. **Data Upload & Validate**
+   - After validation, convert the uploaded CSV into a `pyarrow.Table` and save it as `<name>.arrow` or Parquet on disk.
+   - Use the Flight client to `do_put` the table to the Flight server. The returned ticket (or Arrow file path) is stored in the atom's metadata.
+   - Retain the original CSV only if users need to inspect the raw text. All downstream atoms work from the Arrow table.
+
+2. **Feature Overview**
+   - When a Feature Overview atom is dragged for the first time, check the list of existing atoms. If a Data Upload & Validate atom precedes it, query that atom's saved ticket.
+   - Automatically populate the **Data Source** field with the last validated Arrow file and display its name in the auxiliary panel.
+   - Fetch the table using `do_get` so the user does not need to select a file manually. The dataset can then be summarized or visualized directly from Arrow memory.
+
+To enable this behaviour, extend the atom orchestration logic (likely in `TrinityBackendDjango/apps/orchestration`) so that each atom exposes its latest Flight ticket. The React property panel for Feature Overview should call a new endpoint (e.g. `GET /api/data-upload-validate/latest_ticket`) when instantiated. If a ticket exists, set it as the default value in the data source dropdown.
+
+Which file to display in the data source section?
+-----------------------------------------------
+Prefer showing the `.arrow` file name because it represents the canonical dataset for downstream atoms. However, since Arrow is a binary format, keeping the original CSV path available for previewing in a new tab can be helpful. One approach is to list both the `.arrow` and the `.csv` versions in the auxiliary menu:
+
+```
+validated_sales.arrow  ← used by atoms
+validated_sales.csv    ← optional preview
+```
+
+Clicking the CSV opens the familiar text view, while selecting the Arrow file feeds the pipeline. This keeps the UI consistent with current behaviour while clearly indicating that Arrow is the format transported through Flight.
