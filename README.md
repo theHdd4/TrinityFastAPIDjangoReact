@@ -105,4 +105,8 @@ a duplicate domain. Ensure the request is sent to the public host (e.g.
 With these steps the Django orchestration layer, FastAPI features and the
 React frontend are fully connected.
 
+## Further Reading
+
+- [Arrow Flight Integration](arrow_flight_integration.txt) – detailed guide on using Apache Arrow and Arrow Flight for data transfer across atoms
+
 
