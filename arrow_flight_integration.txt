@@ -33,7 +33,7 @@ Step-by-Step Implementation
    - Inside `TrinityBackendFastAPI/app`, add a new module `flight_server.py` containing a `pyarrow.flight.FlightServerBase` subclass. Implement `do_get` and `do_put` for reading and writing Arrow tables.
    - Launch this server from `main.py` or via a separate process on a dedicated port (e.g., 8815).
 3. **Expose service configuration**
-   - Add environment variables to configure the Flight host and port. Update `TrinityBackendDjango/docker-compose.yml` so the Flight server runs alongside FastAPI.
+   - Add environment variables to configure the Flight host and port. Update `TrinityBackendDjango/docker-compose.yml` to include a dedicated `flight` service running `python app/flight_server.py`. The FastAPI container should reference this service via `FLIGHT_HOST=flight`.
 4. **Client helpers**
    - Create a small library (`utils/arrow_client.py`) wrapping `pyarrow.flight.FlightClient` with methods `upload_dataframe(df, path)` and `download_dataframe(path)`.
    - Convert DataFrames to Arrow tables using `pyarrow.Table.from_pandas` before uploading.
@@ -61,9 +61,9 @@ The two atoms currently implemented—**Data Upload & Validate** and **Feature O
    - Retain the original CSV only if users need to inspect the raw text. All downstream atoms work from the Arrow table.
 
 2. **Feature Overview**
-   - When a Feature Overview atom is dragged for the first time, check the list of existing atoms. If a Data Upload & Validate atom precedes it, query that atom's saved ticket.
-   - Automatically populate the **Data Source** field with the last validated Arrow file and display its name in the auxiliary panel.
-   - Fetch the table using `do_get` so the user does not need to select a file manually. The dataset can then be summarized or visualized directly from Arrow memory.
+  - When a Feature Overview atom is dragged for the first time, check the list of existing atoms. If a Data Upload & Validate atom precedes it, call `GET /api/data-upload-validate/latest_ticket/{file_key}` to fetch the saved ticket.
+  - Automatically populate the **Data Source** field with the last validated Arrow file and display its name in the auxiliary panel.
+  - Fetch the table using `do_get` so the user does not need to select a file manually. The dataset can then be summarized or visualized directly from Arrow memory.
 
 To enable this behaviour, extend the atom orchestration logic (likely in `TrinityBackendDjango/apps/orchestration`) so that each atom exposes its latest Flight ticket. The React property panel for Feature Overview should call a new endpoint (e.g. `GET /api/data-upload-validate/latest_ticket`) when instantiated. If a ticket exists, set it as the default value in the data source dropdown.
 

@@ -7,6 +7,7 @@ import io
 import os
 from pathlib import Path
 import re
+from app.utils.arrow_client import upload_dataframe
 
 # Add this line with your other imports
 from datetime import datetime
@@ -91,6 +92,7 @@ CUSTOM_CONFIG_DIR.mkdir(exist_ok=True)
 
 # In-memory storage
 extraction_results = {}
+latest_tickets: Dict[str, str] = {}
 
 # Health check
 @router.get("/health")
@@ -1808,14 +1810,20 @@ async def validate(
     
     # ✅ MinIO upload: Only if validation passes or passes with warnings
     minio_uploads = []
+    flight_tickets = []
     if validation_results["overall_status"] in ["passed", "passed_with_warnings"]:
         for content, filename, key in file_contents:
             upload_result = upload_to_minio(content, filename, validator_atom_id, key)
+            df = next(df for k, df in files_data if k == key)
+            ticket = upload_dataframe(df, key)
+            latest_tickets[key] = ticket
             minio_uploads.append({
                 "file_key": key,
                 "filename": filename,
-                "minio_upload": upload_result
+                "minio_upload": upload_result,
+                "flight_ticket": ticket
             })
+            flight_tickets.append(ticket)
     
     # ✅ Save detailed validation log to MongoDB
     validation_log_data = {
@@ -1858,6 +1866,7 @@ async def validate(
         "file_validation_results": validation_results["file_results"],
         "summary": validation_results["summary"],
         "minio_uploads": minio_uploads,
+        "flight_tickets": flight_tickets,
         "validation_log_saved": mongo_log_result["status"] == "success",
         "validation_log_id": mongo_log_result.get("mongo_id", ""),
         "total_auto_corrections": validation_results["summary"].get("total_auto_corrections", 0),
@@ -2903,6 +2912,14 @@ async def validate_promo_endpoint(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Promo validation failed: {str(e)}")
 
+
+@router.get("/latest_ticket/{file_key}")
+async def get_latest_ticket(file_key: str):
+    """Retrieve the most recent Flight ticket for a validated file."""
+    ticket = latest_tickets.get(file_key)
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+    return {"file_key": file_key, "ticket": ticket}
 
 # Call this function when the module loads
 load_existing_configs()
