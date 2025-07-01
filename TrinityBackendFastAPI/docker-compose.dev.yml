@@ -26,7 +26,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    command: python -m app.arrow_flight_server
+    # Launch the Flight server via script path so package imports are resolved
+    command: python TrinityBackendFastAPI/app/arrow_flight_server.py
     container_name: dev-flight
     ports:
       - "8815:8815"

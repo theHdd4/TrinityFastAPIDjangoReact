@@ -3,8 +3,11 @@ import pyarrow.flight as flight
 from functools import lru_cache
 
 
-FLIGHT_HOST = "flight"
-FLIGHT_PORT = 8815
+import os
+
+# Allow the Flight host/port to be configured via environment variables
+FLIGHT_HOST = os.getenv("FLIGHT_HOST", "flight")
+FLIGHT_PORT = int(os.getenv("FLIGHT_PORT", "8815"))
 
 
 @lru_cache()
