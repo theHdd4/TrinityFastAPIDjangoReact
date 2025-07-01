@@ -33,7 +33,7 @@ Step-by-Step Implementation
    - Inside `TrinityBackendFastAPI/app`, add a new module `flight_server.py` containing a `pyarrow.flight.FlightServerBase` subclass. Implement `do_get` and `do_put` for reading and writing Arrow tables.
    - Launch this server from `main.py` or via a separate process on a dedicated port (e.g., 8815).
 3. **Expose service configuration**
-   - Add environment variables to configure the Flight host and port. Update `docker-compose.dev.yml` so the Flight server runs alongside FastAPI.
+   - Add environment variables to configure the Flight host and port. Update `TrinityBackendDjango/docker-compose.yml` so the Flight server runs alongside FastAPI.
 4. **Client helpers**
    - Create a small library (`utils/arrow_client.py`) wrapping `pyarrow.flight.FlightClient` with methods `upload_dataframe(df, path)` and `download_dataframe(path)`.
    - Convert DataFrames to Arrow tables using `pyarrow.Table.from_pandas` before uploading.
