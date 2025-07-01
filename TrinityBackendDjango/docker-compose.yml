@@ -107,7 +107,7 @@ services:
 
   flight:
     build: .
-    command: python -m TrinityBackendFastAPI.app.arrow_flight_server
+    command: python TrinityBackendFastAPI/app/arrow_flight_server.py
     volumes:
       - .:/code
       - ../TrinityBackendFastAPI:/code/TrinityBackendFastAPI
