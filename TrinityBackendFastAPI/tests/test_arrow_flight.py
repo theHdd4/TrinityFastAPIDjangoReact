@@ -4,6 +4,7 @@ import pathlib
 import pandas as pd
 import pyarrow.flight as flight
 import threading
+import json
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "app"))
@@ -41,3 +42,16 @@ def test_flight_registry():
     assert path == "path/to/table"
     assert csv == "file.csv"
     assert flight_registry.get_flight_path_for_csv("file.csv") == "path/to/table"
+
+
+def test_registry_persistence(tmp_path, monkeypatch):
+    reg_file = tmp_path / "registry.json"
+    monkeypatch.setenv("FLIGHT_REGISTRY_FILE", str(reg_file))
+    import importlib
+    reg = importlib.reload(flight_registry)
+    reg.set_ticket("sales", "file.csv", "path/to/table")
+    assert json.load(open(reg_file, "r"))[
+        "latest_by_key"]["sales"] == "path/to/table"
+    reg2 = importlib.reload(flight_registry)
+    assert reg2.get_ticket_by_key("sales")[0] == "path/to/table"
+
