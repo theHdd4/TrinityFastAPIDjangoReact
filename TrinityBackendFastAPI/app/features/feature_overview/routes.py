@@ -25,6 +25,8 @@ from .mongodb_saver import (
 
 from .feature_overview.base import run_unique_count,run_feature_overview, output_store, unique_count
 from app.utils.db import fetch_client_app_project
+from app.utils.arrow_client import download_dataframe
+from app.utils.flight_registry import get_flight_path_for_csv
 import asyncio
 
 
@@ -87,17 +89,21 @@ async def column_summary(object_name: str):
     if not object_name.startswith(OBJECT_PREFIX):
         raise HTTPException(status_code=400, detail="Invalid object name")
     try:
-        content = redis_client.get(object_name)
-        if content is None:
-            response = minio_client.get_object(MINIO_BUCKET, object_name)
-            content = response.read()
-            redis_client.setex(object_name, 3600, content)
-        if object_name.endswith(".csv"):
-            df = pd.read_csv(io.BytesIO(content))
-        elif object_name.endswith((".xls", ".xlsx")):
-            df = pd.read_excel(io.BytesIO(content))
+        flight_path = get_flight_path_for_csv(object_name)
+        if flight_path:
+            df = download_dataframe(flight_path)
         else:
-            raise ValueError("Unsupported file format")
+            content = redis_client.get(object_name)
+            if content is None:
+                response = minio_client.get_object(MINIO_BUCKET, object_name)
+                content = response.read()
+                redis_client.setex(object_name, 3600, content)
+            if object_name.endswith(".csv"):
+                df = pd.read_csv(io.BytesIO(content))
+            elif object_name.endswith((".xls", ".xlsx")):
+                df = pd.read_excel(io.BytesIO(content))
+            else:
+                raise ValueError("Unsupported file format")
 
         df.columns = df.columns.str.lower()
         summary = []
@@ -164,18 +170,22 @@ async def sku_stats(object_name: str, y_column: str, combination: str, x_column:
         raise HTTPException(status_code=400, detail=f"Invalid combination: {e}")
 
     try:
-        content = redis_client.get(object_name)
-        if content is None:
-            response = minio_client.get_object(MINIO_BUCKET, object_name)
-            content = response.read()
-            redis_client.setex(object_name, 3600, content)
-
-        if object_name.endswith(".csv"):
-            df = pd.read_csv(io.BytesIO(content))
-        elif object_name.endswith((".xls", ".xlsx")):
-            df = pd.read_excel(io.BytesIO(content))
+        flight_path = get_flight_path_for_csv(object_name)
+        if flight_path:
+            df = download_dataframe(flight_path)
         else:
-            raise ValueError("Unsupported file format")
+            content = redis_client.get(object_name)
+            if content is None:
+                response = minio_client.get_object(MINIO_BUCKET, object_name)
+                content = response.read()
+                redis_client.setex(object_name, 3600, content)
+
+            if object_name.endswith(".csv"):
+                df = pd.read_csv(io.BytesIO(content))
+            elif object_name.endswith((".xls", ".xlsx")):
+                df = pd.read_excel(io.BytesIO(content))
+            else:
+                raise ValueError("Unsupported file format")
 
         df.columns = df.columns.str.lower()
         y_col = y_column.lower()

@@ -104,6 +104,10 @@ from minio.error import S3Error
 from app.features.feature_overview.deps import redis_client
 from app.utils.db import fetch_client_app_project
 from app.utils.arrow_client import upload_dataframe
+from app.utils.flight_registry import set_ticket, get_ticket_by_key
+import pyarrow as pa
+import pyarrow.ipc as ipc
+from pathlib import Path
 import asyncio
 import os
 
@@ -163,6 +167,17 @@ def ensure_minio_bucket():
 # Test connection on startup
 ensure_minio_bucket()
 
+
+ARROW_DIR = Path("arrow_data")
+ARROW_DIR.mkdir(exist_ok=True)
+
+
+def save_arrow_table(df: pd.DataFrame, path: Path) -> None:
+    table = pa.Table.from_pandas(df)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with pa.OSFile(path, "wb") as sink:
+        with ipc.new_file(sink, table.schema) as writer:
+            writer.write_table(table)
 
 
 # app/routes.py - Efficient MinIO upload function
@@ -1835,17 +1850,21 @@ async def validate(
     minio_uploads = []
     flight_uploads = []
     if validation_results["overall_status"] in ["passed", "passed_with_warnings"]:
-        for content, filename, key in file_contents:
+        for (content, filename, key), (_, df) in zip(file_contents, files_data):
             upload_result = upload_to_minio(content, filename, validator_atom_id, key)
             minio_uploads.append({
                 "file_key": key,
                 "filename": filename,
                 "minio_upload": upload_result
             })
-        for key, df in files_data:
-            path = f"{validator_atom_id}/{key}"
-            upload_dataframe(df, path)
-            flight_uploads.append({"file_key": key, "flight_path": path})
+
+            arrow_file = ARROW_DIR / f"{validator_atom_id}_{key}.arrow"
+            save_arrow_table(df, arrow_file)
+
+            flight_path = f"{validator_atom_id}/{key}"
+            upload_dataframe(df, flight_path)
+            flight_uploads.append({"file_key": key, "flight_path": flight_path})
+            set_ticket(key, upload_result.get("object_name", ""), flight_path)
     
     # ✅ Save detailed validation log to MongoDB
     validation_log_data = {
@@ -2986,6 +3005,14 @@ async def list_saved_dataframes():
         raise HTTPException(status_code=500, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/latest_ticket/{file_key}")
+async def latest_ticket(file_key: str):
+    path, csv_name = get_ticket_by_key(file_key)
+    if path is None:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+    return {"flight_path": path, "csv_name": csv_name}
 
 
 @router.get("/download_dataframe")

@@ -10,6 +10,7 @@ sys.path.insert(0, str(ROOT / "app"))
 from flight_server import ArrowFlightServer
 import importlib
 arrow_client = importlib.import_module("utils.arrow_client")
+flight_registry = importlib.import_module("utils.flight_registry")
 
 
 def test_flight_round_trip():
@@ -32,3 +33,11 @@ def test_flight_round_trip():
     thread.join()
 
     pd.testing.assert_frame_equal(df, result)
+
+
+def test_flight_registry():
+    flight_registry.set_ticket("sales", "file.csv", "path/to/table")
+    path, csv = flight_registry.get_ticket_by_key("sales")
+    assert path == "path/to/table"
+    assert csv == "file.csv"
+    assert flight_registry.get_flight_path_for_csv("file.csv") == "path/to/table"
