@@ -108,6 +108,7 @@ from app.utils.flight_registry import (
     set_ticket,
     get_ticket_by_key,
     get_latest_ticket_for_basename,
+    get_original_csv,
 )
 import pyarrow as pa
 import pyarrow.ipc as ipc
@@ -1870,7 +1871,12 @@ async def validate(
             flight_path = f"{validator_atom_id}/{key}"
             upload_dataframe(df, flight_path)
             flight_uploads.append({"file_key": key, "flight_path": flight_path})
-            set_ticket(key, upload_result.get("object_name", ""), flight_path)
+            set_ticket(
+                key,
+                upload_result.get("object_name", ""),
+                flight_path,
+                file.filename,
+            )
     
     # ✅ Save detailed validation log to MongoDB
     validation_log_data = {
@@ -2999,7 +3005,12 @@ async def save_dataframes(
         result = upload_to_minio(arrow_buf.getvalue(), arrow_name, validator_atom_id, key)
         flight_path = f"{validator_atom_id}/{key}"
         upload_dataframe(df, flight_path)
-        set_ticket(key, result.get("object_name", ""), flight_path)
+        set_ticket(
+            key,
+            result.get("object_name", ""),
+            flight_path,
+            file.filename,
+        )
 
         uploads.append({"file_key": key, "filename": arrow_name, "minio_upload": result})
         flights.append({"file_key": key, "flight_path": flight_path})
@@ -3026,7 +3037,14 @@ async def list_saved_dataframes():
                     continue
                 raise
         entries.sort(key=lambda x: x[0], reverse=True)
-        return {"files": [name for _, name in entries]}
+        files = [
+            {
+                "object_name": name,
+                "csv_name": get_original_csv(name) or name,
+            }
+            for _, name in entries
+        ]
+        return {"files": files}
     except S3Error as e:
         if getattr(e, "code", "") == "NoSuchBucket":
             return {"files": []}
@@ -3037,12 +3055,17 @@ async def list_saved_dataframes():
 
 @router.get("/latest_ticket/{file_key}")
 async def latest_ticket(file_key: str):
-    path, csv_name = get_ticket_by_key(file_key)
+    path, arrow_name = get_ticket_by_key(file_key)
     if path is None:
-        path, csv_name = get_latest_ticket_for_basename(file_key)
+        path, arrow_name = get_latest_ticket_for_basename(file_key)
     if path is None:
         raise HTTPException(status_code=404, detail="Ticket not found")
-    return {"flight_path": path, "csv_name": csv_name}
+    original = get_original_csv(arrow_name) or arrow_name
+    return {
+        "flight_path": path,
+        "arrow_name": arrow_name,
+        "csv_name": original,
+    }
 
 
 @router.get("/download_dataframe")

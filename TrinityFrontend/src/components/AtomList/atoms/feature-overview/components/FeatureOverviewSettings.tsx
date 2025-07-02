@@ -19,7 +19,8 @@ interface ColumnInfo {
 }
 
 const FeatureOverviewSettings: React.FC<FeatureOverviewSettingsProps> = ({ settings, onSettingsChange }) => {
-  const [frames, setFrames] = useState<string[]>([]);
+  interface Frame { object_name: string; csv_name: string }
+  const [frames, setFrames] = useState<Frame[]>([]);
   const [columns, setColumns] = useState<ColumnInfo[]>(
     Array.isArray(settings.allColumns) ? settings.allColumns.filter(Boolean) : []
   );
@@ -30,7 +31,7 @@ const FeatureOverviewSettings: React.FC<FeatureOverviewSettingsProps> = ({ setti
   useEffect(() => {
     fetch(`${VALIDATE_API}/list_saved_dataframes`)
       .then(r => r.json())
-      .then(d => setFrames(d.files || []))
+      .then(d => setFrames(Array.isArray(d.files) ? d.files : []))
       .catch(() => setFrames([]));
   }, []);
 
@@ -77,6 +78,7 @@ const FeatureOverviewSettings: React.FC<FeatureOverviewSettingsProps> = ({ setti
     }
     onSettingsChange({
       dataSource: val,
+      csvDisplay: frames.find(f => f.object_name === val)?.csv_name || val,
       selectedColumns: [],
       columnSummary: [],
       allColumns: summary,
@@ -104,8 +106,8 @@ const FeatureOverviewSettings: React.FC<FeatureOverviewSettingsProps> = ({ setti
           <SelectContent>
             {Array.isArray(frames) &&
               frames.map(f => (
-                <SelectItem key={f} value={f}>
-                  {f.split('/').pop()}
+                <SelectItem key={f.object_name} value={f.object_name}>
+                  {f.csv_name.split('/').pop()}
                 </SelectItem>
               ))}
           </SelectContent>

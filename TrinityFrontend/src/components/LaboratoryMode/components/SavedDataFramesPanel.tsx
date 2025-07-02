@@ -10,7 +10,8 @@ interface Props {
 }
 
 const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle }) => {
-  const [files, setFiles] = useState<string[]>([]);
+  interface Frame { object_name: string; csv_name: string }
+  const [files, setFiles] = useState<Frame[]>([]);
   const [renameTarget, setRenameTarget] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
 
@@ -18,7 +19,7 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle }) => {
     if (!isOpen) return;
     fetch(`${VALIDATE_API}/list_saved_dataframes`)
       .then(res => res.json())
-      .then(data => setFiles(data.files || []))
+      .then(data => setFiles(Array.isArray(data.files) ? data.files : []))
       .catch(() => setFiles([]));
   }, [isOpen]);
 
@@ -37,7 +38,7 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle }) => {
 
   const deleteOne = async (obj: string) => {
     await fetch(`${VALIDATE_API}/delete_dataframe?object_name=${encodeURIComponent(obj)}`, { method: 'DELETE' });
-    setFiles(prev => prev.filter(f => f !== obj));
+    setFiles(prev => prev.filter(f => f.object_name !== obj));
   };
 
   const startRename = (obj: string) => {
@@ -56,7 +57,7 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle }) => {
     const res = await fetch(`${VALIDATE_API}/rename_dataframe`, { method: 'POST', body: form });
     if (res.ok) {
       const data = await res.json();
-      setFiles(prev => prev.map(f => (f === obj ? data.new_name : f)));
+      setFiles(prev => prev.map(f => (f.object_name === obj ? { ...f, object_name: data.new_name } : f)));
     }
     setRenameTarget(null);
   };
@@ -92,22 +93,22 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle }) => {
       <div className="flex-1 overflow-y-auto p-4 space-y-2">
         {files.length === 0 && <p className="text-sm text-gray-600">No saved dataframes</p>}
         {files.map(f => (
-          <div key={f} className="flex items-center justify-between border p-2 rounded hover:bg-gray-50">
-            {renameTarget === f ? (
+          <div key={f.object_name} className="flex items-center justify-between border p-2 rounded hover:bg-gray-50">
+            {renameTarget === f.object_name ? (
               <Input
                 value={renameValue}
                 onChange={e => setRenameValue(e.target.value)}
-                onBlur={() => commitRename(f)}
+                onBlur={() => commitRename(f.object_name)}
                 className="h-6 text-xs flex-1 mr-2"
               />
             ) : (
-              <button onClick={() => handleOpen(f)} className="text-sm text-blue-600 hover:underline flex-1 text-left">
-                {f.split('/').pop()}
+              <button onClick={() => handleOpen(f.object_name)} className="text-sm text-blue-600 hover:underline flex-1 text-left">
+                {f.csv_name.split('/').pop()}
               </button>
             )}
             <div className="flex items-center space-x-2 ml-2">
-              <Pencil className="w-4 h-4 text-gray-400 cursor-pointer" onClick={() => startRename(f)} />
-              <Trash2 className="w-4 h-4 text-gray-400 cursor-pointer" onClick={() => deleteOne(f)} />
+              <Pencil className="w-4 h-4 text-gray-400 cursor-pointer" onClick={() => startRename(f.object_name)} />
+              <Trash2 className="w-4 h-4 text-gray-400 cursor-pointer" onClick={() => deleteOne(f.object_name)} />
             </div>
           </div>
         ))}

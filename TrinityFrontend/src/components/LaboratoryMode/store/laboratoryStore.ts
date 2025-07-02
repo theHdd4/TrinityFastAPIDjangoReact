@@ -71,6 +71,7 @@ export interface FeatureOverviewSettings {
   selectedColumns: string[];
   hierarchicalView: boolean;
   dataSource: string;
+  csvDisplay?: string;
   filterCriteria: Record<string, unknown>;
   columnSummary?: any[];
   allColumns?: any[];
@@ -89,6 +90,7 @@ export const DEFAULT_FEATURE_OVERVIEW_SETTINGS: FeatureOverviewSettings = {
   selectedColumns: [],
   hierarchicalView: true,
   dataSource: '',
+  csvDisplay: '',
   filterCriteria: {},
   columnSummary: [],
   allColumns: [],

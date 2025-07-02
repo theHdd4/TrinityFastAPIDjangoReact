@@ -37,14 +37,14 @@ def test_flight_round_trip():
 
 
 def test_flight_registry():
-    flight_registry.set_ticket("sales", "file.csv", "path/to/table")
-    path, csv = flight_registry.get_ticket_by_key("sales")
+    flight_registry.set_ticket("sales", "file.arrow", "path/to/table", "file.csv")
+    path, arrow = flight_registry.get_ticket_by_key("sales")
     assert path == "path/to/table"
-    assert csv == "file.csv"
-    assert flight_registry.get_flight_path_for_csv("file.csv") == "path/to/table"
-    path2, csv2 = flight_registry.get_latest_ticket_for_basename("file.csv")
+    assert arrow == "file.arrow"
+    assert flight_registry.get_flight_path_for_csv("file.arrow") == "path/to/table"
+    path2, arrow2 = flight_registry.get_latest_ticket_for_basename("file.csv")
     assert path2 == "path/to/table"
-    assert csv2 == "file.csv"
+    assert arrow2 == "file.arrow"
 
 
 def test_registry_persistence(tmp_path, monkeypatch):
@@ -52,7 +52,7 @@ def test_registry_persistence(tmp_path, monkeypatch):
     monkeypatch.setenv("FLIGHT_REGISTRY_FILE", str(reg_file))
     import importlib
     reg = importlib.reload(flight_registry)
-    reg.set_ticket("sales", "file.csv", "path/to/table")
+    reg.set_ticket("sales", "file.arrow", "path/to/table", "file.csv")
     assert json.load(open(reg_file, "r"))[
         "latest_by_key"]["sales"] == "path/to/table"
     reg2 = importlib.reload(flight_registry)

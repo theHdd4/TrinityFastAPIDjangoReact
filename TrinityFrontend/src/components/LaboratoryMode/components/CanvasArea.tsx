@@ -109,6 +109,7 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
           const cols = await fetchColumnSummary(a.settings.dataSource);
           return {
             csv: a.settings.dataSource,
+            display: a.settings.csvDisplay || a.settings.dataSource,
             identifiers: a.settings.selectedColumns || [],
             ...(cols || {}),
           };
@@ -126,15 +127,15 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
               ]);
               if (ticketRes.ok) {
                 const ticket = await ticketRes.json();
-                if (ticket.csv_name) {
-                  const cols = await fetchColumnSummary(ticket.csv_name);
+                if (ticket.arrow_name) {
+                  const cols = await fetchColumnSummary(ticket.arrow_name);
                   let ids: string[] = [];
                   if (confRes && confRes.ok) {
                     const cfg = await confRes.json();
                     ids =
                       cfg.classification?.[req]?.final_classification?.identifiers || [];
                   }
-                  return { csv: ticket.csv_name, identifiers: ids, ...(cols || {}) };
+                  return { csv: ticket.arrow_name, display: ticket.csv_name, identifiers: ids, ...(cols || {}) };
                 }
               }
             } catch {
@@ -149,10 +150,10 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
       const res = await fetch(`${VALIDATE_API}/list_saved_dataframes`);
       if (res.ok) {
         const data = await res.json();
-        const file = (data.files || [])[0];
+        const file = Array.isArray(data.files) ? data.files[0] : null;
         if (file) {
-          const cols = await fetchColumnSummary(file);
-          return { csv: file, ...(cols || {}) };
+          const cols = await fetchColumnSummary(file.object_name);
+          return { csv: file.object_name, display: file.csv_name, ...(cols || {}) };
         }
       }
     } catch {
@@ -186,6 +187,7 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
                       settings: {
                         ...(a.settings || {}),
                         dataSource: prev.csv,
+                        csvDisplay: prev.display || prev.csv,
                         allColumns: summary,
                         columnSummary: filtered,
                         selectedColumns: selected,
