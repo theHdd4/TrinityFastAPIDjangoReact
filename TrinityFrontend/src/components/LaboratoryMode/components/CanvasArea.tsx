@@ -107,20 +107,34 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
         const a = card.atoms[j];
         if (a.atomId === 'feature-overview' && a.settings?.dataSource) {
           const cols = await fetchColumnSummary(a.settings.dataSource);
-          return { csv: a.settings.dataSource, ...(cols || {}) };
+          return {
+            csv: a.settings.dataSource,
+            identifiers: a.settings.selectedColumns || [],
+            ...(cols || {}),
+          };
         }
         if (a.atomId === 'data-upload-validate') {
           const req = a.settings?.requiredFiles?.[0];
+          const validatorId = a.settings?.validatorId;
           if (req) {
             try {
-              const res = await fetch(
-                `${VALIDATE_API}/latest_ticket/${encodeURIComponent(req)}`
-              );
-              if (res.ok) {
-                const data = await res.json();
-                if (data.csv_name) {
-                  const cols = await fetchColumnSummary(data.csv_name);
-                  return { csv: data.csv_name, ...(cols || {}) };
+              const [ticketRes, confRes] = await Promise.all([
+                fetch(`${VALIDATE_API}/latest_ticket/${encodeURIComponent(req)}`),
+                validatorId
+                  ? fetch(`${VALIDATE_API}/get_validator_config/${validatorId}`)
+                  : Promise.resolve(null as any),
+              ]);
+              if (ticketRes.ok) {
+                const ticket = await ticketRes.json();
+                if (ticket.csv_name) {
+                  const cols = await fetchColumnSummary(ticket.csv_name);
+                  let ids: string[] = [];
+                  if (confRes && confRes.ok) {
+                    const cfg = await confRes.json();
+                    ids =
+                      cfg.classification?.[req]?.final_classification?.identifiers || [];
+                  }
+                  return { csv: ticket.csv_name, identifiers: ids, ...(cols || {}) };
                 }
               }
             } catch {
@@ -130,6 +144,21 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
         }
       }
     }
+
+    try {
+      const res = await fetch(`${VALIDATE_API}/list_saved_dataframes`);
+      if (res.ok) {
+        const data = await res.json();
+        const file = (data.files || [])[0];
+        if (file) {
+          const cols = await fetchColumnSummary(file);
+          return { csv: file, ...(cols || {}) };
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+
     return null;
   };
 
@@ -149,10 +178,19 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
                         ...(a.settings || {}),
                         dataSource: prev.csv,
                         allColumns: prev.summary || [],
-                        columnSummary: prev.summary || [],
-                        selectedColumns: prev.summary
-                          ? prev.summary.map(cc => cc.column)
+                        columnSummary: prev.summary
+                          ? (prev.identifiers && prev.identifiers.length > 0
+                              ? prev.summary.filter(s =>
+                                  prev.identifiers!.includes(s.column)
+                                )
+                              : prev.summary)
                           : [],
+                        selectedColumns:
+                          prev.identifiers && prev.identifiers.length > 0
+                            ? prev.identifiers
+                            : prev.summary
+                            ? prev.summary.map(cc => cc.column)
+                            : [],
                         numericColumns: prev.numeric || [],
                         xAxis: prev.xField || 'date',
                       },

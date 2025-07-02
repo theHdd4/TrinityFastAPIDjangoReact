@@ -2969,9 +2969,9 @@ load_existing_configs()
 async def save_dataframes(
     validator_atom_id: str = Form(...),
     files: List[UploadFile] = File(...),
-    file_keys: str = Form(...)
+    file_keys: str = Form(...),
 ):
-    """Save validated dataframes to MinIO"""
+    """Save validated dataframes as Arrow tables and upload via Flight."""
     try:
         keys = json.loads(file_keys)
     except json.JSONDecodeError:
@@ -2980,31 +2980,53 @@ async def save_dataframes(
         raise HTTPException(status_code=400, detail="Number of files must match number of keys")
 
     uploads = []
+    flights = []
     for file, key in zip(files, keys):
         content = await file.read()
-        result = upload_to_minio(content, file.filename, validator_atom_id, key)
-        uploads.append({"file_key": key, "filename": file.filename, "minio_upload": result})
+        if file.filename.lower().endswith(".csv"):
+            df = pd.read_csv(io.BytesIO(content))
+        elif file.filename.lower().endswith((".xls", ".xlsx")):
+            df = pd.read_excel(io.BytesIO(content))
+        else:
+            raise HTTPException(status_code=400, detail="Unsupported file type")
 
-    return {"minio_uploads": uploads}
+        arrow_buf = io.BytesIO()
+        table = pa.Table.from_pandas(df)
+        with ipc.new_file(arrow_buf, table.schema) as writer:
+            writer.write_table(table)
+
+        arrow_name = Path(file.filename).stem + ".arrow"
+        result = upload_to_minio(arrow_buf.getvalue(), arrow_name, validator_atom_id, key)
+        flight_path = f"{validator_atom_id}/{key}"
+        upload_dataframe(df, flight_path)
+        set_ticket(key, result.get("object_name", ""), flight_path)
+
+        uploads.append({"file_key": key, "filename": arrow_name, "minio_upload": result})
+        flights.append({"file_key": key, "flight_path": flight_path})
+
+    return {"minio_uploads": uploads, "flight_uploads": flights}
 
 
 @router.get("/list_saved_dataframes")
 async def list_saved_dataframes():
-    """List saved dataframes for the current project"""
+    """List saved Arrow dataframes sorted by newest first."""
     prefix = OBJECT_PREFIX
     try:
         objects = minio_client.list_objects(MINIO_BUCKET, prefix=prefix, recursive=True)
-        files = []
+        entries = []
         for obj in objects:
+            if not obj.object_name.endswith(".arrow"):
+                continue
             try:
-                minio_client.stat_object(MINIO_BUCKET, obj.object_name)
-                files.append(obj.object_name)
+                stat = minio_client.stat_object(MINIO_BUCKET, obj.object_name)
+                entries.append((stat.last_modified, obj.object_name))
             except S3Error as e:
                 if getattr(e, "code", "") in {"NoSuchKey", "NoSuchBucket"}:
                     redis_client.delete(obj.object_name)
                     continue
                 raise
-        return {"files": files}
+        entries.sort(key=lambda x: x[0], reverse=True)
+        return {"files": [name for _, name in entries]}
     except S3Error as e:
         if getattr(e, "code", "") == "NoSuchBucket":
             return {"files": []}
