@@ -56,7 +56,10 @@ def get_ticket_by_key(file_key: str) -> Tuple[str | None, str | None]:
 
 
 def get_flight_path_for_csv(csv_name: str) -> str | None:
-    return CSV_TO_FLIGHT.get(csv_name)
+    """Return the registered flight path for the given CSV."""
+    path = CSV_TO_FLIGHT.get(csv_name)
+    print(f"➡️ lookup flight path for {csv_name}: {path}")
+    return path
 
 
 def get_original_csv(arrow_name: str) -> str | None:

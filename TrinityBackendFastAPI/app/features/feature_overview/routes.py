@@ -99,6 +99,7 @@ async def column_summary(object_name: str):
         flight_path = get_flight_path_for_csv(object_name)
         df = None
         if flight_path:
+            print(f"📡 trying flight download {flight_path}")
             try:
                 df = download_dataframe(flight_path)
             except Exception as e:
@@ -208,6 +209,7 @@ async def sku_stats(object_name: str, y_column: str, combination: str, x_column:
         flight_path = get_flight_path_for_csv(object_name)
         df = None
         if flight_path:
+            print(f"📡 trying flight download {flight_path}")
             try:
                 df = download_dataframe(flight_path)
             except Exception as e:

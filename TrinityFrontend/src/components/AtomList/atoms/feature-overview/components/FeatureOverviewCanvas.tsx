@@ -132,7 +132,8 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({ settings,
       const text = await res.text();
       const [headerLine, ...rows] = text.trim().split(/\r?\n/);
       const headers = headerLine.split(',');
-      const data = rows.map(r => {
+      const rowLines = Array.isArray(rows) ? rows : [];
+      const data = rowLines.map(r => {
         const vals = r.split(',');
         const obj: Record<string, string> = {};
         headers.forEach((h, i) => {
@@ -142,7 +143,7 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({ settings,
       });
       const combos = new Map<string, any>();
       data.forEach(row => {
-        const key = [...marketDims, ...productDims]
+        const key = (Array.isArray(marketDims)?marketDims:[]).concat(Array.isArray(productDims)?productDims:[])
           .map(k => row[k.toLowerCase()] || '')
           .join('||');
         if (!combos.has(key)) combos.set(key, row);
@@ -158,7 +159,7 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({ settings,
 
   const viewStats = async (row: any) => {
     const combo: Record<string, string> = {};
-    [...marketDims, ...productDims].forEach(d => {
+    (Array.isArray(marketDims)?marketDims:[]).concat(Array.isArray(productDims)?productDims:[]).forEach(d => {
       combo[d] = row[d.toLowerCase()];
     });
     if (!settings.yAxes || settings.yAxes.length === 0) return;
@@ -223,13 +224,13 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({ settings,
                         <TableCell className="text-gray-700 text-center font-medium py-4">{c.unique_count}</TableCell>
                         <TableCell className="text-center py-4">
                           <div className="flex flex-wrap gap-1 justify-center">
-                            {c.unique_values.slice(0,3).map((v,i)=>(
+                            {(Array.isArray(c.unique_values)?c.unique_values.slice(0,3):[]).map((v,i)=>(
                               <Badge key={i} variant="outline" className="text-xs bg-gray-50 hover:bg-gray-100 transition-colors">{v}</Badge>
                             ))}
-                            {c.unique_values.length>3 && (
+                            {Array.isArray(c.unique_values) && c.unique_values.length>3 && (
                               <Badge variant="outline" className="text-xs bg-orange-50 text-orange-700 border-orange-200">+{c.unique_values.length-3}</Badge>
                             )}
-                            {c.unique_values.length===0 && (
+                            {Array.isArray(c.unique_values) && c.unique_values.length===0 && (
                               <span className="text-xs text-gray-500 italic font-medium">Multiple values</span>
                             )}
                           </div>
@@ -257,7 +258,7 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({ settings,
               </div>
               <div className="p-6">
                 <div className="flex flex-wrap gap-3">
-                  {marketDims.map(m => (
+                  {(Array.isArray(marketDims)?marketDims:[]).map(m => (
                     <Badge
                       key={m}
                       className="bg-gradient-to-r from-blue-500 to-blue-600 text-white px-4 py-2 font-medium flex items-center gap-1"
@@ -284,7 +285,7 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({ settings,
                         }}
                       >
                         <option value="">Select...</option>
-                        {settings.selectedColumns
+                        {(Array.isArray(settings.selectedColumns)?settings.selectedColumns:[])
                           .filter((c: string) => !marketDims.includes(c) && !productDims.includes(c))
                           .map((c: string) => (
                             <option key={c} value={c}>
@@ -314,7 +315,7 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({ settings,
               </div>
               <div className="p-6">
                 <div className="flex flex-wrap gap-3">
-                  {productDims.map(p => (
+                  {(Array.isArray(productDims)?productDims:[]).map(p => (
                     <Badge
                       key={p}
                       className="bg-gradient-to-r from-green-500 to-green-600 text-white px-4 py-2 font-medium flex items-center gap-1"
@@ -341,7 +342,7 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({ settings,
                         }}
                       >
                         <option value="">Select...</option>
-                        {settings.selectedColumns
+                        {(Array.isArray(settings.selectedColumns)?settings.selectedColumns:[])
                           .filter((c: string) => !productDims.includes(c) && !marketDims.includes(c))
                           .map((c: string) => (
                             <option key={c} value={c}>
@@ -374,17 +375,17 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({ settings,
                   <TableHeader>
                     <TableRow>
                       <TableHead>SR NO.</TableHead>
-                      {[...marketDims, ...productDims].map(d => (
+                      {(Array.isArray(marketDims)?marketDims:[]).concat(Array.isArray(productDims)?productDims:[]).map(d => (
                         <TableHead key={d}>{d}</TableHead>
                     ))}
                     <TableHead>View Stat</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {skuRows.map(row => (
+                  {(Array.isArray(skuRows)?skuRows:[]).map(row => (
                     <TableRow key={row.id} className="border-b">
                       <TableCell>{row.id}</TableCell>
-                      {[...marketDims, ...productDims].map(d => (
+                      {(Array.isArray(marketDims)?marketDims:[]).concat(Array.isArray(productDims)?productDims:[]).map(d => (
                         <TableCell key={d}>{row[d.toLowerCase()]}</TableCell>
                       ))}
                       <TableCell>
@@ -456,7 +457,7 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({ settings,
                           </tr>
                         </thead>
                         <tbody>
-                          {settings.yAxes?.map(m => (
+                          {(Array.isArray(settings.yAxes)?settings.yAxes:[]).map(m => (
                             <tr key={m} className="border-b last:border-0">
                             <td className="p-2 whitespace-nowrap sticky left-0 bg-white z-10">{m}</td>
                             <td className="p-2 text-right whitespace-nowrap">{statDataMap[m]?.summary.avg?.toFixed(2) ?? '-'}</td>

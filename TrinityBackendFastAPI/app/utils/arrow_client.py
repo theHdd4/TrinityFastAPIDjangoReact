@@ -25,8 +25,16 @@ def upload_dataframe(df: pd.DataFrame, path: str) -> str:
     return path
 
 def download_dataframe(path: str) -> pd.DataFrame:
+    """Download a dataframe from the Arrow Flight service with debug logs."""
+    print(f"⬇️ downloading via flight: {path}")
     client = _get_client()
     descriptor = flight.FlightDescriptor.for_path(path)
-    info = client.get_flight_info(descriptor)
-    reader = client.do_get(info.endpoints[0].ticket)
-    return reader.read_pandas()
+    try:
+        info = client.get_flight_info(descriptor)
+        reader = client.do_get(info.endpoints[0].ticket)
+        df = reader.read_pandas()
+        print(f"✔️ downloaded flight table {path} rows={len(df)}")
+        return df
+    except Exception as e:
+        print(f"❌ flight download failed for {path}: {e}")
+        raise
