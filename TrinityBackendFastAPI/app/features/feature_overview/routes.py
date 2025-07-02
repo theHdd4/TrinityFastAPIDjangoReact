@@ -97,9 +97,15 @@ async def column_summary(object_name: str):
         )
     try:
         flight_path = get_flight_path_for_csv(object_name)
+        df = None
         if flight_path:
-            df = download_dataframe(flight_path)
-        else:
+            try:
+                df = download_dataframe(flight_path)
+            except Exception as e:
+                print(
+                    f"⚠️ column_summary flight download failed for {object_name}: {e}"
+                )
+        if df is None:
             content = redis_client.get(object_name)
             if content is None:
                 response = minio_client.get_object(MINIO_BUCKET, object_name)
@@ -191,9 +197,13 @@ async def sku_stats(object_name: str, y_column: str, combination: str, x_column:
 
     try:
         flight_path = get_flight_path_for_csv(object_name)
+        df = None
         if flight_path:
-            df = download_dataframe(flight_path)
-        else:
+            try:
+                df = download_dataframe(flight_path)
+            except Exception as e:
+                print(f"⚠️ sku_stats flight download failed for {object_name}: {e}")
+        if df is None:
             content = redis_client.get(object_name)
             if content is None:
                 response = minio_client.get_object(MINIO_BUCKET, object_name)
@@ -204,6 +214,9 @@ async def sku_stats(object_name: str, y_column: str, combination: str, x_column:
                 df = pd.read_csv(io.BytesIO(content))
             elif object_name.endswith((".xls", ".xlsx")):
                 df = pd.read_excel(io.BytesIO(content))
+            elif object_name.endswith(".arrow"):
+                reader = ipc.RecordBatchFileReader(pa.BufferReader(content))
+                df = reader.read_all().to_pandas()
             else:
                 raise ValueError("Unsupported file format")
 
