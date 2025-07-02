@@ -21,9 +21,11 @@ interface ColumnInfo {
 const FeatureOverviewSettings: React.FC<FeatureOverviewSettingsProps> = ({ settings, onSettingsChange }) => {
   const [frames, setFrames] = useState<string[]>([]);
   const [columns, setColumns] = useState<ColumnInfo[]>(
-    (settings.allColumns || []).filter(Boolean)
+    Array.isArray(settings.allColumns) ? settings.allColumns.filter(Boolean) : []
   );
-  const [selectedIds, setSelectedIds] = useState<string[]>(settings.selectedColumns || []);
+  const [selectedIds, setSelectedIds] = useState<string[]>(
+    Array.isArray(settings.selectedColumns) ? settings.selectedColumns : []
+  );
 
   useEffect(() => {
     fetch(`${VALIDATE_API}/list_saved_dataframes`)
@@ -45,10 +47,10 @@ const FeatureOverviewSettings: React.FC<FeatureOverviewSettingsProps> = ({ setti
 
   // restore dropdown state when settings come from store
   useEffect(() => {
-    if (settings.allColumns && settings.allColumns.length > 0) {
-      setColumns((settings.allColumns || []).filter(Boolean));
+    if (Array.isArray(settings.allColumns) && settings.allColumns.length > 0) {
+      setColumns(settings.allColumns.filter(Boolean));
     }
-    setSelectedIds(settings.selectedColumns || []);
+    setSelectedIds(Array.isArray(settings.selectedColumns) ? settings.selectedColumns : []);
   }, [settings.allColumns, settings.selectedColumns]);
 
   const handleFrameChange = async (val: string) => {
@@ -84,6 +86,7 @@ const FeatureOverviewSettings: React.FC<FeatureOverviewSettingsProps> = ({ setti
   };
 
   const handleReview = () => {
+    if (!Array.isArray(columns)) return;
     const summary = columns
       .filter(c => c && selectedIds.includes(c.column))
       .map(c => c);
@@ -99,9 +102,12 @@ const FeatureOverviewSettings: React.FC<FeatureOverviewSettingsProps> = ({ setti
             <SelectValue placeholder="Select saved dataframe" />
           </SelectTrigger>
           <SelectContent>
-            {frames.map(f => (
-              <SelectItem key={f} value={f}>{f.split('/').pop()}</SelectItem>
-            ))}
+            {Array.isArray(frames) &&
+              frames.map(f => (
+                <SelectItem key={f} value={f}>
+                  {f.split('/').pop()}
+                </SelectItem>
+              ))}
           </SelectContent>
         </Select>
       </Card>
@@ -119,11 +125,12 @@ const FeatureOverviewSettings: React.FC<FeatureOverviewSettingsProps> = ({ setti
             }
             className="w-full border rounded p-1 text-sm h-32"
           >
-            {columns.filter(Boolean).map(c => (
-              <option key={c.column} value={c.column}>
-                {c.column}
-              </option>
-            ))}
+            {Array.isArray(columns) &&
+              columns.filter(Boolean).map(c => (
+                <option key={c.column} value={c.column}>
+                  {c.column}
+                </option>
+              ))}
           </select>
           <Button onClick={handleReview} className="mt-3 w-full">Review Data</Button>
         </Card>

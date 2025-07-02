@@ -165,6 +165,15 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
   const prefillFeatureOverview = async (cardId: string, atomId: string) => {
     const prev = await findLatestDataSource();
     if (!prev || !prev.csv) return;
+    const summary = Array.isArray(prev.summary) ? prev.summary : [];
+    const identifiers = Array.isArray(prev.identifiers) ? prev.identifiers : [];
+    const filtered =
+      identifiers.length > 0
+        ? summary.filter(s => identifiers.includes(s.column))
+        : summary;
+    const selected =
+      identifiers.length > 0 ? identifiers : summary.map(cc => cc.column);
+
     setLayoutCards(cards =>
       cards.map(c =>
         c.id === cardId
@@ -177,21 +186,12 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
                       settings: {
                         ...(a.settings || {}),
                         dataSource: prev.csv,
-                        allColumns: prev.summary || [],
-                        columnSummary: prev.summary
-                          ? (prev.identifiers && prev.identifiers.length > 0
-                              ? prev.summary.filter(s =>
-                                  prev.identifiers!.includes(s.column)
-                                )
-                              : prev.summary)
+                        allColumns: summary,
+                        columnSummary: filtered,
+                        selectedColumns: selected,
+                        numericColumns: Array.isArray(prev.numeric)
+                          ? prev.numeric
                           : [],
-                        selectedColumns:
-                          prev.identifiers && prev.identifiers.length > 0
-                            ? prev.identifiers
-                            : prev.summary
-                            ? prev.summary.map(cc => cc.column)
-                            : [],
-                        numericColumns: prev.numeric || [],
                         xAxis: prev.xField || 'date',
                       },
                     }
