@@ -2,6 +2,7 @@ from minio import Minio
 from minio.error import S3Error
 import os
 from fastapi import APIRouter, Form, HTTPException
+from urllib.parse import unquote
 from fastapi.responses import JSONResponse, Response
 import pandas as pd
 import io
@@ -88,6 +89,7 @@ router = APIRouter()
 @router.get("/column_summary")
 async def column_summary(object_name: str):
     """Return column summary statistics for a saved dataframe."""
+    object_name = unquote(object_name)
     if not object_name.startswith(OBJECT_PREFIX):
         raise HTTPException(status_code=400, detail="Invalid object name")
     try:
@@ -145,6 +147,7 @@ async def column_summary(object_name: str):
 @router.get("/cached_dataframe")
 async def cached_dataframe(object_name: str):
     """Return the raw CSV bytes for a saved dataframe from Redis."""
+    object_name = unquote(object_name)
     if not object_name.startswith(OBJECT_PREFIX):
         raise HTTPException(status_code=400, detail="Invalid object name")
     try:
@@ -167,6 +170,7 @@ async def cached_dataframe(object_name: str):
 @router.get("/sku_stats")
 async def sku_stats(object_name: str, y_column: str, combination: str, x_column: str = "date"):
     """Return time series and summary for a specific SKU combination."""
+    object_name = unquote(object_name)
     if not object_name.startswith(OBJECT_PREFIX):
         raise HTTPException(status_code=400, detail="Invalid object name")
     try:
