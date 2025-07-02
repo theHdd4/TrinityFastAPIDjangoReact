@@ -18,7 +18,7 @@ RUN apt-get update && \
 # 5. Copy and install Python deps into venv
 COPY requirements.txt .
 RUN pip install --upgrade pip \
-    && pip install -r requirements.txt \
+    && pip install --timeout 1000 -r requirements.txt \
     && pip install gunicorn django-guardian  # ensure guardian & gunicorn are present
 
 # 6. Copy project files
