@@ -175,7 +175,9 @@ ARROW_DIR.mkdir(exist_ok=True)
 def save_arrow_table(df: pd.DataFrame, path: Path) -> None:
     table = pa.Table.from_pandas(df)
     path.parent.mkdir(parents=True, exist_ok=True)
-    with pa.OSFile(path, "wb") as sink:
+    # pa.OSFile expects a string path rather than a Path object
+    # Convert to str to avoid "expected bytes, PosixPath found" errors
+    with pa.OSFile(str(path), "wb") as sink:
         with ipc.new_file(sink, table.schema) as writer:
             writer.write_table(table)
 
