@@ -7,7 +7,14 @@ import { Plus, Grid3X3, Trash2, Eye } from 'lucide-react';
 import { useExhibitionStore } from '../../ExhibitionMode/store/exhibitionStore';
 import { atoms as allAtoms } from '@/components/AtomList/data';
 import { molecules } from '@/components/MoleculeList/data';
-import { REGISTRY_API, TEXT_API, CARD_API, LAB_ACTIONS_API } from '@/lib/api';
+import {
+  REGISTRY_API,
+  TEXT_API,
+  CARD_API,
+  LAB_ACTIONS_API,
+  VALIDATE_API,
+  FEATURE_OVERVIEW_API,
+} from '@/lib/api';
 import { AIChatBot } from '@/components/TrinityAI';
 import TextBoxEditor from '@/components/AtomList/atoms/text-box/TextBoxEditor';
 import DataUploadValidateAtom from '@/components/AtomList/atoms/data-upload-validate/DataUploadValidateAtom';
@@ -65,6 +72,98 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
   const initialLoad = React.useRef(true);
   
   const { updateCard, setCards } = useExhibitionStore();
+
+  interface ColumnInfo {
+    column: string;
+    data_type: string;
+    unique_count: number;
+    unique_values: string[];
+  }
+
+  const fetchColumnSummary = async (csv: string) => {
+    try {
+      const res = await fetch(
+        `${FEATURE_OVERVIEW_API}/column_summary?object_name=${encodeURIComponent(csv)}`
+      );
+      if (!res.ok) return null;
+      const data = await res.json();
+      const summary: ColumnInfo[] = (data.summary || []).filter(Boolean);
+      const numeric = summary
+        .filter(c => !['object', 'string'].includes(c.data_type.toLowerCase()))
+        .map(c => c.column);
+      const xField =
+        summary.find(c => c.column.toLowerCase().includes('date'))?.column ||
+        (summary[0]?.column || '');
+      return { summary, numeric, xField };
+    } catch {
+      return null;
+    }
+  };
+
+  const findLatestDataSource = async () => {
+    for (let i = layoutCards.length - 1; i >= 0; i--) {
+      const card = layoutCards[i];
+      for (let j = card.atoms.length - 1; j >= 0; j--) {
+        const a = card.atoms[j];
+        if (a.atomId === 'feature-overview' && a.settings?.dataSource) {
+          const cols = await fetchColumnSummary(a.settings.dataSource);
+          return { csv: a.settings.dataSource, ...cols };
+        }
+        if (a.atomId === 'data-upload-validate') {
+          const req = a.settings?.requiredFiles?.[0];
+          if (req) {
+            try {
+              const res = await fetch(
+                `${VALIDATE_API}/latest_ticket/${encodeURIComponent(req)}`
+              );
+              if (res.ok) {
+                const data = await res.json();
+                if (data.csv_name) {
+                  const cols = await fetchColumnSummary(data.csv_name);
+                  return { csv: data.csv_name, ...cols };
+                }
+              }
+            } catch {
+              /* ignore */
+            }
+          }
+        }
+      }
+    }
+    return null;
+  };
+
+  const prefillFeatureOverview = async (cardId: string, atomId: string) => {
+    const prev = await findLatestDataSource();
+    if (!prev || !prev.csv) return;
+    setLayoutCards(cards =>
+      cards.map(c =>
+        c.id === cardId
+          ? {
+              ...c,
+              atoms: c.atoms.map(a =>
+                a.id === atomId
+                  ? {
+                      ...a,
+                      settings: {
+                        ...(a.settings || {}),
+                        dataSource: prev.csv,
+                        allColumns: prev.summary || [],
+                        columnSummary: prev.summary || [],
+                        selectedColumns: prev.summary
+                          ? prev.summary.map(cc => cc.column)
+                          : [],
+                        numericColumns: prev.numeric || [],
+                        xAxis: prev.xField || 'date',
+                      },
+                    }
+                  : a
+              ),
+            }
+          : c
+      )
+    );
+  };
 
   // Load saved layout and workflow rendering
   useEffect(() => {
@@ -296,49 +395,7 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
       );
 
       if (atom.id === 'feature-overview') {
-        const prevUpload = (() => {
-          for (let i = layoutCards.length - 1; i >= 0; i--) {
-            const card = layoutCards[i];
-            for (let j = card.atoms.length - 1; j >= 0; j--) {
-              const a = card.atoms[j];
-              if (a.atomId === 'data-upload-validate') {
-                const req = a.settings?.requiredFiles?.[0];
-                if (req) return req as string;
-              }
-            }
-          }
-          return null;
-        })();
-
-        if (prevUpload) {
-          fetch(`${VALIDATE_API}/latest_ticket/${encodeURIComponent(prevUpload)}`)
-            .then(res => (res.ok ? res.json() : null))
-            .then(data => {
-              if (data && data.csv_name) {
-                setLayoutCards(cards =>
-                  cards.map(c =>
-                    c.id === cardId
-                      ? {
-                          ...c,
-                          atoms: c.atoms.map(a =>
-                            a.id === newAtom.id
-                              ? {
-                                  ...a,
-                                  settings: {
-                                    ...(a.settings || {}),
-                                    dataSource: data.csv_name,
-                                  },
-                                }
-                              : a
-                          ),
-                        }
-                      : c
-                  )
-                );
-              }
-            })
-            .catch(() => {});
-        }
+        prefillFeatureOverview(cardId, newAtom.id);
       }
     }
   };
@@ -404,48 +461,7 @@ const addNewCard = (moleculeId?: string, position?: number) => {
     );
 
     if (info.id === 'feature-overview') {
-      const prevUpload = (() => {
-        for (let i = layoutCards.length - 1; i >= 0; i--) {
-          const card = layoutCards[i];
-          for (let j = card.atoms.length - 1; j >= 0; j--) {
-            const a = card.atoms[j];
-            if (a.atomId === 'data-upload-validate') {
-              const req = a.settings?.requiredFiles?.[0];
-              if (req) return req as string;
-            }
-          }
-        }
-        return null;
-      })();
-      if (prevUpload) {
-        fetch(`${VALIDATE_API}/latest_ticket/${encodeURIComponent(prevUpload)}`)
-          .then(res => (res.ok ? res.json() : null))
-          .then(data => {
-            if (data && data.csv_name) {
-              setLayoutCards(cards =>
-                cards.map(c =>
-                  c.id === cardId
-                    ? {
-                        ...c,
-                        atoms: c.atoms.map(a =>
-                          a.id === newAtom.id
-                            ? {
-                                ...a,
-                                settings: {
-                                  ...(a.settings || {}),
-                                  dataSource: data.csv_name,
-                                },
-                              }
-                            : a
-                        ),
-                      }
-                    : c
-                )
-              );
-            }
-          })
-          .catch(() => {});
-      }
+      prefillFeatureOverview(cardId, newAtom.id);
     }
   };
 
