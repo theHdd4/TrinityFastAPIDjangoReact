@@ -1,0 +1,30 @@
+The list of available dataframes in the Data Upload & Validate auxiliary menu is
+built directly from the objects stored in MinIO. If a dataframe was deleted or
+the MinIO bucket itself no longer exists, the filename can still appear in the
+frontend list. To remove these entries:
+
+1. Open the MinIO web console (usually `http://localhost:9001`) or use the MinIO
+   CLI.
+2. Locate the bucket defined by the `MINIO_BUCKET` environment variable
+   (default `trinity`).
+3. Delete the missing files or remove the bucket entirely.
+4. Refresh the auxiliary menu in the frontend; the `/list_saved_dataframes`
+   endpoint will no longer return the deleted objects.
+
+If the bucket name was changed in your `.env` file but the old bucket remains on
+ disk, you can delete it with:
+
+```bash
+mc rm --recursive --force MINIO/<old-bucket-name>
+```
+
+This clears out unavailable dataframes so they no longer show up in the menu.
+
+Cached copies of deleted files may also exist in Redis. To remove them run:
+
+```bash
+redis-cli --scan --pattern "${CLIENT_NAME}/${APP_NAME}/${PROJECT_NAME}/*" | \
+  xargs -r redis-cli DEL
+```
+
+Replace the environment variables with their actual values if not set.

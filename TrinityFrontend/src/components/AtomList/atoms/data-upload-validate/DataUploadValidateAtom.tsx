@@ -238,6 +238,16 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
     }
   };
 
+  const handleSaveDataFrames = async () => {
+    if (!settings.validatorId) return;
+    const form = new FormData();
+    form.append('validator_atom_id', settings.validatorId);
+    uploadedFiles.forEach(f => form.append('files', f));
+    const keys = uploadedFiles.map(f => fileAssignments[f.name] || '');
+    form.append('file_keys', JSON.stringify(keys));
+    await fetch(`${VALIDATE_API}/save_dataframes`, { method: 'POST', body: form });
+  };
+
   const dimensions = [
     'Brand',
     'Category',
@@ -299,6 +309,9 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
     );
   };
 
+  const allValid = Object.values(validationResults).length > 0 &&
+    Object.values(validationResults).every(v => v.includes('Success'));
+
   return (
     <div className="w-full h-full bg-gradient-to-br from-gray-50 via-white to-gray-50 rounded-xl border border-gray-200 shadow-lg overflow-hidden flex">
       <div className="flex-1 flex flex-col">
@@ -331,6 +344,8 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
                 onDragLeave={handleDragLeave}
                 onFileSelect={handleFileSelect}
                 onValidateFiles={handleValidateFiles}
+                onSaveDataFrames={handleSaveDataFrames}
+                saveEnabled={allValid}
                 isDragOver={isDragOver}
                 requiredOptions={settings.requiredFiles || []}
                 onDeleteFile={handleDeleteFile}

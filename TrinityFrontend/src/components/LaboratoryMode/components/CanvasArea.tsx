@@ -11,12 +11,14 @@ import { REGISTRY_API, TEXT_API, CARD_API, LAB_ACTIONS_API } from '@/lib/api';
 import { AIChatBot } from '@/components/TrinityAI';
 import TextBoxEditor from '@/components/AtomList/atoms/text-box/TextBoxEditor';
 import DataUploadValidateAtom from '@/components/AtomList/atoms/data-upload-validate/DataUploadValidateAtom';
+import FeatureOverviewAtom from '@/components/AtomList/atoms/feature-overview/FeatureOverviewAtom';
 import {
   useLaboratoryStore,
   LayoutCard,
   DroppedAtom,
   DEFAULT_TEXTBOX_SETTINGS,
   DEFAULT_DATAUPLOAD_SETTINGS,
+  DEFAULT_FEATURE_OVERVIEW_SETTINGS,
 } from '../store/laboratoryStore';
 
 
@@ -343,6 +345,8 @@ const addNewCard = (moleculeId?: string, position?: number) => {
           ? { ...DEFAULT_TEXTBOX_SETTINGS }
           : info.id === 'data-upload-validate'
           ? { ...DEFAULT_DATAUPLOAD_SETTINGS }
+          : info.id === 'feature-overview'
+          ? { ...DEFAULT_FEATURE_OVERVIEW_SETTINGS }
           : undefined,
     };
     setLayoutCards(
@@ -565,6 +569,8 @@ const addNewCard = (moleculeId?: string, position?: number) => {
                                       <TextBoxEditor textId={atom.id} />
                                     ) : atom.atomId === 'data-upload-validate' ? (
                                       <DataUploadValidateAtom atomId={atom.id} />
+                                    ) : atom.atomId === 'feature-overview' ? (
+                                      <FeatureOverviewAtom atomId={atom.id} />
                                     ) : (
                                       <div>
                                         <h4 className="font-semibold text-gray-900 mb-1 text-sm">{atom.title}</h4>
@@ -701,6 +707,8 @@ const addNewCard = (moleculeId?: string, position?: number) => {
                         <TextBoxEditor textId={atom.id} />
                       ) : atom.atomId === 'data-upload-validate' ? (
                         <DataUploadValidateAtom atomId={atom.id} />
+                      ) : atom.atomId === 'feature-overview' ? (
+                        <FeatureOverviewAtom atomId={atom.id} />
                       ) : (
                         <div>
                           <h4 className="font-semibold text-gray-900 mb-1 text-sm">{atom.title}</h4>

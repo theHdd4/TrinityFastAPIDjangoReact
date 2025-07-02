@@ -7,7 +7,7 @@ import Header from '@/components/Header';
 import { safeStringify } from '@/utils/safeStringify';
 import AtomLibrary from '@/components/AtomList/AtomLibrary';
 import CanvasArea from './components/CanvasArea';
-import SettingsPanel from './components/SettingsPanel';
+import AuxiliaryMenu from './components/AuxiliaryMenu';
 import { useExhibitionStore } from '@/components/ExhibitionMode/store/exhibitionStore';
 import { REGISTRY_API, LAB_ACTIONS_API } from '@/lib/api';
 import { useLaboratoryStore } from './store/laboratoryStore';
@@ -16,7 +16,6 @@ const LaboratoryMode = () => {
   const [selectedAtomId, setSelectedAtomId] = useState<string>();
   const [selectedCardId, setSelectedCardId] = useState<string>();
   const [cardExhibited, setCardExhibited] = useState<boolean>(false);
-  const [isSettingsCollapsed, setIsSettingsCollapsed] = useState(false);
   const { toast } = useToast();
   const { cards, setCards } = useExhibitionStore();
   const setLabCards = useLaboratoryStore(state => state.setCards);
@@ -71,9 +70,6 @@ const LaboratoryMode = () => {
     setCardExhibited(exhibited);
   };
 
-  const toggleSettings = () => {
-    setIsSettingsCollapsed(!isSettingsCollapsed);
-  };
 
   const handleSave = async () => {
     const exhibitedCards = cards.filter(card => card.isExhibited);
@@ -165,10 +161,8 @@ const LaboratoryMode = () => {
           <CanvasArea onAtomSelect={handleAtomSelect} onCardSelect={handleCardSelect} selectedCardId={selectedCardId} />
         </div>
 
-        {/* Settings Panel */}
-        <SettingsPanel
-          isCollapsed={isSettingsCollapsed}
-          onToggle={toggleSettings}
+        {/* Auxiliary menu */}
+        <AuxiliaryMenu
           selectedAtomId={selectedAtomId}
           selectedCardId={selectedCardId}
           cardExhibited={cardExhibited}

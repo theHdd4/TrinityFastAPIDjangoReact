@@ -1,6 +1,7 @@
 import uvicorn
 from fastapi import FastAPI
 from fastapi.encoders import jsonable_encoder
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Dict, Any
 import numpy as np
@@ -41,6 +42,15 @@ app = FastAPI(
     title="Single LLM Atom Detection API",
     description="API endpoint using single LLM for domain checking, query enhancement, and atom extraction",
     version="7.0"
+)
+
+# Enable CORS for browser-based clients
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 @app.post("/chat")

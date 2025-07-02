@@ -25,6 +25,8 @@ interface UploadSectionProps {
   onDragLeave: (e: React.DragEvent) => void;
   onFileSelect: (e: React.ChangeEvent<HTMLInputElement>) => void;
   onValidateFiles: () => void;
+  onSaveDataFrames: () => void;
+  saveEnabled: boolean;
   isDragOver: boolean;
   requiredOptions: string[];
   onDeleteFile: (name: string) => void;
@@ -44,6 +46,8 @@ const UploadSection: React.FC<UploadSectionProps> = ({
   onDragLeave,
   onFileSelect,
   onValidateFiles,
+  onSaveDataFrames,
+  saveEnabled,
   isDragOver,
   requiredOptions,
   onDeleteFile
@@ -131,6 +135,11 @@ const UploadSection: React.FC<UploadSectionProps> = ({
       {uploadedFiles.length > 0 && (
         <Button className="w-full mt-4" onClick={onValidateFiles}>
           Validate Files
+        </Button>
+      )}
+      {uploadedFiles.length > 0 && (
+        <Button className="w-full mt-2" onClick={onSaveDataFrames} disabled={!saveEnabled}>
+          Save Data Frame
         </Button>
       )}
     </div>

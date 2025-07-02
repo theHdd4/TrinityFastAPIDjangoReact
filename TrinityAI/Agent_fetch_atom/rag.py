@@ -663,7 +663,7 @@ class AtomKnowledgeBase:
         return cls.UNIQUE_ATOM_KNOWLEDGE.get(canon)
 
 class RAGRetriever:
-    def __init__(self, model_name: str = 'all-MiniLM-L6-v2', embeddings_file: str = "atom_rag_embeddings.pkl"):
+    def __init__(self, model_name: str = './models/all-MiniLM-L6-v2', embeddings_file: str = "atom_rag_embeddings.pkl"):
         self.model = SentenceTransformer(model_name)
         self.embeddings_file = embeddings_file
         self.atom_embeddings = None

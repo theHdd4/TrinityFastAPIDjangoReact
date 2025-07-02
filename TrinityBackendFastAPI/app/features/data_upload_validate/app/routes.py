@@ -101,18 +101,42 @@ async def health_check():
 
 from minio import Minio
 from minio.error import S3Error
+from app.features.feature_overview.deps import redis_client
+from app.utils.db import fetch_client_app_project
+import asyncio
 import os
 
-# ✅ MINIO CONFIGURATION FOR YOUR SERVER
-MINIO_ENDPOINT = "10.2.1.65:9003"
-MINIO_ACCESS_KEY = "admin_dev"  # Update with your credentials
-MINIO_SECRET_KEY = "pass_dev"  # Update with your credentials
-MINIO_BUCKET = "validated-d1"    # Your existing bucket
+# ✅ MINIO CONFIGURATION - values come from docker-compose/.env
+MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "minio:9000")
+MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY", "minio")
+MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY", "minio123")
+MINIO_BUCKET = os.getenv("MINIO_BUCKET", "trinity")
 
-# Path info for saving uploads
+# Database driven folder names
+USER_ID = int(os.getenv("USER_ID", "0"))
+PROJECT_ID = int(os.getenv("PROJECT_ID", "0"))
+
 CLIENT_NAME = os.getenv("CLIENT_NAME", "default_client")
 APP_NAME = os.getenv("APP_NAME", "default_app")
 PROJECT_NAME = os.getenv("PROJECT_NAME", "default_project")
+
+def load_names_from_db() -> None:
+    """Lookup client/app/project names from Postgres if ids are provided."""
+    global CLIENT_NAME, APP_NAME, PROJECT_NAME
+    if USER_ID and PROJECT_ID:
+        try:
+            CLIENT_NAME_DB, APP_NAME_DB, PROJECT_NAME_DB = asyncio.run(
+                fetch_client_app_project(USER_ID, PROJECT_ID)
+            )
+            CLIENT_NAME = CLIENT_NAME_DB or CLIENT_NAME
+            APP_NAME = APP_NAME_DB or APP_NAME
+            PROJECT_NAME = PROJECT_NAME_DB or PROJECT_NAME
+        except Exception as exc:
+            print(f"⚠️ Failed to load names from DB: {exc}")
+
+load_names_from_db()
+
+OBJECT_PREFIX = f"{CLIENT_NAME}/{APP_NAME}/{PROJECT_NAME}/"
 
 # Initialize MinIO client
 minio_client = Minio(
@@ -122,21 +146,21 @@ minio_client = Minio(
     secure=False
 )
 
-# Check bucket exists
-def check_minio_bucket():
+# Ensure bucket exists
+def ensure_minio_bucket():
     try:
-        if minio_client.bucket_exists(MINIO_BUCKET):
-            print(f"✅ MinIO bucket '{MINIO_BUCKET}' is accessible")
-            return True
+        if not minio_client.bucket_exists(MINIO_BUCKET):
+            minio_client.make_bucket(MINIO_BUCKET)
+            print(f"📁 Created MinIO bucket '{MINIO_BUCKET}'")
         else:
-            print(f"❌ MinIO bucket '{MINIO_BUCKET}' not found")
-            return False
+            print(f"✅ MinIO bucket '{MINIO_BUCKET}' is accessible")
+        return True
     except Exception as e:
         print(f"⚠️ MinIO connection error: {e}")
         return False
 
 # Test connection on startup
-check_minio_bucket()
+ensure_minio_bucket()
 
 
 
@@ -151,7 +175,7 @@ def upload_to_minio(file_content_bytes: bytes, filename: str, validator_atom_id:
     try:
         # Create unique object name with timestamp
         timestamp = pd.Timestamp.now().strftime("%Y%m%d_%H%M%S")
-        object_name = f"{CLIENT_NAME}/{APP_NAME}/{PROJECT_NAME}/{timestamp}_{filename}"
+        object_name = f"{OBJECT_PREFIX}{timestamp}_{filename}"
         
         # Convert bytes to BytesIO for seek operations
         file_content = io.BytesIO(file_content_bytes)
@@ -2906,3 +2930,140 @@ async def validate_promo_endpoint(
 
 # Call this function when the module loads
 load_existing_configs()
+
+
+# --- New endpoints for saving and listing validated dataframes ---
+@router.post("/save_dataframes")
+async def save_dataframes(
+    validator_atom_id: str = Form(...),
+    files: List[UploadFile] = File(...),
+    file_keys: str = Form(...)
+):
+    """Save validated dataframes to MinIO"""
+    try:
+        keys = json.loads(file_keys)
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid JSON format for file_keys")
+    if len(files) != len(keys):
+        raise HTTPException(status_code=400, detail="Number of files must match number of keys")
+
+    uploads = []
+    for file, key in zip(files, keys):
+        content = await file.read()
+        result = upload_to_minio(content, file.filename, validator_atom_id, key)
+        uploads.append({"file_key": key, "filename": file.filename, "minio_upload": result})
+
+    return {"minio_uploads": uploads}
+
+
+@router.get("/list_saved_dataframes")
+async def list_saved_dataframes():
+    """List saved dataframes for the current project"""
+    prefix = OBJECT_PREFIX
+    try:
+        objects = minio_client.list_objects(MINIO_BUCKET, prefix=prefix, recursive=True)
+        files = []
+        for obj in objects:
+            try:
+                minio_client.stat_object(MINIO_BUCKET, obj.object_name)
+                files.append(obj.object_name)
+            except S3Error as e:
+                if getattr(e, "code", "") in {"NoSuchKey", "NoSuchBucket"}:
+                    redis_client.delete(obj.object_name)
+                    continue
+                raise
+        return {"files": files}
+    except S3Error as e:
+        if getattr(e, "code", "") == "NoSuchBucket":
+            return {"files": []}
+        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/download_dataframe")
+async def download_dataframe(object_name: str):
+    """Return a presigned URL to download a dataframe"""
+    if not object_name.startswith(OBJECT_PREFIX):
+        raise HTTPException(status_code=400, detail="Invalid object name")
+    try:
+        url = minio_client.presigned_get_object(MINIO_BUCKET, object_name)
+        return {"url": url}
+    except S3Error as e:
+        if getattr(e, "code", "") in {"NoSuchKey", "NoSuchBucket"}:
+            redis_client.delete(object_name)
+            raise HTTPException(status_code=404, detail="File not found")
+        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.delete("/delete_dataframe")
+async def delete_dataframe(object_name: str):
+    """Delete a single saved dataframe"""
+    if not object_name.startswith(OBJECT_PREFIX):
+        raise HTTPException(status_code=400, detail="Invalid object name")
+    try:
+        try:
+            minio_client.remove_object(MINIO_BUCKET, object_name)
+        except S3Error as e:
+            if getattr(e, "code", "") not in {"NoSuchKey", "NoSuchBucket"}:
+                raise
+        redis_client.delete(object_name)
+        return {"deleted": object_name}
+    except S3Error as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.delete("/delete_all_dataframes")
+async def delete_all_dataframes():
+    """Delete all saved dataframes for the current project"""
+    prefix = OBJECT_PREFIX
+    deleted = []
+    try:
+        objects = minio_client.list_objects(MINIO_BUCKET, prefix=prefix, recursive=True)
+        for obj in objects:
+            try:
+                minio_client.remove_object(MINIO_BUCKET, obj.object_name)
+            except S3Error as e:
+                if getattr(e, "code", "") not in {"NoSuchKey", "NoSuchBucket"}:
+                    raise
+            redis_client.delete(obj.object_name)
+            deleted.append(obj.object_name)
+        return {"deleted": deleted}
+    except S3Error as e:
+        if getattr(e, "code", "") == "NoSuchBucket":
+            return {"deleted": []}
+        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/rename_dataframe")
+async def rename_dataframe(object_name: str = Form(...), new_filename: str = Form(...)):
+    """Rename a saved dataframe"""
+    if not object_name.startswith(OBJECT_PREFIX):
+        raise HTTPException(status_code=400, detail="Invalid object name")
+    new_object = f"{OBJECT_PREFIX}{new_filename}"
+    try:
+        minio_client.copy_object(MINIO_BUCKET, new_object, f"/{MINIO_BUCKET}/{object_name}")
+        try:
+            minio_client.remove_object(MINIO_BUCKET, object_name)
+        except S3Error:
+            pass
+        content = redis_client.get(object_name)
+        if content is not None:
+            redis_client.setex(new_object, 3600, content)
+            redis_client.delete(object_name)
+        return {"old_name": object_name, "new_name": new_object}
+    except S3Error as e:
+        code = getattr(e, "code", "")
+        if code in {"NoSuchKey", "NoSuchBucket"}:
+            redis_client.delete(object_name)
+            raise HTTPException(status_code=404, detail="File not found")
+        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+

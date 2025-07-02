@@ -67,6 +67,42 @@ export const DEFAULT_DATAUPLOAD_SETTINGS: DataUploadSettings = {
   fileMappings: {}
 };
 
+export interface FeatureOverviewSettings {
+  selectedColumns: string[];
+  hierarchicalView: boolean;
+  dataSource: string;
+  filterCriteria: Record<string, unknown>;
+  columnSummary?: any[];
+  allColumns?: any[];
+  numericColumns?: string[];
+  marketDims?: string[];
+  productDims?: string[];
+  yAxes?: string[];
+  xAxis?: string;
+  skuTable?: any[];
+  statDataMap?: Record<string, any>;
+  activeMetric?: string;
+  activeRow?: number | null;
+}
+
+export const DEFAULT_FEATURE_OVERVIEW_SETTINGS: FeatureOverviewSettings = {
+  selectedColumns: [],
+  hierarchicalView: true,
+  dataSource: '',
+  filterCriteria: {},
+  columnSummary: [],
+  allColumns: [],
+  numericColumns: [],
+  marketDims: [],
+  productDims: [],
+  yAxes: [],
+  xAxis: 'date',
+  skuTable: [],
+  statDataMap: {},
+  activeMetric: '',
+  activeRow: null
+};
+
 export interface DroppedAtom {
   id: string;
   atomId: string;
