@@ -119,10 +119,14 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({ settings,
   const displaySkus = async () => {
     setError(null);
     try {
+      console.log('🔎 fetching cached dataframe for', settings.dataSource);
       const res = await fetch(
-        `${FEATURE_OVERVIEW_API}/cached_dataframe?object_name=${encodeURIComponent(settings.dataSource)}`
+        `${FEATURE_OVERVIEW_API}/cached_dataframe?object_name=${encodeURIComponent(
+          settings.dataSource
+        )}`
       );
       if (!res.ok) {
+        console.warn('⚠️ cached dataframe request failed', res.status);
         throw new Error('Failed to load data');
       }
       const text = await res.text();
@@ -147,6 +151,7 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({ settings,
       setSkuRows(table);
       onUpdateSettings({ skuTable: table, marketDims, productDims });
     } catch (e: any) {
+      console.error('⚠️ failed to display SKUs', e);
       setError(e.message || 'Error displaying SKUs');
     }
   };
