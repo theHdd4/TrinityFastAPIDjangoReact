@@ -2,6 +2,7 @@ from typing import Dict, Tuple
 import json
 import os
 from pathlib import Path
+from datetime import datetime
 
 REGISTRY_PATH = Path(os.getenv("FLIGHT_REGISTRY_FILE", "arrow_data/flight_registry.json"))
 
@@ -51,3 +52,25 @@ def get_ticket_by_key(file_key: str) -> Tuple[str | None, str | None]:
 
 def get_flight_path_for_csv(csv_name: str) -> str | None:
     return CSV_TO_FLIGHT.get(csv_name)
+
+
+def get_latest_ticket_for_basename(csv_base: str) -> Tuple[str | None, str | None]:
+    """Return the latest flight path and csv name matching the base filename."""
+    matches = []
+    for csv_name, flight_path in CSV_TO_FLIGHT.items():
+        if os.path.basename(csv_name).endswith(csv_base):
+            base = os.path.basename(csv_name)
+            parts = base.split("_", 2)
+            if len(parts) >= 2:
+                try:
+                    ts = datetime.strptime(f"{parts[0]}_{parts[1]}", "%Y%m%d_%H%M%S")
+                except Exception:
+                    ts = datetime.min
+            else:
+                ts = datetime.min
+            matches.append((ts, flight_path, csv_name))
+    if not matches:
+        return None, None
+    matches.sort(key=lambda x: x[0], reverse=True)
+    _, path, name = matches[0]
+    return path, name

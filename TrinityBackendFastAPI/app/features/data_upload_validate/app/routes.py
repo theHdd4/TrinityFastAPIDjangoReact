@@ -104,7 +104,11 @@ from minio.error import S3Error
 from app.features.feature_overview.deps import redis_client
 from app.utils.db import fetch_client_app_project
 from app.utils.arrow_client import upload_dataframe
-from app.utils.flight_registry import set_ticket, get_ticket_by_key
+from app.utils.flight_registry import (
+    set_ticket,
+    get_ticket_by_key,
+    get_latest_ticket_for_basename,
+)
 import pyarrow as pa
 import pyarrow.ipc as ipc
 from pathlib import Path
@@ -3012,6 +3016,8 @@ async def list_saved_dataframes():
 @router.get("/latest_ticket/{file_key}")
 async def latest_ticket(file_key: str):
     path, csv_name = get_ticket_by_key(file_key)
+    if path is None:
+        path, csv_name = get_latest_ticket_for_basename(file_key)
     if path is None:
         raise HTTPException(status_code=404, detail="Ticket not found")
     return {"flight_path": path, "csv_name": csv_name}

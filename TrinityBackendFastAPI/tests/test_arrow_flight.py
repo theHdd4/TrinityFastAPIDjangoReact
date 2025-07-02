@@ -42,6 +42,9 @@ def test_flight_registry():
     assert path == "path/to/table"
     assert csv == "file.csv"
     assert flight_registry.get_flight_path_for_csv("file.csv") == "path/to/table"
+    path2, csv2 = flight_registry.get_latest_ticket_for_basename("file.csv")
+    assert path2 == "path/to/table"
+    assert csv2 == "file.csv"
 
 
 def test_registry_persistence(tmp_path, monkeypatch):
