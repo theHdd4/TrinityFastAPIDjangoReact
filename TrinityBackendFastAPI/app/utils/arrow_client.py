@@ -3,15 +3,16 @@ import pandas as pd
 import pyarrow as pa
 import pyarrow.flight as flight
 
-FLIGHT_HOST = os.getenv("FLIGHT_HOST", "localhost")
-FLIGHT_PORT = int(os.getenv("FLIGHT_PORT", "8815"))
-
 _client: flight.FlightClient | None = None
 
+
 def _get_client() -> flight.FlightClient:
+    """Return a cached Flight client configured from environment variables."""
     global _client
+    host = os.getenv("FLIGHT_HOST", "localhost")
+    port = int(os.getenv("FLIGHT_PORT", "8815"))
     if _client is None:
-        _client = flight.FlightClient(f"grpc://{FLIGHT_HOST}:{FLIGHT_PORT}")
+        _client = flight.FlightClient(f"grpc://{host}:{port}")
     return _client
 
 def upload_dataframe(df: pd.DataFrame, path: str) -> str:
