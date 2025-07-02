@@ -105,6 +105,23 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
     }
   };
 
+  const prefetchDataframe = async (name: string) => {
+    try {
+      console.log('🔎 prefetching dataframe', name);
+      const res = await fetch(
+        `${FEATURE_OVERVIEW_API}/cached_dataframe?object_name=${encodeURIComponent(name)}`
+      );
+      if (res.ok) {
+        await res.text();
+        console.log('✅ prefetched dataframe', name);
+      } else {
+        console.warn('⚠️ prefetch dataframe failed', res.status);
+      }
+    } catch (err) {
+      console.error('⚠️ prefetch dataframe error', err);
+    }
+  };
+
   const findLatestDataSource = async () => {
     console.log('🔎 searching for latest data source');
     for (let i = layoutCards.length - 1; i >= 0; i--) {
@@ -113,6 +130,7 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
         const a = card.atoms[j];
         if (a.atomId === 'feature-overview' && a.settings?.dataSource) {
           console.log('✔️ found feature overview data source', a.settings.dataSource);
+          await prefetchDataframe(a.settings.dataSource);
           const cols = await fetchColumnSummary(a.settings.dataSource);
           return {
             csv: a.settings.dataSource,
@@ -136,6 +154,7 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
                 const ticket = await ticketRes.json();
                 if (ticket.arrow_name) {
                   console.log('✔️ using validated data source', ticket.arrow_name);
+                  await prefetchDataframe(ticket.arrow_name);
                   const cols = await fetchColumnSummary(ticket.arrow_name);
                   let ids: string[] = [];
                   if (confRes && confRes.ok) {
@@ -161,6 +180,7 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
         const file = Array.isArray(data.files) ? data.files[0] : null;
         if (file) {
           console.log('✔️ defaulting to first saved dataframe', file.object_name);
+          await prefetchDataframe(file.object_name);
           const cols = await fetchColumnSummary(file.object_name);
           return { csv: file.object_name, display: file.csv_name, ...(cols || {}) };
         }
@@ -178,6 +198,7 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
       console.warn('⚠️ no data source found for feature overview');
       return;
     }
+    await prefetchDataframe(prev.csv);
     console.log('✅ pre-filling feature overview with', prev.csv);
     const summary = Array.isArray(prev.summary) ? prev.summary : [];
     const identifiers = Array.isArray(prev.identifiers) ? prev.identifiers : [];
