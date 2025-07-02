@@ -15,7 +15,7 @@ RUN apt-get update && apt-get install -y \
 # Copy requirements and install them
 COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt
+    pip install --no-cache-dir --timeout 1000 -r requirements.txt
 
 # Copy application code
 COPY . .
