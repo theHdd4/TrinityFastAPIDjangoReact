@@ -23,6 +23,8 @@ const FeatureOverviewVisualisation: React.FC<Props> = ({
   onXChange,
   onApply,
 }) => {
+  const numericList = Array.isArray(numericColumns) ? numericColumns : [];
+  const columnList = Array.isArray(allColumns) ? allColumns : [];
   const toggle = (col: string, checked: boolean | "indeterminate") => {
     const isChecked = Boolean(checked);
     let next = yValues;
@@ -39,7 +41,7 @@ const FeatureOverviewVisualisation: React.FC<Props> = ({
       <Card className="p-4 border border-gray-200 shadow-sm">
         <label className="text-sm font-medium text-gray-700 block mb-2">Select Dependant Variables for SKU Analysis</label>
         <div className="grid grid-cols-2 gap-2">
-          {numericColumns.map(c => (
+          {numericList.map(c => (
             <label key={c} className="flex items-center space-x-2 text-xs">
               <Checkbox checked={yValues.includes(c)} onCheckedChange={val => toggle(c, val)} />
               <span>{c}</span>
@@ -54,7 +56,7 @@ const FeatureOverviewVisualisation: React.FC<Props> = ({
             <SelectValue placeholder="Select column" />
           </SelectTrigger>
           <SelectContent>
-            {allColumns.map(c => (
+            {columnList.map(c => (
               <SelectItem key={c} value={c} className="text-xs">
                 {c}
               </SelectItem>

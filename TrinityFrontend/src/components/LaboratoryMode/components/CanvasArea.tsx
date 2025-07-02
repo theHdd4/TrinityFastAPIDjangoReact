@@ -88,7 +88,7 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
       );
       if (!res.ok) {
         console.warn('⚠️ column summary request failed', res.status);
-        return null;
+        return { summary: [], numeric: [], xField: '' };
       }
       const data = await res.json();
       const summary: ColumnInfo[] = (data.summary || []).filter(Boolean);
@@ -101,7 +101,7 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
       return { summary, numeric, xField };
     } catch (err) {
       console.error('⚠️ failed to fetch column summary', err);
-      return null;
+      return { summary: [], numeric: [], xField: '' };
     }
   };
 

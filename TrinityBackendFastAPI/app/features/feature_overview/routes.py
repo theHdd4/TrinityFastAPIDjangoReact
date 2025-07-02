@@ -92,8 +92,9 @@ async def column_summary(object_name: str):
     object_name = unquote(object_name)
     print(f"➡️ column_summary request: {object_name}")
     if not object_name.startswith(OBJECT_PREFIX):
-        print(f"❌ column_summary invalid object name: {object_name}")
-        raise HTTPException(status_code=400, detail="Invalid object name")
+        print(
+            f"⚠️ column_summary prefix mismatch: {object_name} (expected {OBJECT_PREFIX})"
+        )
     try:
         flight_path = get_flight_path_for_csv(object_name)
         if flight_path:
@@ -153,8 +154,9 @@ async def cached_dataframe(object_name: str):
     object_name = unquote(object_name)
     print(f"➡️ cached_dataframe request: {object_name}")
     if not object_name.startswith(OBJECT_PREFIX):
-        print(f"❌ cached_dataframe invalid object name: {object_name}")
-        raise HTTPException(status_code=400, detail="Invalid object name")
+        print(
+            f"⚠️ cached_dataframe prefix mismatch: {object_name} (expected {OBJECT_PREFIX})"
+        )
     try:
         content = redis_client.get(object_name)
         if content is None:
@@ -179,8 +181,9 @@ async def sku_stats(object_name: str, y_column: str, combination: str, x_column:
     object_name = unquote(object_name)
     print(f"➡️ sku_stats request: {object_name}")
     if not object_name.startswith(OBJECT_PREFIX):
-        print(f"❌ sku_stats invalid object name: {object_name}")
-        raise HTTPException(status_code=400, detail="Invalid object name")
+        print(
+            f"⚠️ sku_stats prefix mismatch: {object_name} (expected {OBJECT_PREFIX})"
+        )
     try:
         combo = json.loads(combination)
     except Exception as e:
