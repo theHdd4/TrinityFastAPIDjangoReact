@@ -82,10 +82,14 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
 
   const fetchColumnSummary = async (csv: string) => {
     try {
+      console.log('🔎 fetching column summary for', csv);
       const res = await fetch(
         `${FEATURE_OVERVIEW_API}/column_summary?object_name=${encodeURIComponent(csv)}`
       );
-      if (!res.ok) return null;
+      if (!res.ok) {
+        console.warn('⚠️ column summary request failed', res.status);
+        return null;
+      }
       const data = await res.json();
       const summary: ColumnInfo[] = (data.summary || []).filter(Boolean);
       const numeric = summary
@@ -95,17 +99,20 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
         summary.find(c => c.column.toLowerCase().includes('date'))?.column ||
         (summary[0]?.column || '');
       return { summary, numeric, xField };
-    } catch {
+    } catch (err) {
+      console.error('⚠️ failed to fetch column summary', err);
       return null;
     }
   };
 
   const findLatestDataSource = async () => {
+    console.log('🔎 searching for latest data source');
     for (let i = layoutCards.length - 1; i >= 0; i--) {
       const card = layoutCards[i];
       for (let j = card.atoms.length - 1; j >= 0; j--) {
         const a = card.atoms[j];
         if (a.atomId === 'feature-overview' && a.settings?.dataSource) {
+          console.log('✔️ found feature overview data source', a.settings.dataSource);
           const cols = await fetchColumnSummary(a.settings.dataSource);
           return {
             csv: a.settings.dataSource,
@@ -128,6 +135,7 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
               if (ticketRes.ok) {
                 const ticket = await ticketRes.json();
                 if (ticket.arrow_name) {
+                  console.log('✔️ using validated data source', ticket.arrow_name);
                   const cols = await fetchColumnSummary(ticket.arrow_name);
                   let ids: string[] = [];
                   if (confRes && confRes.ok) {
@@ -152,6 +160,7 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
         const data = await res.json();
         const file = Array.isArray(data.files) ? data.files[0] : null;
         if (file) {
+          console.log('✔️ defaulting to first saved dataframe', file.object_name);
           const cols = await fetchColumnSummary(file.object_name);
           return { csv: file.object_name, display: file.csv_name, ...(cols || {}) };
         }
@@ -165,7 +174,11 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
 
   const prefillFeatureOverview = async (cardId: string, atomId: string) => {
     const prev = await findLatestDataSource();
-    if (!prev || !prev.csv) return;
+    if (!prev || !prev.csv) {
+      console.warn('⚠️ no data source found for feature overview');
+      return;
+    }
+    console.log('✅ pre-filling feature overview with', prev.csv);
     const summary = Array.isArray(prev.summary) ? prev.summary : [];
     const identifiers = Array.isArray(prev.identifiers) ? prev.identifiers : [];
     const filtered =

@@ -90,7 +90,9 @@ router = APIRouter()
 async def column_summary(object_name: str):
     """Return column summary statistics for a saved dataframe."""
     object_name = unquote(object_name)
+    print(f"➡️ column_summary request: {object_name}")
     if not object_name.startswith(OBJECT_PREFIX):
+        print(f"❌ column_summary invalid object name: {object_name}")
         raise HTTPException(status_code=400, detail="Invalid object name")
     try:
         flight_path = get_flight_path_for_csv(object_name)
@@ -141,6 +143,7 @@ async def column_summary(object_name: str):
             raise HTTPException(status_code=404, detail="File not found")
         raise HTTPException(status_code=500, detail=str(e))
     except Exception as e:
+        print(f"⚠️ column_summary error for {object_name}: {e}")
         raise HTTPException(status_code=400, detail=str(e))
 
 
@@ -148,7 +151,9 @@ async def column_summary(object_name: str):
 async def cached_dataframe(object_name: str):
     """Return the raw CSV bytes for a saved dataframe from Redis."""
     object_name = unquote(object_name)
+    print(f"➡️ cached_dataframe request: {object_name}")
     if not object_name.startswith(OBJECT_PREFIX):
+        print(f"❌ cached_dataframe invalid object name: {object_name}")
         raise HTTPException(status_code=400, detail="Invalid object name")
     try:
         content = redis_client.get(object_name)
@@ -164,6 +169,7 @@ async def cached_dataframe(object_name: str):
             raise HTTPException(status_code=404, detail="File not found")
         raise HTTPException(status_code=500, detail=str(e))
     except Exception as e:
+        print(f"⚠️ cached_dataframe error for {object_name}: {e}")
         raise HTTPException(status_code=400, detail=str(e))
 
 
@@ -171,7 +177,9 @@ async def cached_dataframe(object_name: str):
 async def sku_stats(object_name: str, y_column: str, combination: str, x_column: str = "date"):
     """Return time series and summary for a specific SKU combination."""
     object_name = unquote(object_name)
+    print(f"➡️ sku_stats request: {object_name}")
     if not object_name.startswith(OBJECT_PREFIX):
+        print(f"❌ sku_stats invalid object name: {object_name}")
         raise HTTPException(status_code=400, detail="Invalid object name")
     try:
         combo = json.loads(combination)
@@ -236,6 +244,7 @@ async def sku_stats(object_name: str, y_column: str, combination: str, x_column:
             raise HTTPException(status_code=404, detail="File not found")
         raise HTTPException(status_code=500, detail=str(e))
     except Exception as e:
+        print(f"⚠️ sku_stats error for {object_name}: {e}")
         raise HTTPException(status_code=400, detail=str(e))
 
 
