@@ -95,6 +95,8 @@ services:
       MINIO_ENDPOINT: minio:9000
       MINIO_ACCESS_KEY: minio
       MINIO_SECRET_KEY: minio123
+      FLIGHT_HOST: flight
+      FLIGHT_PORT: 8815
     ports:
       - "8001:8001"
     depends_on:
@@ -102,6 +104,18 @@ services:
       - mongo
       - redis
       - minio
+    networks:
+      - trinity-net
+
+  flight:
+    build:
+      context: ../TrinityBackendFastAPI
+      dockerfile: Dockerfile
+    command: python app/flight_server.py
+    env_file:
+      - .env
+    ports:
+      - "8815:8815"
     networks:
       - trinity-net
 

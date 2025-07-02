@@ -20,6 +20,9 @@ pymongo           # MongoDB driver
 fastapi
 uvicorn[standard]
 
+# Arrow Flight
+pyarrow>=15.0.0
+
 # Environment
 python-dotenv
 gunicorn

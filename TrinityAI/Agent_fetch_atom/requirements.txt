@@ -7,4 +7,5 @@ langgraph
 scikit-learn
 requests
 pandas
+pyarrow>=15.0.0
 

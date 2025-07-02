@@ -103,6 +103,7 @@ from minio import Minio
 from minio.error import S3Error
 from app.features.feature_overview.deps import redis_client
 from app.utils.db import fetch_client_app_project
+from app.utils.arrow_client import upload_dataframe
 import asyncio
 import os
 
@@ -1832,6 +1833,7 @@ async def validate(
     
     # ✅ MinIO upload: Only if validation passes or passes with warnings
     minio_uploads = []
+    flight_uploads = []
     if validation_results["overall_status"] in ["passed", "passed_with_warnings"]:
         for content, filename, key in file_contents:
             upload_result = upload_to_minio(content, filename, validator_atom_id, key)
@@ -1840,6 +1842,10 @@ async def validate(
                 "filename": filename,
                 "minio_upload": upload_result
             })
+        for key, df in files_data:
+            path = f"{validator_atom_id}/{key}"
+            upload_dataframe(df, path)
+            flight_uploads.append({"file_key": key, "flight_path": path})
     
     # ✅ Save detailed validation log to MongoDB
     validation_log_data = {
@@ -1882,6 +1888,7 @@ async def validate(
         "file_validation_results": validation_results["file_results"],
         "summary": validation_results["summary"],
         "minio_uploads": minio_uploads,
+        "flight_uploads": flight_uploads,
         "validation_log_saved": mongo_log_result["status"] == "success",
         "validation_log_id": mongo_log_result.get("mongo_id", ""),
         "total_auto_corrections": validation_results["summary"].get("total_auto_corrections", 0),
