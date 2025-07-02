@@ -78,7 +78,9 @@ const FeatureOverviewSettings: React.FC<FeatureOverviewSettingsProps> = ({ setti
     }
     onSettingsChange({
       dataSource: val,
-      csvDisplay: frames.find(f => f.object_name === val)?.csv_name || val,
+      csvDisplay:
+        (Array.isArray(frames) ? frames : [])
+          .find(f => f.object_name === val)?.csv_name || val,
       selectedColumns: [],
       columnSummary: [],
       allColumns: summary,
@@ -104,12 +106,11 @@ const FeatureOverviewSettings: React.FC<FeatureOverviewSettingsProps> = ({ setti
             <SelectValue placeholder="Select saved dataframe" />
           </SelectTrigger>
           <SelectContent>
-            {Array.isArray(frames) &&
-              frames.map(f => (
-                <SelectItem key={f.object_name} value={f.object_name}>
-                  {f.csv_name.split('/').pop()}
-                </SelectItem>
-              ))}
+            {(Array.isArray(frames) ? frames : []).map(f => (
+              <SelectItem key={f.object_name} value={f.object_name}>
+                {f.csv_name.split('/').pop()}
+              </SelectItem>
+            ))}
           </SelectContent>
         </Select>
       </Card>

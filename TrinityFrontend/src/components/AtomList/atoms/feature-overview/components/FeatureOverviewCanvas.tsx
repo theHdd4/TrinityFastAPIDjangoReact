@@ -79,7 +79,11 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({ settings,
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settings.yAxes, settings.xAxis]);
 
-  if (!Array.isArray(settings.columnSummary) || settings.columnSummary.length === 0) {
+  const summaryList: ColumnInfo[] = Array.isArray(settings.columnSummary)
+    ? settings.columnSummary.filter(Boolean)
+    : [];
+
+  if (summaryList.length === 0) {
     return (
       <div className="w-full h-full flex items-center justify-center text-gray-500">
         {error || 'Please configure Feature Overview Settings'}
@@ -185,7 +189,7 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({ settings,
           {error}
         </div>
       )}
-      {Array.isArray(settings.columnSummary) && settings.columnSummary.length > 0 && (
+      {summaryList.length > 0 && (
         <div className="mb-8">
           <div className="flex items-center mb-6">
             <div className="w-1 h-8 bg-gradient-to-b from-blue-500 to-blue-600 rounded-full mr-4"></div>
@@ -205,7 +209,7 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({ settings,
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {Array.isArray(settings.columnSummary) && settings.columnSummary.filter(Boolean).map((c: ColumnInfo) => (
+                    {summaryList.map((c: ColumnInfo) => (
                       <TableRow key={c.column} className="hover:bg-blue-50/50 transition-all duration-200 border-b border-gray-100">
                         <TableCell className="font-semibold text-gray-900 text-center py-4">{c.column}</TableCell>
                         <TableCell className="text-center py-4">
