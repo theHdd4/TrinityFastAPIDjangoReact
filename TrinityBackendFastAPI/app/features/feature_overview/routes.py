@@ -6,6 +6,8 @@ from fastapi.responses import JSONResponse, Response
 import pandas as pd
 import io
 import json
+import pyarrow as pa
+import pyarrow.ipc as ipc
 from datetime import date, datetime
 from typing import List
 from fastapi import Depends
@@ -98,7 +100,10 @@ async def column_summary(object_name: str):
                 response = minio_client.get_object(MINIO_BUCKET, object_name)
                 content = response.read()
                 redis_client.setex(object_name, 3600, content)
-            if object_name.endswith(".csv"):
+            if object_name.endswith(".arrow"):
+                reader = ipc.RecordBatchFileReader(pa.BufferReader(content))
+                df = reader.read_all().to_pandas()
+            elif object_name.endswith(".csv"):
                 df = pd.read_csv(io.BytesIO(content))
             elif object_name.endswith((".xls", ".xlsx")):
                 df = pd.read_excel(io.BytesIO(content))
