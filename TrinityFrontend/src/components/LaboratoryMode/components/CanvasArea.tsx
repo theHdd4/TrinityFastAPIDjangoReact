@@ -282,6 +282,8 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
             ? { ...DEFAULT_TEXTBOX_SETTINGS }
             : atom.id === 'data-upload-validate'
             ? { ...DEFAULT_DATAUPLOAD_SETTINGS }
+            : atom.id === 'feature-overview'
+            ? { ...DEFAULT_FEATURE_OVERVIEW_SETTINGS }
             : undefined,
       };
       
@@ -292,6 +294,52 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
             : card
         )
       );
+
+      if (atom.id === 'feature-overview') {
+        const prevUpload = (() => {
+          for (let i = layoutCards.length - 1; i >= 0; i--) {
+            const card = layoutCards[i];
+            for (let j = card.atoms.length - 1; j >= 0; j--) {
+              const a = card.atoms[j];
+              if (a.atomId === 'data-upload-validate') {
+                const req = a.settings?.requiredFiles?.[0];
+                if (req) return req as string;
+              }
+            }
+          }
+          return null;
+        })();
+
+        if (prevUpload) {
+          fetch(`${VALIDATE_API}/latest_ticket/${encodeURIComponent(prevUpload)}`)
+            .then(res => (res.ok ? res.json() : null))
+            .then(data => {
+              if (data && data.csv_name) {
+                setLayoutCards(cards =>
+                  cards.map(c =>
+                    c.id === cardId
+                      ? {
+                          ...c,
+                          atoms: c.atoms.map(a =>
+                            a.id === newAtom.id
+                              ? {
+                                  ...a,
+                                  settings: {
+                                    ...(a.settings || {}),
+                                    dataSource: data.csv_name,
+                                  },
+                                }
+                              : a
+                          ),
+                        }
+                      : c
+                  )
+                );
+              }
+            })
+            .catch(() => {});
+        }
+      }
     }
   };
 
@@ -354,6 +402,51 @@ const addNewCard = (moleculeId?: string, position?: number) => {
         card.id === cardId ? { ...card, atoms: [...card.atoms, newAtom] } : card
       )
     );
+
+    if (info.id === 'feature-overview') {
+      const prevUpload = (() => {
+        for (let i = layoutCards.length - 1; i >= 0; i--) {
+          const card = layoutCards[i];
+          for (let j = card.atoms.length - 1; j >= 0; j--) {
+            const a = card.atoms[j];
+            if (a.atomId === 'data-upload-validate') {
+              const req = a.settings?.requiredFiles?.[0];
+              if (req) return req as string;
+            }
+          }
+        }
+        return null;
+      })();
+      if (prevUpload) {
+        fetch(`${VALIDATE_API}/latest_ticket/${encodeURIComponent(prevUpload)}`)
+          .then(res => (res.ok ? res.json() : null))
+          .then(data => {
+            if (data && data.csv_name) {
+              setLayoutCards(cards =>
+                cards.map(c =>
+                  c.id === cardId
+                    ? {
+                        ...c,
+                        atoms: c.atoms.map(a =>
+                          a.id === newAtom.id
+                            ? {
+                                ...a,
+                                settings: {
+                                  ...(a.settings || {}),
+                                  dataSource: data.csv_name,
+                                },
+                              }
+                            : a
+                        ),
+                      }
+                    : c
+                )
+              );
+            }
+          })
+          .catch(() => {});
+      }
+    }
   };
 
 
