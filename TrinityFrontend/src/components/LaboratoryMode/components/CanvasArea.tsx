@@ -107,7 +107,7 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
         const a = card.atoms[j];
         if (a.atomId === 'feature-overview' && a.settings?.dataSource) {
           const cols = await fetchColumnSummary(a.settings.dataSource);
-          return { csv: a.settings.dataSource, ...cols };
+          return { csv: a.settings.dataSource, ...(cols || {}) };
         }
         if (a.atomId === 'data-upload-validate') {
           const req = a.settings?.requiredFiles?.[0];
@@ -120,7 +120,7 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
                 const data = await res.json();
                 if (data.csv_name) {
                   const cols = await fetchColumnSummary(data.csv_name);
-                  return { csv: data.csv_name, ...cols };
+                  return { csv: data.csv_name, ...(cols || {}) };
                 }
               }
             } catch {
