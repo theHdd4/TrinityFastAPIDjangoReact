@@ -2,7 +2,6 @@ import requests
 import json
 import re
 from typing import Dict
-from sentence_transformers import SentenceTransformer
 
 # --- QueryEnhancer class (inlined and domain-tuned for charting) ---
 class QueryEnhancer:
@@ -14,7 +13,6 @@ class QueryEnhancer:
             "Authorization": f"Bearer {bearer_token}",
             "Content-Type": "application/json"
         }
-        self.embedder = SentenceTransformer('all-MiniLM-L6-v2')
 
     def enhance_query(self, raw_query: str) -> Dict:
         if not raw_query or not raw_query.strip():

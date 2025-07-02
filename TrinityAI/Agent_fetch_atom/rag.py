@@ -3,7 +3,7 @@ import pickle
 import os
 import numpy as np
 from typing import List, Dict, Optional
-from sentence_transformers import SentenceTransformer
+from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 from datetime import datetime
 import re
@@ -664,7 +664,9 @@ class AtomKnowledgeBase:
 
 class RAGRetriever:
     def __init__(self, model_name: str = './models/all-MiniLM-L6-v2', embeddings_file: str = "atom_rag_embeddings.pkl"):
-        self.model = SentenceTransformer(model_name)
+        # The model_name argument is kept for backward compatibility but is
+        # unused in this lightweight implementation.
+        self.vectorizer = TfidfVectorizer(stop_words="english")
         self.embeddings_file = embeddings_file
         self.atom_embeddings = None
         self.atom_texts = []
@@ -733,7 +735,7 @@ class RAGRetriever:
             self.function_type_index[canon_ft].append(canon_name)
 
         print("🔄 Generating embeddings...")
-        self.atom_embeddings = self.model.encode(self.atom_texts)
+        self.atom_embeddings = self.vectorizer.fit_transform(self.atom_texts)
         self._save_embeddings()
         print("✅ Created and saved RAG system")
 
@@ -742,6 +744,7 @@ class RAGRetriever:
             with open(self.embeddings_file, 'wb') as f:
                 pickle.dump({
                     'embeddings': self.atom_embeddings,
+                    'vectorizer': self.vectorizer,
                     'texts': self.atom_texts,
                     'keyword_index': self.keyword_index,
                     'semantic_index': self.semantic_index,
@@ -757,6 +760,7 @@ class RAGRetriever:
         with open(self.embeddings_file, 'rb') as f:
             data = pickle.load(f)
             self.atom_embeddings = data['embeddings']
+            self.vectorizer = data.get('vectorizer', self.vectorizer)
             self.atom_texts = data['texts']
             self.keyword_index = data['keyword_index']
             self.semantic_index = data['semantic_index']
@@ -829,7 +833,7 @@ class RAGRetriever:
 
         # Strategy 4: Embedding similarity
         print("🎯 Strategy 4: Embedding similarity")
-        query_embedding = self.model.encode([query])
+        query_embedding = self.vectorizer.transform([query])
         similarities = cosine_similarity(query_embedding, self.atom_embeddings)[0]
         atom_names = AtomKnowledgeBase.get_all_atoms()
         for idx, similarity in enumerate(similarities):

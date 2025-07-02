@@ -1,11 +1,14 @@
-from sentence_transformers import SentenceTransformer
+"""Placeholder script used during Docker build.
+
+The previous version downloaded a SentenceTransformer model which pulled in the
+PyTorch stack. To avoid heavy dependencies we now rely on a lightweight
+TF‑IDF based approach that does not require any external models.  The Docker
+build still invokes this script so it simply ensures the expected directory
+exists.
+"""
+
 from pathlib import Path
 
-MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
-TARGET_DIR = Path("./models/all-MiniLM-L6-v2")
-
-print(f"Downloading {MODEL_NAME} ...")
-model = SentenceTransformer(MODEL_NAME)
+TARGET_DIR = Path("./models")
 TARGET_DIR.mkdir(parents=True, exist_ok=True)
-model.save(str(TARGET_DIR))
-print(f"✅ Model downloaded to {TARGET_DIR}")
+print("✅ No model download required – directory created.")
