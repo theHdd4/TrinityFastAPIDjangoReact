@@ -16,7 +16,7 @@ import Exhibition from "./pages/Exhibition";
 import NotFound from "./pages/NotFound";
 import Users from "./pages/Users";
 import Clients from "./pages/Clients";
-import DataFrameView from "./pages/DataFrameView";
+import DataFrameView from "./components/AtomList/atoms/data-upload-validate/DataFrameView";
 
 const queryClient = new QueryClient();
 
