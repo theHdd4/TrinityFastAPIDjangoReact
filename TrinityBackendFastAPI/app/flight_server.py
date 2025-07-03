@@ -1,5 +1,6 @@
 import os
 import io
+import logging
 import pyarrow as pa
 import pyarrow.flight as flight
 import pyarrow.ipc as ipc
@@ -8,6 +9,8 @@ from minio import Minio
 from minio.error import S3Error
 
 from utils.flight_registry import get_arrow_for_flight_path
+
+logger = logging.getLogger("trinity.flight")
 
 class ArrowFlightServer(flight.FlightServerBase):
     """Simple in-memory Flight server storing Arrow tables by path."""
@@ -41,18 +44,19 @@ class ArrowFlightServer(flight.FlightServerBase):
     def do_put(self, context, descriptor, reader, writer):  # type: ignore[override]
         path = self._path(descriptor)
         table = reader.read_all()
-        print(f"\U0001f4be storing table {path} rows={table.num_rows}")
+        logger.info("💾 storing table %s rows=%d", path, table.num_rows)
         self._tables[path] = table
         writer.write(b"OK")
 
     def do_get(self, context, ticket):  # type: ignore[override]
         path = ticket.ticket.decode()
-        print(f"\U0001f50e fetching table {path}")
+        logger.info("🔎 fetching table %s", path)
         table = self._tables.get(path)
         if table is None and self._minio and self._bucket:
             arrow_obj = get_arrow_for_flight_path(path)
             if arrow_obj:
                 try:
+                    logger.info("⬇️ loading %s from MinIO object %s", path, arrow_obj)
                     resp = self._minio.get_object(self._bucket, arrow_obj)
                     data = resp.read()
                     reader = ipc.RecordBatchFileReader(pa.BufferReader(data))
@@ -62,17 +66,18 @@ class ArrowFlightServer(flight.FlightServerBase):
                     table = None
         if table is None:
             raise flight.FlightUnavailableError(f"No table for {path}")
-        print(f"\u2705 returning table {path} rows={table.num_rows}")
+        logger.info("\u2705 returning table %s rows=%d", path, table.num_rows)
         return flight.RecordBatchStream(table)
 
     def get_flight_info(self, context, descriptor):  # type: ignore[override]
         path = self._path(descriptor)
-        print(f"\u2139\ufe0f info request for {path}")
+        logger.info("\u2139\ufe0f info request for %s", path)
         table = self._tables.get(path)
         if table is None and self._minio and self._bucket:
             arrow_obj = get_arrow_for_flight_path(path)
             if arrow_obj:
                 try:
+                    logger.info("⬇️ loading %s from MinIO object %s", path, arrow_obj)
                     resp = self._minio.get_object(self._bucket, arrow_obj)
                     data = resp.read()
                     reader = ipc.RecordBatchFileReader(pa.BufferReader(data))
@@ -82,7 +87,7 @@ class ArrowFlightServer(flight.FlightServerBase):
                     table = None
         if table is None:
             raise flight.FlightUnavailableError(f"No table for {path}")
-        print(f"\u2705 info found for {path} rows={table.num_rows}")
+        logger.info("\u2705 info found for %s rows=%d", path, table.num_rows)
         endpoint = flight.FlightEndpoint(
             ticket=flight.Ticket(path),
             locations=[flight.Location.for_grpc_tcp(self._host, self._port)],
@@ -90,8 +95,9 @@ class ArrowFlightServer(flight.FlightServerBase):
         return flight.FlightInfo(table.schema, descriptor, [endpoint], table.num_rows, table.nbytes)
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     host = os.getenv("FLIGHT_HOST", "0.0.0.0")
     port = int(os.getenv("FLIGHT_PORT", "8815"))
     server = ArrowFlightServer(host, port)
-    print(f"\u2708\ufe0f Arrow Flight server running on {host}:{port}")
+    logger.info("\u2708\ufe0f Arrow Flight server running on %s:%s", host, port)
     server.serve()

@@ -1,6 +1,7 @@
 from typing import Dict, Tuple
 import json
 import os
+import logging
 from pathlib import Path
 from datetime import datetime
 
@@ -13,6 +14,8 @@ REDIS_HOST = os.getenv("REDIS_HOST", "redis")
 _redis = redis.Redis(host=REDIS_HOST, port=6379, decode_responses=True) if redis else None
 
 REGISTRY_PATH = Path(os.getenv("FLIGHT_REGISTRY_FILE", "arrow_data/flight_registry.json"))
+
+logger = logging.getLogger("trinity.flight")
 
 def _load() -> tuple[Dict[str, str], Dict[str, str], Dict[str, str], Dict[str, str]]:
     if REGISTRY_PATH.exists():
@@ -52,8 +55,12 @@ LATEST_TICKETS_BY_KEY, FILEKEY_TO_CSV, CSV_TO_FLIGHT, ARROW_TO_ORIGINAL = _load(
 
 def set_ticket(file_key: str, arrow_name: str, flight_path: str, original_csv: str) -> None:
     """Register the flight path and mapping for a saved dataframe."""
-    print(
-        f"\U0001f4cc register {file_key}: flight_path={flight_path} arrow={arrow_name} original={original_csv}"
+    logger.info(
+        "\U0001f4cc register %s: flight_path=%s arrow=%s original=%s",
+        file_key,
+        flight_path,
+        arrow_name,
+        original_csv,
     )
     LATEST_TICKETS_BY_KEY[file_key] = flight_path
     FILEKEY_TO_CSV[file_key] = arrow_name
@@ -70,14 +77,14 @@ def set_ticket(file_key: str, arrow_name: str, flight_path: str, original_csv: s
 def get_ticket_by_key(file_key: str) -> Tuple[str | None, str | None]:
     path = LATEST_TICKETS_BY_KEY.get(file_key)
     arrow = FILEKEY_TO_CSV.get(file_key)
-    print(f"\U0001f50e lookup ticket by key {file_key}: {path} -> {arrow}")
+    logger.info("\U0001f50e lookup ticket by key %s: %s -> %s", file_key, path, arrow)
     return path, arrow
 
 
 def get_flight_path_for_csv(csv_name: str) -> str | None:
     """Return the registered flight path for the given CSV."""
     path = CSV_TO_FLIGHT.get(csv_name)
-    print(f"➡️ lookup flight path for {csv_name}: {path}")
+    logger.info("➡️ lookup flight path for %s: %s", csv_name, path)
     return path
 
 
@@ -117,7 +124,7 @@ def get_arrow_for_flight_path(flight_path: str) -> str | None:
     try:
         obj = _redis.get(f"flight:{flight_path}")
         arrow_name = obj if isinstance(obj, str) else obj.decode() if obj else None
-        print(f"\U0001f50d redis lookup {flight_path} -> {arrow_name}")
+        logger.info("\U0001f50d redis lookup %s -> %s", flight_path, arrow_name)
         return arrow_name
     except Exception:
         return None
