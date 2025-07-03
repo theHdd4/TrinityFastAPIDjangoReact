@@ -223,7 +223,7 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({ settings,
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {summaryList.map((c: ColumnInfo) => (
+                    {Array.isArray(summaryList) && summaryList.map((c: ColumnInfo) => (
                       <TableRow key={c.column} className="hover:bg-blue-50/50 transition-all duration-200 border-b border-gray-100">
                         <TableCell className="font-semibold text-gray-900 text-center py-4">{c.column}</TableCell>
                         <TableCell className="text-center py-4">

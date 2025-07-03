@@ -107,6 +107,7 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
   };
 
   const prefetchDataframe = async (name: string) => {
+    if (!name) return;
     try {
       console.log('✈️ fetching flight table', name);
       const fr = await fetch(
