@@ -40,11 +40,14 @@ class ArrowFlightServer(flight.FlightServerBase):
 
     def do_put(self, context, descriptor, reader, writer):  # type: ignore[override]
         path = self._path(descriptor)
-        self._tables[path] = reader.read_all()
+        table = reader.read_all()
+        print(f"\U0001f4be storing table {path} rows={table.num_rows}")
+        self._tables[path] = table
         writer.write(b"OK")
 
     def do_get(self, context, ticket):  # type: ignore[override]
         path = ticket.ticket.decode()
+        print(f"\U0001f50e fetching table {path}")
         table = self._tables.get(path)
         if table is None and self._minio and self._bucket:
             arrow_obj = get_arrow_for_flight_path(path)
@@ -59,10 +62,12 @@ class ArrowFlightServer(flight.FlightServerBase):
                     table = None
         if table is None:
             raise flight.FlightUnavailableError(f"No table for {path}")
+        print(f"\u2705 returning table {path} rows={table.num_rows}")
         return flight.RecordBatchStream(table)
 
     def get_flight_info(self, context, descriptor):  # type: ignore[override]
         path = self._path(descriptor)
+        print(f"\u2139\ufe0f info request for {path}")
         table = self._tables.get(path)
         if table is None and self._minio and self._bucket:
             arrow_obj = get_arrow_for_flight_path(path)
@@ -77,6 +82,7 @@ class ArrowFlightServer(flight.FlightServerBase):
                     table = None
         if table is None:
             raise flight.FlightUnavailableError(f"No table for {path}")
+        print(f"\u2705 info found for {path} rows={table.num_rows}")
         endpoint = flight.FlightEndpoint(
             ticket=flight.Ticket(path),
             locations=[flight.Location.for_grpc_tcp(self._host, self._port)],

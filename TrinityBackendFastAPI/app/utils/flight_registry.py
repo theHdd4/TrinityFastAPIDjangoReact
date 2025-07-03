@@ -52,6 +52,9 @@ LATEST_TICKETS_BY_KEY, FILEKEY_TO_CSV, CSV_TO_FLIGHT, ARROW_TO_ORIGINAL = _load(
 
 def set_ticket(file_key: str, arrow_name: str, flight_path: str, original_csv: str) -> None:
     """Register the flight path and mapping for a saved dataframe."""
+    print(
+        f"\U0001f4cc register {file_key}: flight_path={flight_path} arrow={arrow_name} original={original_csv}"
+    )
     LATEST_TICKETS_BY_KEY[file_key] = flight_path
     FILEKEY_TO_CSV[file_key] = arrow_name
     CSV_TO_FLIGHT[arrow_name] = flight_path
@@ -65,7 +68,10 @@ def set_ticket(file_key: str, arrow_name: str, flight_path: str, original_csv: s
 
 
 def get_ticket_by_key(file_key: str) -> Tuple[str | None, str | None]:
-    return LATEST_TICKETS_BY_KEY.get(file_key), FILEKEY_TO_CSV.get(file_key)
+    path = LATEST_TICKETS_BY_KEY.get(file_key)
+    arrow = FILEKEY_TO_CSV.get(file_key)
+    print(f"\U0001f50e lookup ticket by key {file_key}: {path} -> {arrow}")
+    return path, arrow
 
 
 def get_flight_path_for_csv(csv_name: str) -> str | None:
@@ -110,6 +116,8 @@ def get_arrow_for_flight_path(flight_path: str) -> str | None:
         return None
     try:
         obj = _redis.get(f"flight:{flight_path}")
-        return obj if isinstance(obj, str) else obj.decode() if obj else None
+        arrow_name = obj if isinstance(obj, str) else obj.decode() if obj else None
+        print(f"\U0001f50d redis lookup {flight_path} -> {arrow_name}")
+        return arrow_name
     except Exception:
         return None
