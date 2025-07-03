@@ -3,6 +3,7 @@ import logging
 import pandas as pd
 import pyarrow as pa
 import pyarrow.flight as flight
+import pyarrow.ipc as ipc
 
 _client: flight.FlightClient | None = None
 logger = logging.getLogger("trinity.flight")
