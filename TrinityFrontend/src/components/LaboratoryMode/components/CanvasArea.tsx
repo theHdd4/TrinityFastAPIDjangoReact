@@ -92,6 +92,7 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
       }
       const data = await res.json();
       const summary: ColumnInfo[] = (data.summary || []).filter(Boolean);
+      console.log('ℹ️ fetched column summary rows', summary.length);
       const numeric = summary
         .filter(c => !['object', 'string'].includes(c.data_type.toLowerCase()))
         .map(c => c.column);
@@ -198,6 +199,7 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
       console.warn('⚠️ no data source found for feature overview');
       return;
     }
+    console.log('ℹ️ prefill data source details', prev);
     await prefetchDataframe(prev.csv);
     console.log('✅ pre-filling feature overview with', prev.csv);
     const summary = Array.isArray(prev.summary) ? prev.summary : [];
@@ -207,7 +209,9 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
         ? summary.filter(s => identifiers.includes(s.column))
         : summary;
     const selected =
-      identifiers.length > 0 ? identifiers : summary.map(cc => cc.column);
+      identifiers.length > 0
+        ? identifiers
+        : (Array.isArray(summary) ? summary : []).map(cc => cc.column);
 
     setLayoutCards(cards =>
       cards.map(c =>

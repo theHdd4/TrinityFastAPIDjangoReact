@@ -25,9 +25,15 @@ interface FeatureOverviewCanvasProps {
 }
 
 const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({ settings, onUpdateSettings }) => {
-  const [marketDims, setMarketDims] = useState<string[]>(settings.marketDims || []);
-  const [productDims, setProductDims] = useState<string[]>(settings.productDims || []);
-  const [skuRows, setSkuRows] = useState<any[]>(settings.skuTable || []);
+  const [marketDims, setMarketDims] = useState<string[]>(
+    Array.isArray(settings.marketDims) ? settings.marketDims : []
+  );
+  const [productDims, setProductDims] = useState<string[]>(
+    Array.isArray(settings.productDims) ? settings.productDims : []
+  );
+  const [skuRows, setSkuRows] = useState<any[]>(
+    Array.isArray(settings.skuTable) ? settings.skuTable : []
+  );
   const [showMarketSelect, setShowMarketSelect] = useState(false);
   const [showProductSelect, setShowProductSelect] = useState(false);
   const [activeRow, setActiveRow] = useState<number | null>(settings.activeRow ?? null);
@@ -44,15 +50,17 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({ settings,
   }, [settings.yAxes]);
 
   useEffect(() => {
-    setMarketDims(settings.marketDims || []);
+    setMarketDims(Array.isArray(settings.marketDims) ? settings.marketDims : []);
   }, [settings.marketDims]);
 
   useEffect(() => {
-    setProductDims(settings.productDims || []);
+    setProductDims(
+      Array.isArray(settings.productDims) ? settings.productDims : []
+    );
   }, [settings.productDims]);
 
   useEffect(() => {
-    setSkuRows(settings.skuTable || []);
+    setSkuRows(Array.isArray(settings.skuTable) ? settings.skuTable : []);
   }, [settings.skuTable]);
 
   useEffect(() => {
