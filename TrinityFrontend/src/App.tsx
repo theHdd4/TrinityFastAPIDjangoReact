@@ -16,6 +16,7 @@ import Exhibition from "./pages/Exhibition";
 import NotFound from "./pages/NotFound";
 import Users from "./pages/Users";
 import Clients from "./pages/Clients";
+import DataFrameView from "./pages/DataFrameView";
 
 const queryClient = new QueryClient();
 
@@ -66,6 +67,11 @@ const App = () => (
             <Route path="/clients" element={
               <ProtectedRoute>
                 <Clients />
+              </ProtectedRoute>
+            } />
+            <Route path="/dataframe" element={
+              <ProtectedRoute>
+                <DataFrameView />
               </ProtectedRoute>
             } />
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}

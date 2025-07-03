@@ -23,12 +23,8 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle }) => {
       .catch(() => setFiles([]));
   }, [isOpen]);
 
-  const handleOpen = async (obj: string) => {
-    const res = await fetch(`${VALIDATE_API}/download_dataframe?object_name=${encodeURIComponent(obj)}`);
-    if (res.ok) {
-      const { url } = await res.json();
-      window.open(url, '_blank');
-    }
+  const handleOpen = (obj: string) => {
+    window.open(`/dataframe?name=${encodeURIComponent(obj)}`, '_blank');
   };
 
   const deleteAll = async () => {
