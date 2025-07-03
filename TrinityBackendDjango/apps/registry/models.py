@@ -100,6 +100,9 @@ class LaboratoryAction(models.Model):
 class ArrowDataset(models.Model):
     """Registry entry for Arrow data saved from the upload atom."""
 
+    project = models.ForeignKey(
+        Project, on_delete=models.CASCADE, related_name="arrow_datasets"
+    )
     atom_id = models.CharField(max_length=150)
     file_key = models.CharField(max_length=150)
     arrow_object = models.CharField(max_length=200)

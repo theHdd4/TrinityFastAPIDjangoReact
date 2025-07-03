@@ -4,6 +4,14 @@ import os
 from pathlib import Path
 from datetime import datetime
 
+try:
+    import redis  # type: ignore
+except ModuleNotFoundError:  # pragma: no cover
+    redis = None
+
+REDIS_HOST = os.getenv("REDIS_HOST", "redis")
+_redis = redis.Redis(host=REDIS_HOST, port=6379, decode_responses=True) if redis else None
+
 REGISTRY_PATH = Path(os.getenv("FLIGHT_REGISTRY_FILE", "arrow_data/flight_registry.json"))
 
 def _load() -> tuple[Dict[str, str], Dict[str, str], Dict[str, str], Dict[str, str]]:
@@ -49,6 +57,11 @@ def set_ticket(file_key: str, arrow_name: str, flight_path: str, original_csv: s
     CSV_TO_FLIGHT[arrow_name] = flight_path
     ARROW_TO_ORIGINAL[arrow_name] = original_csv
     _save()
+    if _redis is not None:
+        try:
+            _redis.set(f"flight:{flight_path}", arrow_name)
+        except Exception:
+            pass
 
 
 def get_ticket_by_key(file_key: str) -> Tuple[str | None, str | None]:
@@ -89,3 +102,14 @@ def get_latest_ticket_for_basename(csv_base: str) -> Tuple[str | None, str | Non
     matches.sort(key=lambda x: x[0], reverse=True)
     _, path, name = matches[0]
     return path, name
+
+
+def get_arrow_for_flight_path(flight_path: str) -> str | None:
+    """Return stored arrow object for the given flight path from Redis."""
+    if _redis is None:
+        return None
+    try:
+        obj = _redis.get(f"flight:{flight_path}")
+        return obj if isinstance(obj, str) else obj.decode() if obj else None
+    except Exception:
+        return None

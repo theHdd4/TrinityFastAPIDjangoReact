@@ -15,6 +15,8 @@ without hitting object storage.
    uploaded to the Flight server via `upload_dataframe`.
 4. Metadata (validator id, file key, Arrow object name and Flight path) is
    recorded in Postgres for reference.
+5. The mapping `flight_path -> arrow_object_name` is cached in Redis so the
+   Flight server can lazily load tables from MinIO when needed.
 
 Saved tables appear in the **Saved DataFrames** panel. They are sorted by the
 latest upload timestamp so newly saved files are shown first.
@@ -32,3 +34,8 @@ print(df.head())
 
 If the dataframe prints without errors the Flight server is correctly serving the
 stored table. `tests/test_arrow_flight.py` provides an automated round‑trip test.
+
+Because the Flight service only keeps a small in‑memory cache it will look up the
+`flight_path` in Redis whenever it needs to serve a table that was not uploaded
+in the current session. The Arrow object is fetched from MinIO and cached for the
+next request.

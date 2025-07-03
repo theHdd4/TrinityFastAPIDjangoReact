@@ -110,4 +110,7 @@ class ArrowDatasetViewSet(viewsets.ModelViewSet):
         atom = self.request.query_params.get("atom_id")
         if atom:
             qs = qs.filter(atom_id=atom)
+        project = self.request.query_params.get("project")
+        if project:
+            qs = qs.filter(project_id=project)
         return qs

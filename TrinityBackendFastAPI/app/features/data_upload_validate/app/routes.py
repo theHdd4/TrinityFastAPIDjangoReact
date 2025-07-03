@@ -3005,14 +3005,17 @@ async def save_dataframes(
         result = upload_to_minio(arrow_buf.getvalue(), arrow_name, validator_atom_id, key)
         flight_path = f"{validator_atom_id}/{key}"
         upload_dataframe(df, flight_path)
+
         set_ticket(
             key,
             result.get("object_name", ""),
             flight_path,
             file.filename,
         )
+        redis_client.set(f"flight:{flight_path}", result.get("object_name", ""))
 
         await record_arrow_dataset(
+            PROJECT_ID,
             validator_atom_id,
             key,
             result.get("object_name", ""),
@@ -3048,7 +3051,7 @@ async def list_saved_dataframes():
         files = [
             {
                 "object_name": name,
-                "csv_name": get_original_csv(name) or name,
+                "csv_name": Path(get_original_csv(name) or name).stem,
             }
             for _, name in entries
         ]

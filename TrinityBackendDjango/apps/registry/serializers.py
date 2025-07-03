@@ -54,6 +54,7 @@ class ArrowDatasetSerializer(serializers.ModelSerializer):
         model = ArrowDataset
         fields = [
             "id",
+            "project",
             "atom_id",
             "file_key",
             "arrow_object",

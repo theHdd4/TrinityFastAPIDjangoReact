@@ -45,6 +45,9 @@ def test_flight_registry():
     path2, arrow2 = flight_registry.get_latest_ticket_for_basename("file.csv")
     assert path2 == "path/to/table"
     assert arrow2 == "file.arrow"
+    arrow_obj = flight_registry.get_arrow_for_flight_path("path/to/table")
+    if arrow_obj is not None:
+        assert arrow_obj == "file.arrow"
 
 
 def test_registry_persistence(tmp_path, monkeypatch):

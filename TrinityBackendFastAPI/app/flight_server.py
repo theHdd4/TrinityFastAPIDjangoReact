@@ -1,6 +1,13 @@
 import os
+import io
 import pyarrow as pa
 import pyarrow.flight as flight
+import pyarrow.ipc as ipc
+
+from minio import Minio
+from minio.error import S3Error
+
+from utils.flight_registry import get_arrow_for_flight_path
 
 class ArrowFlightServer(flight.FlightServerBase):
     """Simple in-memory Flight server storing Arrow tables by path."""
@@ -11,6 +18,19 @@ class ArrowFlightServer(flight.FlightServerBase):
         location = f"grpc://{host}:{port}"
         super().__init__(location)
         self._tables: dict[str, pa.Table] = {}
+        self._minio = None
+        endpoint = os.getenv("MINIO_ENDPOINT")
+        access = os.getenv("MINIO_ACCESS_KEY")
+        secret = os.getenv("MINIO_SECRET_KEY")
+        bucket = os.getenv("MINIO_BUCKET")
+        if endpoint and access and secret and bucket:
+            self._bucket = bucket
+            try:
+                self._minio = Minio(endpoint, access_key=access, secret_key=secret, secure=False)
+            except Exception:
+                self._minio = None
+        else:
+            self._bucket = None
 
     def _path(self, descriptor: flight.FlightDescriptor) -> str:
         return "/".join(
@@ -26,6 +46,17 @@ class ArrowFlightServer(flight.FlightServerBase):
     def do_get(self, context, ticket):  # type: ignore[override]
         path = ticket.ticket.decode()
         table = self._tables.get(path)
+        if table is None and self._minio and self._bucket:
+            arrow_obj = get_arrow_for_flight_path(path)
+            if arrow_obj:
+                try:
+                    resp = self._minio.get_object(self._bucket, arrow_obj)
+                    data = resp.read()
+                    reader = ipc.RecordBatchFileReader(pa.BufferReader(data))
+                    table = reader.read_all()
+                    self._tables[path] = table
+                except S3Error:
+                    table = None
         if table is None:
             raise flight.FlightUnavailableError(f"No table for {path}")
         return flight.RecordBatchStream(table)
@@ -33,6 +64,17 @@ class ArrowFlightServer(flight.FlightServerBase):
     def get_flight_info(self, context, descriptor):  # type: ignore[override]
         path = self._path(descriptor)
         table = self._tables.get(path)
+        if table is None and self._minio and self._bucket:
+            arrow_obj = get_arrow_for_flight_path(path)
+            if arrow_obj:
+                try:
+                    resp = self._minio.get_object(self._bucket, arrow_obj)
+                    data = resp.read()
+                    reader = ipc.RecordBatchFileReader(pa.BufferReader(data))
+                    table = reader.read_all()
+                    self._tables[path] = table
+                except S3Error:
+                    table = None
         if table is None:
             raise flight.FlightUnavailableError(f"No table for {path}")
         endpoint = flight.FlightEndpoint(
