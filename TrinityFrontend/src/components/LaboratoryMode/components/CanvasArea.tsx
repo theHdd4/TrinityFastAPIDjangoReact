@@ -106,8 +106,18 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
     }
   };
 
-  const prefetchDataframe = async (name: string) => {
+  const prefetchDataframe = async (name: string, flightPath?: string) => {
     try {
+      if (flightPath) {
+        console.log('✈️ fetching flight table', flightPath);
+        const fr = await fetch(
+          `${FEATURE_OVERVIEW_API}/flight_table?object_name=${encodeURIComponent(name)}`
+        );
+        if (fr.ok) {
+          await fr.arrayBuffer();
+          console.log('✅ fetched flight table', name);
+        }
+      }
       console.log('🔎 prefetching dataframe', name);
       const res = await fetch(
         `${FEATURE_OVERVIEW_API}/cached_dataframe?object_name=${encodeURIComponent(name)}`
@@ -137,6 +147,7 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
             csv: a.settings.dataSource,
             display: a.settings.csvDisplay || a.settings.dataSource,
             identifiers: a.settings.selectedColumns || [],
+            flightPath: undefined,
             ...(cols || {}),
           };
         }
@@ -155,7 +166,7 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
                 const ticket = await ticketRes.json();
                 if (ticket.arrow_name) {
                   console.log('✔️ using validated data source', ticket.arrow_name);
-                  await prefetchDataframe(ticket.arrow_name);
+                  await prefetchDataframe(ticket.arrow_name, ticket.flight_path);
                   const cols = await fetchColumnSummary(ticket.arrow_name);
                   let ids: string[] = [];
                   if (confRes && confRes.ok) {
@@ -163,7 +174,13 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
                     ids =
                       cfg.classification?.[req]?.final_classification?.identifiers || [];
                   }
-                  return { csv: ticket.arrow_name, display: ticket.csv_name, identifiers: ids, ...(cols || {}) };
+                  return {
+                    csv: ticket.arrow_name,
+                    display: ticket.csv_name,
+                    identifiers: ids,
+                    flightPath: ticket.flight_path,
+                    ...(cols || {}),
+                  };
                 }
               }
             } catch {
@@ -200,7 +217,7 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
       return;
     }
     console.log('ℹ️ prefill data source details', prev);
-    await prefetchDataframe(prev.csv);
+    await prefetchDataframe(prev.csv, prev.flightPath);
     console.log('✅ pre-filling feature overview with', prev.csv);
     const summary = Array.isArray(prev.summary) ? prev.summary : [];
     const identifiers = Array.isArray(prev.identifiers) ? prev.identifiers : [];

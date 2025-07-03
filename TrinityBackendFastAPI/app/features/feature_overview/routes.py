@@ -191,6 +191,29 @@ async def cached_dataframe(object_name: str):
         raise HTTPException(status_code=400, detail=str(e))
 
 
+@router.get("/flight_table")
+async def flight_table(object_name: str):
+    """Return the Arrow table for the given object using Arrow Flight."""
+    object_name = unquote(object_name)
+    print(f"➡️ flight_table request: {object_name}")
+    flight_path = get_flight_path_for_csv(object_name)
+    if not flight_path:
+        raise HTTPException(status_code=404, detail="Flight path not found")
+    try:
+        df = download_dataframe(flight_path)
+        table = pa.Table.from_pandas(df)
+        sink = pa.BufferOutputStream()
+        with ipc.new_file(sink, table.schema) as writer:
+            writer.write_table(table)
+        return Response(
+            sink.getvalue().to_pybytes(),
+            media_type="application/vnd.apache.arrow.file",
+        )
+    except Exception as e:
+        print(f"⚠️ flight_table error for {object_name}: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 @router.get("/sku_stats")
 async def sku_stats(object_name: str, y_column: str, combination: str, x_column: str = "date"):
     """Return time series and summary for a specific SKU combination."""

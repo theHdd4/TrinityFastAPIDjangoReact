@@ -55,6 +55,9 @@ const FeatureOverviewSettings: React.FC<FeatureOverviewSettingsProps> = ({ setti
   }, [settings.allColumns, settings.selectedColumns]);
 
   const handleFrameChange = async (val: string) => {
+    if (!val.endsWith('.arrow')) {
+      val += '.arrow';
+    }
     setSelectedIds([]);
     const res = await fetch(
       `${FEATURE_OVERVIEW_API}/column_summary?object_name=${encodeURIComponent(val)}`
