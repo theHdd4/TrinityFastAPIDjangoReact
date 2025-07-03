@@ -226,3 +226,53 @@ def test_delete_dataframe_route(monkeypatch):
     assert resp.json()["deleted"] == "pref/data.arrow"
     assert dummy_db_delete.called == "pref/data.arrow"
 
+
+def test_save_dataframe_skip_existing(monkeypatch):
+    routes = load_routes()
+
+    class DummyMinio:
+        def __init__(self):
+            self.put_called = False
+
+        def put_object(self, *a, **k):
+            self.put_called = True
+            return types.SimpleNamespace(etag="1")
+
+    class DummyRedis:
+        def set(self, *a, **k):
+            pass
+
+        def setex(self, *a, **k):
+            pass
+
+    async def dummy_exists(p, a, k):
+        return True
+
+    monkeypatch.setattr(routes, "minio_client", DummyMinio())
+    monkeypatch.setattr(routes, "redis_client", DummyRedis())
+    monkeypatch.setattr(routes, "MINIO_BUCKET", "bucket")
+    monkeypatch.setattr(routes, "OBJECT_PREFIX", "pref/")
+    monkeypatch.setattr(routes, "arrow_dataset_exists", dummy_exists)
+    monkeypatch.setattr(routes, "record_arrow_dataset", lambda *a, **k: None)
+    monkeypatch.setattr(routes, "upload_dataframe", lambda df, path: None)
+    monkeypatch.setattr(routes, "set_ticket", lambda *a, **k: None)
+
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    app = FastAPI()
+    app.include_router(routes.router)
+    client = TestClient(app)
+
+    resp = client.post(
+        "/save_dataframes",
+        data={
+            "validator_atom_id": "vid",
+            "file_keys": json.dumps(["k"]),
+        },
+        files={"files": ("f.csv", b"a,b\n1,2", "text/csv")},
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["minio_uploads"][0]["already_saved"] is True
+

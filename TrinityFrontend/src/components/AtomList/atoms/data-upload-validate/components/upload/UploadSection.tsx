@@ -30,6 +30,7 @@ interface UploadSectionProps {
   isDragOver: boolean;
   requiredOptions: string[];
   onDeleteFile: (name: string) => void;
+  saveStatus: Record<string, string>;
 }
 
 const UploadSection: React.FC<UploadSectionProps> = ({
@@ -50,7 +51,8 @@ const UploadSection: React.FC<UploadSectionProps> = ({
   saveEnabled,
   isDragOver,
   requiredOptions,
-  onDeleteFile
+  onDeleteFile,
+  saveStatus
 }) => (
   <Card className="h-full flex flex-col shadow-sm border-0 bg-white">
     <div className="p-4 border-b border-gray-100">
@@ -80,6 +82,9 @@ const UploadSection: React.FC<UploadSectionProps> = ({
                   >
                     {validationResults[file.name]}
                   </p>
+                )}
+                {saveStatus[file.name] && (
+                  <p className="text-xs text-blue-600">{saveStatus[file.name]}</p>
                 )}
               </div>
             </div>

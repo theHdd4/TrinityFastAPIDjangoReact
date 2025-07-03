@@ -32,6 +32,7 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
   const [validationResults, setValidationResults] = useState<Record<string, string>>({});
   const [validationDetails, setValidationDetails] = useState<Record<string, any[]>>({});
   const [openValidatedFile, setOpenValidatedFile] = useState<string | null>(null);
+  const [saveStatus, setSaveStatus] = useState<Record<string, string>>({});
 
   useEffect(() => {
     setFileAssignments(settings.fileMappings || {});
@@ -116,6 +117,10 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
       return rest;
     });
     setValidationDetails(prev => {
+      const { [name]: _, ...rest } = prev;
+      return rest;
+    });
+    setSaveStatus(prev => {
       const { [name]: _, ...rest } = prev;
       return rest;
     });
@@ -245,7 +250,18 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
     uploadedFiles.forEach(f => form.append('files', f));
     const keys = uploadedFiles.map(f => fileAssignments[f.name] || '');
     form.append('file_keys', JSON.stringify(keys));
-    await fetch(`${VALIDATE_API}/save_dataframes`, { method: 'POST', body: form });
+    const res = await fetch(`${VALIDATE_API}/save_dataframes`, { method: 'POST', body: form });
+    if (res.ok) {
+      const data = await res.json();
+      const newStatus: Record<string, string> = {};
+      data.minio_uploads.forEach((r: any, idx: number) => {
+        if (r.already_saved) {
+          const name = uploadedFiles[idx]?.name;
+          if (name) newStatus[name] = 'File is already saved';
+        }
+      });
+      setSaveStatus(prev => ({ ...prev, ...newStatus }));
+    }
   };
 
   const dimensions = [
@@ -349,6 +365,7 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
                 isDragOver={isDragOver}
                 requiredOptions={settings.requiredFiles || []}
                 onDeleteFile={handleDeleteFile}
+                saveStatus={saveStatus}
               />
             </div>
 

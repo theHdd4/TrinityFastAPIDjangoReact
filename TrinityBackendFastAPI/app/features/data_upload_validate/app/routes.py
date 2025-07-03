@@ -107,6 +107,7 @@ from app.utils.db import (
     record_arrow_dataset,
     rename_arrow_dataset,
     delete_arrow_dataset,
+    arrow_dataset_exists,
 )
 from app.utils.arrow_client import upload_dataframe
 from app.utils.flight_registry import (
@@ -2990,12 +2991,18 @@ async def save_dataframes(
         else:
             raise HTTPException(status_code=400, detail="Unsupported file type")
 
+
+        arrow_name = Path(file.filename).stem + ".arrow"
+        if await arrow_dataset_exists(PROJECT_ID, validator_atom_id, key):
+            uploads.append({"file_key": key, "already_saved": True})
+            flights.append({"file_key": key})
+            continue
+
         arrow_buf = io.BytesIO()
         table = pa.Table.from_pandas(df)
         with ipc.new_file(arrow_buf, table.schema) as writer:
             writer.write_table(table)
 
-        arrow_name = Path(file.filename).stem + ".arrow"
         result = upload_to_minio(arrow_buf.getvalue(), arrow_name, validator_atom_id, key)
         flight_path = f"{validator_atom_id}/{key}"
         upload_dataframe(df, flight_path)
@@ -3017,7 +3024,12 @@ async def save_dataframes(
             file.filename,
         )
 
-        uploads.append({"file_key": key, "filename": arrow_name, "minio_upload": result})
+        uploads.append({
+            "file_key": key,
+            "filename": arrow_name,
+            "minio_upload": result,
+            "already_saved": False,
+        })
         flights.append({"file_key": key, "flight_path": flight_path})
 
     return {"minio_uploads": uploads, "flight_uploads": flights}

@@ -148,3 +148,28 @@ async def delete_arrow_dataset(arrow_object: str) -> None:
     finally:
         await conn.close()
 
+
+async def arrow_dataset_exists(project_id: int, atom_id: str, file_key: str) -> bool:
+    """Return True if a dataset entry already exists for this file."""
+    if asyncpg is None:
+        return False
+    try:
+        conn = await asyncpg.connect(
+            host=POSTGRES_HOST,
+            user=POSTGRES_USER,
+            password=POSTGRES_PASSWORD,
+            database=POSTGRES_DB,
+        )
+    except Exception:
+        return False
+    try:
+        row = await conn.fetchrow(
+            "SELECT id FROM registry_arrowdataset WHERE project_id=$1 AND atom_id=$2 AND file_key=$3",
+            project_id,
+            atom_id,
+            file_key,
+        )
+        return row is not None
+    finally:
+        await conn.close()
+
