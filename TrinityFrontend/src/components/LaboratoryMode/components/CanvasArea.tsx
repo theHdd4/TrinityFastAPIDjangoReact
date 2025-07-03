@@ -111,7 +111,7 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
       if (flightPath) {
         console.log('✈️ fetching flight table', flightPath);
         const fr = await fetch(
-          `${FEATURE_OVERVIEW_API}/flight_table?object_name=${encodeURIComponent(name)}`
+          `${FEATURE_OVERVIEW_API}/flight_table?object_name=${encodeURIComponent(name)}&flight_path=${encodeURIComponent(flightPath)}`
         );
         if (fr.ok) {
           await fr.arrayBuffer();

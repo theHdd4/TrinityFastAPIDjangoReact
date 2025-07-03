@@ -40,3 +40,22 @@ def download_dataframe(path: str) -> pd.DataFrame:
     except Exception as e:
         logger.error("❌ flight download failed for %s: %s", path, e)
         raise
+
+
+def download_table_bytes(path: str) -> bytes:
+    """Return the Arrow IPC bytes for the table at the given flight path."""
+    logger.info("⬇️ downloading arrow bytes via flight: %s", path)
+    client = _get_client()
+    descriptor = flight.FlightDescriptor.for_path(path)
+    try:
+        info = client.get_flight_info(descriptor)
+        reader = client.do_get(info.endpoints[0].ticket)
+        sink = pa.BufferOutputStream()
+        with ipc.new_file(sink, reader.schema) as writer:
+            for chunk in reader:
+                writer.write_batch(chunk)
+        logger.info("✔️ downloaded arrow bytes %s", path)
+        return sink.getvalue().to_pybytes()
+    except Exception as e:
+        logger.error("❌ flight byte download failed for %s: %s", path, e)
+        raise

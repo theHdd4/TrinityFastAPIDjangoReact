@@ -28,7 +28,7 @@ from .mongodb_saver import (
 
 from .feature_overview.base import run_unique_count,run_feature_overview, output_store, unique_count
 from app.utils.db import fetch_client_app_project
-from app.utils.arrow_client import download_dataframe
+from app.utils.arrow_client import download_dataframe, download_table_bytes
 from app.utils.flight_registry import get_flight_path_for_csv
 import asyncio
 
@@ -192,23 +192,16 @@ async def cached_dataframe(object_name: str):
 
 
 @router.get("/flight_table")
-async def flight_table(object_name: str):
-    """Return the Arrow table for the given object using Arrow Flight."""
+async def flight_table(object_name: str, flight_path: str | None = None):
+    """Return the Arrow IPC file for the given object via Arrow Flight."""
     object_name = unquote(object_name)
-    print(f"➡️ flight_table request: {object_name}")
-    flight_path = get_flight_path_for_csv(object_name)
+    flight_path = unquote(flight_path) if flight_path else get_flight_path_for_csv(object_name)
+    print(f"➡️ flight_table request: {object_name} path={flight_path}")
     if not flight_path:
         raise HTTPException(status_code=404, detail="Flight path not found")
     try:
-        df = download_dataframe(flight_path)
-        table = pa.Table.from_pandas(df)
-        sink = pa.BufferOutputStream()
-        with ipc.new_file(sink, table.schema) as writer:
-            writer.write_table(table)
-        return Response(
-            sink.getvalue().to_pybytes(),
-            media_type="application/vnd.apache.arrow.file",
-        )
+        data = download_table_bytes(flight_path)
+        return Response(data, media_type="application/vnd.apache.arrow.file")
     except Exception as e:
         print(f"⚠️ flight_table error for {object_name}: {e}")
         raise HTTPException(status_code=400, detail=str(e))
