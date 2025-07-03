@@ -192,10 +192,10 @@ async def cached_dataframe(object_name: str):
 
 
 @router.get("/flight_table")
-async def flight_table(object_name: str, flight_path: str | None = None):
+async def flight_table(object_name: str):
     """Return the Arrow IPC file for the given object via Arrow Flight."""
     object_name = unquote(object_name)
-    flight_path = unquote(flight_path) if flight_path else get_flight_path_for_csv(object_name)
+    flight_path = get_flight_path_for_csv(object_name)
     print(f"➡️ flight_table request: {object_name} path={flight_path}")
     if not flight_path:
         raise HTTPException(status_code=404, detail="Flight path not found")
