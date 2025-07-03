@@ -54,7 +54,8 @@ def download_table_bytes(path: str) -> bytes:
         sink = pa.BufferOutputStream()
         with ipc.new_file(sink, reader.schema) as writer:
             for chunk in reader:
-                writer.write_batch(chunk)
+                # each chunk is a FlightStreamChunk, so use its .data RecordBatch
+                writer.write_batch(chunk.data)
         logger.info("✔️ downloaded arrow bytes %s", path)
         return sink.getvalue().to_pybytes()
     except Exception as e:
