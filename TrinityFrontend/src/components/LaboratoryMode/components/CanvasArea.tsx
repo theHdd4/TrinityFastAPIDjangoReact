@@ -134,6 +134,7 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
 
   const findLatestDataSource = async () => {
     console.log('🔎 searching for latest data source');
+    if (!Array.isArray(layoutCards)) return null;
     for (let i = layoutCards.length - 1; i >= 0; i--) {
       const card = layoutCards[i];
       for (let j = card.atoms.length - 1; j >= 0; j--) {
@@ -382,7 +383,9 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
   // Persist layout to localStorage safely and store undo snapshot
   useEffect(() => {
     if (initialLoad.current) {
-      prevLayout.current = layoutCards.map(c => ({ ...c, atoms: [...c.atoms] }));
+      prevLayout.current = Array.isArray(layoutCards)
+        ? layoutCards.map(c => ({ ...c, atoms: [...c.atoms] }))
+        : [];
       initialLoad.current = false;
     } else if (prevLayout.current) {
       const current = localStorage.getItem('current-project');
@@ -399,17 +402,21 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
           /* ignore */
         }
       }
-      prevLayout.current = layoutCards.map(c => ({ ...c, atoms: [...c.atoms] }));
+      prevLayout.current = Array.isArray(layoutCards)
+        ? layoutCards.map(c => ({ ...c, atoms: [...c.atoms] }))
+        : [];
     }
 
     try {
-      const serializable = layoutCards.map(card => ({
+      const serializable = (Array.isArray(layoutCards) ? layoutCards : []).map(
+        card => ({
         id: card.id,
         atoms: card.atoms.map(a => ({ ...a })),
         isExhibited: card.isExhibited,
         moleculeId: card.moleculeId,
         moleculeTitle: card.moleculeTitle
-      }));
+        })
+      );
       localStorage.setItem(STORAGE_KEY, safeStringify(serializable));
 
       const labConfig = {
@@ -479,7 +486,7 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
       };
       
       setLayoutCards(
-        layoutCards.map(card =>
+        (Array.isArray(layoutCards) ? layoutCards : []).map(card =>
           card.id === cardId
             ? { ...card, atoms: [...card.atoms, newAtom] }
             : card
@@ -502,19 +509,20 @@ const addNewCard = (moleculeId?: string, position?: number) => {
     moleculeTitle: info?.title
   };
   if (position === undefined || position >= layoutCards.length) {
-    setLayoutCards([...layoutCards, newCard]);
+    setLayoutCards([...(Array.isArray(layoutCards) ? layoutCards : []), newCard]);
   } else {
+    const arr = Array.isArray(layoutCards) ? layoutCards : [];
     setLayoutCards([
-      ...layoutCards.slice(0, position),
+      ...arr.slice(0, position),
       newCard,
-      ...layoutCards.slice(position)
+      ...arr.slice(position)
     ]);
   }
 };
 
   const removeAtom = (cardId: string, atomId: string) => {
     setLayoutCards(
-      layoutCards.map(card =>
+      (Array.isArray(layoutCards) ? layoutCards : []).map(card =>
         card.id === cardId
           ? { ...card, atoms: card.atoms.filter(atom => atom.id !== atomId) }
           : card
@@ -547,7 +555,7 @@ const addNewCard = (moleculeId?: string, position?: number) => {
           : undefined,
     };
     setLayoutCards(
-      layoutCards.map(card =>
+      (Array.isArray(layoutCards) ? layoutCards : []).map(card =>
         card.id === cardId ? { ...card, atoms: [...card.atoms, newAtom] } : card
       )
     );
@@ -559,8 +567,9 @@ const addNewCard = (moleculeId?: string, position?: number) => {
 
 
   const deleteCard = async (cardId: string) => {
-    const card = layoutCards.find(c => c.id === cardId);
-    const updated = layoutCards.filter(c => c.id !== cardId);
+    const arr = Array.isArray(layoutCards) ? layoutCards : [];
+    const card = arr.find(c => c.id === cardId);
+    const updated = arr.filter(c => c.id !== cardId);
     setLayoutCards(updated);
     localStorage.setItem(STORAGE_KEY, safeStringify(updated));
     const labConfig = {
@@ -619,8 +628,8 @@ const addNewCard = (moleculeId?: string, position?: number) => {
   };
 
   const handleExhibitionToggle = (cardId: string, isExhibited: boolean) => {
-    const updated = layoutCards.map(card =>
-        card.id === cardId ? { ...card, isExhibited } : card
+    const updated = (Array.isArray(layoutCards) ? layoutCards : []).map(card =>
+      card.id === cardId ? { ...card, isExhibited } : card
     );
 
     // persist updated layout immediately
