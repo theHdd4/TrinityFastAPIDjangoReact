@@ -678,9 +678,10 @@ const addNewCard = (moleculeId?: string, position?: number) => {
                   </div>
 
                   <div className="space-y-6 w-full">
-                    {layoutCards
-                      .filter(card => card.moleculeId === molecule.moleculeId)
-                      .map(card => {
+                    {Array.isArray(layoutCards) &&
+                      layoutCards
+                        .filter(card => card.moleculeId === molecule.moleculeId)
+                        .map(card => {
                         const cardTitle = card.moleculeTitle
                           ? card.atoms.length > 0
                             ? `${card.moleculeTitle} - ${card.atoms[0].title}`
@@ -815,7 +816,7 @@ const addNewCard = (moleculeId?: string, position?: number) => {
     <div className="h-full w-full bg-gradient-to-br from-gray-50 to-gray-100 rounded-xl border border-gray-200 shadow-sm overflow-auto">
       {/* Layout Cards Container */}
       <div className="p-6 space-y-6 w-full">
-        {layoutCards.map((card, index) => {
+        {Array.isArray(layoutCards) && layoutCards.map((card, index) => {
           const cardTitle = card.moleculeTitle
             ? (card.atoms.length > 0 ? `${card.moleculeTitle} - ${card.atoms[0].title}` : card.moleculeTitle)
             : card.atoms.length > 0
