@@ -40,7 +40,7 @@ const DataFrameView = () => {
           <TableBody>
             {rows.slice(1).map((r, i) => (
               <TableRow key={i}>
-                {r.map((c, j) => (
+                {(Array.isArray(r) ? r : []).map((c, j) => (
                   <TableCell key={j}>{c}</TableCell>
                 ))}
               </TableRow>
