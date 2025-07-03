@@ -25,7 +25,7 @@ const DataFrameView = () => {
   return (
     <div className="p-4">
       <h1 className="text-lg font-semibold mb-4 break-all">{name.split('/').pop()}</h1>
-      <div className="overflow-x-auto overflow-y-auto max-h-[80vh]">
+      <div className="overflow-x-auto overflow-y-auto max-h-[80vh] scrollbar-thin scrollbar-thumb-gray-300">
         <Table className="min-w-max">
           <TableHeader>
             <TableRow>
