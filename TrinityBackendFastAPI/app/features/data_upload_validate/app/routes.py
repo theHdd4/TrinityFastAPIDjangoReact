@@ -3057,7 +3057,7 @@ async def list_saved_dataframes():
         files = [
             {
                 "object_name": name,
-                "csv_name": Path(get_original_csv(name) or name).stem,
+                "csv_name": Path(name).stem,
             }
             for _, name in entries
         ]
