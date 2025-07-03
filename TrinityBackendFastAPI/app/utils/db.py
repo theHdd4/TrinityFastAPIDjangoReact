@@ -76,12 +76,15 @@ async def record_arrow_dataset(
     """Insert a saved dataset entry into Postgres if asyncpg is available."""
     if asyncpg is None:
         return
-    conn = await asyncpg.connect(
-        host=POSTGRES_HOST,
-        user=POSTGRES_USER,
-        password=POSTGRES_PASSWORD,
-        database=POSTGRES_DB,
-    )
+    try:
+        conn = await asyncpg.connect(
+            host=POSTGRES_HOST,
+            user=POSTGRES_USER,
+            password=POSTGRES_PASSWORD,
+            database=POSTGRES_DB,
+        )
+    except Exception:
+        return
     try:
         await conn.execute(
             """
@@ -103,12 +106,15 @@ async def rename_arrow_dataset(old_object: str, new_object: str) -> None:
     """Update arrow_object for saved datasets when a file is renamed."""
     if asyncpg is None:
         return
-    conn = await asyncpg.connect(
-        host=POSTGRES_HOST,
-        user=POSTGRES_USER,
-        password=POSTGRES_PASSWORD,
-        database=POSTGRES_DB,
-    )
+    try:
+        conn = await asyncpg.connect(
+            host=POSTGRES_HOST,
+            user=POSTGRES_USER,
+            password=POSTGRES_PASSWORD,
+            database=POSTGRES_DB,
+        )
+    except Exception:
+        return
     try:
         await conn.execute(
             "UPDATE registry_arrowdataset SET arrow_object=$1 WHERE arrow_object=$2",
