@@ -4,6 +4,8 @@ import pandas as pd
 import pyarrow as pa
 import pyarrow.flight as flight
 import pyarrow.ipc as ipc
+from minio import Minio
+from .flight_registry import get_arrow_for_flight_path
 
 _client: flight.FlightClient | None = None
 logger = logging.getLogger("trinity.flight")
@@ -18,6 +20,7 @@ def _get_client() -> flight.FlightClient:
         _client = flight.FlightClient(f"grpc://{host}:{port}")
     return _client
 
+
 def upload_dataframe(df: pd.DataFrame, path: str) -> str:
     client = _get_client()
     table = pa.Table.from_pandas(df)
@@ -26,6 +29,7 @@ def upload_dataframe(df: pd.DataFrame, path: str) -> str:
     writer.write_table(table)
     writer.close()
     return path
+
 
 def download_dataframe(path: str) -> pd.DataFrame:
     """Download a dataframe from the Arrow Flight service with debug logs."""
@@ -40,6 +44,31 @@ def download_dataframe(path: str) -> pd.DataFrame:
         return df
     except Exception as e:
         logger.error("❌ flight download failed for %s: %s", path, e)
+        arrow_obj = get_arrow_for_flight_path(path)
+        if arrow_obj:
+            try:
+                bucket = os.getenv("MINIO_BUCKET", "trinity")
+                m_client = Minio(
+                    os.getenv("MINIO_ENDPOINT", "minio:9000"),
+                    access_key=os.getenv("MINIO_ACCESS_KEY", "admin_dev"),
+                    secret_key=os.getenv("MINIO_SECRET_KEY", "pass_dev"),
+                    secure=False,
+                )
+                resp = m_client.get_object(bucket, arrow_obj)
+                data = resp.read()
+                table = ipc.RecordBatchFileReader(
+                    pa.BufferReader(data)
+                ).read_all()
+                logger.info(
+                    "✔️ fallback minio download %s rows=%d",
+                    path,
+                    table.num_rows,
+                )
+                return table.to_pandas()
+            except Exception as exc:
+                logger.error(
+                    "❌ fallback minio download failed for %s: %s", path, exc
+                )
         raise
 
 
@@ -60,4 +89,24 @@ def download_table_bytes(path: str) -> bytes:
         return sink.getvalue().to_pybytes()
     except Exception as e:
         logger.error("❌ flight byte download failed for %s: %s", path, e)
+        arrow_obj = get_arrow_for_flight_path(path)
+        if arrow_obj:
+            try:
+                bucket = os.getenv("MINIO_BUCKET", "trinity")
+                m_client = Minio(
+                    os.getenv("MINIO_ENDPOINT", "minio:9000"),
+                    access_key=os.getenv("MINIO_ACCESS_KEY", "admin_dev"),
+                    secret_key=os.getenv("MINIO_SECRET_KEY", "pass_dev"),
+                    secure=False,
+                )
+                resp = m_client.get_object(bucket, arrow_obj)
+                data = resp.read()
+                logger.info("✔️ fallback minio bytes %s", arrow_obj)
+                return data
+            except Exception as exc:
+                logger.error(
+                    "❌ fallback minio byte download failed for %s: %s",
+                    path,
+                    exc,
+                )
         raise
