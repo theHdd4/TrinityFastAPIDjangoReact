@@ -124,3 +124,25 @@ async def rename_arrow_dataset(old_object: str, new_object: str) -> None:
     finally:
         await conn.close()
 
+
+async def delete_arrow_dataset(arrow_object: str) -> None:
+    """Remove a dataset entry when a file is deleted."""
+    if asyncpg is None:
+        return
+    try:
+        conn = await asyncpg.connect(
+            host=POSTGRES_HOST,
+            user=POSTGRES_USER,
+            password=POSTGRES_PASSWORD,
+            database=POSTGRES_DB,
+        )
+    except Exception:
+        return
+    try:
+        await conn.execute(
+            "DELETE FROM registry_arrowdataset WHERE arrow_object=$1",
+            arrow_object,
+        )
+    finally:
+        await conn.close()
+

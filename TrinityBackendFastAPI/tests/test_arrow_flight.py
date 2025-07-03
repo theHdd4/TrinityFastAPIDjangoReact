@@ -9,9 +9,67 @@ import json
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "app"))
 from flight_server import ArrowFlightServer
-import importlib
+import importlib.util
+import types
 arrow_client = importlib.import_module("utils.arrow_client")
 flight_registry = importlib.import_module("utils.flight_registry")
+
+
+def load_routes():
+    pkg_base = ROOT / "app"
+    packages = [
+        "app",
+        "app.features",
+        "app.features.data_upload_validate",
+        "app.features.data_upload_validate.app",
+    ]
+    for pkg in packages:
+        if pkg not in sys.modules:
+            mod = types.ModuleType(pkg)
+            subpath = pkg.split(".")[1:]
+            mod.__path__ = [str(pkg_base / "/".join(subpath))]
+            sys.modules[pkg] = mod
+    spec = importlib.util.spec_from_file_location(
+        "app.features.data_upload_validate.app.routes",
+        pkg_base / "features/data_upload_validate/app/routes.py",
+    )
+    routes = importlib.util.module_from_spec(spec)
+    sys.modules["app.features.data_upload_validate.app.routes"] = routes
+    if "pymongo" not in sys.modules:
+        pymod = types.ModuleType("pymongo")
+        class MongoClient:
+            def __init__(self, *a, **k):
+                self.admin = self
+            def command(self, *a, **k):
+                pass
+            def __getitem__(self, name):
+                return {}
+        pymod.MongoClient = MongoClient
+        sys.modules["pymongo"] = pymod
+    if "motor.motor_asyncio" not in sys.modules:
+        motor_mod = types.ModuleType("motor.motor_asyncio")
+        class AsyncIOMotorClient:
+            def __init__(self, *a, **k):
+                pass
+            def __getitem__(self, name):
+                return {}
+        motor_mod.AsyncIOMotorClient = AsyncIOMotorClient
+        sys.modules["motor.motor_asyncio"] = motor_mod
+    if "redis" not in sys.modules:
+        redis_mod = types.ModuleType("redis")
+        class Redis:
+            def __init__(self, *a, **k):
+                pass
+            def get(self, k):
+                return None
+            def set(self, k, v):
+                pass
+            def delete(self, k):
+                pass
+        redis_mod.Redis = Redis
+        sys.modules["redis"] = redis_mod
+    spec.loader.exec_module(routes)  # type: ignore
+    return routes
 
 
 def test_flight_round_trip():
@@ -74,10 +132,7 @@ def test_rename_arrow_object(tmp_path, monkeypatch):
 
 
 def test_rename_dataframe_route(monkeypatch):
-    import importlib
-    routes = importlib.import_module(
-        "app.features.data_upload_validate.app.routes"
-    )
+    routes = load_routes()
 
     class DummyMinio:
         def __init__(self):
@@ -128,4 +183,46 @@ def test_rename_dataframe_route(monkeypatch):
     assert resp.status_code == 200
     assert resp.json()["new_name"] == "pref/new.arrow"
     assert dummy_db.called == ("pref/old.arrow", "pref/new.arrow")
+
+
+def test_delete_dataframe_route(monkeypatch):
+    routes = load_routes()
+
+    class DummyMinio:
+        def __init__(self):
+            self.store = {"pref/data.arrow": b"data"}
+
+        def remove_object(self, bucket, obj):
+            self.store.pop(obj, None)
+
+    class DummyRedis:
+        def __init__(self):
+            self.cache = {}
+
+        def delete(self, k):
+            self.cache.pop(k, None)
+
+    async def dummy_db_delete(obj):
+        dummy_db_delete.called = obj
+
+    monkeypatch.setattr(routes, "minio_client", DummyMinio())
+    monkeypatch.setattr(routes, "redis_client", DummyRedis())
+    monkeypatch.setattr(routes, "MINIO_BUCKET", "bucket")
+    monkeypatch.setattr(routes, "OBJECT_PREFIX", "pref/")
+    monkeypatch.setattr(routes, "delete_arrow_dataset", dummy_db_delete)
+    monkeypatch.setattr(routes, "remove_arrow_object", lambda o: None)
+
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    app = FastAPI()
+    app.include_router(routes.router)
+
+    client = TestClient(app)
+
+    resp = client.delete("/delete_dataframe", params={"object_name": "pref/data.arrow"})
+
+    assert resp.status_code == 200
+    assert resp.json()["deleted"] == "pref/data.arrow"
+    assert dummy_db_delete.called == "pref/data.arrow"
 

@@ -102,7 +102,12 @@ async def health_check():
 from minio import Minio
 from minio.error import S3Error
 from app.features.feature_overview.deps import redis_client
-from app.utils.db import fetch_client_app_project, record_arrow_dataset, rename_arrow_dataset
+from app.utils.db import (
+    fetch_client_app_project,
+    record_arrow_dataset,
+    rename_arrow_dataset,
+    delete_arrow_dataset,
+)
 from app.utils.arrow_client import upload_dataframe
 from app.utils.flight_registry import (
     set_ticket,
@@ -110,6 +115,7 @@ from app.utils.flight_registry import (
     get_latest_ticket_for_basename,
     get_original_csv,
     rename_arrow_object,
+    remove_arrow_object,
 )
 import pyarrow as pa
 import pyarrow.ipc as ipc
@@ -3096,6 +3102,8 @@ async def delete_dataframe(object_name: str):
             if getattr(e, "code", "") not in {"NoSuchKey", "NoSuchBucket"}:
                 raise
         redis_client.delete(object_name)
+        remove_arrow_object(object_name)
+        await delete_arrow_dataset(object_name)
         return {"deleted": object_name}
     except S3Error as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -3117,6 +3125,8 @@ async def delete_all_dataframes():
                 if getattr(e, "code", "") not in {"NoSuchKey", "NoSuchBucket"}:
                     raise
             redis_client.delete(obj.object_name)
+            remove_arrow_object(obj.object_name)
+            await delete_arrow_dataset(obj.object_name)
             deleted.append(obj.object_name)
         return {"deleted": deleted}
     except S3Error as e:

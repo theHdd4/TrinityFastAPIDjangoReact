@@ -91,6 +91,22 @@ def rename_arrow_object(old_name: str, new_name: str) -> None:
     _save()
 
 
+def remove_arrow_object(arrow_name: str) -> None:
+    """Remove mappings and Redis keys when an Arrow object is deleted."""
+    flight_path = CSV_TO_FLIGHT.pop(arrow_name, None)
+    if flight_path and _redis is not None:
+        try:
+            _redis.delete(f"flight:{flight_path}")
+        except Exception:
+            pass
+    keys_to_remove = [k for k, v in FILEKEY_TO_CSV.items() if v == arrow_name]
+    for key in keys_to_remove:
+        FILEKEY_TO_CSV.pop(key, None)
+        LATEST_TICKETS_BY_KEY.pop(key, None)
+    ARROW_TO_ORIGINAL.pop(arrow_name, None)
+    _save()
+
+
 def get_ticket_by_key(file_key: str) -> Tuple[str | None, str | None]:
     path = LATEST_TICKETS_BY_KEY.get(file_key)
     arrow = FILEKEY_TO_CSV.get(file_key)
