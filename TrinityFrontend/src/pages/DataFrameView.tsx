@@ -25,8 +25,11 @@ const DataFrameView = () => {
   return (
     <div className="p-4">
       <h1 className="text-lg font-semibold mb-4 break-all">{name.split('/').pop()}</h1>
-      <div className="overflow-x-auto overflow-y-auto max-h-[80vh] scrollbar-thin scrollbar-thumb-gray-300 rotate-180">
-        <Table className="min-w-max rotate-180">
+      <div
+        className="overflow-x-auto overflow-y-auto max-h-[80vh] scrollbar-thin scrollbar-thumb-gray-300"
+        style={{ transform: 'rotateX(180deg)' }}
+      >
+        <Table className="min-w-max" style={{ transform: 'rotateX(180deg)' }}>
           <TableHeader>
             <TableRow>
               {rows[0]?.map((h, i) => (
