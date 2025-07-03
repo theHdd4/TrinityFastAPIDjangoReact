@@ -102,7 +102,7 @@ async def health_check():
 from minio import Minio
 from minio.error import S3Error
 from app.features.feature_overview.deps import redis_client
-from app.utils.db import fetch_client_app_project
+from app.utils.db import fetch_client_app_project, record_arrow_dataset
 from app.utils.arrow_client import upload_dataframe
 from app.utils.flight_registry import (
     set_ticket,
@@ -3006,6 +3006,14 @@ async def save_dataframes(
         flight_path = f"{validator_atom_id}/{key}"
         upload_dataframe(df, flight_path)
         set_ticket(
+            key,
+            result.get("object_name", ""),
+            flight_path,
+            file.filename,
+        )
+
+        await record_arrow_dataset(
+            validator_atom_id,
             key,
             result.get("object_name", ""),
             flight_path,

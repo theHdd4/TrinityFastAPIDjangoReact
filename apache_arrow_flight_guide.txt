@@ -1,0 +1,34 @@
+Apache Arrow & Flight Guide
+===========================
+
+The platform stores intermediate and validated data as Arrow files. Each time a
+user saves validated files in the **Data Upload & Validate** atom the server
+converts the uploaded CSV into an Arrow table and stores it in MinIO. The same
+table is also uploaded to the Flight service so other atoms can download it
+without hitting object storage.
+
+### Storage flow
+1. CSV is read into a pandas DataFrame.
+2. The DataFrame is converted to an Arrow table and written to a `.arrow` file in
+   MinIO.
+3. A Flight path using `<validator_id>/<file_key>` is created and the table is
+   uploaded to the Flight server via `upload_dataframe`.
+4. Metadata (validator id, file key, Arrow object name and Flight path) is
+   recorded in Postgres for reference.
+
+Saved tables appear in the **Saved DataFrames** panel. They are sorted by the
+latest upload timestamp so newly saved files are shown first.
+
+### Validating through Flight
+To verify that the Flight server works you can run the utility functions in
+`TrinityBackendFastAPI/app/utils/arrow_client.py`:
+
+```python
+from TrinityBackendFastAPI.app.utils import arrow_client
+
+df = arrow_client.download_dataframe("<validator>/<file_key>")
+print(df.head())
+```
+
+If the dataframe prints without errors the Flight server is correctly serving the
+stored table. `tests/test_arrow_flight.py` provides an automated round‑trip test.

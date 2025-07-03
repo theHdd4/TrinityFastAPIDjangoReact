@@ -96,3 +96,20 @@ class LaboratoryAction(models.Model):
 
     def __str__(self):
         return f"Action on {self.project.name} by {self.user.username}"
+
+class ArrowDataset(models.Model):
+    """Registry entry for Arrow data saved from the upload atom."""
+
+    atom_id = models.CharField(max_length=150)
+    file_key = models.CharField(max_length=150)
+    arrow_object = models.CharField(max_length=200)
+    flight_path = models.CharField(max_length=200)
+    original_csv = models.CharField(max_length=200)
+    descriptor = models.CharField(max_length=200, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.atom_id}:{self.file_key}"

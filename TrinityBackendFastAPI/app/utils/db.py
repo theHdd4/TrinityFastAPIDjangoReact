@@ -63,3 +63,30 @@ async def fetch_client_app_project(user_id: int, project_id: int):
         return client_name, app_name or "default_app", project_name or "default_project"
     finally:
         await conn.close()
+
+async def record_arrow_dataset(atom_id: str, file_key: str, arrow_object: str, flight_path: str, original_csv: str, descriptor: str | None = None) -> None:
+    """Insert a saved dataset entry into Postgres if asyncpg is available."""
+    if asyncpg is None:
+        return
+    conn = await asyncpg.connect(
+        host=POSTGRES_HOST,
+        user=POSTGRES_USER,
+        password=POSTGRES_PASSWORD,
+        database=POSTGRES_DB,
+    )
+    try:
+        await conn.execute(
+            """
+            INSERT INTO registry_arrowdataset (atom_id, file_key, arrow_object, flight_path, original_csv, descriptor, created_at)
+            VALUES ($1, $2, $3, $4, $5, $6, NOW())
+            """,
+            atom_id,
+            file_key,
+            arrow_object,
+            flight_path,
+            original_csv,
+            descriptor or "",
+        )
+    finally:
+        await conn.close()
+

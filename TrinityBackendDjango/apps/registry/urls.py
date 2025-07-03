@@ -5,6 +5,7 @@ from .views import (
     ProjectViewSet,
     SessionViewSet,
     LaboratoryActionViewSet,
+    ArrowDatasetViewSet,
 )
 
 router = DefaultRouter()
@@ -12,6 +13,7 @@ router.register(r"apps", AppViewSet, basename="app")
 router.register(r"projects", ProjectViewSet, basename="project")
 router.register(r"sessions", SessionViewSet, basename="session")
 router.register(r"laboratory-actions", LaboratoryActionViewSet, basename="laboratoryaction")
+router.register(r"arrow-datasets", ArrowDatasetViewSet, basename="arrowdataset")
 
 urlpatterns = [
     path("", include(router.urls)),

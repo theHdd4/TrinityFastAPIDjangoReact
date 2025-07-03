@@ -1,11 +1,12 @@
 from rest_framework import viewsets, permissions
 from apps.accounts.views import CsrfExemptSessionAuthentication
-from .models import App, Project, Session, LaboratoryAction
+from .models import App, Project, Session, LaboratoryAction, ArrowDataset
 from .serializers import (
     AppSerializer,
     ProjectSerializer,
     SessionSerializer,
     LaboratoryActionSerializer,
+    ArrowDatasetSerializer,
 )
 
 
@@ -95,3 +96,18 @@ class LaboratoryActionViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         serializer.save(user=self.request.user)
+
+class ArrowDatasetViewSet(viewsets.ModelViewSet):
+    """CRUD for stored Arrow datasets."""
+
+    queryset = ArrowDataset.objects.all()
+    serializer_class = ArrowDatasetSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    authentication_classes = [CsrfExemptSessionAuthentication]
+
+    def get_queryset(self):
+        qs = self.queryset
+        atom = self.request.query_params.get("atom_id")
+        if atom:
+            qs = qs.filter(atom_id=atom)
+        return qs
