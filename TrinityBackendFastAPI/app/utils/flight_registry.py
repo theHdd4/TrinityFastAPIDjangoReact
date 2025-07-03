@@ -151,13 +151,23 @@ def get_latest_ticket_for_basename(csv_base: str) -> Tuple[str | None, str | Non
 
 
 def get_arrow_for_flight_path(flight_path: str) -> str | None:
-    """Return stored arrow object for the given flight path from Redis."""
-    if _redis is None:
-        return None
-    try:
-        obj = _redis.get(f"flight:{flight_path}")
-        arrow_name = obj if isinstance(obj, str) else obj.decode() if obj else None
-        logger.info("\U0001f50d redis lookup %s -> %s", flight_path, arrow_name)
-        return arrow_name
-    except Exception:
-        return None
+    """Return stored arrow object for the given flight path."""
+    arrow_name: str | None = None
+    if _redis is not None:
+        try:
+            obj = _redis.get(f"flight:{flight_path}")
+            arrow_name = obj if isinstance(obj, str) else obj.decode() if obj else None
+            if arrow_name:
+                logger.info("\U0001f50d redis lookup %s -> %s", flight_path, arrow_name)
+                return arrow_name
+        except Exception:
+            pass
+
+    # Fallback to the registry mappings if Redis is unavailable or missing data
+    for a_name, path in CSV_TO_FLIGHT.items():
+        if path == flight_path:
+            logger.info("\U0001f50d registry lookup %s -> %s", flight_path, a_name)
+            arrow_name = a_name
+            break
+
+    return arrow_name
