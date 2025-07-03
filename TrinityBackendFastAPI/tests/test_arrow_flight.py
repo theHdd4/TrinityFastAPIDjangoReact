@@ -72,3 +72,60 @@ def test_rename_arrow_object(tmp_path, monkeypatch):
     assert reg.get_flight_path_for_csv("new.arrow") == "tbl"
     assert reg.get_flight_path_for_csv("old.arrow") is None
 
+
+def test_rename_dataframe_route(monkeypatch):
+    import importlib
+    routes = importlib.import_module(
+        "app.features.data_upload_validate.app.routes"
+    )
+
+    class DummyMinio:
+        def __init__(self):
+            self.store = {"pref/old.arrow": b"data"}
+
+        def copy_object(self, bucket, new_obj, source):
+            self.store[new_obj] = self.store[source.object_name]
+
+        def remove_object(self, bucket, obj):
+            self.store.pop(obj, None)
+
+    class DummyRedis:
+        def __init__(self):
+            self.cache = {}
+
+        def get(self, k):
+            return self.cache.get(k)
+
+        def setex(self, k, t, v):
+            self.cache[k] = v
+
+        def delete(self, k):
+            self.cache.pop(k, None)
+
+    async def dummy_db(old, new):
+        dummy_db.called = (old, new)
+
+    monkeypatch.setattr(routes, "minio_client", DummyMinio())
+    monkeypatch.setattr(routes, "redis_client", DummyRedis())
+    monkeypatch.setattr(routes, "MINIO_BUCKET", "bucket")
+    monkeypatch.setattr(routes, "OBJECT_PREFIX", "pref/")
+    monkeypatch.setattr(routes, "rename_arrow_dataset", dummy_db)
+    monkeypatch.setattr(routes, "rename_arrow_object", lambda o, n: None)
+
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    app = FastAPI()
+    app.include_router(routes.router)
+
+    client = TestClient(app)
+
+    resp = client.post(
+        "/rename_dataframe",
+        data={"object_name": "pref/old.arrow", "new_filename": "new.arrow"},
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["new_name"] == "pref/new.arrow"
+    assert dummy_db.called == ("pref/old.arrow", "pref/new.arrow")
+

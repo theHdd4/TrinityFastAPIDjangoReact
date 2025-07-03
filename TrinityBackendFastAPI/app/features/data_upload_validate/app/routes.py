@@ -3134,7 +3134,12 @@ async def rename_dataframe(object_name: str = Form(...), new_filename: str = For
         raise HTTPException(status_code=400, detail="Invalid object name")
     new_object = f"{OBJECT_PREFIX}{new_filename}"
     try:
-        minio_client.copy_object(MINIO_BUCKET, new_object, f"/{MINIO_BUCKET}/{object_name}")
+        from minio.commonconfig import CopySource
+        minio_client.copy_object(
+            MINIO_BUCKET,
+            new_object,
+            CopySource(MINIO_BUCKET, object_name),
+        )
         try:
             minio_client.remove_object(MINIO_BUCKET, object_name)
         except S3Error:
