@@ -3004,7 +3004,8 @@ async def save_dataframes(
             writer.write_table(table)
 
         result = upload_to_minio(arrow_buf.getvalue(), arrow_name, validator_atom_id, key)
-        flight_path = f"{validator_atom_id}/{Path(key).stem}.arrow"
+        saved_name = Path(result.get("object_name", "")).name or arrow_name
+        flight_path = f"{validator_atom_id}/{saved_name}"
         upload_dataframe(df, flight_path)
 
         set_ticket(
