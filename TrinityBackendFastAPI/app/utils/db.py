@@ -88,8 +88,10 @@ async def record_arrow_dataset(
     try:
         await conn.execute(
             """
-            INSERT INTO registry_arrowdataset (project_id, atom_id, file_key, arrow_object, flight_path, original_csv, descriptor, created_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+            INSERT INTO registry_arrowdataset (
+                project_id, atom_id, file_key, arrow_object, flight_path, original_csv, descriptor, created_at
+            ) VALUES ($1,$2,$3,$4,$5,$6,$7,NOW())
+            ON CONFLICT (project_id, atom_id, file_key) DO NOTHING
             """,
             project_id,
             atom_id,
@@ -151,25 +153,35 @@ async def delete_arrow_dataset(arrow_object: str) -> None:
 
 async def arrow_dataset_exists(project_id: int, atom_id: str, file_key: str) -> bool:
     """Return True if a dataset entry already exists for this file."""
-    if asyncpg is None:
-        return False
-    try:
-        conn = await asyncpg.connect(
-            host=POSTGRES_HOST,
-            user=POSTGRES_USER,
-            password=POSTGRES_PASSWORD,
-            database=POSTGRES_DB,
-        )
-    except Exception:
-        return False
-    try:
-        row = await conn.fetchrow(
-            "SELECT id FROM registry_arrowdataset WHERE project_id=$1 AND atom_id=$2 AND file_key=$3",
-            project_id,
-            atom_id,
-            file_key,
-        )
-        return row is not None
-    finally:
-        await conn.close()
+    exists = False
+    if asyncpg is not None:
+        try:
+            conn = await asyncpg.connect(
+                host=POSTGRES_HOST,
+                user=POSTGRES_USER,
+                password=POSTGRES_PASSWORD,
+                database=POSTGRES_DB,
+            )
+        except Exception:
+            conn = None
+        if conn is not None:
+            try:
+                row = await conn.fetchrow(
+                    "SELECT id FROM registry_arrowdataset WHERE project_id=$1 AND atom_id=$2 AND file_key=$3",
+                    project_id,
+                    atom_id,
+                    file_key,
+                )
+                exists = row is not None
+            finally:
+                await conn.close()
+    if not exists:
+        try:
+            from app.utils.flight_registry import get_ticket_by_key
+            path, _ = get_ticket_by_key(file_key)
+            if path:
+                exists = True
+        except Exception:
+            pass
+    return exists
 

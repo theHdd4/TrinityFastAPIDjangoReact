@@ -113,6 +113,7 @@ class ArrowDataset(models.Model):
 
     class Meta:
         ordering = ["-created_at"]
+        unique_together = ("project", "atom_id", "file_key")
 
     def __str__(self):
         return f"{self.atom_id}:{self.file_key}"
