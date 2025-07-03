@@ -1853,30 +1853,17 @@ async def validate(
     # ✅ Enhanced validation with auto-correction and custom conditions
     validation_results = perform_enhanced_validation(files_data, validator_data)
     
-    # ✅ MinIO upload: Only if validation passes or passes with warnings
-    minio_uploads = []
-    flight_uploads = []
+    # ✅ Upload to Flight server for immediate use if validation passes
+    minio_uploads: list = []
+    flight_uploads: list = []
     if validation_results["overall_status"] in ["passed", "passed_with_warnings"]:
-        for (content, filename, key), (_, df) in zip(file_contents, files_data):
-            upload_result = upload_to_minio(content, filename, validator_atom_id, key)
-            minio_uploads.append({
-                "file_key": key,
-                "filename": filename,
-                "minio_upload": upload_result
-            })
-
+        for (_, filename, key), (_, df) in zip(file_contents, files_data):
             arrow_file = ARROW_DIR / f"{validator_atom_id}_{key}.arrow"
             save_arrow_table(df, arrow_file)
 
             flight_path = f"{validator_atom_id}/{key}"
             upload_dataframe(df, flight_path)
             flight_uploads.append({"file_key": key, "flight_path": flight_path})
-            set_ticket(
-                key,
-                upload_result.get("object_name", ""),
-                flight_path,
-                file.filename,
-            )
     
     # ✅ Save detailed validation log to MongoDB
     validation_log_data = {
