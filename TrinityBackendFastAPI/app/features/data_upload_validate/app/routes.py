@@ -3143,6 +3143,9 @@ async def rename_dataframe(object_name: str = Form(...), new_filename: str = For
     if not object_name.startswith(OBJECT_PREFIX):
         raise HTTPException(status_code=400, detail="Invalid object name")
     new_object = f"{OBJECT_PREFIX}{new_filename}"
+    if new_object == object_name:
+        # Nothing to do if the name hasn't changed
+        return {"old_name": object_name, "new_name": object_name}
     try:
         from minio.commonconfig import CopySource
         minio_client.copy_object(

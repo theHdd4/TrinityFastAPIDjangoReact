@@ -104,6 +104,8 @@ async def record_arrow_dataset(
 
 async def rename_arrow_dataset(old_object: str, new_object: str) -> None:
     """Update arrow_object for saved datasets when a file is renamed."""
+    if old_object == new_object:
+        return
     if asyncpg is None:
         return
     try:
