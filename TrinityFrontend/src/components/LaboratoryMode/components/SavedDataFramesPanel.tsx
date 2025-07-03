@@ -37,9 +37,9 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle }) => {
     setFiles(prev => prev.filter(f => f.object_name !== obj));
   };
 
-  const startRename = (obj: string) => {
+  const startRename = (obj: string, currentName: string) => {
     setRenameTarget(obj);
-    setRenameValue(obj.split('/').pop() || obj);
+    setRenameValue(currentName);
   };
 
   const commitRename = async (obj: string) => {
@@ -47,13 +47,22 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle }) => {
       setRenameTarget(null);
       return;
     }
+    let filename = renameValue.trim();
+    if (!filename.endsWith('.arrow')) {
+      filename += '.arrow';
+    }
     const form = new FormData();
     form.append('object_name', obj);
-    form.append('new_filename', renameValue.trim());
+    form.append('new_filename', filename);
     const res = await fetch(`${VALIDATE_API}/rename_dataframe`, { method: 'POST', body: form });
     if (res.ok) {
       const data = await res.json();
-      setFiles(prev => prev.map(f => (f.object_name === obj ? { ...f, object_name: data.new_name } : f)));
+      const base = filename.replace(/\.arrow$/, '');
+      setFiles(prev =>
+        prev.map(f =>
+          f.object_name === obj ? { ...f, object_name: data.new_name, csv_name: base } : f
+        )
+      );
     }
     setRenameTarget(null);
   };
@@ -95,6 +104,12 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle }) => {
                 value={renameValue}
                 onChange={e => setRenameValue(e.target.value)}
                 onBlur={() => commitRename(f.object_name)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    commitRename(f.object_name);
+                  }
+                }}
                 className="h-6 text-xs flex-1 mr-2"
               />
             ) : (
@@ -103,7 +118,7 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle }) => {
               </button>
             )}
             <div className="flex items-center space-x-2 ml-2">
-              <Pencil className="w-4 h-4 text-gray-400 cursor-pointer" onClick={() => startRename(f.object_name)} />
+              <Pencil className="w-4 h-4 text-gray-400 cursor-pointer" onClick={() => startRename(f.object_name, f.csv_name)} />
               <Trash2 className="w-4 h-4 text-gray-400 cursor-pointer" onClick={() => deleteOne(f.object_name)} />
             </div>
           </div>

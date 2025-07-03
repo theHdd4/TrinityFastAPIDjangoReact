@@ -61,3 +61,14 @@ def test_registry_persistence(tmp_path, monkeypatch):
     reg2 = importlib.reload(flight_registry)
     assert reg2.get_ticket_by_key("sales")[0] == "path/to/table"
 
+
+def test_rename_arrow_object(tmp_path, monkeypatch):
+    reg_file = tmp_path / "registry.json"
+    monkeypatch.setenv("FLIGHT_REGISTRY_FILE", str(reg_file))
+    import importlib
+    reg = importlib.reload(flight_registry)
+    reg.set_ticket("s", "old.arrow", "tbl", "orig.csv")
+    reg.rename_arrow_object("old.arrow", "new.arrow")
+    assert reg.get_flight_path_for_csv("new.arrow") == "tbl"
+    assert reg.get_flight_path_for_csv("old.arrow") is None
+

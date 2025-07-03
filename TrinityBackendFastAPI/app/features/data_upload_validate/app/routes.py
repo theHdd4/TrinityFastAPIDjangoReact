@@ -102,13 +102,14 @@ async def health_check():
 from minio import Minio
 from minio.error import S3Error
 from app.features.feature_overview.deps import redis_client
-from app.utils.db import fetch_client_app_project, record_arrow_dataset
+from app.utils.db import fetch_client_app_project, record_arrow_dataset, rename_arrow_dataset
 from app.utils.arrow_client import upload_dataframe
 from app.utils.flight_registry import (
     set_ticket,
     get_ticket_by_key,
     get_latest_ticket_for_basename,
     get_original_csv,
+    rename_arrow_object,
 )
 import pyarrow as pa
 import pyarrow.ipc as ipc
@@ -3142,6 +3143,8 @@ async def rename_dataframe(object_name: str = Form(...), new_filename: str = For
         if content is not None:
             redis_client.setex(new_object, 3600, content)
             redis_client.delete(object_name)
+        rename_arrow_object(object_name, new_object)
+        await rename_arrow_dataset(object_name, new_object)
         return {"old_name": object_name, "new_name": new_object}
     except S3Error as e:
         code = getattr(e, "code", "")

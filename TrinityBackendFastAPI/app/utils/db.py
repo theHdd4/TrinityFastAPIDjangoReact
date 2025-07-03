@@ -99,3 +99,22 @@ async def record_arrow_dataset(
     finally:
         await conn.close()
 
+async def rename_arrow_dataset(old_object: str, new_object: str) -> None:
+    """Update arrow_object for saved datasets when a file is renamed."""
+    if asyncpg is None:
+        return
+    conn = await asyncpg.connect(
+        host=POSTGRES_HOST,
+        user=POSTGRES_USER,
+        password=POSTGRES_PASSWORD,
+        database=POSTGRES_DB,
+    )
+    try:
+        await conn.execute(
+            "UPDATE registry_arrowdataset SET arrow_object=$1 WHERE arrow_object=$2",
+            new_object,
+            old_object,
+        )
+    finally:
+        await conn.close()
+

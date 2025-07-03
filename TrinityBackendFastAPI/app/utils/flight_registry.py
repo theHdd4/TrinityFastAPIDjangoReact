@@ -73,6 +73,23 @@ def set_ticket(file_key: str, arrow_name: str, flight_path: str, original_csv: s
         except Exception:
             pass
 
+def rename_arrow_object(old_name: str, new_name: str) -> None:
+    """Update registry mappings when an Arrow object is renamed."""
+    flight_path = CSV_TO_FLIGHT.pop(old_name, None)
+    if flight_path:
+        CSV_TO_FLIGHT[new_name] = flight_path
+        if _redis is not None:
+            try:
+                _redis.set(f"flight:{flight_path}", new_name)
+            except Exception:
+                pass
+    for key, val in list(FILEKEY_TO_CSV.items()):
+        if val == old_name:
+            FILEKEY_TO_CSV[key] = new_name
+    if old_name in ARROW_TO_ORIGINAL:
+        ARROW_TO_ORIGINAL[new_name] = ARROW_TO_ORIGINAL.pop(old_name)
+    _save()
+
 
 def get_ticket_by_key(file_key: str) -> Tuple[str | None, str | None]:
     path = LATEST_TICKETS_BY_KEY.get(file_key)
