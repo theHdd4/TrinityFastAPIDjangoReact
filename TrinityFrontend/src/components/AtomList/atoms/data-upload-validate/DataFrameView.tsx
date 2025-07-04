@@ -31,7 +31,7 @@ import {
   ContextMenuSubTrigger,
   ContextMenuTrigger,
 } from '@/components/ui/context-menu';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+// Popover removed in favor of ContextMenu submenus for filtering
 import {
   Search,
   ChevronUp,
@@ -63,7 +63,6 @@ const DataFrameView = () => {
   });
   const [currentPage, setCurrentPage] = useState(1);
   const [columnFilters, setColumnFilters] = useState<Record<string, string[]>>({});
-  const [filterPopoverOpen, setFilterPopoverOpen] = useState<string | null>(null);
 
   useEffect(() => {
     if (!name) return;
@@ -161,7 +160,6 @@ const DataFrameView = () => {
   const handleColumnFilter = (column: string, values: string[]) => {
     setColumnFilters(prev => ({ ...prev, [column]: values }));
     setCurrentPage(1);
-    setFilterPopoverOpen(null);
   };
 
   const clearColumnFilter = (column: string) => {
@@ -173,7 +171,7 @@ const DataFrameView = () => {
     setCurrentPage(1);
   };
 
-  const FilterPopover = ({ column }: { column: string }) => {
+  const FilterMenu = ({ column }: { column: string }) => {
     const uniqueValues = getUniqueColumnValues(column);
     const current = columnFilters[column] || [];
     const [temp, setTemp] = useState<string[]>(current);
@@ -206,7 +204,7 @@ const DataFrameView = () => {
         </div>
         <div className="p-2 border-t flex space-x-2">
           <Button size="sm" onClick={apply}>Apply</Button>
-          <Button size="sm" variant="outline" onClick={() => setFilterPopoverOpen(null)}>
+          <Button size="sm" variant="outline" onClick={() => setTemp(current)}>
             Cancel
           </Button>
         </div>
@@ -314,24 +312,14 @@ const DataFrameView = () => {
                         </ContextMenuSubContent>
                       </ContextMenuSub>
                       <ContextMenuSeparator />
-                      <Popover
-                        open={filterPopoverOpen === header}
-                        onOpenChange={open => setFilterPopoverOpen(open ? header : null)}
-                      >
-                        <PopoverTrigger asChild>
-                          <ContextMenuItem
-                            onSelect={e => {
-                              e.preventDefault();
-                              setFilterPopoverOpen(header);
-                            }}
-                          >
-                            <FilterIcon className="w-4 h-4 mr-2" /> Filter
-                          </ContextMenuItem>
-                        </PopoverTrigger>
-                        <PopoverContent className="p-0 bg-white border border-gray-200 shadow-lg rounded-md" align="start">
-                          <FilterPopover column={header} />
-                        </PopoverContent>
-                      </Popover>
+                      <ContextMenuSub>
+                        <ContextMenuSubTrigger className="flex items-center">
+                          <FilterIcon className="w-4 h-4 mr-2" /> Filter
+                        </ContextMenuSubTrigger>
+                        <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md p-0">
+                          <FilterMenu column={header} />
+                        </ContextMenuSubContent>
+                      </ContextMenuSub>
                       {columnFilters[header]?.length > 0 && (
                         <>
                           <ContextMenuSeparator />
