@@ -131,39 +131,24 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({ settings,
       const res = await fetch(
         `${FEATURE_OVERVIEW_API}/cached_dataframe?object_name=${encodeURIComponent(
           settings.dataSource
-        )}`,
-        { credentials: 'include' }
+        )}`
       );
       if (!res.ok) {
         console.warn('⚠️ cached dataframe request failed', res.status);
         throw new Error('Failed to load data');
       }
-      const buf = await res.arrayBuffer();
-      let data: Record<string, any>[] = [];
-      try {
-        const { tableFromIPC } = await import('apache-arrow');
-        const table = tableFromIPC(new Uint8Array(buf));
-        for (let i = 0; i < table.numRows; i++) {
-          const row: Record<string, any> = {};
-          table.schema.fields.forEach((f, idx) => {
-            row[f.name.toLowerCase()] = table.getColumnAt(idx)?.get(i);
-          });
-          data.push(row);
-        }
-      } catch {
-        const text = new TextDecoder().decode(buf);
-        const [headerLine, ...rows] = text.trim().split(/\r?\n/);
-        const headers = headerLine.split(',');
-        const rowLines = Array.isArray(rows) ? rows : [];
-        data = rowLines.map(r => {
-          const vals = r.split(',');
-          const obj: Record<string, string> = {};
-          headers.forEach((h, i) => {
-            obj[h.toLowerCase()] = vals[i];
-          });
-          return obj;
+      const text = await res.text();
+      const [headerLine, ...rows] = text.trim().split(/\r?\n/);
+      const headers = headerLine.split(',');
+      const rowLines = Array.isArray(rows) ? rows : [];
+      const data = rowLines.map(r => {
+        const vals = r.split(',');
+        const obj: Record<string, string> = {};
+        headers.forEach((h, i) => {
+          obj[h.toLowerCase()] = vals[i];
         });
-      }
+        return obj;
+      });
       const combos = new Map<string, any>();
       data.forEach(row => {
         const key = (Array.isArray(marketDims)?marketDims:[]).concat(Array.isArray(productDims)?productDims:[])
@@ -196,8 +181,7 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({ settings,
           combination: JSON.stringify(combo),
           x_column: settings.xAxis || 'date'
         });
-        const res = await fetch(`${FEATURE_OVERVIEW_API}/sku_stats?${params.toString()}`,
-          { credentials: 'include' });
+        const res = await fetch(`${FEATURE_OVERVIEW_API}/sku_stats?${params.toString()}`);
         if (!res.ok) {
           throw new Error('Failed to fetch statistics');
         }

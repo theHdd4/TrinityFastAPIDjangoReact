@@ -41,3 +41,6 @@ After applying these checks and reuploading the dataset, flight downloads succee
 2025-07-05 additional notes:
 * Observed that after the Flight server restarted the first download fell back to MinIO but subsequent calls still failed because the table wasn't cached.
 * The arrow_client download helpers now store the table back on the Flight server whenever MinIO fallback succeeds, preventing repeated `No table` errors.
+
+2025-07-05 rollback notes:
+- Reverted commit 311b8d491053bacd7d33479a12fe2c1cf4a3387f which added credentials and Arrow decoding to FeatureOverview. The change made atoms disappear when cached dataframes were present.

@@ -84,8 +84,7 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
     try {
       console.log('🔎 fetching column summary for', csv);
       const res = await fetch(
-        `${FEATURE_OVERVIEW_API}/column_summary?object_name=${encodeURIComponent(csv)}`,
-        { credentials: 'include' }
+        `${FEATURE_OVERVIEW_API}/column_summary?object_name=${encodeURIComponent(csv)}`
       );
       if (!res.ok) {
         console.warn('⚠️ column summary request failed', res.status);
@@ -110,28 +109,34 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
   const prefetchDataframe = async (name: string) => {
     if (!name) return;
     try {
-      console.log('🔎 caching dataframe', name);
+      console.log('✈️ fetching flight table', name);
+      const fr = await fetch(
+        `${FEATURE_OVERVIEW_API}/flight_table?object_name=${encodeURIComponent(name)}`
+      );
+      if (fr.ok) {
+        await fr.arrayBuffer();
+        console.log('✅ fetched flight table', name);
+      }
+      console.log('🔎 prefetching dataframe', name);
       const res = await fetch(
-        `${FEATURE_OVERVIEW_API}/cached_dataframe?object_name=${encodeURIComponent(name)}`,
-        { credentials: 'include' }
+        `${FEATURE_OVERVIEW_API}/cached_dataframe?object_name=${encodeURIComponent(name)}`
       );
       if (res.ok) {
         await res.text();
-        console.log('✅ cached dataframe', name);
+        console.log('✅ prefetched dataframe', name);
       } else {
-        console.warn('⚠️ cache dataframe failed', res.status);
+        console.warn('⚠️ prefetch dataframe failed', res.status);
       }
     } catch (err) {
-      console.error('⚠️ cache dataframe error', err);
+      console.error('⚠️ prefetch dataframe error', err);
     }
   };
 
   const findLatestDataSource = async () => {
     console.log('🔎 searching for latest data source');
-    const cards = useLaboratoryStore.getState().cards;
-    if (!Array.isArray(cards)) return null;
-    for (let i = cards.length - 1; i >= 0; i--) {
-      const card = cards[i];
+    if (!Array.isArray(layoutCards)) return null;
+    for (let i = layoutCards.length - 1; i >= 0; i--) {
+      const card = layoutCards[i];
       for (let j = card.atoms.length - 1; j >= 0; j--) {
         const a = card.atoms[j];
         if (a.atomId === 'feature-overview' && a.settings?.dataSource) {
@@ -151,11 +156,9 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
           if (req) {
             try {
               const [ticketRes, confRes] = await Promise.all([
-                fetch(`${VALIDATE_API}/latest_ticket/${encodeURIComponent(req)}`,
-                  { credentials: 'include' }),
+                fetch(`${VALIDATE_API}/latest_ticket/${encodeURIComponent(req)}`),
                 validatorId
-                  ? fetch(`${VALIDATE_API}/get_validator_config/${validatorId}`,
-                      { credentials: 'include' })
+                  ? fetch(`${VALIDATE_API}/get_validator_config/${validatorId}`)
                   : Promise.resolve(null as any),
               ]);
               if (ticketRes.ok) {
@@ -187,7 +190,7 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
     }
 
     try {
-      const res = await fetch(`${VALIDATE_API}/list_saved_dataframes`, { credentials: 'include' });
+      const res = await fetch(`${VALIDATE_API}/list_saved_dataframes`);
       if (res.ok) {
         const data = await res.json();
         const file = Array.isArray(data.files) ? data.files[0] : null;
@@ -225,8 +228,8 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
         ? identifiers
         : (Array.isArray(summary) ? summary : []).map(cc => cc.column);
 
-    setLayoutCards(current =>
-      (Array.isArray(current) ? current : []).map(c =>
+    setLayoutCards(cards =>
+      cards.map(c =>
         c.id === cardId
           ? {
               ...c,

@@ -29,7 +29,7 @@ const FeatureOverviewSettings: React.FC<FeatureOverviewSettingsProps> = ({ setti
   );
 
   useEffect(() => {
-    fetch(`${VALIDATE_API}/list_saved_dataframes`, { credentials: 'include' })
+    fetch(`${VALIDATE_API}/list_saved_dataframes`)
       .then(r => r.json())
       .then(d => setFrames(Array.isArray(d.files) ? d.files : []))
       .catch(() => setFrames([]));
@@ -60,8 +60,7 @@ const FeatureOverviewSettings: React.FC<FeatureOverviewSettingsProps> = ({ setti
     }
     setSelectedIds([]);
     const res = await fetch(
-      `${FEATURE_OVERVIEW_API}/column_summary?object_name=${encodeURIComponent(val)}`,
-      { credentials: 'include' }
+      `${FEATURE_OVERVIEW_API}/column_summary?object_name=${encodeURIComponent(val)}`
     );
     let numeric: string[] = [];
     let summary: ColumnInfo[] = [];

@@ -10,8 +10,7 @@ const DataFrameView = () => {
 
   useEffect(() => {
     if (!name) return;
-    fetch(`${FEATURE_OVERVIEW_API}/cached_dataframe?object_name=${encodeURIComponent(name)}`,
-      { credentials: 'include' })
+    fetch(`${FEATURE_OVERVIEW_API}/cached_dataframe?object_name=${encodeURIComponent(name)}`)
       .then(res => res.text())
       .then(text => {
         const lines = text.trim().split(/\r?\n/);
