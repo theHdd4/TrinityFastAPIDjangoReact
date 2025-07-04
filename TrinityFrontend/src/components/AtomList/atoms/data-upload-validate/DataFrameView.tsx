@@ -1,12 +1,26 @@
 import React, { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { FEATURE_OVERVIEW_API } from '@/lib/api';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import {
+  ColumnDef,
+  flexRender,
+  getCoreRowModel,
+  useReactTable,
+} from '@tanstack/react-table';
 
 const DataFrameView = () => {
   const [params] = useSearchParams();
   const name = params.get('name') || '';
-  const [rows, setRows] = useState<string[][]>([]);
+  const [data, setData] = useState<Record<string, string>[]>([]);
+  const [columns, setColumns] = useState<ColumnDef<Record<string, string>>[]>([]);
 
   useEffect(() => {
     if (!name) return;
@@ -14,11 +28,26 @@ const DataFrameView = () => {
       .then(res => res.text())
       .then(text => {
         const lines = text.trim().split(/\r?\n/);
-        const parsed = lines.map(l => l.split(','));
-        setRows(parsed);
+        const header = lines[0]?.split(',') || [];
+        const rows = lines.slice(1);
+        const objects = rows.map(line => {
+          const vals = line.split(',');
+          const obj: Record<string, string> = {};
+          header.forEach((h, i) => {
+            obj[h] = vals[i] || '';
+          });
+          return obj;
+        });
+        setColumns(header.map(h => ({ accessorKey: h, header: h })));
+        setData(objects);
       })
-      .catch(() => setRows([]));
+      .catch(() => {
+        setColumns([]);
+        setData([]);
+      });
   }, [name]);
+
+  const table = useReactTable({ data, columns, getCoreRowModel: getCoreRowModel() });
 
   if (!name) return <div className="p-4">No dataframe specified</div>;
 
@@ -31,17 +60,26 @@ const DataFrameView = () => {
       >
         <Table className="min-w-max" style={{ transform: 'rotateX(180deg)' }}>
           <TableHeader>
-            <TableRow>
-              {rows[0]?.map((h, i) => (
-                <TableHead key={i}>{h}</TableHead>
-              ))}
-            </TableRow>
+            {table.getHeaderGroups().map(headerGroup => (
+              <TableRow key={headerGroup.id}>
+                {headerGroup.headers.map(header => (
+                  <TableHead key={header.id}>
+                    {flexRender(
+                      header.column.columnDef.header,
+                      header.getContext()
+                    )}
+                  </TableHead>
+                ))}
+              </TableRow>
+            ))}
           </TableHeader>
           <TableBody>
-            {rows.slice(1).map((r, i) => (
-              <TableRow key={i}>
-                {(Array.isArray(r) ? r : []).map((c, j) => (
-                  <TableCell key={j}>{c}</TableCell>
+            {table.getRowModel().rows.map(row => (
+              <TableRow key={row.id}>
+                {row.getVisibleCells().map(cell => (
+                  <TableCell key={cell.id}>
+                    {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                  </TableCell>
                 ))}
               </TableRow>
             ))}
