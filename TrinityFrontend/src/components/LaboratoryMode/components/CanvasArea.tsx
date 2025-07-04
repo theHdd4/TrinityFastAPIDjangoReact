@@ -127,9 +127,10 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
 
   const findLatestDataSource = async () => {
     console.log('🔎 searching for latest data source');
-    if (!Array.isArray(layoutCards)) return null;
-    for (let i = layoutCards.length - 1; i >= 0; i--) {
-      const card = layoutCards[i];
+    const cards = useLaboratoryStore.getState().cards;
+    if (!Array.isArray(cards)) return null;
+    for (let i = cards.length - 1; i >= 0; i--) {
+      const card = cards[i];
       for (let j = card.atoms.length - 1; j >= 0; j--) {
         const a = card.atoms[j];
         if (a.atomId === 'feature-overview' && a.settings?.dataSource) {
