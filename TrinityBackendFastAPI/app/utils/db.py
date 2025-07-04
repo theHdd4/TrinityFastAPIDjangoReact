@@ -152,8 +152,10 @@ async def delete_arrow_dataset(arrow_object: str) -> None:
 
 
 async def arrow_dataset_exists(project_id: int, atom_id: str, file_key: str) -> bool:
-    """Return True if a dataset entry already exists for this file."""
+    """Return True if a dataset entry already exists and is present in MinIO."""
     exists = False
+    arrow_object: str | None = None
+
     if asyncpg is not None:
         try:
             conn = await asyncpg.connect(
@@ -167,21 +169,57 @@ async def arrow_dataset_exists(project_id: int, atom_id: str, file_key: str) -> 
         if conn is not None:
             try:
                 row = await conn.fetchrow(
-                    "SELECT id FROM registry_arrowdataset WHERE project_id=$1 AND atom_id=$2 AND file_key=$3",
+                    "SELECT arrow_object FROM registry_arrowdataset WHERE project_id=$1 AND atom_id=$2 AND file_key=$3",
                     project_id,
                     atom_id,
                     file_key,
                 )
-                exists = row is not None
+                if row:
+                    exists = True
+                    arrow_object = row["arrow_object"]
             finally:
                 await conn.close()
+
     if not exists:
         try:
             from app.utils.flight_registry import get_ticket_by_key
-            path, _ = get_ticket_by_key(file_key)
+
+            path, arrow_name = get_ticket_by_key(file_key)
             if path:
                 exists = True
+                arrow_object = arrow_name
         except Exception:
             pass
+
+    if exists and arrow_object:
+        try:
+            from minio import Minio
+            from minio.error import S3Error
+
+            bucket = os.getenv("MINIO_BUCKET", "trinity")
+            client = Minio(
+                os.getenv("MINIO_ENDPOINT", "minio:9000"),
+                access_key=os.getenv("MINIO_ACCESS_KEY", "minio"),
+                secret_key=os.getenv("MINIO_SECRET_KEY", "minio123"),
+                secure=False,
+            )
+            client.stat_object(bucket, arrow_object)
+        except S3Error as exc:
+            if getattr(exc, "code", "") in {"NoSuchKey", "NoSuchBucket"}:
+                exists = False
+                try:
+                    await delete_arrow_dataset(arrow_object)
+                finally:
+                    try:
+                        from app.utils.flight_registry import remove_arrow_object
+
+                        remove_arrow_object(arrow_object)
+                    except Exception:
+                        pass
+            else:  # pragma: no cover - unexpected error
+                exists = False
+        except Exception:  # pragma: no cover - any other error
+            exists = False
+
     return exists
 
