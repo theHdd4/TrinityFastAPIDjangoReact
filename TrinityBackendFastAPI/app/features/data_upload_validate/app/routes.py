@@ -2891,6 +2891,7 @@ async def save_dataframes(
     validator_atom_id: str = Form(...),
     files: List[UploadFile] = File(...),
     file_keys: str = Form(...),
+    overwrite: bool = Form(False),
 ):
     """Save validated dataframes as Arrow tables and upload via Flight."""
     try:
@@ -2913,7 +2914,8 @@ async def save_dataframes(
 
 
         arrow_name = Path(file.filename).stem + ".arrow"
-        if await arrow_dataset_exists(PROJECT_ID, validator_atom_id, key):
+        exists = await arrow_dataset_exists(PROJECT_ID, validator_atom_id, key)
+        if exists and not overwrite:
             uploads.append({"file_key": key, "already_saved": True})
             flights.append({"file_key": key})
             continue

@@ -91,7 +91,11 @@ async def record_arrow_dataset(
             INSERT INTO registry_arrowdataset (
                 project_id, atom_id, file_key, arrow_object, flight_path, original_csv, descriptor, created_at
             ) VALUES ($1,$2,$3,$4,$5,$6,$7,NOW())
-            ON CONFLICT (project_id, atom_id, file_key) DO NOTHING
+            ON CONFLICT (project_id, atom_id, file_key) DO UPDATE
+              SET arrow_object = EXCLUDED.arrow_object,
+                  flight_path  = EXCLUDED.flight_path,
+                  original_csv = EXCLUDED.original_csv,
+                  descriptor   = EXCLUDED.descriptor
             """,
             project_id,
             atom_id,

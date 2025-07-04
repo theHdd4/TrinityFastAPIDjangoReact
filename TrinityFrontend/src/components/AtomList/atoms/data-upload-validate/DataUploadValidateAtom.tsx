@@ -250,6 +250,7 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
     uploadedFiles.forEach(f => form.append('files', f));
     const keys = uploadedFiles.map(f => fileAssignments[f.name] || '');
     form.append('file_keys', JSON.stringify(keys));
+    form.append('overwrite', 'true');
     const res = await fetch(`${VALIDATE_API}/save_dataframes`, { method: 'POST', body: form });
     if (res.ok) {
       const data = await res.json();

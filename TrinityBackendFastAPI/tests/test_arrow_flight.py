@@ -375,6 +375,7 @@ def test_save_dataframe_skip_existing(monkeypatch):
         data={
             "validator_atom_id": "vid",
             "file_keys": json.dumps(["k"]),
+            "overwrite": "false",
         },
         files={"files": ("f.csv", b"a,b\n1,2", "text/csv")},
     )
