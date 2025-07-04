@@ -50,7 +50,8 @@ const DataFrameView = () => {
         limit: String(PAGE_SIZE),
       });
       const res = await fetch(
-        `${FEATURE_OVERVIEW_API}/cached_dataframe?${search.toString()}`
+        `${FEATURE_OVERVIEW_API}/cached_dataframe?${search.toString()}`,
+        { credentials: 'include' }
       );
       const text = await res.text();
       const total = parseInt(res.headers.get('x-total-count') || '0');
