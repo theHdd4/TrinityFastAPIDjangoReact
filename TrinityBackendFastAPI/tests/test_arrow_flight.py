@@ -86,8 +86,8 @@ if "motor.motor_asyncio" not in sys.modules:
     motor_mod.AsyncIOMotorCollection = AsyncIOMotorCollection
     sys.modules["motor.motor_asyncio"] = motor_mod
 from app.flight_server import ArrowFlightServer
-arrow_client = importlib.import_module("app.utils.arrow_client")
-flight_registry = importlib.import_module("app.utils.flight_registry")
+arrow_client = importlib.import_module("app.DataStorageRetrieval.arrow_client")
+flight_registry = importlib.import_module("app.DataStorageRetrieval.flight_registry")
 
 
 def load_routes():
@@ -215,7 +215,7 @@ def test_registry_persistence(tmp_path, monkeypatch):
     monkeypatch.setenv("FLIGHT_REGISTRY_FILE", str(reg_file))
     import importlib
     reg = importlib.reload(flight_registry)
-    import app.utils.flight_registry as core_reg
+    import app.DataStorageRetrieval.flight_registry as core_reg
     importlib.reload(core_reg)
     reg.set_ticket("sales", "file.arrow", "path/to/table", "file.csv")
     assert json.load(open(reg_file, "r"))[
@@ -229,7 +229,7 @@ def test_rename_arrow_object(tmp_path, monkeypatch):
     monkeypatch.setenv("FLIGHT_REGISTRY_FILE", str(reg_file))
     import importlib
     reg = importlib.reload(flight_registry)
-    import app.utils.flight_registry as core_reg
+    import app.DataStorageRetrieval.flight_registry as core_reg
     importlib.reload(core_reg)
     reg.set_ticket("s", "old.arrow", "tbl", "orig.csv")
     reg.rename_arrow_object("old.arrow", "new.arrow")

@@ -102,15 +102,15 @@ async def health_check():
 from minio import Minio
 from minio.error import S3Error
 from app.features.feature_overview.deps import redis_client
-from app.utils.db import (
+from app.DataStorageRetrieval.db import (
     fetch_client_app_project,
     record_arrow_dataset,
     rename_arrow_dataset,
     delete_arrow_dataset,
     arrow_dataset_exists,
 )
-from app.utils.arrow_client import upload_dataframe
-from app.utils.flight_registry import (
+from app.DataStorageRetrieval.arrow_client import upload_dataframe
+from app.DataStorageRetrieval.flight_registry import (
     set_ticket,
     get_ticket_by_key,
     get_latest_ticket_for_basename,
@@ -120,7 +120,7 @@ from app.utils.flight_registry import (
     get_flight_path_for_csv,
     get_arrow_for_flight_path,
 )
-from app.utils.minio_utils import (
+from app.DataStorageRetrieval.minio_utils import (
     ensure_minio_bucket,
     save_arrow_table,
     upload_to_minio,

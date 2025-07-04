@@ -2,7 +2,7 @@ import types, asyncio, sys
 from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "app"))
-import utils.db as db
+import DataStorageRetrieval.db as db
 
 class DummyS3Error(Exception):
     def __init__(self, code):
@@ -33,14 +33,14 @@ async def dummy_connect(*a, **k):
 def test_arrow_dataset_exists_missing_object(monkeypatch):
     monkeypatch.setattr(db, "asyncpg", types.SimpleNamespace(connect=dummy_connect))
     monkeypatch.setattr(db, "delete_arrow_dataset", dummy_delete)
-    monkeypatch.setattr("utils.flight_registry.remove_arrow_object", dummy_remove)
+    monkeypatch.setattr("DataStorageRetrieval.flight_registry.remove_arrow_object", dummy_remove)
     minio_mod = types.ModuleType("minio")
     minio_mod.Minio = DummyMinio
     error_mod = types.ModuleType("minio.error")
     error_mod.S3Error = DummyS3Error
     monkeypatch.setitem(sys.modules, "minio", minio_mod)
     monkeypatch.setitem(sys.modules, "minio.error", error_mod)
-    monkeypatch.setattr("utils.arrow_client.flight_table_exists", lambda p: True)
+    monkeypatch.setattr("DataStorageRetrieval.arrow_client.flight_table_exists", lambda p: True)
     monkeypatch.setenv("MINIO_BUCKET", "bucket")
     monkeypatch.setenv("MINIO_ENDPOINT", "minio:9000")
     monkeypatch.setenv("MINIO_ACCESS_KEY", "minio")
@@ -61,14 +61,14 @@ def test_arrow_dataset_exists_missing_flight(monkeypatch):
 
     monkeypatch.setattr(db, "asyncpg", types.SimpleNamespace(connect=dummy_connect))
     monkeypatch.setattr(db, "delete_arrow_dataset", dummy_delete)
-    monkeypatch.setattr("utils.flight_registry.remove_arrow_object", dummy_remove)
+    monkeypatch.setattr("DataStorageRetrieval.flight_registry.remove_arrow_object", dummy_remove)
     minio_mod = types.ModuleType("minio")
     minio_mod.Minio = OkMinio
     error_mod = types.ModuleType("minio.error")
     error_mod.S3Error = DummyS3Error
     monkeypatch.setitem(sys.modules, "minio", minio_mod)
     monkeypatch.setitem(sys.modules, "minio.error", error_mod)
-    monkeypatch.setattr("utils.arrow_client.flight_table_exists", lambda p: False)
+    monkeypatch.setattr("DataStorageRetrieval.arrow_client.flight_table_exists", lambda p: False)
     monkeypatch.setenv("MINIO_BUCKET", "bucket")
     monkeypatch.setenv("MINIO_ENDPOINT", "minio:9000")
     monkeypatch.setenv("MINIO_ACCESS_KEY", "minio")

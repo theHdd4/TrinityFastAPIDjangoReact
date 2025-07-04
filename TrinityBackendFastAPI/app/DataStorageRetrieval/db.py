@@ -184,7 +184,7 @@ async def arrow_dataset_exists(project_id: int, atom_id: str, file_key: str) -> 
 
     if not exists:
         try:
-            from utils.flight_registry import get_ticket_by_key
+            from DataStorageRetrieval.flight_registry import get_ticket_by_key
 
             path, arrow_name = get_ticket_by_key(file_key)
             if path:
@@ -214,7 +214,7 @@ async def arrow_dataset_exists(project_id: int, atom_id: str, file_key: str) -> 
                     await delete_arrow_dataset(arrow_object)
                 finally:
                     try:
-                        from utils.flight_registry import remove_arrow_object
+                        from DataStorageRetrieval.flight_registry import remove_arrow_object
 
                         remove_arrow_object(arrow_object)
                     except Exception:
@@ -226,7 +226,7 @@ async def arrow_dataset_exists(project_id: int, atom_id: str, file_key: str) -> 
 
     if exists and flight_path:
         try:
-            from utils.arrow_client import flight_table_exists
+            from DataStorageRetrieval.arrow_client import flight_table_exists
 
             if not flight_table_exists(flight_path):
                 exists = False
@@ -235,7 +235,7 @@ async def arrow_dataset_exists(project_id: int, atom_id: str, file_key: str) -> 
                         await delete_arrow_dataset(arrow_object)
                     finally:
                         try:
-                            from utils.flight_registry import remove_arrow_object
+                            from DataStorageRetrieval.flight_registry import remove_arrow_object
 
                             remove_arrow_object(arrow_object)
                         except Exception:

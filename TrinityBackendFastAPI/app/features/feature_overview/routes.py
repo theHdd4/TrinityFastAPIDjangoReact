@@ -27,12 +27,12 @@ from .mongodb_saver import (
 )
 
 from .feature_overview.base import run_unique_count,run_feature_overview, output_store, unique_count
-from app.utils.db import fetch_client_app_project
-from app.utils.arrow_client import (
+from app.DataStorageRetrieval.db import fetch_client_app_project
+from app.DataStorageRetrieval.arrow_client import (
     download_dataframe,
     download_table_bytes,
 )
-from app.utils.flight_registry import get_flight_path_for_csv
+from app.DataStorageRetrieval.flight_registry import get_flight_path_for_csv
 import asyncio
 
 

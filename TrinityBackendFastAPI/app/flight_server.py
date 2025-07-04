@@ -8,7 +8,7 @@ import pyarrow.ipc as ipc
 from minio import Minio
 from minio.error import S3Error
 
-from utils.flight_registry import get_arrow_for_flight_path
+from DataStorageRetrieval.flight_registry import get_arrow_for_flight_path
 
 logger = logging.getLogger("trinity.flight")
 
