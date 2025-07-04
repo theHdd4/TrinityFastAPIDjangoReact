@@ -2223,7 +2223,7 @@ async def validate_mmm_endpoint(
         
         if validation_report.status == "success":
             for content, filename, key in file_contents:
-                upload_result = upload_to_minio(content, filename, validator_atom_id, key)
+                upload_result = upload_to_minio(content, filename, OBJECT_PREFIX)
                 minio_uploads.append({
                     "file_key": key,
                     "filename": filename,
@@ -2582,7 +2582,7 @@ async def validate_category_forecasting_endpoint(
         validator_atom_result = {"status": "skipped", "reason": "validation_failed"}
         
         if validation_report.status == "success":
-            upload_result = upload_to_minio(content, file.filename, validator_atom_id, key)
+            upload_result = upload_to_minio(content, file.filename, OBJECT_PREFIX)
             minio_uploads.append({
                 "file_key": key,
                 "filename": file.filename,
@@ -2768,7 +2768,7 @@ async def validate_promo_endpoint(
         mongo_log_result = {"status": "skipped", "reason": "validation_failed"}
         
         if validation_report.status == "success":
-            upload_result = upload_to_minio(content, file.filename, validator_atom_id, key)
+            upload_result = upload_to_minio(content, file.filename, OBJECT_PREFIX)
             minio_uploads.append({
                 "file_key": key,
                 "filename": file.filename,
@@ -2923,7 +2923,7 @@ async def save_dataframes(
         with ipc.new_file(arrow_buf, table.schema) as writer:
             writer.write_table(table)
 
-        result = upload_to_minio(arrow_buf.getvalue(), arrow_name, validator_atom_id, key)
+        result = upload_to_minio(arrow_buf.getvalue(), arrow_name, OBJECT_PREFIX)
         saved_name = Path(result.get("object_name", "")).name or arrow_name
         flight_path = f"{validator_atom_id}/{saved_name}"
         upload_dataframe(df, flight_path)
