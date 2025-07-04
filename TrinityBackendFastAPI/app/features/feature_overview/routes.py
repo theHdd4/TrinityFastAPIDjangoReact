@@ -26,7 +26,12 @@ from .mongodb_saver import (
     fetch_dimensions_dict,
 )
 
-from .feature_overview.base import run_unique_count,run_feature_overview, output_store, unique_count
+from .feature_overview.base import (
+    run_unique_count,
+    run_feature_overview,
+    output_store,
+    unique_count,
+)
 from app.DataStorageRetrieval.db import fetch_client_app_project
 from app.DataStorageRetrieval.arrow_client import (
     download_dataframe,
@@ -49,6 +54,7 @@ CLIENT_NAME = os.getenv("CLIENT_NAME", "default_client")
 APP_NAME = os.getenv("APP_NAME", "default_app")
 PROJECT_NAME = os.getenv("PROJECT_NAME", "default_project")
 
+
 def load_names_from_db() -> None:
     global CLIENT_NAME, APP_NAME, PROJECT_NAME
     if USER_ID and PROJECT_ID:
@@ -62,6 +68,7 @@ def load_names_from_db() -> None:
         except Exception as exc:
             print(f"⚠️ Failed to load names from DB: {exc}")
 
+
 load_names_from_db()
 
 OBJECT_PREFIX = f"{CLIENT_NAME}/{APP_NAME}/{PROJECT_NAME}/"
@@ -73,6 +80,7 @@ minio_client = Minio(
     secure=False,  # Set to True if using HTTPS
 )
 
+
 # Ensure required bucket exists on startup
 def ensure_minio_bucket():
     try:
@@ -80,9 +88,12 @@ def ensure_minio_bucket():
             minio_client.make_bucket(MINIO_BUCKET)
             print(f"📁 Created MinIO bucket '{MINIO_BUCKET}' for feature overview")
         else:
-            print(f"✅ MinIO bucket '{MINIO_BUCKET}' is accessible for feature overview")
+            print(
+                f"✅ MinIO bucket '{MINIO_BUCKET}' is accessible for feature overview"
+            )
     except Exception as e:
         print(f"⚠️ MinIO connection error: {e}")
+
 
 ensure_minio_bucket()
 
@@ -106,9 +117,7 @@ async def column_summary(object_name: str):
             try:
                 df = download_dataframe(flight_path)
             except Exception as e:
-                print(
-                    f"⚠️ column_summary flight download failed for {object_name}: {e}"
-                )
+                print(f"⚠️ column_summary flight download failed for {object_name}: {e}")
         if df is None:
             if not object_name.endswith(".arrow"):
                 raise ValueError("Unsupported file format")
@@ -135,12 +144,14 @@ async def column_summary(object_name: str):
                 return str(v)
 
             safe_vals = [_serialize(v) for v in vals[:10]]
-            summary.append({
-                "column": col,
-                "data_type": str(df[col].dtype),
-                "unique_count": int(len(vals)),
-                "unique_values": safe_vals,
-            })
+            summary.append(
+                {
+                    "column": col,
+                    "data_type": str(df[col].dtype),
+                    "unique_count": int(len(vals)),
+                    "unique_values": safe_vals,
+                }
+            )
         return {"summary": summary}
     except S3Error as e:
         error_code = getattr(e, "code", "")
@@ -208,14 +219,14 @@ async def flight_table(object_name: str):
 
 
 @router.get("/sku_stats")
-async def sku_stats(object_name: str, y_column: str, combination: str, x_column: str = "date"):
+async def sku_stats(
+    object_name: str, y_column: str, combination: str, x_column: str = "date"
+):
     """Return time series and summary for a specific SKU combination."""
     object_name = unquote(object_name)
     print(f"➡️ sku_stats request: {object_name}")
     if not object_name.startswith(OBJECT_PREFIX):
-        print(
-            f"⚠️ sku_stats prefix mismatch: {object_name} (expected {OBJECT_PREFIX})"
-        )
+        print(f"⚠️ sku_stats prefix mismatch: {object_name} (expected {OBJECT_PREFIX})")
     try:
         combo = json.loads(combination)
     except Exception as e:
@@ -253,7 +264,6 @@ async def sku_stats(object_name: str, y_column: str, combination: str, x_column:
             if not date_cols:
                 raise ValueError("no date column found")
             x_col = date_cols[0]
-
 
         mask = pd.Series(True, index=df.index)
         for k, v in combo.items():
@@ -300,15 +310,15 @@ async def feature_overview_uniquecountendpoint(
     validator_atom_id: str = Form(...),
     file_key: str = Form(...),
     results_collection=Depends(get_unique_dataframe_results_collection),
-    validator_collection: AsyncIOMotorCollection = Depends(get_validator_atoms_collection),
-   
+    validator_collection: AsyncIOMotorCollection = Depends(
+        get_validator_atoms_collection
+    ),
 ):
     try:
 
-        dimensions = await fetch_dimensions_dict(validator_atom_id, file_key, validator_collection)
-
-
-
+        dimensions = await fetch_dimensions_dict(
+            validator_atom_id, file_key, validator_collection
+        )
 
         dataframes = []
         for object_name in object_names:
@@ -318,6 +328,9 @@ async def feature_overview_uniquecountendpoint(
                 df = pd.read_csv(io.BytesIO(content))
             elif object_name.endswith((".xls", ".xlsx")):
                 df = pd.read_excel(io.BytesIO(content))
+            elif object_name.endswith(".arrow"):
+                reader = ipc.RecordBatchFileReader(pa.BufferReader(content))
+                df = reader.read_all().to_pandas()
             else:
                 raise ValueError(f"Unsupported file format: {object_name}")
             df.columns = df.columns.str.lower()
@@ -327,28 +340,24 @@ async def feature_overview_uniquecountendpoint(
             raise ValueError("No valid files fetched from MinIO")
 
         combined_df = pd.concat(dataframes, ignore_index=True)
-        result = run_unique_count(
-            combined_df,
-            dimensions
-        )
+        result = run_unique_count(combined_df, dimensions)
 
         # Save the results
-        await save_feature_overview_unique_results(unique_count, results_collection,validator_atom_id, file_key)
-        
+        await save_feature_overview_unique_results(
+            unique_count, results_collection, validator_atom_id, file_key
+        )
 
+        return JSONResponse(content={"status": result, "dimensions": dimensions})
 
-
-
-        return JSONResponse(content={"status": result,"dimensions": dimensions})
-    
     except S3Error as e:
-        return JSONResponse(status_code=500, content={"status": "FAILURE", "error": str(e)})
+        return JSONResponse(
+            status_code=500, content={"status": "FAILURE", "error": str(e)}
+        )
 
     except Exception as e:
-        return JSONResponse(status_code=400, content={"status": "FAILURE", "error": str(e)})
-
-
-
+        return JSONResponse(
+            status_code=400, content={"status": "FAILURE", "error": str(e)}
+        )
 
 
 @router.post("/summary")
@@ -363,13 +372,16 @@ async def feature_overview_summaryendpoint(
     create_summary: bool = Form(False),
     combination: str = Form(None),  # Optional specific combo
     results_collection=Depends(get_summary_results_collection),
-    validator_collection: AsyncIOMotorCollection = Depends(get_validator_atoms_collection),
-   
+    validator_collection: AsyncIOMotorCollection = Depends(
+        get_validator_atoms_collection
+    ),
 ):
     try:
-      
-        dimensions = await fetch_dimensions_dict(validator_atom_id, file_key, validator_collection)
-        
+
+        dimensions = await fetch_dimensions_dict(
+            validator_atom_id, file_key, validator_collection
+        )
+
         combination_dict = None
         if combination:
             try:
@@ -387,6 +399,9 @@ async def feature_overview_summaryendpoint(
                 df = pd.read_csv(io.BytesIO(content))
             elif object_name.endswith((".xls", ".xlsx")):
                 df = pd.read_excel(io.BytesIO(content))
+            elif object_name.endswith(".arrow"):
+                reader = ipc.RecordBatchFileReader(pa.BufferReader(content))
+                df = reader.read_all().to_pandas()
             else:
                 raise ValueError(f"Unsupported file format: {object_name}")
             df.columns = df.columns.str.lower()
@@ -401,28 +416,25 @@ async def feature_overview_summaryendpoint(
             dimensions,
             create_hierarchy=create_hierarchy,
             selected_combination=combination_dict,
-            create_summary=create_summary
+            create_summary=create_summary,
         )
 
         # Save the results
-        await save_feature_overview_results(output_store, results_collection,validator_atom_id, file_key)
-        
+        await save_feature_overview_results(
+            output_store, results_collection, validator_atom_id, file_key
+        )
 
+        return JSONResponse(content={"status": result, "dimensions": dimensions})
 
-
-
-        return JSONResponse(content={"status": result,"dimensions": dimensions})
-    
     except S3Error as e:
-        return JSONResponse(status_code=500, content={"status": "FAILURE", "error": str(e)})
+        return JSONResponse(
+            status_code=500, content={"status": "FAILURE", "error": str(e)}
+        )
 
     except Exception as e:
-        return JSONResponse(status_code=400, content={"status": "FAILURE", "error": str(e)})
-
-
-
-
-
+        return JSONResponse(
+            status_code=400, content={"status": "FAILURE", "error": str(e)}
+        )
 
 
 @router.get("/unique_dataframe_results")
@@ -438,8 +450,6 @@ def get_feature_overview_unique_dataframe_results():
             result[key] = val
 
     return result
-
-
 
 
 @router.get("/results")
