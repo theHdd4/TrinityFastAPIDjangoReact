@@ -27,6 +27,7 @@ import {
   ColumnFiltersState,
 } from '@tanstack/react-table';
 import { useVirtualizer } from '@tanstack/react-virtual';
+import { csvParse } from 'd3';
 
 const PAGE_SIZE = 5000;
 
@@ -55,17 +56,9 @@ const DataFrameView = () => {
       );
       const text = await res.text();
       const total = parseInt(res.headers.get('x-total-count') || '0');
-      const lines = text.trim().split(/\r?\n/);
-      const header = lines[0]?.split(',') || [];
-      const rows = lines.slice(1);
-      const objects = rows.map(line => {
-        const vals = line.split(',');
-        const obj: Record<string, string> = {};
-        header.forEach((h, i) => {
-          obj[h] = vals[i] || '';
-        });
-        return obj;
-      });
+      const parsed = csvParse(text);
+      const header = parsed.columns;
+      const objects = parsed.map(d => d as Record<string, string>);
       setColumns(
         header.map(h => ({
           accessorKey: h,
