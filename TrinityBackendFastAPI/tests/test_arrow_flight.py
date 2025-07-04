@@ -8,6 +8,7 @@ import json
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "app"))
+sys.path.insert(0, str(ROOT / ".." / "src"))
 from flight_server import ArrowFlightServer
 import importlib.util
 import types
@@ -113,6 +114,8 @@ def test_registry_persistence(tmp_path, monkeypatch):
     monkeypatch.setenv("FLIGHT_REGISTRY_FILE", str(reg_file))
     import importlib
     reg = importlib.reload(flight_registry)
+    import contexts.DataStorageRetrieval.flight_registry as core_reg
+    importlib.reload(core_reg)
     reg.set_ticket("sales", "file.arrow", "path/to/table", "file.csv")
     assert json.load(open(reg_file, "r"))[
         "latest_by_key"]["sales"] == "path/to/table"
@@ -125,6 +128,8 @@ def test_rename_arrow_object(tmp_path, monkeypatch):
     monkeypatch.setenv("FLIGHT_REGISTRY_FILE", str(reg_file))
     import importlib
     reg = importlib.reload(flight_registry)
+    import contexts.DataStorageRetrieval.flight_registry as core_reg
+    importlib.reload(core_reg)
     reg.set_ticket("s", "old.arrow", "tbl", "orig.csv")
     reg.rename_arrow_object("old.arrow", "new.arrow")
     assert reg.get_flight_path_for_csv("new.arrow") == "tbl"

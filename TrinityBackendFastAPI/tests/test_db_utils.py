@@ -1,5 +1,7 @@
-import types, asyncio
-from app.utils import db
+import types, asyncio, sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
+from contexts.DataStorageRetrieval import db_utils as db
 
 class DummyS3Error(Exception):
     def __init__(self, code):
@@ -30,10 +32,10 @@ async def dummy_connect(*a, **k):
 def test_arrow_dataset_exists_missing_object(monkeypatch):
     monkeypatch.setattr(db, "asyncpg", types.SimpleNamespace(connect=dummy_connect))
     monkeypatch.setattr(db, "delete_arrow_dataset", dummy_delete)
-    monkeypatch.setattr("app.utils.flight_registry.remove_arrow_object", dummy_remove)
+    monkeypatch.setattr("contexts.DataStorageRetrieval.flight_registry.remove_arrow_object", dummy_remove)
     monkeypatch.setattr("minio.Minio", DummyMinio)
     monkeypatch.setattr("minio.error.S3Error", DummyS3Error)
-    monkeypatch.setattr("app.utils.arrow_client.flight_table_exists", lambda p: True)
+    monkeypatch.setattr("contexts.DataStorageRetrieval.arrow_client.flight_table_exists", lambda p: True)
     monkeypatch.setenv("MINIO_BUCKET", "bucket")
     monkeypatch.setenv("MINIO_ENDPOINT", "minio:9000")
     monkeypatch.setenv("MINIO_ACCESS_KEY", "minio")
@@ -54,10 +56,10 @@ def test_arrow_dataset_exists_missing_flight(monkeypatch):
 
     monkeypatch.setattr(db, "asyncpg", types.SimpleNamespace(connect=dummy_connect))
     monkeypatch.setattr(db, "delete_arrow_dataset", dummy_delete)
-    monkeypatch.setattr("app.utils.flight_registry.remove_arrow_object", dummy_remove)
+    monkeypatch.setattr("contexts.DataStorageRetrieval.flight_registry.remove_arrow_object", dummy_remove)
     monkeypatch.setattr("minio.Minio", OkMinio)
     monkeypatch.setattr("minio.error.S3Error", DummyS3Error)
-    monkeypatch.setattr("app.utils.arrow_client.flight_table_exists", lambda p: False)
+    monkeypatch.setattr("contexts.DataStorageRetrieval.arrow_client.flight_table_exists", lambda p: False)
     monkeypatch.setenv("MINIO_BUCKET", "bucket")
     monkeypatch.setenv("MINIO_ENDPOINT", "minio:9000")
     monkeypatch.setenv("MINIO_ACCESS_KEY", "minio")

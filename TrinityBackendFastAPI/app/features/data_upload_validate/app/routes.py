@@ -102,21 +102,24 @@ async def health_check():
 from minio import Minio
 from minio.error import S3Error
 from app.features.feature_overview.deps import redis_client
-from app.utils.db import (
+from contexts.DataStorageRetrieval import (
     fetch_client_app_project,
     record_arrow_dataset,
     rename_arrow_dataset,
     delete_arrow_dataset,
     arrow_dataset_exists,
-)
-from app.utils.arrow_client import upload_dataframe
-from app.utils.flight_registry import (
+    upload_dataframe,
     set_ticket,
     get_ticket_by_key,
     get_latest_ticket_for_basename,
     get_original_csv,
     rename_arrow_object,
     remove_arrow_object,
+    ensure_minio_bucket,
+    save_arrow_table,
+    upload_to_minio,
+    get_client,
+    ARROW_DIR,
 )
 import pyarrow as pa
 import pyarrow.ipc as ipc
@@ -157,97 +160,8 @@ load_names_from_db()
 OBJECT_PREFIX = f"{CLIENT_NAME}/{APP_NAME}/{PROJECT_NAME}/"
 
 # Initialize MinIO client
-minio_client = Minio(
-    endpoint=MINIO_ENDPOINT,
-    access_key=MINIO_ACCESS_KEY,
-    secret_key=MINIO_SECRET_KEY,
-    secure=False
-)
-
-# Ensure bucket exists
-def ensure_minio_bucket():
-    try:
-        if not minio_client.bucket_exists(MINIO_BUCKET):
-            minio_client.make_bucket(MINIO_BUCKET)
-            print(f"📁 Created MinIO bucket '{MINIO_BUCKET}'")
-        else:
-            print(f"✅ MinIO bucket '{MINIO_BUCKET}' is accessible")
-        return True
-    except Exception as e:
-        print(f"⚠️ MinIO connection error: {e}")
-        return False
-
-# Test connection on startup
+minio_client = get_client()
 ensure_minio_bucket()
-
-
-ARROW_DIR = Path("arrow_data")
-ARROW_DIR.mkdir(exist_ok=True)
-
-
-def save_arrow_table(df: pd.DataFrame, path: Path) -> None:
-    table = pa.Table.from_pandas(df)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    # pa.OSFile expects a string path rather than a Path object
-    # Convert to str to avoid "expected bytes, PosixPath found" errors
-    with pa.OSFile(str(path), "wb") as sink:
-        with ipc.new_file(sink, table.schema) as writer:
-            writer.write_table(table)
-
-
-# app/routes.py - Efficient MinIO upload function
-
-# app/routes.py - Add this function definition
-
-def upload_to_minio(file_content_bytes: bytes, filename: str, validator_atom_id: str, file_key: str) -> dict:
-    """
-    Upload file to MinIO - Complete function definition
-    """
-    try:
-        # Create unique object name with timestamp
-        timestamp = pd.Timestamp.now().strftime("%Y%m%d_%H%M%S")
-        object_name = f"{OBJECT_PREFIX}{timestamp}_{filename}"
-        
-        # Convert bytes to BytesIO for seek operations
-        file_content = io.BytesIO(file_content_bytes)
-        
-        # Get file size
-        file_content.seek(0, os.SEEK_END)
-        file_size = file_content.tell()
-        file_content.seek(0)  # Reset to beginning
-        
-        # Upload directly to MinIO
-        result = minio_client.put_object(
-            bucket_name=MINIO_BUCKET,
-            object_name=object_name,
-            data=file_content,
-            length=file_size,
-            content_type="application/octet-stream"
-        )
-        
-        return {
-            "status": "success",
-            "bucket": MINIO_BUCKET,
-            "object_name": object_name,
-            "file_url": f"http://{MINIO_ENDPOINT}/{MINIO_BUCKET}/{object_name}",
-            "uploaded_at": timestamp,
-            "etag": result.etag,
-            "server": MINIO_ENDPOINT
-        }
-        
-    except S3Error as e:
-        return {
-            "status": "error",
-            "error_message": str(e),
-            "error_type": "minio_s3_error"
-        }
-    except Exception as e:
-        return {
-            "status": "error",
-            "error_message": str(e),
-            "error_type": "general_upload_error"
-        }
-
 
 # MongoDB directory setup
 MONGODB_DIR = Path("mongodb")
