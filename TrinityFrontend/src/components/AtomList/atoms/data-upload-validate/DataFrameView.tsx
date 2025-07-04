@@ -13,7 +13,11 @@ import {
   ColumnDef,
   flexRender,
   getCoreRowModel,
+  getFilteredRowModel,
+  getSortedRowModel,
   useReactTable,
+  SortingState,
+  ColumnFiltersState,
 } from '@tanstack/react-table';
 
 const DataFrameView = () => {
@@ -21,6 +25,8 @@ const DataFrameView = () => {
   const name = params.get('name') || '';
   const [data, setData] = useState<Record<string, string>[]>([]);
   const [columns, setColumns] = useState<ColumnDef<Record<string, string>>[]>([]);
+  const [sorting, setSorting] = useState<SortingState>([]);
+  const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
 
   useEffect(() => {
     if (!name) return;
@@ -38,7 +44,13 @@ const DataFrameView = () => {
           });
           return obj;
         });
-        setColumns(header.map(h => ({ accessorKey: h, header: h })));
+        setColumns(
+          header.map(h => ({
+            accessorKey: h,
+            header: h,
+            cell: info => info.getValue(),
+          }))
+        );
         setData(objects);
       })
       .catch(() => {
@@ -47,7 +59,16 @@ const DataFrameView = () => {
       });
   }, [name]);
 
-  const table = useReactTable({ data, columns, getCoreRowModel: getCoreRowModel() });
+  const table = useReactTable({
+    data,
+    columns,
+    state: { sorting, columnFilters },
+    onSortingChange: setSorting,
+    onColumnFiltersChange: setColumnFilters,
+    getCoreRowModel: getCoreRowModel(),
+    getSortedRowModel: getSortedRowModel(),
+    getFilteredRowModel: getFilteredRowModel(),
+  });
 
   if (!name) return <div className="p-4">No dataframe specified</div>;
 
@@ -61,16 +82,41 @@ const DataFrameView = () => {
         <Table className="min-w-max" style={{ transform: 'rotateX(180deg)' }}>
           <TableHeader>
             {table.getHeaderGroups().map(headerGroup => (
-              <TableRow key={headerGroup.id}>
-                {headerGroup.headers.map(header => (
-                  <TableHead key={header.id}>
-                    {flexRender(
-                      header.column.columnDef.header,
-                      header.getContext()
-                    )}
-                  </TableHead>
-                ))}
-              </TableRow>
+              <React.Fragment key={headerGroup.id}>
+                <TableRow>
+                  {headerGroup.headers.map(header => (
+                    <TableHead
+                      key={header.id}
+                      onClick={header.column.getToggleSortingHandler()}
+                      className="cursor-pointer select-none"
+                    >
+                      {flexRender(
+                        header.column.columnDef.header,
+                        header.getContext()
+                      )}
+                      {header.column.getIsSorted() === 'asc'
+                        ? ' \u25B2'
+                        : header.column.getIsSorted() === 'desc'
+                        ? ' \u25BC'
+                        : ''}
+                    </TableHead>
+                  ))}
+                </TableRow>
+                <TableRow>
+                  {headerGroup.headers.map(header => (
+                    <TableHead key={header.id}>
+                      {header.column.getCanFilter() ? (
+                        <input
+                          className="w-full rounded border px-1 py-0.5"
+                          value={(header.column.getFilterValue() as string) ?? ''}
+                          onChange={e => header.column.setFilterValue(e.target.value)}
+                          placeholder="Filter"
+                        />
+                      ) : null}
+                    </TableHead>
+                  ))}
+                </TableRow>
+              </React.Fragment>
             ))}
           </TableHeader>
           <TableBody>
