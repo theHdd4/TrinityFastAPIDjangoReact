@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { FEATURE_OVERVIEW_API } from '@/lib/api';
+import { TrinityAssets } from '@/components/PrimaryMenu';
 import {
   Table,
   TableBody,
@@ -217,7 +218,15 @@ const DataFrameView = () => {
   if (!data) return <div className="p-4">Loading...</div>;
 
   return (
-    <div className="h-full bg-white rounded-lg border border-gray-200 flex flex-col">
+    <div className="min-h-screen bg-gray-50 flex flex-col">
+      <header className="bg-white border-b border-gray-200 px-8 py-4">
+        <Link to="/" className="flex items-center space-x-3 group">
+          <TrinityAssets.AnimatedLogo className="w-12 h-12 group-hover:shadow-xl transition-all duration-300" />
+          <TrinityAssets.LogoText />
+        </Link>
+      </header>
+      <div className="p-4 flex-1">
+        <div className="h-full bg-white rounded-lg border border-gray-200 flex flex-col">
       <div className="border-b border-gray-200 bg-gradient-to-r from-blue-50 to-purple-50 px-6 py-4">
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center space-x-3">
@@ -398,6 +407,8 @@ const DataFrameView = () => {
           </div>
         </div>
       )}
+        </div>
+      </div>
     </div>
   );
 };
