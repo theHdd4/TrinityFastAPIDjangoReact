@@ -131,7 +131,8 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({ settings,
       const res = await fetch(
         `${FEATURE_OVERVIEW_API}/cached_dataframe?object_name=${encodeURIComponent(
           settings.dataSource
-        )}`
+        )}`,
+        { credentials: 'include' }
       );
       if (!res.ok) {
         console.warn('⚠️ cached dataframe request failed', res.status);
@@ -195,7 +196,8 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({ settings,
           combination: JSON.stringify(combo),
           x_column: settings.xAxis || 'date'
         });
-        const res = await fetch(`${FEATURE_OVERVIEW_API}/sku_stats?${params.toString()}`);
+        const res = await fetch(`${FEATURE_OVERVIEW_API}/sku_stats?${params.toString()}`,
+          { credentials: 'include' });
         if (!res.ok) {
           throw new Error('Failed to fetch statistics');
         }

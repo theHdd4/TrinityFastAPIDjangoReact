@@ -84,7 +84,8 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
     try {
       console.log('🔎 fetching column summary for', csv);
       const res = await fetch(
-        `${FEATURE_OVERVIEW_API}/column_summary?object_name=${encodeURIComponent(csv)}`
+        `${FEATURE_OVERVIEW_API}/column_summary?object_name=${encodeURIComponent(csv)}`,
+        { credentials: 'include' }
       );
       if (!res.ok) {
         console.warn('⚠️ column summary request failed', res.status);
@@ -150,9 +151,11 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
           if (req) {
             try {
               const [ticketRes, confRes] = await Promise.all([
-                fetch(`${VALIDATE_API}/latest_ticket/${encodeURIComponent(req)}`),
+                fetch(`${VALIDATE_API}/latest_ticket/${encodeURIComponent(req)}`,
+                  { credentials: 'include' }),
                 validatorId
-                  ? fetch(`${VALIDATE_API}/get_validator_config/${validatorId}`)
+                  ? fetch(`${VALIDATE_API}/get_validator_config/${validatorId}`,
+                      { credentials: 'include' })
                   : Promise.resolve(null as any),
               ]);
               if (ticketRes.ok) {
@@ -184,7 +187,7 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
     }
 
     try {
-      const res = await fetch(`${VALIDATE_API}/list_saved_dataframes`);
+      const res = await fetch(`${VALIDATE_API}/list_saved_dataframes`, { credentials: 'include' });
       if (res.ok) {
         const data = await res.json();
         const file = Array.isArray(data.files) ? data.files[0] : null;
