@@ -70,6 +70,14 @@ def download_dataframe(path: str) -> pd.DataFrame:
                 path,
                 table.num_rows,
             )
+            # store table back in Flight so future requests succeed
+            try:
+                writer, _ = client.do_put(descriptor, table.schema)
+                writer.write_table(table)
+                writer.close()
+                logger.info("🛬 cached table %s on flight server", path)
+            except Exception as cache_exc:
+                logger.error("⚠️ failed to cache table on flight: %s", cache_exc)
             return table.to_pandas()
         except Exception as exc:
             logger.error(
@@ -115,7 +123,16 @@ def download_table_bytes(path: str) -> bytes:
             )
             resp = m_client.get_object(bucket, arrow_obj)
             data = resp.read()
+            table = ipc.RecordBatchFileReader(pa.BufferReader(data)).read_all()
             logger.info("✔️ fallback minio bytes %s", arrow_obj)
+            # store table back in Flight for future requests
+            try:
+                writer, _ = client.do_put(descriptor, table.schema)
+                writer.write_table(table)
+                writer.close()
+                logger.info("🛬 cached bytes for %s on flight server", path)
+            except Exception as cache_exc:
+                logger.error("⚠️ failed to cache bytes on flight: %s", cache_exc)
             return data
         except Exception as exc:
             logger.error(
