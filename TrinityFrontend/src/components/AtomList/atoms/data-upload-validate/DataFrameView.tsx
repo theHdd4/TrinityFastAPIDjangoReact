@@ -1,12 +1,32 @@
 import React, { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { FEATURE_OVERVIEW_API } from '@/lib/api';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import {
+  ColumnDef,
+  flexRender,
+  getCoreRowModel,
+  getFilteredRowModel,
+  getSortedRowModel,
+  useReactTable,
+  SortingState,
+  ColumnFiltersState,
+} from '@tanstack/react-table';
 
 const DataFrameView = () => {
   const [params] = useSearchParams();
   const name = params.get('name') || '';
-  const [rows, setRows] = useState<string[][]>([]);
+  const [data, setData] = useState<Record<string, string>[]>([]);
+  const [columns, setColumns] = useState<ColumnDef<Record<string, string>>[]>([]);
+  const [sorting, setSorting] = useState<SortingState>([]);
+  const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
 
   useEffect(() => {
     if (!name) return;
@@ -14,11 +34,41 @@ const DataFrameView = () => {
       .then(res => res.text())
       .then(text => {
         const lines = text.trim().split(/\r?\n/);
-        const parsed = lines.map(l => l.split(','));
-        setRows(parsed);
+        const header = lines[0]?.split(',') || [];
+        const rows = lines.slice(1);
+        const objects = rows.map(line => {
+          const vals = line.split(',');
+          const obj: Record<string, string> = {};
+          header.forEach((h, i) => {
+            obj[h] = vals[i] || '';
+          });
+          return obj;
+        });
+        setColumns(
+          header.map(h => ({
+            accessorKey: h,
+            header: h,
+            cell: info => info.getValue(),
+          }))
+        );
+        setData(objects);
       })
-      .catch(() => setRows([]));
+      .catch(() => {
+        setColumns([]);
+        setData([]);
+      });
   }, [name]);
+
+  const table = useReactTable({
+    data,
+    columns,
+    state: { sorting, columnFilters },
+    onSortingChange: setSorting,
+    onColumnFiltersChange: setColumnFilters,
+    getCoreRowModel: getCoreRowModel(),
+    getSortedRowModel: getSortedRowModel(),
+    getFilteredRowModel: getFilteredRowModel(),
+  });
 
   if (!name) return <div className="p-4">No dataframe specified</div>;
 
@@ -31,17 +81,51 @@ const DataFrameView = () => {
       >
         <Table className="min-w-max" style={{ transform: 'rotateX(180deg)' }}>
           <TableHeader>
-            <TableRow>
-              {rows[0]?.map((h, i) => (
-                <TableHead key={i}>{h}</TableHead>
-              ))}
-            </TableRow>
+            {table.getHeaderGroups().map(headerGroup => (
+              <React.Fragment key={headerGroup.id}>
+                <TableRow>
+                  {headerGroup.headers.map(header => (
+                    <TableHead
+                      key={header.id}
+                      onClick={header.column.getToggleSortingHandler()}
+                      className="cursor-pointer select-none"
+                    >
+                      {flexRender(
+                        header.column.columnDef.header,
+                        header.getContext()
+                      )}
+                      {header.column.getIsSorted() === 'asc'
+                        ? ' \u25B2'
+                        : header.column.getIsSorted() === 'desc'
+                        ? ' \u25BC'
+                        : ''}
+                    </TableHead>
+                  ))}
+                </TableRow>
+                <TableRow>
+                  {headerGroup.headers.map(header => (
+                    <TableHead key={header.id}>
+                      {header.column.getCanFilter() ? (
+                        <input
+                          className="w-full rounded border px-1 py-0.5"
+                          value={(header.column.getFilterValue() as string) ?? ''}
+                          onChange={e => header.column.setFilterValue(e.target.value)}
+                          placeholder="Filter"
+                        />
+                      ) : null}
+                    </TableHead>
+                  ))}
+                </TableRow>
+              </React.Fragment>
+            ))}
           </TableHeader>
           <TableBody>
-            {rows.slice(1).map((r, i) => (
-              <TableRow key={i}>
-                {(Array.isArray(r) ? r : []).map((c, j) => (
-                  <TableCell key={j}>{c}</TableCell>
+            {table.getRowModel().rows.map(row => (
+              <TableRow key={row.id}>
+                {row.getVisibleCells().map(cell => (
+                  <TableCell key={cell.id}>
+                    {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                  </TableCell>
                 ))}
               </TableRow>
             ))}
