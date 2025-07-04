@@ -29,3 +29,5 @@ Further testing revealed errors like:
 The registry still pointed to a Flight path even when the table was missing, so the upload step was skipped because it thought the data already existed. The new
 `arrow_dataset_exists` check verifies both MinIO and the Flight server and cleans up stale records if either resource is missing. This ensures the "Save dataframe"
 operation actually uploads the table and registers the correct path.
+
+After applying these checks and reuploading the dataset, flight downloads succeed and the UI no longer throws the "n.filter is not a function" error.
