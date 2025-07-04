@@ -1,6 +1,6 @@
 import types, asyncio, sys
 from pathlib import Path
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from contexts.DataStorageRetrieval import db_utils as db
 
 class DummyS3Error(Exception):
