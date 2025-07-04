@@ -31,3 +31,9 @@ The registry still pointed to a Flight path even when the table was missing, so 
 operation actually uploads the table and registers the correct path.
 
 After applying these checks and reuploading the dataset, flight downloads succeed and the UI no longer throws the "n.filter is not a function" error.
+
+2025-07-04 investigation notes:
+* The frontend crash occurred because `/feature-overview/column_summary` returned `{"detail": "File not found"}` when the Arrow Flight table was missing. The UI expected an array and failed at `setCards.filter`.
+* Logs showed `download_dataframe()` raised `No table for validator-...` and the fallback MinIO lookup used an incorrect object name.
+* Verified the save logic now uploads to `CLIENT/APP/PROJECT/<ts>_<name>.arrow` and registers `validator/<ts>_<name>.arrow` in the registry.
+* Column summary and SKU stats fetch Arrow bytes first via Flight, then Redis or MinIO if needed; CSV files are never fetched from Flight.

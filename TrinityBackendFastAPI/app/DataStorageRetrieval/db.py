@@ -194,6 +194,10 @@ async def arrow_dataset_exists(project_id: int, atom_id: str, file_key: str) -> 
         except Exception:
             pass
 
+    # If we found a matching record ensure the referenced resources still exist
+    if exists and not (arrow_object and flight_path):
+        exists = False
+
     if exists and arrow_object:
         try:
             from minio import Minio

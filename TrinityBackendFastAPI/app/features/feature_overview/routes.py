@@ -155,7 +155,7 @@ async def column_summary(object_name: str):
 
 @router.get("/cached_dataframe")
 async def cached_dataframe(object_name: str):
-    """Return the raw CSV bytes for a saved dataframe from Redis."""
+    """Return the saved dataframe bytes from Redis or MinIO."""
     object_name = unquote(object_name)
     print(f"➡️ cached_dataframe request: {object_name}")
     if not object_name.startswith(OBJECT_PREFIX):
@@ -169,15 +169,7 @@ async def cached_dataframe(object_name: str):
             content = response.read()
             redis_client.setex(object_name, 3600, content)
 
-        if object_name.endswith(".arrow"):
-            try:
-                reader = ipc.RecordBatchFileReader(pa.BufferReader(content))
-                df = reader.read_all().to_pandas()
-                content = df.to_csv(index=False).encode()
-            except Exception as e:
-                print(f"⚠️ cached_dataframe failed to convert arrow: {e}")
-
-        return Response(content, media_type="text/csv")
+        return Response(content, media_type="application/octet-stream")
     except S3Error as e:
         error_code = getattr(e, "code", "")
         if error_code in {"NoSuchKey", "NoSuchBucket"}:
