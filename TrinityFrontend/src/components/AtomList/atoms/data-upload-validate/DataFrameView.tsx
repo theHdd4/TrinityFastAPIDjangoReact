@@ -1,4 +1,11 @@
-import React, { useEffect, useState } from 'react';
+import React, {
+  useEffect,
+  useState,
+  useMemo,
+  useCallback,
+  useRef,
+  Profiler,
+} from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { FEATURE_OVERVIEW_API } from '@/lib/api';
 import {
@@ -19,71 +26,129 @@ import {
   SortingState,
   ColumnFiltersState,
 } from '@tanstack/react-table';
+import { useVirtualizer } from '@tanstack/react-virtual';
+
+const PAGE_SIZE = 5000;
 
 const DataFrameView = () => {
   const [params] = useSearchParams();
   const name = params.get('name') || '';
   const [data, setData] = useState<Record<string, string>[]>([]);
   const [columns, setColumns] = useState<ColumnDef<Record<string, string>>[]>([]);
+  const [rowCount, setRowCount] = useState(0);
+  const [page, setPage] = useState(0);
   const [sorting, setSorting] = useState<SortingState>([]);
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
+  const tableContainerRef = useRef<HTMLDivElement>(null);
+
+  const fetchPage = useCallback(
+    async (pg: number) => {
+      if (!name) return;
+      const search = new URLSearchParams({
+        object_name: name,
+        offset: String(pg * PAGE_SIZE),
+        limit: String(PAGE_SIZE),
+      });
+      const res = await fetch(
+        `${FEATURE_OVERVIEW_API}/cached_dataframe?${search.toString()}`
+      );
+      const text = await res.text();
+      const total = parseInt(res.headers.get('x-total-count') || '0');
+      const lines = text.trim().split(/\r?\n/);
+      const header = lines[0]?.split(',') || [];
+      const rows = lines.slice(1);
+      const objects = rows.map(line => {
+        const vals = line.split(',');
+        const obj: Record<string, string> = {};
+        header.forEach((h, i) => {
+          obj[h] = vals[i] || '';
+        });
+        return obj;
+      });
+      setColumns(
+        header.map(h => ({
+          accessorKey: h,
+          header: h,
+          cell: info => info.getValue(),
+        }))
+      );
+      setData(objects);
+      setRowCount(total || objects.length);
+    },
+    [name]
+  );
 
   useEffect(() => {
-    if (!name) return;
-    fetch(`${FEATURE_OVERVIEW_API}/cached_dataframe?object_name=${encodeURIComponent(name)}`)
-      .then(res => res.text())
-      .then(text => {
-        const lines = text.trim().split(/\r?\n/);
-        const header = lines[0]?.split(',') || [];
-        const rows = lines.slice(1);
-        const objects = rows.map(line => {
-          const vals = line.split(',');
-          const obj: Record<string, string> = {};
-          header.forEach((h, i) => {
-            obj[h] = vals[i] || '';
-          });
-          return obj;
-        });
-        setColumns(
-          header.map(h => ({
-            accessorKey: h,
-            header: h,
-            cell: info => info.getValue(),
-          }))
-        );
-        setData(objects);
-      })
-      .catch(() => {
-        setColumns([]);
-        setData([]);
-      });
-  }, [name]);
+    fetchPage(page);
+  }, [page, fetchPage]);
+
+  const memoColumns = useMemo(() => columns, [columns]);
+  const memoData = useMemo(() => data, [data]);
+
 
   const table = useReactTable({
-    data,
-    columns,
+    data: memoData,
+    columns: memoColumns,
     state: { sorting, columnFilters },
     onSortingChange: setSorting,
     onColumnFiltersChange: setColumnFilters,
+    manualPagination: rowCount > PAGE_SIZE,
+    pageCount: rowCount > PAGE_SIZE ? Math.ceil(rowCount / PAGE_SIZE) : undefined,
     getCoreRowModel: getCoreRowModel(),
     getSortedRowModel: getSortedRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
   });
 
+  const rowVirtualizer = useVirtualizer({
+    count: table.getRowModel().rows.length,
+    getScrollElement: () => tableContainerRef.current,
+    estimateSize: () => 35,
+  });
+
+  const virtualRows = rowVirtualizer.getVirtualItems();
+  const totalSize = rowVirtualizer.getTotalSize();
+
+  const Cell = React.memo(({ cell }: { cell: any }) => (
+    <TableCell>{flexRender(cell.column.columnDef.cell, cell.getContext())}</TableCell>
+  ));
+
   if (!name) return <div className="p-4">No dataframe specified</div>;
 
   return (
     <div className="p-4">
-      <h1 className="text-lg font-semibold mb-4 break-all">{name.split('/').pop()}</h1>
+      <h1 className="text-lg font-semibold mb-2 break-all">{name.split('/').pop()}</h1>
+      {rowCount > PAGE_SIZE && (
+        <div className="mb-2 flex items-center gap-2">
+          <button
+            className="px-2 py-1 border rounded"
+            disabled={page === 0}
+            onClick={() => setPage(p => Math.max(0, p - 1))}
+          >
+            Prev
+          </button>
+          <span className="text-sm">
+            Page {page + 1} / {Math.ceil(rowCount / PAGE_SIZE)}
+          </span>
+          <button
+            className="px-2 py-1 border rounded"
+            disabled={(page + 1) * PAGE_SIZE >= rowCount}
+            onClick={() => setPage(p => p + 1)}
+          >
+            Next
+          </button>
+        </div>
+      )}
       <div
+        ref={tableContainerRef}
         className="overflow-x-auto overflow-y-auto max-h-[80vh] scrollbar-thin scrollbar-thumb-gray-300"
         style={{ transform: 'rotateX(180deg)' }}
       >
-        <Table className="min-w-max" style={{ transform: 'rotateX(180deg)' }}>
-          <TableHeader>
-            {table.getHeaderGroups().map(headerGroup => (
-              <React.Fragment key={headerGroup.id}>
-                <TableRow>
+        <Profiler id="dataframe-table" onRender={() => {}}>
+          <Table className="min-w-max" style={{ transform: 'rotateX(180deg)' }}>
+            <TableHeader>
+              {table.getHeaderGroups().map(headerGroup => (
+                <React.Fragment key={headerGroup.id}>
+                  <TableRow>
                   {headerGroup.headers.map(header => (
                     <TableHead
                       key={header.id}
@@ -117,20 +182,30 @@ const DataFrameView = () => {
                   ))}
                 </TableRow>
               </React.Fragment>
-            ))}
-          </TableHeader>
-          <TableBody>
-            {table.getRowModel().rows.map(row => (
-              <TableRow key={row.id}>
-                {row.getVisibleCells().map(cell => (
-                  <TableCell key={cell.id}>
-                    {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                  </TableCell>
-                ))}
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+              ))}
+            </TableHeader>
+            <TableBody style={{ height: `${totalSize}px`, position: 'relative' }}>
+              {virtualRows.map(virtualRow => {
+                const row = table.getRowModel().rows[virtualRow.index];
+                return (
+                  <TableRow
+                    key={row.id}
+                    data-index={virtualRow.index}
+                    style={{
+                      position: 'absolute',
+                      top: 0,
+                      transform: `translateY(${virtualRow.start}px)`,
+                    }}
+                  >
+                    {row.getVisibleCells().map(cell => (
+                      <Cell key={cell.id} cell={cell} />
+                    ))}
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        </Profiler>
       </div>
     </div>
   );

@@ -165,7 +165,7 @@ async def column_summary(object_name: str):
 
 
 @router.get("/cached_dataframe")
-async def cached_dataframe(object_name: str):
+async def cached_dataframe(object_name: str, offset: int = 0, limit: int = 0):
     """Return the saved dataframe as CSV text from Redis or MinIO."""
     object_name = unquote(object_name)
     print(f"➡️ cached_dataframe request: {object_name}")
@@ -183,14 +183,36 @@ async def cached_dataframe(object_name: str):
         if object_name.endswith(".arrow"):
             reader = ipc.RecordBatchFileReader(pa.BufferReader(content))
             df = reader.read_all().to_pandas()
+            row_count = len(df)
+            if limit > 0:
+                df = df.iloc[offset : offset + limit]
             csv_text = df.to_csv(index=False)
-            return Response(csv_text, media_type="text/csv")
+            return Response(
+                csv_text,
+                media_type="text/csv",
+                headers={"X-Total-Count": str(row_count)},
+            )
 
         try:
             text = content.decode()
         except Exception:
             text = content
-        return Response(text, media_type="text/csv")
+
+        lines = text.splitlines()
+        row_count = len(lines) - 1
+        header = lines[0] if lines else ""
+        data_lines = lines[1:]
+        if offset > 0:
+            data_lines = data_lines[offset:]
+        if limit > 0:
+            data_lines = data_lines[:limit]
+        text = "\n".join([header] + data_lines)
+
+        return Response(
+            text,
+            media_type="text/csv",
+            headers={"X-Total-Count": str(row_count)},
+        )
     except S3Error as e:
         error_code = getattr(e, "code", "")
         if error_code in {"NoSuchKey", "NoSuchBucket"}:
