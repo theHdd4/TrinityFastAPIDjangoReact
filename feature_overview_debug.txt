@@ -1,0 +1,23 @@
+During investigation of the feature overview atom failing to load the latest dataframe we traced the
+backend calls. When the frontend requests `/feature-overview/column_summary` or `/sku_stats` the
+following steps occur:
+
+1. The route resolves the Arrow Flight path using `get_flight_path_for_csv`.
+2. `download_dataframe` from `app.utils.arrow_client` attempts to retrieve the table from the
+   Flight service. If the table is missing an error like `No table for <path>` is logged.
+3. The client then falls back to MinIO using the arrow object name. When MinIO is unreachable the
+   logs show repeated retries from `urllib3` and finally `fallback minio download failed`.
+4. Because the dataframe was not returned, the UI later throws `TypeError: n.filter is not a
+   function` when trying to use the response.
+
+Running a simple script demonstrates these messages:
+```
+⬇️ downloading via flight: missing/table
+❌ flight download failed for missing/table: No table for missing/table. Detail: Unavailable
+🪶 inferred arrow object default_client/default_app/default_project/table
+Retrying ... Failed to resolve 'minio'
+❌ fallback minio download failed for missing/table: HTTPConnectionPool(...)
+```
+
+To avoid stale or unsupported formats the routes now only fetch Arrow files. If flight retrieval
+fails the service loads the Arrow file from Redis or MinIO before processing.

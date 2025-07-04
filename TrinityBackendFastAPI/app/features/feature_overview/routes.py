@@ -107,20 +107,15 @@ async def column_summary(object_name: str):
                     f"⚠️ column_summary flight download failed for {object_name}: {e}"
                 )
         if df is None:
+            if not object_name.endswith(".arrow"):
+                raise ValueError("Unsupported file format")
             content = redis_client.get(object_name)
             if content is None:
                 response = minio_client.get_object(MINIO_BUCKET, object_name)
                 content = response.read()
                 redis_client.setex(object_name, 3600, content)
-            if object_name.endswith(".arrow"):
-                reader = ipc.RecordBatchFileReader(pa.BufferReader(content))
-                df = reader.read_all().to_pandas()
-            elif object_name.endswith(".csv"):
-                df = pd.read_csv(io.BytesIO(content))
-            elif object_name.endswith((".xls", ".xlsx")):
-                df = pd.read_excel(io.BytesIO(content))
-            else:
-                raise ValueError("Unsupported file format")
+            reader = ipc.RecordBatchFileReader(pa.BufferReader(content))
+            df = reader.read_all().to_pandas()
 
         df.columns = df.columns.str.lower()
         summary = []
@@ -231,21 +226,16 @@ async def sku_stats(object_name: str, y_column: str, combination: str, x_column:
             except Exception as e:
                 print(f"⚠️ sku_stats flight download failed for {object_name}: {e}")
         if df is None:
+            if not object_name.endswith(".arrow"):
+                raise ValueError("Unsupported file format")
             content = redis_client.get(object_name)
             if content is None:
                 response = minio_client.get_object(MINIO_BUCKET, object_name)
                 content = response.read()
                 redis_client.setex(object_name, 3600, content)
 
-            if object_name.endswith(".csv"):
-                df = pd.read_csv(io.BytesIO(content))
-            elif object_name.endswith((".xls", ".xlsx")):
-                df = pd.read_excel(io.BytesIO(content))
-            elif object_name.endswith(".arrow"):
-                reader = ipc.RecordBatchFileReader(pa.BufferReader(content))
-                df = reader.read_all().to_pandas()
-            else:
-                raise ValueError("Unsupported file format")
+            reader = ipc.RecordBatchFileReader(pa.BufferReader(content))
+            df = reader.read_all().to_pandas()
 
         df.columns = df.columns.str.lower()
         y_col = y_column.lower()
