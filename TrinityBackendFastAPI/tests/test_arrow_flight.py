@@ -7,13 +7,87 @@ import threading
 import json
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "app"))
-sys.path.insert(0, str(ROOT / "src"))
-from flight_server import ArrowFlightServer
 import importlib.util
 import types
-arrow_client = importlib.import_module("utils.arrow_client")
-flight_registry = importlib.import_module("utils.flight_registry")
+if "minio" not in sys.modules:
+    minio_mod = types.ModuleType("minio")
+    class Minio:
+        def __init__(self, *a, **k):
+            pass
+
+        def get_object(self, *a, **k):
+            class Resp:
+                def read(self):
+                    return b""
+
+            return Resp()
+
+    minio_mod.Minio = Minio
+    error_mod = types.ModuleType("minio.error")
+    class S3Error(Exception):
+        pass
+
+    error_mod.S3Error = S3Error
+    common_mod = types.ModuleType("minio.commonconfig")
+    class CopySource:
+        def __init__(self, bucket, name):
+            self.bucket_name = bucket
+            self.object_name = name
+
+    common_mod.CopySource = CopySource
+    sys.modules["minio"] = minio_mod
+    sys.modules["minio.error"] = error_mod
+    sys.modules["minio.commonconfig"] = common_mod
+if "pymongo" not in sys.modules:
+    pymod = types.ModuleType("pymongo")
+    class MongoClient:
+        def __init__(self, *a, **k):
+            self.admin = self
+
+        def command(self, *a, **k):
+            pass
+
+        def __getitem__(self, name):
+            return {}
+
+    pymod.MongoClient = MongoClient
+    sys.modules["pymongo"] = pymod
+if "redis" not in sys.modules:
+    redis_mod = types.ModuleType("redis")
+    class Redis:
+        def __init__(self, *a, **k):
+            pass
+
+        def get(self, k):
+            return None
+
+        def set(self, k, v):
+            pass
+
+        def delete(self, k):
+            pass
+
+    redis_mod.Redis = Redis
+    sys.modules["redis"] = redis_mod
+if "motor.motor_asyncio" not in sys.modules:
+    motor_mod = types.ModuleType("motor.motor_asyncio")
+    class AsyncIOMotorClient:
+        def __init__(self, *a, **k):
+            pass
+
+        def __getitem__(self, name):
+            return {}
+    class AsyncIOMotorCollection:
+        pass
+
+    motor_mod.AsyncIOMotorClient = AsyncIOMotorClient
+    motor_mod.AsyncIOMotorCollection = AsyncIOMotorCollection
+    sys.modules["motor.motor_asyncio"] = motor_mod
+from app.flight_server import ArrowFlightServer
+arrow_client = importlib.import_module("app.utils.arrow_client")
+flight_registry = importlib.import_module("app.utils.flight_registry")
 
 
 def load_routes():
@@ -52,9 +126,15 @@ def load_routes():
         class AsyncIOMotorClient:
             def __init__(self, *a, **k):
                 pass
+
             def __getitem__(self, name):
                 return {}
+
+        class AsyncIOMotorCollection:
+            pass
+
         motor_mod.AsyncIOMotorClient = AsyncIOMotorClient
+        motor_mod.AsyncIOMotorCollection = AsyncIOMotorCollection
         sys.modules["motor.motor_asyncio"] = motor_mod
     if "redis" not in sys.modules:
         redis_mod = types.ModuleType("redis")
@@ -69,6 +149,27 @@ def load_routes():
                 pass
         redis_mod.Redis = Redis
         sys.modules["redis"] = redis_mod
+    if "minio" not in sys.modules:
+        minio_mod = types.ModuleType("minio")
+        class Minio:
+            def __init__(self, *a, **k):
+                pass
+
+            def get_object(self, *a, **k):
+                class Resp:
+                    def read(self):
+                        return b""
+
+                return Resp()
+
+        minio_mod.Minio = Minio
+        error_mod = types.ModuleType("minio.error")
+        class S3Error(Exception):
+            pass
+
+        error_mod.S3Error = S3Error
+        sys.modules["minio"] = minio_mod
+        sys.modules["minio.error"] = error_mod
     spec.loader.exec_module(routes)  # type: ignore
     return routes
 
@@ -114,7 +215,7 @@ def test_registry_persistence(tmp_path, monkeypatch):
     monkeypatch.setenv("FLIGHT_REGISTRY_FILE", str(reg_file))
     import importlib
     reg = importlib.reload(flight_registry)
-    import contexts.DataStorageRetrieval.flight_registry as core_reg
+    import app.utils.flight_registry as core_reg
     importlib.reload(core_reg)
     reg.set_ticket("sales", "file.arrow", "path/to/table", "file.csv")
     assert json.load(open(reg_file, "r"))[
@@ -128,7 +229,7 @@ def test_rename_arrow_object(tmp_path, monkeypatch):
     monkeypatch.setenv("FLIGHT_REGISTRY_FILE", str(reg_file))
     import importlib
     reg = importlib.reload(flight_registry)
-    import contexts.DataStorageRetrieval.flight_registry as core_reg
+    import app.utils.flight_registry as core_reg
     importlib.reload(core_reg)
     reg.set_ticket("s", "old.arrow", "tbl", "orig.csv")
     reg.rename_arrow_object("old.arrow", "new.arrow")
