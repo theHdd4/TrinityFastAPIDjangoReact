@@ -45,30 +45,36 @@ def download_dataframe(path: str) -> pd.DataFrame:
     except Exception as e:
         logger.error("❌ flight download failed for %s: %s", path, e)
         arrow_obj = get_arrow_for_flight_path(path)
-        if arrow_obj:
-            try:
-                bucket = os.getenv("MINIO_BUCKET", "trinity")
-                m_client = Minio(
-                    os.getenv("MINIO_ENDPOINT", "minio:9000"),
-                    access_key=os.getenv("MINIO_ACCESS_KEY", "admin_dev"),
-                    secret_key=os.getenv("MINIO_SECRET_KEY", "pass_dev"),
-                    secure=False,
-                )
-                resp = m_client.get_object(bucket, arrow_obj)
-                data = resp.read()
-                table = ipc.RecordBatchFileReader(
-                    pa.BufferReader(data)
-                ).read_all()
-                logger.info(
-                    "✔️ fallback minio download %s rows=%d",
-                    path,
-                    table.num_rows,
-                )
-                return table.to_pandas()
-            except Exception as exc:
-                logger.error(
-                    "❌ fallback minio download failed for %s: %s", path, exc
-                )
+        if not arrow_obj:
+            basename = os.path.basename(path)
+            arrow_obj = os.path.join(
+                os.getenv("CLIENT_NAME", "default_client"),
+                os.getenv("APP_NAME", "default_app"),
+                os.getenv("PROJECT_NAME", "default_project"),
+                basename,
+            )
+            logger.info("🪶 inferred arrow object %s", arrow_obj)
+        try:
+            bucket = os.getenv("MINIO_BUCKET", "trinity")
+            m_client = Minio(
+                os.getenv("MINIO_ENDPOINT", "minio:9000"),
+                access_key=os.getenv("MINIO_ACCESS_KEY", "admin_dev"),
+                secret_key=os.getenv("MINIO_SECRET_KEY", "pass_dev"),
+                secure=False,
+            )
+            resp = m_client.get_object(bucket, arrow_obj)
+            data = resp.read()
+            table = ipc.RecordBatchFileReader(pa.BufferReader(data)).read_all()
+            logger.info(
+                "✔️ fallback minio download %s rows=%d",
+                path,
+                table.num_rows,
+            )
+            return table.to_pandas()
+        except Exception as exc:
+            logger.error(
+                "❌ fallback minio download failed for %s: %s", path, exc
+            )
         raise
 
 
@@ -90,23 +96,31 @@ def download_table_bytes(path: str) -> bytes:
     except Exception as e:
         logger.error("❌ flight byte download failed for %s: %s", path, e)
         arrow_obj = get_arrow_for_flight_path(path)
-        if arrow_obj:
-            try:
-                bucket = os.getenv("MINIO_BUCKET", "trinity")
-                m_client = Minio(
-                    os.getenv("MINIO_ENDPOINT", "minio:9000"),
-                    access_key=os.getenv("MINIO_ACCESS_KEY", "admin_dev"),
-                    secret_key=os.getenv("MINIO_SECRET_KEY", "pass_dev"),
-                    secure=False,
-                )
-                resp = m_client.get_object(bucket, arrow_obj)
-                data = resp.read()
-                logger.info("✔️ fallback minio bytes %s", arrow_obj)
-                return data
-            except Exception as exc:
-                logger.error(
-                    "❌ fallback minio byte download failed for %s: %s",
-                    path,
-                    exc,
-                )
+        if not arrow_obj:
+            basename = os.path.basename(path)
+            arrow_obj = os.path.join(
+                os.getenv("CLIENT_NAME", "default_client"),
+                os.getenv("APP_NAME", "default_app"),
+                os.getenv("PROJECT_NAME", "default_project"),
+                basename,
+            )
+            logger.info("🪶 inferred arrow object %s", arrow_obj)
+        try:
+            bucket = os.getenv("MINIO_BUCKET", "trinity")
+            m_client = Minio(
+                os.getenv("MINIO_ENDPOINT", "minio:9000"),
+                access_key=os.getenv("MINIO_ACCESS_KEY", "admin_dev"),
+                secret_key=os.getenv("MINIO_SECRET_KEY", "pass_dev"),
+                secure=False,
+            )
+            resp = m_client.get_object(bucket, arrow_obj)
+            data = resp.read()
+            logger.info("✔️ fallback minio bytes %s", arrow_obj)
+            return data
+        except Exception as exc:
+            logger.error(
+                "❌ fallback minio byte download failed for %s: %s",
+                path,
+                exc,
+            )
         raise
