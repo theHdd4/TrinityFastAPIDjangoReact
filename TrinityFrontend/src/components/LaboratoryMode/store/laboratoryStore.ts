@@ -134,9 +134,10 @@ const STORAGE_KEY = 'laboratory-layout-cards';
 
 export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
   cards: [],
-  setCards: (cards) => {
-    localStorage.setItem(STORAGE_KEY, safeStringify(cards));
-    set({ cards });
+  setCards: (cards: LayoutCard[] | unknown) => {
+    const safeCards = Array.isArray(cards) ? cards : [];
+    localStorage.setItem(STORAGE_KEY, safeStringify(safeCards));
+    set({ cards: safeCards });
   },
   updateAtomSettings: (atomId, settings) => {
     const updatedCards = get().cards.map(card => ({

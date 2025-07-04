@@ -100,12 +100,13 @@ export const useExhibitionStore = create<ExhibitionStore>((set, get) => ({
     });
   },
 
-  setCards: (cards: LayoutCard[]) => {
-    const exhibitedCards = cards.filter(card => card.isExhibited);
-    const newState = { cards, exhibitedCards };
+  setCards: (cards: LayoutCard[] | unknown) => {
+    const safeCards = Array.isArray(cards) ? cards : [];
+    const exhibitedCards = safeCards.filter(card => (card as any).isExhibited);
+    const newState = { cards: safeCards, exhibitedCards };
     localStorage.setItem(
       'laboratory-config',
-      safeStringify({ cards, exhibitedCards, timestamp: new Date().toISOString() })
+      safeStringify({ cards: safeCards, exhibitedCards, timestamp: new Date().toISOString() })
     );
     set(newState);
   },
