@@ -152,9 +152,10 @@ async def delete_arrow_dataset(arrow_object: str) -> None:
 
 
 async def arrow_dataset_exists(project_id: int, atom_id: str, file_key: str) -> bool:
-    """Return True if a dataset entry already exists and is present in MinIO."""
+    """Return True if a dataset entry already exists and is present in MinIO and Flight."""
     exists = False
     arrow_object: str | None = None
+    flight_path: str | None = None
 
     if asyncpg is not None:
         try:
@@ -169,7 +170,7 @@ async def arrow_dataset_exists(project_id: int, atom_id: str, file_key: str) -> 
         if conn is not None:
             try:
                 row = await conn.fetchrow(
-                    "SELECT arrow_object FROM registry_arrowdataset WHERE project_id=$1 AND atom_id=$2 AND file_key=$3",
+                    "SELECT arrow_object, flight_path FROM registry_arrowdataset WHERE project_id=$1 AND atom_id=$2 AND file_key=$3",
                     project_id,
                     atom_id,
                     file_key,
@@ -177,6 +178,7 @@ async def arrow_dataset_exists(project_id: int, atom_id: str, file_key: str) -> 
                 if row:
                     exists = True
                     arrow_object = row["arrow_object"]
+                    flight_path = row["flight_path"]
             finally:
                 await conn.close()
 
@@ -187,6 +189,7 @@ async def arrow_dataset_exists(project_id: int, atom_id: str, file_key: str) -> 
             path, arrow_name = get_ticket_by_key(file_key)
             if path:
                 exists = True
+                flight_path = path
                 arrow_object = arrow_name
         except Exception:
             pass
@@ -218,6 +221,25 @@ async def arrow_dataset_exists(project_id: int, atom_id: str, file_key: str) -> 
                         pass
             else:  # pragma: no cover - unexpected error
                 exists = False
+        except Exception:  # pragma: no cover - any other error
+            exists = False
+
+    if exists and flight_path:
+        try:
+            from app.utils.arrow_client import flight_table_exists
+
+            if not flight_table_exists(flight_path):
+                exists = False
+                if arrow_object:
+                    try:
+                        await delete_arrow_dataset(arrow_object)
+                    finally:
+                        try:
+                            from app.utils.flight_registry import remove_arrow_object
+
+                            remove_arrow_object(arrow_object)
+                        except Exception:
+                            pass
         except Exception:  # pragma: no cover - any other error
             exists = False
 

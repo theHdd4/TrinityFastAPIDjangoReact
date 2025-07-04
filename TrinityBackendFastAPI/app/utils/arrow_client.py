@@ -124,3 +124,14 @@ def download_table_bytes(path: str) -> bytes:
                 exc,
             )
         raise
+
+
+def flight_table_exists(path: str) -> bool:
+    """Return True if the given flight path is available on the Flight server."""
+    client = _get_client()
+    descriptor = flight.FlightDescriptor.for_path(path)
+    try:
+        client.get_flight_info(descriptor)
+        return True
+    except Exception:
+        return False

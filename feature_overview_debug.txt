@@ -21,3 +21,11 @@ Retrying ... Failed to resolve 'minio'
 
 To avoid stale or unsupported formats the routes now only fetch Arrow files. If flight retrieval
 fails the service loads the Arrow file from Redis or MinIO before processing.
+
+Further testing revealed errors like:
+```
+❌ flight byte download failed for validator-.../file.arrow: No table for validator-.../file.arrow. Detail: Unavailable
+```
+The registry still pointed to a Flight path even when the table was missing, so the upload step was skipped because it thought the data already existed. The new
+`arrow_dataset_exists` check verifies both MinIO and the Flight server and cleans up stale records if either resource is missing. This ensures the "Save dataframe"
+operation actually uploads the table and registers the correct path.
