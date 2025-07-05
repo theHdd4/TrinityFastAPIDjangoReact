@@ -228,34 +228,34 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
         ? identifiers
         : (Array.isArray(summary) ? summary : []).map(cc => cc.column);
 
-    setLayoutCards(cards =>
-      cards.map(c =>
-        c.id === cardId
-          ? {
-              ...c,
-              atoms: c.atoms.map(a =>
-                a.id === atomId
-                  ? {
-                      ...a,
-                      settings: {
-                        ...(a.settings || {}),
-                        dataSource: prev.csv,
-                        csvDisplay: prev.display || prev.csv,
-                        allColumns: summary,
-                        columnSummary: filtered,
-                        selectedColumns: selected,
-                        numericColumns: Array.isArray(prev.numeric)
-                          ? prev.numeric
-                          : [],
-                        xAxis: prev.xField || 'date',
-                      },
-                    }
-                  : a
-              ),
-            }
-          : c
-      )
+    const current = useLaboratoryStore.getState().cards;
+    const updated = current.map(c =>
+      c.id === cardId
+        ? {
+            ...c,
+            atoms: c.atoms.map(a =>
+              a.id === atomId
+                ? {
+                    ...a,
+                    settings: {
+                      ...(a.settings || {}),
+                      dataSource: prev.csv,
+                      csvDisplay: prev.display || prev.csv,
+                      allColumns: summary,
+                      columnSummary: filtered,
+                      selectedColumns: selected,
+                      numericColumns: Array.isArray(prev.numeric)
+                        ? prev.numeric
+                        : [],
+                      xAxis: prev.xField || 'date',
+                    },
+                  }
+                : a
+            ),
+          }
+        : c
     );
+    setLayoutCards(updated);
   };
 
   // Load saved layout and workflow rendering
