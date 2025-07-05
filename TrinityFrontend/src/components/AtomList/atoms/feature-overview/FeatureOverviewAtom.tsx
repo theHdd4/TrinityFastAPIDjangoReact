@@ -12,7 +12,7 @@ const FeatureOverviewAtom: React.FC<Props> = ({ atomId }) => {
   const settings: SettingsType = (atom?.settings as SettingsType) || { ...DEFAULT_FEATURE_OVERVIEW_SETTINGS };
 
   return (
-    <div className="w-full h-full bg-white rounded-lg overflow-hidden flex flex-col">
+    <div className="w-full h-full bg-white rounded-lg overflow-hidden flex flex-col mb-2">
       <FeatureOverviewCanvas
         settings={settings}
         onUpdateSettings={s => updateSettings(atomId, s)}
