@@ -228,34 +228,15 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
         ? identifiers
         : (Array.isArray(summary) ? summary : []).map(cc => cc.column);
 
-    setLayoutCards(cards =>
-      cards.map(c =>
-        c.id === cardId
-          ? {
-              ...c,
-              atoms: c.atoms.map(a =>
-                a.id === atomId
-                  ? {
-                      ...a,
-                      settings: {
-                        ...(a.settings || {}),
-                        dataSource: prev.csv,
-                        csvDisplay: prev.display || prev.csv,
-                        allColumns: summary,
-                        columnSummary: filtered,
-                        selectedColumns: selected,
-                        numericColumns: Array.isArray(prev.numeric)
-                          ? prev.numeric
-                          : [],
-                        xAxis: prev.xField || 'date',
-                      },
-                    }
-                  : a
-              ),
-            }
-          : c
-      )
-    );
+    updateAtomSettings(atomId, {
+      dataSource: prev.csv,
+      csvDisplay: prev.display || prev.csv,
+      allColumns: summary,
+      columnSummary: filtered,
+      selectedColumns: selected,
+      numericColumns: Array.isArray(prev.numeric) ? prev.numeric : [],
+      xAxis: prev.xField || 'date',
+    });
   };
 
   // Load saved layout and workflow rendering
@@ -701,7 +682,7 @@ const addNewCard = (moleculeId?: string, position?: number) => {
                         return (
                         <Card
                           key={card.id}
-                          className={`w-full min-h-[200px] bg-white rounded-2xl border-2 transition-all duration-300 flex flex-col ${
+                          className={`w-full min-h-[200px] bg-white rounded-2xl border-2 transition-all duration-300 flex flex-col overflow-hidden ${
                             dragOver === card.id
                               ? 'border-[#458EE2] bg-gradient-to-br from-blue-50 to-blue-100 shadow-lg'
                               : 'border-gray-200 shadow-sm hover:shadow-md'
@@ -760,7 +741,7 @@ const addNewCard = (moleculeId?: string, position?: number) => {
                                 {card.atoms.map(atom => (
                                   <AtomBox
                                     key={atom.id}
-                                    className="p-4 cursor-pointer hover:shadow-lg transition-all duration-200 group border border-gray-200 bg-white"
+                                    className="p-4 cursor-pointer hover:shadow-lg transition-all duration-200 group border border-gray-200 bg-white overflow-hidden"
                                     onClick={(e) => handleAtomClick(e, atom.id)}
                                   >
                                     <div className="flex items-center justify-between mb-3">
@@ -896,7 +877,7 @@ const addNewCard = (moleculeId?: string, position?: number) => {
                   {card.atoms.map((atom) => (
                     <AtomBox
                       key={atom.id}
-                      className="p-4 cursor-pointer hover:shadow-lg transition-all duration-200 group border border-gray-200 bg-white"
+                      className="p-4 cursor-pointer hover:shadow-lg transition-all duration-200 group border border-gray-200 bg-white overflow-hidden"
                       onClick={(e) => handleAtomClick(e, atom.id)}
                     >
                       {/* Atom Header */}
