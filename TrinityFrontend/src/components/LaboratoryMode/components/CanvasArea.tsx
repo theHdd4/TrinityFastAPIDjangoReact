@@ -228,34 +228,15 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
         ? identifiers
         : (Array.isArray(summary) ? summary : []).map(cc => cc.column);
 
-    const currentCards = useLaboratoryStore.getState().cards;
-    const updatedCards = (Array.isArray(currentCards) ? currentCards : []).map(c =>
-      c.id === cardId
-        ? {
-            ...c,
-            atoms: c.atoms.map(a =>
-              a.id === atomId
-                ? {
-                    ...a,
-                    settings: {
-                      ...(a.settings || {}),
-                      dataSource: prev.csv,
-                      csvDisplay: prev.display || prev.csv,
-                      allColumns: summary,
-                      columnSummary: filtered,
-                      selectedColumns: selected,
-                      numericColumns: Array.isArray(prev.numeric)
-                        ? prev.numeric
-                        : [],
-                      xAxis: prev.xField || 'date',
-                    },
-                  }
-                : a
-            ),
-          }
-        : c
-    );
-    setLayoutCards(updatedCards);
+    updateAtomSettings(atomId, {
+      dataSource: prev.csv,
+      csvDisplay: prev.display || prev.csv,
+      allColumns: summary,
+      columnSummary: filtered,
+      selectedColumns: selected,
+      numericColumns: Array.isArray(prev.numeric) ? prev.numeric : [],
+      xAxis: prev.xField || 'date',
+    });
   };
 
   // Load saved layout and workflow rendering
