@@ -508,6 +508,28 @@ async def view_new(validator_atom_id: str):
     return data.get("schemas", {})
 
 
+# New endpoint to fetch full validator configuration
+@router.get("/get_validator_config/{validator_atom_id}")
+async def get_validator_config(validator_atom_id: str):
+    """Return schemas and column types for a validator atom."""
+    data = extraction_results.get(validator_atom_id)
+    if not data:
+        data = get_validator_atom_from_mongo(validator_atom_id)
+        if not data:
+            data = get_validator_from_memory_or_disk(validator_atom_id)
+
+    if not data:
+        raise HTTPException(status_code=404, detail=f"Validator atom '{validator_atom_id}' not found")
+
+    return {
+        "validator_atom_id": validator_atom_id,
+        "schemas": data.get("schemas", {}),
+        "column_types": data.get("column_types", {}),
+        "validations": data.get("validations", {}),
+        "file_keys": data.get("file_keys", []),
+    }
+
+
 # POST: CLASSIFY_COLUMNS - Complete fixed version for both validator types
 @router.post("/classify_columns", response_model=ClassifyColumnsResponse)
 async def classify_columns(
