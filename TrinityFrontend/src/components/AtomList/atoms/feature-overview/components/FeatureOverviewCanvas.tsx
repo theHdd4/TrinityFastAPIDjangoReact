@@ -197,7 +197,7 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({ settings,
   };
 
   return (
-    <div className="w-full h-full p-6 bg-gradient-to-br from-slate-50 to-blue-50 overflow-y-auto">
+    <div className="w-full h-full p-6 pb-[50px] bg-gradient-to-br from-slate-50 to-blue-50 overflow-y-auto">
       {error && (
         <div className="mb-4 text-sm text-red-600 font-medium" data-testid="fo-error">
           {error}
