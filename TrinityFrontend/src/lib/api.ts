@@ -26,7 +26,7 @@ export const SUBSCRIPTIONS_API =
   import.meta.env.VITE_SUBSCRIPTIONS_API || `${backendOrigin}/api/subscriptions`;
 
 export const VALIDATE_API =
-  import.meta.env.VITE_VALIDATE_API || `${backendOrigin}/api/data-upload-validate`;
+  import.meta.env.VITE_VALIDATE_API || `${backendOrigin.replace(/:8000$/, ':8001')}/api/data-upload-validate`;
 
 export const COLUMN_CLASSIFIER_API =
   import.meta.env.VITE_COLUMN_CLASSIFIER_API || `${backendOrigin.replace(/:8000$/, ':8005')}/classify`;
