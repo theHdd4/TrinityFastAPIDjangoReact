@@ -228,6 +228,8 @@ def apply_validation_condition(column_data, operator, value, col_name):
             failed_mask = ~(column_data == value)
         elif operator == "not_equal_to":
             failed_mask = ~(column_data != value)
+        elif operator == "not_null":
+            failed_mask = column_data.isna()
         elif operator == "between":
             if isinstance(value, list) and len(value) == 2:
                 failed_mask = ~((column_data >= value[0]) & (column_data <= value[1]))

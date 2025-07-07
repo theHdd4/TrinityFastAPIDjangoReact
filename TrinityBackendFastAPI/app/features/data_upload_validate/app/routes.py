@@ -1558,7 +1558,8 @@ VALIDATION_OPERATORS = {
     "not_in_list": "NOT_IN",
     "date_before": "DATE_BEFORE",
     "date_after": "DATE_AFTER",
-    "date_between": "DATE_BETWEEN"
+    "date_between": "DATE_BETWEEN",
+    "not_null": "NOT_NULL"
 }
 
 # ✅ ADD: Valid frequency options

@@ -11,7 +11,7 @@ import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Input } from '@/components/ui/input';
-// Removed unused imports after simplifying the properties UI
+import { Checkbox } from '@/components/ui/checkbox';
 import { VALIDATE_API } from '@/lib/api';
 import {
   useLaboratoryStore,
@@ -63,6 +63,8 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
     { id: 1, column: '', periodicity: '' }
   ]);
 
+  const [missingValueChecks, setMissingValueChecks] = useState<string[]>([]);
+
   const [numericalColumns, setNumericalColumns] = useState<string[]>([]);
   const [dateColumns, setDateColumns] = useState<string[]>([]);
 
@@ -87,7 +89,10 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
             const periodicities = (list as any[])
               .filter(v => v.validation_type === 'periodicity')
               .map(v => ({ id: Date.now() + Math.random(), column: v.column, periodicity: v.periodicity || '' }));
-            parsedValidations[k] = { ranges, periodicities };
+            const noMissing = (list as any[])
+              .filter(v => v.validation_type === 'not_null')
+              .map(v => v.column);
+            parsedValidations[k] = { ranges, periodicities, noMissing };
           });
         }
 
@@ -187,10 +192,13 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
           const periodicities = list
             .filter(v => v.validation_type === 'periodicity')
             .map(v => ({ id: Date.now() + Math.random(), column: v.column, periodicity: v.periodicity || '' }));
+          const noMissing = list
+            .filter(v => v.validation_type === 'not_null')
+            .map(v => v.column);
           updateSettings(atomId, {
             validations: {
               ...(settings.validations || {}),
-              [selectedMasterFile]: { ranges, periodicities }
+              [selectedMasterFile]: { ranges, periodicities, noMissing }
             }
           });
         }
@@ -222,9 +230,11 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
           ? val.periodicities
           : [{ id: Date.now(), column: '', periodicity: '' }]
       );
+      setMissingValueChecks(val.noMissing || []);
     } else {
       setRangeValidations([{ id: Date.now(), column: '', min: '', max: '' }]);
       setPeriodicityValidations([{ id: Date.now(), column: '', periodicity: '' }]);
+      setMissingValueChecks([]);
     }
 
   }, [selectedMasterFile]);
@@ -288,6 +298,15 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
       if (p.column && p.periodicity) columnFrequencies[p.column] = p.periodicity;
     });
 
+    missingValueChecks.forEach(col => {
+      if (!columnConditions[col]) columnConditions[col] = [];
+      columnConditions[col].push({
+        operator: 'not_null',
+        value: true,
+        error_message: 'missing value check'
+      });
+    });
+
     await fetch(`${VALIDATE_API}/configure_validation_config`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -305,7 +324,8 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
       ...(settings.validations || {}),
       [selectedMasterFile]: {
         ranges: savedRanges,
-        periodicities: savedPeriods
+        periodicities: savedPeriods,
+        noMissing: missingValueChecks
       }
     };
     updateSettings(atomId, {
@@ -501,9 +521,9 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
                       </Button>
                     </div>
 
-                    {periodicityValidations.map(periodicity => (
-                      <div
-                        key={periodicity.id}
+                  {periodicityValidations.map(periodicity => (
+                    <div
+                      key={periodicity.id}
                         className="p-3 bg-gray-50 rounded-lg border border-gray-200 space-y-3"
                       >
                         <div className="flex items-center justify-between">
@@ -554,6 +574,27 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
                         </div>
                       </div>
                     ))}
+                  </div>
+
+                  {/* Missing Value Validation Section */}
+                  <div className="space-y-4 mt-6">
+                    <h5 className="text-sm font-medium text-gray-700">Missing Value Checks</h5>
+                    <div className="grid grid-cols-2 gap-2">
+                      {Object.keys(columnDataTypes).map(col => (
+                        <label key={col} className="flex items-center space-x-2 text-xs">
+                          <Checkbox
+                            checked={missingValueChecks.includes(col)}
+                            onCheckedChange={val => {
+                              const checked = Boolean(val);
+                              setMissingValueChecks(prev =>
+                                checked ? [...prev, col] : prev.filter(c => c !== col)
+                              );
+                            }}
+                          />
+                          <span>{col}</span>
+                        </label>
+                      ))}
+                    </div>
                   </div>
                 </div>
               </TabsContent>

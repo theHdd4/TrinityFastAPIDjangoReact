@@ -165,7 +165,7 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
     if (res.ok) {
       const data = await res.json();
       const cfgRes = await fetch(`${VALIDATE_API}/get_validator_config/${settings.validatorId}`);
-      const cfg = cfgRes.ok ? await cfgRes.json() : { validations: {} };
+      const cfg = cfgRes.ok ? await cfgRes.json() : { validations: {}, column_types: {} };
 
       const results: Record<string, string> = {};
       const details: Record<string, any[]> = {};
@@ -174,9 +174,22 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
         const fileName = uploadedFiles[idx].name;
         const fileRes = data.file_validation_results?.[k] || {};
 
-        const units = cfg.validations?.[k] || [];
+        const typeUnits = cfg.column_types?.[k]
+          ? Object.entries(cfg.column_types[k]).map(([col, typ]) => ({
+              validation_type: 'datatype',
+              column: col,
+              expected: typ
+            }))
+          : [];
+        const units = [...typeUnits, ...(cfg.validations?.[k] || [])];
         const failures = fileRes.condition_failures || [];
         const errors = fileRes.errors || [];
+        const warnings = fileRes.warnings || [];
+        const nullMap: Record<string, number> = {};
+        warnings.forEach((w: string) => {
+          const m = w.match(/Column '(.*)' has (\d+) null\/empty values/i);
+          if (m) nullMap[m[1]] = parseInt(m[2], 10);
+        });
         const fileDetails: any[] = [];
 
         const missingCount = fileRes.mandatory_columns_missing || 0;
@@ -207,6 +220,7 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
             desc = parts.join(' ');
           }
           if (u.validation_type === 'periodicity') desc = u.periodicity;
+          if (u.validation_type === 'not_null') desc = 'no missing';
 
           let failed = false;
           if (u.validation_type === 'datatype') {
@@ -218,6 +232,8 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
               (fileRes.auto_corrections || []).some((c: string) =>
                 c.toLowerCase().includes(`column '${col}'`)
               );
+          } else if (u.validation_type === 'not_null') {
+            failed = nullMap[u.column] > 0;
           } else if (u.validation_type === 'periodicity') {
             failed = failures.some((f: any) => f.column === u.column && f.operator === 'date_frequency');
           } else if (u.validation_type === 'range') {
