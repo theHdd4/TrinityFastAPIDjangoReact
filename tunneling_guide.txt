@@ -1,0 +1,85 @@
+# Cloudflare Tunnel Setup for Trinity Platform
+
+This guide explains how to expose the Dockerized Trinity application using Cloudflare Tunnel so the services are reachable at **quantmatrixai.com** and its subdomains.
+
+## 1. Install cloudflared
+
+1. [Create a free Cloudflare account](https://dash.cloudflare.com) and add the `quantmatrixai.com` domain.
+2. On the host machine install the Cloudflare tunnel client:
+   ```bash
+   curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb -o cloudflared.deb
+   sudo dpkg -i cloudflared.deb
+   ```
+   Alternatively use `brew install cloudflared` or download the binary from the Cloudflare website.
+3. Authenticate:
+   ```bash
+   cloudflared login
+   ```
+   A browser window opens where you select the Cloudflare account and domain. This generates a credentials file under `~/.cloudflared`.
+
+## 2. Create a named tunnel
+
+```bash
+cloudflared tunnel create trinity-tunnel
+```
+
+Copy the generated tunnel UUID. Cloudflare also saves a credentials JSON for the tunnel. Move this JSON inside the repository so Docker can mount it, e.g. `cloudflared/credentials.json`.
+
+## 3. Configure DNS routing
+
+Set up DNS records in Cloudflare to point to the tunnel:
+- `quantmatrixai.com` -> tunnel
+- `api.quantmatrixai.com` -> tunnel
+- `admin.quantmatrixai.com` -> tunnel
+
+These can be created automatically using:
+```bash
+cloudflared tunnel route dns trinity-tunnel quantmatrixai.com
+cloudflared tunnel route dns trinity-tunnel api.quantmatrixai.com
+cloudflared tunnel route dns trinity-tunnel admin.quantmatrixai.com
+```
+
+## 4. Cloudflared configuration
+
+Create `cloudflared/config.yml`:
+```yaml
+tunnel: YOUR_TUNNEL_UUID
+credentials-file: /etc/cloudflared/credentials.json
+
+ingress:
+  - hostname: quantmatrixai.com
+    service: http://frontend:80
+  - hostname: api.quantmatrixai.com
+    service: http://fastapi:8001
+  - hostname: admin.quantmatrixai.com
+    service: http://web:8000
+  - service: http_status:404
+```
+Replace `YOUR_TUNNEL_UUID` with the ID from step 2. Place `credentials.json` (generated when the tunnel was created) inside the `cloudflared` directory.
+
+## 5. Docker Compose service
+
+The `docker-compose.yml` inside `TrinityBackendDjango` already exposes all containers on the `trinity-net` network. Add the following service (already included in the repository):
+```yaml
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    command: tunnel run
+    volumes:
+      - ./cloudflared:/etc/cloudflared
+    depends_on:
+      - frontend
+    networks:
+      - trinity-net
+```
+This container runs the tunnel using the configuration from `cloudflared/config.yml`.
+
+## 6. Running everything
+
+1. Build and start the stack:
+   ```bash
+   docker-compose up --build
+   ```
+2. Cloudflared establishes the tunnel and routes requests for the configured hostnames to the correct containers.
+3. Visit `https://quantmatrixai.com` for the frontend, `https://api.quantmatrixai.com` for FastAPI and `https://admin.quantmatrixai.com` for Django.
+
+The services remain reachable on the local network as before, while Cloudflare Tunnel provides secure public access.

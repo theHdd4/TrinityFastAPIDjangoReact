@@ -139,6 +139,16 @@ services:
       - trinity-net
     depends_on:
       - web
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    command: tunnel run
+    volumes:
+      - ./cloudflared:/etc/cloudflared
+    depends_on:
+      - frontend
+    networks:
+      - trinity-net
+
 
 volumes:
   postgres_data:

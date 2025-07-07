@@ -1,0 +1,11 @@
+tunnel: YOUR_TUNNEL_UUID
+credentials-file: /etc/cloudflared/credentials.json
+
+ingress:
+  - hostname: quantmatrixai.com
+    service: http://frontend:80
+  - hostname: api.quantmatrixai.com
+    service: http://fastapi:8001
+  - hostname: admin.quantmatrixai.com
+    service: http://web:8000
+  - service: http_status:404
