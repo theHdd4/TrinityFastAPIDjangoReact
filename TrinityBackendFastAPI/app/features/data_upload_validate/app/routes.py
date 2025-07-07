@@ -12,12 +12,12 @@ import re
 from datetime import datetime
 
 
-from app.features.data_upload_validate.app.validators.mmm import validate_mmm
-from app.features.data_upload_validate.app.validators.category_forecasting import validate_category_forecasting
+from app.features.data_upload_validate.Validate_Atom.app.validators.mmm import validate_mmm
+from app.features.data_upload_validate.Validate_Atom.app.validators.category_forecasting import validate_category_forecasting
 # Add this import at the top of your routes.py file
-from app.features.data_upload_validate.app.validators.promo import validate_promo_intensity
+from app.features.data_upload_validate.Validate_Atom.app.validators.promo import validate_promo_intensity
 # app/routes.py - Add this import
-from app.features.data_upload_validate.app.schemas import (
+from app.features.data_upload_validate.Validate_Atom.app.schemas import (
     # Create validator schemas
     CreateValidatorResponse,
     
@@ -47,33 +47,26 @@ from app.features.data_upload_validate.app.schemas import (
 )
 
 # Add to your existing imports in app/routes.py
-from app.features.data_upload_validate.app.database import get_validation_config_from_mongo  # ✅ ADD THIS
+from app.features.data_upload_validate.Validate_Atom.app.database import get_validation_config_from_mongo  # ✅ ADD THIS
 
-from app.features.data_upload_validate.app.database import save_validation_config_to_mongo
-from app.features.data_upload_validate.app.schemas import ConfigureValidationConfigResponse
-from app.features.data_upload_validate.app.database import save_classification_to_mongo
-from app.features.data_upload_validate.app.database import save_classification_to_mongo, get_validator_atom_from_mongo, update_validator_atom_in_mongo
+from app.features.data_upload_validate.Validate_Atom.app.database import save_validation_config_to_mongo
+from app.features.data_upload_validate.Validate_Atom.app.schemas import ConfigureValidationConfigResponse
+from app.features.data_upload_validate.Validate_Atom.app.database import save_classification_to_mongo
+from app.features.data_upload_validate.Validate_Atom.app.database import save_classification_to_mongo, get_validator_atom_from_mongo, update_validator_atom_in_mongo
 
-from app.features.data_upload_validate.app.database import (
-    save_business_dimensions_to_mongo,
-    get_business_dimensions_from_mongo,
-    get_classification_from_mongo,
-    update_business_dimensions_assignments_in_mongo,
-    save_validation_units_to_mongo,
-    get_validation_units_from_mongo,
-)
+from app.features.data_upload_validate.Validate_Atom.app.database import save_business_dimensions_to_mongo, get_business_dimensions_from_mongo, get_business_dimensions_from_mongo,get_classification_from_mongo ,update_business_dimensions_assignments_in_mongo
 
 
 
 
-from app.features.data_upload_validate.app.database import (
+from app.features.data_upload_validate.Validate_Atom.app.database import (
     get_validator_atom_from_mongo,  # Fallback function
     save_validation_log_to_mongo
 )
 
 # Add this import
-from app.features.data_upload_validate.app.database import save_validator_atom_to_mongo
-from app.features.data_upload_validate.app.database import save_classification_to_mongo, get_validator_atom_from_mongo
+from app.features.data_upload_validate.Validate_Atom.app.database import save_validator_atom_to_mongo
+from app.features.data_upload_validate.Validate_Atom.app.database import save_classification_to_mongo, get_validator_atom_from_mongo
 
 
 # Initialize router
@@ -83,7 +76,7 @@ router = APIRouter()
 
 
 
-from app.features.data_upload_validate.app.validators.custom_validator import perform_enhanced_validation
+from app.features.data_upload_validate.Validate_Atom.app.validators.custom_validator import perform_enhanced_validation
 
 # Config directory
 CUSTOM_CONFIG_DIR = Path("custom_validations")
@@ -101,73 +94,93 @@ async def health_check():
 
 from minio import Minio
 from minio.error import S3Error
-from app.features.feature_overview.deps import redis_client
-from app.DataStorageRetrieval.db import (
-    fetch_client_app_project,
-    record_arrow_dataset,
-    rename_arrow_dataset,
-    delete_arrow_dataset,
-    arrow_dataset_exists,
-)
-from app.DataStorageRetrieval.arrow_client import upload_dataframe
-from app.DataStorageRetrieval.flight_registry import (
-    set_ticket,
-    get_ticket_by_key,
-    get_latest_ticket_for_basename,
-    get_original_csv,
-    rename_arrow_object,
-    remove_arrow_object,
-    get_flight_path_for_csv,
-    get_arrow_for_flight_path,
-)
-from app.DataStorageRetrieval.minio_utils import (
-    ensure_minio_bucket,
-    save_arrow_table,
-    upload_to_minio,
-    get_client,
-    ARROW_DIR,
-)
-import pyarrow as pa
-import pyarrow.ipc as ipc
-from pathlib import Path
-import asyncio
 import os
 
-# ✅ MINIO CONFIGURATION - values come from docker-compose/.env
-MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "minio:9000")
-MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY", "minio")
-MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY", "minio123")
-MINIO_BUCKET = os.getenv("MINIO_BUCKET", "trinity")
-
-# Database driven folder names
-USER_ID = int(os.getenv("USER_ID", "0"))
-PROJECT_ID = int(os.getenv("PROJECT_ID", "0"))
-
-CLIENT_NAME = os.getenv("CLIENT_NAME", "default_client")
-APP_NAME = os.getenv("APP_NAME", "default_app")
-PROJECT_NAME = os.getenv("PROJECT_NAME", "default_project")
-
-def load_names_from_db() -> None:
-    """Lookup client/app/project names from Postgres if ids are provided."""
-    global CLIENT_NAME, APP_NAME, PROJECT_NAME
-    if USER_ID and PROJECT_ID:
-        try:
-            CLIENT_NAME_DB, APP_NAME_DB, PROJECT_NAME_DB = asyncio.run(
-                fetch_client_app_project(USER_ID, PROJECT_ID)
-            )
-            CLIENT_NAME = CLIENT_NAME_DB or CLIENT_NAME
-            APP_NAME = APP_NAME_DB or APP_NAME
-            PROJECT_NAME = PROJECT_NAME_DB or PROJECT_NAME
-        except Exception as exc:
-            print(f"⚠️ Failed to load names from DB: {exc}")
-
-load_names_from_db()
-
-OBJECT_PREFIX = f"{CLIENT_NAME}/{APP_NAME}/{PROJECT_NAME}/"
+# ✅ MINIO CONFIGURATION FOR YOUR SERVER
+MINIO_ENDPOINT = "10.2.1.65:9003"
+MINIO_ACCESS_KEY = "admin_dev"  # Update with your credentials
+MINIO_SECRET_KEY = "pass_dev"  # Update with your credentials
+MINIO_BUCKET = "validated-d1"    # Your existing bucket
 
 # Initialize MinIO client
-minio_client = get_client()
-ensure_minio_bucket()
+minio_client = Minio(
+    endpoint=MINIO_ENDPOINT,
+    access_key=MINIO_ACCESS_KEY,
+    secret_key=MINIO_SECRET_KEY,
+    secure=False
+)
+
+# Check bucket exists
+def check_minio_bucket():
+    try:
+        if minio_client.bucket_exists(MINIO_BUCKET):
+            print(f"✅ MinIO bucket '{MINIO_BUCKET}' is accessible")
+            return True
+        else:
+            print(f"❌ MinIO bucket '{MINIO_BUCKET}' not found")
+            return False
+    except Exception as e:
+        print(f"⚠️ MinIO connection error: {e}")
+        return False
+
+# Test connection on startup
+check_minio_bucket()
+
+
+
+# app/routes.py - Efficient MinIO upload function
+
+# app/routes.py - Add this function definition
+
+def upload_to_minio(file_content_bytes: bytes, filename: str, validator_atom_id: str, file_key: str) -> dict:
+    """
+    Upload file to MinIO - Complete function definition
+    """
+    try:
+        # Create unique object name with timestamp
+        timestamp = pd.Timestamp.now().strftime("%Y%m%d_%H%M%S")
+        object_name = f"{validator_atom_id}/{file_key}/{timestamp}_{filename}"
+        
+        # Convert bytes to BytesIO for seek operations
+        file_content = io.BytesIO(file_content_bytes)
+        
+        # Get file size
+        file_content.seek(0, os.SEEK_END)
+        file_size = file_content.tell()
+        file_content.seek(0)  # Reset to beginning
+        
+        # Upload directly to MinIO
+        result = minio_client.put_object(
+            bucket_name=MINIO_BUCKET,
+            object_name=object_name,
+            data=file_content,
+            length=file_size,
+            content_type="application/octet-stream"
+        )
+        
+        return {
+            "status": "success",
+            "bucket": MINIO_BUCKET,
+            "object_name": object_name,
+            "file_url": f"http://{MINIO_ENDPOINT}/{MINIO_BUCKET}/{object_name}",
+            "uploaded_at": timestamp,
+            "etag": result.etag,
+            "server": MINIO_ENDPOINT
+        }
+        
+    except S3Error as e:
+        return {
+            "status": "error",
+            "error_message": str(e),
+            "error_type": "minio_s3_error"
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "error_message": str(e),
+            "error_type": "general_upload_error"
+        }
+
 
 # MongoDB directory setup
 MONGODB_DIR = Path("mongodb")
@@ -847,7 +860,7 @@ async def update_column_types(
     """
     # Parse column_types JSON
     try:
-        submitted_column_types = json.loads(column_types)
+        new_column_types = json.loads(column_types)
     except json.JSONDecodeError:
         raise HTTPException(status_code=400, detail="Invalid JSON format for column_types")
 
@@ -868,8 +881,8 @@ async def update_column_types(
     current_schema = validator_data["schemas"][file_key]
     available_columns = [col["column"] for col in current_schema.get("columns", [])]
 
-    # Validate that all columns in submitted_column_types exist in the schema
-    invalid_columns = [col for col in submitted_column_types.keys() if col not in available_columns]
+    # Validate that all columns in new_column_types exist in the schema
+    invalid_columns = [col for col in new_column_types.keys() if col not in available_columns]
     if invalid_columns:
         raise HTTPException(
             status_code=400, 
@@ -877,23 +890,17 @@ async def update_column_types(
         )
 
     # Validate column type values
-    valid_types = ["string", "integer", "numeric", "date", "boolean", "number"]
-    invalid_types = {col: typ for col, typ in submitted_column_types.items() if typ not in valid_types and typ not in ["", None, "not_defined"]}
+    valid_types = ["string", "integer", "numeric", "date", "boolean"]
+    invalid_types = {col: typ for col, typ in new_column_types.items() if typ not in valid_types}
     if invalid_types:
         raise HTTPException(
             status_code=400,
             detail=f"Invalid column types: {invalid_types}. Valid types: {valid_types}"
         )
 
-    # Normalize and update column_types in memory
+    # Update column_types in memory
     current_column_types = extraction_results[validator_atom_id]["column_types"].get(file_key, {})
-    for col in available_columns:
-        val = submitted_column_types.get(col)
-        if val in ["", None, "not_defined"]:
-            current_column_types.pop(col, None)
-        else:
-            normalized = "numeric" if val == "number" else val
-            current_column_types[col] = normalized
+    current_column_types.update(new_column_types)
     extraction_results[validator_atom_id]["column_types"][file_key] = current_column_types
 
     # Also update in schemas for consistency
@@ -903,9 +910,8 @@ async def update_column_types(
     updated_columns = []
     for col_info in current_schema["columns"]:
         col_name = col_info["column"]
-        if col_name in submitted_column_types and submitted_column_types.get(col_name) not in ["", None, "not_defined"]:
-            normalized = "numeric" if submitted_column_types[col_name] == "number" else submitted_column_types[col_name]
-            col_info["type"] = normalized
+        if col_name in new_column_types:
+            col_info["type"] = new_column_types[col_name]
         updated_columns.append(col_info)
     
     extraction_results[validator_atom_id]["schemas"][file_key]["columns"] = updated_columns
@@ -941,23 +947,6 @@ async def update_column_types(
     }
     mongo_result = update_validator_atom_in_mongo(validator_atom_id, mongo_update_data)
 
-    # Save datatype validation units
-    datatype_units = [
-        {"column": col, "validation_type": "datatype", "expected": typ}
-        for col, typ in current_column_types.items()
-    ]
-    existing_units = get_validation_units_from_mongo(validator_atom_id, file_key)
-    other_units = []
-    if existing_units and "validations" in existing_units:
-        other_units = [
-            u for u in existing_units["validations"] if u.get("validation_type") != "datatype"
-        ]
-    save_validation_units_to_mongo(
-        validator_atom_id,
-        file_key,
-        other_units + datatype_units,
-    )
-
     # Optional: Log MongoDB result
     if mongo_result["status"] == "success":
         print(f"✅ Validator atom updated in MongoDB")
@@ -969,9 +958,9 @@ async def update_column_types(
         "message": "Column types updated successfully",
         "validator_atom_id": validator_atom_id,
         "file_key": file_key,
-        "updated_column_types": submitted_column_types,
+        "updated_column_types": new_column_types,
         "current_all_column_types": current_column_types,
-        "updated_columns_count": len([c for c in submitted_column_types.values() if c not in ["", None, "not_defined"]]),
+        "updated_columns_count": len(new_column_types),
         # ✅ ADD: MongoDB update status
         "mongodb_update": {
             "status": mongo_result["status"],
@@ -1575,7 +1564,7 @@ async def configure_validation_config(request: Request):
         raise HTTPException(status_code=400, detail="validator_atom_id is required")
     if not file_key:
         raise HTTPException(status_code=400, detail="file_key is required")
-    if column_conditions is None:
+    if not column_conditions:
         raise HTTPException(status_code=400, detail="column_conditions is required")
 
     if not isinstance(column_conditions, dict):
@@ -1650,48 +1639,6 @@ async def configure_validation_config(request: Request):
     }
 
     mongo_result = save_validation_config_to_mongo(validator_atom_id, file_key, config_data)
-
-    # Build validation units and save
-    range_units = []
-    for col, conds in column_conditions.items():
-        min_val = None
-        max_val = None
-        for cond in conds:
-            op = cond.get("operator")
-            if op in ["greater_than_or_equal", "greater_than"]:
-                min_val = cond.get("value")
-            elif op in ["less_than_or_equal", "less_than"]:
-                max_val = cond.get("value")
-        if (min_val not in [None, ""] or max_val not in [None, ""]):
-            range_units.append({
-                "column": col,
-                "validation_type": "range",
-                "min": min_val,
-                "max": max_val,
-            })
-
-    periodicity_units = [
-        {
-            "column": col,
-            "validation_type": "periodicity",
-            "periodicity": freq,
-        }
-        for col, freq in column_frequencies.items()
-    ]
-
-    existing_units = get_validation_units_from_mongo(validator_atom_id, file_key)
-    other_units = []
-    if existing_units and "validations" in existing_units:
-        other_units = [
-            u
-            for u in existing_units["validations"]
-            if u.get("validation_type") not in ["range", "periodicity"]
-        ]
-    save_validation_units_to_mongo(
-        validator_atom_id,
-        file_key,
-        other_units + range_units + periodicity_units,
-    )
 
     message = f"Validation config configured successfully for file key '{file_key}' with {total_conditions} conditions"
     if column_frequencies:
@@ -1781,17 +1728,16 @@ async def validate(
     # ✅ Enhanced validation with auto-correction and custom conditions
     validation_results = perform_enhanced_validation(files_data, validator_data)
     
-    # ✅ Upload to Flight server for immediate use if validation passes
-    minio_uploads: list = []
-    flight_uploads: list = []
+    # ✅ MinIO upload: Only if validation passes or passes with warnings
+    minio_uploads = []
     if validation_results["overall_status"] in ["passed", "passed_with_warnings"]:
-        for (_, filename, key), (_, df) in zip(file_contents, files_data):
-            arrow_file = ARROW_DIR / f"{validator_atom_id}_{key}.arrow"
-            save_arrow_table(df, arrow_file)
-
-            flight_path = f"{validator_atom_id}/{key}"
-            upload_dataframe(df, flight_path)
-            flight_uploads.append({"file_key": key, "flight_path": flight_path})
+        for content, filename, key in file_contents:
+            upload_result = upload_to_minio(content, filename, validator_atom_id, key)
+            minio_uploads.append({
+                "file_key": key,
+                "filename": filename,
+                "minio_upload": upload_result
+            })
     
     # ✅ Save detailed validation log to MongoDB
     validation_log_data = {
@@ -1834,7 +1780,6 @@ async def validate(
         "file_validation_results": validation_results["file_results"],
         "summary": validation_results["summary"],
         "minio_uploads": minio_uploads,
-        "flight_uploads": flight_uploads,
         "validation_log_saved": mongo_log_result["status"] == "success",
         "validation_log_id": mongo_log_result.get("mongo_id", ""),
         "total_auto_corrections": validation_results["summary"].get("total_auto_corrections", 0),
@@ -1922,30 +1867,6 @@ async def delete_validator_atom(validator_atom_id: str):
             "total_files_deleted": len([f for f in deleted_files if f != "memory_cleared"])
         }
     }
-
-
-# GET: GET_VALIDATOR_CONFIG - return validator setup with MongoDB details
-@router.get("/get_validator_config/{validator_atom_id}")
-async def get_validator_config(validator_atom_id: str):
-    """Retrieve stored validator atom configuration along with any
-    classification or dimension information."""
-
-    validator_data = get_validator_atom_from_mongo(validator_atom_id)
-    if not validator_data:
-        validator_data = get_validator_from_memory_or_disk(validator_atom_id)
-
-    if not validator_data:
-        raise HTTPException(status_code=404, detail=f"Validator atom '{validator_atom_id}' not found")
-
-    extra = load_all_non_validation_data(validator_atom_id)
-
-    validations = {}
-    for key in validator_data.get("file_keys", []):
-        units = get_validation_units_from_mongo(validator_atom_id, key)
-        if units:
-            validations[key] = units.get("validations", [])
-
-    return {**validator_data, **extra, "validations": validations}
 
 
 ############################prebuild
@@ -2136,6 +2057,8 @@ async def get_validator_config(validator_atom_id: str):
 #     except Exception as e:
 #         raise HTTPException(status_code=500, detail=f"MMM validation failed: {str(e)}")
 
+
+
 # ✅ UPDATED: Complete MMM Validation Endpoint with Full Integration
 @router.post("/validate_mmm")
 async def validate_mmm_endpoint(
@@ -2223,7 +2146,7 @@ async def validate_mmm_endpoint(
         
         if validation_report.status == "success":
             for content, filename, key in file_contents:
-                upload_result = upload_to_minio(content, filename, OBJECT_PREFIX)
+                upload_result = upload_to_minio(content, filename, validator_atom_id, key)
                 minio_uploads.append({
                     "file_key": key,
                     "filename": filename,
@@ -2582,7 +2505,7 @@ async def validate_category_forecasting_endpoint(
         validator_atom_result = {"status": "skipped", "reason": "validation_failed"}
         
         if validation_report.status == "success":
-            upload_result = upload_to_minio(content, file.filename, OBJECT_PREFIX)
+            upload_result = upload_to_minio(content, file.filename, validator_atom_id, key)
             minio_uploads.append({
                 "file_key": key,
                 "filename": file.filename,
@@ -2768,7 +2691,7 @@ async def validate_promo_endpoint(
         mongo_log_result = {"status": "skipped", "reason": "validation_failed"}
         
         if validation_report.status == "success":
-            upload_result = upload_to_minio(content, file.filename, OBJECT_PREFIX)
+            upload_result = upload_to_minio(content, file.filename, validator_atom_id, key)
             minio_uploads.append({
                 "file_key": key,
                 "filename": file.filename,
@@ -2883,228 +2806,3 @@ async def validate_promo_endpoint(
 
 # Call this function when the module loads
 load_existing_configs()
-
-
-# --- New endpoints for saving and listing validated dataframes ---
-@router.post("/save_dataframes")
-async def save_dataframes(
-    validator_atom_id: str = Form(...),
-    files: List[UploadFile] = File(...),
-    file_keys: str = Form(...),
-    overwrite: bool = Form(False),
-):
-    """Save validated dataframes as Arrow tables and upload via Flight."""
-    try:
-        keys = json.loads(file_keys)
-    except json.JSONDecodeError:
-        raise HTTPException(status_code=400, detail="Invalid JSON format for file_keys")
-    if len(files) != len(keys):
-        raise HTTPException(status_code=400, detail="Number of files must match number of keys")
-
-    uploads = []
-    flights = []
-    for file, key in zip(files, keys):
-        content = await file.read()
-        if file.filename.lower().endswith(".csv"):
-            df = pd.read_csv(io.BytesIO(content))
-        elif file.filename.lower().endswith((".xls", ".xlsx")):
-            df = pd.read_excel(io.BytesIO(content))
-        else:
-            raise HTTPException(status_code=400, detail="Unsupported file type")
-
-
-        arrow_name = Path(file.filename).stem + ".arrow"
-        exists = await arrow_dataset_exists(PROJECT_ID, validator_atom_id, key)
-        if exists and not overwrite:
-            uploads.append({"file_key": key, "already_saved": True})
-            flights.append({"file_key": key})
-            continue
-
-        arrow_buf = io.BytesIO()
-        table = pa.Table.from_pandas(df)
-        with ipc.new_file(arrow_buf, table.schema) as writer:
-            writer.write_table(table)
-
-        result = upload_to_minio(arrow_buf.getvalue(), arrow_name, OBJECT_PREFIX)
-        saved_name = Path(result.get("object_name", "")).name or arrow_name
-        flight_path = f"{validator_atom_id}/{saved_name}"
-        upload_dataframe(df, flight_path)
-
-        set_ticket(
-            key,
-            result.get("object_name", ""),
-            flight_path,
-            file.filename,
-        )
-        redis_client.set(f"flight:{flight_path}", result.get("object_name", ""))
-
-        await record_arrow_dataset(
-            PROJECT_ID,
-            validator_atom_id,
-            key,
-            result.get("object_name", ""),
-            flight_path,
-            file.filename,
-        )
-
-        uploads.append({
-            "file_key": key,
-            "filename": arrow_name,
-            "minio_upload": result,
-            "already_saved": False,
-        })
-        flights.append({"file_key": key, "flight_path": flight_path})
-
-    return {"minio_uploads": uploads, "flight_uploads": flights}
-
-
-@router.get("/list_saved_dataframes")
-async def list_saved_dataframes():
-    """List saved Arrow dataframes sorted by newest first."""
-    prefix = OBJECT_PREFIX
-    try:
-        objects = minio_client.list_objects(MINIO_BUCKET, prefix=prefix, recursive=True)
-        entries = []
-        for obj in objects:
-            if not obj.object_name.endswith(".arrow"):
-                continue
-            try:
-                stat = minio_client.stat_object(MINIO_BUCKET, obj.object_name)
-                entries.append((stat.last_modified, obj.object_name))
-            except S3Error as e:
-                if getattr(e, "code", "") in {"NoSuchKey", "NoSuchBucket"}:
-                    redis_client.delete(obj.object_name)
-                    continue
-                raise
-        entries.sort(key=lambda x: x[0], reverse=True)
-        files = [
-            {
-                "object_name": name,
-                "csv_name": Path(name).stem,
-            }
-            for _, name in entries
-        ]
-        return {"files": files}
-    except S3Error as e:
-        if getattr(e, "code", "") == "NoSuchBucket":
-            return {"files": []}
-        raise HTTPException(status_code=500, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-
-@router.get("/latest_ticket/{file_key}")
-async def latest_ticket(file_key: str):
-    path, arrow_name = get_ticket_by_key(file_key)
-    if path is None:
-        path, arrow_name = get_latest_ticket_for_basename(file_key)
-    if path is None:
-        raise HTTPException(status_code=404, detail="Ticket not found")
-    original = get_original_csv(arrow_name) or arrow_name
-    return {
-        "flight_path": path,
-        "arrow_name": arrow_name,
-        "csv_name": original,
-    }
-
-
-@router.get("/download_dataframe")
-async def download_dataframe(object_name: str):
-    """Return a presigned URL to download a dataframe"""
-    if not object_name.startswith(OBJECT_PREFIX):
-        raise HTTPException(status_code=400, detail="Invalid object name")
-    try:
-        url = minio_client.presigned_get_object(MINIO_BUCKET, object_name)
-        return {"url": url}
-    except S3Error as e:
-        if getattr(e, "code", "") in {"NoSuchKey", "NoSuchBucket"}:
-            redis_client.delete(object_name)
-            raise HTTPException(status_code=404, detail="File not found")
-        raise HTTPException(status_code=500, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-
-@router.delete("/delete_dataframe")
-async def delete_dataframe(object_name: str):
-    """Delete a single saved dataframe"""
-    if not object_name.startswith(OBJECT_PREFIX):
-        raise HTTPException(status_code=400, detail="Invalid object name")
-    try:
-        try:
-            minio_client.remove_object(MINIO_BUCKET, object_name)
-        except S3Error as e:
-            if getattr(e, "code", "") not in {"NoSuchKey", "NoSuchBucket"}:
-                raise
-        redis_client.delete(object_name)
-        remove_arrow_object(object_name)
-        await delete_arrow_dataset(object_name)
-        return {"deleted": object_name}
-    except S3Error as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-
-@router.delete("/delete_all_dataframes")
-async def delete_all_dataframes():
-    """Delete all saved dataframes for the current project"""
-    prefix = OBJECT_PREFIX
-    deleted = []
-    try:
-        objects = minio_client.list_objects(MINIO_BUCKET, prefix=prefix, recursive=True)
-        for obj in objects:
-            try:
-                minio_client.remove_object(MINIO_BUCKET, obj.object_name)
-            except S3Error as e:
-                if getattr(e, "code", "") not in {"NoSuchKey", "NoSuchBucket"}:
-                    raise
-            redis_client.delete(obj.object_name)
-            remove_arrow_object(obj.object_name)
-            await delete_arrow_dataset(obj.object_name)
-            deleted.append(obj.object_name)
-        return {"deleted": deleted}
-    except S3Error as e:
-        if getattr(e, "code", "") == "NoSuchBucket":
-            return {"deleted": []}
-        raise HTTPException(status_code=500, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-
-@router.post("/rename_dataframe")
-async def rename_dataframe(object_name: str = Form(...), new_filename: str = Form(...)):
-    """Rename a saved dataframe"""
-    if not object_name.startswith(OBJECT_PREFIX):
-        raise HTTPException(status_code=400, detail="Invalid object name")
-    new_object = f"{OBJECT_PREFIX}{new_filename}"
-    if new_object == object_name:
-        # Nothing to do if the name hasn't changed
-        return {"old_name": object_name, "new_name": object_name}
-    try:
-        from minio.commonconfig import CopySource
-        minio_client.copy_object(
-            MINIO_BUCKET,
-            new_object,
-            CopySource(MINIO_BUCKET, object_name),
-        )
-        try:
-            minio_client.remove_object(MINIO_BUCKET, object_name)
-        except S3Error:
-            pass
-        content = redis_client.get(object_name)
-        if content is not None:
-            redis_client.setex(new_object, 3600, content)
-            redis_client.delete(object_name)
-        rename_arrow_object(object_name, new_object)
-        await rename_arrow_dataset(object_name, new_object)
-        return {"old_name": object_name, "new_name": new_object}
-    except S3Error as e:
-        code = getattr(e, "code", "")
-        if code in {"NoSuchKey", "NoSuchBucket"}:
-            redis_client.delete(object_name)
-            raise HTTPException(status_code=404, detail="File not found")
-        raise HTTPException(status_code=500, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
