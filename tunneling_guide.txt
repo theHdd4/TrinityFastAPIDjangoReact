@@ -55,17 +55,17 @@ ingress:
     service: http://web:8000
   - service: http_status:404
 ```
-Replace `YOUR_TUNNEL_UUID` with the ID from step 2. Place `credentials.json` (generated when the tunnel was created) inside the `cloudflared` directory.
+Replace `YOUR_TUNNEL_UUID` with the ID from step 2. Place `credentials.json` (generated when the tunnel was created) inside the repository's `cloudflared` directory.
 
 ## 5. Docker Compose service
 
-The `docker-compose.yml` inside `TrinityBackendDjango` already exposes all containers on the `trinity-net` network. Add the following service (already included in the repository):
+The `docker-compose.yml` inside `TrinityBackendDjango` already exposes all containers on the `trinity-net` network. Add the following service (already included in the repository). The volume path references the `cloudflared` folder in the repository root (one directory above this compose file):
 ```yaml
   cloudflared:
     image: cloudflare/cloudflared:latest
     command: tunnel run
     volumes:
-      - ./cloudflared:/etc/cloudflared
+      - ../cloudflared:/etc/cloudflared
     depends_on:
       - frontend
     networks:

@@ -143,7 +143,7 @@ services:
     image: cloudflare/cloudflared:latest
     command: tunnel run
     volumes:
-      - ./cloudflared:/etc/cloudflared
+      - ../cloudflared:/etc/cloudflared
     depends_on:
       - frontend
     networks:
