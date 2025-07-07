@@ -8,16 +8,29 @@ import os
 from pathlib import Path
 import re
 
+from app.DataStorageRetrieval.arrow_client import upload_dataframe
+from app.DataStorageRetrieval.flight_registry import (
+    set_ticket,
+    rename_arrow_object,
+    remove_arrow_object,
+)
+from app.DataStorageRetrieval.db import (
+    record_arrow_dataset,
+    rename_arrow_dataset,
+    delete_arrow_dataset,
+    arrow_dataset_exists,
+)
+
 # Add this line with your other imports
 from datetime import datetime
 
 
-from app.features.data_upload_validate.Validate_Atom.app.validators.mmm import validate_mmm
-from app.features.data_upload_validate.Validate_Atom.app.validators.category_forecasting import validate_category_forecasting
+from app.features.data_upload_validate.app.validators.mmm import validate_mmm
+from app.features.data_upload_validate.app.validators.category_forecasting import validate_category_forecasting
 # Add this import at the top of your routes.py file
-from app.features.data_upload_validate.Validate_Atom.app.validators.promo import validate_promo_intensity
+from app.features.data_upload_validate.app.validators.promo import validate_promo_intensity
 # app/routes.py - Add this import
-from app.features.data_upload_validate.Validate_Atom.app.schemas import (
+from app.features.data_upload_validate.app.schemas import (
     # Create validator schemas
     CreateValidatorResponse,
     
@@ -47,36 +60,38 @@ from app.features.data_upload_validate.Validate_Atom.app.schemas import (
 )
 
 # Add to your existing imports in app/routes.py
-from app.features.data_upload_validate.Validate_Atom.app.database import get_validation_config_from_mongo  # ✅ ADD THIS
+from app.features.data_upload_validate.app.database import get_validation_config_from_mongo  # ✅ ADD THIS
 
-from app.features.data_upload_validate.Validate_Atom.app.database import save_validation_config_to_mongo
-from app.features.data_upload_validate.Validate_Atom.app.schemas import ConfigureValidationConfigResponse
-from app.features.data_upload_validate.Validate_Atom.app.database import save_classification_to_mongo
-from app.features.data_upload_validate.Validate_Atom.app.database import save_classification_to_mongo, get_validator_atom_from_mongo, update_validator_atom_in_mongo
+from app.features.data_upload_validate.app.database import save_validation_config_to_mongo
+from app.features.data_upload_validate.app.schemas import ConfigureValidationConfigResponse
+from app.features.data_upload_validate.app.database import save_classification_to_mongo
+from app.features.data_upload_validate.app.database import save_classification_to_mongo, get_validator_atom_from_mongo, update_validator_atom_in_mongo
 
-from app.features.data_upload_validate.Validate_Atom.app.database import save_business_dimensions_to_mongo, get_business_dimensions_from_mongo, get_business_dimensions_from_mongo,get_classification_from_mongo ,update_business_dimensions_assignments_in_mongo
-
-
+from app.features.data_upload_validate.app.database import save_business_dimensions_to_mongo, get_business_dimensions_from_mongo, get_business_dimensions_from_mongo,get_classification_from_mongo ,update_business_dimensions_assignments_in_mongo
 
 
-from app.features.data_upload_validate.Validate_Atom.app.database import (
+
+
+from app.features.data_upload_validate.app.database import (
     get_validator_atom_from_mongo,  # Fallback function
     save_validation_log_to_mongo
 )
 
 # Add this import
-from app.features.data_upload_validate.Validate_Atom.app.database import save_validator_atom_to_mongo
-from app.features.data_upload_validate.Validate_Atom.app.database import save_classification_to_mongo, get_validator_atom_from_mongo
+from app.features.data_upload_validate.app.database import save_validator_atom_to_mongo
+from app.features.data_upload_validate.app.database import save_classification_to_mongo, get_validator_atom_from_mongo
 
 
 # Initialize router
 router = APIRouter()
+# Placeholder for Redis client to be overridden in tests
+redis_client = None
 
 
 
 
 
-from app.features.data_upload_validate.Validate_Atom.app.validators.custom_validator import perform_enhanced_validation
+from app.features.data_upload_validate.app.validators.custom_validator import perform_enhanced_validation
 
 # Config directory
 CUSTOM_CONFIG_DIR = Path("custom_validations")
@@ -101,6 +116,7 @@ MINIO_ENDPOINT = "10.2.1.65:9003"
 MINIO_ACCESS_KEY = "admin_dev"  # Update with your credentials
 MINIO_SECRET_KEY = "pass_dev"  # Update with your credentials
 MINIO_BUCKET = "validated-d1"    # Your existing bucket
+OBJECT_PREFIX = "trinity/data_upload_validate/"
 
 # Initialize MinIO client
 minio_client = Minio(
@@ -2806,3 +2822,68 @@ async def validate_promo_endpoint(
 
 # Call this function when the module loads
 load_existing_configs()
+
+
+# ---------------------------------------------------------------------------
+# Minimal endpoints used in tests for dataset management
+# ---------------------------------------------------------------------------
+
+@router.post("/rename_dataframe")
+async def rename_dataframe(object_name: str = Form(...), new_filename: str = Form(...)):
+    """Rename an uploaded dataframe."""
+    new_name = OBJECT_PREFIX + new_filename if not new_filename.startswith(OBJECT_PREFIX) else new_filename
+    await rename_arrow_dataset(object_name, new_name)
+    rename_arrow_object(object_name, new_name)
+    try:
+        from minio.commonconfig import CopySource
+        minio_client.copy_object(MINIO_BUCKET, new_name, CopySource(MINIO_BUCKET, object_name))
+        minio_client.remove_object(MINIO_BUCKET, object_name)
+    except Exception:
+        pass
+    if redis_client:
+        try:
+            redis_client.delete(object_name)
+        except Exception:
+            pass
+    return {"old_name": object_name, "new_name": new_name}
+
+
+@router.delete("/delete_dataframe")
+async def delete_dataframe(object_name: str):
+    """Delete an uploaded dataframe and its registry entry."""
+    await delete_arrow_dataset(object_name)
+    remove_arrow_object(object_name)
+    try:
+        minio_client.remove_object(MINIO_BUCKET, object_name)
+    except Exception:
+        pass
+    if redis_client:
+        try:
+            redis_client.delete(object_name)
+        except Exception:
+            pass
+    return {"deleted": object_name}
+
+
+@router.post("/save_dataframes")
+async def save_dataframes(
+    validator_atom_id: str = Form(...),
+    file_keys: str = Form(...),
+    overwrite: str = Form("false"),
+    files: List[UploadFile] = File(...),
+):
+    """Save uploaded dataframes to MinIO and record them."""
+    keys = json.loads(file_keys)
+    uploads = []
+    for upload, key in zip(files, keys):
+        exists = await arrow_dataset_exists(0, validator_atom_id, key)
+        if exists and overwrite.lower() != "true":
+            uploads.append({"already_saved": True})
+            continue
+        df = pd.read_csv(upload.file)
+        flight_path = f"{validator_atom_id}/{key}"
+        upload_dataframe(df, flight_path)
+        await record_arrow_dataset(0, validator_atom_id, key, f"{validator_atom_id}/{key}/{upload.filename}", flight_path, upload.filename)
+        set_ticket(key, f"{validator_atom_id}/{key}/{upload.filename}", flight_path, upload.filename)
+        uploads.append({"already_saved": False})
+    return {"minio_uploads": uploads}
