@@ -265,35 +265,6 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
     }
   };
 
-  const dimensions = [
-    'Brand',
-    'Category',
-    'Region',
-    'Channel',
-    'Season',
-    'Customer_Segment',
-    'Product_Type',
-    'Price_Tier',
-    'Market',
-    'Distribution',
-    'Segment',
-    'SKU',
-  ];
-
-  const measures = [
-    'Volume_Sales',
-    'Value_Sales',
-    'Revenue',
-    'Profit',
-    'Units_Sold',
-    'Market_Share',
-    'Price',
-    'Cost',
-    'Margin',
-    'Discount',
-    'Promotion_Lift',
-    'Base_Sales',
-  ];
 
   const SectionCard = ({
     id,

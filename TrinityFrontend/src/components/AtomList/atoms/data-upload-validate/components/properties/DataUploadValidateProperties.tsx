@@ -11,8 +11,7 @@ import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Input } from '@/components/ui/input';
-import { Badge } from '@/components/ui/badge';
-import { Checkbox } from '@/components/ui/checkbox';
+// Removed unused imports after simplifying the properties UI
 import { VALIDATE_API } from '@/lib/api';
 import {
   useLaboratoryStore,
@@ -66,10 +65,6 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
 
   const [numericalColumns, setNumericalColumns] = useState<string[]>([]);
   const [dateColumns, setDateColumns] = useState<string[]>([]);
-  const [categoricalColumns, setCategoricalColumns] = useState<string[]>([]);
-  const [continuousColumns, setContinuousColumns] = useState<string[]>([]);
-  const [selectedIdentifiers, setSelectedIdentifiers] = useState<string[]>([]);
-  const [selectedMeasures, setSelectedMeasures] = useState<string[]>([]);
 
   // Load existing configuration if validator id already present
   useEffect(() => {
@@ -100,7 +95,6 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
           validatorId,
           requiredFiles: files,
           validations: parsedValidations,
-          classification: cfg.classification || {},
           columnConfig: cfg.column_types || {}
         });
 
@@ -185,11 +179,6 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
             [selectedMasterFile]: merged
           }
         });
-        if (cfg.classification?.[selectedMasterFile]) {
-          const cls = cfg.classification[selectedMasterFile];
-          setSelectedIdentifiers(cls.identifiers || []);
-          setSelectedMeasures(cls.measures || []);
-        }
         if (cfg.validations?.[selectedMasterFile]) {
           const list = cfg.validations[selectedMasterFile] as any[];
           const ranges = list
@@ -218,13 +207,8 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
     const dates = Object.entries(columnDataTypes)
       .filter(([, t]) => t === 'date')
       .map(([c]) => c);
-    const cats = Object.entries(columnDataTypes)
-      .filter(([, t]) => !['integer', 'numeric', 'date'].includes(t))
-      .map(([c]) => c);
     setNumericalColumns(nums);
     setDateColumns(dates);
-    setContinuousColumns(nums);
-    setCategoricalColumns(cats);
   }, [columnDataTypes]);
 
   useEffect(() => {
@@ -243,14 +227,6 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
       setPeriodicityValidations([{ id: Date.now(), column: '', periodicity: '' }]);
     }
 
-    if (selectedMasterFile && settings.classification?.[selectedMasterFile]) {
-      const cls = settings.classification[selectedMasterFile];
-      setSelectedIdentifiers(cls.identifiers);
-      setSelectedMeasures(cls.measures);
-    } else {
-      setSelectedIdentifiers([]);
-      setSelectedMeasures([]);
-    }
   }, [selectedMasterFile]);
 
   const addRangeValidation = () => {
@@ -323,14 +299,6 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
       })
     });
 
-    const classifyForm = new FormData();
-    classifyForm.append('validator_atom_id', validatorId);
-    classifyForm.append('file_key', selectedMasterFile);
-    classifyForm.append('identifiers', JSON.stringify(selectedIdentifiers));
-    classifyForm.append('measures', JSON.stringify(selectedMeasures));
-    classifyForm.append('unclassified', JSON.stringify([]));
-    await fetch(`${VALIDATE_API}/classify_columns`, { method: 'POST', body: classifyForm });
-
     const savedRanges = rangeValidations.filter(r => r.column && (r.min !== '' || r.max !== ''));
     const savedPeriods = periodicityValidations.filter(p => p.column && p.periodicity);
     const newValidations = {
@@ -340,18 +308,10 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
         periodicities: savedPeriods
       }
     };
-    const newClassification = {
-      ...(settings.classification || {}),
-      [selectedMasterFile]: {
-        identifiers: selectedIdentifiers,
-        measures: selectedMeasures
-      }
-    };
     updateSettings(atomId, {
       validatorId,
       requiredFiles: allAvailableFiles.map(f => f.name),
       validations: newValidations,
-      classification: newClassification,
       columnConfig: {
         ...(settings.columnConfig || {}),
         [selectedMasterFile]: columnDataTypes
@@ -419,7 +379,7 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
         {/* Tabs Section - Only active when master file is selected */}
         {selectedMasterFile && selectedMasterFile !== 'no-files' && (
           <Tabs defaultValue="datatype" className="w-full">
-            <TabsList className="grid w-full grid-cols-3 mx-4 my-4">
+            <TabsList className="grid w-full grid-cols-2 mx-4 my-4">
               <TabsTrigger value="datatype" className="text-xs">
                 <Table className="w-3 h-3 mr-1" />
                 DataType
@@ -427,10 +387,6 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
               <TabsTrigger value="value" className="text-xs">
                 <BarChart3 className="w-3 h-3 mr-1" />
                 Value
-              </TabsTrigger>
-              <TabsTrigger value="dimension" className="text-xs">
-                <Settings className="w-3 h-3 mr-1" />
-                Dimension
               </TabsTrigger>
             </TabsList>
 
@@ -602,57 +558,6 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
                 </div>
               </TabsContent>
 
-              <TabsContent value="dimension" className="space-y-4">
-                <div className="pt-4">
-                  <h4 className="text-sm font-medium text-gray-900 mb-3">Dimension Settings</h4>
-                  <div className="space-y-4">
-                    <div>
-                      <label className="text-sm font-medium text-gray-700 block mb-3">Identifiers</label>
-                      <div className="grid grid-cols-2 gap-2">
-                        {categoricalColumns.map(col => (
-                          <label key={col} className="flex items-center space-x-2 text-xs">
-                            <Checkbox
-                              checked={selectedIdentifiers.includes(col)}
-                              onCheckedChange={val => {
-                                const checked = Boolean(val);
-                                setSelectedIdentifiers(prev =>
-                                  checked ? [...prev, col] : prev.filter(c => c !== col)
-                                );
-                              }}
-                            />
-                            <span>{col}</span>
-                          </label>
-                        ))}
-                      </div>
-                    </div>
-
-                    <div>
-                      <label className="text-sm font-medium text-gray-700 block mb-3">Measures</label>
-                      <div className="grid grid-cols-2 gap-2">
-                        {continuousColumns.map(col => (
-                          <label key={col} className="flex items-center space-x-2 text-xs">
-                            <Checkbox
-                              checked={selectedMeasures.includes(col)}
-                              onCheckedChange={val => {
-                                const checked = Boolean(val);
-                                setSelectedMeasures(prev =>
-                                  checked ? [...prev, col] : prev.filter(c => c !== col)
-                                );
-                              }}
-                            />
-                            <span>{col}</span>
-                          </label>
-                        ))}
-                      </div>
-                    </div>
-
-                    <Button variant="outline" size="sm" className="w-full border-gray-300">
-                      <Plus className="w-3 h-3 mr-1" />
-                      Add Custom Dimension
-                    </Button>
-                  </div>
-                </div>
-              </TabsContent>
             </div>
 
             <div className="p-4 border-t border-gray-200 mt-4">
