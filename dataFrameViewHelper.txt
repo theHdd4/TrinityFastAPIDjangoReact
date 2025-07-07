@@ -62,3 +62,16 @@ Style Guide
 - Maintain consistent spacing using Tailwind’s `p-4`, `space-x-*` and `space-y-*` utilities.
 
 By following these steps and using the same libraries the Trinity interface uses, you can reproduce the saved dataframe viewer exactly.
+
+Table Logic and Use of TanStack
+------------------------------
+The viewer does **not** rely on TanStack React Table or any other table library.
+Instead, it uses shadcn's lightweight `Table` components which are thin wrappers
+around the native `<table>` element styled with Tailwind CSS. All table
+behaviour—sorting, searching, per-column filtering and pagination—is coded
+manually in `DataFrameView.tsx` using React state.
+
+TanStack React Query **is** included for data fetching elsewhere in the app, but
+it plays no part in the table logic here. The shadcn components simply provide
+the markup structure, while the logic is built with custom React hooks and
+utility functions.
