@@ -1,0 +1,71 @@
+# Tunnel Validation Guide
+
+Follow these steps to confirm that the Django backend is reachable via the Cloudflare tunnel.
+
+## 1. Start the stack
+
+Run the Docker compose services from the `TrinityBackendDjango` directory:
+
+```bash
+cd TrinityBackendDjango
+docker-compose up --build
+```
+
+Wait until the `web` (Django) and `cloudflared` containers report `Connected`.
+
+## 2. Check the tunnel
+
+Use the validation helper located in the `scripts` folder. It sends a request to the admin login page and prints the HTTP status and server header.
+
+```bash
+python scripts/check_django_tunnel.py
+```
+
+To check a different host, pass the URL as an argument or set `BACKEND_URL`:
+
+```bash
+python scripts/check_django_tunnel.py https://admin.quantmatrixai.com/admin/login/
+```
+
+A healthy tunnel prints output similar to:
+
+```
+[INFO] Checking https://admin.quantmatrixai.com/admin/login/
+[INFO] Status 200
+[INFO] Server cloudflare
+[INFO] Tunnel appears healthy
+```
+
+## 3. Troubleshooting
+
+If the script reports an error:
+
+1. Inspect the tunnel logs:
+
+   ```bash
+   docker-compose logs cloudflared
+   ```
+
+   Look for messages like `Connected` or any errors indicating authentication or DNS issues.
+
+2. Ensure the `cloudflared` container is running:
+
+   ```bash
+   docker-compose ps cloudflared
+   ```
+
+3. Verify the Django container is healthy:
+
+   ```bash
+   docker-compose logs web
+   ```
+
+4. Confirm the DNS records in Cloudflare point to the correct tunnel and are set to **Proxied**.
+
+5. Restart the tunnel if needed:
+
+   ```bash
+   docker-compose restart cloudflared
+   ```
+
+Use these logs to identify whether the request is reaching the tunnel or failing earlier. Once the script shows a 200 status, the frontend should be able to access the backend through `https://admin.quantmatrixai.com`.
