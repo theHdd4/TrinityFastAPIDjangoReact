@@ -4,6 +4,13 @@ let backendOrigin = import.meta.env.VITE_BACKEND_ORIGIN;
 if (!backendOrigin) {
   if (hostIp) {
     backendOrigin = `http://${hostIp}:8000`;
+  } else if (
+    typeof window !== 'undefined' &&
+    window.location.hostname === 'quantmatrixai.com'
+  ) {
+    // When the site is served from the root domain the APIs live on the
+    // admin subdomain, so switch automatically unless overridden.
+    backendOrigin = 'https://admin.quantmatrixai.com';
   } else if (typeof window !== 'undefined') {
     backendOrigin = window.location.origin.replace(/:8080$/, ':8000');
   } else {
