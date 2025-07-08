@@ -32,6 +32,10 @@ def main() -> int:
             return 0
     except error.HTTPError as e:
         logger.error("FAILURE: HTTP error %s - %s", e.code, e.reason)
+        if e.code == 530:
+            logger.error(
+                "Cloudflare 530 typically means the tunnel is not connected to the origin"
+            )
         logger.debug("Headers: %s", e.headers)
     except Exception as exc:
         logger.error("FAILURE: request failed: %s", exc)
