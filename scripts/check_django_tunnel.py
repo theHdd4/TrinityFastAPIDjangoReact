@@ -16,6 +16,7 @@ def get_url() -> str:
 
 
 def main() -> int:
+    """Return 0 if the admin URL is reachable and responds without error."""
     url = get_url()
     logger.info("Checking %s", url)
     try:
@@ -25,12 +26,12 @@ def main() -> int:
             logger.info("Status %s", status)
             logger.info("Server %s", headers.get('Server'))
             if status >= 400:
-                logger.error("FAILURE: endpoint responded with an error")
+                logger.error("FAILURE: endpoint responded with an error (%s)", status)
                 return 1
             logger.info("SUCCESS: tunnel appears healthy")
             return 0
     except error.HTTPError as e:
-        logger.error("FAILURE: HTTP error %s", e.code)
+        logger.error("FAILURE: HTTP error %s - %s", e.code, e.reason)
         logger.debug("Headers: %s", e.headers)
     except Exception as exc:
         logger.error("FAILURE: request failed: %s", exc)
