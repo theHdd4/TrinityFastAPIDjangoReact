@@ -17,6 +17,9 @@ Follow the steps below to run all services together.
    The frontend `.env` includes `VITE_SUBSCRIPTIONS_API` which should point to
    the Django subscription endpoints and `VITE_TRINITY_AI_API` for the AI
    service.
+   When exposing the app via Cloudflare Tunnel, set
+   `VITE_BACKEND_ORIGIN=https://admin.quantmatrixai.com` so login requests reach
+   the Django server.
 
 Docker and Node.js must be installed locally. The Python dependencies listed in
 `TrinityBackendDjango/requirements.txt` and

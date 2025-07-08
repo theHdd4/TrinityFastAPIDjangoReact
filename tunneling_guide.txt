@@ -89,7 +89,18 @@ This container runs the tunnel using the configuration from `tunnelCreds/config.
 If running Docker on Windows, use an absolute path such as:
 `C:/TrinityFastAPIDjangoReact/tunnelCreds:/etc/cloudflared:ro`.
 
-## 6. Running everything
+## 6. Frontend environment
+
+Update `TrinityFrontend/.env` so API calls go to the Django backend through the
+tunnel:
+
+```bash
+cp TrinityFrontend/.env.example TrinityFrontend/.env
+echo "VITE_BACKEND_ORIGIN=https://admin.quantmatrixai.com" >> TrinityFrontend/.env
+```
+This ensures `fetch()` requests like `/api/accounts/login/` hit the correct host
+instead of the frontend container.
+## 7. Running everything
 
 1. Build and start the stack:
    ```bash
@@ -100,7 +111,7 @@ If running Docker on Windows, use an absolute path such as:
 
 The services remain reachable on the local network as before, while Cloudflare Tunnel provides secure public access.
 
-## 7. Troubleshooting
+## 8. Troubleshooting
 
 If visiting `https://quantmatrixai.com` or its subdomains returns a Cloudflare **530** error, the tunnel is not connected to the
 origin. Common causes are missing DNS records or incorrect IDs in `tunnelCreds/config.yml`.
