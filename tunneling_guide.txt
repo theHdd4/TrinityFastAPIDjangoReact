@@ -91,3 +91,18 @@ If running Docker on Windows, use an absolute path such as:
 3. Visit `https://quantmatrixai.com` for the frontend, `https://api.quantmatrixai.com` for FastAPI and `https://admin.quantmatrixai.com` for Django.
 
 The services remain reachable on the local network as before, while Cloudflare Tunnel provides secure public access.
+
+## 7. Troubleshooting
+
+If visiting `https://quantmatrixai.com` or its subdomains returns a Cloudflare **530** error, the tunnel is not connected to the
+origin. Common causes are missing DNS records or incorrect IDs in `tunnelCreds/config.yml`.
+
+1. Verify your DNS entries in Cloudflare are **Proxied** (orange cloud) and point to the tunnel using
+   `cloudflared tunnel route dns trinity-tunnel <hostname>`.
+2. Check that `tunnelCreds/config.yml` contains your actual tunnel UUID and that
+   `tunnelCreds/credentials.json` matches the same ID.
+3. Ensure the `cloudflared` container is running by inspecting the output of `docker-compose logs cloudflared`.
+   It should report "Connected" after startup.
+
+Cloudflare handles HTTPS automatically, so the services in `config.yml` use plain `http://` URLs. Once the tunnel is active the
+external domain will load over HTTPS without additional changes.
