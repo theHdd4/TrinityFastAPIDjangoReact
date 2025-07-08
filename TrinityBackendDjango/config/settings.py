@@ -47,8 +47,13 @@ ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS", "*").split(",")
 # Explicitly trust these origins for CSRF-protected requests such as the login
 # form. When deploying behind Cloudflare or another proxy, add your external
 # domain (e.g. "https://example.com") here so browser POSTs are accepted.
-_trusted = os.getenv("CSRF_TRUSTED_ORIGINS", FRONTEND_URL)
-CSRF_TRUSTED_ORIGINS = _trusted.split(",") if _trusted else []
+_default_csrf = (
+    "https://quantmatrixai.com,"
+    "https://admin.quantmatrixai.com,"
+    "https://api.quantmatrixai.com"
+)
+_trusted = os.getenv("CSRF_TRUSTED_ORIGINS", _default_csrf)
+CSRF_TRUSTED_ORIGINS = [o.strip() for o in _trusted.split(",") if o.strip()]
 ADDITIONAL_DOMAINS = os.getenv("ADDITIONAL_DOMAINS", HOST_IP)
 
 # ------------------------------------------------------------------

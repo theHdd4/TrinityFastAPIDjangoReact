@@ -5,22 +5,15 @@ if (!backendOrigin) {
   if (hostIp) {
     backendOrigin = `http://${hostIp}:8000`;
   } else if (typeof window !== 'undefined') {
-    const origin = window.location.origin.replace(/:8080$/, ':8000');
-    const host = window.location.hostname;
-    if (host === 'quantmatrixai.com' || host === 'www.quantmatrixai.com') {
-      backendOrigin = 'https://admin.quantmatrixai.com';
-      console.log('Root domain detected, using admin subdomain', backendOrigin);
-    } else {
-      backendOrigin = origin;
-    }
+    backendOrigin = window.location.origin.replace(/:8080$/, ':8000');
   } else {
     backendOrigin = 'http://localhost:8000';
   }
 }
 
-// When hosting at quantmatrixai.com without `VITE_BACKEND_ORIGIN`, Nginx should
-// proxy `/api/` paths to the backend so we keep the origin unchanged to avoid
-// CORS issues. Set `VITE_BACKEND_ORIGIN` if using a separate domain.
+// When hosting at quantmatrixai.com configure Nginx to proxy `/api/` paths
+// to the Django backend so the frontend and backend share the same origin. Set
+// `VITE_BACKEND_ORIGIN` if the APIs live on a different domain.
 
 console.log('Using backend origin', backendOrigin);
 
