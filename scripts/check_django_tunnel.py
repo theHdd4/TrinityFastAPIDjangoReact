@@ -26,9 +26,13 @@ def main() -> int:
             logger.info("Status %s", status)
             logger.info("Server %s", headers.get('Server'))
             if status >= 400:
-                logger.error("FAILURE: endpoint responded with an error (%s)", status)
+                logger.error(
+                    "FAILURE: endpoint responded with an error (%s)", status
+                )
+                print("FAILURE")
                 return 1
             logger.info("SUCCESS: tunnel appears healthy")
+            print("SUCCESS")
             return 0
     except error.HTTPError as e:
         logger.error("FAILURE: HTTP error %s - %s", e.code, e.reason)
@@ -37,8 +41,10 @@ def main() -> int:
                 "Cloudflare 530 typically means the tunnel is not connected to the origin"
             )
         logger.debug("Headers: %s", e.headers)
+        print("FAILURE")
     except Exception as exc:
         logger.error("FAILURE: request failed: %s", exc)
+        print("FAILURE")
     return 1
 
 
