@@ -48,7 +48,7 @@ ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS", "*").split(",")
 # form. When deploying behind Cloudflare or another proxy, add your external
 # domain (e.g. "https://example.com") here so browser POSTs are accepted.
 _default_csrf = (
-    "https://trinity.quantmatrixai.com,"
+    "https://trinity.quanmatrixai.com,"
     "https://admin.quantmatrixai.com,"
     "https://api.quantmatrixai.com"
 )
@@ -60,7 +60,7 @@ ADDITIONAL_DOMAINS = os.getenv("ADDITIONAL_DOMAINS", HOST_IP)
 # CORS configuration
 # ------------------------------------------------------------------
 _default_cors = (
-    "https://trinity.quantmatrixai.com,"
+    "https://trinity.quanmatrixai.com,"
     "https://admin.quantmatrixai.com,"
     "https://api.quantmatrixai.com"
 )
