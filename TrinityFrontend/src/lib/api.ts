@@ -1,11 +1,23 @@
 const hostIp = import.meta.env.VITE_HOST_IP;
-const backendOrigin =
+let backendOrigin =
   import.meta.env.VITE_BACKEND_ORIGIN ||
   (hostIp
     ? `http://${hostIp}:8000`
     : typeof window !== 'undefined'
       ? window.location.origin.replace(/:8080$/, ':8000')
       : 'http://localhost:8000');
+
+// When running the frontend from the public domain without VITE_BACKEND_ORIGIN
+// set, default to the admin subdomain so API requests reach Django.
+if (
+  !import.meta.env.VITE_BACKEND_ORIGIN &&
+  typeof window !== 'undefined' &&
+  window.location.hostname === 'quantmatrixai.com'
+) {
+  backendOrigin = 'https://admin.quantmatrixai.com';
+}
+
+console.log('Using backend origin', backendOrigin);
 
 export const ACCOUNTS_API =
   import.meta.env.VITE_ACCOUNTS_API || `${backendOrigin}/api/accounts`;

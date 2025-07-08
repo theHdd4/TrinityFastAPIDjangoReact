@@ -28,9 +28,10 @@ Follow the steps below to run all services together.
 
   The root domain (`quantmatrixai.com`) only serves the static frontend via
   Nginx. Requests to `/api/` paths will return **405** unless they are proxied to
-  the Django backend or you use the `admin` subdomain. Ensure your login requests
-  hit `https://admin.quantmatrixai.com/api/accounts/` or configure Nginx as in
-  `TrinityFrontend/nginx.conf`.
+  the Django backend or you use the `admin` subdomain. The frontend automatically
+  switches to `https://admin.quantmatrixai.com` when loaded from
+  `quantmatrixai.com`, but you can also set `VITE_BACKEND_ORIGIN` explicitly or
+  configure Nginx as shown in `TrinityFrontend/nginx.conf`.
 
 Docker and Node.js must be installed locally. The Python dependencies listed in
 `TrinityBackendDjango/requirements.txt` and
