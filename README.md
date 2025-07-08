@@ -26,9 +26,10 @@ Follow the steps below to run all services together.
   docker-compose build frontend
   ```
 
-  The root domain (`quantmatrixai.com`) only serves the static frontend via
-  Nginx. If `/api/` paths are not proxied to Django, the frontend automatically
-  uses `https://admin.quantmatrixai.com` for API calls. Set
+  The frontend is exposed at `https://trinity.quanmatrixai.com` through
+  Cloudflare Tunnel while the APIs live on the `admin` subdomain. If `/api/`
+  paths are not proxied to Django, the frontend automatically uses
+  `https://admin.quantmatrixai.com` for API calls. Set
   `VITE_BACKEND_ORIGIN` to override this behavior or when hosting the APIs on a
   completely different domain.
 

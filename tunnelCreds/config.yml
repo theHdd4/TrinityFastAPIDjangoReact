@@ -2,7 +2,7 @@ tunnel: d53d4b08-f2ee-4be2-98b0-ac7a733a648c
 credentials-file: /etc/cloudflared/d53d4b08-f2ee-4be2-98b0-ac7a733a648c.json
 
 ingress:
-  - hostname: quantmatrixai.com
+  - hostname: trinity.quanmatrixai.com
     service: http://frontend:80
   - hostname: api.quantmatrixai.com
     service: http://fastapi:8001

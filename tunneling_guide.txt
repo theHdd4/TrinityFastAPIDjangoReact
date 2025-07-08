@@ -1,10 +1,10 @@
 # Cloudflare Tunnel Setup for Trinity Platform
 
-This guide explains how to expose the Dockerized Trinity application using Cloudflare Tunnel so the services are reachable at **quantmatrixai.com** and its subdomains. The examples assume your host IP is `10.2.1.65`.
+This guide explains how to expose the Dockerized Trinity application using Cloudflare Tunnel so the services are reachable at **trinity.quanmatrixai.com** and the backend subdomains. The examples assume your host IP is `10.2.1.65`.
 
 ## 1. Install cloudflared
 
-1. [Create a free Cloudflare account](https://dash.cloudflare.com) and add the `quantmatrixai.com` domain.
+1. [Create a free Cloudflare account](https://dash.cloudflare.com) and add the `quanmatrixai.com` domain.
 2. On the host machine install the Cloudflare tunnel client:
    ```bash
    curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb -o cloudflared.deb
@@ -36,19 +36,19 @@ chmod 600 tunnelCreds/d53d4b08-f2ee-4be2-98b0-ac7a733a648c.json \
 ## 3. Configure DNS routing
 
 Set up DNS records in Cloudflare to point to the tunnel:
-- `quantmatrixai.com` -> tunnel
+- `trinity.quanmatrixai.com` -> tunnel
 - `api.quantmatrixai.com` -> tunnel
 - `admin.quantmatrixai.com` -> tunnel
 
 These can be created automatically using:
 ```bash
-cloudflared tunnel route dns trinityapp quantmatrixai.com
+cloudflared tunnel route dns trinityapp trinity.quanmatrixai.com
 cloudflared tunnel route dns trinityapp api.quantmatrixai.com
 cloudflared tunnel route dns trinityapp admin.quantmatrixai.com
 ```
 You can also run them from inside the container:
 ```bash
-docker-compose exec cloudflared cloudflared tunnel route dns trinityapp quantmatrixai.com
+docker-compose exec cloudflared cloudflared tunnel route dns trinityapp trinity.quanmatrixai.com
 docker-compose exec cloudflared cloudflared tunnel route dns trinityapp api.quantmatrixai.com
 docker-compose exec cloudflared cloudflared tunnel route dns trinityapp admin.quantmatrixai.com
 ```
@@ -61,7 +61,7 @@ tunnel: d53d4b08-f2ee-4be2-98b0-ac7a733a648c
 credentials-file: /etc/cloudflared/d53d4b08-f2ee-4be2-98b0-ac7a733a648c.json
 
 ingress:
-  - hostname: quantmatrixai.com
+  - hostname: trinity.quanmatrixai.com
     service: http://frontend:80
   - hostname: api.quantmatrixai.com
     service: http://fastapi:8001
@@ -113,13 +113,13 @@ docker-compose build frontend
    docker-compose up --build
    ```
 2. Cloudflared establishes the tunnel and routes requests for the configured hostnames to the correct containers.
-3. Visit `https://quantmatrixai.com` for the frontend, `https://api.quantmatrixai.com` for FastAPI and `https://admin.quantmatrixai.com` for Django.
+3. Visit `https://trinity.quanmatrixai.com` for the frontend, `https://api.quantmatrixai.com` for FastAPI and `https://admin.quantmatrixai.com` for Django.
 
 The services remain reachable on the local network as before, while Cloudflare Tunnel provides secure public access.
 
 ## 8. Troubleshooting
 
-If visiting `https://quantmatrixai.com` or its subdomains returns a Cloudflare **530** error, the tunnel is not connected to the
+If visiting `https://trinity.quanmatrixai.com` or the backend subdomains returns a Cloudflare **530** error, the tunnel is not connected to the
 origin. Common causes are missing DNS records or incorrect IDs in `tunnelCreds/config.yml`.
 
 1. Verify your DNS entries in Cloudflare are **Proxied** (orange cloud) and point to the tunnel using
@@ -131,3 +131,28 @@ origin. Common causes are missing DNS records or incorrect IDs in `tunnelCreds/c
 
 Cloudflare handles HTTPS automatically, so the services in `config.yml` use plain `http://` URLs. Once the tunnel is active the
 external domain will load over HTTPS without additional changes.
+
+## 9. Switching the frontend domain
+
+Follow these steps if you need to rename the frontend tunnel endpoint to
+`trinity.quanmatrixai.com`:
+
+1. Purchase or configure the `quanmatrixai.com` domain in Cloudflare if you do
+   not already control it.
+2. Under *DNS* add a **CNAME** record for `trinity` pointing to your Cloudflare
+   tunnel. Enable the orange proxy icon.
+3. Edit `tunnelCreds/config.yml` and replace the original `quantmatrixai.com`
+   hostname with `trinity.quanmatrixai.com` for the frontend service.
+4. Update CORS settings by editing `TrinityBackendDjango/.env`,
+   `.env.example` and `config/settings.py` to include
+   `https://trinity.quanmatrixai.com`.
+5. Rebuild the containers so the new configuration is applied:
+
+   ```bash
+   docker-compose build frontend web cloudflared
+   docker-compose up -d
+   ```
+
+When Cloudflared reports **Connected** you can access the React application at
+`https://trinity.quanmatrixai.com` while API calls continue to go to the
+`admin` and `api` subdomains.
