@@ -66,8 +66,8 @@ If the script reports an error:
    ```
 
 4. Confirm the DNS records in Cloudflare point to the correct tunnel and are set to **Proxied**.
-
-5. Restart a tunnel if needed:
+5. Double-check that the credential JSON files in `tunnelCreds/` match the UUID listed in each config file. If the file name or ID is wrong the tunnel cannot authenticate.
+6. Restart a tunnel if needed:
 
    ```bash
    docker-compose restart cloudflared-admin cloudflared-frontend cloudflared-api

@@ -60,3 +60,27 @@ python scripts/check_fastapi_tunnel.py
 ```
 All commands should print `SUCCESS` when the tunnels and services are working.
 
+## 6. Troubleshooting
+
+If a script prints a **530** status the tunnel is not connected to your
+containers. Common causes are:
+
+1. The credentials JSON file does not match the `tunnel:` ID in the config
+   (`config_admin.yml`, `config_frontend.yml`, or `config_api.yml`). Ensure the
+   file name is `<UUID>.json` and that the same UUID appears in the `tunnel:`
+   field of the config.
+2. DNS records may be missing or not proxied. Verify the `cloudflared tunnel`
+   `route dns` commands completed successfully and that the orange cloud is
+   enabled in the Cloudflare dashboard.
+3. The origin containers might not be running. Check the logs with
+   `docker-compose logs web fastapi frontend` and confirm the `cloudflared-*`
+   containers show `Connected`.
+
+After correcting any issues restart the tunnel service:
+
+```bash
+docker-compose restart cloudflared-admin cloudflared-frontend cloudflared-api
+```
+
+Once the logs show **Connected** re-run the check scripts.
+
