@@ -1,0 +1,11 @@
+# Django Backend Tunnel Validation
+
+Run the `scripts/validate_backend.py` helper to confirm the admin subdomain
+is reachable through the Cloudflare tunnel:
+
+```bash
+python scripts/validate_backend.py
+```
+
+A successful request prints the HTTP status and server header returned by
+`https://admin.quantmatrixai.com/admin/login/`.

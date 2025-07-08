@@ -70,6 +70,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const login = async (username: string, password: string) => {
     console.log('Attempting login for', username);
     console.log('API base is', API_BASE);
+    console.log('Checking backend availability at', `${API_BASE}/users/me/`);
+    try {
+      const ping = await fetch(`${API_BASE}/users/me/`, { credentials: 'include' });
+      console.log('Backend check status', ping.status);
+    } catch (err) {
+      console.log('Backend check failed', err);
+    }
     console.log('Posting to', `${API_BASE}/login/`);
     const options = {
       method: 'POST',
