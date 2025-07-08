@@ -1,0 +1,62 @@
+# Separate Cloudflare Tunnels Setup
+
+The project now expects three individual Cloudflare tunnels so each service is reachable on its own subdomain:
+
+- **trinity.quantmatrixai.com** → React frontend
+- **admin.quantmatrixai.com** → Django admin
+- **api.quantmatrixai.com** → FastAPI backend
+
+Follow the steps below on your host machine.
+
+## 1. Install `cloudflared`
+1. Create or sign in to your Cloudflare account and add the `quantmatrixai.com` domain.
+2. Install the Cloudflare Tunnel client:
+   ```bash
+   curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb -o cloudflared.deb
+   sudo dpkg -i cloudflared.deb
+   cloudflared login
+   ```
+   Authentication places credentials under `~/.cloudflared`.
+
+## 2. Create three tunnels
+Create a tunnel for each service and record the generated UUID:
+```bash
+cloudflared tunnel create trinity-frontend
+cloudflared tunnel create trinity-admin
+cloudflared tunnel create trinity-api
+```
+Copy the corresponding `<UUID>.json` files and `cert.pem` into `tunnelCreds/`.
+Three example config files (`config_frontend.yml`, `config_admin.yml`, `config_api.yml`) are provided. Replace `TUNNEL_ID_*` with the real IDs in each file.
+
+## 3. Configure DNS
+Point the subdomains to their respective tunnels:
+```bash
+cloudflared tunnel route dns trinity-frontend trinity.quantmatrixai.com
+cloudflared tunnel route dns trinity-admin admin.quantmatrixai.com
+cloudflared tunnel route dns trinity-api api.quantmatrixai.com
+```
+Ensure the records are **Proxied** (orange cloud) in the Cloudflare dashboard.
+
+## 4. Docker Compose services
+The `docker-compose.yml` inside `TrinityBackendDjango` defines three `cloudflared-*` services. They mount `tunnelCreds` and run with their dedicated config files. Build and start the stack:
+```bash
+cd TrinityBackendDjango
+docker-compose up --build
+```
+Each tunnel container should report `Connected` shortly after startup.
+
+## 5. Validate connectivity
+Short‑lived `check-*` containers automatically run a script verifying that each public URL responds:
+```bash
+docker-compose logs check-admin
+docker-compose logs check-frontend
+docker-compose logs check-api
+```
+You can run the helpers manually from the repository root:
+```bash
+python scripts/check_django_tunnel.py
+python scripts/check_frontend_tunnel.py
+python scripts/check_fastapi_tunnel.py
+```
+All commands should print `SUCCESS` when the tunnels and services are working.
+

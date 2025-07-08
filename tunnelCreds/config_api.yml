@@ -1,0 +1,7 @@
+tunnel: TUNNEL_ID_API
+credentials-file: /etc/cloudflared/TUNNEL_ID_API.json
+
+ingress:
+  - hostname: api.quantmatrixai.com
+    service: http://fastapi:8001
+  - service: http_status:404

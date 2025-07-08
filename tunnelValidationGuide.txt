@@ -1,6 +1,6 @@
 # Tunnel Validation Guide
 
-Follow these steps to confirm that the Django backend is reachable via the Cloudflare tunnel.
+Follow these steps to confirm that the services are reachable via their Cloudflare tunnels.
 
 ## 1. Start the stack
 
@@ -11,10 +11,10 @@ cd TrinityBackendDjango
 docker-compose up --build
 ```
 
-Wait until the `web` (Django) and `cloudflared` containers report `Connected`.
-Docker Compose also starts a short‑lived `tunnel-check` service that
-executes the helper script automatically. It prints **SUCCESS** or **FAILURE**
-in the logs based on the response from the admin URL.
+Wait until the `cloudflared-*` containers report `Connected`.
+Docker Compose also starts short‑lived `check-*` services that
+execute the helper scripts automatically. They print **SUCCESS** or **FAILURE**
+in the logs based on the response from each public URL.
 
 ## 2. Check the tunnel
 
@@ -46,15 +46,17 @@ If the script reports an error:
 1. Inspect the tunnel logs:
 
    ```bash
-   docker-compose logs cloudflared
+   docker-compose logs cloudflared-admin
+   docker-compose logs cloudflared-frontend
+   docker-compose logs cloudflared-api
    ```
 
    Look for messages like `Connected` or any errors indicating authentication or DNS issues.
 
-2. Ensure the `cloudflared` container is running:
+2. Ensure the `cloudflared-*` containers are running:
 
    ```bash
-   docker-compose ps cloudflared
+   docker-compose ps cloudflared-admin cloudflared-frontend cloudflared-api
    ```
 
 3. Verify the Django container is healthy:
@@ -65,10 +67,10 @@ If the script reports an error:
 
 4. Confirm the DNS records in Cloudflare point to the correct tunnel and are set to **Proxied**.
 
-5. Restart the tunnel if needed:
+5. Restart a tunnel if needed:
 
    ```bash
-   docker-compose restart cloudflared
+   docker-compose restart cloudflared-admin cloudflared-frontend cloudflared-api
    ```
 
 Use these logs to identify whether the request is reaching the tunnel or failing earlier. Once the script shows a 200 status, the frontend should be able to access the backend through `https://admin.quantmatrixai.com`.

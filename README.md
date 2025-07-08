@@ -120,16 +120,18 @@ a duplicate domain. Ensure the request is sent to the public host (e.g.
 With these steps the Django orchestration layer, FastAPI features and the
 React frontend are fully connected.
 
-## 5. Validate the backend tunnel
+## 5. Validate the tunnels
 
-After exposing the services through Cloudflare Tunnel you can verify that the
-Django backend responds on the public hostname. Docker Compose automatically
-launches a short‑lived `tunnel-check` container. This container runs the
-validation helper once during `docker-compose up` and then exits. You can also
-run the same helper manually from the repository root:
+After exposing the services through Cloudflare Tunnels you can verify that each
+public hostname responds. Docker Compose automatically launches short‑lived
+`check-*` containers. These run the validation helpers once during
+`docker-compose up` and then exit. You can also run the helpers manually from
+the repository root:
 
 ```bash
 python scripts/check_django_tunnel.py
+python scripts/check_frontend_tunnel.py
+python scripts/check_fastapi_tunnel.py
 ```
 
 A healthy tunnel prints the HTTP status and server header, for example:
@@ -144,7 +146,8 @@ If you see a 4xx or 5xx status code the request reached the server but
 returned an error. Double‑check the URL and that the Django container is
 running. A 404 response usually means the endpoint path is wrong while a 5xx
 status indicates the tunnel or backend might be down. Use `docker-compose logs
-cloudflared` to confirm the tunnel is connected if you suspect connectivity
+cloudflared-admin` (and the other tunnel containers) to confirm they are
+connected if you suspect connectivity
 issues.
 
 

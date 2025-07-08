@@ -1,0 +1,7 @@
+tunnel: TUNNEL_ID_ADMIN
+credentials-file: /etc/cloudflared/TUNNEL_ID_ADMIN.json
+
+ingress:
+  - hostname: admin.quantmatrixai.com
+    service: http://web:8000
+  - service: http_status:404
