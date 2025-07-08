@@ -19,7 +19,12 @@ Follow the steps below to run all services together.
    service.
    When exposing the app via Cloudflare Tunnel, set
    `VITE_BACKEND_ORIGIN=https://admin.quantmatrixai.com` so login requests reach
-   the Django server.
+   the Django server. Rebuild the `frontend` service after changing this file so
+   Vite picks up the new value:
+
+   ```bash
+   docker-compose build frontend
+   ```
 
 Docker and Node.js must be installed locally. The Python dependencies listed in
 `TrinityBackendDjango/requirements.txt` and

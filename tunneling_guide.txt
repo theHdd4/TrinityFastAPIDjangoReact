@@ -100,6 +100,12 @@ echo "VITE_BACKEND_ORIGIN=https://admin.quantmatrixai.com" >> TrinityFrontend/.e
 ```
 This ensures `fetch()` requests like `/api/accounts/login/` hit the correct host
 instead of the frontend container.
+After editing `.env`, rebuild the frontend image so the environment variable is
+embedded in the compiled bundle:
+
+```bash
+docker-compose build frontend
+```
 ## 7. Running everything
 
 1. Build and start the stack:
