@@ -23,11 +23,11 @@ This guide explains how to expose the Dockerized Trinity application using Cloud
 cloudflared tunnel create trinity-tunnel
 ```
 
-Copy the generated tunnel UUID. Cloudflare also saves a credentials JSON for the tunnel. Move this JSON into `cloudflared/credentials.json` within the repository so Docker can mount it. Ensure the file is readable only by you:
+Copy the generated tunnel UUID. Cloudflare also saves a credentials JSON for the tunnel. Move this JSON into `tunnelCreds/credentials.json` within the repository so Docker can mount it. Ensure the file is readable only by you:
 
 ```bash
-cp ~/.cloudflared/<UUID>.json cloudflared/credentials.json
-chmod 600 cloudflared/credentials.json
+cp ~/.cloudflared/<UUID>.json tunnelCreds/credentials.json
+chmod 600 tunnelCreds/credentials.json
 ```
 
 ## 3. Configure DNS routing
@@ -46,7 +46,7 @@ cloudflared tunnel route dns trinity-tunnel admin.quantmatrixai.com
 
 ## 4. Cloudflared configuration
 
-Create `cloudflared/config.yml`:
+Create `tunnelCreds/config.yml`:
 ```yaml
 tunnel: YOUR_TUNNEL_UUID
 credentials-file: /etc/cloudflared/credentials.json
@@ -60,23 +60,23 @@ ingress:
     service: http://web:8000
   - service: http_status:404
 ```
-Replace `YOUR_TUNNEL_UUID` with the ID from step 2. Copy the generated credentials file into `cloudflared/credentials.json` (an example `credentials.json.example` is provided). The Docker container mounts this path so Cloudflared can authenticate.
+Replace `YOUR_TUNNEL_UUID` with the ID from step 2. Copy the generated credentials file into `tunnelCreds/credentials.json` (an example `credentials.json.example` is provided). The Docker container mounts this path so Cloudflared can authenticate.
 
 ## 5. Docker Compose service
 
-The `docker-compose.yml` inside `TrinityBackendDjango` already exposes all containers on the `trinity-net` network. Add the following service (already included in the repository). The volume path references the `cloudflared` folder in the repository root (one directory above this compose file):
+The `docker-compose.yml` inside `TrinityBackendDjango` already exposes all containers on the `trinity-net` network. Add the following service (already included in the repository). The volume path references the `tunnelCreds` folder in the repository root (one directory above this compose file):
 ```yaml
   cloudflared:
     image: cloudflare/cloudflared:latest
     command: tunnel run
     volumes:
-      - ../cloudflared:/etc/cloudflared
+      - ../tunnelCreds:/etc/cloudflared
     depends_on:
       - frontend
     networks:
       - trinity-net
 ```
-This container runs the tunnel using the configuration from `cloudflared/config.yml`.
+This container runs the tunnel using the configuration from `tunnelCreds/config.yml`.
 
 ## 6. Running everything
 
