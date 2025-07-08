@@ -69,6 +69,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const login = async (username: string, password: string) => {
     console.log('Attempting login for', username);
+    console.log('API base is', API_BASE);
+    console.log('Posting to', `${API_BASE}/login/`);
     try {
       const res = await fetch(`${API_BASE}/login/`, {
         method: 'POST',
@@ -76,6 +78,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         credentials: 'include',
         body: JSON.stringify({ username, password }),
       });
+      console.log('Login response headers', Array.from(res.headers.entries()));
       console.log('Login response status', res.status);
       if (res.ok) {
         const data = await res.json();

@@ -23,8 +23,14 @@ Follow the steps below to run all services together.
    Vite picks up the new value:
 
    ```bash
-   docker-compose build frontend
-   ```
+  docker-compose build frontend
+  ```
+
+  The root domain (`quantmatrixai.com`) only serves the static frontend via
+  Nginx. Requests to `/api/` paths will return **405** unless they are proxied to
+  the Django backend or you use the `admin` subdomain. Ensure your login requests
+  hit `https://admin.quantmatrixai.com/api/accounts/` or configure Nginx as in
+  `TrinityFrontend/nginx.conf`.
 
 Docker and Node.js must be installed locally. The Python dependencies listed in
 `TrinityBackendDjango/requirements.txt` and
