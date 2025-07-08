@@ -7,5 +7,15 @@ is reachable through the Cloudflare tunnel:
 python scripts/validate_backend.py
 ```
 
-A successful request prints the HTTP status and server header returned by
-`https://admin.quantmatrixai.com/admin/login/`.
+The script prints the HTTP status and `Server` header. A typical successful
+check looks like this:
+
+```
+Checking https://admin.quantmatrixai.com/admin/login/
+Status 200
+Server cloudflare
+```
+
+If you receive a 4xx or 5xx status, verify the URL and inspect the tunnel logs
+with `docker-compose logs cloudflared`. Errors such as `unexpected EOF` indicate
+the tunnel dropped and should be restarted.

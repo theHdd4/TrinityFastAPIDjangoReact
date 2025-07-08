@@ -27,6 +27,8 @@ def main():
 
     print('Status', status)
     print('Server', headers.get('Server'))
+    if status >= 400:
+        print('Endpoint responded with an error; check the URL and tunnel logs')
     sys.exit(0 if status < 400 else 1)
 
 if __name__ == '__main__':

@@ -137,8 +137,11 @@ Status 200
 Server cloudflare
 ```
 
-Any status code 4xx or 5xx indicates the service is unreachable through the
-tunnel. Ensure the `cloudflared` container is running and DNS records point to
-your tunnel if the check fails.
+If you see a 4xx or 5xx status code the request reached the server but
+returned an error. Double‑check the URL and that the Django container is
+running. A 404 response usually means the endpoint path is wrong while a 5xx
+status indicates the tunnel or backend might be down. Use `docker-compose logs
+cloudflared` to confirm the tunnel is connected if you suspect connectivity
+issues.
 
 
