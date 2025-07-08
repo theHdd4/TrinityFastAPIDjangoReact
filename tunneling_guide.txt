@@ -23,11 +23,12 @@ This guide explains how to expose the Dockerized Trinity application using Cloud
 cloudflared tunnel create trinity-tunnel
 ```
 
-Copy the generated tunnel UUID. Cloudflare also saves a credentials JSON for the tunnel. Move this JSON into `tunnelCreds/credentials.json` within the repository so Docker can mount it. Ensure the file is readable only by you:
+Copy the generated tunnel UUID. Cloudflare also saves a credentials JSON for the tunnel and updates your `cert.pem`. Copy both files into `tunnelCreds` so Docker can mount them. Ensure they are readable only by you:
 
 ```bash
 cp ~/.cloudflared/<UUID>.json tunnelCreds/credentials.json
-chmod 600 tunnelCreds/credentials.json
+cp ~/.cloudflared/cert.pem tunnelCreds/cert.pem
+chmod 600 tunnelCreds/credentials.json tunnelCreds/cert.pem
 ```
 
 ## 3. Configure DNS routing
@@ -64,19 +65,21 @@ Replace `YOUR_TUNNEL_UUID` with the ID from step 2. Copy the generated credentia
 
 ## 5. Docker Compose service
 
-The `docker-compose.yml` inside `TrinityBackendDjango` already exposes all containers on the `trinity-net` network. Add the following service (already included in the repository). The volume path references the `tunnelCreds` folder in the repository root (one directory above this compose file):
+The `docker-compose.yml` inside `TrinityBackendDjango` already exposes all containers on the `trinity-net` network. Add the following service (already included in the repository). The volume path references the `tunnelCreds` folder in the repository root (one directory above this compose file). Use a read-only mount so the container cannot modify the files:
 ```yaml
   cloudflared:
     image: cloudflare/cloudflared:latest
     command: tunnel run
     volumes:
-      - ../tunnelCreds:/etc/cloudflared
+      - ../tunnelCreds:/etc/cloudflared:ro
     depends_on:
       - frontend
     networks:
       - trinity-net
 ```
 This container runs the tunnel using the configuration from `tunnelCreds/config.yml`.
+If running Docker on Windows, use an absolute path such as:
+`C:/TrinityFastAPIDjangoReact/tunnelCreds:/etc/cloudflared:ro`.
 
 ## 6. Running everything
 

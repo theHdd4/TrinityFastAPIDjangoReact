@@ -105,3 +105,4 @@ TrinityAI/Agent_fetch_atom/models/
 
 arrow_data/
 tunnelCreds/credentials.json
+tunnelCreds/cert.pem
