@@ -124,11 +124,11 @@ React frontend are fully connected.
 After exposing the services through Cloudflare Tunnel you can verify that the
 Django backend responds on the public hostname. Docker Compose automatically
 launches a short lived `tunnel-check` container which runs a validation helper
-during `docker-compose up`. You can also run it manually from the repository
-root:
+during `docker-compose up`. You can also run the same helper manually from the
+repository root:
 
 ```bash
-python scripts/validate_backend.py
+python scripts/check_django_tunnel.py
 ```
 
 A healthy tunnel prints the HTTP status and server header, for example:
