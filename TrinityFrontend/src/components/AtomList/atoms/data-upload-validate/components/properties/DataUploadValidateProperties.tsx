@@ -136,10 +136,11 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
 
     const res = await fetch(`${VALIDATE_API}/create_new`, { method: 'POST', body: form });
     if (res.ok) {
+      const createData = await res.json();
       setValidatorId(id);
       setAllAvailableFiles(keys.map(k => ({ name: k, source: 'upload' })));
       setSelectedMasterFile(keys[0]);
-      const cfg = await fetch(`${VALIDATE_API}/get_validator_config/${id}`).then(r => r.json());
+      const cfg = createData.schemas ? createData : await fetch(`${VALIDATE_API}/get_validator_config/${id}`).then(r => r.json());
       const defaultTypes: Record<string, string> = {};
       const firstKey = keys[0];
       if (cfg.schemas && cfg.schemas[firstKey]) {

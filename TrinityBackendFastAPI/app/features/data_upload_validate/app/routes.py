@@ -355,16 +355,8 @@ async def create_new(
     """
     # ✅ ADD COLUMN PREPROCESSING FUNCTION
     def preprocess_column_name(col_name: str) -> str:
-        """
-        Preprocess column name:
-        - Strip leading/trailing spaces
-        - Lowercase
-        - Remove spaces inside the name but preserve underscores
-        """
-        col_name = col_name.strip().lower()
-        # Remove spaces but keep underscores
-        col_name = re.sub(r'(?<!_)\s+(?!_)', '', col_name)
-        return col_name
+        """Preprocess column name by trimming whitespace only."""
+        return col_name.strip()
 
     # Parse file_keys JSON
     try:
@@ -487,9 +479,12 @@ async def create_new(
     # ✅ MINIMAL POST RESPONSE - Only success confirmation
     return {
         "status": "success",
-        "message": "Validator atom created successfully", 
+        "message": "Validator atom created successfully",
         "validator_atom_id": validator_atom_id,
-        "config_saved": True
+        "config_saved": True,
+        "schemas": schemas,
+        "column_types": column_types,
+        "file_keys": keys,
     }
     
     
@@ -1735,10 +1730,8 @@ async def validate(
     
     # ✅ Column preprocessing function (same as create_new)
     def preprocess_column_name(col_name: str) -> str:
-        """Preprocess column name: strip, lowercase, remove spaces but preserve underscores"""
-        col_name = col_name.strip().lower()
-        col_name = re.sub(r'(?<!_)\s+(?!_)', '', col_name)
-        return col_name
+        """Preprocess column name by trimming whitespace only."""
+        return col_name.strip()
     
     # ✅ Parse files and store content for MinIO
     files_data = []
@@ -2122,11 +2115,8 @@ async def validate_mmm_endpoint(
     
     # ✅ FIXED: Column preprocessing function that matches MMM validation expectations
     def preprocess_column_name(col_name: str) -> str:
-        """Preprocess column name: strip, lowercase, replace spaces with underscores"""
-        col_name = col_name.strip().lower()
-        col_name = col_name.replace(' ', '_').replace('-', '_').replace('__', '_')
-        col_name = col_name.strip('_')  # Remove leading/trailing underscores
-        return col_name
+        """Preprocess column name by trimming whitespace only."""
+        return col_name.strip()
     
     # Parse files and store data
     files_data = {}
