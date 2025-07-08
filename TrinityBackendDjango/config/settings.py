@@ -54,12 +54,15 @@ ADDITIONAL_DOMAINS = os.getenv("ADDITIONAL_DOMAINS", HOST_IP)
 # ------------------------------------------------------------------
 # CORS configuration
 # ------------------------------------------------------------------
-_cors = os.getenv("CORS_ALLOWED_ORIGINS")
-if _cors:
-    CORS_ALLOWED_ORIGINS = [o.strip() for o in _cors.split(",")]
-    CORS_ALLOW_ALL_ORIGINS = False
-else:
-    CORS_ALLOW_ALL_ORIGINS = True            # wildcard access for dev
+_default_cors = (
+    "https://quantmatrixai.com,"
+    "https://admin.quantmatrixai.com,"
+    "https://api.quantmatrixai.com"
+)
+CORS_ALLOWED_ORIGINS = [
+    o.strip() for o in os.getenv("CORS_ALLOWED_ORIGINS", _default_cors).split(",")
+]
+CORS_ALLOW_ALL_ORIGINS = False
 
 CORS_ALLOW_CREDENTIALS = True            # echo origin when cookies/auth supplied
 CORS_ALLOW_HEADERS = list(default_headers) + [

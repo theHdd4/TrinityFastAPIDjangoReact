@@ -71,13 +71,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     console.log('Attempting login for', username);
     console.log('API base is', API_BASE);
     console.log('Posting to', `${API_BASE}/login/`);
+    const options = {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ username, password }),
+    };
+    console.log('Login fetch options', options);
     try {
-      const res = await fetch(`${API_BASE}/login/`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ username, password }),
-      });
+      const res = await fetch(`${API_BASE}/login/`, options);
       console.log('Login response headers', Array.from(res.headers.entries()));
       console.log('Login response status', res.status);
       if (res.ok) {
