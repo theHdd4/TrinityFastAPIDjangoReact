@@ -104,3 +104,4 @@ Desktop.ini
 TrinityAI/Agent_fetch_atom/models/
 
 arrow_data/
+cloudflared/credentials.json

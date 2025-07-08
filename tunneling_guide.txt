@@ -1,6 +1,6 @@
 # Cloudflare Tunnel Setup for Trinity Platform
 
-This guide explains how to expose the Dockerized Trinity application using Cloudflare Tunnel so the services are reachable at **quantmatrixai.com** and its subdomains.
+This guide explains how to expose the Dockerized Trinity application using Cloudflare Tunnel so the services are reachable at **quantmatrixai.com** and its subdomains. The examples assume your host IP is `10.2.1.65`.
 
 ## 1. Install cloudflared
 
@@ -23,7 +23,12 @@ This guide explains how to expose the Dockerized Trinity application using Cloud
 cloudflared tunnel create trinity-tunnel
 ```
 
-Copy the generated tunnel UUID. Cloudflare also saves a credentials JSON for the tunnel. Move this JSON inside the repository so Docker can mount it, e.g. `cloudflared/credentials.json`.
+Copy the generated tunnel UUID. Cloudflare also saves a credentials JSON for the tunnel. Move this JSON into `cloudflared/credentials.json` within the repository so Docker can mount it. Ensure the file is readable only by you:
+
+```bash
+cp ~/.cloudflared/<UUID>.json cloudflared/credentials.json
+chmod 600 cloudflared/credentials.json
+```
 
 ## 3. Configure DNS routing
 
@@ -55,7 +60,7 @@ ingress:
     service: http://web:8000
   - service: http_status:404
 ```
-Replace `YOUR_TUNNEL_UUID` with the ID from step 2. Place `credentials.json` (generated when the tunnel was created) inside the repository's `cloudflared` directory.
+Replace `YOUR_TUNNEL_UUID` with the ID from step 2. Copy the generated credentials file into `cloudflared/credentials.json` (an example `credentials.json.example` is provided). The Docker container mounts this path so Cloudflared can authenticate.
 
 ## 5. Docker Compose service
 
