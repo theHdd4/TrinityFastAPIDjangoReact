@@ -149,6 +149,20 @@ services:
     networks:
       - trinity-net
 
+  tunnel-check:
+    image: python:3.10-slim
+    command: python /app/scripts/check_django_tunnel.py
+    volumes:
+      - ../:/app
+    working_dir: /app
+    environment:
+      BACKEND_URL: https://admin.quantmatrixai.com/admin/login/
+    depends_on:
+      - web
+      - cloudflared
+    networks:
+      - trinity-net
+
 
 volumes:
   postgres_data:

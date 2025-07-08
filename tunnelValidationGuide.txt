@@ -12,6 +12,9 @@ docker-compose up --build
 ```
 
 Wait until the `web` (Django) and `cloudflared` containers report `Connected`.
+Docker Compose also starts a short‑lived `tunnel-check` service that
+executes the helper script automatically. It prints **SUCCESS** or **FAILURE**
+in the logs based on the response from the admin URL.
 
 ## 2. Check the tunnel
 
