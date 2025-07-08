@@ -27,10 +27,9 @@ Follow the steps below to run all services together.
   ```
 
   The root domain (`quantmatrixai.com`) only serves the static frontend via
-  Nginx. Requests to `/api/` paths will return **405** unless they are proxied to
-  the Django backend or you use the `admin` subdomain. Configure Nginx as shown
-  in `TrinityFrontend/nginx.conf` if hosting at the root domain, or set
-  `VITE_BACKEND_ORIGIN` explicitly when using a separate backend domain.
+  Nginx. When `VITE_BACKEND_ORIGIN` is not provided the frontend automatically
+  switches API calls to the `admin` subdomain. Configure Nginx as shown in
+  `TrinityFrontend/nginx.conf` if you want to proxy `/api/` paths instead.
 
 Docker and Node.js must be installed locally. The Python dependencies listed in
 `TrinityBackendDjango/requirements.txt` and
