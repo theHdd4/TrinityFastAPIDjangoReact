@@ -119,4 +119,26 @@ a duplicate domain. Ensure the request is sent to the public host (e.g.
 With these steps the Django orchestration layer, FastAPI features and the
 React frontend are fully connected.
 
+## 5. Validate the backend tunnel
+
+After exposing the services through Cloudflare Tunnel you can verify that the
+Django backend responds on the public hostname. Run the validation helper from
+the repository root:
+
+```bash
+python scripts/validate_backend.py
+```
+
+A healthy tunnel prints the HTTP status and server header, for example:
+
+```
+Checking https://admin.quantmatrixai.com/admin/login/
+Status 200
+Server cloudflare
+```
+
+Any status code 4xx or 5xx indicates the service is unreachable through the
+tunnel. Ensure the `cloudflared` container is running and DNS records point to
+your tunnel if the check fails.
+
 
