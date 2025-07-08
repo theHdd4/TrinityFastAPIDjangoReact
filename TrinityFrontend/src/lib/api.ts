@@ -7,15 +7,9 @@ let backendOrigin =
       ? window.location.origin.replace(/:8080$/, ':8000')
       : 'http://localhost:8000');
 
-// When running the frontend from the public domain without VITE_BACKEND_ORIGIN
-// set, default to the admin subdomain so API requests reach Django.
-if (
-  !import.meta.env.VITE_BACKEND_ORIGIN &&
-  typeof window !== 'undefined' &&
-  window.location.hostname === 'quantmatrixai.com'
-) {
-  backendOrigin = 'https://admin.quantmatrixai.com';
-}
+// When hosting at quantmatrixai.com without `VITE_BACKEND_ORIGIN`, Nginx should
+// proxy `/api/` paths to the backend so we keep the origin unchanged to avoid
+// CORS issues. Set `VITE_BACKEND_ORIGIN` if using a separate domain.
 
 console.log('Using backend origin', backendOrigin);
 
