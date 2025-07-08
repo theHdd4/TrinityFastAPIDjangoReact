@@ -26,7 +26,7 @@ Follow the steps below to run all services together.
   docker-compose build frontend
   ```
 
-  The frontend is exposed at `https://trinity.quanmatrixai.com` through
+  The frontend is exposed at `https://trinity.quantmatrixai.com` through
   Cloudflare Tunnel while the APIs live on the `admin` subdomain. If `/api/`
   paths are not proxied to Django, the frontend automatically uses
   `https://admin.quantmatrixai.com` for API calls. Set
