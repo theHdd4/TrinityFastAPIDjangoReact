@@ -6,7 +6,7 @@ if (!backendOrigin) {
     backendOrigin = `http://${hostIp}:8000`;
   } else if (
     typeof window !== 'undefined' &&
-    window.location.hostname === 'trinity.quanmatrixai.com'
+    window.location.hostname === 'trinity.quantmatrixai.com'
   ) {
     // When the site is served from the Cloudflare domain the APIs live on the
     // admin subdomain, so switch automatically unless overridden.
@@ -18,7 +18,7 @@ if (!backendOrigin) {
   }
 }
 
-// When hosting at trinity.quanmatrixai.com configure Nginx to proxy `/api/` paths
+// When hosting at trinity.quantmatrixai.com configure Nginx to proxy `/api/` paths
 // to the Django backend so the frontend and backend share the same origin. Set
 // `VITE_BACKEND_ORIGIN` if the APIs live on a different domain.
 
