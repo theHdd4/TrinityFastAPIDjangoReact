@@ -1,12 +1,20 @@
+import os
 import sys
 from urllib import request, error
 
-URL = 'https://admin.quantmatrixai.com/admin/login/'
+DEFAULT_URL = "https://admin.quantmatrixai.com/admin/login/"
+
+def get_url() -> str:
+    """Return the URL to check from argv or the BACKEND_URL env var."""
+    if len(sys.argv) > 1:
+        return sys.argv[1]
+    return os.getenv("BACKEND_URL", DEFAULT_URL)
 
 def main():
-    print('Checking', URL)
+    url = get_url()
+    print('Checking', url)
     try:
-        with request.urlopen(URL, timeout=5) as resp:
+        with request.urlopen(url, timeout=5) as resp:
             status = resp.status
             headers = resp.headers
     except error.HTTPError as e:

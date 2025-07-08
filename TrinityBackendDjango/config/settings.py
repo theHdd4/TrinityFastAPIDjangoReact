@@ -65,7 +65,9 @@ _default_cors = (
     "https://api.quantmatrixai.com"
 )
 CORS_ALLOWED_ORIGINS = [
-    o.strip() for o in os.getenv("CORS_ALLOWED_ORIGINS", _default_cors).split(",")
+    o.strip()
+    for o in (os.getenv("CORS_ALLOWED_ORIGINS") or _default_cors).split(",")
+    if o.strip()
 ]
 CORS_ALLOW_ALL_ORIGINS = False
 
