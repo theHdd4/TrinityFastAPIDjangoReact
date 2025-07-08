@@ -18,7 +18,7 @@ def main():
             status = resp.status
             headers = resp.headers
     except error.HTTPError as e:
-        # Treat 4xx responses as a successful reachability check
+        # HTTP errors indicate the endpoint is reachable but returned an error
         status = e.code
         headers = e.headers
     except Exception as e:
@@ -27,7 +27,7 @@ def main():
 
     print('Status', status)
     print('Server', headers.get('Server'))
-    sys.exit(0 if status < 500 else 1)
+    sys.exit(0 if status < 400 else 1)
 
 if __name__ == '__main__':
     main()
