@@ -28,8 +28,10 @@ Follow the steps below to run all services together.
 
   The frontend is exposed at `https://trinity.quantmatrixai.com` through
   Cloudflare Tunnel while Traefik proxies `/admin/` and `/api/` requests to the
-  backend containers on the same host. Set `VITE_BACKEND_ORIGIN` only if you
-  deploy the APIs on a different domain.
+  backend containers on the same host. Django's REST API lives under the `/api/`
+  prefix (for example `/api/accounts/login/`). Use that path without the
+  `/admin` segment when calling the backend. Set `VITE_BACKEND_ORIGIN` only if
+  you deploy the APIs on a different domain.
 
   Update `CSRF_TRUSTED_ORIGINS` and `CORS_ALLOWED_ORIGINS` in
   `TrinityBackendDjango/.env` so both the local frontend URL
