@@ -43,6 +43,8 @@ Follow the steps below to run all services together.
   `http://10.2.1.65:8080` and the public domain
   `https://trinity.quantmatrixai.com` are trusted. This prevents CORS and CSRF
   errors when logging in from either address.
+  Set `FASTAPI_CORS_ORIGINS` to the same comma separated list so the FastAPI
+  service accepts requests from both origins as well.
   When exposing a public hostname also add it to the `ADDITIONAL_DOMAINS`
   variable so Django's tenant middleware accepts the domain. Run
   `python create_tenant.py` again after setting this variable if the domain was

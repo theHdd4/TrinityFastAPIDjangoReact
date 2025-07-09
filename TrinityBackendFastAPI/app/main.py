@@ -8,12 +8,19 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.api.router import api_router, text_router
+import os
 
 app = FastAPI()
 
+origins = os.getenv(
+    "FASTAPI_CORS_ORIGINS",
+    "http://10.2.1.65:8080,https://trinity.quantmatrixai.com",
+)
+allowed_origins = [o.strip() for o in origins.split(",") if o.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=allowed_origins or ["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

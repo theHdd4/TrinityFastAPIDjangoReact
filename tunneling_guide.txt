@@ -141,7 +141,8 @@ Follow these steps if you need to rename the frontend tunnel endpoint to
    hostname with `trinity.quantmatrixai.com` for the frontend service.
 4. Update CORS settings by editing `TrinityBackendDjango/.env`,
    `.env.example` and `config/settings.py` to include
-   `https://trinity.quantmatrixai.com`.
+   `https://trinity.quantmatrixai.com`. Also set `FASTAPI_CORS_ORIGINS` to the
+   same value so the FastAPI service accepts requests from the tunnel.
 5. Rebuild the containers so the new configuration is applied:
 
    ```bash

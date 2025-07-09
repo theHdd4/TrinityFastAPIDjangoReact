@@ -34,4 +34,8 @@ FastAPI lives under `/app/`. Key paths are:
 - `/app/data-upload-validate`
 - `/app/t/` for text box operations
 
+If requests to these endpoints return **502 Bad Gateway** through the tunnel,
+double-check that `FASTAPI_CORS_ORIGINS` in `.env` includes the public domain
+so the FastAPI container accepts the origin header.
+
 From the outside the Django API appears under `/admin/api/`, but Traefik removes the `/admin` prefix before forwarding the request. Internally the paths still begin with `/api/` as shown above.

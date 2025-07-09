@@ -48,3 +48,6 @@ The other services (PostgreSQL, MongoDB, Redis, MinIO, etc.) remain accessible o
 - Confirm the `cloudflared` container logs show `Connected`.
 - Verify the DNS records are proxied and reference the same tunnel ID as `config.yml`.
 - Check `docker-compose logs traefik` to inspect routing if the admin or API endpoints fail.
+- A `502` on `/app/` often means the FastAPI container rejected the request.
+  Ensure `FASTAPI_CORS_ORIGINS` in `.env` lists `https://trinity.quantmatrixai.com`
+  so CORS preflights succeed from the public site.
