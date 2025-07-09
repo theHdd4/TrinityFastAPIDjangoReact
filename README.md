@@ -43,6 +43,10 @@ Follow the steps below to run all services together.
   `http://10.2.1.65:8080` and the public domain
   `https://trinity.quantmatrixai.com` are trusted. This prevents CORS and CSRF
   errors when logging in from either address.
+  When exposing a public hostname also add it to the `ADDITIONAL_DOMAINS`
+  variable so Django's tenant middleware accepts the domain. Run
+  `python create_tenant.py` again after setting this variable if the domain was
+  not added during the initial setup.
 
 Docker and Node.js must be installed locally. The Python dependencies listed in
 `TrinityBackendDjango/requirements.txt` and
