@@ -31,6 +31,8 @@ Ensure the record is **Proxied** in the Cloudflare dashboard.
 ## 4. Docker Compose
 `TrinityBackendDjango/docker-compose.yml` defines a `traefik` service and a single `cloudflared` container. Cloudflared forwards all traffic for `trinity.quantmatrixai.com` to Traefik (`service: http://traefik:80`). Traefik then routes `/`, `/admin/` and `/api/` to the appropriate containers.
 
+Traefik requires access to the Docker socket to read the labels. The compose file mounts `/var/run/docker.sock` into the Traefik container.
+
 Start all services from the `TrinityBackendDjango` directory:
 ```bash
 docker-compose up --build

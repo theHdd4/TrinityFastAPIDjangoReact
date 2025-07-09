@@ -67,12 +67,17 @@ The `docker-compose.yml` inside `TrinityBackendDjango` already exposes all conta
     command: tunnel run
     volumes:
       - ../tunnelCreds:/etc/cloudflared:ro
+  traefik:
+    image: traefik:v2.11
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
     depends_on:
       - frontend
     networks:
       - trinity-net
 ```
-This container runs the tunnel using the configuration from `tunnelCreds/config.yml`.
+The `cloudflared` container runs the tunnel using the configuration from `tunnelCreds/config.yml`.
+Traefik watches the other containers via the mounted Docker socket.
 If running Docker on Windows, use an absolute path such as:
 `C:/TrinityFastAPIDjangoReact/tunnelCreds:/etc/cloudflared:ro`.
 

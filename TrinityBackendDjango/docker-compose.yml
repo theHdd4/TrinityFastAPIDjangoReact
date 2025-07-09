@@ -162,6 +162,8 @@ services:
       - --entrypoints.web.address=:80
     ports:
       - "9080:80"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
     networks:
       - trinity-net
     depends_on:
