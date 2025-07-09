@@ -72,7 +72,9 @@ services:
       - "traefik.enable=true"
       - "traefik.http.routers.django.rule=Host(`trinity.quantmatrixai.com`) && PathPrefix(`/admin`)"
       - "traefik.http.routers.django.entrypoints=web"
-      - "traefik.http.services.django.loadbalancer.server.url=http://10.2.1.65:8000"
+      - "traefik.http.routers.django.middlewares=django-strip@docker"
+      - "traefik.http.middlewares.django-strip.stripprefix.prefixes=/admin"
+      - "traefik.http.services.django.loadbalancer.server.port=8000"
 
   celery:
     build: .
@@ -102,6 +104,7 @@ services:
       MINIO_SECRET_KEY: minio123
       FLIGHT_HOST: flight
       FLIGHT_PORT: 8815
+      FASTAPI_CORS_ORIGINS: ${FASTAPI_CORS_ORIGINS}
     ports:
       - "8001:8001"
     depends_on:
@@ -115,7 +118,7 @@ services:
       - "traefik.enable=true"
       - "traefik.http.routers.fastapi.rule=Host(`trinity.quantmatrixai.com`) && PathPrefix(`/api`)"
       - "traefik.http.routers.fastapi.entrypoints=web"
-      - "traefik.http.services.fastapi.loadbalancer.server.url=http://10.2.1.65:8001"
+      - "traefik.http.services.fastapi.loadbalancer.server.port=8001"
 
   flight:
     build:

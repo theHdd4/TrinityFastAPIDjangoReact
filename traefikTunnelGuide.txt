@@ -2,8 +2,8 @@
 
 This project exposes the React frontend to the public and keeps the backend services private. Cloudflare Tunnel forwards `https://trinity.quantmatrixai.com` into the Docker network. Traefik receives all requests and routes them by path:
 * `/` → React frontend
-* `/admin/` → Django on `10.2.1.65:8000`
-* `/api/` → FastAPI on `10.2.1.65:8001`
+* `/admin/` → Django (container `web:8000`, Traefik strips `/admin`)
+* `/api/` → FastAPI (container `fastapi:8001`)
 
 ## 1. Install `cloudflared`
 1. Sign in to your Cloudflare account and add the desired domain.
@@ -48,3 +48,8 @@ The other services (PostgreSQL, MongoDB, Redis, MinIO, etc.) remain accessible o
 - Confirm the `cloudflared` container logs show `Connected`.
 - Verify the DNS records are proxied and reference the same tunnel ID as `config.yml`.
 - Check `docker-compose logs traefik` to inspect routing if the admin or API endpoints fail.
+- A `502` on `/api/` usually means Traefik cannot reach the FastAPI container.
+  Verify the label `traefik.http.services.fastapi.loadbalancer.server.port=8001`
+  exists in `docker-compose.yml` and that the container is running. Also ensure
+  `FASTAPI_CORS_ORIGINS` includes `https://trinity.quantmatrixai.com` so CORS
+  preflights succeed.

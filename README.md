@@ -27,9 +27,28 @@ Follow the steps below to run all services together.
   ```
 
   The frontend is exposed at `https://trinity.quantmatrixai.com` through
-  Cloudflare Tunnel while Traefik proxies `/admin/` and `/api/` requests to the
-  backend containers on the same host. Set `VITE_BACKEND_ORIGIN` only if you
-  deploy the APIs on a different domain.
+  Cloudflare Tunnel while Traefik proxies `/admin/` to the Django container and
+  `/api/` to the FastAPI service. Traefik strips the `/admin` prefix so Django
+  receives requests under `/api/` and `/admin/` as defined in `config/urls.py`.
+  Login requests therefore go to `/admin/api/accounts/login/` when accessed
+  through Traefik or the frontend proxy. When connecting directly to the Django
+  container on port `8000` the prefix is **not** removed, so the frontend falls
+  back to `/api/accounts/login/`. This selection happens automatically in
+  `src/lib/api.ts` based on whether `VITE_BACKEND_ORIGIN` contains `:8000`.
+  Override the API paths with `VITE_ACCOUNTS_API` etc. if needed when deploying
+  the APIs on a separate domain.
+
+  Update `CSRF_TRUSTED_ORIGINS` and `CORS_ALLOWED_ORIGINS` in
+  `TrinityBackendDjango/.env` so both the local frontend URL
+  `http://10.2.1.65:8080` and the public domain
+  `https://trinity.quantmatrixai.com` are trusted. This prevents CORS and CSRF
+  errors when logging in from either address.
+  Set `FASTAPI_CORS_ORIGINS` to the same comma separated list so the FastAPI
+  service accepts requests from both origins as well.
+  When exposing a public hostname also add it to the `ADDITIONAL_DOMAINS`
+  variable so Django's tenant middleware accepts the domain. Run
+  `python create_tenant.py` again after setting this variable if the domain was
+  not added during the initial setup.
 
 Docker and Node.js must be installed locally. The Python dependencies listed in
 `TrinityBackendDjango/requirements.txt` and
@@ -85,7 +104,7 @@ Text Box atoms are archived by setting their status to `archived` via
    another terminal and run:
 
    ```bash
-   curl http://localhost:8001/api/t/text/<ID>
+    curl http://localhost:8001/api/t/text/<ID>
    ```
 
    Replace `<ID>` with the `textId` you used. You should receive the stored
@@ -143,9 +162,17 @@ Server cloudflare
 If you see a 4xx or 5xx status code the request reached the server but
 returned an error. Double‑check the URL and that the Django container is
 running. A 404 response usually means the endpoint path is wrong while a 5xx
-status indicates the tunnel or backend might be down. Use `docker-compose logs
-cloudflared-admin` (and the other tunnel containers) to confirm they are
-connected if you suspect connectivity
+status indicates the tunnel or backend might be down. If FastAPI endpoints
+return a **502 Bad Gateway**, check that the FastAPI container is running and
+that its Traefik service label points to port `8001`:
+
+```yaml
+traefik.http.services.fastapi.loadbalancer.server.port=8001
+```
+
+Use `docker-compose logs traefik` and `docker-compose logs fastapi` for
+additional details. Use `docker-compose logs cloudflared-admin` (and the other
+tunnel containers) to confirm they are connected if you suspect connectivity
 issues.
 
 
