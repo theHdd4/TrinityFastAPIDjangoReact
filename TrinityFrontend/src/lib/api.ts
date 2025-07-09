@@ -11,21 +11,20 @@ if (!backendOrigin) {
   }
 }
 
-// When hosting at trinity.quantmatrixai.com configure the reverse proxy to route
-// `/api/` paths to the Django backend so the frontend and backend share the same
-// origin. Set
+// When hosting at trinity.quantmatrixai.com the reverse proxy exposes Django
+// under the `/admin/` prefix while the FastAPI service remains at `/api/`. Use
 // `VITE_BACKEND_ORIGIN` if the APIs live on a different domain.
 
 console.log('Using backend origin', backendOrigin);
 
 export const ACCOUNTS_API =
-  import.meta.env.VITE_ACCOUNTS_API || `${backendOrigin}/api/accounts`;
+  import.meta.env.VITE_ACCOUNTS_API || `${backendOrigin}/admin/api/accounts`;
 
 export const REGISTRY_API =
-  import.meta.env.VITE_REGISTRY_API || `${backendOrigin}/api/registry`;
+  import.meta.env.VITE_REGISTRY_API || `${backendOrigin}/admin/api/registry`;
 
 export const TENANTS_API =
-  import.meta.env.VITE_TENANTS_API || `${backendOrigin}/api/tenants`;
+  import.meta.env.VITE_TENANTS_API || `${backendOrigin}/admin/api/tenants`;
 
 export const TEXT_API =
   import.meta.env.VITE_TEXT_API || `${backendOrigin.replace(/:8000$/, ':8001')}/api/t`;
@@ -34,7 +33,7 @@ export const CARD_API =
   import.meta.env.VITE_CARD_API || `${backendOrigin.replace(/:8000$/, ':8001')}/api`;
 
 export const SUBSCRIPTIONS_API =
-  import.meta.env.VITE_SUBSCRIPTIONS_API || `${backendOrigin}/api/subscriptions`;
+  import.meta.env.VITE_SUBSCRIPTIONS_API || `${backendOrigin}/admin/api/subscriptions`;
 
 export const VALIDATE_API =
   import.meta.env.VITE_VALIDATE_API || `${backendOrigin.replace(/:8000$/, ':8001')}/api/data-upload-validate`;
