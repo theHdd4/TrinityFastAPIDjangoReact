@@ -30,7 +30,10 @@ Follow the steps below to run all services together.
   Cloudflare Tunnel while Traefik proxies `/admin/` to the Django container and
   `/app/` to the FastAPI service. Traefik strips the `/admin` prefix so Django
   receives requests under `/api/` and `/admin/` as defined in `config/urls.py`.
-  Login requests therefore go to `/admin/api/accounts/login/`. Set `VITE_BACKEND_ORIGIN` only if you deploy the
+  Login requests therefore go to `/admin/api/accounts/login/` when accessed
+  through Traefik or the frontend proxy. If you connect directly to the Django
+  container on port `8000` (bypassing Traefik), omit the `/admin` prefix and use
+  `/api/accounts/login/` instead. Set `VITE_BACKEND_ORIGIN` only if you deploy the
   APIs on a different domain.
 
   Update `CSRF_TRUSTED_ORIGINS` and `CORS_ALLOWED_ORIGINS` in
