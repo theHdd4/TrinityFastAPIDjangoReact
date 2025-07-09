@@ -14,16 +14,16 @@ This project uses a single Cloudflare Tunnel together with Traefik to expose the
 
 ## 2. Create a tunnel
 ```bash
-cloudflared tunnel create trinityapp
+cloudflared tunnel create trinity-frontend
 ```
-Copy the generated `<UUID>.json` and `cert.pem` into `tunnelCreds/`. Use the UUID in `tunnelCreds/config.yml`.
+Copy the generated `<UUID>.json` (for this project it is `e0a883c4-bc43-4742-b47a-96ef902e6bb3.json`) and `cert.pem` into `tunnelCreds/`. Use the UUID in `tunnelCreds/config.yml`.
 
 ## 3. Configure DNS
 Create DNS records pointing the subdomains to the tunnel:
 ```bash
-cloudflared tunnel route dns trinityapp trinity.quantmatrixai.com
-cloudflared tunnel route dns trinityapp admin.quantmatrixai.com
-cloudflared tunnel route dns trinityapp api.quantmatrixai.com
+cloudflared tunnel route dns trinity-frontend trinity.quantmatrixai.com
+cloudflared tunnel route dns trinity-frontend admin.quantmatrixai.com
+cloudflared tunnel route dns trinity-frontend api.quantmatrixai.com
 ```
 Ensure the records are **Proxied** in the Cloudflare dashboard.
 

@@ -1,5 +1,5 @@
-tunnel: d53d4b08-f2ee-4be2-98b0-ac7a733a648c
-credentials-file: /etc/cloudflared/d53d4b08-f2ee-4be2-98b0-ac7a733a648c.json
+tunnel: e0a883c4-bc43-4742-b47a-96ef902e6bb3
+credentials-file: /etc/cloudflared/e0a883c4-bc43-4742-b47a-96ef902e6bb3.json
 
 ingress:
   - hostname: trinity.quantmatrixai.com
