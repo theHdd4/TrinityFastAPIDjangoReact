@@ -1,6 +1,6 @@
 # Routing map for Trinity
 
-The Cloudflare tunnel forwards `https://trinity.quantmatrixai.com` into the local host at `10.2.1.65` where Traefik dispatches requests by path:
+The Cloudflare tunnel forwards `https://trinity.quantmatrixai.com` into the local host at `10.2.1.65` where Traefik dispatches requests by path. The `/admin` prefix is stripped so Django receives `/api/` and `/admin/` URLs without the leading segment:
 
 - `/` &rarr; React frontend container on `10.2.1.65:8080`
 - `/admin/` &rarr; Django backend on `10.2.1.65:8000`
@@ -30,4 +30,4 @@ FastAPI lives under `/app/`. Key paths are:
 - `/app/data-upload-validate`
 - `/app/t/` for text box operations
 
-Django REST endpoints use the `/admin/api/` prefix, for example `/admin/api/accounts/login/`.
+From the outside the Django API appears under `/admin/api/`, but Traefik removes the `/admin` prefix before forwarding the request. Internally the paths still begin with `/api/` as shown above.

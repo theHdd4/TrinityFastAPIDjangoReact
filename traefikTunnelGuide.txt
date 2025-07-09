@@ -2,7 +2,7 @@
 
 This project exposes the React frontend to the public and keeps the backend services private. Cloudflare Tunnel forwards `https://trinity.quantmatrixai.com` into the Docker network. Traefik receives all requests and routes them by path:
 * `/` → React frontend
-* `/admin/` → Django on `10.2.1.65:8000`
+* `/admin/` → Django on `10.2.1.65:8000` (Traefik strips the `/admin` prefix)
 * `/app/` → FastAPI on `10.2.1.65:8001`
 
 ## 1. Install `cloudflared`

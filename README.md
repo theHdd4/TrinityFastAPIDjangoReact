@@ -28,9 +28,9 @@ Follow the steps below to run all services together.
 
   The frontend is exposed at `https://trinity.quantmatrixai.com` through
   Cloudflare Tunnel while Traefik proxies `/admin/` to the Django container and
-  `/app/` to the FastAPI service. Django's REST API still uses the `/api/`
-  prefix internally, so login requests go to
-  `/admin/api/accounts/login/`. Set `VITE_BACKEND_ORIGIN` only if you deploy the
+  `/app/` to the FastAPI service. Traefik strips the `/admin` prefix so Django
+  receives requests under `/api/` and `/admin/` as defined in `config/urls.py`.
+  Login requests therefore go to `/admin/api/accounts/login/`. Set `VITE_BACKEND_ORIGIN` only if you deploy the
   APIs on a different domain.
 
   Update `CSRF_TRUSTED_ORIGINS` and `CORS_ALLOWED_ORIGINS` in

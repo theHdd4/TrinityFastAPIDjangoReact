@@ -19,8 +19,10 @@ in the logs based on the response from each public URL.
 Traefik handles path based routing for the tunnel. Requests to
 `https://trinity.quantmatrixai.com/admin/` map to the Django container on
 `10.2.1.65:8000` while `https://trinity.quantmatrixai.com/app/` is forwarded to
-the FastAPI service on `10.2.1.65:8001`. The root path `/` serves the React
-frontend. Ensure these mappings are configured in
+the FastAPI service on `10.2.1.65:8001`. Traefik removes the `/admin` prefix
+before forwarding the request so Django handles it under `/api/` or `/admin/` as
+defined in `config/urls.py`. The root path `/` serves the React frontend.
+Ensure these mappings are configured in
 `TrinityBackendDjango/docker-compose.yml` before validating the tunnel.
 
 ## 2. Check the tunnel
