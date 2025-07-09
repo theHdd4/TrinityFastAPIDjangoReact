@@ -4,13 +4,6 @@ let backendOrigin = import.meta.env.VITE_BACKEND_ORIGIN;
 if (!backendOrigin) {
   if (hostIp) {
     backendOrigin = `http://${hostIp}:8000`;
-  } else if (
-    typeof window !== 'undefined' &&
-    window.location.hostname === 'trinity.quantmatrixai.com'
-  ) {
-    // When the site is served from the Cloudflare domain the APIs live on the
-    // admin subdomain, so switch automatically unless overridden.
-    backendOrigin = 'https://admin.quantmatrixai.com';
   } else if (typeof window !== 'undefined') {
     backendOrigin = window.location.origin.replace(/:8080$/, ':8000');
   } else {
@@ -18,8 +11,9 @@ if (!backendOrigin) {
   }
 }
 
-// When hosting at trinity.quantmatrixai.com configure Nginx to proxy `/api/` paths
-// to the Django backend so the frontend and backend share the same origin. Set
+// When hosting at trinity.quantmatrixai.com configure the reverse proxy to route
+// `/api/` paths to the Django backend so the frontend and backend share the same
+// origin. Set
 // `VITE_BACKEND_ORIGIN` if the APIs live on a different domain.
 
 console.log('Using backend origin', backendOrigin);

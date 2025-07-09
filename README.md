@@ -17,21 +17,19 @@ Follow the steps below to run all services together.
    The frontend `.env` includes `VITE_SUBSCRIPTIONS_API` which should point to
    the Django subscription endpoints and `VITE_TRINITY_AI_API` for the AI
    service.
-   When exposing the app via Cloudflare Tunnel, set
-   `VITE_BACKEND_ORIGIN=https://admin.quantmatrixai.com` so login requests reach
-   the Django server. Rebuild the `frontend` service after changing this file so
-   Vite picks up the new value:
+  When exposing the app via Cloudflare Tunnel, set
+  `VITE_BACKEND_ORIGIN=https://trinity.quantmatrixai.com` so the frontend sends
+  API requests through Traefik. Rebuild the `frontend` service after changing
+  this file so Vite picks up the new value:
 
    ```bash
   docker-compose build frontend
   ```
 
   The frontend is exposed at `https://trinity.quantmatrixai.com` through
-  Cloudflare Tunnel while the APIs live on the `admin` subdomain. If `/api/`
-  paths are not proxied to Django, the frontend automatically uses
-  `https://admin.quantmatrixai.com` for API calls. Set
-  `VITE_BACKEND_ORIGIN` to override this behavior or when hosting the APIs on a
-  completely different domain.
+  Cloudflare Tunnel while Traefik proxies `/admin/` and `/api/` requests to the
+  backend containers on the same host. Set `VITE_BACKEND_ORIGIN` only if you
+  deploy the APIs on a different domain.
 
 Docker and Node.js must be installed locally. The Python dependencies listed in
 `TrinityBackendDjango/requirements.txt` and
@@ -137,7 +135,7 @@ python scripts/check_fastapi_tunnel.py
 A healthy tunnel prints the HTTP status and server header, for example:
 
 ```
-Checking https://admin.quantmatrixai.com/admin/login/
+Checking https://trinity.quantmatrixai.com/admin/login/
 Status 200
 Server cloudflare
 ```

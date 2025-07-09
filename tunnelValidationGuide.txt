@@ -27,13 +27,13 @@ python scripts/check_django_tunnel.py
 To check a different host, pass the URL as an argument or set `BACKEND_URL`:
 
 ```bash
-python scripts/check_django_tunnel.py https://admin.quantmatrixai.com/admin/login/
+python scripts/check_django_tunnel.py https://trinity.quantmatrixai.com/admin/login/
 ```
 
 A healthy tunnel prints output similar to:
 
 ```
-[INFO] Checking https://admin.quantmatrixai.com/admin/login/
+[INFO] Checking https://trinity.quantmatrixai.com/admin/login/
 [INFO] Status 200
 [INFO] Server cloudflare
 [INFO] Tunnel appears healthy
@@ -70,7 +70,7 @@ If the script reports an error:
 6. Restart a tunnel if needed:
 
    ```bash
-   docker-compose restart cloudflared-admin cloudflared-frontend cloudflared-api
+   docker-compose restart cloudflared
    ```
 
-Use these logs to identify whether the request is reaching the tunnel or failing earlier. Once the script shows a 200 status, the frontend should be able to access the backend through `https://admin.quantmatrixai.com`.
+Use these logs to identify whether the request is reaching the tunnel or failing earlier. Once the script shows a 200 status, the frontend should be able to access the backend through `https://trinity.quantmatrixai.com/admin/`.

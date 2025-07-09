@@ -1,0 +1,50 @@
+# Cloudflare Tunnel with Traefik
+
+This project exposes the React frontend to the public and keeps the backend services private. Cloudflare Tunnel forwards `https://trinity.quantmatrixai.com` into the Docker network. Traefik receives all requests and routes them by path:
+* `/` → React frontend
+* `/admin/` → Django on `10.2.1.65:8000`
+* `/api/` → FastAPI on `10.2.1.65:8001`
+
+## 1. Install `cloudflared`
+1. Sign in to your Cloudflare account and add the desired domain.
+2. Install the tunnel client on the host:
+   ```bash
+   curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb -o cloudflared.deb
+   sudo dpkg -i cloudflared.deb
+   cloudflared login
+   ```
+   Authentication stores credentials under `~/.cloudflared`.
+
+## 2. Create a tunnel
+```bash
+cloudflared tunnel create trinity-frontend
+```
+Copy the generated `<UUID>.json` (for this project it is `e0a883c4-bc43-4742-b47a-96ef902e6bb3.json`) and `cert.pem` into `tunnelCreds/`. Use the UUID in `tunnelCreds/config.yml`.
+
+## 3. Configure DNS
+Create a single DNS record for the frontend:
+```bash
+cloudflared tunnel route dns trinity-frontend trinity.quantmatrixai.com
+```
+Ensure the record is **Proxied** in the Cloudflare dashboard.
+
+## 4. Docker Compose
+`TrinityBackendDjango/docker-compose.yml` defines a `traefik` service and a single `cloudflared` container. Cloudflared forwards all traffic for `trinity.quantmatrixai.com` to Traefik (`service: http://traefik:80`). Traefik then routes `/`, `/admin/` and `/api/` to the appropriate containers.
+
+Traefik requires access to the Docker socket to read the labels. The compose file mounts `/var/run/docker.sock` into the Traefik container.
+
+Start all services from the `TrinityBackendDjango` directory:
+```bash
+docker-compose up --build
+```
+Once the containers report "Connected" you can reach:
+- `https://trinity.quantmatrixai.com` – React frontend
+- `https://trinity.quantmatrixai.com/admin/` – Django admin
+- `https://trinity.quantmatrixai.com/api/` – FastAPI
+
+The other services (PostgreSQL, MongoDB, Redis, MinIO, etc.) remain accessible only inside the Docker network and through the codebase.
+
+## 5. Troubleshooting
+- Confirm the `cloudflared` container logs show `Connected`.
+- Verify the DNS records are proxied and reference the same tunnel ID as `config.yml`.
+- Check `docker-compose logs traefik` to inspect routing if the admin or API endpoints fail.

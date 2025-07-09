@@ -1,6 +1,6 @@
 # Cloudflare Tunnel Setup for Trinity Platform
 
-This guide explains how to expose the Dockerized Trinity application using Cloudflare Tunnel so the services are reachable at **trinity.quantmatrixai.com** and the backend subdomains. The examples assume your host IP is `10.2.1.65`.
+This guide explains how to expose the Dockerized Trinity application using a single Cloudflare Tunnel so the public accesses **trinity.quantmatrixai.com** while the backend services remain private. All traffic is routed to Traefik inside the Docker network. The examples assume your host IP is `10.2.1.65`.
 
 ## 1. Install cloudflared
 
@@ -20,56 +20,43 @@ This guide explains how to expose the Dockerized Trinity application using Cloud
 ## 2. Create a named tunnel
 
 ```bash
-cloudflared tunnel create trinityapp
+cloudflared tunnel create trinity-frontend
 ```
 
 Copy the generated tunnel UUID. Cloudflare also saves a credentials JSON for the tunnel and updates your `cert.pem`. Copy both files into `tunnelCreds` so Docker can mount them. Ensure they are readable only by you:
 
 ```bash
-cp ~/.cloudflared/d53d4b08-f2ee-4be2-98b0-ac7a733a648c.json \
-  tunnelCreds/d53d4b08-f2ee-4be2-98b0-ac7a733a648c.json
+cp ~/.cloudflared/e0a883c4-bc43-4742-b47a-96ef902e6bb3.json \
+  tunnelCreds/e0a883c4-bc43-4742-b47a-96ef902e6bb3.json
 cp ~/.cloudflared/cert.pem tunnelCreds/cert.pem
-chmod 600 tunnelCreds/d53d4b08-f2ee-4be2-98b0-ac7a733a648c.json \
+chmod 600 tunnelCreds/e0a883c4-bc43-4742-b47a-96ef902e6bb3.json \
   tunnelCreds/cert.pem
 ```
 
 ## 3. Configure DNS routing
 
-Set up DNS records in Cloudflare to point to the tunnel:
-- `trinity.quantmatrixai.com` -> tunnel
-- `api.quantmatrixai.com` -> tunnel
-- `admin.quantmatrixai.com` -> tunnel
-
-These can be created automatically using:
+Set up a DNS record in Cloudflare for the frontend:
 ```bash
-cloudflared tunnel route dns trinityapp trinity.quantmatrixai.com
-cloudflared tunnel route dns trinityapp api.quantmatrixai.com
-cloudflared tunnel route dns trinityapp admin.quantmatrixai.com
+cloudflared tunnel route dns trinity-frontend trinity.quantmatrixai.com
 ```
-You can also run them from inside the container:
+Ensure the record is **Proxied**. You can also run the command from inside the container:
 ```bash
-docker-compose exec cloudflared cloudflared tunnel route dns trinityapp trinity.quantmatrixai.com
-docker-compose exec cloudflared cloudflared tunnel route dns trinityapp api.quantmatrixai.com
-docker-compose exec cloudflared cloudflared tunnel route dns trinityapp admin.quantmatrixai.com
+docker-compose exec cloudflared cloudflared tunnel route dns trinity-frontend trinity.quantmatrixai.com
 ```
 
 ## 4. Cloudflared configuration
 
 Create `tunnelCreds/config.yml`:
 ```yaml
-tunnel: d53d4b08-f2ee-4be2-98b0-ac7a733a648c
-credentials-file: /etc/cloudflared/d53d4b08-f2ee-4be2-98b0-ac7a733a648c.json
+tunnel: e0a883c4-bc43-4742-b47a-96ef902e6bb3
+credentials-file: /etc/cloudflared/e0a883c4-bc43-4742-b47a-96ef902e6bb3.json
 
 ingress:
   - hostname: trinity.quantmatrixai.com
-    service: http://frontend:80
-  - hostname: api.quantmatrixai.com
-    service: http://fastapi:8001
-  - hostname: admin.quantmatrixai.com
-    service: http://web:8000
+    service: http://traefik:80
   - service: http_status:404
 ```
-The values above use the real tunnel ID. Copy the generated credentials file into `tunnelCreds/d53d4b08-f2ee-4be2-98b0-ac7a733a648c.json` (an example `credentials.json.example` is provided). The Docker container mounts this path so Cloudflared can authenticate.
+The values above use the real tunnel ID. Copy the generated credentials file into `tunnelCreds/e0a883c4-bc43-4742-b47a-96ef902e6bb3.json` (an example `credentials.json.example` is provided). The Docker container mounts this path so Cloudflared can authenticate.
 
 ## 5. Docker Compose service
 
@@ -80,12 +67,17 @@ The `docker-compose.yml` inside `TrinityBackendDjango` already exposes all conta
     command: tunnel run
     volumes:
       - ../tunnelCreds:/etc/cloudflared:ro
+  traefik:
+    image: traefik:v2.11
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
     depends_on:
       - frontend
     networks:
       - trinity-net
 ```
-This container runs the tunnel using the configuration from `tunnelCreds/config.yml`.
+The `cloudflared` container runs the tunnel using the configuration from `tunnelCreds/config.yml`.
+Traefik watches the other containers via the mounted Docker socket.
 If running Docker on Windows, use an absolute path such as:
 `C:/TrinityFastAPIDjangoReact/tunnelCreds:/etc/cloudflared:ro`.
 
@@ -96,7 +88,7 @@ tunnel:
 
 ```bash
 cp TrinityFrontend/.env.example TrinityFrontend/.env
-echo "VITE_BACKEND_ORIGIN=https://admin.quantmatrixai.com" >> TrinityFrontend/.env
+echo "VITE_BACKEND_ORIGIN=https://trinity.quantmatrixai.com" >> TrinityFrontend/.env
 ```
 This ensures `fetch()` requests like `/api/accounts/login/` hit the correct host
 instead of the frontend container.
@@ -112,8 +104,8 @@ docker-compose build frontend
    ```bash
    docker-compose up --build
    ```
-2. Cloudflared establishes the tunnel and routes requests for the configured hostnames to the correct containers.
-3. Visit `https://trinity.quantmatrixai.com` for the frontend, `https://api.quantmatrixai.com` for FastAPI and `https://admin.quantmatrixai.com` for Django.
+2. Cloudflared establishes the tunnel and routes all requests for `trinity.quantmatrixai.com` to Traefik.
+3. Visit `https://trinity.quantmatrixai.com` for the frontend. Use the `/api/` and `/admin/` paths for the backend services.
 
 The services remain reachable on the local network as before, while Cloudflare Tunnel provides secure public access.
 
@@ -123,9 +115,9 @@ If visiting `https://trinity.quantmatrixai.com` or the backend subdomains return
 origin. Common causes are missing DNS records or incorrect IDs in `tunnelCreds/config.yml`.
 
 1. Verify your DNS entries in Cloudflare are **Proxied** (orange cloud) and point to the tunnel using
-   `cloudflared tunnel route dns trinityapp <hostname>`.
+   `cloudflared tunnel route dns trinity-frontend <hostname>`.
 2. Check that `tunnelCreds/config.yml` contains your actual tunnel UUID and that
-   `tunnelCreds/d53d4b08-f2ee-4be2-98b0-ac7a733a648c.json` matches the same ID.
+   `tunnelCreds/e0a883c4-bc43-4742-b47a-96ef902e6bb3.json` matches the same ID.
 3. Ensure the `cloudflared` container is running by inspecting the output of `docker-compose logs cloudflared`.
    It should report "Connected" after startup.
 
