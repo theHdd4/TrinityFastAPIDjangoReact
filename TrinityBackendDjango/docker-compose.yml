@@ -183,3 +183,4 @@ volumes:
 
 networks:
   trinity-net:
+    name: trinity-net

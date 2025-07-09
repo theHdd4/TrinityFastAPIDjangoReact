@@ -10,3 +10,4 @@ services:
 networks:
   trinity-net:
     external: true
+    name: trinity-net
