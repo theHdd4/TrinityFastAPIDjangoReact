@@ -3,9 +3,5 @@ credentials-file: /etc/cloudflared/e0a883c4-bc43-4742-b47a-96ef902e6bb3.json
 
 ingress:
   - hostname: trinity.quantmatrixai.com
-    service: http://frontend:80
-  - hostname: api.quantmatrixai.com
-    service: http://traefik:80
-  - hostname: admin.quantmatrixai.com
     service: http://traefik:80
   - service: http_status:404

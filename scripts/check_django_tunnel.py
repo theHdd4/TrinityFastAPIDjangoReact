@@ -6,7 +6,7 @@ from urllib import request, error
 logging.basicConfig(level=logging.INFO, format='[%(levelname)s] %(message)s')
 logger = logging.getLogger(__name__)
 
-DEFAULT_URL = "http://10.2.1.65:8000/admin/login/"
+DEFAULT_URL = "https://trinity.quantmatrixai.com/admin/login/"
 
 
 def get_url() -> str:

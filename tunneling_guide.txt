@@ -1,6 +1,6 @@
 # Cloudflare Tunnel Setup for Trinity Platform
 
-This guide explains how to expose the Dockerized Trinity application using Cloudflare Tunnel so the services are reachable at **trinity.quantmatrixai.com** and the backend subdomains. The examples assume your host IP is `10.2.1.65`.
+This guide explains how to expose the Dockerized Trinity application using a single Cloudflare Tunnel so the public accesses **trinity.quantmatrixai.com** while the backend services remain private. All traffic is routed to Traefik inside the Docker network. The examples assume your host IP is `10.2.1.65`.
 
 ## 1. Install cloudflared
 
@@ -35,22 +35,13 @@ chmod 600 tunnelCreds/e0a883c4-bc43-4742-b47a-96ef902e6bb3.json \
 
 ## 3. Configure DNS routing
 
-Set up DNS records in Cloudflare to point to the tunnel:
-- `trinity.quantmatrixai.com` -> tunnel
-- `api.quantmatrixai.com` -> tunnel
-- `admin.quantmatrixai.com` -> tunnel
-
-These can be created automatically using:
+Set up a DNS record in Cloudflare for the frontend:
 ```bash
 cloudflared tunnel route dns trinity-frontend trinity.quantmatrixai.com
-cloudflared tunnel route dns trinity-frontend api.quantmatrixai.com
-cloudflared tunnel route dns trinity-frontend admin.quantmatrixai.com
 ```
-You can also run them from inside the container:
+Ensure the record is **Proxied**. You can also run the command from inside the container:
 ```bash
 docker-compose exec cloudflared cloudflared tunnel route dns trinity-frontend trinity.quantmatrixai.com
-docker-compose exec cloudflared cloudflared tunnel route dns trinity-frontend api.quantmatrixai.com
-docker-compose exec cloudflared cloudflared tunnel route dns trinity-frontend admin.quantmatrixai.com
 ```
 
 ## 4. Cloudflared configuration
@@ -62,11 +53,7 @@ credentials-file: /etc/cloudflared/e0a883c4-bc43-4742-b47a-96ef902e6bb3.json
 
 ingress:
   - hostname: trinity.quantmatrixai.com
-    service: http://frontend:80
-  - hostname: api.quantmatrixai.com
-    service: http://fastapi:8001
-  - hostname: admin.quantmatrixai.com
-    service: http://web:8000
+    service: http://traefik:80
   - service: http_status:404
 ```
 The values above use the real tunnel ID. Copy the generated credentials file into `tunnelCreds/e0a883c4-bc43-4742-b47a-96ef902e6bb3.json` (an example `credentials.json.example` is provided). The Docker container mounts this path so Cloudflared can authenticate.
@@ -96,7 +83,7 @@ tunnel:
 
 ```bash
 cp TrinityFrontend/.env.example TrinityFrontend/.env
-echo "VITE_BACKEND_ORIGIN=https://admin.quantmatrixai.com" >> TrinityFrontend/.env
+echo "VITE_BACKEND_ORIGIN=https://trinity.quantmatrixai.com" >> TrinityFrontend/.env
 ```
 This ensures `fetch()` requests like `/api/accounts/login/` hit the correct host
 instead of the frontend container.
@@ -112,8 +99,8 @@ docker-compose build frontend
    ```bash
    docker-compose up --build
    ```
-2. Cloudflared establishes the tunnel and routes requests for the configured hostnames to the correct containers.
-3. Visit `https://trinity.quantmatrixai.com` for the frontend, `https://api.quantmatrixai.com` for FastAPI and `https://admin.quantmatrixai.com` for Django.
+2. Cloudflared establishes the tunnel and routes all requests for `trinity.quantmatrixai.com` to Traefik.
+3. Visit `https://trinity.quantmatrixai.com` for the frontend. Use the `/api/` and `/admin/` paths for the backend services.
 
 The services remain reachable on the local network as before, while Cloudflare Tunnel provides secure public access.
 
