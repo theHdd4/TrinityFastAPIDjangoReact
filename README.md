@@ -31,10 +31,12 @@ Follow the steps below to run all services together.
   `/app/` to the FastAPI service. Traefik strips the `/admin` prefix so Django
   receives requests under `/api/` and `/admin/` as defined in `config/urls.py`.
   Login requests therefore go to `/admin/api/accounts/login/` when accessed
-  through Traefik or the frontend proxy. If you connect directly to the Django
-  container on port `8000` (bypassing Traefik), omit the `/admin` prefix and use
-  `/api/accounts/login/` instead. Set `VITE_BACKEND_ORIGIN` only if you deploy the
-  APIs on a different domain.
+  through Traefik or the frontend proxy. When connecting directly to the Django
+  container on port `8000` the prefix is **not** removed, so the frontend falls
+  back to `/api/accounts/login/`. This selection happens automatically in
+  `src/lib/api.ts` based on whether `VITE_BACKEND_ORIGIN` contains `:8000`.
+  Override the API paths with `VITE_ACCOUNTS_API` etc. if needed when deploying
+  the APIs on a separate domain.
 
   Update `CSRF_TRUSTED_ORIGINS` and `CORS_ALLOWED_ORIGINS` in
   `TrinityBackendDjango/.env` so both the local frontend URL

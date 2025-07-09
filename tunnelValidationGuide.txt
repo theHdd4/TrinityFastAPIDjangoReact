@@ -25,6 +25,14 @@ defined in `config/urls.py`. The root path `/` serves the React frontend.
 Ensure these mappings are configured in
 `TrinityBackendDjango/docker-compose.yml` before validating the tunnel.
 
+The effective routing looks like this:
+
+```
+https://trinity.quantmatrixai.com/       -> frontend container
+https://trinity.quantmatrixai.com/admin/ -> Django (http://10.2.1.65:8000)
+https://trinity.quantmatrixai.com/app/   -> FastAPI (http://10.2.1.65:8001)
+```
+
 ## 2. Check the tunnel
 
 Use the validation helper located in the `scripts` folder. It sends a request to the admin login page and prints the HTTP status and server header.
