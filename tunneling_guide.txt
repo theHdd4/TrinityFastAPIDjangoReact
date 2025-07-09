@@ -90,7 +90,7 @@ tunnel:
 cp TrinityFrontend/.env.example TrinityFrontend/.env
 echo "VITE_BACKEND_ORIGIN=https://trinity.quantmatrixai.com" >> TrinityFrontend/.env
 ```
-This ensures `fetch()` requests like `/admin/api/accounts/login/` hit the correct host
+This ensures `fetch()` requests like `/api/accounts/login/` hit the correct host
 instead of the frontend container.
 After editing `.env`, rebuild the frontend image so the environment variable is
 embedded in the compiled bundle:
