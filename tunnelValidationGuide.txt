@@ -18,7 +18,7 @@ in the logs based on the response from each public URL.
 
 Traefik handles path based routing for the tunnel. Requests to
 `https://trinity.quantmatrixai.com/admin/` map to the Django container
-`web:8000` while `https://trinity.quantmatrixai.com/app/` is forwarded to
+`web:8000` while `https://trinity.quantmatrixai.com/api/` is forwarded to
 the FastAPI service `fastapi:8001`. Traefik removes the `/admin` prefix
 before forwarding the request so Django handles it under `/api/` or `/admin/` as
 defined in `config/urls.py`. The root path `/` serves the React frontend.
@@ -30,7 +30,7 @@ The effective routing looks like this:
 ```
 https://trinity.quantmatrixai.com/       -> frontend container
 https://trinity.quantmatrixai.com/admin/ -> Django (http://web:8000)
-https://trinity.quantmatrixai.com/app/   -> FastAPI (http://fastapi:8001)
+https://trinity.quantmatrixai.com/api/   -> FastAPI (http://fastapi:8001)
 ```
 
 ## 2. Check the tunnel

@@ -105,7 +105,7 @@ docker-compose build frontend
    docker-compose up --build
    ```
 2. Cloudflared establishes the tunnel and routes all requests for `trinity.quantmatrixai.com` to Traefik.
-3. Visit `https://trinity.quantmatrixai.com` for the frontend. Use the `/app/` and `/admin/` paths for the backend services. Traefik strips `/admin` before forwarding to Django so the REST API still lives under `/api/` internally.
+3. Visit `https://trinity.quantmatrixai.com` for the frontend. Use the `/api/` and `/admin/` paths for the backend services. Traefik strips `/admin` before forwarding to Django so the REST API still lives under `/api/` internally.
 
 The services remain reachable on the local network as before, while Cloudflare Tunnel provides secure public access.
 

@@ -28,7 +28,7 @@ Follow the steps below to run all services together.
 
   The frontend is exposed at `https://trinity.quantmatrixai.com` through
   Cloudflare Tunnel while Traefik proxies `/admin/` to the Django container and
-  `/app/` to the FastAPI service. Traefik strips the `/admin` prefix so Django
+  `/api/` to the FastAPI service. Traefik strips the `/admin` prefix so Django
   receives requests under `/api/` and `/admin/` as defined in `config/urls.py`.
   Login requests therefore go to `/admin/api/accounts/login/` when accessed
   through Traefik or the frontend proxy. When connecting directly to the Django
@@ -76,7 +76,7 @@ folder runs on `localhost:8002` for chat prompts. Use `docker-compose logs
 fastapi` or `docker-compose logs trinity-ai` to confirm the servers started
 successfully. CORS is enabled so the React frontend served from `localhost:8080`
 can call the APIs. Once the containers finish installing dependencies the text
-service is reachable at `http://localhost:8001/app/t` and Trinity AI at
+service is reachable at `http://localhost:8001/api/t` and Trinity AI at
 `http://localhost:8002/chat`.
 
 ## 3. Start the frontend
@@ -94,9 +94,9 @@ which stores it in MongoDB.
 
 Use the trash icon next to the **Exhibit the Card** toggle to remove a card.
 When clicked the frontend archives the entire card object to the FastAPI
-endpoint `/app/cards/archive` before deleting any associated atoms.
+endpoint `/api/cards/archive` before deleting any associated atoms.
 Text Box atoms are archived by setting their status to `archived` via
-`DELETE /app/t/text/<id>` so nothing is permanently lost.
+`DELETE /api/t/text/<id>` so nothing is permanently lost.
 
 ## 4. Verify the services communicate
 
@@ -104,7 +104,7 @@ Text Box atoms are archived by setting their status to `archived` via
    another terminal and run:
 
    ```bash
-    curl http://localhost:8001/app/t/text/<ID>
+    curl http://localhost:8001/api/t/text/<ID>
    ```
 
    Replace `<ID>` with the `textId` you used. You should receive the stored

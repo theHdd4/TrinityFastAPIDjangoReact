@@ -5,7 +5,7 @@ Locally the same mapping is available through the frontend proxy on `http://10.2
 
 - `/` &rarr; React frontend container on `10.2.1.65:8080`
 - `/admin/` &rarr; Django container `web:8000`
-- `/app/` &rarr; FastAPI container `fastapi:8001`
+- `/api/` &rarr; FastAPI container `fastapi:8001`
 
 When calling Django directly on port `8000`, the `/admin` prefix is not removed.
 Use `/api/...` paths in that case, e.g. `http://10.2.1.65:8000/api/accounts/login/`.
@@ -28,11 +28,11 @@ All Django API endpoints start with `/api/` once the request reaches the backend
 - `/api/audit/...`
 
 ## FastAPI endpoints
-FastAPI lives under `/app/`. Key paths are:
-- `/app/feature-overview`
-- `/app/cards/archive`
-- `/app/data-upload-validate`
-- `/app/t/` for text box operations
+FastAPI lives under `/api/`. Key paths are:
+- `/api/feature-overview`
+- `/api/cards/archive`
+- `/api/data-upload-validate`
+- `/api/t/` for text box operations
 
 If requests to these endpoints return **502 Bad Gateway** through the tunnel,
 double-check that `FASTAPI_CORS_ORIGINS` in `.env` includes the public domain
