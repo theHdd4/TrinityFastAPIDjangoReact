@@ -162,9 +162,17 @@ Server cloudflare
 If you see a 4xx or 5xx status code the request reached the server but
 returned an error. Double‑check the URL and that the Django container is
 running. A 404 response usually means the endpoint path is wrong while a 5xx
-status indicates the tunnel or backend might be down. Use `docker-compose logs
-cloudflared-admin` (and the other tunnel containers) to confirm they are
-connected if you suspect connectivity
+status indicates the tunnel or backend might be down. If FastAPI endpoints
+return a **502 Bad Gateway**, check that the FastAPI container is running and
+that its Traefik service label points to port `8001`:
+
+```yaml
+traefik.http.services.fastapi.loadbalancer.server.port=8001
+```
+
+Use `docker-compose logs traefik` and `docker-compose logs fastapi` for
+additional details. Use `docker-compose logs cloudflared-admin` (and the other
+tunnel containers) to confirm they are connected if you suspect connectivity
 issues.
 
 

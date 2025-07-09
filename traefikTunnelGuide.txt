@@ -48,6 +48,8 @@ The other services (PostgreSQL, MongoDB, Redis, MinIO, etc.) remain accessible o
 - Confirm the `cloudflared` container logs show `Connected`.
 - Verify the DNS records are proxied and reference the same tunnel ID as `config.yml`.
 - Check `docker-compose logs traefik` to inspect routing if the admin or API endpoints fail.
-- A `502` on `/api/` often means the FastAPI container rejected the request.
-  Ensure `FASTAPI_CORS_ORIGINS` in `.env` lists `https://trinity.quantmatrixai.com`
-  so CORS preflights succeed from the public site.
+- A `502` on `/api/` usually means Traefik cannot reach the FastAPI container.
+  Verify the label `traefik.http.services.fastapi.loadbalancer.server.port=8001`
+  exists in `docker-compose.yml` and that the container is running. Also ensure
+  `FASTAPI_CORS_ORIGINS` includes `https://trinity.quantmatrixai.com` so CORS
+  preflights succeed.
