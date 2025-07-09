@@ -31,6 +31,12 @@ Follow the steps below to run all services together.
   backend containers on the same host. Set `VITE_BACKEND_ORIGIN` only if you
   deploy the APIs on a different domain.
 
+  Update `CSRF_TRUSTED_ORIGINS` and `CORS_ALLOWED_ORIGINS` in
+  `TrinityBackendDjango/.env` so both the local frontend URL
+  `http://10.2.1.65:8080` and the public domain
+  `https://trinity.quantmatrixai.com` are trusted. This prevents CORS and CSRF
+  errors when logging in from either address.
+
 Docker and Node.js must be installed locally. The Python dependencies listed in
 `TrinityBackendDjango/requirements.txt` and
 `TrinityBackendFastAPI/requirements.txt` (including pandas, motor,
