@@ -175,7 +175,10 @@ services:
 
   cloudflared:
     image: cloudflare/cloudflared:latest
-    command: tunnel --config /etc/cloudflared/config.yml run
+    entrypoint: >
+      /bin/sh -c "if [ \"$ENABLE_CLOUDFLARED\" = 'true' ]; then exec cloudflared tunnel --config /etc/cloudflared/config.yml run; else echo 'Cloudflared disabled'; exit 0; fi"
+    environment:
+      - ENABLE_CLOUDFLARED=${ENABLE_CLOUDFLARED:-false}
     volumes:
       - ../tunnelCreds:/etc/cloudflared:ro
     depends_on:
