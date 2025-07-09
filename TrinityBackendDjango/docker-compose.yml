@@ -113,7 +113,7 @@ services:
       - trinity-net
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.fastapi.rule=Host(`trinity.quantmatrixai.com`) && PathPrefix(`/api`)"
+      - "traefik.http.routers.fastapi.rule=Host(`trinity.quantmatrixai.com`) && PathPrefix(`/app`)"
       - "traefik.http.routers.fastapi.entrypoints=web"
       - "traefik.http.services.fastapi.loadbalancer.server.url=http://10.2.1.65:8001"
 

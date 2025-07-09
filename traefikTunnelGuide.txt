@@ -3,7 +3,7 @@
 This project exposes the React frontend to the public and keeps the backend services private. Cloudflare Tunnel forwards `https://trinity.quantmatrixai.com` into the Docker network. Traefik receives all requests and routes them by path:
 * `/` → React frontend
 * `/admin/` → Django on `10.2.1.65:8000`
-* `/api/` → FastAPI on `10.2.1.65:8001`
+* `/app/` → FastAPI on `10.2.1.65:8001`
 
 ## 1. Install `cloudflared`
 1. Sign in to your Cloudflare account and add the desired domain.
@@ -29,7 +29,7 @@ cloudflared tunnel route dns trinity-frontend trinity.quantmatrixai.com
 Ensure the record is **Proxied** in the Cloudflare dashboard.
 
 ## 4. Docker Compose
-`TrinityBackendDjango/docker-compose.yml` defines a `traefik` service and a single `cloudflared` container. Cloudflared forwards all traffic for `trinity.quantmatrixai.com` to Traefik (`service: http://traefik:80`). Traefik then routes `/`, `/admin/` and `/api/` to the appropriate containers.
+`TrinityBackendDjango/docker-compose.yml` defines a `traefik` service and a single `cloudflared` container. Cloudflared forwards all traffic for `trinity.quantmatrixai.com` to Traefik (`service: http://traefik:80`). Traefik then routes `/`, `/admin/` and `/app/` to the appropriate containers.
 
 Traefik requires access to the Docker socket to read the labels. The compose file mounts `/var/run/docker.sock` into the Traefik container.
 
@@ -40,7 +40,7 @@ docker-compose up --build
 Once the containers report "Connected" you can reach:
 - `https://trinity.quantmatrixai.com` – React frontend
 - `https://trinity.quantmatrixai.com/admin/` – Django admin
-- `https://trinity.quantmatrixai.com/api/` – FastAPI
+- `https://trinity.quantmatrixai.com/app/` – FastAPI
 
 The other services (PostgreSQL, MongoDB, Redis, MinIO, etc.) remain accessible only inside the Docker network and through the codebase.
 

@@ -19,8 +19,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(api_router, prefix="/api")
+app.include_router(api_router, prefix="/app")
 
-# Include the text router under /api/text
-app.include_router(text_router, prefix="/api/t")
+# Include the text router under /app/text
+app.include_router(text_router, prefix="/app/t")
 

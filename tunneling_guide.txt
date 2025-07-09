@@ -90,7 +90,7 @@ tunnel:
 cp TrinityFrontend/.env.example TrinityFrontend/.env
 echo "VITE_BACKEND_ORIGIN=https://trinity.quantmatrixai.com" >> TrinityFrontend/.env
 ```
-This ensures `fetch()` requests like `/api/accounts/login/` hit the correct host
+This ensures `fetch()` requests like `/admin/api/accounts/login/` hit the correct host
 instead of the frontend container.
 After editing `.env`, rebuild the frontend image so the environment variable is
 embedded in the compiled bundle:
@@ -105,7 +105,7 @@ docker-compose build frontend
    docker-compose up --build
    ```
 2. Cloudflared establishes the tunnel and routes all requests for `trinity.quantmatrixai.com` to Traefik.
-3. Visit `https://trinity.quantmatrixai.com` for the frontend. Use the `/api/` and `/admin/` paths for the backend services.
+3. Visit `https://trinity.quantmatrixai.com` for the frontend. Use the `/app/` and `/admin/` paths for the backend services.
 
 The services remain reachable on the local network as before, while Cloudflare Tunnel provides secure public access.
 

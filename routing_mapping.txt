@@ -4,7 +4,7 @@ The Cloudflare tunnel forwards `https://trinity.quantmatrixai.com` into the loca
 
 - `/` &rarr; React frontend container on `10.2.1.65:8080`
 - `/admin/` &rarr; Django backend on `10.2.1.65:8000`
-- `/api/` &rarr; FastAPI backend on `10.2.1.65:8001`
+- `/app/` &rarr; FastAPI backend on `10.2.1.65:8001`
 
 ## Django REST API
 All Django API endpoints start with `/api/` once the request reaches the backend. Examples include:
@@ -24,10 +24,10 @@ All Django API endpoints start with `/api/` once the request reaches the backend
 - `/api/audit/...`
 
 ## FastAPI endpoints
-FastAPI also lives under `/api/`. Key paths are:
-- `/api/feature-overview`
-- `/api/cards/archive`
-- `/api/data-upload-validate`
-- `/api/t/` for text box operations
+FastAPI lives under `/app/`. Key paths are:
+- `/app/feature-overview`
+- `/app/cards/archive`
+- `/app/data-upload-validate`
+- `/app/t/` for text box operations
 
-Because Traefik does not rewrite paths, requests like `/admin/api/accounts/login/` do **not** match the Django URLs and will return `404`. Use `/api/accounts/login/` instead.
+Django REST endpoints use the `/admin/api/` prefix, for example `/admin/api/accounts/login/`.

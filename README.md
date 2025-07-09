@@ -27,11 +27,11 @@ Follow the steps below to run all services together.
   ```
 
   The frontend is exposed at `https://trinity.quantmatrixai.com` through
-  Cloudflare Tunnel while Traefik proxies `/admin/` and `/api/` requests to the
-  backend containers on the same host. Django's REST API lives under the `/api/`
-  prefix (for example `/api/accounts/login/`). Use that path without the
-  `/admin` segment when calling the backend. Set `VITE_BACKEND_ORIGIN` only if
-  you deploy the APIs on a different domain.
+  Cloudflare Tunnel while Traefik proxies `/admin/` to the Django container and
+  `/app/` to the FastAPI service. Django's REST API still uses the `/api/`
+  prefix internally, so login requests go to
+  `/admin/api/accounts/login/`. Set `VITE_BACKEND_ORIGIN` only if you deploy the
+  APIs on a different domain.
 
   Update `CSRF_TRUSTED_ORIGINS` and `CORS_ALLOWED_ORIGINS` in
   `TrinityBackendDjango/.env` so both the local frontend URL
@@ -65,7 +65,7 @@ folder runs on `localhost:8002` for chat prompts. Use `docker-compose logs
 fastapi` or `docker-compose logs trinity-ai` to confirm the servers started
 successfully. CORS is enabled so the React frontend served from `localhost:8080`
 can call the APIs. Once the containers finish installing dependencies the text
-service is reachable at `http://localhost:8001/api/t` and Trinity AI at
+service is reachable at `http://localhost:8001/app/t` and Trinity AI at
 `http://localhost:8002/chat`.
 
 ## 3. Start the frontend
@@ -83,9 +83,9 @@ which stores it in MongoDB.
 
 Use the trash icon next to the **Exhibit the Card** toggle to remove a card.
 When clicked the frontend archives the entire card object to the FastAPI
-endpoint `/api/cards/archive` before deleting any associated atoms.
+endpoint `/app/cards/archive` before deleting any associated atoms.
 Text Box atoms are archived by setting their status to `archived` via
-`DELETE /api/t/text/<id>` so nothing is permanently lost.
+`DELETE /app/t/text/<id>` so nothing is permanently lost.
 
 ## 4. Verify the services communicate
 
@@ -93,7 +93,7 @@ Text Box atoms are archived by setting their status to `archived` via
    another terminal and run:
 
    ```bash
-   curl http://localhost:8001/api/t/text/<ID>
+    curl http://localhost:8001/app/t/text/<ID>
    ```
 
    Replace `<ID>` with the `textId` you used. You should receive the stored
