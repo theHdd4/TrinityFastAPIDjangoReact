@@ -68,6 +68,10 @@ services:
       - minio
     networks:
       - trinity-net
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.django.rule=Host(`admin.quantmatrixai.com`)"
+      - "traefik.http.services.django.loadbalancer.server.url=http://10.2.1.65:8000"
 
   celery:
     build: .
@@ -106,6 +110,10 @@ services:
       - minio
     networks:
       - trinity-net
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.fastapi.rule=Host(`api.quantmatrixai.com`)"
+      - "traefik.http.services.fastapi.loadbalancer.server.url=http://10.2.1.65:8001"
 
   flight:
     build:
@@ -139,75 +147,28 @@ services:
       - trinity-net
     depends_on:
       - web
-  cloudflared-frontend:
-    image: cloudflare/cloudflared:latest
-    command: tunnel --config /etc/cloudflared/config_frontend.yml run
-    volumes:
-      - ../tunnelCreds:/etc/cloudflared:ro
-    depends_on:
-      - frontend
+  traefik:
+    image: traefik:v2.11
+    command:
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+      - --entrypoints.web.address=:80
+    ports:
+      - "9080:80"
     networks:
       - trinity-net
-
-  cloudflared-admin:
-    image: cloudflare/cloudflared:latest
-    command: tunnel --config /etc/cloudflared/config_admin.yml run
-    volumes:
-      - ../tunnelCreds:/etc/cloudflared:ro
     depends_on:
       - web
-    networks:
-      - trinity-net
+      - fastapi
 
-  cloudflared-api:
+  cloudflared:
     image: cloudflare/cloudflared:latest
-    command: tunnel --config /etc/cloudflared/config_api.yml run
+    command: tunnel --config /etc/cloudflared/config.yml run
     volumes:
       - ../tunnelCreds:/etc/cloudflared:ro
     depends_on:
-      - fastapi
-    networks:
-      - trinity-net
-
-  check-admin:
-    image: python:3.10-slim
-    command: python /app/scripts/check_django_tunnel.py
-    volumes:
-      - ../:/app
-    working_dir: /app
-    environment:
-      BACKEND_URL: https://admin.quantmatrixai.com/admin/login/
-    depends_on:
-      - web
-      - cloudflared-admin
-    networks:
-      - trinity-net
-
-  check-frontend:
-    image: python:3.10-slim
-    command: python /app/scripts/check_frontend_tunnel.py
-    volumes:
-      - ../:/app
-    working_dir: /app
-    environment:
-      FRONTEND_URL: https://trinity.quantmatrixai.com/
-    depends_on:
+      - traefik
       - frontend
-      - cloudflared-frontend
-    networks:
-      - trinity-net
-
-  check-api:
-    image: python:3.10-slim
-    command: python /app/scripts/check_fastapi_tunnel.py
-    volumes:
-      - ../:/app
-    working_dir: /app
-    environment:
-      FASTAPI_URL: https://api.quantmatrixai.com/api/validator_atom/health
-    depends_on:
-      - fastapi
-      - cloudflared-api
     networks:
       - trinity-net
 

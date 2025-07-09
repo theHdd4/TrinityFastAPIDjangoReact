@@ -5,7 +5,7 @@ ingress:
   - hostname: trinity.quantmatrixai.com
     service: http://frontend:80
   - hostname: api.quantmatrixai.com
-    service: http://fastapi:8001
+    service: http://traefik:80
   - hostname: admin.quantmatrixai.com
-    service: http://web:8000
+    service: http://traefik:80
   - service: http_status:404

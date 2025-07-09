@@ -1,0 +1,47 @@
+# Cloudflare Tunnel with Traefik
+
+This project uses a single Cloudflare Tunnel together with Traefik to expose the services. The `frontend` container is reached directly through the tunnel while requests for the Django admin and FastAPI APIs are forwarded to Traefik. Traefik then proxies the traffic to the local endpoints `10.2.1.65:8000` (Django) and `10.2.1.65:8001` (FastAPI).
+
+## 1. Install `cloudflared`
+1. Sign in to your Cloudflare account and add the desired domain.
+2. Install the tunnel client on the host:
+   ```bash
+   curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb -o cloudflared.deb
+   sudo dpkg -i cloudflared.deb
+   cloudflared login
+   ```
+   Authentication stores credentials under `~/.cloudflared`.
+
+## 2. Create a tunnel
+```bash
+cloudflared tunnel create trinityapp
+```
+Copy the generated `<UUID>.json` and `cert.pem` into `tunnelCreds/`. Use the UUID in `tunnelCreds/config.yml`.
+
+## 3. Configure DNS
+Create DNS records pointing the subdomains to the tunnel:
+```bash
+cloudflared tunnel route dns trinityapp trinity.quantmatrixai.com
+cloudflared tunnel route dns trinityapp admin.quantmatrixai.com
+cloudflared tunnel route dns trinityapp api.quantmatrixai.com
+```
+Ensure the records are **Proxied** in the Cloudflare dashboard.
+
+## 4. Docker Compose
+`TrinityBackendDjango/docker-compose.yml` defines a `traefik` service and a single `cloudflared` container. Traefik listens on port `9080` inside the compose network and routes by hostname. The Cloudflared configuration (`tunnelCreds/config.yml`) forwards the frontend hostname directly to the `frontend` container and sends the admin and API hostnames to Traefik (`service: http://traefik:80`). Traefik in turn proxies to `10.2.1.65:8000` and `10.2.1.65:8001`.
+
+Start all services from the `TrinityBackendDjango` directory:
+```bash
+docker-compose up --build
+```
+Once the containers report "Connected" you can reach:
+- `https://trinity.quantmatrixai.com` – React frontend
+- `https://admin.quantmatrixai.com` – Django admin
+- `https://api.quantmatrixai.com` – FastAPI
+
+The other services (PostgreSQL, MongoDB, Redis, MinIO, etc.) remain accessible only inside the Docker network and through the codebase.
+
+## 5. Troubleshooting
+- Confirm the `cloudflared` container logs show `Connected`.
+- Verify the DNS records are proxied and reference the same tunnel ID as `config.yml`.
+- Check `docker-compose logs traefik` to inspect routing if the admin or API endpoints fail.
