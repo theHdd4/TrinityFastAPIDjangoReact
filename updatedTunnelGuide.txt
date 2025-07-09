@@ -1,12 +1,8 @@
-# Separate Cloudflare Tunnels Setup
+# Cloudflare Tunnel Setup
 
-The project now expects three individual Cloudflare tunnels so each service is reachable on its own subdomain:
-
-- **trinity.quantmatrixai.com** → React frontend
-- **admin.quantmatrixai.com** → Django admin
-- **api.quantmatrixai.com** → FastAPI backend
-
-Follow the steps below on your host machine.
+The services are exposed through a Cloudflare tunnel that forwards requests to
+Traefik. Traefik then routes traffic to the React frontend, Django admin and
+FastAPI backend. Follow the steps below on your host machine.
 
 ## 1. Install `cloudflared`
 1. Create or sign in to your Cloudflare account and add the `quantmatrixai.com` domain.
@@ -18,39 +14,46 @@ Follow the steps below on your host machine.
    ```
    Authentication places credentials under `~/.cloudflared`.
 
-## 2. Create three tunnels
-Create a tunnel for each service and record the generated UUID:
+## 2. Create a tunnel
+Create a named tunnel and record the generated UUID:
 ```bash
-cloudflared tunnel create trinity-frontend
-cloudflared tunnel create trinity-admin
-cloudflared tunnel create trinity-api
+cloudflared tunnel create trinity-tunnel
 ```
-Copy the corresponding `<UUID>.json` files and `cert.pem` into `tunnelCreds/`.
-Three example config files (`config_frontend.yml`, `config_admin.yml`, `config_api.yml`) are provided. Replace `TUNNEL_ID_*` with the real IDs in each file.
+Copy the `<UUID>.json` file and `cert.pem` into `tunnelCreds/`. The
+`config.yml` file references this UUID and defines the ingress rules for the
+frontend, admin and API subdomains.
 
 ## 3. Configure DNS
-Point the subdomains to their respective tunnels:
+Create DNS records for the frontend, admin and API domains and associate them
+with the tunnel:
 ```bash
-cloudflared tunnel route dns trinity-frontend trinity.quantmatrixai.com
-cloudflared tunnel route dns trinity-admin admin.quantmatrixai.com
-cloudflared tunnel route dns trinity-api api.quantmatrixai.com
+cloudflared tunnel route dns trinity-tunnel trinity.quantmatrixai.com
+cloudflared tunnel route dns trinity-tunnel admin.quantmatrixai.com
+cloudflared tunnel route dns trinity-tunnel api.quantmatrixai.com
 ```
-Ensure the records are **Proxied** (orange cloud) in the Cloudflare dashboard.
+Ensure each record is **Proxied** (orange cloud) in the Cloudflare dashboard.
 
 ## 4. Docker Compose services
-The `docker-compose.yml` inside `TrinityBackendDjango` defines three `cloudflared-*` services. They mount `tunnelCreds` and run with their dedicated config files. Build and start the stack:
+The tunnel containers are defined in `cloudflared/docker-compose.yml` so they
+can run independently from the backend stack. Start the backend services first
+so the shared `trinity-net` network exists:
 ```bash
 cd TrinityBackendDjango
-docker-compose up --build
+docker compose up --build
+```
+Then launch the tunnels:
+```bash
+cd ../cloudflared
+docker compose up -d
 ```
 Each tunnel container should report `Connected` shortly after startup.
 
 ## 5. Validate connectivity
 Short‑lived `check-*` containers automatically run a script verifying that each public URL responds:
 ```bash
-docker-compose logs check-admin
-docker-compose logs check-frontend
-docker-compose logs check-api
+docker compose logs check-admin
+docker compose logs check-frontend
+docker compose logs check-api
 ```
 You can run the helpers manually from the repository root:
 ```bash
@@ -73,13 +76,13 @@ containers. Common causes are:
    `route dns` commands completed successfully and that the orange cloud is
    enabled in the Cloudflare dashboard.
 3. The origin containers might not be running. Check the logs with
-   `docker-compose logs web fastapi frontend` and confirm the `cloudflared-*`
-   containers show `Connected`.
+   `docker compose logs web fastapi frontend cloudflared` and confirm the
+   tunnel container shows `Connected`.
 
 After correcting any issues restart the tunnel service:
 
 ```bash
-docker-compose restart cloudflared-admin cloudflared-frontend cloudflared-api
+docker compose restart cloudflared
 ```
 
 Once the logs show **Connected** re-run the check scripts.

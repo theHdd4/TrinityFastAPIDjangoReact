@@ -11,7 +11,7 @@ cd TrinityBackendDjango
 docker-compose up --build
 ```
 
-Wait until the `cloudflared-*` containers report `Connected`.
+Wait until the `cloudflared` container reports `Connected`.
 Docker Compose also starts short‑lived `check-*` services that
 execute the helper scripts automatically. They print **SUCCESS** or **FAILURE**
 in the logs based on the response from each public URL.
@@ -63,17 +63,15 @@ If the script reports an error:
 1. Inspect the tunnel logs:
 
    ```bash
-   docker-compose logs cloudflared-admin
-   docker-compose logs cloudflared-frontend
-   docker-compose logs cloudflared-api
+   docker compose logs cloudflared
    ```
 
    Look for messages like `Connected` or any errors indicating authentication or DNS issues.
 
-2. Ensure the `cloudflared-*` containers are running:
+2. Ensure the `cloudflared` container is running:
 
    ```bash
-   docker-compose ps cloudflared-admin cloudflared-frontend cloudflared-api
+   docker compose ps cloudflared
    ```
 
 3. Verify the Django container is healthy:
@@ -87,7 +85,7 @@ If the script reports an error:
 6. Restart a tunnel if needed:
 
    ```bash
-   docker-compose restart cloudflared
+   docker compose restart cloudflared
    ```
 
 Use these logs to identify whether the request is reaching the tunnel or failing earlier. Once the script shows a 200 status, the frontend should be able to access the backend through `https://trinity.quantmatrixai.com/admin/`.

@@ -29,13 +29,23 @@ cloudflared tunnel route dns trinity-frontend trinity.quantmatrixai.com
 Ensure the record is **Proxied** in the Cloudflare dashboard.
 
 ## 4. Docker Compose
-`TrinityBackendDjango/docker-compose.yml` defines a `traefik` service and a single `cloudflared` container. Cloudflared forwards all traffic for `trinity.quantmatrixai.com` to Traefik (`service: http://traefik:80`). Traefik then routes `/`, `/admin/` and `/api/` to the appropriate containers.
+`TrinityBackendDjango/docker-compose.yml` provides the backend services and the
+Traefik reverse proxy. The Cloudflare tunnel now runs separately using the
+compose file in the `cloudflared/` directory. The tunnel forwards all traffic
+for `trinity.quantmatrixai.com` to Traefik (`service: http://traefik:80`).
+Traefik then routes `/`, `/admin/` and `/api/` to the appropriate containers.
 
 Traefik requires access to the Docker socket to read the labels. The compose file mounts `/var/run/docker.sock` into the Traefik container.
 
-Start all services from the `TrinityBackendDjango` directory:
+Start the backend stack from the `TrinityBackendDjango` directory so the
+`trinity-net` network is created:
 ```bash
-docker-compose up --build
+docker compose up --build
+```
+Then launch the tunnel separately:
+```bash
+cd ../cloudflared
+docker compose up -d
 ```
 Once the containers report "Connected" you can reach:
 - `https://trinity.quantmatrixai.com` – React frontend
@@ -47,7 +57,7 @@ The other services (PostgreSQL, MongoDB, Redis, MinIO, etc.) remain accessible o
 ## 5. Troubleshooting
 - Confirm the `cloudflared` container logs show `Connected`.
 - Verify the DNS records are proxied and reference the same tunnel ID as `config.yml`.
-- Check `docker-compose logs traefik` to inspect routing if the admin or API endpoints fail.
+- Check `docker compose logs traefik` to inspect routing if the admin or API endpoints fail.
 - A `502` on `/api/` usually means Traefik cannot reach the FastAPI container.
   Verify the label `traefik.http.services.fastapi.loadbalancer.server.port=8001`
   exists in `docker-compose.yml` and that the container is running. Also ensure
