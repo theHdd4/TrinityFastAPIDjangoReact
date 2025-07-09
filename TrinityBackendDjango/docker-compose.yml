@@ -173,16 +173,6 @@ services:
       - web
       - fastapi
 
-  cloudflared:
-    image: cloudflare/cloudflared:latest
-    command: tunnel --config /etc/cloudflared/config.yml run
-    volumes:
-      - ../tunnelCreds:/etc/cloudflared:ro
-    depends_on:
-      - traefik
-      - frontend
-    networks:
-      - trinity-net
 
 
 volumes:
