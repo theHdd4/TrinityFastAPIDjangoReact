@@ -1,8 +1,8 @@
 # Django Backend Tunnel Validation
 
 Run the `scripts/check_django_tunnel.py` helper to confirm the admin interface
-is reachable through the Cloudflare tunnel. Traefik maps `/admin/` to Django on
-`10.2.1.65:8000` and removes the prefix, so the script requests
+is reachable through the Cloudflare tunnel. Traefik maps `/admin/` to the Django
+container `web:8000` and removes the prefix, so the script requests
 `https://trinity.quantmatrixai.com/admin/login/` by default:
 
 ```bash

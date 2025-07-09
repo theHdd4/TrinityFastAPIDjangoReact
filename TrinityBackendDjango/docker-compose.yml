@@ -74,7 +74,7 @@ services:
       - "traefik.http.routers.django.entrypoints=web"
       - "traefik.http.routers.django.middlewares=django-strip@docker"
       - "traefik.http.middlewares.django-strip.stripprefix.prefixes=/admin"
-      - "traefik.http.services.django.loadbalancer.server.url=http://10.2.1.65:8000"
+      - "traefik.http.services.django.loadbalancer.server.url=http://web:8000"
 
   celery:
     build: .
@@ -117,7 +117,7 @@ services:
       - "traefik.enable=true"
       - "traefik.http.routers.fastapi.rule=Host(`trinity.quantmatrixai.com`) && PathPrefix(`/app`)"
       - "traefik.http.routers.fastapi.entrypoints=web"
-      - "traefik.http.services.fastapi.loadbalancer.server.url=http://10.2.1.65:8001"
+      - "traefik.http.services.fastapi.loadbalancer.server.url=http://fastapi:8001"
 
   flight:
     build:
