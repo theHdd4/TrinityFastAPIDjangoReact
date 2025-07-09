@@ -16,6 +16,13 @@ Docker Compose also starts short‑lived `check-*` services that
 execute the helper scripts automatically. They print **SUCCESS** or **FAILURE**
 in the logs based on the response from each public URL.
 
+Traefik handles path based routing for the tunnel. Requests to
+`https://trinity.quantmatrixai.com/admin/` map to the Django container on
+`10.2.1.65:8000` while `https://trinity.quantmatrixai.com/api/` is forwarded to
+the FastAPI service on `10.2.1.65:8001`. The root path `/` serves the React
+frontend. Ensure these mappings are configured in
+`TrinityBackendDjango/docker-compose.yml` before validating the tunnel.
+
 ## 2. Check the tunnel
 
 Use the validation helper located in the `scripts` folder. It sends a request to the admin login page and prints the HTTP status and server header.
