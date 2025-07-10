@@ -100,9 +100,9 @@ docker compose build frontend
 ```
 ## 7. Running everything
 
-1. Build and start the stack:
+1. Build and start the stack using the helper script:
    ```bash
-   docker compose up --build
+   ./scripts/start_backend.sh
    ```
 2. Cloudflared establishes the tunnel and routes all requests for `trinity.quantmatrixai.com` to Traefik.
 3. Visit `https://trinity.quantmatrixai.com` for the frontend. Use the `/api/` and `/admin/` paths for the backend services. Traefik strips `/admin` before forwarding to Django so the REST API still lives under `/api/` internally.

@@ -3,9 +3,9 @@
 This directory contains a standalone compose file for running the
 Cloudflare Tunnel used by the Trinity stack.
 
-Ensure the `trinity-net` network exists (it is created automatically when the
-backend stack is started). If running the tunnel before the other containers you
-can create it manually:
+Ensure the `trinity-net` network exists. It is created automatically when the
+backend stack is started via `../scripts/start_backend.sh`. If running the
+tunnel before the other containers you can create it manually:
 
 ```bash
 docker network create trinity-net
