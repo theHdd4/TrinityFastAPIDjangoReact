@@ -45,8 +45,9 @@ Follow the steps below to run all services together.
   errors when logging in from either address.
   Set `FASTAPI_CORS_ORIGINS` to the same comma separated list so the FastAPI
   service accepts requests from both origins as well.
-  When exposing a public hostname also add it **and the host IP** to the
-  `ADDITIONAL_DOMAINS` variable so Django's tenant middleware accepts both.
+  When exposing a public hostname also add it, the host IP, and `localhost` to
+  the `ADDITIONAL_DOMAINS` variable so Django's tenant middleware accepts all
+  three.
   Run `python create_tenant.py` again after adjusting this list if the entries
   were not added during the initial setup.
 
@@ -170,9 +171,11 @@ that its Traefik service label points to port `8001`:
 traefik.http.services.fastapi.loadbalancer.server.port=8001
 ```
 
-Use `docker-compose logs traefik` and `docker-compose logs fastapi` for
-additional details. Use `docker-compose logs cloudflared-admin` (and the other
-tunnel containers) to confirm they are connected if you suspect connectivity
-issues.
+Use `docker compose logs traefik` and `docker compose logs fastapi` for
+additional details. Use `docker compose logs cloudflared` to confirm the tunnel
+is connected if you suspect connectivity issues.
+
+For tips on reducing startup times and improving responsiveness see
+[performance_tips.md](performance_tips.md).
 
 

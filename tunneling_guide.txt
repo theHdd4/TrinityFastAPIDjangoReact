@@ -122,7 +122,7 @@ origin. Common causes are missing DNS records or incorrect IDs in `tunnelCreds/c
    It should report "Connected" after startup.
 4. If requests succeed when using the backend IP but return **404** on the public
    domain, the Django tenant middleware may not recognize the hostname. Add the
-   domain **and your host IP** to `ADDITIONAL_DOMAINS` in
+   domain, your host IP **and `localhost`** to `ADDITIONAL_DOMAINS` in
    `TrinityBackendDjango/.env` and rerun `python create_tenant.py` so the aliases
    are created.
 
