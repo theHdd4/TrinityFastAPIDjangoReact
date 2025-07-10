@@ -45,10 +45,10 @@ Follow the steps below to run all services together.
   errors when logging in from either address.
   Set `FASTAPI_CORS_ORIGINS` to the same comma separated list so the FastAPI
   service accepts requests from both origins as well.
-  When exposing a public hostname also add it to the `ADDITIONAL_DOMAINS`
-  variable so Django's tenant middleware accepts the domain. Run
-  `python create_tenant.py` again after setting this variable if the domain was
-  not added during the initial setup.
+  When exposing a public hostname also add it **and the host IP** to the
+  `ADDITIONAL_DOMAINS` variable so Django's tenant middleware accepts both.
+  Run `python create_tenant.py` again after adjusting this list if the entries
+  were not added during the initial setup.
 
 Docker and Node.js must be installed locally. The Python dependencies listed in
 `TrinityBackendDjango/requirements.txt` and

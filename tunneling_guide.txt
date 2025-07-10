@@ -122,8 +122,9 @@ origin. Common causes are missing DNS records or incorrect IDs in `tunnelCreds/c
    It should report "Connected" after startup.
 4. If requests succeed when using the backend IP but return **404** on the public
    domain, the Django tenant middleware may not recognize the hostname. Add the
-   domain to `ADDITIONAL_DOMAINS` in `TrinityBackendDjango/.env` and rerun
-   `python create_tenant.py` so the alias is created.
+   domain **and your host IP** to `ADDITIONAL_DOMAINS` in
+   `TrinityBackendDjango/.env` and rerun `python create_tenant.py` so the aliases
+   are created.
 
 Cloudflare handles HTTPS automatically, so the services in `config.yml` use plain `http://` URLs. Once the tunnel is active the
 external domain will load over HTTPS without additional changes.
