@@ -253,3 +253,28 @@ async def arrow_dataset_exists(project_id: int, atom_id: str, file_key: str) -> 
 
     return exists
 
+
+async def get_dataset_info(arrow_object: str):
+    """Return dataset info for a stored Arrow object if available."""
+    if asyncpg is None:
+        return None
+    try:
+        conn = await asyncpg.connect(
+            host=POSTGRES_HOST,
+            user=POSTGRES_USER,
+            password=POSTGRES_PASSWORD,
+            database=POSTGRES_DB,
+        )
+    except Exception:
+        return None
+    try:
+        row = await conn.fetchrow(
+            "SELECT file_key, flight_path, original_csv FROM registry_arrowdataset WHERE arrow_object=$1",
+            arrow_object,
+        )
+        if row:
+            return row["file_key"], row["flight_path"], row["original_csv"]
+    finally:
+        await conn.close()
+    return None
+

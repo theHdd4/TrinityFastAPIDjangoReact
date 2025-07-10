@@ -2964,19 +2964,22 @@ async def list_saved_dataframes():
     prefix = OBJECT_PREFIX
     try:
         objects = minio_client.list_objects(MINIO_BUCKET, prefix=prefix, recursive=True)
-        entries = []
+        latest: dict[str, tuple[datetime, str]] = {}
         for obj in objects:
             if not obj.object_name.endswith(".arrow"):
                 continue
             try:
                 stat = minio_client.stat_object(MINIO_BUCKET, obj.object_name)
-                entries.append((stat.last_modified, obj.object_name))
+                base = Path(obj.object_name).stem.split("_", 2)
+                key = base[2] if len(base) >= 3 else base[-1]
+                if key not in latest or stat.last_modified > latest[key][0]:
+                    latest[key] = (stat.last_modified, obj.object_name)
             except S3Error as e:
                 if getattr(e, "code", "") in {"NoSuchKey", "NoSuchBucket"}:
                     redis_client.delete(obj.object_name)
                     continue
                 raise
-        entries.sort(key=lambda x: x[0], reverse=True)
+        entries = sorted(latest.values(), key=lambda x: x[0], reverse=True)
         files = [
             {
                 "object_name": name,
