@@ -29,18 +29,18 @@ cloudflared tunnel route dns trinity-frontend trinity.quantmatrixai.com
 Ensure the record is **Proxied** in the Cloudflare dashboard.
 
 ## 4. Docker Compose
-`TrinityBackendDjango/docker-compose.yml` provides the backend services and the
-Traefik reverse proxy. The Cloudflare tunnel now runs separately using the
+`docker-compose.yml` in the repository root provides the backend services and
+the Traefik reverse proxy. The Cloudflare tunnel now runs separately using the
 compose file in the `cloudflared/` directory. The tunnel forwards all traffic
 for `trinity.quantmatrixai.com` to Traefik (`service: http://traefik:80`).
 Traefik then routes `/`, `/admin/` and `/api/` to the appropriate containers.
 
 Traefik requires access to the Docker socket to read the labels. The compose file mounts `/var/run/docker.sock` into the Traefik container.
 
-Start the backend stack from the `TrinityBackendDjango` directory so the
-`trinity-net` network is created:
+Start the backend stack from the repository root so the `trinity-net` network is
+created:
 ```bash
-docker compose up --build
+scripts/start_backend.sh
 ```
 Then launch the tunnel separately:
 ```bash

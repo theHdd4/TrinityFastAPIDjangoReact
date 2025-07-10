@@ -4,11 +4,11 @@ Follow these steps to confirm that the services are reachable via their Cloudfla
 
 ## 1. Start the stack
 
-Run the Docker compose services from the `TrinityBackendDjango` directory:
+Run the Docker compose services from the repository root using the helper
+script:
 
 ```bash
-cd TrinityBackendDjango
-docker-compose up --build
+scripts/start_backend.sh
 ```
 
 Wait until the `cloudflared` container reports `Connected`.
@@ -22,8 +22,8 @@ Traefik handles path based routing for the tunnel. Requests to
 the FastAPI service `fastapi:8001`. Traefik removes the `/admin` prefix
 before forwarding the request so Django handles it under `/api/` or `/admin/` as
 defined in `config/urls.py`. The root path `/` serves the React frontend.
-Ensure these mappings are configured in
-`TrinityBackendDjango/docker-compose.yml` before validating the tunnel.
+Ensure these mappings are configured in `docker-compose.yml` before validating
+the tunnel.
 
 The effective routing looks like this:
 

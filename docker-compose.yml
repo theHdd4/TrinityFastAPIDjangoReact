@@ -53,13 +53,13 @@ services:
       - trinity-net
 
   web:
-    build: .
+    build: ./TrinityBackendDjango
     command: gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 3
     volumes:
-      - .:/code
+      - ./TrinityBackendDjango:/code
     env_file:
-      - ../host.env
-      - .env
+      - ./host.env
+      - ./TrinityBackendDjango/.env
     ports:
       - "8000:8000"
     depends_on:
@@ -78,13 +78,13 @@ services:
       - "traefik.http.services.django.loadbalancer.server.port=8000"
 
   celery:
-    build: .
+    build: ./TrinityBackendDjango
     command: celery -A config.celery worker --loglevel=info
     volumes:
-      - .:/code
+      - ./TrinityBackendDjango:/code
     env_file:
-      - ../host.env
-      - .env
+      - ./host.env
+      - ./TrinityBackendDjango/.env
     depends_on:
       - redis
       - postgres
@@ -93,14 +93,14 @@ services:
       - trinity-net
 
   fastapi:
-    build: .
+    build: ./TrinityBackendDjango
     command: uvicorn apps.orchestration.fastapi_app:app --host 0.0.0.0 --port 8001
     volumes:
-      - .:/code
-      - ../TrinityBackendFastAPI:/code/TrinityBackendFastAPI
+      - ./TrinityBackendDjango:/code
+      - ./TrinityBackendFastAPI:/code/TrinityBackendFastAPI
     env_file:
-      - ../host.env
-      - .env
+      - ./host.env
+      - ./TrinityBackendDjango/.env
     environment:
       MINIO_ENDPOINT: minio:9000
       MINIO_ACCESS_KEY: minio
@@ -125,12 +125,12 @@ services:
 
   flight:
     build:
-      context: ../TrinityBackendFastAPI
+      context: ./TrinityBackendFastAPI
       dockerfile: Dockerfile
     command: python app/flight_server.py
     env_file:
-      - ../host.env
-      - .env
+      - ./host.env
+      - ./TrinityBackendDjango/.env
     ports:
       - "8815:8815"
     networks:
@@ -138,11 +138,11 @@ services:
 
   trinity-ai:
     build:
-      context: ../TrinityAI/Agent_fetch_atom
+      context: ./TrinityAI/Agent_fetch_atom
       dockerfile: Dockerfile
     env_file:
-      - ../host.env
-      - .env
+      - ./host.env
+      - ./TrinityBackendDjango/.env
     ports:
       - "8002:8002"
     networks:
@@ -150,7 +150,7 @@ services:
 
   frontend:
     build:
-      context: ../TrinityFrontend
+      context: ./TrinityFrontend
       dockerfile: Dockerfile
     container_name: trinity-frontend
     ports:

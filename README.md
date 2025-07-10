@@ -10,7 +10,10 @@ Follow the steps below to run all services together.
 
 ## 1. Environment setup
 
-1. Copy `host.env.example` to `host.env` and set `HOST_IP` to the address of your Docker host.
+1. Ensure `host.env` exists in the repository root. The helper script
+   `scripts/start_backend.sh` automatically copies `host.env.example` to
+   `host.env` if it is missing. Edit the file and set `HOST_IP` to the
+   address of your Docker host.
 2. Copy `TrinityBackendDjango/.env.example` to `TrinityBackendDjango/.env` and adjust values if required.
 3. Copy `TrinityFrontend/.env.example` to `TrinityFrontend/.env`.
    Ensure `DEBUG=true` in the Django `.env` file so error messages appear if
@@ -23,8 +26,8 @@ Follow the steps below to run all services together.
   API requests through Traefik. Rebuild the `frontend` service after changing
   this file so Vite picks up the new value:
 
-   ```bash
-  docker-compose build frontend
+  ```bash
+  docker compose build frontend
   ```
 
   The frontend is exposed at `https://trinity.quantmatrixai.com` through
@@ -64,18 +67,18 @@ database migrations for new tenants.
 
 ## 2. Start the backend containers
 
-From the `TrinityBackendDjango` directory run the following command. It builds
-the Docker image and launches all backend services:
+From the repository root run the helper script which ensures `host.env` exists
+and then starts the backend containers:
 
 ```bash
-docker-compose up --build
+scripts/start_backend.sh
 ```
 
 This starts PostgreSQL, MongoDB, Redis, the Django admin API on `localhost:8000`
 and a FastAPI instance on `localhost:8001`. Uvicorn loads the app from
 `apps/orchestration/fastapi_app.py`. A separate AI service from the `TrinityAI`
-folder runs on `localhost:8002` for chat prompts. Use `docker-compose logs
-fastapi` or `docker-compose logs trinity-ai` to confirm the servers started
+folder runs on `localhost:8002` for chat prompts. Use `docker compose logs
+fastapi` or `docker compose logs trinity-ai` to confirm the servers started
 successfully. CORS is enabled so the React frontend served from `localhost:8080`
 can call the APIs. Once the containers finish installing dependencies the text
 service is reachable at `http://localhost:8001/api/t` and Trinity AI at
@@ -125,7 +128,7 @@ If tenant creation returns a **500** error the traceback will appear in the
 backend logs. Run:
 
 ```bash
-docker-compose logs web
+docker compose logs web
 ```
 
 Common issues are saving the tenant while connected to a tenant schema or using
@@ -144,7 +147,7 @@ React frontend are fully connected.
 After exposing the services through Cloudflare Tunnels you can verify that each
 public hostname responds. Docker Compose automatically launches short‑lived
 `check-*` containers. These run the validation helpers once during
-`docker-compose up` and then exit. You can also run the helpers manually from
+`scripts/start_backend.sh` and then exit. You can also run the helpers manually from
 the repository root:
 
 ```bash

@@ -14,7 +14,7 @@ docker network create trinity-net
 Then from this folder run:
 
 ```bash
-docker-compose up -d
+docker compose up -d
 ```
 
 The service mounts `./tunnelCreds` which should contain `config.yml` and

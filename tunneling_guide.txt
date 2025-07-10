@@ -41,7 +41,7 @@ cloudflared tunnel route dns trinity-frontend trinity.quantmatrixai.com
 ```
 Ensure the record is **Proxied**. You can also run the command from inside the container:
 ```bash
-docker-compose exec cloudflared cloudflared tunnel route dns trinity-frontend trinity.quantmatrixai.com
+docker compose exec cloudflared cloudflared tunnel route dns trinity-frontend trinity.quantmatrixai.com
 ```
 
 ## 4. Cloudflared configuration
@@ -60,7 +60,7 @@ The values above use the real tunnel ID. Copy the generated credentials file int
 
 ## 5. Docker Compose service
 
-The `docker-compose.yml` inside `TrinityBackendDjango` already exposes all containers on the `trinity-net` network. Add the following service (already included in the repository). The volume path references the `cloudflared/tunnelCreds` folder in the repository root. Use a read-only mount so the container cannot modify the files:
+The `docker-compose.yml` in the repository root already exposes all containers on the `trinity-net` network. Add the following service (already included in the repository). The volume path references the `cloudflared/tunnelCreds` folder in the repository root. Use a read-only mount so the container cannot modify the files:
 ```yaml
   cloudflared:
     image: cloudflare/cloudflared:latest
@@ -96,13 +96,13 @@ After editing `.env`, rebuild the frontend image so the environment variable is
 embedded in the compiled bundle:
 
 ```bash
-docker-compose build frontend
+docker compose build frontend
 ```
 ## 7. Running everything
 
 1. Build and start the stack:
    ```bash
-   docker-compose up --build
+   scripts/start_backend.sh
    ```
 2. Cloudflared establishes the tunnel and routes all requests for `trinity.quantmatrixai.com` to Traefik.
 3. Visit `https://trinity.quantmatrixai.com` for the frontend. Use the `/api/` and `/admin/` paths for the backend services. Traefik strips `/admin` before forwarding to Django so the REST API still lives under `/api/` internally.
@@ -118,7 +118,7 @@ origin. Common causes are missing DNS records or incorrect IDs in `cloudflared/t
    `cloudflared tunnel route dns trinity-frontend <hostname>`.
 2. Check that `cloudflared/tunnelCreds/config.yml` contains your actual tunnel UUID and that
    `cloudflared/tunnelCreds/e0a883c4-bc43-4742-b47a-96ef902e6bb3.json` matches the same ID.
-3. Ensure the `cloudflared` container is running by inspecting the output of `docker-compose logs cloudflared`.
+3. Ensure the `cloudflared` container is running by inspecting the output of `docker compose logs cloudflared`.
    It should report "Connected" after startup.
 4. If requests succeed when using the backend IP but return **404** on the public
    domain, the Django tenant middleware may not recognize the hostname. Add the
@@ -147,8 +147,8 @@ Follow these steps if you need to rename the frontend tunnel endpoint to
 5. Rebuild the containers so the new configuration is applied:
 
    ```bash
-   docker-compose build frontend web cloudflared
-   docker-compose up -d
+   docker compose build frontend web cloudflared
+   docker compose up -d
    ```
 
 When Cloudflared reports **Connected** you can access the React application at
