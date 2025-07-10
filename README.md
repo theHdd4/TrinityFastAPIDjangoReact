@@ -10,8 +10,9 @@ Follow the steps below to run all services together.
 
 ## 1. Environment setup
 
-1. Copy `TrinityBackendDjango/.env.example` to `TrinityBackendDjango/.env` and adjust values if required.
-2. Copy `TrinityFrontend/.env.example` to `TrinityFrontend/.env`.
+1. Copy `host.env.example` to `host.env` and set `HOST_IP` to the address of your Docker host.
+2. Copy `TrinityBackendDjango/.env.example` to `TrinityBackendDjango/.env` and adjust values if required.
+3. Copy `TrinityFrontend/.env.example` to `TrinityFrontend/.env`.
    Ensure `DEBUG=true` in the Django `.env` file so error messages appear if
    tenant creation fails.
    The frontend `.env` includes `VITE_SUBSCRIPTIONS_API` which should point to
@@ -40,7 +41,7 @@ Follow the steps below to run all services together.
 
   Update `CSRF_TRUSTED_ORIGINS` and `CORS_ALLOWED_ORIGINS` in
   `TrinityBackendDjango/.env` so both the local frontend URL
-  `http://10.2.1.65:8080` and the public domain
+  `http://${HOST_IP}:8080` and the public domain
   `https://trinity.quantmatrixai.com` are trusted. This prevents CORS and CSRF
   errors when logging in from either address.
   Set `FASTAPI_CORS_ORIGINS` to the same comma separated list so the FastAPI

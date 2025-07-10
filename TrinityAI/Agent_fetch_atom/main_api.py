@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from typing import Dict, Any
 import numpy as np
 from single_llm_processor import SingleLLMProcessor
+import os
 
 def convert_numpy(obj):
     if isinstance(obj, dict):
@@ -23,8 +24,9 @@ def convert_numpy(obj):
 
 def initialize_single_llm_system():
     try:
+        host_ip = os.getenv("HOST_IP", "10.2.1.65")
         processor = SingleLLMProcessor(
-            api_url="http://10.2.1.65:11434/api/chat",
+            api_url=f"http://{host_ip}:11434/api/chat",
             model_name="deepseek-r1:32b",
             bearer_token="aakash_api_key"
         )

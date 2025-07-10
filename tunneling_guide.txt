@@ -1,6 +1,6 @@
 # Cloudflare Tunnel Setup for Trinity Platform
 
-This guide explains how to expose the Dockerized Trinity application using a single Cloudflare Tunnel so the public accesses **trinity.quantmatrixai.com** while the backend services remain private. All traffic is routed to Traefik inside the Docker network. The examples assume your host IP is `10.2.1.65`.
+This guide explains how to expose the Dockerized Trinity application using a single Cloudflare Tunnel so the public accesses **trinity.quantmatrixai.com** while the backend services remain private. All traffic is routed to Traefik inside the Docker network. The examples assume your host IP is stored in the `HOST_IP` environment variable.
 
 ## 1. Install cloudflared
 
