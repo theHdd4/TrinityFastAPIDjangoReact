@@ -17,5 +17,5 @@ Then from this folder run:
 docker-compose up -d
 ```
 
-The service mounts `../tunnelCreds` which should contain `config.yml` and
+The service mounts `./tunnelCreds` which should contain `config.yml` and
 your credential JSON.

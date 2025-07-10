@@ -104,5 +104,5 @@ Desktop.ini
 TrinityAI/Agent_fetch_atom/models/
 
 arrow_data/
-tunnelCreds/credentials.json
-tunnelCreds/cert.pem
+cloudflared/tunnelCreds/credentials.json
+cloudflared/tunnelCreds/cert.pem

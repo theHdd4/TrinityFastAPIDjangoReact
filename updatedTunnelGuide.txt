@@ -19,7 +19,7 @@ Create a named tunnel and record the generated UUID:
 ```bash
 cloudflared tunnel create trinity-tunnel
 ```
-Copy the `<UUID>.json` file and `cert.pem` into `tunnelCreds/`. The
+Copy the `<UUID>.json` file and `cert.pem` into `cloudflared/tunnelCreds/`. The
 `config.yml` file references this UUID and defines the ingress rules for the
 frontend, admin and API subdomains.
 

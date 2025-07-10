@@ -19,7 +19,7 @@ This project exposes the React frontend to the public and keeps the backend serv
 ```bash
 cloudflared tunnel create trinity-frontend
 ```
-Copy the generated `<UUID>.json` (for this project it is `e0a883c4-bc43-4742-b47a-96ef902e6bb3.json`) and `cert.pem` into `tunnelCreds/`. Use the UUID in `tunnelCreds/config.yml`.
+Copy the generated `<UUID>.json` (for this project it is `e0a883c4-bc43-4742-b47a-96ef902e6bb3.json`) and `cert.pem` into `cloudflared/tunnelCreds/`. Use the UUID in `cloudflared/tunnelCreds/config.yml`.
 
 ## 3. Configure DNS
 Create a single DNS record for the frontend:

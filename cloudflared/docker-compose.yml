@@ -3,7 +3,7 @@ services:
     image: cloudflare/cloudflared:latest
     command: tunnel --config /etc/cloudflared/config.yml run
     volumes:
-      - ../tunnelCreds:/etc/cloudflared:ro
+      - ./tunnelCreds:/etc/cloudflared:ro
     networks:
       - trinity-net
 
