@@ -5,10 +5,33 @@ import pyarrow as pa
 import pyarrow.flight as flight
 import pyarrow.ipc as ipc
 from minio import Minio
+from typing import Optional
 from .flight_registry import get_arrow_for_flight_path
 
 _client: flight.FlightClient | None = None
 logger = logging.getLogger("trinity.flight")
+
+
+def _find_minio_object(
+    m_client: Minio, bucket: str, basename: str
+) -> Optional[str]:
+    """Return the latest object name in MinIO matching the basename."""
+    prefix = os.path.join(
+        os.getenv("CLIENT_NAME", "default_client"),
+        os.getenv("APP_NAME", "default_app"),
+        os.getenv("PROJECT_NAME", "default_project"),
+    )
+    try:
+        candidates = []
+        for obj in m_client.list_objects(bucket, prefix=prefix, recursive=True):
+            if obj.object_name.endswith(basename):
+                candidates.append((obj.last_modified, obj.object_name))
+        if not candidates:
+            return None
+        candidates.sort(key=lambda x: x[0], reverse=True)
+        return candidates[0][1]
+    except Exception:
+        return None
 
 
 def _get_client() -> flight.FlightClient:
@@ -45,23 +68,27 @@ def download_dataframe(path: str) -> pd.DataFrame:
     except Exception as e:
         logger.error("❌ flight download failed for %s: %s", path, e)
         arrow_obj = get_arrow_for_flight_path(path)
+        bucket = os.getenv("MINIO_BUCKET", "trinity")
+        m_client = Minio(
+            os.getenv("MINIO_ENDPOINT", "minio:9000"),
+            access_key=os.getenv("MINIO_ACCESS_KEY", "admin_dev"),
+            secret_key=os.getenv("MINIO_SECRET_KEY", "pass_dev"),
+            secure=False,
+        )
         if not arrow_obj:
             basename = os.path.basename(path)
-            arrow_obj = os.path.join(
-                os.getenv("CLIENT_NAME", "default_client"),
-                os.getenv("APP_NAME", "default_app"),
-                os.getenv("PROJECT_NAME", "default_project"),
-                basename,
-            )
-            logger.info("🪶 inferred arrow object %s", arrow_obj)
+            arrow_obj = _find_minio_object(m_client, bucket, basename)
+            if arrow_obj:
+                logger.info("🪶 matched arrow object %s", arrow_obj)
+            else:
+                arrow_obj = os.path.join(
+                    os.getenv("CLIENT_NAME", "default_client"),
+                    os.getenv("APP_NAME", "default_app"),
+                    os.getenv("PROJECT_NAME", "default_project"),
+                    basename,
+                )
+                logger.info("🪶 inferred arrow object %s", arrow_obj)
         try:
-            bucket = os.getenv("MINIO_BUCKET", "trinity")
-            m_client = Minio(
-                os.getenv("MINIO_ENDPOINT", "minio:9000"),
-                access_key=os.getenv("MINIO_ACCESS_KEY", "admin_dev"),
-                secret_key=os.getenv("MINIO_SECRET_KEY", "pass_dev"),
-                secure=False,
-            )
             resp = m_client.get_object(bucket, arrow_obj)
             data = resp.read()
             table = ipc.RecordBatchFileReader(pa.BufferReader(data)).read_all()
@@ -104,23 +131,27 @@ def download_table_bytes(path: str) -> bytes:
     except Exception as e:
         logger.error("❌ flight byte download failed for %s: %s", path, e)
         arrow_obj = get_arrow_for_flight_path(path)
+        bucket = os.getenv("MINIO_BUCKET", "trinity")
+        m_client = Minio(
+            os.getenv("MINIO_ENDPOINT", "minio:9000"),
+            access_key=os.getenv("MINIO_ACCESS_KEY", "admin_dev"),
+            secret_key=os.getenv("MINIO_SECRET_KEY", "pass_dev"),
+            secure=False,
+        )
         if not arrow_obj:
             basename = os.path.basename(path)
-            arrow_obj = os.path.join(
-                os.getenv("CLIENT_NAME", "default_client"),
-                os.getenv("APP_NAME", "default_app"),
-                os.getenv("PROJECT_NAME", "default_project"),
-                basename,
-            )
-            logger.info("🪶 inferred arrow object %s", arrow_obj)
+            arrow_obj = _find_minio_object(m_client, bucket, basename)
+            if arrow_obj:
+                logger.info("🪶 matched arrow object %s", arrow_obj)
+            else:
+                arrow_obj = os.path.join(
+                    os.getenv("CLIENT_NAME", "default_client"),
+                    os.getenv("APP_NAME", "default_app"),
+                    os.getenv("PROJECT_NAME", "default_project"),
+                    basename,
+                )
+                logger.info("🪶 inferred arrow object %s", arrow_obj)
         try:
-            bucket = os.getenv("MINIO_BUCKET", "trinity")
-            m_client = Minio(
-                os.getenv("MINIO_ENDPOINT", "minio:9000"),
-                access_key=os.getenv("MINIO_ACCESS_KEY", "admin_dev"),
-                secret_key=os.getenv("MINIO_SECRET_KEY", "pass_dev"),
-                secure=False,
-            )
             resp = m_client.get_object(bucket, arrow_obj)
             data = resp.read()
             table = ipc.RecordBatchFileReader(pa.BufferReader(data)).read_all()
