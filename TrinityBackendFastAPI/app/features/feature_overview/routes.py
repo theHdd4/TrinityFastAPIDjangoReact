@@ -37,7 +37,11 @@ from app.DataStorageRetrieval.arrow_client import (
     download_dataframe,
     download_table_bytes,
 )
-from app.DataStorageRetrieval.flight_registry import get_flight_path_for_csv
+from app.DataStorageRetrieval.flight_registry import (
+    get_flight_path_for_csv,
+    set_ticket,
+)
+from app.DataStorageRetrieval.db import get_dataset_info
 import asyncio
 
 
@@ -111,6 +115,12 @@ async def column_summary(object_name: str):
         )
     try:
         flight_path = get_flight_path_for_csv(object_name)
+        if not flight_path:
+            info = await get_dataset_info(object_name)
+            if info:
+                file_key, flight_path, original_csv = info
+                set_ticket(file_key, object_name, flight_path, original_csv)
+                print(f"🗄 restored ticket for {object_name}: {flight_path}")
         df = None
         if flight_path:
             print(f"📡 trying flight download {flight_path}")
@@ -207,9 +217,16 @@ async def flight_table(object_name: str):
     """Return the Arrow IPC file for the given object via Arrow Flight."""
     object_name = unquote(object_name)
     flight_path = get_flight_path_for_csv(object_name)
+    if not flight_path:
+        info = await get_dataset_info(object_name)
+        if info:
+            file_key, flight_path, original_csv = info
+            set_ticket(file_key, object_name, flight_path, original_csv)
+            print(f"🗄 restored ticket for {object_name}: {flight_path}")
     print(f"➡️ flight_table request: {object_name} path={flight_path}")
     if not flight_path:
-        raise HTTPException(status_code=404, detail="Flight path not found")
+        print(f"⚠️ flight path not found for {object_name}; using object name")
+        flight_path = object_name
     try:
         data = download_table_bytes(flight_path)
         return Response(data, media_type="application/vnd.apache.arrow.file")
@@ -234,6 +251,12 @@ async def sku_stats(
 
     try:
         flight_path = get_flight_path_for_csv(object_name)
+        if not flight_path:
+            info = await get_dataset_info(object_name)
+            if info:
+                file_key, flight_path, original_csv = info
+                set_ticket(file_key, object_name, flight_path, original_csv)
+                print(f"🗄 restored ticket for {object_name}: {flight_path}")
         df = None
         if flight_path:
             print(f"📡 trying flight download {flight_path}")
