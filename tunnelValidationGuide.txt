@@ -4,11 +4,10 @@ Follow these steps to confirm that the services are reachable via their Cloudfla
 
 ## 1. Start the stack
 
-Run the Docker compose services from the repository root using the helper
-script:
+Run the Docker compose services from the repository root:
 
 ```bash
-scripts/start_backend.sh
+docker compose up --build
 ```
 
 Wait until the `cloudflared` container reports `Connected`.

@@ -10,10 +10,9 @@ Follow the steps below to run all services together.
 
 ## 1. Environment setup
 
-1. Ensure `host.env` exists in the repository root. The helper script
-   `scripts/start_backend.sh` automatically copies `host.env.example` to
-   `host.env` if it is missing. Edit the file and set `HOST_IP` to the
-   address of your Docker host.
+1. Copy `host.env.example` to `host.env` at the repository root and edit the
+   `HOST_IP` variable so it matches the address of your Docker host. This file is
+   loaded by Docker Compose for every service.
 2. Copy `TrinityBackendDjango/.env.example` to `TrinityBackendDjango/.env` and adjust values if required.
 3. Copy `TrinityFrontend/.env.example` to `TrinityFrontend/.env`.
    Ensure `DEBUG=true` in the Django `.env` file so error messages appear if
@@ -67,11 +66,10 @@ database migrations for new tenants.
 
 ## 2. Start the backend containers
 
-From the repository root run the helper script which ensures `host.env` exists
-and then starts the backend containers:
+From the repository root build and start the backend containers:
 
 ```bash
-scripts/start_backend.sh
+docker compose up --build
 ```
 
 This starts PostgreSQL, MongoDB, Redis, the Django admin API on `localhost:8000`
@@ -146,9 +144,8 @@ React frontend are fully connected.
 
 After exposing the services through Cloudflare Tunnels you can verify that each
 public hostname responds. Docker Compose automatically launches short‑lived
-`check-*` containers. These run the validation helpers once during
-`scripts/start_backend.sh` and then exit. You can also run the helpers manually from
-the repository root:
+`check-*` containers when you start the stack. They run once and then exit. You
+can also run the helpers manually from the repository root:
 
 ```bash
 python scripts/check_django_tunnel.py

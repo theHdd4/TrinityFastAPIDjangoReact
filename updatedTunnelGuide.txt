@@ -38,7 +38,7 @@ The tunnel containers are defined in `cloudflared/docker-compose.yml` so they
 can run independently from the backend stack. Start the backend services first
 so the shared `trinity-net` network exists:
 ```bash
-scripts/start_backend.sh
+docker compose up --build
 ```
 Then launch the tunnels:
 ```bash

@@ -40,7 +40,7 @@ Traefik requires access to the Docker socket to read the labels. The compose fil
 Start the backend stack from the repository root so the `trinity-net` network is
 created:
 ```bash
-scripts/start_backend.sh
+docker compose up --build
 ```
 Then launch the tunnel separately:
 ```bash
