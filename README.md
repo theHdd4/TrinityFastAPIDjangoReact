@@ -10,8 +10,11 @@ Follow the steps below to run all services together.
 
 ## 1. Environment setup
 
-1. Copy `TrinityBackendDjango/.env.example` to `TrinityBackendDjango/.env` and adjust values if required.
-2. Copy `TrinityFrontend/.env.example` to `TrinityFrontend/.env`.
+1. Ensure the `HOST_IP` variable is defined. The helper script will copy
+   `host.env.example` to `host.env` in the repository root if it is missing so
+   you only need to edit the value the first time.
+2. Copy `TrinityBackendDjango/.env.example` to `TrinityBackendDjango/.env` and adjust values if required.
+3. Copy `TrinityFrontend/.env.example` to `TrinityFrontend/.env`.
    Ensure `DEBUG=true` in the Django `.env` file so error messages appear if
    tenant creation fails.
    The frontend `.env` includes `VITE_SUBSCRIPTIONS_API` which should point to
@@ -22,8 +25,8 @@ Follow the steps below to run all services together.
   API requests through Traefik. Rebuild the `frontend` service after changing
   this file so Vite picks up the new value:
 
-   ```bash
-  docker-compose build frontend
+  ```bash
+  docker compose build frontend
   ```
 
   The frontend is exposed at `https://trinity.quantmatrixai.com` through
@@ -40,15 +43,16 @@ Follow the steps below to run all services together.
 
   Update `CSRF_TRUSTED_ORIGINS` and `CORS_ALLOWED_ORIGINS` in
   `TrinityBackendDjango/.env` so both the local frontend URL
-  `http://10.2.1.65:8080` and the public domain
+  `http://${HOST_IP}:8080` and the public domain
   `https://trinity.quantmatrixai.com` are trusted. This prevents CORS and CSRF
   errors when logging in from either address.
   Set `FASTAPI_CORS_ORIGINS` to the same comma separated list so the FastAPI
   service accepts requests from both origins as well.
-  When exposing a public hostname also add it to the `ADDITIONAL_DOMAINS`
-  variable so Django's tenant middleware accepts the domain. Run
-  `python create_tenant.py` again after setting this variable if the domain was
-  not added during the initial setup.
+  When exposing a public hostname also add it, the host IP, and `localhost` to
+  the `ADDITIONAL_DOMAINS` variable so Django's tenant middleware accepts all
+  three.
+  Run `python create_tenant.py` again after adjusting this list if the entries
+  were not added during the initial setup.
 
 Docker and Node.js must be installed locally. The Python dependencies listed in
 `TrinityBackendDjango/requirements.txt` and
@@ -62,18 +66,18 @@ database migrations for new tenants.
 
 ## 2. Start the backend containers
 
-From the `TrinityBackendDjango` directory run the following command. It builds
-the Docker image and launches all backend services:
+From the repository root run the helper script which copies `host.env` if
+needed and then builds and starts the containers:
 
 ```bash
-docker-compose up --build
+./scripts/start_backend.sh
 ```
 
 This starts PostgreSQL, MongoDB, Redis, the Django admin API on `localhost:8000`
 and a FastAPI instance on `localhost:8001`. Uvicorn loads the app from
 `apps/orchestration/fastapi_app.py`. A separate AI service from the `TrinityAI`
-folder runs on `localhost:8002` for chat prompts. Use `docker-compose logs
-fastapi` or `docker-compose logs trinity-ai` to confirm the servers started
+folder runs on `localhost:8002` for chat prompts. Use `docker compose logs
+fastapi` or `docker compose logs trinity-ai` to confirm the servers started
 successfully. CORS is enabled so the React frontend served from `localhost:8080`
 can call the APIs. Once the containers finish installing dependencies the text
 service is reachable at `http://localhost:8001/api/t` and Trinity AI at
@@ -123,7 +127,7 @@ If tenant creation returns a **500** error the traceback will appear in the
 backend logs. Run:
 
 ```bash
-docker-compose logs web
+docker compose logs web
 ```
 
 Common issues are saving the tenant while connected to a tenant schema or using
@@ -141,9 +145,8 @@ React frontend are fully connected.
 
 After exposing the services through Cloudflare Tunnels you can verify that each
 public hostname responds. Docker Compose automatically launches short‑lived
-`check-*` containers. These run the validation helpers once during
-`docker-compose up` and then exit. You can also run the helpers manually from
-the repository root:
+`check-*` containers when you start the stack. They run once and then exit. You
+can also run the helpers manually from the repository root:
 
 ```bash
 python scripts/check_django_tunnel.py
@@ -170,9 +173,11 @@ that its Traefik service label points to port `8001`:
 traefik.http.services.fastapi.loadbalancer.server.port=8001
 ```
 
-Use `docker-compose logs traefik` and `docker-compose logs fastapi` for
-additional details. Use `docker-compose logs cloudflared-admin` (and the other
-tunnel containers) to confirm they are connected if you suspect connectivity
-issues.
+Use `docker compose logs traefik` and `docker compose logs fastapi` for
+additional details. Use `docker compose logs cloudflared` to confirm the tunnel
+is connected if you suspect connectivity issues.
+
+For tips on reducing startup times and improving responsiveness see
+[performance_tips.md](performance_tips.md).
 
 

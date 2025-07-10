@@ -19,5 +19,5 @@ Server cloudflare
 ```
 
 If you receive a 4xx or 5xx status, verify the URL and inspect the tunnel logs
-with `docker-compose logs cloudflared`. Errors such as `unexpected EOF` indicate
+with `docker compose logs cloudflared`. Errors such as `unexpected EOF` indicate
 the tunnel dropped and should be restarted.

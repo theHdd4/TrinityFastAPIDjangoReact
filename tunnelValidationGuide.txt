@@ -4,14 +4,13 @@ Follow these steps to confirm that the services are reachable via their Cloudfla
 
 ## 1. Start the stack
 
-Run the Docker compose services from the `TrinityBackendDjango` directory:
+Run the helper script from the repository root which starts all services:
 
 ```bash
-cd TrinityBackendDjango
-docker-compose up --build
+./scripts/start_backend.sh
 ```
 
-Wait until the `cloudflared-*` containers report `Connected`.
+Wait until the `cloudflared` container reports `Connected`.
 Docker Compose also starts short‑lived `check-*` services that
 execute the helper scripts automatically. They print **SUCCESS** or **FAILURE**
 in the logs based on the response from each public URL.
@@ -22,8 +21,8 @@ Traefik handles path based routing for the tunnel. Requests to
 the FastAPI service `fastapi:8001`. Traefik removes the `/admin` prefix
 before forwarding the request so Django handles it under `/api/` or `/admin/` as
 defined in `config/urls.py`. The root path `/` serves the React frontend.
-Ensure these mappings are configured in
-`TrinityBackendDjango/docker-compose.yml` before validating the tunnel.
+Ensure these mappings are configured in `docker-compose.yml` before validating
+the tunnel.
 
 The effective routing looks like this:
 
@@ -63,17 +62,15 @@ If the script reports an error:
 1. Inspect the tunnel logs:
 
    ```bash
-   docker-compose logs cloudflared-admin
-   docker-compose logs cloudflared-frontend
-   docker-compose logs cloudflared-api
+   docker compose logs cloudflared
    ```
 
    Look for messages like `Connected` or any errors indicating authentication or DNS issues.
 
-2. Ensure the `cloudflared-*` containers are running:
+2. Ensure the `cloudflared` container is running:
 
    ```bash
-   docker-compose ps cloudflared-admin cloudflared-frontend cloudflared-api
+   docker compose ps cloudflared
    ```
 
 3. Verify the Django container is healthy:
@@ -83,11 +80,11 @@ If the script reports an error:
    ```
 
 4. Confirm the DNS records in Cloudflare point to the correct tunnel and are set to **Proxied**.
-5. Double-check that the credential JSON files in `tunnelCreds/` match the UUID listed in each config file. If the file name or ID is wrong the tunnel cannot authenticate.
+5. Double-check that the credential JSON files in `cloudflared/tunnelCreds/` match the UUID listed in each config file. If the file name or ID is wrong the tunnel cannot authenticate.
 6. Restart a tunnel if needed:
 
    ```bash
-   docker-compose restart cloudflared
+   docker compose restart cloudflared
    ```
 
 Use these logs to identify whether the request is reaching the tunnel or failing earlier. Once the script shows a 200 status, the frontend should be able to access the backend through `https://trinity.quantmatrixai.com/admin/`.

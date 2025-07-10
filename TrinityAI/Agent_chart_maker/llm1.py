@@ -1,6 +1,7 @@
 import requests
 import json
 import re
+import os
 from typing import Dict
 
 # --- QueryEnhancer class (inlined and domain-tuned for charting) ---
@@ -262,7 +263,8 @@ def main(user_query, api_url, model_name, bearer_token):
 
 # Example usage
 if __name__ == "__main__":
-    API_URL = "http://10.2.1.65:11434/api/chat"
+    host_ip = os.getenv("HOST_IP", "10.2.1.65")
+    API_URL = f"http://{host_ip}:11434/api/chat"
     MODEL_NAME = "deepseek-r1:32b"
     BEARER_TOKEN = "aakash_api_key"
 

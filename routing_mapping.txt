@@ -1,14 +1,14 @@
 # Routing map for Trinity
 
 The Cloudflare tunnel forwards `https://trinity.quantmatrixai.com` into the Docker network where Traefik dispatches requests by path. The `/admin` prefix is stripped so Django receives `/api/` and `/admin/` URLs without the leading segment.
-Locally the same mapping is available through the frontend proxy on `http://10.2.1.65:8080`:
+Locally the same mapping is available through the frontend proxy on `http://${HOST_IP}:8080`:
 
-- `/` &rarr; React frontend container on `10.2.1.65:8080`
+- `/` &rarr; React frontend container on `${HOST_IP}:8080`
 - `/admin/` &rarr; Django container `web:8000`
 - `/api/` &rarr; FastAPI container `fastapi:8001`
 
 When calling Django directly on port `8000`, the `/admin` prefix is not removed.
-Use `/api/...` paths in that case, e.g. `http://10.2.1.65:8000/api/accounts/login/`.
+Use `/api/...` paths in that case, e.g. `http://${HOST_IP}:8000/api/accounts/login/`.
 
 ## Django REST API
 All Django API endpoints start with `/api/` once the request reaches the backend. Examples include:
