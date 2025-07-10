@@ -209,7 +209,8 @@ async def flight_table(object_name: str):
     flight_path = get_flight_path_for_csv(object_name)
     print(f"➡️ flight_table request: {object_name} path={flight_path}")
     if not flight_path:
-        raise HTTPException(status_code=404, detail="Flight path not found")
+        print(f"⚠️ flight path not found for {object_name}; using object name")
+        flight_path = object_name
     try:
         data = download_table_bytes(flight_path)
         return Response(data, media_type="application/vnd.apache.arrow.file")
