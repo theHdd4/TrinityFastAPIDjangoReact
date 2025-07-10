@@ -1,0 +1,122 @@
+# Guide: Adding a New Atom
+
+This guide explains how to create a new "atom" feature in both the React frontend and the FastAPI backend.
+
+---
+
+## 1. Create the frontend atom
+
+1. Navigate to `TrinityFrontend/src/components/AtomList/atoms` and create a new folder named after the atom id. For example:
+
+   ```bash
+   TrinityFrontend/src/components/AtomList/atoms/my-new-atom/
+   ```
+
+2. Inside that folder add `index.ts` defining the `Atom` object. A minimal template:
+
+   ```ts
+   import type { Atom } from '@/components/AtomCategory/data/atomCategories';
+
+   const myNewAtom: Atom = {
+     id: 'my-new-atom',
+     title: 'My New Atom',
+     category: 'Data Processing',
+     description: 'Brief description of the feature',
+     tags: ['custom', 'atom'],
+     color: 'bg-blue-500'
+   };
+
+   export default myNewAtom;
+   ```
+
+3. Edit `TrinityFrontend/src/components/AtomCategory/data/atomCategories.ts`.
+   - Add an import for your atom near the other imports:
+
+     ```ts
+     import myNewAtom from '@/components/AtomList/atoms/my-new-atom';
+     ```
+   - Locate the category array where the atom belongs and include `myNewAtom` in the `atoms:` list.
+
+4. Rebuild or restart the frontend (`npm run dev`) and the new atom will appear in the Atom Library.
+
+## 2. Create the backend feature
+
+1. Under `TrinityBackendFastAPI/app/features` create a folder named after the feature, for example:
+
+   ```bash
+   TrinityBackendFastAPI/app/features/my_new_atom/
+   ```
+
+2. Inside create the FastAPI router. Example `endpoint.py`:
+
+   ```py
+   from fastapi import APIRouter
+
+   router = APIRouter()
+
+   @router.get('/my-new-atom/example')
+   async def example_endpoint():
+       return {'message': 'Hello from my-new-atom'}
+   ```
+
+   Add other modules like `service.py`, `schema.py` etc. as needed.
+
+3. Register the router so the API exposes the new endpoints.
+   Edit `TrinityBackendFastAPI/app/api/router.py` and add:
+
+   ```py
+   from app.features.my_new_atom.endpoint import router as my_new_atom_router
+   ...
+   api_router.include_router(my_new_atom_router)
+   ```
+
+4. (Optional) Add tests under `TrinityBackendFastAPI/tests` following the existing pattern.
+
+5. Rebuild the FastAPI service and verify that requests to `/api/my-new-atom/...` return responses.
+
+---
+
+Following these steps keeps the atom lists in sync across the frontend and backend.
+
+## Example: Implementing the Concat atom
+
+The Concat atom merges two datasets either vertically or horizontally. Below are concrete steps to integrate the provided React components and expose a backend API.
+
+### Frontend steps
+1. Create `TrinityFrontend/src/components/AtomList/atoms/concat/components` and add these files using the code snippets:
+   - `ConcatCanvas.tsx`
+   - `ConcatSettings.tsx`
+   - `ConcatVisualisation.tsx`
+   - `ConcatExhibition.tsx`
+2. Add `ConcatAtom.tsx` in `TrinityFrontend/src/components/AtomList/atoms/concat` which imports the above components and renders `<ConcatCanvas />`.
+3. `index.ts` under the same folder already defines the Atom metadata. No changes are required there.
+4. Update `TrinityFrontend/src/components/LaboratoryMode/components/CanvasArea.tsx`:
+   - Add `import ConcatAtom from '@/components/AtomList/atoms/concat/ConcatAtom';` near the top with other atom imports.
+   - Where atoms are rendered (the large conditional containing `text-box` and `data-upload-validate`), add a new branch:
+     ```tsx
+     ) : atom.atomId === 'concat' ? (
+       <ConcatAtom atomId={atom.id} />
+     ) : (
+     ```
+5. (Optional) To edit settings inside the right side panel, create `ConcatProperties.tsx` that combines `ConcatSettings`, `ConcatVisualisation` and `ConcatExhibition` using `<Tabs />`. Import and render this component in `SettingsPanel.tsx` when `atom?.atomId === 'concat'`.
+6. Rebuild the frontend (`npm run dev`) and verify the Concat atom appears in the Atom Library and can be dragged onto a card.
+
+### Backend steps
+1. Under `TrinityBackendFastAPI/app/features` create a new folder `concat`.
+2. Add `endpoint.py` with a router stub:
+   ```py
+   from fastapi import APIRouter
+   from .service import concatenate
+   from .schemas import ConcatRequest
+
+   router = APIRouter()
+
+   @router.post('/concat')
+   async def concat_data(req: ConcatRequest):
+       return await concatenate(req)
+   ```
+3. Implement `service.py` to load the two files (using pandas) and return the concatenated dataframe or a summary. Define the request model in `schemas.py` with `file1`, `file2` and `direction` fields.
+4. Register this router in `TrinityBackendFastAPI/app/api/router.py` by importing it and calling `api_router.include_router(concat_router)`.
+5. Restart the FastAPI server so `/api/concat/concat` (or similar) is available for the frontend.
+
+These instructions apply the generic steps above to a real atom and ensure both the UI and API are connected.
