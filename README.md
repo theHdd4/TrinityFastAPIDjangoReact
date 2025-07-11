@@ -79,9 +79,11 @@ and a FastAPI instance on `localhost:8001`. Uvicorn loads the app from
 folder runs on `localhost:8002` for chat prompts. Use `docker compose logs
 fastapi` or `docker compose logs trinity-ai` to confirm the servers started
 successfully. CORS is enabled so the React frontend served from `localhost:8080`
-can call the APIs. Once the containers finish installing dependencies the text
-service is reachable at `http://localhost:8001/api/t` and Trinity AI at
-`http://localhost:8002/chat`.
+ can call the APIs. Once the containers finish installing dependencies the text
+ service is reachable at `http://localhost:8001/api/t` and Trinity AI at
+ `http://localhost:8002/chat`. When accessed through the tunnel, Traefik
+ proxies `/chat` to the `trinity-ai` container so the frontend posts to
+ `https://trinity.quantmatrixai.com/chat`.
 
 ## 3. Start the frontend
 
@@ -171,6 +173,12 @@ that its Traefik service label points to port `8001`:
 
 ```yaml
 traefik.http.services.fastapi.loadbalancer.server.port=8001
+```
+
+Similarly the Trinity AI service should map port `8002`:
+
+```yaml
+traefik.http.services.trinity-ai.loadbalancer.server.port=8002
 ```
 
 Use `docker compose logs traefik` and `docker compose logs fastapi` for

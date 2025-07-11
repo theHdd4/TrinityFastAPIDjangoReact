@@ -147,6 +147,11 @@ services:
       - "8002:8002"
     networks:
       - trinity-net
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.trinity-ai.rule=Host(`trinity.quantmatrixai.com`) && PathPrefix(`/chat`)"
+      - "traefik.http.routers.trinity-ai.entrypoints=web"
+      - "traefik.http.services.trinity-ai.loadbalancer.server.port=8002"
 
   frontend:
     build:
