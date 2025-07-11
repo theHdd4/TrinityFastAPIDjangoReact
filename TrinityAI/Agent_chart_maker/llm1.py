@@ -263,7 +263,7 @@ def main(user_query, api_url, model_name, bearer_token):
 
 # Example usage
 if __name__ == "__main__":
-    host_ip = os.getenv("HOST_IP", "10.2.1.65")
+    host_ip = os.getenv("HOST_IP", "127.0.0.1")
     API_URL = f"http://{host_ip}:11434/api/chat"
     MODEL_NAME = "deepseek-r1:32b"
     BEARER_TOKEN = "aakash_api_key"

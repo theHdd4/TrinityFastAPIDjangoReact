@@ -12,7 +12,8 @@ Follow the steps below to run all services together.
 
 1. Ensure the `HOST_IP` variable is defined. The helper script will copy
    `host.env.example` to `host.env` in the repository root if it is missing so
-   you only need to edit the value the first time.
+   you only need to edit the value the first time. The example defaults to
+   `127.0.0.1`.
 2. Copy `TrinityBackendDjango/.env.example` to `TrinityBackendDjango/.env` and adjust values if required.
 3. Copy `TrinityFrontend/.env.example` to `TrinityFrontend/.env`.
    Ensure `DEBUG=true` in the Django `.env` file so error messages appear if
@@ -73,8 +74,10 @@ needed and then builds and starts the containers:
 ./scripts/start_backend.sh
 ```
 
-This starts PostgreSQL, MongoDB, Redis, the Django admin API on `localhost:8000`
-and a FastAPI instance on `localhost:8001`. Uvicorn loads the app from
+This script passes `host.env` to Docker Compose so variables like `HOST_IP`
+expand correctly. It starts PostgreSQL, MongoDB, Redis, the Django admin API on
+`localhost:8000` and a FastAPI instance on `localhost:8001`. Uvicorn loads the
+app from
 `apps/orchestration/fastapi_app.py`. A separate AI service from the `TrinityAI`
 folder runs on `localhost:8002` for chat prompts. Use `docker compose logs
 fastapi` or `docker compose logs trinity-ai` to confirm the servers started
