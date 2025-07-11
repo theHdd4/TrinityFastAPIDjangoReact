@@ -52,6 +52,12 @@ Follow the steps below to run all services together.
   When exposing a public hostname also add it, the host IP, and `localhost` to
   the `ADDITIONAL_DOMAINS` variable so Django's tenant middleware accepts all
   three.
+  If `docker compose exec` prints a warning that `FASTAPI_CORS_ORIGINS` is not
+  set, pass `--env-file host.env` so Compose can load the defaults:
+
+  ```bash
+  docker compose --env-file host.env exec web python create_tenant.py
+  ```
   Run `python create_tenant.py` again after adjusting this list if the entries
   were not added during the initial setup.
 
