@@ -83,7 +83,9 @@ successfully. CORS is enabled so the React frontend served from `localhost:8080`
  service is reachable at `http://localhost:8001/api/t` and Trinity AI at
  `http://localhost:8002/chat`. When accessed through the tunnel, Traefik
  proxies `/chat` to the `trinity-ai` container so the frontend posts to
- `https://trinity.quantmatrixai.com/chat`.
+ `https://trinity.quantmatrixai.com/chat`. Use `python
+ scripts/check_ai_tunnel.py` to verify the chat endpoint responds through
+ the tunnel.
 
 ## 3. Start the frontend
 
@@ -180,6 +182,9 @@ Similarly the Trinity AI service should map port `8002`:
 ```yaml
 traefik.http.services.trinity-ai.loadbalancer.server.port=8002
 ```
+
+Run `python scripts/check_ai_tunnel.py` to confirm `/chat` is reachable
+through the tunnel and routed to the AI container.
 
 Use `docker compose logs traefik` and `docker compose logs fastapi` for
 additional details. Use `docker compose logs cloudflared` to confirm the tunnel
