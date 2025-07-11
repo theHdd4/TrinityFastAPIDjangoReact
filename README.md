@@ -10,9 +10,13 @@ Follow the steps below to run all services together.
 
 ## 1. Environment setup
 
-1. Ensure the `HOST_IP` variable is defined. The helper script will copy
-   `host.env.example` to `host.env` in the repository root if it is missing so
-   you only need to edit the value the first time.
+1. Edit `TrinityBackendDjango/.env` and `TrinityFrontend/.env` to set the
+   `HOST_IP` variable. In most setups this is the IP of the machine running the
+   containers. For the current deployment the main services use
+   `HOST_IP=10.2.1.242`.
+   The Trinity AI container communicates with an external Ollama server so set
+   `OLLAMA_IP=10.2.1.65` either in `docker-compose.yml` or the environment to
+   reach that server.
 2. Copy `TrinityBackendDjango/.env.example` to `TrinityBackendDjango/.env` and adjust values if required.
 3. Copy `TrinityFrontend/.env.example` to `TrinityFrontend/.env`.
    Ensure `DEBUG=true` in the Django `.env` file so error messages appear if
@@ -50,9 +54,8 @@ Follow the steps below to run all services together.
   service accepts requests from both origins as well.
   When exposing a public hostname also add it, the host IP, and `localhost` to
   the `ADDITIONAL_DOMAINS` variable so Django's tenant middleware accepts all
-  three.
-  Run `python create_tenant.py` again after adjusting this list if the entries
-  were not added during the initial setup.
+  three. Run `python create_tenant.py` again after adjusting this list if the
+  entries were not added during the initial setup.
 
 Docker and Node.js must be installed locally. The Python dependencies listed in
 `TrinityBackendDjango/requirements.txt` and
@@ -66,22 +69,28 @@ database migrations for new tenants.
 
 ## 2. Start the backend containers
 
-From the repository root run the helper script which copies `host.env` if
-needed and then builds and starts the containers:
+From the repository root run the helper script which builds and starts the
+containers:
 
 ```bash
 ./scripts/start_backend.sh
 ```
 
-This starts PostgreSQL, MongoDB, Redis, the Django admin API on `localhost:8000`
-and a FastAPI instance on `localhost:8001`. Uvicorn loads the app from
+This script starts PostgreSQL, MongoDB, Redis, the Django admin API on
+`localhost:8000` and a FastAPI instance on `localhost:8001`. Uvicorn loads the
+app from
 `apps/orchestration/fastapi_app.py`. A separate AI service from the `TrinityAI`
 folder runs on `localhost:8002` for chat prompts. Use `docker compose logs
 fastapi` or `docker compose logs trinity-ai` to confirm the servers started
 successfully. CORS is enabled so the React frontend served from `localhost:8080`
-can call the APIs. Once the containers finish installing dependencies the text
-service is reachable at `http://localhost:8001/api/t` and Trinity AI at
-`http://localhost:8002/chat`.
+ can call the APIs. Once the containers finish installing dependencies the text
+ service is reachable at `http://localhost:8001/api/t` and Trinity AI at
+ `http://localhost:8002/chat`. When accessed through the tunnel, Traefik
+ proxies `/chat` to the `trinity-ai` container so the frontend posts to
+ `https://trinity.quantmatrixai.com/chat`. The router uses a high priority so
+ `/chat` requests never fall back to the frontend service. Use
+ `python scripts/check_ai_tunnel.py` to verify the chat endpoint responds
+ through the tunnel.
 
 ## 3. Start the frontend
 
@@ -172,6 +181,15 @@ that its Traefik service label points to port `8001`:
 ```yaml
 traefik.http.services.fastapi.loadbalancer.server.port=8001
 ```
+
+Similarly the Trinity AI service should map port `8002`:
+
+```yaml
+traefik.http.services.trinity-ai.loadbalancer.server.port=8002
+```
+
+Run `python scripts/check_ai_tunnel.py` to confirm `/chat` is reachable
+through the tunnel and routed to the AI container.
 
 Use `docker compose logs traefik` and `docker compose logs fastapi` for
 additional details. Use `docker compose logs cloudflared` to confirm the tunnel
