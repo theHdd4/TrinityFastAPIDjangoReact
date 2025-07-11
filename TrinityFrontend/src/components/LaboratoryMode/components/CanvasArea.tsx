@@ -19,6 +19,9 @@ import { AIChatBot } from '@/components/TrinityAI';
 import TextBoxEditor from '@/components/AtomList/atoms/text-box/TextBoxEditor';
 import DataUploadValidateAtom from '@/components/AtomList/atoms/data-upload-validate/DataUploadValidateAtom';
 import FeatureOverviewAtom from '@/components/AtomList/atoms/feature-overview/FeatureOverviewAtom';
+import ConcatAtom from '@/components/AtomList/atoms/concat/ConcatAtom';
+import MergeAtom from '@/components/AtomList/atoms/merge/MergeAtom';
+
 import {
   useLaboratoryStore,
   LayoutCard,
@@ -387,43 +390,6 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
         ? layoutCards.map(c => ({ ...c, atoms: [...c.atoms] }))
         : [];
     }
-
-    try {
-      const serializable = (Array.isArray(layoutCards) ? layoutCards : []).map(
-        card => ({
-        id: card.id,
-        atoms: card.atoms.map(a => ({ ...a })),
-        isExhibited: card.isExhibited,
-        moleculeId: card.moleculeId,
-        moleculeTitle: card.moleculeTitle
-        })
-      );
-      localStorage.setItem(STORAGE_KEY, safeStringify(serializable));
-
-      const labConfig = {
-        cards: serializable,
-        exhibitedCards: serializable.filter(c => c.isExhibited),
-        timestamp: new Date().toISOString()
-      };
-      localStorage.setItem('laboratory-config', safeStringify(labConfig));
-
-      const current = localStorage.getItem('current-project');
-      if (current) {
-        try {
-          const proj = JSON.parse(current);
-          fetch(`${REGISTRY_API}/projects/${proj.id}/`, {
-            method: 'PATCH',
-            credentials: 'include',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ state: { laboratory_config: labConfig } })
-          }).catch(() => {});
-        } catch {
-          /* ignore */
-        }
-      }
-    } catch (err) {
-      console.error('Failed to persist laboratory layout', err);
-    }
   }, [layoutCards]);
 
   // Sync cards with exhibition store
@@ -552,13 +518,6 @@ const addNewCard = (moleculeId?: string, position?: number) => {
     const card = arr.find(c => c.id === cardId);
     const updated = arr.filter(c => c.id !== cardId);
     setLayoutCards(updated);
-    localStorage.setItem(STORAGE_KEY, safeStringify(updated));
-    const labConfig = {
-      cards: updated,
-      exhibitedCards: updated.filter(c => c.isExhibited),
-      timestamp: new Date().toISOString(),
-    };
-    localStorage.setItem('laboratory-config', safeStringify(labConfig));
     setCards(updated);
 
     if (card) {
@@ -582,7 +541,7 @@ const addNewCard = (moleculeId?: string, position?: number) => {
           method: 'PATCH',
           credentials: 'include',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ state: { laboratory_config: labConfig } }),
+          body: JSON.stringify({ state: { laboratory_config: { cards: updated } } }),
         });
       } catch {
         /* ignore */
@@ -613,26 +572,8 @@ const addNewCard = (moleculeId?: string, position?: number) => {
       card.id === cardId ? { ...card, isExhibited } : card
     );
 
-    // persist updated layout immediately
-    localStorage.setItem(STORAGE_KEY, safeStringify(updated));
-
-    // persist exhibition configuration for direct use in Exhibition mode
-    const exhibitedCards = updated.filter(c => c.isExhibited);
-    const labConfig = {
-      cards: updated,
-      exhibitedCards,
-      timestamp: new Date().toISOString(),
-    };
-    localStorage.setItem('laboratory-config', safeStringify(labConfig));
-
     setLayoutCards(updated);
-
-    // keep exhibition store in sync
-    updateCard(cardId, { isExhibited });
-
-    if (onCardSelect && selectedCardId === cardId) {
-      onCardSelect(cardId, isExhibited);
-    }
+    setCards(updated);
   };
 
   if (workflowMolecules.length > 0) {
@@ -901,6 +842,10 @@ const addNewCard = (moleculeId?: string, position?: number) => {
                         <DataUploadValidateAtom atomId={atom.id} />
                       ) : atom.atomId === 'feature-overview' ? (
                         <FeatureOverviewAtom atomId={atom.id} />
+                      ) : atom.atomId === 'concat' ? (
+                        <ConcatAtom atomId={atom.id} />
+                      ) : atom.atomId === 'merge' ? (
+                        <MergeAtom atomId={atom.id} />
                       ) : (
                         <div>
                           <h4 className="font-semibold text-gray-900 mb-1 text-sm">{atom.title}</h4>

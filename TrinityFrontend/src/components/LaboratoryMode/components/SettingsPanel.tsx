@@ -17,6 +17,8 @@ import {
 } from '../store/laboratoryStore';
 import DataUploadValidateProperties from '@/components/AtomList/atoms/data-upload-validate/components/properties/DataUploadValidateProperties';
 import FeatureOverviewProperties from '@/components/AtomList/atoms/feature-overview/components/properties/FeatureOverviewProperties';
+import ConcatProperties from '@/components/AtomList/atoms/concat/components/properties/ConcatProperties';
+import MergeProperties from '@/components/AtomList/atoms/merge/components/properties/MergeProperties';
 
 interface SettingsPanelProps {
   isCollapsed: boolean;
@@ -91,6 +93,10 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
             <DataUploadValidateProperties atomId={selectedAtomId} />
           ) : selectedAtomId && atom?.atomId === 'feature-overview' ? (
             <FeatureOverviewProperties atomId={selectedAtomId} />
+          ) : selectedAtomId && atom?.atomId === 'concat' ? (
+            <ConcatProperties atomId={selectedAtomId} />
+          ) : selectedAtomId && atom?.atomId === 'merge' ? (
+            <MergeProperties atomId={selectedAtomId} />
           ) : (
           <>
           <Tabs value={tab} onValueChange={setTab} className="w-full">

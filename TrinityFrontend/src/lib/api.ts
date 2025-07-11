@@ -44,6 +44,12 @@ export const SUBSCRIPTIONS_API =
 export const VALIDATE_API =
   import.meta.env.VITE_VALIDATE_API || `${backendOrigin.replace(/:8000$/, ':8001')}/api/data-upload-validate`;
 
+export const CONCAT_API =
+  import.meta.env.VITE_CONCAT_API || `${backendOrigin.replace(/:8000$/, ':8001')}/api/concat`;
+
+export const MERGE_API =
+  import.meta.env.VITE_MERGE_API || `${backendOrigin.replace(/:8000$/, ':8001')}/api/merge`;
+
 export const FEATURE_OVERVIEW_API =
   import.meta.env.VITE_FEATURE_OVERVIEW_API || `${backendOrigin.replace(/:8000$/, ':8001')}/api/feature-overview`;
 

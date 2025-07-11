@@ -105,6 +105,24 @@ export const DEFAULT_FEATURE_OVERVIEW_SETTINGS: FeatureOverviewSettings = {
   activeRow: null
 };
 
+export interface ConcatSettings {
+  file1: File | string | null;
+  file2: File | string | null;
+  direction: string;
+  performConcat: boolean;
+  concatResults?: any;
+  concatId?: string;
+}
+
+export const DEFAULT_CONCAT_SETTINGS: ConcatSettings = {
+  file1: null,
+  file2: null,
+  direction: 'vertical',
+  performConcat: false,
+  concatResults: undefined,
+  concatId: undefined
+};
+
 export interface DroppedAtom {
   id: string;
   atomId: string;
@@ -130,24 +148,26 @@ interface LaboratoryStore {
   reset: () => void;
 }
 
-const STORAGE_KEY = 'laboratory-layout-cards';
-
 export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
   cards: [],
-  setCards: (cards: LayoutCard[] | unknown) => {
-    const safeCards = Array.isArray(cards) ? cards : [];
-    localStorage.setItem(STORAGE_KEY, safeStringify(safeCards));
-    set({ cards: safeCards });
+  setCards: (cards: LayoutCard[]) => {
+    set({ cards });
   },
-  updateAtomSettings: (atomId, settings) => {
-    const updatedCards = get().cards.map(card => ({
-      ...card,
-      atoms: card.atoms.map(a =>
-        a.id === atomId ? { ...a, settings: { ...(a.settings || {}), ...settings } } : a
-      )
-    }));
-    localStorage.setItem(STORAGE_KEY, safeStringify(updatedCards));
-    set({ cards: updatedCards });
+
+  updateAtomSettings: (atomId: string, settings: any) => {
+    set((state) => {
+      const updatedCards = state.cards.map((card) => ({
+        ...card,
+        atoms: card.atoms.map((atom) => {
+          if (atom.id === atomId) {
+            return { ...atom, settings };
+          }
+          return atom;
+        })
+      }));
+
+      return { cards: updatedCards };
+    });
   },
   getAtom: (atomId) => {
     for (const card of get().cards) {
@@ -157,7 +177,6 @@ export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
     return undefined;
   },
   reset: () => {
-    localStorage.removeItem(STORAGE_KEY);
     set({ cards: [] });
   }
 }));

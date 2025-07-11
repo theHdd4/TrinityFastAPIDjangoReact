@@ -9,3 +9,4 @@ motor
 python-multipart
 pyarrow>=15.0.0
 asyncpg
+openpyxl

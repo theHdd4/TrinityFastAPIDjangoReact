@@ -33,16 +33,8 @@ export const useExhibitionStore = create<ExhibitionStore>((set, get) => ({
   exhibitedCards: [],
   
   loadSavedConfiguration: () => {
-    const savedConfig = localStorage.getItem('laboratory-config');
-    if (savedConfig) {
-      const config = JSON.parse(savedConfig);
-      const exhibitedCards = config.cards.filter((card: LayoutCard) => card.isExhibited);
-      
-      set({
-        cards: config.cards,
-        exhibitedCards
-      });
-    }
+    // Load from global store instead of localStorage
+    set({ cards: [], exhibitedCards: [] });
   },
   
   toggleCardExhibition: (cardId: string) => {
@@ -58,14 +50,6 @@ export const useExhibitionStore = create<ExhibitionStore>((set, get) => ({
         cards: updatedCards,
         exhibitedCards
       };
-      localStorage.setItem(
-        'laboratory-config',
-        safeStringify({
-          cards: updatedCards,
-          exhibitedCards,
-          timestamp: new Date().toISOString()
-        })
-      );
       return newState;
     });
   },
@@ -88,14 +72,6 @@ export const useExhibitionStore = create<ExhibitionStore>((set, get) => ({
         cards: updatedCards,
         exhibitedCards
       };
-      localStorage.setItem(
-        'laboratory-config',
-        safeStringify({
-          cards: updatedCards,
-          exhibitedCards,
-          timestamp: new Date().toISOString()
-        })
-      );
       return newState;
     });
   },
@@ -104,14 +80,9 @@ export const useExhibitionStore = create<ExhibitionStore>((set, get) => ({
     const safeCards = Array.isArray(cards) ? cards : [];
     const exhibitedCards = safeCards.filter(card => (card as any).isExhibited);
     const newState = { cards: safeCards, exhibitedCards };
-    localStorage.setItem(
-      'laboratory-config',
-      safeStringify({ cards: safeCards, exhibitedCards, timestamp: new Date().toISOString() })
-    );
     set(newState);
   },
   reset: () => {
-    localStorage.removeItem('laboratory-config');
     set({ cards: [], exhibitedCards: [] });
   }
 }));

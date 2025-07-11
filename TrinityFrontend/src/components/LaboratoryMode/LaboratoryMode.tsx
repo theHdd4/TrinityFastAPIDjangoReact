@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { Play, Save, Share2, Undo2 } from 'lucide-react';
+import { Play, Save, Share2, Undo2, AlertTriangle } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import Header from '@/components/Header';
 import { safeStringify } from '@/utils/safeStringify';
@@ -16,6 +16,7 @@ const LaboratoryMode = () => {
   const [selectedAtomId, setSelectedAtomId] = useState<string>();
   const [selectedCardId, setSelectedCardId] = useState<string>();
   const [cardExhibited, setCardExhibited] = useState<boolean>(false);
+  const [error, setError] = useState<string | null>(null);
   const { toast } = useToast();
   const { cards, setCards } = useExhibitionStore();
   const setLabCards = useLaboratoryStore(state => state.setCards);
@@ -32,25 +33,29 @@ const LaboratoryMode = () => {
         if (last && last.state) {
           setLabCards(last.state);
           setCards(last.state);
-          localStorage.setItem('laboratory-layout-cards', safeStringify(last.state));
-          const labConfig = {
-            cards: last.state,
-            exhibitedCards: last.state.filter((c: any) => c.isExhibited),
-            timestamp: new Date().toISOString(),
-          };
-          localStorage.setItem('laboratory-config', safeStringify(labConfig));
-          await fetch(`${REGISTRY_API}/projects/${proj.id}/`, {
-            method: 'PATCH',
-            credentials: 'include',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ state: { laboratory_config: labConfig } }),
-          }).catch(() => {});
-          await fetch(`${LAB_ACTIONS_API}/${last.id}/`, { method: 'DELETE', credentials: 'include' }).catch(() => {});
-          toast({ title: 'Undo', description: 'Last change reverted' });
+          try {
+            const labConfig = {
+              cards: last.state,
+              exhibitedCards: last.state.filter((c: any) => c.isExhibited),
+              timestamp: new Date().toISOString(),
+            };
+            await fetch(`${REGISTRY_API}/projects/${proj.id}/`, {
+              method: 'PATCH',
+              credentials: 'include',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ state: { laboratory_config: labConfig } }),
+            }).catch(() => {});
+            await fetch(`${LAB_ACTIONS_API}/${last.id}/`, { method: 'DELETE', credentials: 'include' }).catch(() => {});
+            toast({ title: 'Undo', description: 'Last change reverted' });
+          } catch (storageError) {
+            console.error('Storage error during undo:', storageError);
+            setError('Storage quota exceeded. Please clear browser data and try again.');
+          }
         }
       }
-    } catch {
-      /* ignore */
+    } catch (error) {
+      console.error('Undo error:', error);
+      setError('Failed to undo. Please try again.');
     }
   };
 
@@ -70,48 +75,97 @@ const LaboratoryMode = () => {
     setCardExhibited(exhibited);
   };
 
-
   const handleSave = async () => {
-    const exhibitedCards = cards.filter(card => card.isExhibited);
+    try {
+      const exhibitedCards = cards.filter(card => card.isExhibited);
 
-    setCards(cards);
-    
-    // Save the current laboratory configuration
-    const labConfig = {
-      cards,
-      exhibitedCards,
-      timestamp: new Date().toISOString()
-    };
-    
-    // Store in localStorage for persistence
-    localStorage.setItem('laboratory-config', safeStringify(labConfig));
+      setCards(cards);
+      
+      // Save the current laboratory configuration
+      const labConfig = {
+        cards,
+        exhibitedCards,
+        timestamp: new Date().toISOString()
+      };
 
-    const current = localStorage.getItem('current-project');
-    if (current) {
-      try {
-        const proj = JSON.parse(current);
-        await fetch(`${REGISTRY_API}/projects/${proj.id}/`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'include',
-          body: JSON.stringify({
-            state: { laboratory_config: labConfig },
-          }),
-        });
-      } catch {
-        /* ignore */
+      const current = localStorage.getItem('current-project');
+      if (current) {
+        try {
+          const proj = JSON.parse(current);
+          await fetch(`${REGISTRY_API}/projects/${proj.id}/`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({
+              state: { laboratory_config: labConfig },
+            }),
+          });
+        } catch (apiError) {
+          console.error('API error during save:', apiError);
+          // Don't show error for API failures, just log them
+        }
       }
+      
+      toast({
+        title: "Configuration Saved",
+        description: `Laboratory configuration saved successfully. ${exhibitedCards.length} card(s) marked for exhibition.`,
+      });
+      setError(null);
+    } catch (error) {
+      console.error('Save error:', error);
+      setError('Failed to save configuration. Please try again.');
+      toast({
+        title: "Save Error",
+        description: "Failed to save configuration. Please try again.",
+        variant: "destructive",
+      });
     }
-    
-    toast({
-      title: "Configuration Saved",
-      description: `Laboratory configuration saved successfully. ${exhibitedCards.length} card(s) marked for exhibition.`,
-    });
+  };
+
+  const clearStorageAndReload = () => {
+    try {
+      localStorage.clear();
+      sessionStorage.clear();
+      window.location.reload();
+    } catch (e) {
+      console.error('Failed to clear storage:', e);
+      window.location.reload();
+    }
   };
 
   return (
     <div className="h-screen bg-gradient-to-br from-gray-50 to-gray-100 flex flex-col">
       <Header />
+      
+      {/* Error Banner */}
+      {error && (
+        <div className="bg-red-50 border-b border-red-200 px-6 py-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center">
+              <AlertTriangle className="w-5 h-5 text-red-600 mr-3" />
+              <span className="text-red-800 text-sm">{error}</span>
+            </div>
+            <div className="flex items-center space-x-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setError(null)}
+                className="text-red-600 border-red-300 hover:bg-red-50"
+              >
+                Dismiss
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={clearStorageAndReload}
+                className="text-red-600 border-red-300 hover:bg-red-50"
+              >
+                Clear Storage & Reload
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
       
       {/* Laboratory Header */}
       <div className="bg-white/80 backdrop-blur-sm border-b border-gray-200/60 px-6 py-6 flex-shrink-0 shadow-sm">
