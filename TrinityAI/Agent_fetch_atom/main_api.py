@@ -24,9 +24,9 @@ def convert_numpy(obj):
 
 def initialize_single_llm_system():
     try:
-        host_ip = os.getenv("HOST_IP", "127.0.0.1")
+        ollama_ip = os.getenv("OLLAMA_IP", os.getenv("HOST_IP", "127.0.0.1"))
         processor = SingleLLMProcessor(
-            api_url=f"http://{host_ip}:11434/api/chat",
+            api_url=f"http://{ollama_ip}:11434/api/chat",
             model_name="deepseek-r1:32b",
             bearer_token="aakash_api_key"
         )

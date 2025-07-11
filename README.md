@@ -11,8 +11,12 @@ Follow the steps below to run all services together.
 ## 1. Environment setup
 
 1. Edit `TrinityBackendDjango/.env` and `TrinityFrontend/.env` to set the
-   `HOST_IP` variable. The provided examples default to `127.0.0.1`. Update this
-   address if the services run on another machine.
+   `HOST_IP` variable. In most setups this is the IP of the machine running the
+   containers. For the current deployment the main services use
+   `HOST_IP=10.2.1.242`.
+   The Trinity AI container communicates with an external Ollama server so set
+   `OLLAMA_IP=10.2.1.65` either in `docker-compose.yml` or the environment to
+   reach that server.
 2. Copy `TrinityBackendDjango/.env.example` to `TrinityBackendDjango/.env` and adjust values if required.
 3. Copy `TrinityFrontend/.env.example` to `TrinityFrontend/.env`.
    Ensure `DEBUG=true` in the Django `.env` file so error messages appear if

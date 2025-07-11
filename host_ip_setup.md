@@ -1,9 +1,12 @@
 # Configuring HOST_IP
 
 The backend and frontend read the `HOST_IP` variable from their respective
-`.env` files. Both examples default to `127.0.0.1`. Edit the value in
-`TrinityBackendDjango/.env` and `TrinityFrontend/.env` if the services should
-listen on another IP address.
+`.env` files. These examples use `10.2.1.242` as the address of the main host.
+Adjust this value when deploying to a different machine.
+
+The Trinity AI container may need to reach an external Ollama server. Set
+`OLLAMA_IP` to that server's IP address (for example `10.2.1.65`) so the
+internal services can connect to it.
 
 Run `scripts/start_backend.sh` from the repository root to build and launch the
 containers. Rebuild the frontend container after updating its `.env` so Vite

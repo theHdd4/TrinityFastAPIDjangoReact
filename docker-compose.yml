@@ -138,6 +138,8 @@ services:
       dockerfile: Dockerfile
     env_file:
       - ./TrinityBackendDjango/.env
+    environment:
+      OLLAMA_IP: 10.2.1.65
     ports:
       - "8002:8002"
     networks:
