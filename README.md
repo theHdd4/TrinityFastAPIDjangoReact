@@ -86,9 +86,10 @@ successfully. CORS is enabled so the React frontend served from `localhost:8080`
  service is reachable at `http://localhost:8001/api/t` and Trinity AI at
  `http://localhost:8002/chat`. When accessed through the tunnel, Traefik
  proxies `/chat` to the `trinity-ai` container so the frontend posts to
- `https://trinity.quantmatrixai.com/chat`. Use `python
- scripts/check_ai_tunnel.py` to verify the chat endpoint responds through
- the tunnel.
+ `https://trinity.quantmatrixai.com/chat`. The router uses a high priority so
+ `/chat` requests never fall back to the frontend service. Use
+ `python scripts/check_ai_tunnel.py` to verify the chat endpoint responds
+ through the tunnel.
 
 ## 3. Start the frontend
 
