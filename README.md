@@ -10,10 +10,9 @@ Follow the steps below to run all services together.
 
 ## 1. Environment setup
 
-1. Ensure the `HOST_IP` variable is defined. The helper script will copy
-   `host.env.example` to `host.env` in the repository root if it is missing so
-   you only need to edit the value the first time. The example defaults to
-   `127.0.0.1`.
+1. Edit `TrinityBackendDjango/.env` and `TrinityFrontend/.env` to set the
+   `HOST_IP` variable. The provided examples default to `127.0.0.1`. Update this
+   address if the services run on another machine.
 2. Copy `TrinityBackendDjango/.env.example` to `TrinityBackendDjango/.env` and adjust values if required.
 3. Copy `TrinityFrontend/.env.example` to `TrinityFrontend/.env`.
    Ensure `DEBUG=true` in the Django `.env` file so error messages appear if
@@ -51,15 +50,8 @@ Follow the steps below to run all services together.
   service accepts requests from both origins as well.
   When exposing a public hostname also add it, the host IP, and `localhost` to
   the `ADDITIONAL_DOMAINS` variable so Django's tenant middleware accepts all
-  three.
-  If `docker compose exec` prints a warning that `FASTAPI_CORS_ORIGINS` is not
-  set, pass `--env-file host.env` so Compose can load the defaults:
-
-  ```bash
-  docker compose --env-file host.env exec web python create_tenant.py
-  ```
-  Run `python create_tenant.py` again after adjusting this list if the entries
-  were not added during the initial setup.
+  three. Run `python create_tenant.py` again after adjusting this list if the
+  entries were not added during the initial setup.
 
 Docker and Node.js must be installed locally. The Python dependencies listed in
 `TrinityBackendDjango/requirements.txt` and
@@ -73,15 +65,14 @@ database migrations for new tenants.
 
 ## 2. Start the backend containers
 
-From the repository root run the helper script which copies `host.env` if
-needed and then builds and starts the containers:
+From the repository root run the helper script which builds and starts the
+containers:
 
 ```bash
 ./scripts/start_backend.sh
 ```
 
-This script passes `host.env` to Docker Compose so variables like `HOST_IP`
-expand correctly. It starts PostgreSQL, MongoDB, Redis, the Django admin API on
+This script starts PostgreSQL, MongoDB, Redis, the Django admin API on
 `localhost:8000` and a FastAPI instance on `localhost:8001`. Uvicorn loads the
 app from
 `apps/orchestration/fastapi_app.py`. A separate AI service from the `TrinityAI`
