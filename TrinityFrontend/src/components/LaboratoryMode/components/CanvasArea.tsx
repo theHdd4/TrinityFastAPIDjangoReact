@@ -3,7 +3,7 @@ import { safeStringify } from '@/utils/safeStringify';
 import { Card, Card as AtomBox } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
-import { Plus, Grid3X3, Trash2, Eye } from 'lucide-react';
+import { Plus, Grid3X3, Trash2, Eye, Settings, ChevronDown, ChevronUp } from 'lucide-react';
 import { useExhibitionStore } from '../../ExhibitionMode/store/exhibitionStore';
 import { atoms as allAtoms } from '@/components/AtomList/data';
 import { molecules } from '@/components/MoleculeList/data';
@@ -45,6 +45,7 @@ interface CanvasAreaProps {
   onAtomSelect?: (atomId: string) => void;
   onCardSelect?: (cardId: string, exhibited: boolean) => void;
   selectedCardId?: string;
+  onToggleSettingsPanel?: () => void;
 }
 
 const deriveWorkflowMolecules = (cards: LayoutCard[]): WorkflowMolecule[] => {
@@ -66,11 +67,12 @@ const deriveWorkflowMolecules = (cards: LayoutCard[]): WorkflowMolecule[] => {
 
 const STORAGE_KEY = 'laboratory-layout-cards';
 
-const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, selectedCardId }) => {
+const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, selectedCardId, onToggleSettingsPanel }) => {
   const { cards: layoutCards, setCards: setLayoutCards, updateAtomSettings } = useLaboratoryStore();
   const [workflowMolecules, setWorkflowMolecules] = useState<WorkflowMolecule[]>([]);
   const [activeTab, setActiveTab] = useState<string>('');
   const [dragOver, setDragOver] = useState<string | null>(null);
+  const [collapsedCards, setCollapsedCards] = useState<Record<string, boolean>>({});
   const prevLayout = React.useRef<LayoutCard[] | null>(null);
   const initialLoad = React.useRef(true);
   
@@ -465,6 +467,7 @@ const addNewCard = (moleculeId?: string, position?: number) => {
       ...arr.slice(position)
     ]);
   }
+  setCollapsedCards(prev => ({ ...prev, [newCard.id]: false }));
 };
 
   const removeAtom = (cardId: string, atomId: string) => {
@@ -519,6 +522,11 @@ const addNewCard = (moleculeId?: string, position?: number) => {
     const updated = arr.filter(c => c.id !== cardId);
     setLayoutCards(updated);
     setCards(updated);
+    setCollapsedCards(prev => {
+      const copy = { ...prev };
+      delete copy[cardId];
+      return copy;
+    });
 
     if (card) {
       card.atoms.forEach(atom => {
@@ -556,6 +564,14 @@ const addNewCard = (moleculeId?: string, position?: number) => {
     }
   };
 
+  const handleAtomSettingsClick = (e: React.MouseEvent, atomId: string) => {
+    e.stopPropagation();
+    if (onAtomSelect) {
+      onAtomSelect(atomId);
+    }
+    onToggleSettingsPanel?.();
+  };
+
   const handleCardClick = (
     e: React.MouseEvent,
     cardId: string,
@@ -565,6 +581,10 @@ const addNewCard = (moleculeId?: string, position?: number) => {
     if (onCardSelect) {
       onCardSelect(cardId, exhibited);
     }
+  };
+
+  const toggleCardCollapse = (id: string) => {
+    setCollapsedCards(prev => ({ ...prev, [id]: !prev[id] }));
   };
 
   const handleExhibitionToggle = (cardId: string, isExhibited: boolean) => {
@@ -686,7 +706,16 @@ const addNewCard = (moleculeId?: string, position?: number) => {
                                     onClick={(e) => handleAtomClick(e, atom.id)}
                                   >
                                     <div className="flex items-center justify-between mb-3">
-                                      <div className={`w-3 h-3 ${atom.color} rounded-full`}></div>
+                                      <div className="flex items-center space-x-1">
+                                        <div className={`w-3 h-3 ${atom.color} rounded-full`}></div>
+                                        <button
+                                          onClick={e => handleAtomSettingsClick(e, atom.id)}
+                                          className="p-1 hover:bg-gray-100 rounded"
+                                          title="Atom Settings"
+                                        >
+                                          <Settings className="w-4 h-4 text-gray-400" />
+                                        </button>
+                                      </div>
                                       <button
                                         onClick={e => {
                                           e.stopPropagation();
@@ -779,6 +808,17 @@ const addNewCard = (moleculeId?: string, position?: number) => {
                   onAddAtom={(id, atom) => addAtomByName(id, atom)}
                   disabled={card.atoms.length > 0}
                 />
+                <button
+                  onClick={e => { e.stopPropagation(); toggleCardCollapse(card.id); }}
+                  className="p-1 hover:bg-gray-100 rounded"
+                  title="Toggle Card"
+                >
+                  {collapsedCards[card.id] ? (
+                    <ChevronUp className="w-4 h-4 text-gray-400" />
+                  ) : (
+                    <ChevronDown className="w-4 h-4 text-gray-400" />
+                  )}
+                </button>
               </div>
               <div className="flex items-center space-x-2">
                 <span className="text-xs text-gray-500">Exhibit the Card</span>
@@ -798,7 +838,7 @@ const addNewCard = (moleculeId?: string, position?: number) => {
             </div>
 
             {/* Card Content */}
-            <div className="flex-1 flex flex-col p-4 overflow-y-auto">
+            <div className={`flex-1 flex flex-col p-4 overflow-y-auto ${collapsedCards[card.id] ? 'hidden' : ''}`}>
               {card.atoms.length === 0 ? (
                 <div className="flex-1 flex flex-col items-center justify-center text-center border-2 border-dashed border-gray-300 rounded-lg min-h-[140px] mb-4">
                   <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mb-4">
@@ -823,7 +863,16 @@ const addNewCard = (moleculeId?: string, position?: number) => {
                     >
                       {/* Atom Header */}
                       <div className="flex items-center justify-between mb-3">
-                        <div className={`w-3 h-3 ${atom.color} rounded-full`}></div>
+                        <div className="flex items-center space-x-1">
+                          <div className={`w-3 h-3 ${atom.color} rounded-full`}></div>
+                          <button
+                            onClick={e => handleAtomSettingsClick(e, atom.id)}
+                            className="p-1 hover:bg-gray-100 rounded"
+                            title="Atom Settings"
+                          >
+                            <Settings className="w-4 h-4 text-gray-400" />
+                          </button>
+                        </div>
                         <button
                           onClick={(e) => {
                             e.stopPropagation();

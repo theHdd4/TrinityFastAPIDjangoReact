@@ -16,6 +16,7 @@ const LaboratoryMode = () => {
   const [selectedAtomId, setSelectedAtomId] = useState<string>();
   const [selectedCardId, setSelectedCardId] = useState<string>();
   const [cardExhibited, setCardExhibited] = useState<boolean>(false);
+  const [auxActive, setAuxActive] = useState<'settings' | 'frames' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const { toast } = useToast();
   const { cards, setCards } = useExhibitionStore();
@@ -73,6 +74,10 @@ const LaboratoryMode = () => {
     setSelectedAtomId(undefined);
     setSelectedCardId(cardId);
     setCardExhibited(exhibited);
+  };
+
+  const toggleSettingsPanel = () => {
+    setAuxActive(prev => (prev === 'settings' ? null : 'settings'));
   };
 
   const handleSave = async () => {
@@ -212,7 +217,12 @@ const LaboratoryMode = () => {
 
         {/* Main Canvas Area */}
         <div className="flex-1 p-6" onClick={() => {setSelectedAtomId(undefined); setSelectedCardId(undefined);}}>
-          <CanvasArea onAtomSelect={handleAtomSelect} onCardSelect={handleCardSelect} selectedCardId={selectedCardId} />
+          <CanvasArea
+            onAtomSelect={handleAtomSelect}
+            onCardSelect={handleCardSelect}
+            selectedCardId={selectedCardId}
+            onToggleSettingsPanel={toggleSettingsPanel}
+          />
         </div>
 
         {/* Auxiliary menu */}
@@ -220,6 +230,8 @@ const LaboratoryMode = () => {
           selectedAtomId={selectedAtomId}
           selectedCardId={selectedCardId}
           cardExhibited={cardExhibited}
+          active={auxActive}
+          onActiveChange={setAuxActive}
         />
       </div>
     </div>

@@ -7,10 +7,28 @@ interface Props {
   selectedAtomId?: string;
   selectedCardId?: string;
   cardExhibited?: boolean;
+  active?: 'settings' | 'frames' | null;
+  onActiveChange?: (active: 'settings' | 'frames' | null) => void;
 }
 
-const AuxiliaryMenu: React.FC<Props> = ({ selectedAtomId, selectedCardId, cardExhibited }) => {
-  const [active, setActive] = useState<'settings' | 'frames' | null>(null);
+const AuxiliaryMenu: React.FC<Props> = ({
+  selectedAtomId,
+  selectedCardId,
+  cardExhibited,
+  active: activeProp,
+  onActiveChange
+}) => {
+  const [internalActive, setInternalActive] = useState<'settings' | 'frames' | null>(null);
+  const controlled = activeProp !== undefined;
+  const active = controlled ? activeProp : internalActive;
+
+  const setActive = (value: 'settings' | 'frames' | null) => {
+    if (controlled) {
+      onActiveChange?.(value);
+    } else {
+      setInternalActive(value);
+    }
+  };
 
   const openSettings = () => setActive(active === 'settings' ? null : 'settings');
   const openFrames = () => setActive(active === 'frames' ? null : 'frames');
