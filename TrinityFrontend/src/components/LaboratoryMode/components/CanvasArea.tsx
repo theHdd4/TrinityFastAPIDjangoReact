@@ -785,7 +785,7 @@ const addNewCard = (moleculeId?: string, position?: number) => {
           return (
           <React.Fragment key={card.id}>
           <Card
-            className={`w-full min-h-[200px] bg-white rounded-2xl border-2 transition-all duration-300 flex flex-col ${
+            className={`w-full ${collapsedCards[card.id] ? '' : 'min-h-[200px]'} bg-white rounded-2xl border-2 transition-all duration-300 flex flex-col overflow-hidden ${
               dragOver === card.id
                 ? 'border-[#458EE2] bg-gradient-to-br from-blue-50 to-blue-100 shadow-lg'
                 : 'border-gray-200 shadow-sm hover:shadow-md'
@@ -808,6 +808,15 @@ const addNewCard = (moleculeId?: string, position?: number) => {
                   onAddAtom={(id, atom) => addAtomByName(id, atom)}
                   disabled={card.atoms.length > 0}
                 />
+                {card.atoms.length > 0 && (
+                  <button
+                    onClick={e => handleAtomSettingsClick(e, card.atoms[0].id)}
+                    className="p-1 hover:bg-gray-100 rounded"
+                    title="Atom Settings"
+                  >
+                    <Settings className="w-4 h-4 text-gray-400" />
+                  </button>
+                )}
                 <button
                   onClick={e => { e.stopPropagation(); toggleCardCollapse(card.id); }}
                   className="p-1 hover:bg-gray-100 rounded"
