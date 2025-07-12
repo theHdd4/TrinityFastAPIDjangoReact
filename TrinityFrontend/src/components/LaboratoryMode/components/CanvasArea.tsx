@@ -818,14 +818,17 @@ const addNewCard = (moleculeId?: string, position?: number) => {
                   </button>
                 )}
                 <button
-                  onClick={e => { e.stopPropagation(); toggleCardCollapse(card.id); }}
+                  onClick={e => {
+                    e.stopPropagation();
+                    toggleCardCollapse(card.id);
+                  }}
                   className="p-1 hover:bg-gray-100 rounded"
                   title="Toggle Card"
                 >
                   {collapsedCards[card.id] ? (
-                    <ChevronUp className="w-4 h-4 text-gray-400" />
-                  ) : (
                     <ChevronDown className="w-4 h-4 text-gray-400" />
+                  ) : (
+                    <ChevronUp className="w-4 h-4 text-gray-400" />
                   )}
                 </button>
               </div>

@@ -5,9 +5,9 @@ import { Play, Save, Share2, Undo2, AlertTriangle } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import Header from '@/components/Header';
 import { safeStringify } from '@/utils/safeStringify';
-import AtomLibrary from '@/components/AtomList/AtomLibrary';
 import CanvasArea from './components/CanvasArea';
 import AuxiliaryMenu from './components/AuxiliaryMenu';
+import AuxiliaryMenuLeft from './components/AuxiliaryMenuLeft';
 import { useExhibitionStore } from '@/components/ExhibitionMode/store/exhibitionStore';
 import { REGISTRY_API, LAB_ACTIONS_API } from '@/lib/api';
 import { useLaboratoryStore } from './store/laboratoryStore';
@@ -213,7 +213,7 @@ const LaboratoryMode = () => {
 
       <div className="flex-1 flex overflow-hidden">
         {/* Atoms Sidebar */}
-        <AtomLibrary onAtomDragStart={handleAtomDragStart} />
+        <AuxiliaryMenuLeft onAtomDragStart={handleAtomDragStart} />
 
         {/* Main Canvas Area */}
         <div className="flex-1 p-6" onClick={() => {setSelectedAtomId(undefined); setSelectedCardId(undefined);}}>
