@@ -155,17 +155,15 @@ export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
   },
 
   updateAtomSettings: (atomId: string, settings: any) => {
-    set((state) => {
-      const updatedCards = state.cards.map((card) => ({
+    set(state => {
+      const updatedCards = state.cards.map(card => ({
         ...card,
-        atoms: card.atoms.map((atom) => {
-          if (atom.id === atomId) {
-            return { ...atom, settings };
-          }
-          return atom;
-        })
+        atoms: card.atoms.map(atom =>
+          atom.id === atomId
+            ? { ...atom, settings: { ...(atom.settings || {}), ...settings } }
+            : atom
+        )
       }));
-
       return { cards: updatedCards };
     });
   },
