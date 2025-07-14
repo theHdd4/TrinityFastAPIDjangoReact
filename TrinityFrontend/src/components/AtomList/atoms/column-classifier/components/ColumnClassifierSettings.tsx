@@ -28,6 +28,7 @@ const ColumnClassifierSettings: React.FC<ColumnClassifierSettingsProps> = ({
   const [isDragOver, setIsDragOver] = useState(false);
   const [uploadedFiles, setUploadedFiles] = useState<{ name: string; data: any }[]>([]);
   const [savedDataframes, setSavedDataframes] = useState<{ object_name: string; csv_name: string }[]>([]);
+  // value is the MinIO object name of the saved dataframe
   const [selectedDataframe, setSelectedDataframe] = useState('');
 
   useEffect(() => {
@@ -161,7 +162,9 @@ const ColumnClassifierSettings: React.FC<ColumnClassifierSettingsProps> = ({
 
   const handleClassifyColumns = async () => {
     if (selectedDataframe) {
-      const fileKey = selectedDataframe.replace(/\.(csv|arrow)$/i, '');
+      // selectedDataframe is the MinIO object name (e.g. 20250711_142433_key.arrow)
+      const base = selectedDataframe.replace(/\.(csv|arrow)$/i, '').split('_', 3);
+      const fileKey = base.length >= 3 ? base[2] : base[base.length - 1];
       try {
         const ticketRes = await fetch(`${VALIDATE_API}/latest_ticket/${fileKey}`);
         if (!ticketRes.ok) return;
@@ -182,7 +185,8 @@ const ColumnClassifierSettings: React.FC<ColumnClassifierSettingsProps> = ({
           ...data.final_classification.measures.map((n: string) => ({ name: n, category: 'measures' })),
           ...data.final_classification.unclassified.map((n: string) => ({ name: n, category: 'unclassified' }))
         ];
-        onDataUpload([{ fileName: fileKey, columns: cols, customDimensions: {} }]);
+        const displayName = savedDataframes.find(f => f.object_name === selectedDataframe)?.csv_name || fileKey;
+        onDataUpload([{ fileName: displayName, columns: cols, customDimensions: {} }]);
         await prefetchDataframe(selectedDataframe);
         return;
       } catch {
@@ -257,7 +261,7 @@ const ColumnClassifierSettings: React.FC<ColumnClassifierSettingsProps> = ({
           </SelectTrigger>
           <SelectContent>
             {savedDataframes.map(f => (
-              <SelectItem key={f.object_name} value={f.csv_name}>{f.csv_name}</SelectItem>
+              <SelectItem key={f.object_name} value={f.object_name}>{f.csv_name}</SelectItem>
             ))}
           </SelectContent>
         </Select>
