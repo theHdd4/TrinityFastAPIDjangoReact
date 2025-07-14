@@ -60,8 +60,9 @@ Follow the steps below to run all services together.
 Docker and Node.js must be installed locally. The Python dependencies listed in
 `TrinityBackendDjango/requirements.txt` and
 `TrinityBackendFastAPI/requirements.txt` (including pandas, motor,
-`python-multipart` and `asyncpg`) will be installed inside the containers during
-the build step. If `asyncpg` cannot be installed the FastAPI service falls back
+`python-multipart`, `pydantic-settings` and `asyncpg`) will be installed inside
+the containers during the build step. If `asyncpg` cannot be installed the
+FastAPI service falls back
 to the `CLIENT_NAME`, `APP_NAME` and `PROJECT_NAME` environment variables
 instead of querying PostgreSQL.
 Set `SIMPLE_TENANT_CREATION=true` in `.env` if your environment cannot run
