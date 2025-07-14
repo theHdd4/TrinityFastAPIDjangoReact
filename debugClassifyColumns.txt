@@ -1,0 +1,43 @@
+# Debugging Column Classifier 404 Issues
+
+These steps help trace why POST requests to `/api/column-classifier/classify_columns` return a 404.
+
+1. **Confirm the FastAPI container is running**
+   - Execute `docker-compose ps` to check the `fastapi` service status.
+   - The container should expose port `8001`.
+
+2. **Verify the route exists**
+   - Visit `http://<host>:8001/api/docs` and look for the `Column Classifier` section.
+   - You should see `/column-classifier/classify_columns` listed.
+
+3. **Test the endpoint directly**
+   - Use curl or a tool like Postman:
+     ```bash
+     curl -X POST \
+       -F validator_atom_id=<id> \
+       -F file_key=<file_key> \
+       -F identifiers='[]' \
+       -F measures='[]' \
+       -F unclassified='[]' \
+       http://<host>:8001/api/column-classifier/classify_columns
+     ```
+   - A missing route error likely means the container is outdated. Rebuild with `docker-compose build fastapi && docker-compose up -d fastapi`.
+   - If the response body contains a JSON error, the route exists but your parameters may be invalid. Check that `validator_atom_id` and `file_key` are correct (see `/api/data-upload-validate/view_new/{validator_atom_id}`).
+
+4. **Compare with other atoms**
+   - Confirm `/api/data-upload-validate/health` returns status 200. If other atoms work while the classifier does not, inspect container logs:
+     `docker-compose logs -f fastapi`.
+   - Look for import errors or router load failures during startup.
+
+5. **Inspect available routes programmatically** (optional)
+   - Run inside the `fastapi` container:
+     ```bash
+     python - <<'PY'
+     from fastapi.routing import APIRoute
+     from app.main import app
+     print('\n'.join(r.path for r in app.routes if isinstance(r, APIRoute)))
+     PY
+     ```
+   - Ensure `/api/column-classifier/classify_columns` appears in the output.
+
+Following these steps should reveal whether the 404 comes from a routing issue or from the endpoint returning 404 due to bad input.
