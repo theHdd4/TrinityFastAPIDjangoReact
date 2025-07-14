@@ -1,0 +1,35 @@
+# Debugging Column Classifier API
+
+These steps help verify that the column classifier service is reachable and
+configured like the other FastAPI atoms.
+
+1. **Check routing in the main router**
+   - `TrinityBackendFastAPI/app/api/router.py` should import the router from
+     `app.features.column_classifier.endpoint` and include it without an extra
+     prefix. This mirrors how other atoms (data upload & validate, feature
+     overview, concat) are registered.
+
+2. **Health check**
+   - Request `GET /api/column-classifier/health` on the FastAPI service
+     (port `8001`). A response with `{"status": "healthy"}` confirms the
+     routes are loaded.
+
+3. **Validate endpoints manually**
+   - `POST /api/column-classifier/classify_columns` accepts form data. Test with
+     `curl`:
+     ```bash
+     curl -X POST http://<HOST_IP>:8001/api/column-classifier/classify_columns \
+          -F validator_atom_id=example_id \
+          -F file_key=dataset1 \
+          -F identifiers="[]" -F measures="[]" -F unclassified="[]"
+     ```
+     Replace `<HOST_IP>` with `127.0.0.1` or the container's address.
+
+4. **Browser errors**
+   - A `404 Not Found` typically means the router prefix is incorrect or the
+     FastAPI container isn't running. Verify the container logs with
+     `docker-compose logs fastapi` for any import errors.
+
+5. **Restart services**
+   - After modifying backend code, run `scripts/start_backend.sh` to rebuild
+     the FastAPI container so changes take effect.
