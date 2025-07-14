@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -13,7 +12,6 @@ interface ColumnClassifierCanvasProps {
   onCustomDimensionAdd: (dimensionName: string, fileIndex?: number) => void;
   onActiveFileChange: (fileIndex: number) => void;
   onFileDelete?: (fileIndex: number) => void;
-  onSaveDimensions?: () => void;
 }
 
 const ColumnClassifierCanvas: React.FC<ColumnClassifierCanvasProps> = ({ 
@@ -21,8 +19,7 @@ const ColumnClassifierCanvas: React.FC<ColumnClassifierCanvasProps> = ({
   onColumnMove,
   onCustomDimensionAdd,
   onActiveFileChange,
-  onFileDelete,
-  onSaveDimensions
+  onFileDelete
 }) => {
   const [showDropdowns, setShowDropdowns] = useState<{ [key: string]: boolean }>({});
   const [showCustomDimensionInput, setShowCustomDimensionInput] = useState(false);
@@ -307,10 +304,7 @@ const ColumnClassifierCanvas: React.FC<ColumnClassifierCanvasProps> = ({
 
         {/* Save Dimensions Button */}
         <div className="pt-4">
-          <Button
-            className="w-full h-14 text-lg font-semibold bg-gradient-to-r from-gray-800 to-gray-900 hover:from-gray-900 hover:to-black shadow-xl"
-            onClick={onSaveDimensions}
-          >
+          <Button className="w-full h-14 text-lg font-semibold bg-gradient-to-r from-gray-800 to-gray-900 hover:from-gray-900 hover:to-black shadow-xl">
             Save Dimensions
           </Button>
         </div>

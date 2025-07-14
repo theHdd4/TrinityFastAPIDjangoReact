@@ -113,7 +113,6 @@ const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
         onCustomDimensionAdd={handleCustomDimensionAdd}
         onActiveFileChange={setActiveFile}
         onFileDelete={handleFileDelete}
-        onSaveDimensions={handleSaveDimensions}
       />
     </div>
   );
