@@ -18,6 +18,7 @@ export interface ClassifierData {
   activeFileIndex: number;
 }
 import ColumnClassifierCanvas from './components/ColumnClassifierCanvas';
+import { COLUMN_CLASSIFIER_API } from '@/lib/api';
 
 interface Props {
   atomId: string;
@@ -82,6 +83,28 @@ const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
     updateSettings(atomId, { classifierData: { files: newFiles, activeFileIndex: newFiles.length > 0 ? Math.min(newActive, newFiles.length - 1) : 0 } });
   };
 
+  const handleSaveDimensions = () => {
+    const current = settings.classifierData.files[settings.classifierData.activeFileIndex];
+    if (!settings.validatorId || !settings.fileKey || !current) return;
+    const dimensions = Object.keys(current.customDimensions).map(name => ({ id: name.toLowerCase().replace(/\s+/g, '_'), name }));
+    if (dimensions.length === 0) return;
+    const form = new FormData();
+    form.append('validator_atom_id', settings.validatorId);
+    form.append('file_key', settings.fileKey);
+    form.append('dimensions', JSON.stringify(dimensions));
+    fetch(`${COLUMN_CLASSIFIER_API}/define_dimensions`, { method: 'POST', body: form })
+      .then(() => {
+        const assignments: Record<string, string[]> = {};
+        dimensions.forEach(d => { assignments[d.id] = current.customDimensions[d.name] || []; });
+        const form2 = new FormData();
+        form2.append('validator_atom_id', settings.validatorId);
+        form2.append('file_key', settings.fileKey);
+        form2.append('identifier_assignments', JSON.stringify(assignments));
+        return fetch(`${COLUMN_CLASSIFIER_API}/assign_identifiers_to_dimensions`, { method: 'POST', body: form2 });
+      })
+      .catch(() => {});
+  };
+
   return (
     <div className="w-full h-full bg-white rounded-lg overflow-hidden flex flex-col">
       <ColumnClassifierCanvas
@@ -90,6 +113,7 @@ const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
         onCustomDimensionAdd={handleCustomDimensionAdd}
         onActiveFileChange={setActiveFile}
         onFileDelete={handleFileDelete}
+        onSaveDimensions={handleSaveDimensions}
       />
     </div>
   );

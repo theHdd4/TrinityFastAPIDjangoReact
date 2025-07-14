@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
@@ -6,7 +6,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Upload, File, Check } from 'lucide-react';
 import { ColumnData, FileClassification } from '../ColumnClassifierAtom';
-import { COLUMN_CLASSIFIER_API } from '@/lib/api';
+import { COLUMN_CLASSIFIER_API, VALIDATE_API } from '@/lib/api';
 
 interface ColumnClassifierSettingsProps {
   settings: {
@@ -27,6 +27,15 @@ const ColumnClassifierSettings: React.FC<ColumnClassifierSettingsProps> = ({
 }) => {
   const [isDragOver, setIsDragOver] = useState(false);
   const [uploadedFiles, setUploadedFiles] = useState<{ name: string; data: any }[]>([]);
+  const [savedDataframes, setSavedDataframes] = useState<{ object_name: string; csv_name: string }[]>([]);
+  const [selectedDataframe, setSelectedDataframe] = useState('');
+
+  useEffect(() => {
+    fetch(`${VALIDATE_API}/list_saved_dataframes`)
+      .then(res => res.json())
+      .then(res => setSavedDataframes(res.files || []))
+      .catch(() => {});
+  }, []);
 
   const parseCSV = (text: string): { headers: string[], rows: any[] } => {
     const lines = text.split('\n').filter(line => line.trim());
@@ -136,28 +145,36 @@ const ColumnClassifierSettings: React.FC<ColumnClassifierSettingsProps> = ({
     onSettingsChange({ selectedFiles: newSelectedFiles });
   };
 
-  const handleClassifyColumns = () => {
-    if (settings.validatorId && settings.fileKey) {
-      const form = new FormData();
-      form.append('validator_atom_id', settings.validatorId);
-      form.append('file_key', settings.fileKey);
-      form.append('identifiers', JSON.stringify([]));
-      form.append('measures', JSON.stringify([]));
-      form.append('unclassified', JSON.stringify([]));
-      fetch(`${COLUMN_CLASSIFIER_API}/classify_columns`, { method: 'POST', body: form })
-        .then(res => res.json())
-        .then(res => {
-          const cols: ColumnData[] = [
-            ...res.final_classification.identifiers.map((n: string) => ({ name: n, category: 'identifiers' })),
-            ...res.final_classification.measures.map((n: string) => ({ name: n, category: 'measures' })),
-            ...res.final_classification.unclassified.map((n: string) => ({ name: n, category: 'unclassified' }))
-          ];
-          onDataUpload([{ fileName: settings.fileKey as string, columns: cols, customDimensions: {} }]);
-        })
-        .catch(() => {});
-      return;
+  const handleClassifyColumns = async () => {
+    if (selectedDataframe) {
+      const fileKey = selectedDataframe.replace(/\.csv$/i, '');
+      try {
+        const ticketRes = await fetch(`${VALIDATE_API}/latest_ticket/${fileKey}`);
+        if (!ticketRes.ok) return;
+        const ticket = await ticketRes.json();
+        const validatorId = (ticket.flight_path || '').split('/')[0];
+        onSettingsChange({ validatorId, fileKey });
+        const form = new FormData();
+        form.append('validator_atom_id', validatorId);
+        form.append('file_key', fileKey);
+        form.append('identifiers', JSON.stringify([]));
+        form.append('measures', JSON.stringify([]));
+        form.append('unclassified', JSON.stringify([]));
+        const res = await fetch(`${COLUMN_CLASSIFIER_API}/classify_columns`, { method: 'POST', body: form });
+        if (!res.ok) return;
+        const data = await res.json();
+        const cols: ColumnData[] = [
+          ...data.final_classification.identifiers.map((n: string) => ({ name: n, category: 'identifiers' })),
+          ...data.final_classification.measures.map((n: string) => ({ name: n, category: 'measures' })),
+          ...data.final_classification.unclassified.map((n: string) => ({ name: n, category: 'unclassified' }))
+        ];
+        onDataUpload([{ fileName: fileKey, columns: cols, customDimensions: {} }]);
+        return;
+      } catch {
+        return;
+      }
     }
-    const selectedFileData = uploadedFiles.filter(file => 
+    const selectedFileData = uploadedFiles.filter(file =>
       settings.selectedFiles.includes(file.name)
     );
     
@@ -218,27 +235,24 @@ const ColumnClassifierSettings: React.FC<ColumnClassifierSettingsProps> = ({
     <div className="space-y-6">
       {/* Backend Options */}
       <Card className="p-4">
-        <h4 className="font-semibold text-gray-900 mb-4">Backend Configuration</h4>
-        <div className="space-y-3">
-          <div>
-            <Label className="text-sm mb-1 block">Validator Atom ID</Label>
-            <input
-              className="w-full border rounded p-2 text-sm"
-              value={settings.validatorId || ''}
-              onChange={e => onSettingsChange({ validatorId: e.target.value })}
-              placeholder="validator_atom_id"
-            />
-          </div>
-          <div>
-            <Label className="text-sm mb-1 block">File Key</Label>
-            <input
-              className="w-full border rounded p-2 text-sm"
-              value={settings.fileKey || ''}
-              onChange={e => onSettingsChange({ fileKey: e.target.value })}
-              placeholder="file_key"
-            />
-          </div>
-        </div>
+        <h4 className="font-semibold text-gray-900 mb-4">Select Saved Dataframe</h4>
+        <Select value={selectedDataframe} onValueChange={val => setSelectedDataframe(val)}>
+          <SelectTrigger className="w-full">
+            <SelectValue placeholder="Choose dataframe" />
+          </SelectTrigger>
+          <SelectContent>
+            {savedDataframes.map(f => (
+              <SelectItem key={f.object_name} value={f.csv_name}>{f.csv_name}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Button
+          className="mt-4 w-full bg-blue-600 hover:bg-blue-700"
+          onClick={handleClassifyColumns}
+          disabled={!selectedDataframe}
+        >
+          Classify Columns
+        </Button>
       </Card>
       {/* File Upload Drag & Drop */}
       <Card 

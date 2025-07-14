@@ -13,14 +13,16 @@ interface ColumnClassifierCanvasProps {
   onCustomDimensionAdd: (dimensionName: string, fileIndex?: number) => void;
   onActiveFileChange: (fileIndex: number) => void;
   onFileDelete?: (fileIndex: number) => void;
+  onSaveDimensions?: () => void;
 }
 
 const ColumnClassifierCanvas: React.FC<ColumnClassifierCanvasProps> = ({ 
-  data, 
-  onColumnMove, 
+  data,
+  onColumnMove,
   onCustomDimensionAdd,
   onActiveFileChange,
-  onFileDelete
+  onFileDelete,
+  onSaveDimensions
 }) => {
   const [showDropdowns, setShowDropdowns] = useState<{ [key: string]: boolean }>({});
   const [showCustomDimensionInput, setShowCustomDimensionInput] = useState(false);
@@ -305,7 +307,10 @@ const ColumnClassifierCanvas: React.FC<ColumnClassifierCanvasProps> = ({
 
         {/* Save Dimensions Button */}
         <div className="pt-4">
-          <Button className="w-full h-14 text-lg font-semibold bg-gradient-to-r from-gray-800 to-gray-900 hover:from-gray-900 hover:to-black shadow-xl">
+          <Button
+            className="w-full h-14 text-lg font-semibold bg-gradient-to-r from-gray-800 to-gray-900 hover:from-gray-900 hover:to-black shadow-xl"
+            onClick={onSaveDimensions}
+          >
             Save Dimensions
           </Button>
         </div>
