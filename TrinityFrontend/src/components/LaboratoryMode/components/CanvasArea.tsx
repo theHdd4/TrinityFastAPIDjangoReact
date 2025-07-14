@@ -3,7 +3,7 @@ import { safeStringify } from '@/utils/safeStringify';
 import { Card, Card as AtomBox } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
-import { Plus, Grid3X3, Trash2, Eye, Settings, ChevronDown, ChevronUp } from 'lucide-react';
+import { Plus, Grid3X3, Trash2, Eye, Settings, ChevronDown, Minus } from 'lucide-react';
 import { useExhibitionStore } from '../../ExhibitionMode/store/exhibitionStore';
 import { atoms as allAtoms } from '@/components/AtomList/data';
 import { molecules } from '@/components/MoleculeList/data';
@@ -817,20 +817,6 @@ const addNewCard = (moleculeId?: string, position?: number) => {
                     <Settings className="w-4 h-4 text-gray-400" />
                   </button>
                 )}
-                <button
-                  onClick={e => {
-                    e.stopPropagation();
-                    toggleCardCollapse(card.id);
-                  }}
-                  className="p-1 hover:bg-gray-100 rounded"
-                  title="Toggle Card"
-                >
-                  {collapsedCards[card.id] ? (
-                    <ChevronDown className="w-4 h-4 text-gray-400" />
-                  ) : (
-                    <ChevronUp className="w-4 h-4 text-gray-400" />
-                  )}
-                </button>
               </div>
               <div className="flex items-center space-x-2">
                 <span className="text-xs text-gray-500">Exhibit the Card</span>
@@ -845,6 +831,20 @@ const addNewCard = (moleculeId?: string, position?: number) => {
                   className="p-1 hover:bg-gray-100 rounded"
                 >
                   <Trash2 className="w-4 h-4 text-gray-400" />
+                </button>
+                <button
+                  onClick={e => {
+                    e.stopPropagation();
+                    toggleCardCollapse(card.id);
+                  }}
+                  className="p-1 hover:bg-gray-100 rounded"
+                  title="Toggle Card"
+                >
+                  {collapsedCards[card.id] ? (
+                    <ChevronDown className="w-4 h-4 text-gray-400" />
+                  ) : (
+                    <Minus className="w-4 h-4 text-gray-400" />
+                  )}
                 </button>
               </div>
             </div>
