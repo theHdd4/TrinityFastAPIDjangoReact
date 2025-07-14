@@ -57,3 +57,6 @@ export const TRINITY_AI_API =
   import.meta.env.VITE_TRINITY_AI_API || backendOrigin.replace(/:8000$/, ':8002');
 
 export const LAB_ACTIONS_API = `${REGISTRY_API}/laboratory-actions`;
+
+export const CLASSIFIER_API =
+  import.meta.env.VITE_CLASSIFIER_API || `${backendOrigin.replace(/:8000$/, ':8005')}/classify`;
