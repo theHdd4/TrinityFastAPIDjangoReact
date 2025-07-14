@@ -12,6 +12,7 @@ interface ColumnClassifierCanvasProps {
   onCustomDimensionAdd: (dimensionName: string, fileIndex?: number) => void;
   onActiveFileChange: (fileIndex: number) => void;
   onFileDelete?: (fileIndex: number) => void;
+  onSaveDimensions?: () => void;
 }
 
 const ColumnClassifierCanvas: React.FC<ColumnClassifierCanvasProps> = ({ 
@@ -19,7 +20,8 @@ const ColumnClassifierCanvas: React.FC<ColumnClassifierCanvasProps> = ({
   onColumnMove,
   onCustomDimensionAdd,
   onActiveFileChange,
-  onFileDelete
+  onFileDelete,
+  onSaveDimensions
 }) => {
   const [showDropdowns, setShowDropdowns] = useState<{ [key: string]: boolean }>({});
   const [showCustomDimensionInput, setShowCustomDimensionInput] = useState(false);
@@ -57,6 +59,12 @@ const ColumnClassifierCanvas: React.FC<ColumnClassifierCanvasProps> = ({
     if (!currentFile) return [];
     const usedColumns = getAllUsedColumns();
     return currentFile.columns.filter(col => !usedColumns.has(col.name));
+  };
+
+  const getAvailableIdentifiers = () => {
+    if (!currentFile) return [];
+    const used = new Set(Object.values(currentFile.customDimensions).flat());
+    return identifiers.filter(col => !used.has(col.name));
   };
 
   const toggleDropdown = (category: string) => {
@@ -119,7 +127,7 @@ const ColumnClassifierCanvas: React.FC<ColumnClassifierCanvasProps> = ({
             {showDropdowns[category] && (
               <select
                 className="p-2 border rounded bg-white text-sm min-w-[120px]"
-                onChange={(e) => {
+                onChange={e => {
                   const val = e.target.value;
                   if (val) {
                     handleColumnSelect(val, category);
@@ -128,7 +136,10 @@ const ColumnClassifierCanvas: React.FC<ColumnClassifierCanvasProps> = ({
                 value=""
               >
                 <option value="">Select...</option>
-                {getAvailableColumns().map(column => (
+                {(category === 'identifiers' || category === 'measures'
+                  ? getAvailableColumns()
+                  : getAvailableIdentifiers()
+                ).map(column => (
                   <option key={column.name} value={column.name}>
                     {column.name}
                   </option>
@@ -304,7 +315,10 @@ const ColumnClassifierCanvas: React.FC<ColumnClassifierCanvasProps> = ({
 
         {/* Save Dimensions Button */}
         <div className="pt-4">
-          <Button className="w-full h-14 text-lg font-semibold bg-gradient-to-r from-gray-800 to-gray-900 hover:from-gray-900 hover:to-black shadow-xl">
+          <Button
+            className="w-full h-14 text-lg font-semibold bg-gradient-to-r from-gray-800 to-gray-900 hover:from-gray-900 hover:to-black shadow-xl"
+            onClick={() => onSaveDimensions && onSaveDimensions()}
+          >
             Save Dimensions
           </Button>
         </div>

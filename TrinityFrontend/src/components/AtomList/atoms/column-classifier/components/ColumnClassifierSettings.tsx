@@ -6,7 +6,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Upload, File, Check } from 'lucide-react';
 import { ColumnData, FileClassification } from '../ColumnClassifierAtom';
-import { COLUMN_CLASSIFIER_API, VALIDATE_API } from '@/lib/api';
+import { COLUMN_CLASSIFIER_API, VALIDATE_API, FEATURE_OVERVIEW_API } from '@/lib/api';
 
 interface ColumnClassifierSettingsProps {
   settings: {
@@ -36,6 +36,20 @@ const ColumnClassifierSettings: React.FC<ColumnClassifierSettingsProps> = ({
       .then(res => setSavedDataframes(res.files || []))
       .catch(() => {});
   }, []);
+
+  const prefetchDataframe = async (name: string) => {
+    if (!name) return;
+    try {
+      await fetch(
+        `${FEATURE_OVERVIEW_API}/flight_table?object_name=${encodeURIComponent(name)}`
+      ).then(r => r.arrayBuffer());
+      await fetch(
+        `${FEATURE_OVERVIEW_API}/cached_dataframe?object_name=${encodeURIComponent(name)}`
+      ).then(r => r.text());
+    } catch {
+      /* ignore */
+    }
+  };
 
   const parseCSV = (text: string): { headers: string[], rows: any[] } => {
     const lines = text.split('\n').filter(line => line.trim());
@@ -147,7 +161,7 @@ const ColumnClassifierSettings: React.FC<ColumnClassifierSettingsProps> = ({
 
   const handleClassifyColumns = async () => {
     if (selectedDataframe) {
-      const fileKey = selectedDataframe.replace(/\.csv$/i, '');
+      const fileKey = selectedDataframe.replace(/\.(csv|arrow)$/i, '');
       try {
         const ticketRes = await fetch(`${VALIDATE_API}/latest_ticket/${fileKey}`);
         if (!ticketRes.ok) return;
@@ -169,6 +183,7 @@ const ColumnClassifierSettings: React.FC<ColumnClassifierSettingsProps> = ({
           ...data.final_classification.unclassified.map((n: string) => ({ name: n, category: 'unclassified' }))
         ];
         onDataUpload([{ fileName: fileKey, columns: cols, customDimensions: {} }]);
+        await prefetchDataframe(selectedDataframe);
         return;
       } catch {
         return;
