@@ -29,7 +29,15 @@ These steps help trace why POST requests to `/api/column-classifier/classify_col
      `docker-compose logs -f fastapi`.
    - Look for import errors or router load failures during startup.
 
-5. **Inspect available routes programmatically** (optional)
+5. **Ensure CORS configuration**
+   - The frontend and backend hosts must be included in `FASTAPI_CORS_ORIGINS`.
+     Update `.env` files if your IP changed:
+     ```
+     FASTAPI_CORS_ORIGINS=http://10.2.x.x:8080
+     ```
+   - Restart the backend so FastAPI reloads the allowed origins list.
+
+6. **Inspect available routes programmatically** (optional)
    - Run inside the `fastapi` container:
      ```bash
      python - <<'PY'
@@ -40,4 +48,4 @@ These steps help trace why POST requests to `/api/column-classifier/classify_col
      ```
    - Ensure `/api/column-classifier/classify_columns` appears in the output.
 
-Following these steps should reveal whether the 404 comes from a routing issue or from the endpoint returning 404 due to bad input.
+Following these steps should reveal whether the 404 comes from a routing issue, an outdated container, CORS misconfiguration, or from the endpoint returning 404 due to bad input.

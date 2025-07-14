@@ -25,3 +25,7 @@
 4. **Compare with other atoms**
    - `data-upload-validate` and `feature-overview` follow the same router inclusion pattern.
    - Confirm their endpoints work, then verify the classifier using the same base URL and port.
+
+5. **Check CORS settings**
+   - If the browser console shows a CORS error, update `FASTAPI_CORS_ORIGINS` in your `.env`.
+   - Restart the backend so the new origins take effect.
