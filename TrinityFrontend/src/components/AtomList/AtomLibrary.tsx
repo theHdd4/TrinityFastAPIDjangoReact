@@ -37,18 +37,20 @@ const AtomLibrary: React.FC<AtomLibraryProps> = ({ onAtomDragStart, onCollapse }
     <div className="w-80 bg-white border-r border-gray-200 flex flex-col h-full">
       {/* Search Header */}
       <div className="p-4 border-b border-gray-200">
-        <div className="relative flex items-center">
-          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
-          <Input
-            placeholder="Search atoms..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="pl-10 pr-8 text-sm"
-          />
+        <div className="flex items-center">
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+            <Input
+              placeholder="Search atoms..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="pl-10 text-sm"
+            />
+          </div>
           {onCollapse && (
             <button
               onClick={onCollapse}
-              className="absolute right-2 top-1/2 transform -translate-y-1/2 p-1 hover:bg-gray-100 rounded"
+              className="ml-2 p-1 hover:bg-gray-100 rounded"
               title="Collapse"
             >
               <ChevronLeft className="w-4 h-4 text-gray-500" />
