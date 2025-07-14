@@ -123,6 +123,27 @@ export const DEFAULT_CONCAT_SETTINGS: ConcatSettings = {
   concatId: undefined
 };
 
+export interface ColumnClassifierSettings {
+  validatorId: string;
+  fileKey: string;
+  autoClassify?: boolean;
+  classificationMethod?: 'dataType' | 'columnName';
+  selectedFiles?: string[];
+  classifierData: {
+    files: { fileName: string; columns: { name: string; category: string; sampleValues?: any[] }[]; customDimensions: Record<string, string[]>; }[];
+    activeFileIndex: number;
+  };
+}
+
+export const DEFAULT_COLUMN_CLASSIFIER_SETTINGS: ColumnClassifierSettings = {
+  validatorId: '',
+  fileKey: '',
+  autoClassify: true,
+  classificationMethod: 'dataType',
+  selectedFiles: [],
+  classifierData: { files: [], activeFileIndex: 0 }
+};
+
 export interface DroppedAtom {
   id: string;
   atomId: string;

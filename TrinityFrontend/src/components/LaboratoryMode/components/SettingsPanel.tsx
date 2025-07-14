@@ -19,6 +19,7 @@ import DataUploadValidateProperties from '@/components/AtomList/atoms/data-uploa
 import FeatureOverviewProperties from '@/components/AtomList/atoms/feature-overview/components/properties/FeatureOverviewProperties';
 import ConcatProperties from '@/components/AtomList/atoms/concat/components/properties/ConcatProperties';
 import MergeProperties from '@/components/AtomList/atoms/merge/components/properties/MergeProperties';
+import ColumnClassifierProperties from '@/components/AtomList/atoms/column-classifier/components/properties/ColumnClassifierProperties';
 
 interface SettingsPanelProps {
   isCollapsed: boolean;
@@ -97,6 +98,8 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
             <ConcatProperties atomId={selectedAtomId} />
           ) : selectedAtomId && atom?.atomId === 'merge' ? (
             <MergeProperties atomId={selectedAtomId} />
+          ) : selectedAtomId && atom?.atomId === 'column-classifier' ? (
+            <ColumnClassifierProperties atomId={selectedAtomId} />
           ) : (
           <>
           <Tabs value={tab} onValueChange={setTab} className="w-full">

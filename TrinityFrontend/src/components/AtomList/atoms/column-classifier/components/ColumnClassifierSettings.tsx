@@ -5,13 +5,16 @@ import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Upload, File, Check } from 'lucide-react';
-import { ClassifierData, ColumnData, FileClassification } from '../ColumnClassifierAtom';
+import { ColumnData, FileClassification } from '../ColumnClassifierAtom';
+import { COLUMN_CLASSIFIER_API } from '@/lib/api';
 
 interface ColumnClassifierSettingsProps {
   settings: {
     autoClassify: boolean;
     classificationMethod: 'dataType' | 'columnName';
     selectedFiles: string[];
+    validatorId?: string;
+    fileKey?: string;
   };
   onSettingsChange: (settings: any) => void;
   onDataUpload: (data: FileClassification[]) => void;
@@ -134,6 +137,26 @@ const ColumnClassifierSettings: React.FC<ColumnClassifierSettingsProps> = ({
   };
 
   const handleClassifyColumns = () => {
+    if (settings.validatorId && settings.fileKey) {
+      const form = new FormData();
+      form.append('validator_atom_id', settings.validatorId);
+      form.append('file_key', settings.fileKey);
+      form.append('identifiers', JSON.stringify([]));
+      form.append('measures', JSON.stringify([]));
+      form.append('unclassified', JSON.stringify([]));
+      fetch(`${COLUMN_CLASSIFIER_API}/classify_columns`, { method: 'POST', body: form })
+        .then(res => res.json())
+        .then(res => {
+          const cols: ColumnData[] = [
+            ...res.final_classification.identifiers.map((n: string) => ({ name: n, category: 'identifiers' })),
+            ...res.final_classification.measures.map((n: string) => ({ name: n, category: 'measures' })),
+            ...res.final_classification.unclassified.map((n: string) => ({ name: n, category: 'unclassified' }))
+          ];
+          onDataUpload([{ fileName: settings.fileKey as string, columns: cols, customDimensions: {} }]);
+        })
+        .catch(() => {});
+      return;
+    }
     const selectedFileData = uploadedFiles.filter(file => 
       settings.selectedFiles.includes(file.name)
     );
@@ -193,6 +216,30 @@ const ColumnClassifierSettings: React.FC<ColumnClassifierSettingsProps> = ({
 
   return (
     <div className="space-y-6">
+      {/* Backend Options */}
+      <Card className="p-4">
+        <h4 className="font-semibold text-gray-900 mb-4">Backend Configuration</h4>
+        <div className="space-y-3">
+          <div>
+            <Label className="text-sm mb-1 block">Validator Atom ID</Label>
+            <input
+              className="w-full border rounded p-2 text-sm"
+              value={settings.validatorId || ''}
+              onChange={e => onSettingsChange({ validatorId: e.target.value })}
+              placeholder="validator_atom_id"
+            />
+          </div>
+          <div>
+            <Label className="text-sm mb-1 block">File Key</Label>
+            <input
+              className="w-full border rounded p-2 text-sm"
+              value={settings.fileKey || ''}
+              onChange={e => onSettingsChange({ fileKey: e.target.value })}
+              placeholder="file_key"
+            />
+          </div>
+        </div>
+      </Card>
       {/* File Upload Drag & Drop */}
       <Card 
         className={`p-6 border-2 border-dashed transition-colors ${

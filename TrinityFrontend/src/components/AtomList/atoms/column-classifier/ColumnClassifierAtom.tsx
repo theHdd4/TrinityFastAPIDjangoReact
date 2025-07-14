@@ -1,11 +1,5 @@
-
-import React, { useState } from 'react';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Settings, BarChart3, Eye } from 'lucide-react';
-import ColumnClassifierCanvas from './components/ColumnClassifierCanvas';
-import ColumnClassifierSettings from './components/ColumnClassifierSettings';
-import ColumnClassifierVisualisation from './components/ColumnClassifierVisualisation';
-import ColumnClassifierExhibition from './components/ColumnClassifierExhibition';
+import React from 'react';
+import { useLaboratoryStore, DEFAULT_COLUMN_CLASSIFIER_SETTINGS, ColumnClassifierSettings } from '@/components/LaboratoryMode/store/laboratoryStore';
 
 export interface ColumnData {
   name: string;
@@ -23,160 +17,80 @@ export interface ClassifierData {
   files: FileClassification[];
   activeFileIndex: number;
 }
+import ColumnClassifierCanvas from './components/ColumnClassifierCanvas';
 
-const ColumnClassifierAtom: React.FC = () => {
-  const [classifierData, setClassifierData] = useState<ClassifierData>({
-    files: [],
-    activeFileIndex: 0
-  });
-  
-  const [settings, setSettings] = useState({
-    autoClassify: true,
-    classificationMethod: 'dataType' as 'dataType' | 'columnName',
-    selectedFiles: [] as string[]
-  });
+interface Props {
+  atomId: string;
+}
 
-  const handleDataUpload = (files: FileClassification[]) => {
-    setClassifierData({
-      files,
-      activeFileIndex: 0
-    });
-  };
-
-  const handleSettingsChange = (newSettings: any) => {
-    setSettings(prev => ({ ...prev, ...newSettings }));
-  };
+const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
+  const atom = useLaboratoryStore(state => state.getAtom(atomId));
+  const updateSettings = useLaboratoryStore(state => state.updateAtomSettings);
+  const settings: ColumnClassifierSettings = (atom?.settings as ColumnClassifierSettings) || { ...DEFAULT_COLUMN_CLASSIFIER_SETTINGS };
 
   const handleColumnMove = (columnName: string, newCategory: string, fileIndex?: number) => {
-    const targetFileIndex = fileIndex !== undefined ? fileIndex : classifierData.activeFileIndex;
-    
-    setClassifierData(prev => ({
-      ...prev,
-      files: prev.files.map((file, index) => {
-        if (index === targetFileIndex) {
-          // Remove column from custom dimensions if it was there
-          const updatedCustomDimensions = { ...file.customDimensions };
-          Object.keys(updatedCustomDimensions).forEach(key => {
-            updatedCustomDimensions[key] = updatedCustomDimensions[key].filter(col => col !== columnName);
-          });
-
-          // Update column category
-          const updatedColumns = file.columns.map(col => 
-            col.name === columnName ? { ...col, category: newCategory } : col
-          );
-
-          // If moving to a custom dimension, add to that dimension
-          if (newCategory !== 'identifiers' && newCategory !== 'measures' && newCategory !== 'unclassified') {
-            if (!updatedCustomDimensions[newCategory]) {
-              updatedCustomDimensions[newCategory] = [];
-            }
-            updatedCustomDimensions[newCategory].push(columnName);
+    const data = settings.classifierData;
+    const targetFileIndex = fileIndex !== undefined ? fileIndex : data.activeFileIndex;
+    const updatedFiles = data.files.map((file, index) => {
+      if (index === targetFileIndex) {
+        const updatedCustom = { ...file.customDimensions };
+        Object.keys(updatedCustom).forEach(key => {
+          updatedCustom[key] = updatedCustom[key].filter(col => col !== columnName);
+        });
+        const updatedColumns = file.columns.map(col =>
+          col.name === columnName ? { ...col, category: newCategory } : col
+        );
+        if (newCategory !== 'identifiers' && newCategory !== 'measures' && newCategory !== 'unclassified') {
+          if (!updatedCustom[newCategory]) {
+            updatedCustom[newCategory] = [];
           }
-
-          return {
-            ...file,
-            columns: updatedColumns,
-            customDimensions: updatedCustomDimensions
-          };
+          updatedCustom[newCategory].push(columnName);
         }
-        return file;
-      })
-    }));
+        return { ...file, columns: updatedColumns, customDimensions: updatedCustom };
+      }
+      return file;
+    });
+    updateSettings(atomId, { classifierData: { ...data, files: updatedFiles } });
   };
 
   const handleCustomDimensionAdd = (dimensionName: string, fileIndex?: number) => {
-    const targetFileIndex = fileIndex !== undefined ? fileIndex : classifierData.activeFileIndex;
-    
-    setClassifierData(prev => ({
-      ...prev,
-      files: prev.files.map((file, index) => {
-        if (index === targetFileIndex) {
-          return {
-            ...file,
-            customDimensions: {
-              ...file.customDimensions,
-              [dimensionName]: []
-            }
-          };
-        }
-        return file;
-      })
-    }));
-  };
-
-  const handleFileDelete = (fileIndex: number) => {
-    setClassifierData(prev => {
-      const newFiles = prev.files.filter((_, index) => index !== fileIndex);
-      const newActiveIndex = fileIndex === prev.activeFileIndex 
-        ? Math.max(0, prev.activeFileIndex - 1)
-        : prev.activeFileIndex > fileIndex 
-          ? prev.activeFileIndex - 1 
-          : prev.activeFileIndex;
-
-      return {
-        files: newFiles,
-        activeFileIndex: newFiles.length > 0 ? Math.min(newActiveIndex, newFiles.length - 1) : 0
-      };
+    const data = settings.classifierData;
+    const targetFileIndex = fileIndex !== undefined ? fileIndex : data.activeFileIndex;
+    const updatedFiles = data.files.map((file, index) => {
+      if (index === targetFileIndex) {
+        return {
+          ...file,
+          customDimensions: {
+            ...file.customDimensions,
+            [dimensionName]: []
+          }
+        };
+      }
+      return file;
     });
+    updateSettings(atomId, { classifierData: { ...data, files: updatedFiles } });
   };
 
   const setActiveFile = (fileIndex: number) => {
-    setClassifierData(prev => ({
-      ...prev,
-      activeFileIndex: fileIndex
-    }));
+    updateSettings(atomId, { classifierData: { ...settings.classifierData, activeFileIndex: fileIndex } });
+  };
+
+  const handleFileDelete = (fileIndex: number) => {
+    const data = settings.classifierData;
+    const newFiles = data.files.filter((_, idx) => idx !== fileIndex);
+    const newActive = fileIndex === data.activeFileIndex ? Math.max(0, data.activeFileIndex - 1) : data.activeFileIndex > fileIndex ? data.activeFileIndex - 1 : data.activeFileIndex;
+    updateSettings(atomId, { classifierData: { files: newFiles, activeFileIndex: newFiles.length > 0 ? Math.min(newActive, newFiles.length - 1) : 0 } });
   };
 
   return (
-    <div className="w-full h-full bg-white flex">
-      {/* Main Canvas Area */}
-      <div className="flex-1">
-        <ColumnClassifierCanvas 
-          data={classifierData}
-          onColumnMove={handleColumnMove}
-          onCustomDimensionAdd={handleCustomDimensionAdd}
-          onActiveFileChange={setActiveFile}
-          onFileDelete={handleFileDelete}
-        />
-      </div>
-
-      {/* Properties Panel */}
-      <div className="w-80 border-l border-gray-200 bg-gray-50">
-        <Tabs defaultValue="settings" className="w-full h-full">
-          <TabsList className="grid w-full grid-cols-3 mx-4 my-4">
-            <TabsTrigger value="settings" className="text-xs">
-              <Settings className="w-3 h-3 mr-1" />
-              Settings
-            </TabsTrigger>
-            <TabsTrigger value="visualisation" className="text-xs">
-              <BarChart3 className="w-3 h-3 mr-1" />
-              Charts
-            </TabsTrigger>
-            <TabsTrigger value="exhibition" className="text-xs">
-              <Eye className="w-3 h-3 mr-1" />
-              Export
-            </TabsTrigger>
-          </TabsList>
-          
-          <div className="px-4 pb-4 h-[calc(100%-80px)] overflow-y-auto">
-            <TabsContent value="settings" className="mt-2">
-              <ColumnClassifierSettings 
-                settings={settings}
-                onSettingsChange={handleSettingsChange}
-                onDataUpload={handleDataUpload}
-              />
-            </TabsContent>
-            
-            <TabsContent value="visualisation" className="mt-2">
-              <ColumnClassifierVisualisation data={classifierData} />
-            </TabsContent>
-            
-            <TabsContent value="exhibition" className="mt-2">
-              <ColumnClassifierExhibition data={classifierData} />
-            </TabsContent>
-          </div>
-        </Tabs>
-      </div>
+    <div className="w-full h-full bg-white rounded-lg overflow-hidden flex flex-col">
+      <ColumnClassifierCanvas
+        data={settings.classifierData}
+        onColumnMove={handleColumnMove}
+        onCustomDimensionAdd={handleCustomDimensionAdd}
+        onActiveFileChange={setActiveFile}
+        onFileDelete={handleFileDelete}
+      />
     </div>
   );
 };
