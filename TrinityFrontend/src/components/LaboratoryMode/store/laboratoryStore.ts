@@ -123,6 +123,33 @@ export const DEFAULT_CONCAT_SETTINGS: ConcatSettings = {
   concatId: undefined
 };
 
+export interface ColumnClassifierColumn {
+  name: string;
+  category: 'identifiers' | 'measures' | 'unclassified' | string;
+}
+
+export interface ColumnClassifierFile {
+  fileName: string;
+  columns: ColumnClassifierColumn[];
+  customDimensions: { [key: string]: string[] };
+}
+
+export interface ColumnClassifierData {
+  files: ColumnClassifierFile[];
+  activeFileIndex: number;
+}
+
+export interface ColumnClassifierSettings {
+  data: ColumnClassifierData;
+}
+
+export const DEFAULT_COLUMN_CLASSIFIER_SETTINGS: ColumnClassifierSettings = {
+  data: {
+    files: [],
+    activeFileIndex: 0
+  }
+};
+
 export interface DroppedAtom {
   id: string;
   atomId: string;

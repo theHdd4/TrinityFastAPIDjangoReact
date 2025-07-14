@@ -1,43 +1,43 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Settings, BarChart3, Eye } from 'lucide-react';
 import ColumnClassifierCanvas from './components/ColumnClassifierCanvas';
 import ColumnClassifierSettings from './components/ColumnClassifierSettings';
 import ColumnClassifierVisualisation from './components/ColumnClassifierVisualisation';
 import ColumnClassifierExhibition from './components/ColumnClassifierExhibition';
+import {
+  useLaboratoryStore,
+  DEFAULT_COLUMN_CLASSIFIER_SETTINGS,
+  ColumnClassifierSettings as SettingsType,
+  ColumnClassifierData,
+  ColumnClassifierFile,
+  ColumnClassifierColumn
+} from '@/components/LaboratoryMode/store/laboratoryStore';
 
-export interface ColumnData {
-  name: string;
-  category: 'identifiers' | 'measures' | 'unclassified' | string;
+export type ColumnData = ColumnClassifierColumn;
+export type FileClassification = ColumnClassifierFile;
+export type ClassifierData = ColumnClassifierData;
+interface Props {
+  atomId: string;
 }
 
-export interface FileClassification {
-  fileName: string;
-  columns: ColumnData[];
-  customDimensions: { [key: string]: string[] };
-}
-
-export interface ClassifierData {
-  files: FileClassification[];
-  activeFileIndex: number;
-}
-
-const ColumnClassifierAtom: React.FC = () => {
-  const [classifierData, setClassifierData] = useState<ClassifierData>({
-    files: [],
-    activeFileIndex: 0
-  });
+const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
+  const atom = useLaboratoryStore(state => state.getAtom(atomId));
+  const updateSettings = useLaboratoryStore(state => state.updateAtomSettings);
+  const settings: SettingsType = (atom?.settings as SettingsType) || {
+    ...DEFAULT_COLUMN_CLASSIFIER_SETTINGS
+  };
+  const classifierData = settings.data;
 
   const handleClassification = (file: FileClassification) => {
-    setClassifierData({ files: [file], activeFileIndex: 0 });
+    updateSettings(atomId, { data: { files: [file], activeFileIndex: 0 } });
   };
 
   const handleColumnMove = (columnName: string, newCategory: string, fileIndex?: number) => {
     const targetFileIndex = fileIndex !== undefined ? fileIndex : classifierData.activeFileIndex;
-
-    setClassifierData(prev => ({
-      ...prev,
-      files: prev.files.map((file, index) => {
+    const updated = {
+      ...classifierData,
+      files: classifierData.files.map((file, index) => {
         if (index === targetFileIndex) {
           const updatedCustom = { ...file.customDimensions };
           Object.keys(updatedCustom).forEach(key => {
@@ -63,15 +63,15 @@ const ColumnClassifierAtom: React.FC = () => {
         }
         return file;
       })
-    }));
+    };
+    updateSettings(atomId, { data: updated });
   };
 
   const handleCustomDimensionAdd = (dimensionName: string, fileIndex?: number) => {
     const targetFileIndex = fileIndex !== undefined ? fileIndex : classifierData.activeFileIndex;
-
-    setClassifierData(prev => ({
-      ...prev,
-      files: prev.files.map((file, index) => {
+    const updated = {
+      ...classifierData,
+      files: classifierData.files.map((file, index) => {
         if (index === targetFileIndex) {
           return {
             ...file,
@@ -83,30 +83,30 @@ const ColumnClassifierAtom: React.FC = () => {
         }
         return file;
       })
-    }));
+    };
+    updateSettings(atomId, { data: updated });
   };
 
   const handleFileDelete = (fileIndex: number) => {
-    setClassifierData(prev => {
-      const newFiles = prev.files.filter((_, index) => index !== fileIndex);
-      const newActiveIndex = fileIndex === prev.activeFileIndex
-        ? Math.max(0, prev.activeFileIndex - 1)
-        : prev.activeFileIndex > fileIndex
-          ? prev.activeFileIndex - 1
-          : prev.activeFileIndex;
+    const newFiles = classifierData.files.filter((_, index) => index !== fileIndex);
+    const newActiveIndex =
+      fileIndex === classifierData.activeFileIndex
+        ? Math.max(0, classifierData.activeFileIndex - 1)
+        : classifierData.activeFileIndex > fileIndex
+        ? classifierData.activeFileIndex - 1
+        : classifierData.activeFileIndex;
 
-      return {
+    updateSettings(atomId, {
+      data: {
         files: newFiles,
-        activeFileIndex: newFiles.length > 0 ? Math.min(newActiveIndex, newFiles.length - 1) : 0
-      };
+        activeFileIndex:
+          newFiles.length > 0 ? Math.min(newActiveIndex, newFiles.length - 1) : 0
+      }
     });
   };
 
   const setActiveFile = (fileIndex: number) => {
-    setClassifierData(prev => ({
-      ...prev,
-      activeFileIndex: fileIndex
-    }));
+    updateSettings(atomId, { data: { ...classifierData, activeFileIndex: fileIndex } });
   };
 
   return (
