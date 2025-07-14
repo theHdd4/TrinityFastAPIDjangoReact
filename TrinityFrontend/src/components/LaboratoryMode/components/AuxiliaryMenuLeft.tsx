@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Grid3X3, ChevronLeft } from 'lucide-react';
+import { Grid3X3 } from 'lucide-react';
 import AtomLibrary from '@/components/AtomList/AtomLibrary';
 
 interface Props {
@@ -26,18 +26,10 @@ const AuxiliaryMenuLeft: React.FC<Props> = ({ onAtomDragStart }) => {
   }
 
   return (
-    <div className="relative">
-      <div className="absolute top-2 right-2 z-10">
-        <button
-          onClick={() => setOpen(false)}
-          className="p-1 hover:bg-gray-100 rounded"
-          title="Collapse"
-        >
-          <ChevronLeft className="w-4 h-4 text-gray-500" />
-        </button>
-      </div>
-      <AtomLibrary onAtomDragStart={onAtomDragStart} />
-    </div>
+    <AtomLibrary
+      onAtomDragStart={onAtomDragStart}
+      onCollapse={() => setOpen(false)}
+    />
   );
 };
 

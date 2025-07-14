@@ -2,16 +2,17 @@
 import React, { useState } from 'react';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
-import { Search, ChevronDown, ChevronRight } from 'lucide-react';
+import { Search, ChevronDown, ChevronRight, ChevronLeft } from 'lucide-react';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import AtomCard from './AtomCard';
 import { atomCategories } from '../AtomCategory/data/atomCategories';
 
 interface AtomLibraryProps {
   onAtomDragStart?: (e: React.DragEvent, atomId: string) => void;
+  onCollapse?: () => void;
 }
 
-const AtomLibrary: React.FC<AtomLibraryProps> = ({ onAtomDragStart }) => {
+const AtomLibrary: React.FC<AtomLibraryProps> = ({ onAtomDragStart, onCollapse }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [openCategories, setOpenCategories] = useState<string[]>(['Data Sources']);
 
@@ -36,14 +37,23 @@ const AtomLibrary: React.FC<AtomLibraryProps> = ({ onAtomDragStart }) => {
     <div className="w-80 bg-white border-r border-gray-200 flex flex-col h-full">
       {/* Search Header */}
       <div className="p-4 border-b border-gray-200">
-        <div className="relative">
+        <div className="relative flex items-center">
           <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
           <Input
             placeholder="Search atoms..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="pl-10 text-sm"
+            className="pl-10 pr-8 text-sm"
           />
+          {onCollapse && (
+            <button
+              onClick={onCollapse}
+              className="absolute right-2 top-1/2 transform -translate-y-1/2 p-1 hover:bg-gray-100 rounded"
+              title="Collapse"
+            >
+              <ChevronLeft className="w-4 h-4 text-gray-500" />
+            </button>
+          )}
         </div>
       </div>
       
