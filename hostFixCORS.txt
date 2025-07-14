@@ -1,0 +1,18 @@
+To add a new machine so the Trinity services work from its IP address:
+
+1. Edit `TrinityBackendDjango/.env` and `TrinityFrontend/.env` and append the new
+   host IP to the `CORS_ALLOWED_ORIGINS`, `CSRF_TRUSTED_ORIGINS` and
+   `FASTAPI_CORS_ORIGINS` variables. Use a comma separated list. Example:
+   
+   ```
+   CORS_ALLOWED_ORIGINS=http://10.2.1.242:8080,http://10.2.1.65:8080
+   CSRF_TRUSTED_ORIGINS=http://10.2.1.242:8080,http://10.2.1.65:8080
+   FASTAPI_CORS_ORIGINS=http://10.2.1.242:8080,http://10.2.1.65:8080
+   ```
+
+2. Update `HOST_IP` in both `.env` files to match the address the services will
+   listen on. Rebuild the frontend container so Vite embeds the updated value.
+
+3. Restart the backend by running `scripts/start_backend.sh`. The Django and
+   FastAPI containers will load the new environment values, enabling requests
+   from the new host.
