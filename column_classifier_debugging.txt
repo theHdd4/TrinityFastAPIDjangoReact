@@ -1,0 +1,27 @@
+# Column Classifier Debugging Steps
+
+1. **Verify FastAPI service**
+   - Ensure `TrinityBackendFastAPI` container is running on port `8001`.
+   - Browse `http://<host>:8001/api/docs` to confirm the API is up.
+
+2. **Check routing**
+   - The classifier routes are mounted under `/api/column-classifier`.
+   - A backward compatible prefix `/api/classify` is also available.
+   - Use the health endpoint to confirm the router is loaded:
+     `curl http://<host>:8001/api/column-classifier/health`
+
+3. **Classify columns**
+   - Send a POST request with form data:
+     ```bash
+     curl -F validator_atom_id=<id> \
+          -F file_key=<file_key> \
+          -F identifiers='[]' \
+          -F measures='[]' \
+          -F unclassified='[]' \
+          http://<host>:8001/api/column-classifier/classify_columns
+     ```
+   - A `404` error usually indicates the service is not running or the prefix is incorrect.
+
+4. **Compare with other atoms**
+   - `data-upload-validate` and `feature-overview` follow the same router inclusion pattern.
+   - Confirm their endpoints work, then verify the classifier using the same base URL and port.
