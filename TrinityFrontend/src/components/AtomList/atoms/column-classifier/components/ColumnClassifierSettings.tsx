@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from 'react';
+import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
 import { VALIDATE_API, CLASSIFIER_API } from '@/lib/api';
@@ -68,38 +70,58 @@ const ColumnClassifierSettings: React.FC<ColumnClassifierSettingsProps> = ({ onC
 
   return (
     <div className="space-y-6 p-2">
-      <div>
-        <label className="text-sm font-medium text-gray-700 block mb-2">Saved Dataframe</label>
-        <Select value={savedId} onValueChange={setSavedId}>
-          <SelectTrigger className="w-full">
-            <SelectValue placeholder="Select dataframe" />
-          </SelectTrigger>
-          <SelectContent>
-            {frames.map(f => (
-              <SelectItem key={f.object_name} value={f.object_name}>
-                {f.csv_name.split('/').pop()}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-      <div>
-        <label className="text-sm font-medium text-gray-700 block mb-2">File Key</label>
-        <Input value={fileKey} onChange={e => setFileKey(e.target.value)} placeholder="Optional" />
-      </div>
-      <div>
-        <p className="text-sm font-medium text-gray-700 mb-2">Business Dimensions</p>
-        {dimensionOptions.map(dim => (
-          <div key={dim} className="flex items-center space-x-2 mb-1">
-            <Checkbox id={dim} checked={selectedDims.includes(dim)} onCheckedChange={() => toggleDim(dim)} />
-            <label htmlFor={dim} className="text-sm capitalize">{dim}</label>
-          </div>
-        ))}
-      </div>
-      {error && <p className="text-red-500 text-sm">{error}</p>}
-      <Button onClick={classify} disabled={loading || !savedId} className="w-full">
-        Classify Columns
-      </Button>
+      <Card className="p-4 space-y-4">
+        <div>
+          <Label className="text-sm mb-2 block">Saved Dataframe</Label>
+          <Select value={savedId} onValueChange={setSavedId}>
+            <SelectTrigger className="w-full">
+              <SelectValue placeholder="Select dataframe" />
+            </SelectTrigger>
+            <SelectContent>
+              {frames.map(f => (
+                <SelectItem key={f.object_name} value={f.object_name}>
+                  {f.csv_name.split('/').pop()}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div>
+          <Label className="text-sm mb-2 block">File Key</Label>
+          <Input
+            value={fileKey}
+            onChange={e => setFileKey(e.target.value)}
+            placeholder="Optional"
+          />
+        </div>
+
+        <div>
+          <Label className="text-sm mb-2 block">Business Dimensions</Label>
+          {dimensionOptions.map(dim => (
+            <div key={dim} className="flex items-center space-x-2 mb-1">
+              <Checkbox
+                id={dim}
+                checked={selectedDims.includes(dim)}
+                onCheckedChange={() => toggleDim(dim)}
+              />
+              <label htmlFor={dim} className="text-sm capitalize">
+                {dim}
+              </label>
+            </div>
+          ))}
+        </div>
+
+        {error && <p className="text-red-500 text-sm">{error}</p>}
+
+        <Button
+          onClick={classify}
+          disabled={loading || !savedId}
+          className="w-full"
+        >
+          Classify Columns
+        </Button>
+      </Card>
     </div>
   );
 };
