@@ -162,14 +162,13 @@ const ColumnClassifierSettings: React.FC<ColumnClassifierSettingsProps> = ({
 
   const handleClassifyColumns = async () => {
     if (selectedDataframe) {
-      // selectedDataframe is the MinIO object name (e.g. 20250711_142433_key.arrow)
-      const base = selectedDataframe.replace(/\.(csv|arrow)$/i, '').split('_', 3);
-      const fileKey = base.length >= 3 ? base[2] : base[base.length - 1];
+      // Parse validator and file key from saved dataframe name
+      const filePart = selectedDataframe.split("/").pop() || selectedDataframe;
+      const base = filePart.replace(/.(csv|arrow)$/i, "");
+      const parts = base.split("_");
+      const validatorId = parts.length >= 2 ? `${parts[0]}_${parts[1]}` : parts[0];
+      const fileKey = parts.slice(2).join("_") || parts[parts.length - 1];
       try {
-        const ticketRes = await fetch(`${VALIDATE_API}/latest_ticket/${fileKey}`);
-        if (!ticketRes.ok) return;
-        const ticket = await ticketRes.json();
-        const validatorId = (ticket.flight_path || '').split('/')[0];
         onSettingsChange({ validatorId, fileKey });
         const form = new FormData();
         form.append('validator_atom_id', validatorId);
