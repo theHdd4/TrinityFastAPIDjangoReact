@@ -158,7 +158,17 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({ settings,
       });
       const table = Array.from(combos.values()).map((row, i) => ({ id: i + 1, ...row }));
       setSkuRows(table);
-      onUpdateSettings({ skuTable: table, marketDims, productDims });
+      const newSettings: any = { skuTable: table, marketDims, productDims };
+      if (!settings.yAxes || settings.yAxes.length === 0) {
+        const lower = Array.isArray(settings.numericColumns)
+          ? settings.numericColumns.map(c => c.toLowerCase())
+          : [];
+        const defaults = ['salesvalue', 'volume'].filter(d => lower.includes(d));
+        if (defaults.length > 0) {
+          newSettings.yAxes = defaults;
+        }
+      }
+      onUpdateSettings(newSettings);
     } catch (e: any) {
       console.error('⚠️ failed to display SKUs', e);
       setError(e.message || 'Error displaying SKUs');
