@@ -1,6 +1,5 @@
 import React from 'react';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { BarChart3 } from 'lucide-react';
+
 import ColumnClassifierCanvas from './components/ColumnClassifierCanvas';
 import ColumnClassifierVisualisation from './components/ColumnClassifierVisualisation';
 import {
@@ -108,46 +107,31 @@ const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
     });
   };
 
+  const saveDisabled =
+    !classifierData.files.length ||
+    Object.keys(
+      classifierData.files[classifierData.activeFileIndex]?.customDimensions || {}
+    ).length === 0 ||
+    Object.values(
+      classifierData.files[classifierData.activeFileIndex]?.customDimensions || {}
+    ).every(c => c.length === 0);
+
   return (
     <div className="w-full h-full bg-white flex">
-      <div className="flex-1">
+      <div className="w-3/5 p-4 overflow-y-auto">
         <ColumnClassifierCanvas
           data={classifierData}
           validatorId={settings.validatorId}
           onColumnMove={handleColumnMove}
           onActiveFileChange={setActiveFile}
           onFileDelete={handleFileDelete}
+          onSave={saveAssignments}
+          saveDisabled={saveDisabled}
         />
       </div>
 
-      <div className="w-80 border-l border-gray-200 bg-gray-50">
-        <Tabs defaultValue="visualisation" className="w-full h-full">
-          <TabsList className="grid w-full grid-cols-1 mx-4 my-4">
-            <TabsTrigger value="visualisation" className="text-xs">
-              <BarChart3 className="w-3 h-3 mr-1" />
-              Charts
-            </TabsTrigger>
-          </TabsList>
-
-          <div className="px-4 pb-4 h-[calc(100%-80px)] overflow-y-auto">
-            <TabsContent value="visualisation" className="mt-2">
-              <ColumnClassifierVisualisation
-                data={classifierData}
-                onSave={saveAssignments}
-                saveDisabled={
-                  !classifierData.files.length ||
-                  Object.keys(
-                    classifierData.files[classifierData.activeFileIndex]?.customDimensions || {}
-                  ).length === 0 ||
-                  Object.values(
-                    classifierData.files[classifierData.activeFileIndex]?.customDimensions || {}
-                  ).every(c => c.length === 0)
-                }
-              />
-            </TabsContent>
-
-          </div>
-        </Tabs>
+      <div className="w-2/5 border-l border-gray-200 bg-gray-50 p-4 overflow-y-auto">
+        <ColumnClassifierVisualisation data={classifierData} />
       </div>
     </div>
   );

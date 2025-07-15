@@ -12,6 +12,8 @@ interface ColumnClassifierCanvasProps {
   onColumnMove: (columnName: string, newCategory: string, fileIndex?: number) => void;
   onActiveFileChange: (fileIndex: number) => void;
   onFileDelete?: (fileIndex: number) => void;
+  onSave?: () => void;
+  saveDisabled?: boolean;
 }
 
 const ColumnClassifierCanvas: React.FC<ColumnClassifierCanvasProps> = ({
@@ -19,7 +21,9 @@ const ColumnClassifierCanvas: React.FC<ColumnClassifierCanvasProps> = ({
   validatorId,
   onColumnMove,
   onActiveFileChange,
-  onFileDelete
+  onFileDelete,
+  onSave,
+  saveDisabled
 }) => {
   const [showDropdowns, setShowDropdowns] = useState<{ [key: string]: boolean }>({});
 
@@ -248,6 +252,16 @@ const ColumnClassifierCanvas: React.FC<ColumnClassifierCanvasProps> = ({
           })
         )}
 
+      </div>
+
+      <div className="pt-4">
+        <Button
+          disabled={saveDisabled}
+          onClick={onSave}
+          className="w-full h-12 text-sm font-semibold bg-gradient-to-r from-gray-800 to-gray-900 hover:from-gray-900 hover:to-black"
+        >
+          Save Dimensions
+        </Button>
       </div>
     </div>
   );
