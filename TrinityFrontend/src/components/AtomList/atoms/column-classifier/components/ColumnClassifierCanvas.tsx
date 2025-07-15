@@ -3,28 +3,23 @@ import React, { useState } from 'react';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Edit2, Plus, X, FileText, Trash2, TrendingUp, BarChart3, Tag } from 'lucide-react';
+import { Edit2, X, FileText, Trash2, TrendingUp, BarChart3, Tag } from 'lucide-react';
 import { ClassifierData, ColumnData } from '../ColumnClassifierAtom';
 
 interface ColumnClassifierCanvasProps {
   data: ClassifierData;
   onColumnMove: (columnName: string, newCategory: string, fileIndex?: number) => void;
-  onCustomDimensionAdd: (dimensionName: string, fileIndex?: number) => void;
   onActiveFileChange: (fileIndex: number) => void;
   onFileDelete?: (fileIndex: number) => void;
 }
 
-const ColumnClassifierCanvas: React.FC<ColumnClassifierCanvasProps> = ({ 
-  data, 
-  onColumnMove, 
-  onCustomDimensionAdd,
+const ColumnClassifierCanvas: React.FC<ColumnClassifierCanvasProps> = ({
+  data,
+  onColumnMove,
   onActiveFileChange,
   onFileDelete
 }) => {
   const [showDropdowns, setShowDropdowns] = useState<{ [key: string]: boolean }>({});
-  const [showCustomDimensionInput, setShowCustomDimensionInput] = useState(false);
-  const [newDimensionName, setNewDimensionName] = useState('');
 
   if (!data.files.length) {
     return (
@@ -72,13 +67,6 @@ const ColumnClassifierCanvas: React.FC<ColumnClassifierCanvasProps> = ({
     setShowDropdowns(prev => ({ ...prev, [category]: false }));
   };
 
-  const handleAddCustomDimension = () => {
-    if (newDimensionName.trim()) {
-      onCustomDimensionAdd(newDimensionName.trim(), data.activeFileIndex);
-      setNewDimensionName('');
-      setShowCustomDimensionInput(false);
-    }
-  };
 
   const handleFileDelete = (fileIndex: number, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -214,71 +202,30 @@ const ColumnClassifierCanvas: React.FC<ColumnClassifierCanvasProps> = ({
         />
 
         {/* Custom Dimensions */}
-        {currentFile && Object.entries(currentFile.customDimensions).map(([dimensionName, columnNames]) => {
-          const dimensionColumns = columnNames.map(name => 
-            currentFile.columns.find(col => col.name === name)
-          ).filter(Boolean) as ColumnData[];
-
-          return (
-            <DimensionCard
-              key={dimensionName}
-              title={dimensionName}
-              icon={<TrendingUp className="w-5 h-5 mr-2" />}
-              gradient="bg-gradient-to-r from-purple-500 to-purple-600"
-              columns={dimensionColumns}
-              category={dimensionName}
-              onRemove={(columnName) => onColumnMove(columnName, 'unclassified', data.activeFileIndex)}
-            />
-          );
-        })}
-
-        {/* Create Custom Dimension */}
-        {!showCustomDimensionInput ? (
-          <Card className="border-2 border-dashed border-gray-300 hover:border-gray-400 transition-colors">
-            <div className="p-6">
-              <Button 
-                variant="outline" 
-                className="w-full h-16 text-lg font-medium"
-                onClick={() => setShowCustomDimensionInput(true)}
-              >
-                <Plus className="w-6 h-6 mr-3" />
-                Create Custom Dimension
-              </Button>
-            </div>
-          </Card>
+        {Object.keys(currentFile.customDimensions).length === 0 ? (
+          <p className="text-sm text-gray-500">
+            Configure Dimensions in Properties -&gt; Dimensions to set Dimensions
+          </p>
         ) : (
-          <Card className="border-0 shadow-xl bg-white/90 backdrop-blur-sm">
-            <div className="bg-gradient-to-r from-purple-500 to-purple-600 p-4">
-              <h4 className="font-bold text-white text-lg">New Custom Dimension</h4>
-            </div>
-            <div className="p-6 space-y-4">
-              <Input
-                placeholder="Enter dimension name..."
-                value={newDimensionName}
-                onChange={(e) => setNewDimensionName(e.target.value)}
-                onKeyPress={(e) => e.key === 'Enter' && handleAddCustomDimension()}
-                className="text-lg p-3"
+          Object.entries(currentFile.customDimensions).map(([dimensionName, columnNames]) => {
+            const dimensionColumns = columnNames.map(name =>
+              currentFile.columns.find(col => col.name === name)
+            ).filter(Boolean) as ColumnData[];
+
+            return (
+              <DimensionCard
+                key={dimensionName}
+                title={dimensionName}
+                icon={<TrendingUp className="w-5 h-5 mr-2" />}
+                gradient="bg-gradient-to-r from-purple-500 to-purple-600"
+                columns={dimensionColumns}
+                category={dimensionName}
+                onRemove={(columnName) => onColumnMove(columnName, 'unclassified', data.activeFileIndex)}
               />
-              <div className="flex space-x-3">
-                <Button 
-                  onClick={handleAddCustomDimension}
-                  className="bg-gradient-to-r from-purple-500 to-purple-600 hover:from-purple-600 hover:to-purple-700"
-                >
-                  Create Dimension
-                </Button>
-                <Button 
-                  variant="outline" 
-                  onClick={() => {
-                    setShowCustomDimensionInput(false);
-                    setNewDimensionName('');
-                  }}
-                >
-                  Cancel
-                </Button>
-              </div>
-            </div>
-          </Card>
+            );
+          })
         )}
+
 
         {/* Unclassified Columns - if any */}
         {getAvailableColumns().length > 0 && (

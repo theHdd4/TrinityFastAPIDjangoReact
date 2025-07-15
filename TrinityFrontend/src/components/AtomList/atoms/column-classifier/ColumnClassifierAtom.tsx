@@ -66,25 +66,6 @@ const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
     updateSettings(atomId, { data: updated });
   };
 
-  const handleCustomDimensionAdd = (dimensionName: string, fileIndex?: number) => {
-    const targetFileIndex = fileIndex !== undefined ? fileIndex : classifierData.activeFileIndex;
-    const updated = {
-      ...classifierData,
-      files: classifierData.files.map((file, index) => {
-        if (index === targetFileIndex) {
-          return {
-            ...file,
-            customDimensions: {
-              ...file.customDimensions,
-              [dimensionName]: []
-            }
-          };
-        }
-        return file;
-      })
-    };
-    updateSettings(atomId, { data: updated });
-  };
 
   const handleFileDelete = (fileIndex: number) => {
     const newFiles = classifierData.files.filter((_, index) => index !== fileIndex);
@@ -114,7 +95,6 @@ const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
         <ColumnClassifierCanvas
           data={classifierData}
           onColumnMove={handleColumnMove}
-          onCustomDimensionAdd={handleCustomDimensionAdd}
           onActiveFileChange={setActiveFile}
           onFileDelete={handleFileDelete}
         />
