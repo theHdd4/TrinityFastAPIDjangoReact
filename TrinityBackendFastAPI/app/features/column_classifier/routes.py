@@ -4,6 +4,16 @@ from datetime import datetime
 import json
 from typing import Dict, Any, List, Optional
 from pydantic import BaseModel
+from urllib.parse import unquote
+import os
+import pyarrow as pa
+import pyarrow.ipc as ipc
+from minio.error import S3Error
+from app.DataStorageRetrieval.arrow_client import download_dataframe
+from app.DataStorageRetrieval.flight_registry import get_flight_path_for_csv, set_ticket
+from app.DataStorageRetrieval.db import get_dataset_info
+from app.DataStorageRetrieval.minio_utils import get_client, MINIO_BUCKET
+from app.features.feature_overview.deps import redis_client
 
 # Import your existing database functions
 # Change these lines at the top of routes.py:
@@ -34,6 +44,9 @@ router = APIRouter()
 
 # In-memory storage (keeping your existing structure)
 extraction_results = {}
+
+# MinIO client for loading saved dataframes
+minio_client = get_client()
 
 
 # =============================================================================
@@ -148,48 +161,54 @@ async def check_collections_with_counts():
 # =============================================================================
 @router.post("/classify_columns", response_model=ClassifyColumnsResponse)
 async def classify_columns(
-    validator_atom_id: str = Form(...),
-    file_key: str = Form(...),
+    dataframe: str = Form(...),
     identifiers: str = Form(default="[]"),
     measures: str = Form(default="[]"),
     unclassified: str = Form(default="[]")
 ):
     """
     Auto-classify data columns with optional user overrides.
-    
-    - **validator_atom_id**: ID of the validator atom containing the data schema
-    - **file_key**: Key identifying the specific file/dataset within the validator
+
+    - **dataframe**: Saved Arrow dataframe object name
     - **identifiers**: JSON array of columns to classify as identifiers
     - **measures**: JSON array of columns to classify as measures
     - **unclassified**: JSON array of columns to leave unclassified
     """
-    
-    # Check if validator atom exists (MongoDB first, then fallback)
-    validator_data = get_validator_atom_from_mongo(validator_atom_id)
-    if not validator_data:
-        # Fallback to old method for backward compatibility
-        validator_data = get_validator_from_memory_or_disk(validator_atom_id)
 
-    if not validator_data:
-        raise HTTPException(
-            status_code=404, 
-            detail=f"Validator atom '{validator_atom_id}' not found in database"
-        )
+    object_name = unquote(dataframe)
+    flight_path = get_flight_path_for_csv(object_name)
+    if not flight_path:
+        info = await get_dataset_info(object_name)
+        if info:
+            file_key, flight_path, original_csv = info
+            set_ticket(file_key, object_name, flight_path, original_csv)
+    df = None
+    if flight_path:
+        try:
+            df = download_dataframe(flight_path)
+        except Exception:
+            df = None
+    if df is None:
+        if not object_name.endswith(".arrow"):
+            raise HTTPException(status_code=400, detail="Unsupported file format")
+        content = redis_client.get(object_name)
+        if content is None:
+            try:
+                response = minio_client.get_object(MINIO_BUCKET, object_name)
+                content = response.read()
+                redis_client.setex(object_name, 3600, content)
+            except S3Error as e:
+                code = getattr(e, "code", "")
+                if code in {"NoSuchKey", "NoSuchBucket"}:
+                    redis_client.delete(object_name)
+                    raise HTTPException(status_code=404, detail="File not found")
+                raise HTTPException(status_code=500, detail=str(e))
+        reader = ipc.RecordBatchFileReader(pa.BufferReader(content))
+        df = reader.read_all().to_pandas()
 
-    # Get column information from existing schema
-    schema_data = validator_data["schemas"].get(file_key, {})
-    if not schema_data:
-        available_keys = list(validator_data["schemas"].keys())
-        raise HTTPException(
-            status_code=400, 
-            detail=f"File key '{file_key}' not found in validator. Available file keys: {available_keys}"
-        )
-
-    all_columns = [col["column"] for col in schema_data.get("columns", [])]
-    column_types = schema_data.get("column_types", {})
-
-    if not all_columns:
-        raise HTTPException(status_code=400, detail="No columns found in schema data")
+    df.columns = [str(c).lower() for c in df.columns]
+    all_columns = df.columns.tolist()
+    column_types = {c: str(df[c].dtype) for c in df.columns}
 
     # Parse user overrides (if provided)
     try:
@@ -314,41 +333,12 @@ async def classify_columns(
         },
         "user_modified": bool(user_identifiers or user_measures or user_unclassified),
         "timestamp": datetime.now().isoformat(),
-        "validator_type": validator_data.get("template_type", "custom")
     }
-
-    # SAVE TO MONGODB
-    try:
-        mongo_result = save_classification_to_mongo(validator_atom_id, file_key, classification_data)
-    except Exception as e:
-        raise HTTPException(
-            status_code=500, 
-            detail=f"Failed to save classification to MongoDB: {str(e)}"
-        )
-
-    # Safe update in memory (works for both validator types)
-    try:
-        # Initialize extraction_results entry if it doesn't exist
-        if validator_atom_id not in extraction_results:
-            extraction_results[validator_atom_id] = {}
-        
-        if "classification" not in extraction_results[validator_atom_id]:
-            extraction_results[validator_atom_id]["classification"] = {}
-        
-        extraction_results[validator_atom_id]["classification"][file_key] = classification_data
-        
-        in_memory_status = "success"
-    except Exception as e:
-        # Log but don't fail - MongoDB save is what matters
-        print(f"Warning: Could not update in-memory results for {validator_atom_id}: {e}")
-        in_memory_status = "warning"
 
     return ClassifyColumnsResponse(
         status="success",
         message="Column classification completed successfully",
-        validator_atom_id=validator_atom_id,
-        file_key=file_key,
-        validator_type=validator_data.get("template_type", "custom"),
+        dataframe=object_name,
         auto_classification=AutoClassification(
             identifiers=auto_identifiers,
             measures=auto_measures,
@@ -373,9 +363,7 @@ async def classify_columns(
             identifiers_count=len(final_identifiers),
             measures_count=len(final_measures),
             unclassified_count=len(final_unclassified)
-        ),
-        mongodb_save_status=mongo_result.get("status", "unknown"),
-        in_memory_save_status=in_memory_status
+        )
     )
     
     

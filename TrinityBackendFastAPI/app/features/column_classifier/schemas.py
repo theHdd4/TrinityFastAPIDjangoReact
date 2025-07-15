@@ -32,16 +32,12 @@ class FinalClassification(BaseModel):
 class ClassifyColumnsResponse(BaseModel):
     status: str
     message: str
-    validator_atom_id: str
-    file_key: str
-    validator_type: str
+    dataframe: str
     auto_classification: AutoClassification
     user_classification: UserClassification
     final_classification: FinalClassification
     user_modified: bool
     summary: ClassificationSummary
-    mongodb_save_status: str
-    in_memory_save_status: str
     
     
 # Add this to your schemas.py file

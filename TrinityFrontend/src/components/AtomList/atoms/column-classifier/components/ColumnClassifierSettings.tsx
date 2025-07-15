@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { VALIDATE_API, CLASSIFIER_API } from '@/lib/api';
@@ -36,7 +35,6 @@ const ColumnClassifierSettings: React.FC<ColumnClassifierSettingsProps> = ({ ato
 
   const [frames, setFrames] = useState<Frame[]>([]);
   const [savedId, setSavedId] = useState(settings.validatorId || '');
-  const [fileKey, setFileKey] = useState(settings.fileKey || '');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -53,8 +51,7 @@ const ColumnClassifierSettings: React.FC<ColumnClassifierSettingsProps> = ({ ato
     setError('');
     try {
       const form = new FormData();
-      form.append('validator_atom_id', savedId);
-      form.append('file_key', fileKey);
+      form.append('dataframe', savedId);
       const res = await fetch(`${CLASSIFIER_API}/classify_columns`, {
         method: 'POST',
         body: form,
@@ -71,7 +68,7 @@ const ColumnClassifierSettings: React.FC<ColumnClassifierSettingsProps> = ({ ato
       ];
       const custom = Object.fromEntries((settings.dimensions || []).map(d => [d, []]));
       onClassification({ fileName: savedId, columns: cols, customDimensions: custom });
-      updateSettings(atomId, { validatorId: savedId, fileKey, assignments: {} });
+      updateSettings(atomId, { validatorId: savedId, assignments: {} });
     } catch (e: any) {
       setError(e.message);
     } finally {
@@ -96,15 +93,6 @@ const ColumnClassifierSettings: React.FC<ColumnClassifierSettingsProps> = ({ ato
               ))}
             </SelectContent>
           </Select>
-        </div>
-
-        <div>
-          <Label className="text-sm mb-2 block">File Key</Label>
-          <Input
-            value={fileKey}
-            onChange={e => setFileKey(e.target.value)}
-            placeholder="Optional"
-          />
         </div>
 
         {error && <p className="text-red-500 text-sm">{error}</p>}
