@@ -31,37 +31,54 @@ const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
     updateSettings(atomId, { data: { files: [file], activeFileIndex: 0 } });
   };
 
-  const handleColumnMove = (columnName: string, newCategory: string, fileIndex?: number) => {
-    const targetFileIndex = fileIndex !== undefined ? fileIndex : classifierData.activeFileIndex;
+  const handleColumnMove = (
+    columnName: string,
+    newCategory: string,
+    fileIndex?: number
+  ) => {
+    const targetFileIndex =
+      fileIndex !== undefined ? fileIndex : classifierData.activeFileIndex;
+
     const updated = {
       ...classifierData,
       files: classifierData.files.map((file, index) => {
-        if (index === targetFileIndex) {
-          const updatedCustom = { ...file.customDimensions };
-          Object.keys(updatedCustom).forEach(key => {
-            updatedCustom[key] = updatedCustom[key].filter(col => col !== columnName);
-          });
+        if (index !== targetFileIndex) return file;
 
-          const updatedColumns = file.columns.map(col =>
+        const updatedCustom = { ...file.customDimensions };
+        // remove from all custom dimensions first
+        Object.keys(updatedCustom).forEach(key => {
+          updatedCustom[key] = updatedCustom[key].filter(col => col !== columnName);
+        });
+
+        let updatedColumns = file.columns;
+
+        if (
+          newCategory === 'identifiers' ||
+          newCategory === 'measures' ||
+          newCategory === 'unclassified'
+        ) {
+          // regular category change
+          updatedColumns = file.columns.map(col =>
             col.name === columnName ? { ...col, category: newCategory } : col
           );
-
-          if (newCategory !== 'identifiers' && newCategory !== 'measures' && newCategory !== 'unclassified') {
-            if (!updatedCustom[newCategory]) {
-              updatedCustom[newCategory] = [];
-            }
+        } else {
+          // assigning to a dimension: keep identifier category
+          if (!updatedCustom[newCategory]) {
+            updatedCustom[newCategory] = [];
+          }
+          if (!updatedCustom[newCategory].includes(columnName)) {
             updatedCustom[newCategory].push(columnName);
           }
-
-          return {
-            ...file,
-            columns: updatedColumns,
-            customDimensions: updatedCustom
-          };
         }
-        return file;
+
+        return {
+          ...file,
+          columns: updatedColumns,
+          customDimensions: updatedCustom
+        };
       })
     };
+
     updateSettings(atomId, { data: updated });
   };
 

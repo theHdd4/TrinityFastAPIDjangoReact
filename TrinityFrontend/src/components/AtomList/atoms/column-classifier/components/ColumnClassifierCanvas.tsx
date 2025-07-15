@@ -53,10 +53,7 @@ const ColumnClassifierCanvas: React.FC<ColumnClassifierCanvasProps> = ({
 
   const getAvailableIdentifiers = () => {
     if (!currentFile) return [];
-    const used = new Set(Object.values(currentFile.customDimensions).flat());
-    return currentFile.columns.filter(
-      col => col.category === 'identifiers' && !used.has(col.name)
-    );
+    return currentFile.columns.filter(col => col.category === 'identifiers');
   };
 
   const toggleDropdown = (category: string) => {
@@ -141,7 +138,7 @@ const ColumnClassifierCanvas: React.FC<ColumnClassifierCanvasProps> = ({
   );
 
   return (
-    <div className="w-full h-full p-4 bg-gradient-to-br from-gray-50 to-gray-100 overflow-y-auto">
+    <div className="w-full h-full p-4 bg-gradient-to-br from-gray-50 to-gray-100 flex flex-col">
       <div className="mb-6">
         <h2 className="text-2xl font-bold text-gray-900 mb-4">
           Column <span className="bg-yellow-200 px-2 py-1 rounded">Classifier</span>
@@ -184,85 +181,89 @@ const ColumnClassifierCanvas: React.FC<ColumnClassifierCanvasProps> = ({
         </div>
       </div>
 
-      <div className="space-y-4">
-        {/* Identifiers Section */}
-        <DimensionCard
-          title="Identifiers"
-          icon={<Tag className="w-5 h-5 mr-2" />}
-          gradient="bg-gradient-to-r from-blue-500 to-blue-600"
-          columns={identifiers}
-          category="identifiers"
-          onRemove={(columnName) => onColumnMove(columnName, 'unclassified', data.activeFileIndex)}
-        />
+      <div className="flex-1 flex flex-col overflow-hidden">
+        <div className="flex-1 overflow-y-auto space-y-4">
+          {/* Identifiers Section */}
+          <DimensionCard
+            title="Identifiers"
+            icon={<Tag className="w-5 h-5 mr-2" />}
+            gradient="bg-gradient-to-r from-blue-500 to-blue-600"
+            columns={identifiers}
+            category="identifiers"
+            onRemove={(columnName) => onColumnMove(columnName, 'identifiers', data.activeFileIndex)}
+          />
 
-        {/* Measures Section */}
-        <DimensionCard
-          title="Measures"
-          icon={<BarChart3 className="w-5 h-5 mr-2" />}
-          gradient="bg-gradient-to-r from-green-500 to-green-600"
-          columns={measures}
-          category="measures"
-          onRemove={(columnName) => onColumnMove(columnName, 'unclassified', data.activeFileIndex)}
-        />
+          {/* Measures Section */}
+          <DimensionCard
+            title="Measures"
+            icon={<BarChart3 className="w-5 h-5 mr-2" />}
+            gradient="bg-gradient-to-r from-green-500 to-green-600"
+            columns={measures}
+            category="measures"
+            onRemove={(columnName) => onColumnMove(columnName, 'measures', data.activeFileIndex)}
+          />
 
-        {/* Unclassified Columns - if any */}
-        {getUnclassifiedColumns().length > 0 && (
-          <Card className="border-2 border-dashed border-orange-300 bg-orange-50">
-            <div className="p-4">
-              <h4 className="font-semibold text-orange-800 mb-3 flex items-center">
-                <Edit2 className="w-4 h-4 mr-2" />
-                Unclassified Columns
-              </h4>
-              <div className="flex flex-wrap gap-2">
-                {getUnclassifiedColumns().map(column => (
-                  <Badge
-                    key={column.name}
-                    variant="outline"
-                    className="bg-white border-orange-300 text-orange-700"
-                  >
-                    {column.name}
-                  </Badge>
-                ))}
+          {/* Unclassified Columns - if any */}
+          {getUnclassifiedColumns().length > 0 && (
+            <Card className="border-2 border-dashed border-orange-300 bg-orange-50">
+              <div className="p-4">
+                <h4 className="font-semibold text-orange-800 mb-3 flex items-center">
+                  <Edit2 className="w-4 h-4 mr-2" />
+                  Unclassified Columns
+                </h4>
+                <div className="flex flex-wrap gap-2">
+                  {getUnclassifiedColumns().map(column => (
+                    <Badge
+                      key={column.name}
+                      variant="outline"
+                      className="bg-white border-orange-300 text-orange-700"
+                    >
+                      {column.name}
+                    </Badge>
+                  ))}
+                </div>
               </div>
-            </div>
-          </Card>
-        )}
+            </Card>
+          )}
 
-        {/* Custom Dimensions */}
-        {Object.keys(currentFile.customDimensions).length === 0 ? (
-          <p className="text-sm text-gray-500">
-            Configure Dimensions in Properties -&gt; Dimensions to set Dimensions
-          </p>
-        ) : (
-          Object.entries(currentFile.customDimensions).map(([dimensionName, columnNames]) => {
-            const dimensionColumns = columnNames.map(name =>
-              currentFile.columns.find(col => col.name === name)
-            ).filter(Boolean) as ColumnData[];
+          <h4 className="font-semibold text-gray-700 text-lg mt-4 mb-2 w-full border-t pt-2">
+            Dimensions Config
+          </h4>
 
-            return (
-              <DimensionCard
-                key={dimensionName}
-                title={dimensionName}
-                icon={<TrendingUp className="w-5 h-5 mr-2" />}
-                gradient="bg-gradient-to-r from-purple-500 to-purple-600"
-                columns={dimensionColumns}
-                category={dimensionName}
-                onRemove={(columnName) => onColumnMove(columnName, 'unclassified', data.activeFileIndex)}
-              />
-            );
-          })
-        )}
+          {Object.keys(currentFile.customDimensions).length === 0 ? (
+            <p className="text-sm text-gray-500">
+              Configure Dimensions in Properties -&gt; Dimensions to set Dimensions
+            </p>
+          ) : (
+            Object.entries(currentFile.customDimensions).map(([dimensionName, columnNames]) => {
+              const dimensionColumns = columnNames
+                .map(name => currentFile.columns.find(col => col.name === name))
+                .filter(Boolean) as ColumnData[];
 
-      </div>
+              return (
+                <DimensionCard
+                  key={dimensionName}
+                  title={dimensionName}
+                  icon={<TrendingUp className="w-5 h-5 mr-2" />}
+                  gradient="bg-gradient-to-r from-purple-500 to-purple-600"
+                  columns={dimensionColumns}
+                  category={dimensionName}
+                  onRemove={(columnName) => onColumnMove(columnName, 'identifiers', data.activeFileIndex)}
+                />
+              );
+            })
+          )}
+        </div>
 
-      <div className="pt-4">
-        <Button
-          disabled={saveDisabled}
-          onClick={onSave}
-          className="w-full h-12 text-sm font-semibold bg-gradient-to-r from-gray-800 to-gray-900 hover:from-gray-900 hover:to-black"
-        >
-          Save Dimensions
-        </Button>
+        <div className="pt-4">
+          <Button
+            disabled={saveDisabled}
+            onClick={onSave}
+            className="w-full h-12 text-sm font-semibold bg-gradient-to-r from-gray-800 to-gray-900 hover:from-gray-900 hover:to-black"
+          >
+            Save Dimensions
+          </Button>
+        </div>
       </div>
     </div>
   );
