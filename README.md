@@ -49,6 +49,11 @@ Follow the steps below to run all services together.
   cookie. Log in via the correct `/api/accounts/login/` path before calling
   authenticated endpoints like `/api/registry/laboratory-actions/`.
 
+  The frontend performs a preliminary GET request to `/api/accounts/users/me/`
+  during login to verify the API is reachable. Since no session exists yet this
+  check will usually return **401** or **403**. The actual login follows
+  immediately after.
+
   Update `CSRF_TRUSTED_ORIGINS` and `CORS_ALLOWED_ORIGINS` in
   `TrinityBackendDjango/.env` so both the local frontend URL
   `http://${HOST_IP}:8080` and the public domain
