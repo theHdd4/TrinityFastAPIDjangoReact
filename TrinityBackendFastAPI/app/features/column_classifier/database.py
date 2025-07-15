@@ -270,3 +270,29 @@ def update_business_dimensions_assignments_in_mongo(
     except Exception as e:
         logging.error(f"MongoDB update error for dimension assignments: {e}")
         return {"status": "error", "error": str(e)}
+
+
+def save_project_dimension_mapping(project_id: int, assignments: dict):
+    """Save identifier assignments per project"""
+    if not check_mongodb_connection():
+        return {"status": "error", "error": "MongoDB not connected"}
+    try:
+        document_id = f"project_{project_id}_dimensions"
+        document = {
+            "_id": document_id,
+            "project_id": project_id,
+            "assignments": assignments,
+            "updated_at": datetime.utcnow(),
+        }
+        result = db["project_dimension_mappings"].replace_one(
+            {"_id": document_id}, document, upsert=True
+        )
+        return {
+            "status": "success",
+            "mongo_id": document_id,
+            "operation": "inserted" if result.upserted_id else "updated",
+            "collection": "project_dimension_mappings",
+        }
+    except Exception as e:
+        logging.error(f"MongoDB save error for project mapping: {e}")
+        return {"status": "error", "error": str(e)}

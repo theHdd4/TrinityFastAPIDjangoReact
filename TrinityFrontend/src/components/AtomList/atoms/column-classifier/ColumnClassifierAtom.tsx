@@ -89,17 +89,17 @@ const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
   };
 
   const saveAssignments = async () => {
-    if (!settings.validatorId || !classifierData.files.length) return;
+    if (!classifierData.files.length) return;
     const currentFile = classifierData.files[classifierData.activeFileIndex];
     const stored = localStorage.getItem('current-project');
     const projectId = stored ? JSON.parse(stored).id : null;
     const form = new FormData();
-    form.append('validator_atom_id', settings.validatorId);
-    form.append('file_key', currentFile.fileName);
     form.append('identifier_assignments', JSON.stringify(currentFile.customDimensions));
     if (projectId) {
       form.append('project_id', String(projectId));
     }
+    if (settings.validatorId) form.append('validator_atom_id', settings.validatorId);
+    form.append('file_key', currentFile.fileName);
     await fetch(`${CLASSIFIER_API}/assign_identifiers_to_dimensions`, {
       method: 'POST',
       body: form,
