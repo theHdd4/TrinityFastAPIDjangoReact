@@ -1,8 +1,7 @@
 import React from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Settings, BarChart3, Eye } from 'lucide-react';
+import { BarChart3, Eye } from 'lucide-react';
 import ColumnClassifierCanvas from './components/ColumnClassifierCanvas';
-import ColumnClassifierSettings from './components/ColumnClassifierSettings';
 import ColumnClassifierVisualisation from './components/ColumnClassifierVisualisation';
 import ColumnClassifierExhibition from './components/ColumnClassifierExhibition';
 import {
@@ -122,12 +121,8 @@ const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
       </div>
 
       <div className="w-80 border-l border-gray-200 bg-gray-50">
-        <Tabs defaultValue="settings" className="w-full h-full">
-          <TabsList className="grid w-full grid-cols-3 mx-4 my-4">
-            <TabsTrigger value="settings" className="text-xs">
-              <Settings className="w-3 h-3 mr-1" />
-              Settings
-            </TabsTrigger>
+        <Tabs defaultValue="visualisation" className="w-full h-full">
+          <TabsList className="grid w-full grid-cols-2 mx-4 my-4">
             <TabsTrigger value="visualisation" className="text-xs">
               <BarChart3 className="w-3 h-3 mr-1" />
               Charts
@@ -139,10 +134,6 @@ const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
           </TabsList>
 
           <div className="px-4 pb-4 h-[calc(100%-80px)] overflow-y-auto">
-            <TabsContent value="settings" className="mt-2">
-              <ColumnClassifierSettings onClassification={handleClassification} />
-            </TabsContent>
-
             <TabsContent value="visualisation" className="mt-2">
               <ColumnClassifierVisualisation data={classifierData} />
             </TabsContent>
