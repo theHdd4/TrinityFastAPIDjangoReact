@@ -1,0 +1,13 @@
+# Column Classifier API Check
+
+Run this `curl` command with sample form values. Replace `demo123` and `sales` with your own
+validator atom ID and file key as needed:
+
+```bash
+curl -X POST http://localhost:8001/api/classify/classify_columns \
+  -F "validator_atom_id=demo123" \
+  -F "file_key=sales" \
+  -F "identifiers=[]" \
+  -F "measures=[]" \
+  -F "unclassified=[]"
+```
