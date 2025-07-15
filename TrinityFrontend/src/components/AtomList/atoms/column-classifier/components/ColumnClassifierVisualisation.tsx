@@ -48,13 +48,13 @@ const ColumnClassifierVisualisation: React.FC<ColumnClassifierVisualisationProps
   ];
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       <Card className="p-4">
         <h4 className="font-semibold text-gray-900 mb-2">Current File</h4>
         <p className="text-sm text-gray-600 mb-4">{currentFile.fileName}</p>
         
         <h5 className="font-medium text-gray-900 mb-4">Column Distribution</h5>
-        <ResponsiveContainer width="100%" height={200}>
+        <ResponsiveContainer width="100%" height={160}>
           <BarChart data={barData}>
             <CartesianGrid strokeDasharray="3 3" />
             <XAxis dataKey="name" />
@@ -67,7 +67,7 @@ const ColumnClassifierVisualisation: React.FC<ColumnClassifierVisualisationProps
 
       <Card className="p-4">
         <h4 className="font-semibold text-gray-900 mb-4">Category Breakdown</h4>
-        <ResponsiveContainer width="100%" height={200}>
+        <ResponsiveContainer width="100%" height={160}>
           <PieChart>
             <Pie
               data={pieData}

@@ -83,13 +83,13 @@ const ColumnClassifierCanvas: React.FC<ColumnClassifierCanvasProps> = ({
     onRemove: (columnName: string) => void;
   }> = ({ title, icon, gradient, columns, category, onRemove }) => (
     <Card className="border-0 shadow-xl bg-white/90 backdrop-blur-sm overflow-hidden transform hover:scale-105 transition-all duration-300">
-      <div className={`${gradient} p-4`}>
+      <div className={`${gradient} p-3`}>
         <h4 className="font-bold text-white text-lg flex items-center">
           {icon}
           {title}
         </h4>
       </div>
-      <div className="p-6">
+      <div className="p-4">
         <div className="flex flex-wrap gap-3">
           {columns.map(column => (
             <Badge
@@ -136,7 +136,7 @@ const ColumnClassifierCanvas: React.FC<ColumnClassifierCanvasProps> = ({
   );
 
   return (
-    <div className="w-full h-full p-6 bg-gradient-to-br from-gray-50 to-gray-100 overflow-y-auto">
+    <div className="w-full h-full p-4 bg-gradient-to-br from-gray-50 to-gray-100 overflow-y-auto">
       <div className="mb-6">
         <h2 className="text-2xl font-bold text-gray-900 mb-4">
           Column <span className="bg-yellow-200 px-2 py-1 rounded">Classifier</span>
@@ -179,7 +179,7 @@ const ColumnClassifierCanvas: React.FC<ColumnClassifierCanvasProps> = ({
         </div>
       </div>
 
-      <div className="space-y-6">
+      <div className="space-y-4">
         {/* Identifiers Section */}
         <DimensionCard
           title="Identifiers"
