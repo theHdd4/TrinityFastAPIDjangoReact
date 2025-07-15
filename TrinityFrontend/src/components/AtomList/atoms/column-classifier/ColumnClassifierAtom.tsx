@@ -2,6 +2,7 @@ import React from 'react';
 
 import ColumnClassifierCanvas from './components/ColumnClassifierCanvas';
 import ColumnClassifierVisualisation from './components/ColumnClassifierVisualisation';
+import ColumnClassifierDimensionConfig from './components/ColumnClassifierDimensionConfig';
 import {
   useLaboratoryStore,
   DEFAULT_COLUMN_CLASSIFIER_SETTINGS,
@@ -133,21 +134,28 @@ const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
     ).every(c => c.length === 0);
 
   return (
-    <div className="w-full h-full bg-white flex">
-      <div className="w-3/5 p-4 overflow-y-auto">
-        <ColumnClassifierCanvas
+    <div className="w-full h-full bg-white flex flex-col">
+      <div className="flex flex-1">
+        <div className="w-3/5 p-4 overflow-y-auto">
+          <ColumnClassifierCanvas
+            data={classifierData}
+            validatorId={settings.validatorId}
+            onColumnMove={handleColumnMove}
+            onActiveFileChange={setActiveFile}
+            onFileDelete={handleFileDelete}
+          />
+        </div>
+        <div className="w-2/5 border-l border-gray-200 bg-gray-50 p-4 overflow-y-auto">
+          <ColumnClassifierVisualisation data={classifierData} />
+        </div>
+      </div>
+      <div className="border-t p-4 overflow-y-auto">
+        <ColumnClassifierDimensionConfig
           data={classifierData}
-          validatorId={settings.validatorId}
           onColumnMove={handleColumnMove}
-          onActiveFileChange={setActiveFile}
-          onFileDelete={handleFileDelete}
           onSave={saveAssignments}
           saveDisabled={saveDisabled}
         />
-      </div>
-
-      <div className="w-2/5 border-l border-gray-200 bg-gray-50 p-4 overflow-y-auto">
-        <ColumnClassifierVisualisation data={classifierData} />
       </div>
     </div>
   );

@@ -12,8 +12,7 @@ interface ColumnClassifierCanvasProps {
   onColumnMove: (columnName: string, newCategory: string, fileIndex?: number) => void;
   onActiveFileChange: (fileIndex: number) => void;
   onFileDelete?: (fileIndex: number) => void;
-  onSave?: () => void;
-  saveDisabled?: boolean;
+  // only handles column movements; saving handled separately
 }
 
 const ColumnClassifierCanvas: React.FC<ColumnClassifierCanvasProps> = ({
@@ -22,8 +21,7 @@ const ColumnClassifierCanvas: React.FC<ColumnClassifierCanvasProps> = ({
   onColumnMove,
   onActiveFileChange,
   onFileDelete,
-  onSave,
-  saveDisabled
+  // save functionality removed from this component
 }) => {
   const [showDropdowns, setShowDropdowns] = useState<{ [key: string]: boolean }>({});
   const getDisplayName = (name: string) => name.split('/').pop() || name;
@@ -226,43 +224,6 @@ const ColumnClassifierCanvas: React.FC<ColumnClassifierCanvasProps> = ({
             </Card>
           )}
 
-          <h4 className="font-semibold text-gray-700 text-lg mt-4 mb-2 w-full border-t pt-2">
-            Dimensions Config
-          </h4>
-
-          {Object.keys(currentFile.customDimensions).length === 0 ? (
-            <p className="text-sm text-gray-500">
-              Configure Dimensions in Properties -&gt; Dimensions to set Dimensions
-            </p>
-          ) : (
-            Object.entries(currentFile.customDimensions).map(([dimensionName, columnNames]) => {
-              const dimensionColumns = columnNames
-                .map(name => currentFile.columns.find(col => col.name === name))
-                .filter(Boolean) as ColumnData[];
-
-              return (
-                <DimensionCard
-                  key={dimensionName}
-                  title={dimensionName}
-                  icon={<TrendingUp className="w-5 h-5 mr-2" />}
-                  gradient="bg-gradient-to-r from-purple-500 to-purple-600"
-                  columns={dimensionColumns}
-                  category={dimensionName}
-                  onRemove={(columnName) => onColumnMove(columnName, 'identifiers', data.activeFileIndex)}
-                />
-              );
-            })
-          )}
-        </div>
-
-        <div className="pt-4">
-          <Button
-            disabled={saveDisabled}
-            onClick={onSave}
-            className="w-full h-12 text-sm font-semibold bg-gradient-to-r from-gray-800 to-gray-900 hover:from-gray-900 hover:to-black"
-          >
-            Save Dimensions
-          </Button>
         </div>
       </div>
     </div>
