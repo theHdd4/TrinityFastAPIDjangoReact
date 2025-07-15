@@ -115,8 +115,7 @@ const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
     if (projectId) {
       form.append('project_id', String(projectId));
     }
-    if (settings.validatorId) form.append('validator_atom_id', settings.validatorId);
-    form.append('file_key', currentFile.fileName);
+    console.log('Saving assignments for project', projectId, currentFile.customDimensions);
     await fetch(`${CLASSIFIER_API}/assign_identifiers_to_dimensions`, {
       method: 'POST',
       body: form,

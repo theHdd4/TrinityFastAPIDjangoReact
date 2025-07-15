@@ -499,14 +499,8 @@ async def define_dimensions(
 async def assign_identifiers_to_dimensions(
     identifier_assignments: str = Form(...),
     project_id: int = Form(...),
-    validator_atom_id: str = Form(None),
-    file_key: str = Form(None),
 ):
-    """
-    Assign identifiers to dimensions. When a validator and file key are supplied
-    the assignments are stored within that validator's business dimensions. If
-    only a project ID is provided the mapping is saved per project.
-    """
+    """Assign identifiers to business dimensions for the given project."""
     
     # Parse identifier_assignments JSON
     try:
@@ -517,116 +511,25 @@ async def assign_identifiers_to_dimensions(
     # Validate assignments structure
     if not isinstance(assignments, dict):
         raise HTTPException(status_code=400, detail="identifier_assignments must be a JSON object")
-    
+
     if not assignments:
         raise HTTPException(status_code=400, detail="identifier_assignments cannot be empty")
-
-    if validator_atom_id and file_key:
-        validator_data = get_validator_atom_from_mongo(validator_atom_id)
-        if not validator_data:
-            validator_data = get_validator_from_memory_or_disk(validator_atom_id)
-        if not validator_data:
-            raise HTTPException(status_code=404, detail=f"Validator atom '{validator_atom_id}' not found")
-        if file_key not in validator_data.get("schemas", {}):
-            available_keys = list(validator_data.get("schemas", {}).keys())
-            raise HTTPException(
-                status_code=400,
-                detail=f"File key '{file_key}' not found in validator. Available file keys: {available_keys}"
-            )
-        mongo_dimensions = get_business_dimensions_from_mongo(validator_atom_id, file_key)
-        if not mongo_dimensions:
-            raise HTTPException(
-                status_code=400,
-                detail=f"No business dimensions defined for file key '{file_key}'. Define dimensions first using /define_dimensions."
-            )
-        business_dimensions = mongo_dimensions.get("dimensions", {})
-        available_dimension_ids = list(business_dimensions.keys())
-    else:
-        business_dimensions = {}
-        available_dimension_ids = list(assignments.keys())
-
-    # Validate dimension IDs
-    invalid_dimensions = [dim_id for dim_id in assignments.keys() if dim_id not in available_dimension_ids]
-    if invalid_dimensions:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Invalid dimension IDs: {invalid_dimensions}. Available dimensions: {available_dimension_ids}"
-        )
-
-    if validator_atom_id and file_key:
-        mongo_classification = get_classification_from_mongo(validator_atom_id, file_key)
-        if not mongo_classification:
-            raise HTTPException(
-                status_code=400,
-                detail=f"No column classification found for file key '{file_key}'. Classify columns first using /classify_columns."
-            )
-        available_identifiers = mongo_classification.get("final_classification", {}).get("identifiers", [])
-        if not available_identifiers:
-            raise HTTPException(
-                status_code=400,
-                detail=f"No identifiers classified for file key '{file_key}'. Classify columns first using /classify_columns."
-            )
-    else:
-        available_identifiers = [ident for vals in assignments.values() for ident in vals]
 
     # Validate assignments
     all_assigned_identifiers = []
     for dim_id, identifiers in assignments.items():
         if not isinstance(identifiers, list):
             raise HTTPException(status_code=400, detail=f"Identifiers for dimension '{dim_id}' must be a list")
-        
         if not identifiers:
             raise HTTPException(status_code=400, detail=f"Identifiers list for dimension '{dim_id}' cannot be empty")
-        
-        invalid_identifiers = [ident for ident in identifiers if ident not in available_identifiers]
-        if invalid_identifiers:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Invalid identifiers for dimension '{dim_id}': {invalid_identifiers}. Available: {available_identifiers}"
-            )
         all_assigned_identifiers.extend(identifiers)
 
-    # Check for unique assignment
-    if len(all_assigned_identifiers) != len(set(all_assigned_identifiers)):
-        duplicates = [ident for ident in set(all_assigned_identifiers) if all_assigned_identifiers.count(ident) > 1]
-        raise HTTPException(status_code=400, detail=f"Identifiers cannot be assigned to multiple dimensions: {duplicates}")
-
-    # Update business dimensions structure with assignments
-    updated_business_dimensions = business_dimensions.copy()
-    for dim_id, identifiers in assignments.items():
-        if dim_id in updated_business_dimensions:
-            updated_business_dimensions[dim_id]["assigned_identifiers"] = identifiers
-            updated_business_dimensions[dim_id]["assignment_timestamp"] = datetime.now().isoformat()
-
-    if validator_atom_id and file_key:
-        try:
-            mongo_result = update_business_dimensions_assignments_in_mongo(
-                validator_atom_id, file_key, assignments, project_id
-            )
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Failed to save assignments to MongoDB: {str(e)}")
-
-        try:
-            if validator_atom_id not in extraction_results:
-                extraction_results[validator_atom_id] = {}
-            if "business_dimensions" not in extraction_results[validator_atom_id]:
-                extraction_results[validator_atom_id]["business_dimensions"] = {}
-            extraction_results[validator_atom_id]["business_dimensions"][file_key] = updated_business_dimensions
-            in_memory_status = "success"
-        except Exception as e:
-            print(f"Warning: Could not update in-memory results for {validator_atom_id}: {e}")
-            in_memory_status = "warning"
-        message = (
-            f"Identifiers assigned to dimensions and saved in business dimensions structure for file key '{file_key}'"
-        )
-        validator_type = validator_data.get("template_type", "custom")
-        unassigned_identifiers = [ident for ident in available_identifiers if ident not in all_assigned_identifiers]
-    else:
-        mongo_result = save_project_dimension_mapping(project_id, assignments)
-        in_memory_status = "skipped"
-        message = "Identifiers assigned to project dimensions"
-        validator_type = "project"
-        unassigned_identifiers = []
+    mongo_result = save_project_dimension_mapping(project_id, assignments)
+    in_memory_status = "skipped"
+    message = "Identifiers assigned to project dimensions"
+    validator_type = "project"
+    unassigned_identifiers = []
+    updated_business_dimensions = assignments
 
     # Push mapping to flight server for project consumption
     try:
@@ -644,24 +547,21 @@ async def assign_identifiers_to_dimensions(
     return AssignIdentifiersResponse(
         status="success",
         message=message,
-        validator_atom_id=validator_atom_id or "",
-        file_key=file_key or "",
+        validator_atom_id="",
+        file_key="",
         validator_type=validator_type,
         project_id=project_id,
         updated_business_dimensions=updated_business_dimensions,
         assignment_summary=AssignmentSummary(
-            total_identifiers=len(available_identifiers),
+            total_identifiers=len(all_assigned_identifiers),
             assigned_identifiers=len(all_assigned_identifiers),
-            unassigned_identifiers=len(unassigned_identifiers),
+            unassigned_identifiers=0,
             dimensions_with_assignments=len(assignments),
             assignment_timestamp=datetime.now().isoformat(),
         ),
-        unassigned_identifiers=unassigned_identifiers,
+        unassigned_identifiers=[],
         dimension_breakdown={dim_id: len(ids) for dim_id, ids in assignments.items()},
         mongodb_updated=mongo_result.get("status") == "success",
         in_memory_updated=in_memory_status,
-        next_steps=NextStepsAssignment(
-            view_complete_setup=f"GET /get_validator_atom_summary/{validator_atom_id}" if validator_atom_id else "",
-            export_configuration=f"GET /export_validator_atom/{validator_atom_id}" if validator_atom_id else "",
-        ),
+        next_steps=NextStepsAssignment(view_complete_setup="", export_configuration=""),
     )
