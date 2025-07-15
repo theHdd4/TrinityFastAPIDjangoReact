@@ -31,3 +31,4 @@ minio
 pandas
 motor
 python-multipart
+pydantic-settings==2.10.1
