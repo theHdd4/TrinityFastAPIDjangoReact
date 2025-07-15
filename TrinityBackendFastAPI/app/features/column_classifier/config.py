@@ -1,5 +1,5 @@
 # config.py - Data Classification API Configuration (FIXED)
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from functools import lru_cache
 from typing import Optional
 
@@ -58,11 +58,13 @@ class Settings(BaseSettings):
     log_format: str = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
     enable_request_logging: bool = True
     
-    class Config:
-        env_prefix = "CLASSIFY_"
-        case_sensitive = False
-        env_file = ".env"
-        env_file_encoding = "utf-8"
+    model_config = SettingsConfigDict(
+        env_prefix="CLASSIFY_",
+        case_sensitive=False,
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
 
 @lru_cache()
 def get_settings() -> Settings:
