@@ -34,7 +34,7 @@ const ColumnClassifierCanvas: React.FC<ColumnClassifierCanvasProps> = ({
             <Edit2 className="w-8 h-8 text-gray-400" />
           </div>
           <h3 className="text-lg font-semibold text-gray-700 mb-2">Column Classifier</h3>
-          <p className="text-gray-500">Upload files and click "Classify Columns" to start</p>
+          <p className="text-gray-500">Use the Properties panel to upload files and classify columns</p>
         </div>
       </div>
     );
