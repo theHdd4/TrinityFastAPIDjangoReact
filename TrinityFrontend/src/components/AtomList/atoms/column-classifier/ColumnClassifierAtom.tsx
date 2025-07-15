@@ -94,6 +94,7 @@ const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
       <div className="flex-1">
         <ColumnClassifierCanvas
           data={classifierData}
+          validatorId={settings.validatorId}
           onColumnMove={handleColumnMove}
           onActiveFileChange={setActiveFile}
           onFileDelete={handleFileDelete}

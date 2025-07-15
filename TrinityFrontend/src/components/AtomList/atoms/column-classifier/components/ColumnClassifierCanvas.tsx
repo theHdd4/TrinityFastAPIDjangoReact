@@ -5,9 +5,11 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Edit2, X, FileText, Trash2, TrendingUp, BarChart3, Tag } from 'lucide-react';
 import { ClassifierData, ColumnData } from '../ColumnClassifierAtom';
+import { CLASSIFIER_API } from '@/lib/api';
 
 interface ColumnClassifierCanvasProps {
   data: ClassifierData;
+  validatorId?: string;
   onColumnMove: (columnName: string, newCategory: string, fileIndex?: number) => void;
   onActiveFileChange: (fileIndex: number) => void;
   onFileDelete?: (fileIndex: number) => void;
@@ -15,6 +17,7 @@ interface ColumnClassifierCanvasProps {
 
 const ColumnClassifierCanvas: React.FC<ColumnClassifierCanvasProps> = ({
   data,
+  validatorId,
   onColumnMove,
   onActiveFileChange,
   onFileDelete
@@ -39,20 +42,17 @@ const ColumnClassifierCanvas: React.FC<ColumnClassifierCanvasProps> = ({
   const identifiers = currentFile?.columns.filter(col => col.category === 'identifiers') || [];
   const measures = currentFile?.columns.filter(col => col.category === 'measures') || [];
 
-  const getAllUsedColumns = () => {
-    if (!currentFile) return new Set();
-    const used = new Set([
-      ...identifiers.map(col => col.name),
-      ...measures.map(col => col.name),
-      ...Object.values(currentFile.customDimensions).flat()
-    ]);
-    return used;
+  const getUnclassifiedColumns = () => {
+    if (!currentFile) return [];
+    return currentFile.columns.filter(col => col.category === 'unclassified');
   };
 
-  const getAvailableColumns = () => {
+  const getAvailableIdentifiers = () => {
     if (!currentFile) return [];
-    const usedColumns = getAllUsedColumns();
-    return currentFile.columns.filter(col => !usedColumns.has(col.name));
+    const used = new Set(Object.values(currentFile.customDimensions).flat());
+    return currentFile.columns.filter(
+      col => col.category === 'identifiers' && !used.has(col.name)
+    );
   };
 
   const toggleDropdown = (category: string) => {
@@ -72,6 +72,26 @@ const ColumnClassifierCanvas: React.FC<ColumnClassifierCanvasProps> = ({
     e.stopPropagation();
     if (onFileDelete) {
       onFileDelete(fileIndex);
+    }
+  };
+
+  const saveAssignments = async () => {
+    if (!validatorId) return;
+    const form = new FormData();
+    form.append('validator_atom_id', validatorId);
+    form.append('file_key', currentFile.fileName);
+    form.append(
+      'identifier_assignments',
+      JSON.stringify(currentFile.customDimensions)
+    );
+    try {
+      await fetch(`${CLASSIFIER_API}/assign_identifiers_to_dimensions`, {
+        method: 'POST',
+        body: form,
+        credentials: 'include'
+      });
+    } catch (err) {
+      console.error('Failed to save assignments', err);
     }
   };
 
@@ -117,7 +137,7 @@ const ColumnClassifierCanvas: React.FC<ColumnClassifierCanvasProps> = ({
                 value=""
               >
                 <option value="">Select...</option>
-                {getAvailableColumns().map(column => (
+                {getAvailableIdentifiers().map(column => (
                   <option key={column.name} value={column.name}>
                     {column.name}
                   </option>
@@ -202,7 +222,7 @@ const ColumnClassifierCanvas: React.FC<ColumnClassifierCanvasProps> = ({
         />
 
         {/* Unclassified Columns - if any */}
-        {getAvailableColumns().length > 0 && (
+        {getUnclassifiedColumns().length > 0 && (
           <Card className="border-2 border-dashed border-orange-300 bg-orange-50">
             <div className="p-4">
               <h4 className="font-semibold text-orange-800 mb-3 flex items-center">
@@ -210,7 +230,7 @@ const ColumnClassifierCanvas: React.FC<ColumnClassifierCanvasProps> = ({
                 Unclassified Columns
               </h4>
               <div className="flex flex-wrap gap-2">
-                {getAvailableColumns().map(column => (
+                {getUnclassifiedColumns().map(column => (
                   <Badge
                     key={column.name}
                     variant="outline"
@@ -252,7 +272,11 @@ const ColumnClassifierCanvas: React.FC<ColumnClassifierCanvasProps> = ({
         {/* Save Dimensions Button */}
         <div className="pt-4">
           <Button
-            disabled={Object.keys(currentFile.customDimensions).length === 0}
+            disabled={
+              Object.keys(currentFile.customDimensions).length === 0 ||
+              Object.values(currentFile.customDimensions).every(c => c.length === 0)
+            }
+            onClick={saveAssignments}
             className="w-full h-14 text-lg font-semibold bg-gradient-to-r from-gray-800 to-gray-900 hover:from-gray-900 hover:to-black shadow-xl"
           >
             Save Dimensions
