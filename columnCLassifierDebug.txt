@@ -18,6 +18,10 @@ curl -b cookies.txt -X POST http://localhost:8001/api/classify/classify_columns 
   -F "unclassified=[]"
 ```
 
+If the response is `{"detail": "Validator atom 'demo123' not found in database"}`
+or a similar 404 message, the service is reachable but the given `validator_atom_id`
+or `file_key` does not exist. Provide valid values from your environment.
+
 Replace `admin`/`admin123` with your Django credentials and update the
 `validator_atom_id` and `file_key` parameters with actual values from your
 environment.

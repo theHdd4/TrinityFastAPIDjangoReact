@@ -55,9 +55,15 @@ const ColumnClassifierSettings: React.FC<ColumnClassifierSettingsProps> = ({ ato
       const form = new FormData();
       form.append('validator_atom_id', savedId);
       form.append('file_key', fileKey);
-      const res = await fetch(`${CLASSIFIER_API}/classify_columns`, { method: 'POST', body: form });
-      if (!res.ok) throw new Error('Failed to classify');
-      const data: ClassificationResponse = await res.json();
+      const res = await fetch(`${CLASSIFIER_API}/classify_columns`, {
+        method: 'POST',
+        body: form,
+        credentials: 'include'
+      });
+      const data: ClassificationResponse = await res.json().catch(() => null);
+      if (!res.ok) {
+        throw new Error(data?.detail || 'Failed to classify');
+      }
       const cols: ColumnData[] = [
         ...data.final_classification.identifiers.map(name => ({ name, category: 'identifiers' })),
         ...data.final_classification.measures.map(name => ({ name, category: 'measures' })),

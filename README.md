@@ -54,6 +54,11 @@ Follow the steps below to run all services together.
   check will usually return **401** or **403**. The actual login follows
   immediately after.
 
+  When testing the column classifier endpoints a **404 Not Found** response
+  often indicates the specified `validator_atom_id` or `file_key` does not exist
+  rather than a missing route. Double-check these parameters if the API returns
+  a 404 JSON message like `{"detail": "Validator atom 'demo123' not found in database"}`.
+
   Update `CSRF_TRUSTED_ORIGINS` and `CORS_ALLOWED_ORIGINS` in
   `TrinityBackendDjango/.env` so both the local frontend URL
   `http://${HOST_IP}:8080` and the public domain
