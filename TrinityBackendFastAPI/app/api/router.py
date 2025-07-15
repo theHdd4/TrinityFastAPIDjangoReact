@@ -15,5 +15,5 @@ api_router.include_router(card_archive_router)
 api_router.include_router(data_upload_validate_router)
 api_router.include_router(concat_router)
 api_router.include_router(merge_router)
-api_router.include_router(column_classifier_router, prefix="/classify")
+api_router.include_router(column_classifier_router)
 
