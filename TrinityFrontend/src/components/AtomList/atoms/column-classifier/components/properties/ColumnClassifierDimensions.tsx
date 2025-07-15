@@ -5,7 +5,6 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Plus } from 'lucide-react';
-import { CLASSIFIER_API } from '@/lib/api';
 import {
   useLaboratoryStore,
   ColumnClassifierSettings as SettingsType,
@@ -55,23 +54,13 @@ const ColumnClassifierDimensions: React.FC<Props> = ({ atomId }) => {
 
 
   const save = async () => {
-    if (!settings.validatorId || !settings.fileKey) {
+    if (!settings.validatorId || settings.data.files.length === 0) {
       setError('Classify a dataframe first');
       return;
     }
     setLoading(true);
     setError('');
     try {
-      const form = new FormData();
-      form.append('validator_atom_id', settings.validatorId);
-      form.append('file_key', settings.fileKey);
-      const dims = selected.map(d => ({ id: d, name: d }));
-      form.append('dimensions', JSON.stringify(dims));
-      const res = await fetch(`${CLASSIFIER_API}/define_dimensions`, {
-        method: 'POST',
-        body: form
-      });
-      if (!res.ok) throw new Error('Failed to save dimensions');
       updateSettings(atomId, { dimensions: selected });
       if (settings.data.files.length) {
         const updatedFiles = settings.data.files.map(file => ({
