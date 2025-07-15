@@ -41,7 +41,7 @@ async def root():
 async def startup_event():
     print("🚀 Data Classification API starting up...")
     print("📊 Available classifiers: column_classifier, auto_classification, user_override")
-    print("📖 API Documentation: http://localhost:8005/docs")
+    print("📖 API Documentation: http://localhost:8001/docs")
 
 @app.on_event("shutdown")
 async def shutdown_event():
@@ -52,7 +52,7 @@ if __name__ == "__main__":
     uvicorn.run(
         app,  # ✅ Pass app object directly
         host="0.0.0.0",
-        port=8005,
+        port=8001,
         reload=True,
         log_level="info"
     )
