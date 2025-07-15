@@ -42,7 +42,6 @@ const ColumnClassifierExhibition: React.FC<ColumnClassifierExhibitionProps> = ({
   };
 
   const exportToCSV = () => {
-    const currentFile = data.files[data.activeFileIndex];
     const csvContent = [
       ['Column Name', 'Category'],
       ...currentFile.columns.map(col => [col.name, col.category]),
@@ -55,15 +54,14 @@ const ColumnClassifierExhibition: React.FC<ColumnClassifierExhibitionProps> = ({
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `${currentFile.fileName}-classification.csv`;
+    a.download = `${displayName}-classification.csv`;
     a.click();
     URL.revokeObjectURL(url);
   };
 
   const copyToClipboard = () => {
-    const currentFile = data.files[data.activeFileIndex];
     const text = JSON.stringify({
-      fileName: currentFile.fileName,
+      fileName: displayName,
       identifiers: currentFile.columns.filter(col => col.category === 'identifiers').map(col => col.name),
       measures: currentFile.columns.filter(col => col.category === 'measures').map(col => col.name),
       customDimensions: currentFile.customDimensions,
@@ -74,6 +72,7 @@ const ColumnClassifierExhibition: React.FC<ColumnClassifierExhibitionProps> = ({
   };
 
   const currentFile = data.files[data.activeFileIndex];
+  const displayName = currentFile.fileName.split('/').pop();
 
   return (
     <div className="space-y-6">
@@ -165,7 +164,7 @@ const ColumnClassifierExhibition: React.FC<ColumnClassifierExhibitionProps> = ({
         <div className="space-y-2 text-sm">
           <div className="flex justify-between">
             <span>Current File:</span>
-            <span className="font-medium">{currentFile.fileName}</span>
+            <span className="font-medium break-all whitespace-normal">{displayName}</span>
           </div>
           <div className="flex justify-between">
             <span>Total Columns:</span>

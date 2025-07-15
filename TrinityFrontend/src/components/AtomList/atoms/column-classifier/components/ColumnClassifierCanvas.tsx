@@ -26,6 +26,7 @@ const ColumnClassifierCanvas: React.FC<ColumnClassifierCanvasProps> = ({
   saveDisabled
 }) => {
   const [showDropdowns, setShowDropdowns] = useState<{ [key: string]: boolean }>({});
+  const getDisplayName = (name: string) => name.split('/').pop() || name;
 
   if (!data.files.length) {
     return (
@@ -161,12 +162,12 @@ const ColumnClassifierCanvas: React.FC<ColumnClassifierCanvasProps> = ({
                 variant="ghost"
                 size="sm"
                 onClick={() => onActiveFileChange(index)}
-                className={`flex items-center space-x-2 p-0 h-auto ${
+                className={`flex items-center space-x-2 p-0 h-auto whitespace-normal ${
                   index === data.activeFileIndex ? 'text-white hover:text-white' : ''
                 }`}
               >
                 <FileText className="w-4 h-4" />
-                <span className="font-medium">{file.fileName}</span>
+                <span className="font-medium break-all whitespace-normal">{getDisplayName(file.fileName)}</span>
               </Button>
               <Button
                 variant="ghost"

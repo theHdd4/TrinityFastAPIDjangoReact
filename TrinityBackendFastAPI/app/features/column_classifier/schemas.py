@@ -39,8 +39,6 @@ class ClassifyColumnsResponse(BaseModel):
     user_modified: bool
     summary: ClassificationSummary
     
-    
-# Add this to your schemas.py file
 
 class DimensionDetails(BaseModel):
     dimension_ids: List[str]
@@ -67,8 +65,6 @@ class DefineDimensionsResponse(BaseModel):
     next_steps: NextSteps
 
 
-
-# Add these to your schemas.py file
 
 class AssignmentSummary(BaseModel):
     total_identifiers: int

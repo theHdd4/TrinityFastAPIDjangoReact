@@ -367,8 +367,6 @@ async def classify_columns(
     )
     
     
-# Add this endpoint to your routes.py
-
 @router.post("/define_dimensions", response_model=DefineDimensionsResponse)
 async def define_dimensions(
     validator_atom_id: str = Form(...),
@@ -491,8 +489,6 @@ async def define_dimensions(
         )
     )
 
-
-# Add this endpoint to your routes.py
 
 @router.post("/assign_identifiers_to_dimensions", response_model=AssignIdentifiersResponse)
 async def assign_identifiers_to_dimensions(

@@ -164,8 +164,6 @@ def test_mongodb_operations():
 
 
 
-# Add this function to your database.py
-
 def save_business_dimensions_to_mongo(
     validator_atom_id: str,
     file_key: str,

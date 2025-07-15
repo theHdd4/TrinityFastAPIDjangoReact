@@ -18,6 +18,7 @@ const ColumnClassifierVisualisation: React.FC<ColumnClassifierVisualisationProps
   }
 
   const currentFile = data.files[data.activeFileIndex];
+  const displayName = currentFile.fileName.split('/').pop();
   
   const categoryCounts = {
     identifiers: currentFile.columns.filter(col => col.category === 'identifiers').length,
@@ -48,7 +49,7 @@ const ColumnClassifierVisualisation: React.FC<ColumnClassifierVisualisationProps
     <div className="space-y-4">
       <Card className="p-4">
         <h4 className="font-semibold text-gray-900 mb-2">Current File</h4>
-        <p className="text-sm text-gray-600 mb-4">{currentFile.fileName}</p>
+        <p className="text-sm text-gray-600 mb-4 break-all whitespace-normal">{displayName}</p>
         
         <h5 className="font-medium text-gray-900 mb-4">Column Distribution</h5>
         <ResponsiveContainer width="100%" height={160}>
