@@ -30,14 +30,18 @@ const ColumnClassifierVisualisation: React.FC<ColumnClassifierVisualisationProps
     { name: 'Identifiers', count: categoryCounts.identifiers },
     { name: 'Measures', count: categoryCounts.measures },
     { name: 'Unclassified', count: categoryCounts.unclassified },
-    { name: 'Custom Dimensions', count: categoryCounts.customDimensions }
+    ...(categoryCounts.customDimensions > 0
+      ? [{ name: 'Custom Dimensions', count: categoryCounts.customDimensions }]
+      : [])
   ];
 
   const pieData = [
     { name: 'Identifiers', value: categoryCounts.identifiers, color: '#3b82f6' },
     { name: 'Measures', value: categoryCounts.measures, color: '#10b981' },
     { name: 'Unclassified', value: categoryCounts.unclassified, color: '#f59e0b' },
-    { name: 'Custom Dimensions', value: categoryCounts.customDimensions, color: '#8b5cf6' }
+    ...(categoryCounts.customDimensions > 0
+      ? [{ name: 'Custom Dimensions', value: categoryCounts.customDimensions, color: '#8b5cf6' }]
+      : [])
   ];
 
   return (
@@ -106,10 +110,12 @@ const ColumnClassifierVisualisation: React.FC<ColumnClassifierVisualisationProps
               {((categoryCounts.identifiers + categoryCounts.measures + Object.values(currentFile.customDimensions).flat().length) / currentFile.columns.length * 100).toFixed(1)}%
             </span>
           </div>
-          <div className="flex justify-between">
-            <span>Custom Dimensions:</span>
-            <span className="font-medium">{categoryCounts.customDimensions}</span>
-          </div>
+          {categoryCounts.customDimensions > 0 && (
+            <div className="flex justify-between">
+              <span>Custom Dimensions:</span>
+              <span className="font-medium">{categoryCounts.customDimensions}</span>
+            </div>
+          )}
         </div>
       </Card>
     </div>

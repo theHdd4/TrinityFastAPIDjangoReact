@@ -171,10 +171,12 @@ const ColumnClassifierExhibition: React.FC<ColumnClassifierExhibitionProps> = ({
             <span>Total Columns:</span>
             <span className="font-medium">{currentFile.columns.length}</span>
           </div>
-          <div className="flex justify-between">
-            <span>Custom Dimensions:</span>
-            <span className="font-medium">{Object.keys(currentFile.customDimensions).length}</span>
-          </div>
+          {Object.keys(currentFile.customDimensions).length > 0 && (
+            <div className="flex justify-between">
+              <span>Custom Dimensions:</span>
+              <span className="font-medium">{Object.keys(currentFile.customDimensions).length}</span>
+            </div>
+          )}
         </div>
       </Card>
     </div>

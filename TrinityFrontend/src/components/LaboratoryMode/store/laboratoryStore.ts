@@ -154,7 +154,7 @@ export const DEFAULT_COLUMN_CLASSIFIER_SETTINGS: ColumnClassifierSettings = {
   },
   validatorId: '',
   fileKey: '',
-  dimensions: ['market', 'product'],
+  dimensions: [],
   assignments: {}
 };
 

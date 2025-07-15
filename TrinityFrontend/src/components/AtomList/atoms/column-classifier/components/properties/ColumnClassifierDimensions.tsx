@@ -24,7 +24,7 @@ const ColumnClassifierDimensions: React.FC<Props> = ({ atomId }) => {
   };
 
   const [options, setOptions] = useState<string[]>(
-    Array.from(new Set(['market', 'product', ...(settings.dimensions || [])]))
+    Array.from(new Set(settings.dimensions || []))
   );
   const [selected, setSelected] = useState<string[]>(settings.dimensions || []);
   const [showInput, setShowInput] = useState(false);
