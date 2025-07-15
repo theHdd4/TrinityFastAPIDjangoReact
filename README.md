@@ -45,6 +45,10 @@ Follow the steps below to run all services together.
   Override the API paths with `VITE_ACCOUNTS_API` etc. if needed when deploying
   the APIs on a separate domain.
 
+  If API requests return **403 Forbidden** ensure the browser has a valid session
+  cookie. Log in via the correct `/api/accounts/login/` path before calling
+  authenticated endpoints like `/api/registry/laboratory-actions/`.
+
   Update `CSRF_TRUSTED_ORIGINS` and `CORS_ALLOWED_ORIGINS` in
   `TrinityBackendDjango/.env` so both the local frontend URL
   `http://${HOST_IP}:8080` and the public domain
