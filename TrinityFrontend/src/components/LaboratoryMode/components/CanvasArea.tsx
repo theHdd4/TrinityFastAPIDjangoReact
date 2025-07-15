@@ -14,6 +14,7 @@ import {
   LAB_ACTIONS_API,
   VALIDATE_API,
   FEATURE_OVERVIEW_API,
+  CLASSIFIER_API,
 } from '@/lib/api';
 import { AIChatBot } from '@/components/TrinityAI';
 import TextBoxEditor from '@/components/AtomList/atoms/text-box/TextBoxEditor';
@@ -30,6 +31,7 @@ import {
   DEFAULT_TEXTBOX_SETTINGS,
   DEFAULT_DATAUPLOAD_SETTINGS,
   DEFAULT_FEATURE_OVERVIEW_SETTINGS,
+  ColumnClassifierColumn,
 } from '../store/laboratoryStore';
 
 
@@ -245,6 +247,60 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
     });
   };
 
+  const prefillColumnClassifier = async (atomId: string) => {
+    const prev = await findLatestDataSource();
+    if (!prev || !prev.csv) {
+      console.warn('⚠️ no dataframe found for column classifier');
+      return;
+    }
+    console.log('ℹ️ prefill column classifier with', prev.csv);
+    await prefetchDataframe(prev.csv);
+    try {
+      const form = new FormData();
+      form.append('dataframe', prev.csv);
+      const res = await fetch(`${CLASSIFIER_API}/classify_columns`, {
+        method: 'POST',
+        body: form,
+        credentials: 'include',
+      });
+      if (!res.ok) {
+        console.warn('⚠️ auto classification failed', res.status);
+        return;
+      }
+      const data = await res.json();
+      const columns: ColumnClassifierColumn[] = [
+        ...data.final_classification.identifiers.map((name: string) => ({
+          name,
+          category: 'identifiers',
+        })),
+        ...data.final_classification.measures.map((name: string) => ({
+          name,
+          category: 'measures',
+        })),
+        ...data.final_classification.unclassified.map((name: string) => ({
+          name,
+          category: 'unclassified',
+        })),
+      ];
+      updateAtomSettings(atomId, {
+        validatorId: prev.csv,
+        assignments: {},
+        data: {
+          files: [
+            {
+              fileName: prev.csv,
+              columns,
+              customDimensions: {},
+            },
+          ],
+          activeFileIndex: 0,
+        },
+      });
+    } catch (err) {
+      console.error('⚠️ prefill column classifier error', err);
+    }
+  };
+
   // Load saved layout and workflow rendering
   useEffect(() => {
     let initialCards: LayoutCard[] | null = null;
@@ -445,6 +501,8 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
 
       if (atom.id === 'feature-overview') {
         prefillFeatureOverview(cardId, newAtom.id);
+      } else if (atom.id === 'column-classifier') {
+        prefillColumnClassifier(newAtom.id);
       }
     }
   };
@@ -513,6 +571,8 @@ const addNewCard = (moleculeId?: string, position?: number) => {
 
     if (info.id === 'feature-overview') {
       prefillFeatureOverview(cardId, newAtom.id);
+    } else if (info.id === 'column-classifier') {
+      prefillColumnClassifier(newAtom.id);
     }
   };
 
