@@ -1,9 +1,8 @@
 import React, { useState } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Settings, BarChart3, Eye } from 'lucide-react';
+import { Settings } from 'lucide-react';
 import ColumnClassifierSettings from '../ColumnClassifierSettings';
-import ColumnClassifierVisualisation from '../ColumnClassifierVisualisation';
-import ColumnClassifierExhibition from '../ColumnClassifierExhibition';
+import ColumnClassifierDimensions from './ColumnClassifierDimensions';
 import {
   useLaboratoryStore,
   DEFAULT_COLUMN_CLASSIFIER_SETTINGS,
@@ -32,30 +31,22 @@ const ColumnClassifierProperties: React.FC<Props> = ({ atomId }) => {
 
   return (
     <Tabs value={tab} onValueChange={setTab} className="w-full">
-      <TabsList className="grid w-full grid-cols-3 mx-4 my-4">
+      <TabsList className="grid w-full grid-cols-2 mx-4 my-4">
         <TabsTrigger value="settings" className="text-xs">
           <Settings className="w-3 h-3 mr-1" />
           Settings
         </TabsTrigger>
-        <TabsTrigger value="visualisation" className="text-xs">
-          <BarChart3 className="w-3 h-3 mr-1" />
-          Charts
-        </TabsTrigger>
-        <TabsTrigger value="exhibition" className="text-xs">
-          <Eye className="w-3 h-3 mr-1" />
-          Export
+        <TabsTrigger value="dimensions" className="text-xs">
+          Dimensions
         </TabsTrigger>
       </TabsList>
 
       <div className="px-4">
         <TabsContent value="settings" className="space-y-4" forceMount>
-          <ColumnClassifierSettings onClassification={handleClassification} />
+          <ColumnClassifierSettings atomId={atomId} onClassification={handleClassification} />
         </TabsContent>
-        <TabsContent value="visualisation" className="space-y-4" forceMount>
-          <ColumnClassifierVisualisation data={settings.data} />
-        </TabsContent>
-        <TabsContent value="exhibition" className="space-y-4" forceMount>
-          <ColumnClassifierExhibition data={settings.data} />
+        <TabsContent value="dimensions" className="space-y-4" forceMount>
+          <ColumnClassifierDimensions atomId={atomId} />
         </TabsContent>
       </div>
     </Tabs>

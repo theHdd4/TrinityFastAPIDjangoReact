@@ -141,13 +141,19 @@ export interface ColumnClassifierData {
 
 export interface ColumnClassifierSettings {
   data: ColumnClassifierData;
+  validatorId?: string;
+  fileKey?: string;
+  dimensions: string[];
 }
 
 export const DEFAULT_COLUMN_CLASSIFIER_SETTINGS: ColumnClassifierSettings = {
   data: {
     files: [],
     activeFileIndex: 0
-  }
+  },
+  validatorId: '',
+  fileKey: '',
+  dimensions: ['market', 'product']
 };
 
 export interface DroppedAtom {
