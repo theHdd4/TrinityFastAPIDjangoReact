@@ -1,7 +1,7 @@
 # main.py - FastAPI App Entrypoint
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.features.column_classify.routes import router  # ✅ Direct import, not relative
+from app.features.column_classifier.routes import router
 import uvicorn
 
 # Create FastAPI app instance

@@ -3,7 +3,7 @@
 from pymongo import MongoClient
 from datetime import datetime
 import logging
-from config import settings
+from .config import settings
 
 # MongoDB Configuration
 MONGODB_URL = settings.mongo_uri
