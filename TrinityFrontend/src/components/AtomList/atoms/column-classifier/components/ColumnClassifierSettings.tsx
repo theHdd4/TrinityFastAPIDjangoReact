@@ -65,7 +65,7 @@ const ColumnClassifierSettings: React.FC<ColumnClassifierSettingsProps> = ({ ato
       ];
       const custom = Object.fromEntries((settings.dimensions || []).map(d => [d, []]));
       onClassification({ fileName: savedId, columns: cols, customDimensions: custom });
-      updateSettings(atomId, { validatorId: savedId, fileKey });
+      updateSettings(atomId, { validatorId: savedId, fileKey, assignments: {} });
     } catch (e: any) {
       setError(e.message);
     } finally {

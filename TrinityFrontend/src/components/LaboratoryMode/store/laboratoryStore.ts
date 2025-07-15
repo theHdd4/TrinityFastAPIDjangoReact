@@ -144,6 +144,7 @@ export interface ColumnClassifierSettings {
   validatorId?: string;
   fileKey?: string;
   dimensions: string[];
+  assignments: { [key: string]: string[] };
 }
 
 export const DEFAULT_COLUMN_CLASSIFIER_SETTINGS: ColumnClassifierSettings = {
@@ -153,7 +154,8 @@ export const DEFAULT_COLUMN_CLASSIFIER_SETTINGS: ColumnClassifierSettings = {
   },
   validatorId: '',
   fileKey: '',
-  dimensions: ['market', 'product']
+  dimensions: ['market', 'product'],
+  assignments: {}
 };
 
 export interface DroppedAtom {
