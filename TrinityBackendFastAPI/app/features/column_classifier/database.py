@@ -166,7 +166,12 @@ def test_mongodb_operations():
 
 # Add this function to your database.py
 
-def save_business_dimensions_to_mongo(validator_atom_id: str, file_key: str, dimensions_dict: dict):
+def save_business_dimensions_to_mongo(
+    validator_atom_id: str,
+    file_key: str,
+    dimensions_dict: dict,
+    project_id: int | None = None,
+):
     """Save business dimensions for a specific file key to MongoDB"""
     if not check_mongodb_connection():
         return {"status": "error", "error": "MongoDB not connected"}
@@ -177,6 +182,7 @@ def save_business_dimensions_to_mongo(validator_atom_id: str, file_key: str, dim
             "_id": document_id,
             "validator_atom_id": validator_atom_id,
             "file_key": file_key,
+            "project_id": project_id,
             "dimensions_type": "business_dimensions",
             "dimensions": dimensions_dict,
             "dimensions_count": len(dimensions_dict),
@@ -217,7 +223,12 @@ def get_business_dimensions_from_mongo(validator_atom_id: str, file_key: str):
         logging.error(f"MongoDB read error for business dimensions: {e}")
         return None
 
-def update_business_dimensions_assignments_in_mongo(validator_atom_id: str, file_key: str, assignments: dict):
+def update_business_dimensions_assignments_in_mongo(
+    validator_atom_id: str,
+    file_key: str,
+    assignments: dict,
+    project_id: int | None = None,
+):
     """Update business dimensions with identifier assignments in MongoDB"""
     if not check_mongodb_connection():
         return {"status": "error", "error": "MongoDB not connected"}
@@ -242,7 +253,8 @@ def update_business_dimensions_assignments_in_mongo(validator_atom_id: str, file
             "dimensions": updated_dimensions,
             "identifier_assignments": assignments,
             "updated_at": datetime.utcnow(),
-            "assignment_completed": True
+            "assignment_completed": True,
+            "project_id": project_id,
         }
         
         result = db["business_dimensions_with_assignments"].update_one(

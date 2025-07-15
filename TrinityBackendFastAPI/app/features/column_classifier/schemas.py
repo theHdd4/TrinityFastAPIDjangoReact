@@ -63,6 +63,7 @@ class DefineDimensionsResponse(BaseModel):
     dimension_details: DimensionDetails
     mongodb_saved: bool
     in_memory_saved: str
+    project_id: int | None = None
     next_steps: NextSteps
 
 
@@ -86,6 +87,7 @@ class AssignIdentifiersResponse(BaseModel):
     validator_atom_id: str
     file_key: str
     validator_type: str
+    project_id: int | None = None
     updated_business_dimensions: Dict[str, Any]
     assignment_summary: AssignmentSummary
     unassigned_identifiers: List[str]

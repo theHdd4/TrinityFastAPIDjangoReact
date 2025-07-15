@@ -12,6 +12,7 @@ import {
   ColumnClassifierFile,
   ColumnClassifierColumn
 } from '@/components/LaboratoryMode/store/laboratoryStore';
+import { CLASSIFIER_API } from '@/lib/api';
 
 export type ColumnData = ColumnClassifierColumn;
 export type FileClassification = ColumnClassifierFile;
@@ -89,6 +90,25 @@ const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
     updateSettings(atomId, { data: { ...classifierData, activeFileIndex: fileIndex } });
   };
 
+  const saveAssignments = async () => {
+    if (!settings.validatorId || !classifierData.files.length) return;
+    const currentFile = classifierData.files[classifierData.activeFileIndex];
+    const stored = localStorage.getItem('current-project');
+    const projectId = stored ? JSON.parse(stored).id : null;
+    const form = new FormData();
+    form.append('validator_atom_id', settings.validatorId);
+    form.append('file_key', currentFile.fileName);
+    form.append('identifier_assignments', JSON.stringify(currentFile.customDimensions));
+    if (projectId) {
+      form.append('project_id', String(projectId));
+    }
+    await fetch(`${CLASSIFIER_API}/assign_identifiers_to_dimensions`, {
+      method: 'POST',
+      body: form,
+      credentials: 'include'
+    });
+  };
+
   return (
     <div className="w-full h-full bg-white flex">
       <div className="flex-1">
@@ -116,7 +136,14 @@ const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
 
           <div className="px-4 pb-4 h-[calc(100%-80px)] overflow-y-auto">
             <TabsContent value="visualisation" className="mt-2">
-              <ColumnClassifierVisualisation data={classifierData} />
+              <ColumnClassifierVisualisation
+                data={classifierData}
+                onSave={saveAssignments}
+                saveDisabled={
+                  Object.keys(classifierData.files[classifierData.activeFileIndex].customDimensions).length === 0 ||
+                  Object.values(classifierData.files[classifierData.activeFileIndex].customDimensions).every(c => c.length === 0)
+                }
+              />
             </TabsContent>
 
             <TabsContent value="exhibition" className="mt-2">

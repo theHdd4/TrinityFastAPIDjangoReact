@@ -373,7 +373,8 @@ async def classify_columns(
 async def define_dimensions(
     validator_atom_id: str = Form(...),
     file_key: str = Form(...),
-    dimensions: str = Form(...)
+    dimensions: str = Form(...),
+    project_id: int = Form(None)
 ):
     """
     Endpoint to define business dimensions for a specific file key in a validator atom.
@@ -445,7 +446,9 @@ async def define_dimensions(
 
     # Save to MongoDB
     try:
-        mongo_result = save_business_dimensions_to_mongo(validator_atom_id, file_key, dims_dict)
+        mongo_result = save_business_dimensions_to_mongo(
+            validator_atom_id, file_key, dims_dict, project_id
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to save dimensions to MongoDB: {str(e)}")
 
@@ -481,6 +484,7 @@ async def define_dimensions(
         ),
         mongodb_saved=mongo_result.get("status") == "success",
         in_memory_saved=in_memory_status,
+        project_id=project_id,
         next_steps=NextSteps(
             assign_identifiers=f"POST /assign_identifiers_to_dimensions with validator_atom_id: {validator_atom_id}",
             view_assignments=f"GET /get_identifier_assignments/{validator_atom_id}/{file_key}"
@@ -494,7 +498,8 @@ async def define_dimensions(
 async def assign_identifiers_to_dimensions(
     validator_atom_id: str = Form(...),
     file_key: str = Form(...),
-    identifier_assignments: str = Form(...)
+    identifier_assignments: str = Form(...),
+    project_id: int = Form(None)
 ):
     """
     Assign identifiers to dimensions and save within business dimensions structure.
@@ -599,7 +604,9 @@ async def assign_identifiers_to_dimensions(
 
     # Save to MongoDB
     try:
-        mongo_result = update_business_dimensions_assignments_in_mongo(validator_atom_id, file_key, assignments)
+        mongo_result = update_business_dimensions_assignments_in_mongo(
+            validator_atom_id, file_key, assignments, project_id
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to save assignments to MongoDB: {str(e)}")
 
@@ -628,6 +635,7 @@ async def assign_identifiers_to_dimensions(
         validator_atom_id=validator_atom_id,
         file_key=file_key,
         validator_type=validator_data.get("template_type", "custom"),
+        project_id=project_id,
         updated_business_dimensions=updated_business_dimensions,
         assignment_summary=AssignmentSummary(
             total_identifiers=len(available_identifiers),

@@ -5,7 +5,6 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Edit2, X, FileText, Trash2, TrendingUp, BarChart3, Tag } from 'lucide-react';
 import { ClassifierData, ColumnData } from '../ColumnClassifierAtom';
-import { CLASSIFIER_API } from '@/lib/api';
 
 interface ColumnClassifierCanvasProps {
   data: ClassifierData;
@@ -75,26 +74,6 @@ const ColumnClassifierCanvas: React.FC<ColumnClassifierCanvasProps> = ({
     }
   };
 
-  const saveAssignments = async () => {
-    if (!validatorId) return;
-    const form = new FormData();
-    form.append('validator_atom_id', validatorId);
-    form.append('file_key', currentFile.fileName);
-    form.append(
-      'identifier_assignments',
-      JSON.stringify(currentFile.customDimensions)
-    );
-    try {
-      await fetch(`${CLASSIFIER_API}/assign_identifiers_to_dimensions`, {
-        method: 'POST',
-        body: form,
-        credentials: 'include'
-      });
-    } catch (err) {
-      console.error('Failed to save assignments', err);
-    }
-  };
-
   const DimensionCard: React.FC<{
     title: string;
     icon: React.ReactNode;
@@ -157,7 +136,7 @@ const ColumnClassifierCanvas: React.FC<ColumnClassifierCanvasProps> = ({
   );
 
   return (
-    <div className="w-full h-full p-6 bg-gradient-to-br from-gray-50 to-gray-100">
+    <div className="w-full h-full p-6 bg-gradient-to-br from-gray-50 to-gray-100 overflow-y-auto">
       <div className="mb-6">
         <h2 className="text-2xl font-bold text-gray-900 mb-4">
           Column <span className="bg-yellow-200 px-2 py-1 rounded">Classifier</span>
@@ -269,19 +248,6 @@ const ColumnClassifierCanvas: React.FC<ColumnClassifierCanvasProps> = ({
           })
         )}
 
-        {/* Save Dimensions Button */}
-        <div className="pt-4">
-          <Button
-            disabled={
-              Object.keys(currentFile.customDimensions).length === 0 ||
-              Object.values(currentFile.customDimensions).every(c => c.length === 0)
-            }
-            onClick={saveAssignments}
-            className="w-full h-14 text-lg font-semibold bg-gradient-to-r from-gray-800 to-gray-900 hover:from-gray-900 hover:to-black shadow-xl"
-          >
-            Save Dimensions
-          </Button>
-        </div>
       </div>
     </div>
   );

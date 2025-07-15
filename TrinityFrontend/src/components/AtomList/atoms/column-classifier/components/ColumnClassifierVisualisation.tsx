@@ -1,14 +1,17 @@
 
 import React from 'react';
 import { Card } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 import { ClassifierData } from '../ColumnClassifierAtom';
 
 interface ColumnClassifierVisualisationProps {
   data: ClassifierData;
+  onSave?: () => void;
+  saveDisabled?: boolean;
 }
 
-const ColumnClassifierVisualisation: React.FC<ColumnClassifierVisualisationProps> = ({ data }) => {
+const ColumnClassifierVisualisation: React.FC<ColumnClassifierVisualisationProps> = ({ data, onSave, saveDisabled }) => {
   if (!data.files.length) {
     return (
       <div className="text-center p-8">
@@ -118,6 +121,16 @@ const ColumnClassifierVisualisation: React.FC<ColumnClassifierVisualisationProps
           )}
         </div>
       </Card>
+
+      <div className="pt-2">
+        <Button
+          disabled={saveDisabled}
+          onClick={onSave}
+          className="w-full h-12 text-sm font-semibold bg-gradient-to-r from-gray-800 to-gray-900 hover:from-gray-900 hover:to-black"
+        >
+          Save Dimensions
+        </Button>
+      </div>
     </div>
   );
 };
