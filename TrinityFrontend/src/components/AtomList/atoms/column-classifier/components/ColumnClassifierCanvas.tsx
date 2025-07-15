@@ -201,6 +201,29 @@ const ColumnClassifierCanvas: React.FC<ColumnClassifierCanvasProps> = ({
           onRemove={(columnName) => onColumnMove(columnName, 'unclassified', data.activeFileIndex)}
         />
 
+        {/* Unclassified Columns - if any */}
+        {getAvailableColumns().length > 0 && (
+          <Card className="border-2 border-dashed border-orange-300 bg-orange-50">
+            <div className="p-4">
+              <h4 className="font-semibold text-orange-800 mb-3 flex items-center">
+                <Edit2 className="w-4 h-4 mr-2" />
+                Unclassified Columns
+              </h4>
+              <div className="flex flex-wrap gap-2">
+                {getAvailableColumns().map(column => (
+                  <Badge
+                    key={column.name}
+                    variant="outline"
+                    className="bg-white border-orange-300 text-orange-700"
+                  >
+                    {column.name}
+                  </Badge>
+                ))}
+              </div>
+            </div>
+          </Card>
+        )}
+
         {/* Custom Dimensions */}
         {Object.keys(currentFile.customDimensions).length === 0 ? (
           <p className="text-sm text-gray-500">
@@ -226,33 +249,12 @@ const ColumnClassifierCanvas: React.FC<ColumnClassifierCanvasProps> = ({
           })
         )}
 
-
-        {/* Unclassified Columns - if any */}
-        {getAvailableColumns().length > 0 && (
-          <Card className="border-2 border-dashed border-orange-300 bg-orange-50">
-            <div className="p-4">
-              <h4 className="font-semibold text-orange-800 mb-3 flex items-center">
-                <Edit2 className="w-4 h-4 mr-2" />
-                Unclassified Columns
-              </h4>
-              <div className="flex flex-wrap gap-2">
-                {getAvailableColumns().map(column => (
-                  <Badge 
-                    key={column.name}
-                    variant="outline" 
-                    className="bg-white border-orange-300 text-orange-700"
-                  >
-                    {column.name}
-                  </Badge>
-                ))}
-              </div>
-            </div>
-          </Card>
-        )}
-
         {/* Save Dimensions Button */}
         <div className="pt-4">
-          <Button className="w-full h-14 text-lg font-semibold bg-gradient-to-r from-gray-800 to-gray-900 hover:from-gray-900 hover:to-black shadow-xl">
+          <Button
+            disabled={Object.keys(currentFile.customDimensions).length === 0}
+            className="w-full h-14 text-lg font-semibold bg-gradient-to-r from-gray-800 to-gray-900 hover:from-gray-900 hover:to-black shadow-xl"
+          >
             Save Dimensions
           </Button>
         </div>
