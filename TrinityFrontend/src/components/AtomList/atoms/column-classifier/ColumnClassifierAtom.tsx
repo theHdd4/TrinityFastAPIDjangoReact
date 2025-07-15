@@ -140,8 +140,13 @@ const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
                 data={classifierData}
                 onSave={saveAssignments}
                 saveDisabled={
-                  Object.keys(classifierData.files[classifierData.activeFileIndex].customDimensions).length === 0 ||
-                  Object.values(classifierData.files[classifierData.activeFileIndex].customDimensions).every(c => c.length === 0)
+                  !classifierData.files.length ||
+                  Object.keys(
+                    classifierData.files[classifierData.activeFileIndex]?.customDimensions || {}
+                  ).length === 0 ||
+                  Object.values(
+                    classifierData.files[classifierData.activeFileIndex]?.customDimensions || {}
+                  ).every(c => c.length === 0)
                 }
               />
             </TabsContent>
