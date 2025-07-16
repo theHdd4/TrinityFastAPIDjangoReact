@@ -367,6 +367,7 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
                 requiredOptions={settings.requiredFiles || []}
                 onDeleteFile={handleDeleteFile}
                 saveStatus={saveStatus}
+                disabled={(settings.requiredFiles || []).length === 0}
               />
             </div>
 

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Settings, Upload, Table, BarChart3, Minus, Plus } from "lucide-react";
+import { Settings, Upload, Table, BarChart3, Minus, Plus, Pencil, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -35,6 +35,8 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
     { name: string; source: string }[]
   >(settings.requiredFiles?.map((name) => ({ name, source: "upload" })) || []);
   const [selectedMasterFile, setSelectedMasterFile] = useState<string>("");
+  const [renameTarget, setRenameTarget] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState<string>("");
   const [validatorId, setValidatorId] = useState<string>(
     settings.validatorId || "",
   );
@@ -183,6 +185,27 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
         columnConfig: { [firstKey]: defaultTypes },
       });
     }
+  };
+
+  const startRename = (name: string) => {
+    setRenameTarget(name);
+    setRenameValue(name);
+  };
+
+  const commitRename = (oldName: string) => {
+    if (!renameValue.trim()) {
+      setRenameTarget(null);
+      return;
+    }
+    const newName = renameValue.trim();
+    setAllAvailableFiles(prev => prev.map(f => f.name === oldName ? { ...f, name: newName } : f));
+    if (selectedMasterFile === oldName) setSelectedMasterFile(newName);
+    setRenameTarget(null);
+  };
+
+  const deleteMasterFile = (name: string) => {
+    setAllAvailableFiles(prev => prev.filter(f => f.name !== name));
+    if (selectedMasterFile === name) setSelectedMasterFile('');
   };
 
   const handleDataTypeChange = (column: string, value: string) => {
@@ -495,6 +518,29 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
                 </SelectContent>
               </Select>
             </div>
+
+            {allAvailableFiles.length > 0 && (
+              <div className="space-y-2">
+                {allAvailableFiles.map(file => (
+                  <div key={file.name} className="flex items-center justify-between">
+                    {renameTarget === file.name ? (
+                      <Input
+                        value={renameValue}
+                        onChange={e => setRenameValue(e.target.value)}
+                        onBlur={() => commitRename(file.name)}
+                        className="h-7 text-xs flex-1 mr-2"
+                      />
+                    ) : (
+                      <span className="text-sm truncate flex-1 max-w-[140px]" title={file.name}>{file.name}</span>
+                    )}
+                    <div className="flex items-center space-x-1 ml-2">
+                      <Pencil className="w-4 h-4 text-gray-400 cursor-pointer" onClick={() => startRename(file.name)} />
+                      <Trash2 className="w-4 h-4 text-gray-400 cursor-pointer" onClick={() => deleteMasterFile(file.name)} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
 
