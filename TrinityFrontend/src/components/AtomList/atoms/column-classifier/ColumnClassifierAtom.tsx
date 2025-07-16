@@ -1,4 +1,5 @@
 import React from 'react';
+import { useToast } from '@/hooks/use-toast';
 
 import ColumnClassifierCanvas from './components/ColumnClassifierCanvas';
 import ColumnClassifierVisualisation from './components/ColumnClassifierVisualisation';
@@ -28,6 +29,7 @@ const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
     ...DEFAULT_COLUMN_CLASSIFIER_SETTINGS
   };
   const classifierData = settings.data;
+  const { toast } = useToast();
 
   React.useEffect(() => {
     const loadMapping = async () => {
@@ -144,11 +146,22 @@ const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
       credentials: 'include'
     });
     console.log('✅ dimension assignment response', res.status);
-    try {
-      const json = await res.json();
-      console.log('📝 assignment save result', json);
-    } catch (err) {
-      console.warn('assignment save result parse error', err);
+    if (res.ok) {
+      toast({ title: 'Dimensions Saved Successfully' });
+      try {
+        const json = await res.json();
+        console.log('📝 assignment save result', json);
+      } catch (err) {
+        console.warn('assignment save result parse error', err);
+      }
+    } else {
+      toast({ title: 'Unable to Save Dimensions', variant: 'destructive' });
+      try {
+        const txt = await res.text();
+        console.warn('assignment save error response', txt);
+      } catch (err) {
+        console.warn('assignment save error parse fail', err);
+      }
     }
   };
 
