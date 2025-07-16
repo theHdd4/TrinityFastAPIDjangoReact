@@ -896,8 +896,6 @@ const addNewCard = (moleculeId?: string, position?: number) => {
                     <Settings className="w-4 h-4 text-gray-400" />
                   </button>
                 )}
-              </div>
-              <div className="flex items-center space-x-2">
                 <button
                   onClick={e => {
                     e.stopPropagation();
@@ -908,6 +906,8 @@ const addNewCard = (moleculeId?: string, position?: number) => {
                 >
                   <RefreshCcw className="w-4 h-4 text-gray-400" />
                 </button>
+              </div>
+              <div className="flex items-center space-x-2">
                 <span className="text-xs text-gray-500">Exhibit the Card</span>
                 <Switch
                   checked={card.isExhibited || false}
