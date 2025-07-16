@@ -535,6 +535,66 @@ const addNewCard = (moleculeId?: string, position?: number) => {
   setCollapsedCards(prev => ({ ...prev, [newCard.id]: false }));
 };
 
+const addNewCardWithAtom = (
+  atomId: string,
+  moleculeId?: string,
+  position?: number
+) => {
+  const cardInfo = moleculeId ? molecules.find(m => m.id === moleculeId) : undefined;
+  const atomInfo = allAtoms.find(a => a.id === atomId);
+  const newAtom: DroppedAtom = {
+    id: `${atomId}-${Date.now()}`,
+    atomId,
+    title: atomInfo?.title || atomId,
+    category: atomInfo?.category || 'Atom',
+    color: atomInfo?.color || 'bg-gray-400',
+    settings:
+      atomId === 'text-box'
+        ? { ...DEFAULT_TEXTBOX_SETTINGS }
+        : atomId === 'data-upload-validate'
+        ? { ...DEFAULT_DATAUPLOAD_SETTINGS }
+        : atomId === 'feature-overview'
+        ? { ...DEFAULT_FEATURE_OVERVIEW_SETTINGS }
+        : undefined,
+  };
+  const newCard: LayoutCard = {
+    id: `card-${Date.now()}`,
+    atoms: [newAtom],
+    isExhibited: false,
+    moleculeId,
+    moleculeTitle: cardInfo?.title,
+  };
+  const arr = Array.isArray(layoutCards) ? layoutCards : [];
+  const insertIndex =
+    position === undefined || position >= arr.length ? arr.length : position;
+  setLayoutCards([
+    ...arr.slice(0, insertIndex),
+    newCard,
+    ...arr.slice(insertIndex),
+  ]);
+  setCollapsedCards(prev => ({ ...prev, [newCard.id]: false }));
+
+  if (atomId === 'feature-overview') {
+    prefillFeatureOverview(newCard.id, newAtom.id);
+  } else if (atomId === 'column-classifier') {
+    prefillColumnClassifier(newAtom.id);
+  }
+};
+
+const handleDropNewCard = (
+  e: React.DragEvent,
+  moleculeId?: string,
+  position?: number
+) => {
+  e.preventDefault();
+  setDragOver(null);
+  const atomData = e.dataTransfer.getData('application/json');
+  if (!atomData) return;
+  const atom = JSON.parse(atomData);
+  if (!atom?.id) return;
+  addNewCardWithAtom(atom.id, moleculeId, position);
+};
+
   const removeAtom = (cardId: string, atomId: string) => {
     setLayoutCards(
       (Array.isArray(layoutCards) ? layoutCards : []).map(card =>
@@ -843,6 +903,8 @@ const addNewCard = (moleculeId?: string, position?: number) => {
                     <div className="flex justify-center">
                       <button
                         onClick={() => addNewCard(molecule.moleculeId)}
+                        onDragOver={e => e.preventDefault()}
+                        onDrop={e => handleDropNewCard(e, molecule.moleculeId)}
                         className="flex items-center px-2 py-2 bg-white border-2 border-dashed border-gray-300 rounded-xl hover:border-[#458EE2] hover:bg-blue-50 transition-all duration-500 ease-in-out group"
                       >
                         <Plus className="w-5 h-5 text-gray-400 group-hover:text-[#458EE2]" />
@@ -1029,6 +1091,8 @@ const addNewCard = (moleculeId?: string, position?: number) => {
             <div className="flex justify-center my-4">
               <button
                 onClick={() => addNewCard(undefined, index + 1)}
+                onDragOver={e => e.preventDefault()}
+                onDrop={e => handleDropNewCard(e, undefined, index + 1)}
                 className="flex items-center px-2 py-2 bg-white border-2 border-dashed border-gray-300 rounded-xl hover:border-[#458EE2] hover:bg-blue-50 transition-all duration-500 ease-in-out group"
                 title="Add new card"
               >
@@ -1049,6 +1113,8 @@ const addNewCard = (moleculeId?: string, position?: number) => {
         <div className="flex justify-center">
           <button
             onClick={() => addNewCard()}
+            onDragOver={e => e.preventDefault()}
+            onDrop={e => handleDropNewCard(e)}
             className="flex items-center px-2 py-2 bg-white border-2 border-dashed border-gray-300 rounded-xl hover:border-[#458EE2] hover:bg-blue-50 transition-all duration-500 ease-in-out group"
           >
             <Plus className="w-5 h-5 text-gray-400 group-hover:text-[#458EE2]" />
