@@ -275,24 +275,37 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
     fetch(`${VALIDATE_API}/get_validator_config/${validatorId}`)
       .then((res) => res.json())
       .then((cfg) => {
-        const schemaCols = cfg.schemas?.[selectedMasterFile]?.columns || [];
+        const savedLocal =
+          (settings.columnConfig || {})[selectedMasterFile] || {};
         const savedBackend = cfg.column_types?.[selectedMasterFile] || {};
-        const savedLocal = (settings.columnConfig || {})[selectedMasterFile] || {};
-        const merged: Record<string, string> = {};
-        schemaCols.forEach((c: any) => {
-          merged[c.column] = savedLocal[c.column]
-            ? savedLocal[c.column]
-            : savedBackend[c.column]
-            ? mapBackendType(savedBackend[c.column])
-            : "not_defined";
-        });
-        setColumnDataTypes(merged);
-        updateSettings(atomId, {
-          columnConfig: {
-            ...(settings.columnConfig || {}),
-            [selectedMasterFile]: merged,
-          },
-        });
+        const schemaCols = cfg.schemas?.[selectedMasterFile]?.columns || [];
+
+        if (schemaCols.length === 0 && Object.keys(savedLocal).length > 0) {
+          setColumnDataTypes(savedLocal);
+          updateSettings(atomId, {
+            columnConfig: {
+              ...(settings.columnConfig || {}),
+              [selectedMasterFile]: savedLocal,
+            },
+          });
+        } else {
+          const merged: Record<string, string> = {};
+          schemaCols.forEach((c: any) => {
+            merged[c.column] = savedLocal[c.column]
+              ? savedLocal[c.column]
+              : savedBackend[c.column]
+              ? mapBackendType(savedBackend[c.column])
+              : "not_defined";
+          });
+          setColumnDataTypes(merged);
+          updateSettings(atomId, {
+            columnConfig: {
+              ...(settings.columnConfig || {}),
+              [selectedMasterFile]: merged,
+            },
+          });
+        }
+
         if (cfg.classification?.[selectedMasterFile]) {
           const cls = cfg.classification[selectedMasterFile];
           setSelectedIdentifiers(cls.identifiers || []);
@@ -324,7 +337,9 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
         }
       })
       .catch(() => {
-        setColumnDataTypes({});
+        const savedLocal =
+          (settings.columnConfig || {})[selectedMasterFile] || {};
+        setColumnDataTypes(savedLocal);
       });
   }, [validatorId, selectedMasterFile]);
 
