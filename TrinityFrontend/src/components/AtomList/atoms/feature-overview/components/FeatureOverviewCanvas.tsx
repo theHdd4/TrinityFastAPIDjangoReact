@@ -347,21 +347,22 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
             {Object.keys(dimensionMap).length > 0 ? (
               Object.entries(dimensionMap).map(([dim, ids], idx) => {
-                const colors = [
+                const colorPairs = [
                   ["from-blue-500", "to-blue-600"],
                   ["from-green-500", "to-green-600"],
                   ["from-orange-500", "to-orange-600"],
                   ["from-purple-500", "to-purple-600"],
                 ];
-                const [from, to] = colors[idx % colors.length];
+                const [from, to] = colorPairs[idx % colorPairs.length];
+                const Icon = idx === 1 ? TrendingUp : BarChart3;
                 return (
                   <Card
                     key={dim}
-                    className="border-0 shadow-xl bg-white/90 backdrop-blur-sm overflow-hidden"
+                    className="border-0 shadow-xl bg-white/90 backdrop-blur-sm overflow-hidden transform hover:scale-105 transition-all duration-300"
                   >
                     <div className={`bg-gradient-to-r ${from} ${to} p-4`}>
                       <h4 className="font-bold text-white text-lg flex items-center">
-                        <BarChart3 className="w-5 h-5 mr-2" />
+                        <Icon className="w-5 h-5 mr-2" />
                         {dim}
                       </h4>
                     </div>
@@ -370,7 +371,7 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
                         {ids.map((id) => (
                           <Badge
                             key={id}
-                            className="bg-gray-100 px-4 py-2 font-medium"
+                            className={`bg-gradient-to-r ${from} ${to} text-white px-4 py-2 font-medium`}
                           >
                             {id}
                           </Badge>
