@@ -235,6 +235,28 @@ async def flight_table(object_name: str):
         raise HTTPException(status_code=400, detail=str(e))
 
 
+@router.get("/dimension_mapping")
+async def dimension_mapping(project_id: int = PROJECT_ID):
+    """Return dimension to identifier mapping stored on the Flight server."""
+    try:
+        path = f"{project_id}/dimension_mapping"
+        df = download_dataframe(path)
+    except Exception as exc:
+        print(f"⚠️ dimension_mapping download failed for {path}: {exc}")
+        raise HTTPException(status_code=404, detail="Mapping not found")
+
+    mapping: dict[str, list[str]] = {}
+    try:
+        for _, row in df.iterrows():
+            dim = str(row.get("dimension", "")).strip()
+            ident = str(row.get("identifier", "")).strip()
+            if dim:
+                mapping.setdefault(dim, []).append(ident)
+    except Exception as exc:
+        print(f"⚠️ dimension_mapping parse error: {exc}")
+    return {"mapping": mapping}
+
+
 @router.get("/sku_stats")
 async def sku_stats(
     object_name: str, y_column: str, combination: str, x_column: str = "date"
