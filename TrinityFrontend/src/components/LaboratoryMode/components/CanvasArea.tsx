@@ -142,6 +142,25 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
     }
   };
 
+  const fetchDimensionMapping = async () => {
+    try {
+      const saved = localStorage.getItem('current-project');
+      const projectId = saved ? JSON.parse(saved).id : '';
+      console.log('🔄 fetching dimension mapping for project', projectId);
+      const res = await fetch(
+        `${FEATURE_OVERVIEW_API}/dimension_mapping?project_id=${projectId}`,
+        { credentials: 'include' }
+      );
+      if (res.ok) {
+        const data = await res.json();
+        return data.mapping || {};
+      }
+    } catch (err) {
+      console.warn('dimension mapping fetch failed', err);
+    }
+    return {};
+  };
+
   const findLatestDataSource = async () => {
     console.log('🔎 searching for latest data source');
     if (!Array.isArray(layoutCards)) return null;
@@ -226,6 +245,7 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
     }
     console.log('ℹ️ prefill data source details', prev);
     await prefetchDataframe(prev.csv);
+    const mapping = await fetchDimensionMapping();
     console.log('✅ pre-filling feature overview with', prev.csv);
     const summary = Array.isArray(prev.summary) ? prev.summary : [];
     const identifiers = Array.isArray(prev.identifiers) ? prev.identifiers : [];
@@ -245,6 +265,7 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
       columnSummary: filtered,
       selectedColumns: selected,
       numericColumns: Array.isArray(prev.numeric) ? prev.numeric : [],
+      dimensionMap: mapping,
       xAxis: prev.xField || 'date',
     });
   };
