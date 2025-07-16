@@ -3,7 +3,7 @@ import { safeStringify } from '@/utils/safeStringify';
 import { Card, Card as AtomBox } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
-import { Plus, Grid3X3, Trash2, Eye, Settings, ChevronDown, Minus } from 'lucide-react';
+import { Plus, Grid3X3, Trash2, Eye, Settings, ChevronDown, Minus, RefreshCcw } from 'lucide-react';
 import { useExhibitionStore } from '../../ExhibitionMode/store/exhibitionStore';
 import { atoms as allAtoms } from '@/components/AtomList/data';
 import { molecules } from '@/components/MoleculeList/data';
@@ -659,6 +659,18 @@ const addNewCard = (moleculeId?: string, position?: number) => {
     setCards(updated);
   };
 
+  const refreshCardAtoms = async (cardId: string) => {
+    const card = (Array.isArray(layoutCards) ? layoutCards : []).find(c => c.id === cardId);
+    if (!card) return;
+    for (const atom of card.atoms) {
+      if (atom.atomId === 'feature-overview') {
+        await prefillFeatureOverview(cardId, atom.id);
+      } else if (atom.atomId === 'column-classifier') {
+        await prefillColumnClassifier(atom.id);
+      }
+    }
+  };
+
   if (workflowMolecules.length > 0) {
     return (
       <div className="h-full bg-gradient-to-br from-gray-50 to-gray-100 rounded-xl border border-gray-200 shadow-sm overflow-auto">
@@ -882,6 +894,16 @@ const addNewCard = (moleculeId?: string, position?: number) => {
                 )}
               </div>
               <div className="flex items-center space-x-2">
+                <button
+                  onClick={e => {
+                    e.stopPropagation();
+                    refreshCardAtoms(card.id);
+                  }}
+                  className="p-1 hover:bg-gray-100 rounded"
+                  title="Refresh Atom"
+                >
+                  <RefreshCcw className="w-4 h-4 text-gray-400" />
+                </button>
                 <span className="text-xs text-gray-500">Exhibit the Card</span>
                 <Switch
                   checked={card.isExhibited || false}
