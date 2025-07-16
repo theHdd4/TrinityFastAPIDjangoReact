@@ -1,0 +1,3 @@
+The Data Upload & Validate atom only accepts Apache Arrow (.arrow) files. Files
+are read using `pyarrow.ipc.open_file` to create pandas DataFrames before
+validation. CSV and Excel formats are no longer supported.

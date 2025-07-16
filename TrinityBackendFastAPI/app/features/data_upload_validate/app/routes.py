@@ -20,13 +20,7 @@ from app.features.data_upload_validate.app.validators.promo import validate_prom
 from app.features.data_upload_validate.app.schemas import (
     # Create validator schemas
     CreateValidatorResponse,
-    
-    # Classification schemas
-    ClassifyColumnsResponse,
-    Classification,
-    AutoClassification,
-    ClassificationSummary,
-    
+
     # Column types schemas
     UpdateColumnTypesResponse,
     MongoDBUpdateStatus,
@@ -51,13 +45,11 @@ from app.features.data_upload_validate.app.database import get_validation_config
 
 from app.features.data_upload_validate.app.database import save_validation_config_to_mongo
 from app.features.data_upload_validate.app.schemas import ConfigureValidationConfigResponse
-from app.features.data_upload_validate.app.database import save_classification_to_mongo
-from app.features.data_upload_validate.app.database import save_classification_to_mongo, get_validator_atom_from_mongo, update_validator_atom_in_mongo
+from app.features.data_upload_validate.app.database import get_validator_atom_from_mongo, update_validator_atom_in_mongo
 
 from app.features.data_upload_validate.app.database import (
     save_business_dimensions_to_mongo,
     get_business_dimensions_from_mongo,
-    get_classification_from_mongo,
     update_business_dimensions_assignments_in_mongo,
     save_validation_units_to_mongo,
     get_validation_units_from_mongo,
@@ -73,7 +65,6 @@ from app.features.data_upload_validate.app.database import (
 
 # Add this import
 from app.features.data_upload_validate.app.database import save_validator_atom_to_mongo
-from app.features.data_upload_validate.app.database import save_classification_to_mongo, get_validator_atom_from_mongo
 
 
 # Initialize router
@@ -176,7 +167,7 @@ MONGODB_DIR.mkdir(exist_ok=True)
 def save_non_validation_data(validator_atom_id: str, data_type: str, data: dict):
     """
     Save non-validation data to separate JSON files in mongodb folder
-    data_type: 'classification', 'business_dimensions', 'identifier_assignments'
+    data_type: 'business_dimensions', 'identifier_assignments'
     """
     try:
         file_path = MONGODB_DIR / f"{validator_atom_id}_{data_type}.json"
@@ -222,16 +213,14 @@ def load_non_validation_data(validator_atom_id: str, data_type: str) -> dict:
 def load_all_non_validation_data(validator_atom_id: str) -> dict:
     """
     Load all non-validation data for a validator atom from mongodb folder
-    Returns: dict with classification, business_dimensions, identifier_assignments
+    Returns: dict with business_dimensions and identifier_assignments
     """
-    classification = load_non_validation_data(validator_atom_id, "classification")
     business_dimensions = load_non_validation_data(validator_atom_id, "business_dimensions")
     identifier_assignments = load_non_validation_data(validator_atom_id, "identifier_assignments")
-    
+
     return {
-        "classification": classification,
         "business_dimensions": business_dimensions,
-        "identifier_assignments": identifier_assignments
+        "identifier_assignments": identifier_assignments,
     }
 
 def get_validator_from_memory_or_disk(validator_atom_id: str):
@@ -261,7 +250,7 @@ def get_validator_from_memory_or_disk(validator_atom_id: str):
                 "column_types": config.get("column_types", {}),
                 "config_saved": True,
                 "config_path": str(config_path),
-                **non_validation_data  # Add classification, business_dimensions, identifier_assignments
+                **non_validation_data  # Add business_dimensions, identifier_assignments
             }
             
             print(f"✅ Loaded {validator_atom_id} from disk (validation + mongodb data)")
@@ -275,7 +264,7 @@ def load_existing_configs():
     """
     Load all existing validator configs from both folders on startup
     - custom_validations/: validation data (schemas, column_types)
-    - mongodb/: non-validation data (classification, dimensions, assignments)
+    - mongodb/: non-validation data (dimensions, assignments)
     """
     if not CUSTOM_CONFIG_DIR.exists():
         print("ℹ️ No custom_validations folder found")
@@ -305,7 +294,6 @@ def load_existing_configs():
                 
                 print(f"✅ Loaded validator atom: {validator_atom_id}")
                 print(f"   - Validation: {len(config.get('schemas', {}))}")
-                print(f"   - Classification: {len(non_validation_data.get('classification', {}))}")
                 print(f"   - Dimensions: {len(non_validation_data.get('business_dimensions', {}))}")
                 print(f"   - Assignments: {len(non_validation_data.get('identifier_assignments', {}))}")
         except Exception as e:
@@ -479,222 +467,6 @@ async def view_new(validator_atom_id: str):
     return data.get("schemas", {})
 
 
-# POST: CLASSIFY_COLUMNS - Complete fixed version for both validator types
-@router.post("/classify_columns", response_model=ClassifyColumnsResponse)
-async def classify_columns(
-    validator_atom_id: str = Form(...),
-    file_key: str = Form(...),
-    identifiers: str = Form(default="[]"),
-    measures: str = Form(default="[]"),
-    unclassified: str = Form(default="[]")
-):
-    """
-    Auto-classify columns first, then allow user to override classifications.
-    Works for both regular validator atoms (from /create_new) and template validator atoms (from /validate_*)
-    """
-    # Check if validator atom exists (MongoDB first, then fallback)
-    validator_data = get_validator_atom_from_mongo(validator_atom_id)
-    if not validator_data:
-        # Fallback to old method for backward compatibility (regular validator atoms)
-        validator_data = get_validator_from_memory_or_disk(validator_atom_id)
-
-    if not validator_data:
-        raise HTTPException(status_code=404, detail=f"Validator atom '{validator_atom_id}' not found")
-
-    # Get column information from existing schema
-    schema_data = validator_data["schemas"].get(file_key, {})
-    if not schema_data:
-        available_keys = list(validator_data["schemas"].keys())
-        raise HTTPException(
-            status_code=400, 
-            detail=f"File key '{file_key}' not found in validator. Available file keys: {available_keys}"
-        )
-
-    all_columns = [col["column"] for col in schema_data.get("columns", [])]
-    column_types = schema_data.get("column_types", {})
-
-    if not all_columns:
-        raise HTTPException(status_code=400, detail="No columns found in schema data")
-
-    # Parse user overrides (if provided)
-    try:
-        user_identifiers = json.loads(identifiers) if identifiers != "[]" else []
-        user_measures = json.loads(measures) if measures != "[]" else []
-        user_unclassified = json.loads(unclassified) if unclassified != "[]" else []
-    except json.JSONDecodeError as e:
-        raise HTTPException(status_code=400, detail=f"Invalid JSON format for classification lists: {str(e)}")
-
-    # Validate user inputs - ensure they reference actual columns
-    all_user_columns = user_identifiers + user_measures + user_unclassified
-    invalid_columns = [col for col in all_user_columns if col not in all_columns]
-    if invalid_columns:
-        raise HTTPException(
-            status_code=400, 
-            detail=f"Invalid columns specified: {invalid_columns}. Available columns: {all_columns}"
-        )
-
-    # ✅ FIXED LOGIC: Start with user-specified classifications
-    final_identifiers = user_identifiers.copy()
-    final_measures = user_measures.copy()
-    final_unclassified = user_unclassified.copy()
-
-    # Get columns already classified by user
-    user_classified_columns = set(final_identifiers + final_measures + final_unclassified)
-
-    # Check for user classification conflicts
-    all_user_specified = user_identifiers + user_measures + user_unclassified
-    if len(all_user_specified) != len(set(all_user_specified)):
-        raise HTTPException(status_code=400, detail="Column specified in multiple classification categories")
-
-    # AUTO-CLASSIFY only the remaining columns
-    identifier_keywords = ['id', 'name', 'brand', 'market', 'category', 'region', 'channel', 
-                          'date', 'time', 'year','week', 'month', 'variant', 'ppg', 'type', 'code', 'packsize', 'packtype']
-    measure_keywords = ['sales', 'revenue', 'volume', 'amount', 'value', 'price', 'cost', 
-                       'profit', 'units', 'd1', 'd2', 'd3', 'd4', 'd5', 'd6', 'salesvalue', 'baseprice', 'promoprice']
-
-    auto_identifiers = []
-    auto_measures = []
-    auto_unclassified = []
-
-    # Only auto-classify columns NOT already specified by user
-    remaining_columns = [col for col in all_columns if col not in user_classified_columns]
-
-    for col in remaining_columns:
-        col_lower = col.lower()
-        col_type = column_types.get(col, "string")
-        
-        # Auto-classify remaining columns
-        if any(keyword in col_lower for keyword in identifier_keywords):
-            auto_identifiers.append(col)
-            final_identifiers.append(col)
-        elif any(keyword in col_lower for keyword in measure_keywords):
-            auto_measures.append(col)
-            final_measures.append(col)
-        elif col_type in ["numeric", "integer", "float64"]:
-            auto_measures.append(col)
-            final_measures.append(col)
-        else:
-            auto_unclassified.append(col)
-            final_unclassified.append(col)
-
-    # Calculate confidence scores
-    confidence_scores = {}
-    for col in all_columns:
-        col_lower = col.lower()
-        if col in user_classified_columns:
-            confidence_scores[col] = 1.0  # User specified = 100% confidence
-        elif any(keyword in col_lower for keyword in identifier_keywords):
-            confidence_scores[col] = 0.9
-        elif any(keyword in col_lower for keyword in measure_keywords):
-            confidence_scores[col] = 0.9
-        elif column_types.get(col) in ["numeric", "integer", "float64"]:
-            confidence_scores[col] = 0.7
-        else:
-            confidence_scores[col] = 0.5
-
-    # ✅ FINAL VALIDATION: Check no duplicates and all columns classified
-    all_final = final_identifiers + final_measures + final_unclassified
-    if len(all_final) != len(set(all_final)):
-        raise HTTPException(status_code=400, detail="Internal error: Column classification conflict")
-    
-    if set(all_final) != set(all_columns):
-        missing = set(all_columns) - set(all_final)
-        extra = set(all_final) - set(all_columns)
-        error_msg = []
-        if missing:
-            error_msg.append(f"Missing columns: {list(missing)}")
-        if extra:
-            error_msg.append(f"Extra columns: {list(extra)}")
-        raise HTTPException(status_code=400, detail=f"Classification mismatch: {'; '.join(error_msg)}")
-
-    # Build classification data
-    classification_data = {
-        "auto_classification": {
-            "identifiers": auto_identifiers,
-            "measures": auto_measures,
-            "unclassified": auto_unclassified,
-        },
-        "final_classification": {
-            "identifiers": final_identifiers,
-            "measures": final_measures,
-            "unclassified": final_unclassified
-        },
-        "user_modified": bool(user_identifiers or user_measures or user_unclassified),
-        "timestamp": datetime.now().isoformat(),
-        "validator_type": validator_data.get("template_type", "custom")
-    }
-
-    # ✅ SAVE TO MONGODB
-    try:
-        mongo_result = save_classification_to_mongo(validator_atom_id, file_key, classification_data)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to save classification to MongoDB: {str(e)}")
-
-    # ✅ FIXED: Safe update in memory (works for both validator types)
-    try:
-        # Initialize extraction_results entry if it doesn't exist (for template validator atoms)
-        if validator_atom_id not in extraction_results:
-            extraction_results[validator_atom_id] = {}
-        
-        if "classification" not in extraction_results[validator_atom_id]:
-            extraction_results[validator_atom_id]["classification"] = {}
-        
-        extraction_results[validator_atom_id]["classification"][file_key] = classification_data
-        
-        in_memory_status = "success"
-    except Exception as e:
-        # Log but don't fail - MongoDB save is what matters
-        print(f"Warning: Could not update in-memory results for {validator_atom_id}: {e}")
-        in_memory_status = "warning"
-
-    return {
-        "status": "success",
-        "message": "Column classification completed successfully",
-        "validator_atom_id": validator_atom_id,
-        "file_key": file_key,
-        "validator_type": validator_data.get("template_type", "custom"),
-        "auto_classification": {
-            "identifiers": auto_identifiers,
-            "measures": auto_measures,
-            "unclassified": auto_unclassified,
-            "confidence_scores": confidence_scores
-        },
-        "user_classification": {
-            "identifiers": user_identifiers,
-            "measures": user_measures,
-            "unclassified": user_unclassified
-        },
-        "final_classification": {
-            "identifiers": final_identifiers,
-            "measures": final_measures,
-            "unclassified": final_unclassified
-        },
-        "user_modified": bool(user_identifiers or user_measures or user_unclassified),
-        "summary": {
-            "total_columns": len(all_columns),
-            "user_specified": len(user_identifiers + user_measures + user_unclassified),
-            "auto_classified": len(auto_identifiers + auto_measures + auto_unclassified),
-            "identifiers_count": len(final_identifiers),
-            "measures_count": len(final_measures),
-            "unclassified_count": len(final_unclassified)
-        },
-        "mongodb_save_status": mongo_result.get("status", "unknown"),
-        "in_memory_save_status": in_memory_status
-    }
-
-
-# # POST: CLASSIFY_COLUMNS - Fixed logic with MongoDB storage
-# @router.post("/classify_columns", response_model=ClassifyColumnsResponse)
-# async def classify_columns(
-#     validator_atom_id: str = Form(...),
-#     file_key: str = Form(...),
-#     identifiers: str = Form(default="[]"),
-#     measures: str = Form(default="[]"),
-#     unclassified: str = Form(default="[]")
-# ):
-#     """
-#     Auto-classify columns first, then allow user to override classifications
-#     """
 #     # Check if validator atom exists (MongoDB first, then fallback)
 #     validator_data = get_validator_atom_from_mongo(validator_atom_id)
 #     if not validator_data:
@@ -1435,24 +1207,12 @@ async def assign_identifiers_to_dimensions(
             detail=f"Invalid dimension IDs: {invalid_dimensions}. Available dimensions: {available_dimension_ids}"
         )
 
-    # ✅ Get available identifiers from MongoDB classification
-    mongo_classification = get_classification_from_mongo(validator_atom_id, file_key)
-    
-    if mongo_classification:
-        classification_data = mongo_classification
-    elif validator_data.get("classification", {}).get(file_key, {}):
-        classification_data = validator_data.get("classification", {}).get(file_key, {})
-    else:
-        raise HTTPException(
-            status_code=400, 
-            detail=f"No column classification found for file key '{file_key}'. Classify columns first using /classify_columns."
-        )
-
-    available_identifiers = classification_data.get("final_classification", {}).get("identifiers", [])
+    # Identifier information should come from the Column Classifier atom
+    available_identifiers = []
     if not available_identifiers:
         raise HTTPException(
-            status_code=400, 
-            detail=f"No identifiers classified for file key '{file_key}'. Classify columns first using /classify_columns."
+            status_code=400,
+            detail=f"No identifiers classified for file key '{file_key}'."
         )
 
     # Validate assignments
@@ -1869,8 +1629,8 @@ async def delete_validator_atom(validator_atom_id: str):
             custom_file.unlink()
             deleted_files.append(str(custom_file))
 
-        # Delete from mongodb folder - classification, dimensions, assignments
-        for suffix in ["classification", "business_dimensions", "identifier_assignments"]:
+        # Delete from mongodb folder - dimensions, assignments
+        for suffix in ["business_dimensions", "identifier_assignments"]:
             mongo_file = mongo_dir / f"{validator_atom_id}_{suffix}.json"
             if mongo_file.exists():
                 mongo_file.unlink()
@@ -1890,14 +1650,12 @@ async def delete_validator_atom(validator_atom_id: str):
     # Check if validator atom exists
     validator_exists = False
     custom_file = CUSTOM_CONFIG_DIR / f"{validator_atom_id}.json"
-    mongo_classification = MONGODB_DIR / f"{validator_atom_id}_classification.json"
     mongo_dimensions = MONGODB_DIR / f"{validator_atom_id}_business_dimensions.json"
     mongo_assignments = MONGODB_DIR / f"{validator_atom_id}_identifier_assignments.json"
     
-    if (custom_file.exists() or 
-        mongo_classification.exists() or 
-        mongo_dimensions.exists() or 
-        mongo_assignments.exists() or 
+    if (custom_file.exists() or
+        mongo_dimensions.exists() or
+        mongo_assignments.exists() or
         validator_atom_id in extraction_results):
         validator_exists = True
     
@@ -1928,7 +1686,7 @@ async def delete_validator_atom(validator_atom_id: str):
 @router.get("/get_validator_config/{validator_atom_id}")
 async def get_validator_config(validator_atom_id: str):
     """Retrieve stored validator atom configuration along with any
-    classification or dimension information."""
+    dimension information."""
 
     validator_data = get_validator_atom_from_mongo(validator_atom_id)
     if not validator_data:
@@ -2332,11 +2090,8 @@ async def validate_mmm_endpoint(
             # ✅ NEW: Template integration section
             "template_integration": {
                 "validator_atom_saved": validator_atom_result.get("status") == "success" if validation_report.status == "success" else False,
-                "classify_columns_ready": True if validation_report.status == "success" else False,
                 "available_file_keys": keys if validation_report.status == "success" else [],
                 "next_steps": {
-                    "classification_media": f"POST /classify_columns with validator_atom_id: {validator_atom_id}, file_key: media",
-                    "classification_sales": f"POST /classify_columns with validator_atom_id: {validator_atom_id}, file_key: sales",
                     "dimensions_media": f"POST /define_dimensions with validator_atom_id: {validator_atom_id}, file_key: media",
                     "dimensions_sales": f"POST /define_dimensions with validator_atom_id: {validator_atom_id}, file_key: sales"
                 } if validation_report.status == "success" else {}
@@ -2675,10 +2430,8 @@ async def validate_category_forecasting_endpoint(
             # ✅ NEW: Template integration section
             "template_integration": {
                 "validator_atom_saved": validator_atom_result.get("status") == "success" if validation_report.status == "success" else False,
-                "classify_columns_ready": True if validation_report.status == "success" else False,
                 "available_file_keys": [key] if validation_report.status == "success" else [],
                 "next_steps": {
-                    "classification": f"POST /classify_columns with validator_atom_id: {validator_atom_id}",
                     "dimensions": f"POST /define_dimensions with validator_atom_id: {validator_atom_id}"
                 } if validation_report.status == "success" else {}
             },
@@ -2866,10 +2619,8 @@ async def validate_promo_endpoint(
             },
             "template_integration": {
                 "validator_atom_saved": validator_atom_result.get("status") == "success" if validation_report.status == "success" else False,
-                "classify_columns_ready": True if validation_report.status == "success" else False,
-                "available_file_keys": [key] if validation_report.status == "success" else [],  # ✅ Use actual key
+                "available_file_keys": [key] if validation_report.status == "success" else [],
                 "next_steps": {
-                    "classification": f"POST /classify_columns with validator_atom_id: {validator_atom_id}",
                     "dimensions": f"POST /define_dimensions with validator_atom_id: {validator_atom_id}"
                 } if validation_report.status == "success" else {}
             }
