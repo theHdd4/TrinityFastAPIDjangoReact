@@ -49,9 +49,9 @@ const ColumnClassifierCanvas: React.FC<ColumnClassifierCanvasProps> = ({
     return currentFile.columns.filter(col => col.category === 'unclassified');
   };
 
-  const getAvailableIdentifiers = () => {
+  const getAvailableUnclassified = () => {
     if (!currentFile) return [];
-    return currentFile.columns.filter(col => col.category === 'identifiers');
+    return currentFile.columns.filter(col => col.category === 'unclassified');
   };
 
   const toggleDropdown = (category: string) => {
@@ -116,7 +116,7 @@ const ColumnClassifierCanvas: React.FC<ColumnClassifierCanvasProps> = ({
                 value=""
               >
                 <option value="">Select...</option>
-                {getAvailableIdentifiers().map(column => (
+                {getAvailableUnclassified().map(column => (
                   <option key={column.name} value={column.name}>
                     {column.name}
                   </option>
@@ -188,7 +188,7 @@ const ColumnClassifierCanvas: React.FC<ColumnClassifierCanvasProps> = ({
             gradient="bg-gradient-to-r from-blue-500 to-blue-600"
             columns={identifiers}
             category="identifiers"
-            onRemove={(columnName) => onColumnMove(columnName, 'identifiers', data.activeFileIndex)}
+            onRemove={(columnName) => onColumnMove(columnName, 'unclassified', data.activeFileIndex)}
           />
 
           {/* Measures Section */}
@@ -198,7 +198,7 @@ const ColumnClassifierCanvas: React.FC<ColumnClassifierCanvasProps> = ({
             gradient="bg-gradient-to-r from-green-500 to-green-600"
             columns={measures}
             category="measures"
-            onRemove={(columnName) => onColumnMove(columnName, 'measures', data.activeFileIndex)}
+            onRemove={(columnName) => onColumnMove(columnName, 'unclassified', data.activeFileIndex)}
           />
 
           {/* Unclassified Columns - if any */}
