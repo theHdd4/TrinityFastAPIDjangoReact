@@ -10,6 +10,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { useLaboratoryStore, DEFAULT_DATAUPLOAD_SETTINGS, DataUploadSettings } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { VALIDATE_API } from '@/lib/api';
+import { useToast } from '@/hooks/use-toast';
 import UploadSection from './components/upload/UploadSection';
 import RequiredFilesSection from './components/required-files/RequiredFilesSection';
 
@@ -21,6 +22,8 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
   const atom = useLaboratoryStore((state) => state.getAtom(atomId));
   const updateSettings = useLaboratoryStore((state) => state.updateAtomSettings);
   const settings: DataUploadSettings = atom?.settings || { ...DEFAULT_DATAUPLOAD_SETTINGS };
+
+  const { toast } = useToast();
 
   const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
   const [isDragOver, setIsDragOver] = useState(false);
@@ -271,6 +274,9 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
         }
       });
       setSaveStatus(prev => ({ ...prev, ...newStatus }));
+      toast({ title: 'Dataframes Saved Successfully' });
+    } else {
+      toast({ title: 'Unable to Save Dataframes', variant: 'destructive' });
     }
   };
 

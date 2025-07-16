@@ -105,6 +105,8 @@ const LaboratoryMode = () => {
               state: { laboratory_config: labConfig },
             }),
           });
+          localStorage.setItem('laboratory-layout-cards', safeStringify(cards));
+          localStorage.setItem('laboratory-config', safeStringify(labConfig));
         } catch (apiError) {
           console.error('API error during save:', apiError);
           // Don't show error for API failures, just log them
