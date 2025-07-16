@@ -37,6 +37,8 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
   const [selectedMasterFile, setSelectedMasterFile] = useState<string>("");
   const [renameTarget, setRenameTarget] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState<string>("");
+  const [renameMap, setRenameMap] = useState<Record<string, string>>({});
+  const [skipFetch, setSkipFetch] = useState(false);
   const [validatorId, setValidatorId] = useState<string>(
     settings.validatorId || "",
   );
@@ -178,12 +180,7 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
         });
       }
       setColumnDataTypes(defaultTypes);
-      updateSettings(atomId, {
-        validatorId: id,
-        requiredFiles: keys,
-        validations: settings.validations || {},
-        columnConfig: { [firstKey]: defaultTypes },
-      });
+      updateSettings(atomId, { validatorId: id, columnConfig: { [firstKey]: defaultTypes } });
     }
   };
 
@@ -199,7 +196,11 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
     }
     const newName = renameValue.trim();
     setAllAvailableFiles(prev => prev.map(f => f.name === oldName ? { ...f, name: newName } : f));
-    if (selectedMasterFile === oldName) setSelectedMasterFile(newName);
+    if (selectedMasterFile === oldName) {
+      setSelectedMasterFile(newName);
+      setSkipFetch(true);
+    }
+    setRenameMap(prev => ({ ...prev, [oldName]: newName }));
     setRenameTarget(null);
   };
 
@@ -214,6 +215,7 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
 
   useEffect(() => {
     if (!validatorId || !selectedMasterFile) return;
+    if (skipFetch) { setSkipFetch(false); return; }
     fetch(`${VALIDATE_API}/get_validator_config/${validatorId}`)
       .then((res) => res.json())
       .then((cfg) => {
@@ -424,30 +426,48 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
     const savedPeriods = periodicityValidations.filter(
       (p) => p.column && p.periodicity,
     );
-    const newValidations = {
-      ...(settings.validations || {}),
-      [selectedMasterFile]: {
-        ranges: savedRanges,
-        periodicities: savedPeriods,
-      },
+    let renamedValidations = { ...(settings.validations || {}) } as Record<string, any>;
+    let renamedClassification = { ...(settings.classification || {}) } as Record<string, any>;
+    let renamedColumns = { ...(settings.columnConfig || {}) } as Record<string, Record<string,string>>;
+    Object.entries(renameMap).forEach(([oldName, newName]) => {
+      if (renamedValidations[oldName]) {
+        renamedValidations[newName] = renamedValidations[oldName];
+        delete renamedValidations[oldName];
+      }
+      if (renamedClassification[oldName]) {
+        renamedClassification[newName] = renamedClassification[oldName];
+        delete renamedClassification[oldName];
+      }
+      if (renamedColumns[oldName]) {
+        renamedColumns[newName] = renamedColumns[oldName];
+        delete renamedColumns[oldName];
+      }
+    });
+    renamedValidations = {
+      ...renamedValidations,
+      [selectedMasterFile]: { ranges: savedRanges, periodicities: savedPeriods },
     };
-    const newClassification = {
-      ...(settings.classification || {}),
-      [selectedMasterFile]: {
-        identifiers: selectedIdentifiers,
-        measures: selectedMeasures,
-      },
+    renamedClassification = {
+      ...renamedClassification,
+      [selectedMasterFile]: { identifiers: selectedIdentifiers, measures: selectedMeasures },
     };
+    renamedColumns = {
+      ...renamedColumns,
+      [selectedMasterFile]: columnDataTypes,
+    };
+    const finalFiles = allAvailableFiles.map(f => f.name);
+    Object.keys(renamedValidations).forEach(k => { if (!finalFiles.includes(k)) delete renamedValidations[k]; });
+    Object.keys(renamedClassification).forEach(k => { if (!finalFiles.includes(k)) delete renamedClassification[k]; });
+    Object.keys(renamedColumns).forEach(k => { if (!finalFiles.includes(k)) delete renamedColumns[k]; });
+
     updateSettings(atomId, {
       validatorId,
-      requiredFiles: allAvailableFiles.map((f) => f.name),
-      validations: newValidations,
-      classification: newClassification,
-      columnConfig: {
-        ...(settings.columnConfig || {}),
-        [selectedMasterFile]: columnDataTypes,
-      },
+      requiredFiles: finalFiles,
+      validations: renamedValidations,
+      classification: renamedClassification,
+      columnConfig: renamedColumns,
     });
+    setRenameMap({});
   };
 
   return (

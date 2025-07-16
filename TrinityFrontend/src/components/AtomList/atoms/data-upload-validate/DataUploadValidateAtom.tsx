@@ -88,7 +88,6 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
       return;
     }
     const newName = renameValue.trim();
-    const newRequired = (settings.requiredFiles || []).map(n => (n === oldName ? newName : n));
     const newValidations: Record<string, any> = {};
     Object.entries(settings.validations || {}).forEach(([k, v]) => {
       newValidations[k === oldName ? newName : k] = v;
@@ -98,7 +97,6 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
       newColumnConfig[k === oldName ? newName : k] = v as Record<string, string>;
     });
     updateSettings(atomId, {
-      requiredFiles: newRequired,
       validations: newValidations,
       columnConfig: newColumnConfig
     });
