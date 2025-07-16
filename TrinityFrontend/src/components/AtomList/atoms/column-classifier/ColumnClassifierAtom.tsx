@@ -11,7 +11,8 @@ import {
   ColumnClassifierFile,
   ColumnClassifierColumn
 } from '@/components/LaboratoryMode/store/laboratoryStore';
-import { CLASSIFIER_API, FEATURE_OVERVIEW_API } from '@/lib/api';
+import { CLASSIFIER_API } from '@/lib/api';
+import { fetchDimensionMapping } from '@/lib/dimensions';
 
 export type ColumnData = ColumnClassifierColumn;
 export type FileClassification = ColumnClassifierFile;
@@ -30,28 +31,17 @@ const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
 
   React.useEffect(() => {
     const loadMapping = async () => {
-      try {
-        const saved = localStorage.getItem('current-project');
-        const projectId = saved ? JSON.parse(saved).id : '';
-        console.log('🔄 fetching existing dimension mapping for project', projectId);
-        const res = await fetch(`${FEATURE_OVERVIEW_API}/dimension_mapping?project_id=${projectId}`);
-        if (res.ok) {
-          const data = await res.json();
-          console.log('✅ existing mapping', data.mapping);
-          if (data.mapping && classifierData.files.length > 0) {
-            const file = classifierData.files[0];
-            const updatedFile: ColumnClassifierFile = {
-              ...file,
-              customDimensions: data.mapping,
-            };
-            updateSettings(atomId, {
-              data: { files: [updatedFile], activeFileIndex: 0 },
-              dimensions: Object.keys(data.mapping),
-            });
-          }
-        }
-      } catch (err) {
-        console.warn('dimension mapping preload failed', err);
+      const mapping = await fetchDimensionMapping();
+      if (Object.keys(mapping).length && classifierData.files.length > 0) {
+        const file = classifierData.files[0];
+        const updatedFile: ColumnClassifierFile = {
+          ...file,
+          customDimensions: mapping,
+        };
+        updateSettings(atomId, {
+          data: { files: [updatedFile], activeFileIndex: 0 },
+          dimensions: Object.keys(mapping),
+        });
       }
     };
     if (classifierData.files.length > 0) {

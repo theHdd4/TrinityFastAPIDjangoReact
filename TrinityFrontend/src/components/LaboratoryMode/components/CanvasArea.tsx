@@ -3,7 +3,7 @@ import { safeStringify } from '@/utils/safeStringify';
 import { Card, Card as AtomBox } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
-import { Plus, Grid3X3, Trash2, Eye, Settings, ChevronDown, Minus } from 'lucide-react';
+import { Plus, Grid3X3, Trash2, Eye, Settings, ChevronDown, Minus, RefreshCcw } from 'lucide-react';
 import { useExhibitionStore } from '../../ExhibitionMode/store/exhibitionStore';
 import { atoms as allAtoms } from '@/components/AtomList/data';
 import { molecules } from '@/components/MoleculeList/data';
@@ -23,6 +23,7 @@ import FeatureOverviewAtom from '@/components/AtomList/atoms/feature-overview/Fe
 import ConcatAtom from '@/components/AtomList/atoms/concat/ConcatAtom';
 import MergeAtom from '@/components/AtomList/atoms/merge/MergeAtom';
 import ColumnClassifierAtom from '@/components/AtomList/atoms/column-classifier/ColumnClassifierAtom';
+import { fetchDimensionMapping } from '@/lib/dimensions';
 
 import {
   useLaboratoryStore,
@@ -119,7 +120,8 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
     try {
       console.log('✈️ fetching flight table', name);
       const fr = await fetch(
-        `${FEATURE_OVERVIEW_API}/flight_table?object_name=${encodeURIComponent(name)}`
+        `${FEATURE_OVERVIEW_API}/flight_table?object_name=${encodeURIComponent(name)}`,
+        { credentials: 'include' }
       );
       if (fr.ok) {
         await fr.arrayBuffer();
@@ -127,7 +129,8 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
       }
       console.log('🔎 prefetching dataframe', name);
       const res = await fetch(
-        `${FEATURE_OVERVIEW_API}/cached_dataframe?object_name=${encodeURIComponent(name)}`
+        `${FEATURE_OVERVIEW_API}/cached_dataframe?object_name=${encodeURIComponent(name)}`,
+        { credentials: 'include' }
       );
       if (res.ok) {
         await res.text();
@@ -139,6 +142,7 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
       console.error('⚠️ prefetch dataframe error', err);
     }
   };
+
 
   const findLatestDataSource = async () => {
     console.log('🔎 searching for latest data source');
@@ -224,6 +228,7 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
     }
     console.log('ℹ️ prefill data source details', prev);
     await prefetchDataframe(prev.csv);
+    const mapping = await fetchDimensionMapping();
     console.log('✅ pre-filling feature overview with', prev.csv);
     const summary = Array.isArray(prev.summary) ? prev.summary : [];
     const identifiers = Array.isArray(prev.identifiers) ? prev.identifiers : [];
@@ -243,6 +248,7 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
       columnSummary: filtered,
       selectedColumns: selected,
       numericColumns: Array.isArray(prev.numeric) ? prev.numeric : [],
+      dimensionMap: mapping,
       xAxis: prev.xField || 'date',
     });
   };
@@ -633,6 +639,18 @@ const addNewCard = (moleculeId?: string, position?: number) => {
     onToggleSettingsPanel?.();
   };
 
+  const handleCardSettingsClick = (
+    e: React.MouseEvent,
+    cardId: string,
+    exhibited: boolean
+  ) => {
+    e.stopPropagation();
+    if (onCardSelect) {
+      onCardSelect(cardId, exhibited);
+    }
+    onToggleSettingsPanel?.();
+  };
+
   const handleCardClick = (
     e: React.MouseEvent,
     cardId: string,
@@ -655,6 +673,18 @@ const addNewCard = (moleculeId?: string, position?: number) => {
 
     setLayoutCards(updated);
     setCards(updated);
+  };
+
+  const refreshCardAtoms = async (cardId: string) => {
+    const card = (Array.isArray(layoutCards) ? layoutCards : []).find(c => c.id === cardId);
+    if (!card) return;
+    for (const atom of card.atoms) {
+      if (atom.atomId === 'feature-overview') {
+        await prefillFeatureOverview(cardId, atom.id);
+      } else if (atom.atomId === 'column-classifier') {
+        await prefillColumnClassifier(atom.id);
+      }
+    }
   };
 
   if (workflowMolecules.length > 0) {
@@ -871,13 +901,23 @@ const addNewCard = (moleculeId?: string, position?: number) => {
                 />
                 {card.atoms.length > 0 && (
                   <button
-                    onClick={e => handleAtomSettingsClick(e, card.atoms[0].id)}
+                    onClick={e => handleCardSettingsClick(e, card.id, card.isExhibited)}
                     className="p-1 hover:bg-gray-100 rounded"
-                    title="Atom Settings"
+                    title="Card Settings"
                   >
                     <Settings className="w-4 h-4 text-gray-400" />
                   </button>
                 )}
+                <button
+                  onClick={e => {
+                    e.stopPropagation();
+                    refreshCardAtoms(card.id);
+                  }}
+                  className="p-1 hover:bg-gray-100 rounded"
+                  title="Refresh Atom"
+                >
+                  <RefreshCcw className="w-4 h-4 text-gray-400" />
+                </button>
               </div>
               <div className="flex items-center space-x-2">
                 <span className="text-xs text-gray-500">Exhibit the Card</span>
