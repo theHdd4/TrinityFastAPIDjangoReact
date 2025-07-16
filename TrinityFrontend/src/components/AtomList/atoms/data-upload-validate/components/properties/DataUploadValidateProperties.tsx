@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { Settings, Upload, Table, BarChart3, Minus, Plus, Pencil, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -39,6 +39,7 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
   const [renameValue, setRenameValue] = useState<string>("");
   const [renameMap, setRenameMap] = useState<Record<string, string>>({});
   const [skipFetch, setSkipFetch] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [validatorId, setValidatorId] = useState<string>(
     settings.validatorId || "",
   );
@@ -51,6 +52,14 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
     { value: "string", label: "String" },
     { value: "date", label: "Date" },
   ];
+
+  const mapBackendType = (typ: string): string => {
+    const t = typ.toLowerCase();
+    if (t === "integer" || t === "numeric" || t === "number") return "number";
+    if (t.includes("date")) return "date";
+    if (t === "string") return "string";
+    return "not_defined";
+  };
 
   interface RangeValidation {
     id: number;
@@ -130,7 +139,9 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
           const saved = cfg.column_types?.[firstKey] || {};
           const merged: Record<string, string> = {};
           schemaCols.forEach((c: any) => {
-            merged[c.column] = saved[c.column] || "not_defined";
+            merged[c.column] = saved[c.column]
+              ? mapBackendType(saved[c.column])
+              : "not_defined";
           });
           setColumnDataTypes(merged);
         }
@@ -149,6 +160,7 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
   ) => {
     if (!e.target.files) return;
     const files = Array.from(e.target.files);
+    if (fileInputRef.current) fileInputRef.current.value = "";
     const id = `validator-${Date.now()}`;
     const form = new FormData();
     form.append("validator_atom_id", id);
@@ -176,7 +188,7 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
       }
       if (cfg.column_types && cfg.column_types[firstKey]) {
         Object.entries(cfg.column_types[firstKey]).forEach(([col, typ]) => {
-          defaultTypes[col] = typ as string;
+          defaultTypes[col] = mapBackendType(typ as string);
         });
       }
       setColumnDataTypes(defaultTypes);
@@ -223,7 +235,9 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
         const saved = cfg.column_types?.[selectedMasterFile] || {};
         const merged: Record<string, string> = {};
         schemaCols.forEach((c: any) => {
-          merged[c.column] = saved[c.column] || "not_defined";
+          merged[c.column] = saved[c.column]
+            ? mapBackendType(saved[c.column])
+            : "not_defined";
         });
         setColumnDataTypes(merged);
         updateSettings(atomId, {
@@ -269,13 +283,13 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
 
   useEffect(() => {
     const nums = Object.entries(columnDataTypes)
-      .filter(([, t]) => t === "integer" || t === "numeric")
+      .filter(([, t]) => t === "number")
       .map(([c]) => c);
     const dates = Object.entries(columnDataTypes)
       .filter(([, t]) => t === "date")
       .map(([c]) => c);
     const cats = Object.entries(columnDataTypes)
-      .filter(([, t]) => !["integer", "numeric", "date"].includes(t))
+      .filter(([, t]) => !["number", "date"].includes(t))
       .map(([c]) => c);
     setNumericalColumns(nums);
     setDateColumns(dates);
@@ -494,6 +508,7 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
                 onChange={handleMasterFileSelect}
                 className="hidden"
                 id="master-file-upload"
+                ref={fileInputRef}
               />
               <label htmlFor="master-file-upload">
                 <Button
