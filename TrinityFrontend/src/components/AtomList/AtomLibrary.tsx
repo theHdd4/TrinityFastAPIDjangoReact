@@ -14,10 +14,8 @@ interface AtomLibraryProps {
 
 const AtomLibrary: React.FC<AtomLibraryProps> = ({ onAtomDragStart, onCollapse }) => {
   const [searchTerm, setSearchTerm] = useState('');
-  const [openCategories, setOpenCategories] = useState<string[]>([
-    'Data Sources',
-    'Data Processing'
-  ]);
+  // Collapse all categories by default so users see only the category list
+  const [openCategories, setOpenCategories] = useState<string[]>([]);
 
   const toggleCategory = (categoryName: string) => {
     setOpenCategories(prev => 
