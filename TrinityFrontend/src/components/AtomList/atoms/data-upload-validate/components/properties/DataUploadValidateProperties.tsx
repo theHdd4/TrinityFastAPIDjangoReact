@@ -212,11 +212,37 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
       return;
     }
     const newName = renameValue.trim();
-    setAllAvailableFiles(prev => prev.map(f => f.name === oldName ? { ...f, name: newName } : f));
+    setAllAvailableFiles(prev =>
+      prev.map(f => (f.name === oldName ? { ...f, name: newName } : f)),
+    );
     if (selectedMasterFile === oldName) {
       setSelectedMasterFile(newName);
       setSkipFetch(true);
     }
+
+    // immediately mirror rename in stored settings so selecting the file
+    // still shows its configuration without requiring a refetch
+    const newColumnCfg = { ...(settings.columnConfig || {}) } as Record<string, Record<string, string>>;
+    if (newColumnCfg[oldName]) {
+      newColumnCfg[newName] = newColumnCfg[oldName];
+      delete newColumnCfg[oldName];
+    }
+    const newValidations = { ...(settings.validations || {}) } as Record<string, any>;
+    if (newValidations[oldName]) {
+      newValidations[newName] = newValidations[oldName];
+      delete newValidations[oldName];
+    }
+    const newClassification = { ...(settings.classification || {}) } as Record<string, any>;
+    if (newClassification[oldName]) {
+      newClassification[newName] = newClassification[oldName];
+      delete newClassification[oldName];
+    }
+    updateSettings(atomId, {
+      columnConfig: newColumnCfg,
+      validations: newValidations,
+      classification: newClassification,
+    });
+
     setRenameMap(prev => ({ ...prev, [oldName]: newName }));
     setRenameTarget(null);
   };
@@ -304,6 +330,12 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
   }, [columnDataTypes]);
 
   useEffect(() => {
+    if (selectedMasterFile && settings.columnConfig?.[selectedMasterFile]) {
+      setColumnDataTypes(settings.columnConfig[selectedMasterFile]);
+    } else {
+      setColumnDataTypes({});
+    }
+
     if (selectedMasterFile && settings.validations?.[selectedMasterFile]) {
       const val = settings.validations[selectedMasterFile];
       setRangeValidations(
@@ -331,7 +363,7 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
       setSelectedIdentifiers([]);
       setSelectedMeasures([]);
     }
-  }, [selectedMasterFile]);
+  }, [selectedMasterFile, settings.columnConfig, settings.validations, settings.classification]);
 
   const addRangeValidation = () => {
     setRangeValidations((prev) => [
