@@ -8,6 +8,25 @@ interface ColumnClassifierVisualisationProps {
   data: ClassifierData;
 }
 
+const RADIAN = Math.PI / 180;
+const renderPieLabel = ({ cx, cy, midAngle, innerRadius, outerRadius, name, value }: any) => {
+  const radius = innerRadius + (outerRadius - innerRadius) * 0.7;
+  const x = cx + radius * Math.cos(-midAngle * RADIAN);
+  const y = cy + radius * Math.sin(-midAngle * RADIAN);
+  return (
+    <text
+      x={x}
+      y={y}
+      textAnchor="middle"
+      dominantBaseline="central"
+      fontSize={12}
+      fill="#000"
+    >
+      {`${name}: ${value}`}
+    </text>
+  );
+};
+
 const ColumnClassifierVisualisation: React.FC<ColumnClassifierVisualisationProps> = ({ data }) => {
   if (!data.files.length) {
     return (
@@ -53,7 +72,7 @@ const ColumnClassifierVisualisation: React.FC<ColumnClassifierVisualisationProps
         
         <h5 className="font-medium text-gray-900 mb-4">Column Distribution</h5>
         <ResponsiveContainer width="100%" height={160}>
-          <BarChart data={barData}>
+          <BarChart data={barData} margin={{ left: -20 }}>
             <CartesianGrid strokeDasharray="3 3" />
             <XAxis dataKey="name" />
             <YAxis />
@@ -73,7 +92,8 @@ const ColumnClassifierVisualisation: React.FC<ColumnClassifierVisualisationProps
               cy="50%"
               outerRadius={80}
               dataKey="value"
-              label={({ name, value }) => `${name}: ${value}`}
+              label={renderPieLabel}
+              labelLine={false}
             >
               {pieData.map((entry, index) => (
                 <Cell key={`cell-${index}`} fill={entry.color} />
