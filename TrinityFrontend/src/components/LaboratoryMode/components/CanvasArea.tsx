@@ -77,6 +77,7 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
   const [activeTab, setActiveTab] = useState<string>('');
   const [dragOver, setDragOver] = useState<string | null>(null);
   const [collapsedCards, setCollapsedCards] = useState<Record<string, boolean>>({});
+  const [addDragTarget, setAddDragTarget] = useState<string | null>(null);
   const prevLayout = React.useRef<LayoutCard[] | null>(null);
   const initialLoad = React.useRef(true);
   
@@ -588,11 +589,22 @@ const handleDropNewCard = (
 ) => {
   e.preventDefault();
   setDragOver(null);
+  setAddDragTarget(null);
   const atomData = e.dataTransfer.getData('application/json');
   if (!atomData) return;
   const atom = JSON.parse(atomData);
   if (!atom?.id) return;
   addNewCardWithAtom(atom.id, moleculeId, position);
+};
+
+const handleAddDragEnter = (e: React.DragEvent, targetId: string) => {
+  e.preventDefault();
+  setAddDragTarget(targetId);
+};
+
+const handleAddDragLeave = (e: React.DragEvent) => {
+  e.preventDefault();
+  setAddDragTarget(null);
 };
 
   const removeAtom = (cardId: string, atomId: string) => {
@@ -903,11 +915,13 @@ const handleDropNewCard = (
                     <div className="flex justify-center">
                       <button
                         onClick={() => addNewCard(molecule.moleculeId)}
+                        onDragEnter={e => handleAddDragEnter(e, `m-${molecule.moleculeId}`)}
+                        onDragLeave={handleAddDragLeave}
                         onDragOver={e => e.preventDefault()}
                         onDrop={e => handleDropNewCard(e, molecule.moleculeId)}
-                        className="flex items-center px-2 py-2 bg-white border-2 border-dashed border-gray-300 rounded-xl hover:border-[#458EE2] hover:bg-blue-50 transition-all duration-500 ease-in-out group"
+                        className={`flex flex-col items-center justify-center px-2 py-2 bg-white border-2 border-dashed rounded-xl hover:border-[#458EE2] hover:bg-blue-50 transition-all duration-500 ease-in-out group ${addDragTarget === `m-${molecule.moleculeId}` ? 'min-h-[160px] w-full border-[#458EE2] bg-blue-50' : 'border-gray-300'}`}
                       >
-                        <Plus className="w-5 h-5 text-gray-400 group-hover:text-[#458EE2]" />
+                        <Plus className={`w-5 h-5 text-gray-400 group-hover:text-[#458EE2] transition-transform duration-500 ${addDragTarget === `m-${molecule.moleculeId}` ? 'scale-125 mb-2' : ''}`} />
                         <span
                           className="max-w-0 overflow-hidden ml-0 group-hover:ml-2 group-hover:max-w-[120px] text-gray-600 group-hover:text-[#458EE2] font-medium whitespace-nowrap transition-all duration-500 ease-in-out"
                         >
@@ -1091,12 +1105,14 @@ const handleDropNewCard = (
             <div className="flex justify-center my-4">
               <button
                 onClick={() => addNewCard(undefined, index + 1)}
+                onDragEnter={e => handleAddDragEnter(e, `p-${index}`)}
+                onDragLeave={handleAddDragLeave}
                 onDragOver={e => e.preventDefault()}
                 onDrop={e => handleDropNewCard(e, undefined, index + 1)}
-                className="flex items-center px-2 py-2 bg-white border-2 border-dashed border-gray-300 rounded-xl hover:border-[#458EE2] hover:bg-blue-50 transition-all duration-500 ease-in-out group"
+                className={`flex flex-col items-center justify-center px-2 py-2 bg-white border-2 border-dashed rounded-xl hover:border-[#458EE2] hover:bg-blue-50 transition-all duration-500 ease-in-out group ${addDragTarget === `p-${index}` ? 'min-h-[160px] w-full border-[#458EE2] bg-blue-50' : 'border-gray-300'}`}
                 title="Add new card"
               >
-                <Plus className="w-5 h-5 text-gray-400 group-hover:text-[#458EE2]" />
+                <Plus className={`w-5 h-5 text-gray-400 group-hover:text-[#458EE2] transition-transform duration-500 ${addDragTarget === `p-${index}` ? 'scale-125 mb-2' : ''}`} />
                 <span
                   className="max-w-0 overflow-hidden ml-0 group-hover:ml-2 group-hover:max-w-[120px] text-gray-600 group-hover:text-[#458EE2] font-medium whitespace-nowrap transition-all duration-500 ease-in-out"
                 >
@@ -1113,11 +1129,13 @@ const handleDropNewCard = (
         <div className="flex justify-center">
           <button
             onClick={() => addNewCard()}
+            onDragEnter={e => handleAddDragEnter(e, 'end')}
+            onDragLeave={handleAddDragLeave}
             onDragOver={e => e.preventDefault()}
             onDrop={e => handleDropNewCard(e)}
-            className="flex items-center px-2 py-2 bg-white border-2 border-dashed border-gray-300 rounded-xl hover:border-[#458EE2] hover:bg-blue-50 transition-all duration-500 ease-in-out group"
+            className={`flex flex-col items-center justify-center px-2 py-2 bg-white border-2 border-dashed rounded-xl hover:border-[#458EE2] hover:bg-blue-50 transition-all duration-500 ease-in-out group ${addDragTarget === 'end' ? 'min-h-[160px] w-full border-[#458EE2] bg-blue-50' : 'border-gray-300'}`}
           >
-            <Plus className="w-5 h-5 text-gray-400 group-hover:text-[#458EE2]" />
+            <Plus className={`w-5 h-5 text-gray-400 group-hover:text-[#458EE2] transition-transform duration-500 ${addDragTarget === 'end' ? 'scale-125 mb-2' : ''}`} />
             <span
               className="max-w-0 overflow-hidden ml-0 group-hover:ml-2 group-hover:max-w-[120px] text-gray-600 group-hover:text-[#458EE2] font-medium whitespace-nowrap transition-all duration-500 ease-in-out"
             >
