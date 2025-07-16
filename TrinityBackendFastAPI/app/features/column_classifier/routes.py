@@ -4,13 +4,28 @@ from datetime import datetime
 import json
 from typing import Dict, Any, List, Optional
 from pydantic import BaseModel
+from urllib.parse import unquote
+import os
+import pyarrow as pa
+import pyarrow.ipc as ipc
+from minio.error import S3Error
+from app.DataStorageRetrieval.arrow_client import download_dataframe, upload_dataframe
+from app.DataStorageRetrieval.flight_registry import get_flight_path_for_csv, set_ticket
+from app.DataStorageRetrieval.db import get_dataset_info
+from app.DataStorageRetrieval.minio_utils import get_client, MINIO_BUCKET
+from app.features.feature_overview.deps import redis_client
 
 # Import your existing database functions
 # Change these lines at the top of routes.py:
 from app.features.column_classifier.database import (
-    get_validator_atom_from_mongo, 
-    save_classification_to_mongo, get_classification_from_mongo,
-    get_validator_from_memory_or_disk,save_business_dimensions_to_mongo,update_business_dimensions_assignments_in_mongo,get_business_dimensions_from_mongo, 
+    get_validator_atom_from_mongo,
+    save_classification_to_mongo,
+    get_classification_from_mongo,
+    get_validator_from_memory_or_disk,
+    save_business_dimensions_to_mongo,
+    update_business_dimensions_assignments_in_mongo,
+    get_business_dimensions_from_mongo,
+    save_project_dimension_mapping,
 )
 from app.features.column_classifier.config import settings
 
@@ -34,6 +49,9 @@ router = APIRouter()
 
 # In-memory storage (keeping your existing structure)
 extraction_results = {}
+
+# MinIO client for loading saved dataframes
+minio_client = get_client()
 
 
 # =============================================================================
@@ -148,48 +166,54 @@ async def check_collections_with_counts():
 # =============================================================================
 @router.post("/classify_columns", response_model=ClassifyColumnsResponse)
 async def classify_columns(
-    validator_atom_id: str = Form(...),
-    file_key: str = Form(...),
+    dataframe: str = Form(...),
     identifiers: str = Form(default="[]"),
     measures: str = Form(default="[]"),
     unclassified: str = Form(default="[]")
 ):
     """
     Auto-classify data columns with optional user overrides.
-    
-    - **validator_atom_id**: ID of the validator atom containing the data schema
-    - **file_key**: Key identifying the specific file/dataset within the validator
+
+    - **dataframe**: Saved Arrow dataframe object name
     - **identifiers**: JSON array of columns to classify as identifiers
     - **measures**: JSON array of columns to classify as measures
     - **unclassified**: JSON array of columns to leave unclassified
     """
-    
-    # Check if validator atom exists (MongoDB first, then fallback)
-    validator_data = get_validator_atom_from_mongo(validator_atom_id)
-    if not validator_data:
-        # Fallback to old method for backward compatibility
-        validator_data = get_validator_from_memory_or_disk(validator_atom_id)
 
-    if not validator_data:
-        raise HTTPException(
-            status_code=404, 
-            detail=f"Validator atom '{validator_atom_id}' not found in database"
-        )
+    object_name = unquote(dataframe)
+    flight_path = get_flight_path_for_csv(object_name)
+    if not flight_path:
+        info = await get_dataset_info(object_name)
+        if info:
+            file_key, flight_path, original_csv = info
+            set_ticket(file_key, object_name, flight_path, original_csv)
+    df = None
+    if flight_path:
+        try:
+            df = download_dataframe(flight_path)
+        except Exception:
+            df = None
+    if df is None:
+        if not object_name.endswith(".arrow"):
+            raise HTTPException(status_code=400, detail="Unsupported file format")
+        content = redis_client.get(object_name)
+        if content is None:
+            try:
+                response = minio_client.get_object(MINIO_BUCKET, object_name)
+                content = response.read()
+                redis_client.setex(object_name, 3600, content)
+            except S3Error as e:
+                code = getattr(e, "code", "")
+                if code in {"NoSuchKey", "NoSuchBucket"}:
+                    redis_client.delete(object_name)
+                    raise HTTPException(status_code=404, detail="File not found")
+                raise HTTPException(status_code=500, detail=str(e))
+        reader = ipc.RecordBatchFileReader(pa.BufferReader(content))
+        df = reader.read_all().to_pandas()
 
-    # Get column information from existing schema
-    schema_data = validator_data["schemas"].get(file_key, {})
-    if not schema_data:
-        available_keys = list(validator_data["schemas"].keys())
-        raise HTTPException(
-            status_code=400, 
-            detail=f"File key '{file_key}' not found in validator. Available file keys: {available_keys}"
-        )
-
-    all_columns = [col["column"] for col in schema_data.get("columns", [])]
-    column_types = schema_data.get("column_types", {})
-
-    if not all_columns:
-        raise HTTPException(status_code=400, detail="No columns found in schema data")
+    df.columns = [str(c).lower() for c in df.columns]
+    all_columns = df.columns.tolist()
+    column_types = {c: str(df[c].dtype) for c in df.columns}
 
     # Parse user overrides (if provided)
     try:
@@ -314,41 +338,12 @@ async def classify_columns(
         },
         "user_modified": bool(user_identifiers or user_measures or user_unclassified),
         "timestamp": datetime.now().isoformat(),
-        "validator_type": validator_data.get("template_type", "custom")
     }
-
-    # SAVE TO MONGODB
-    try:
-        mongo_result = save_classification_to_mongo(validator_atom_id, file_key, classification_data)
-    except Exception as e:
-        raise HTTPException(
-            status_code=500, 
-            detail=f"Failed to save classification to MongoDB: {str(e)}"
-        )
-
-    # Safe update in memory (works for both validator types)
-    try:
-        # Initialize extraction_results entry if it doesn't exist
-        if validator_atom_id not in extraction_results:
-            extraction_results[validator_atom_id] = {}
-        
-        if "classification" not in extraction_results[validator_atom_id]:
-            extraction_results[validator_atom_id]["classification"] = {}
-        
-        extraction_results[validator_atom_id]["classification"][file_key] = classification_data
-        
-        in_memory_status = "success"
-    except Exception as e:
-        # Log but don't fail - MongoDB save is what matters
-        print(f"Warning: Could not update in-memory results for {validator_atom_id}: {e}")
-        in_memory_status = "warning"
 
     return ClassifyColumnsResponse(
         status="success",
         message="Column classification completed successfully",
-        validator_atom_id=validator_atom_id,
-        file_key=file_key,
-        validator_type=validator_data.get("template_type", "custom"),
+        dataframe=object_name,
         auto_classification=AutoClassification(
             identifiers=auto_identifiers,
             measures=auto_measures,
@@ -373,19 +368,16 @@ async def classify_columns(
             identifiers_count=len(final_identifiers),
             measures_count=len(final_measures),
             unclassified_count=len(final_unclassified)
-        ),
-        mongodb_save_status=mongo_result.get("status", "unknown"),
-        in_memory_save_status=in_memory_status
+        )
     )
     
     
-# Add this endpoint to your routes.py
-
 @router.post("/define_dimensions", response_model=DefineDimensionsResponse)
 async def define_dimensions(
     validator_atom_id: str = Form(...),
     file_key: str = Form(...),
-    dimensions: str = Form(...)
+    dimensions: str = Form(...),
+    project_id: int = Form(None)
 ):
     """
     Endpoint to define business dimensions for a specific file key in a validator atom.
@@ -457,7 +449,9 @@ async def define_dimensions(
 
     # Save to MongoDB
     try:
-        mongo_result = save_business_dimensions_to_mongo(validator_atom_id, file_key, dims_dict)
+        mongo_result = save_business_dimensions_to_mongo(
+            validator_atom_id, file_key, dims_dict, project_id
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to save dimensions to MongoDB: {str(e)}")
 
@@ -493,6 +487,7 @@ async def define_dimensions(
         ),
         mongodb_saved=mongo_result.get("status") == "success",
         in_memory_saved=in_memory_status,
+        project_id=project_id,
         next_steps=NextSteps(
             assign_identifiers=f"POST /assign_identifiers_to_dimensions with validator_atom_id: {validator_atom_id}",
             view_assignments=f"GET /get_identifier_assignments/{validator_atom_id}/{file_key}"
@@ -500,18 +495,12 @@ async def define_dimensions(
     )
 
 
-# Add this endpoint to your routes.py
-
 @router.post("/assign_identifiers_to_dimensions", response_model=AssignIdentifiersResponse)
 async def assign_identifiers_to_dimensions(
-    validator_atom_id: str = Form(...),
-    file_key: str = Form(...),
-    identifier_assignments: str = Form(...)
+    identifier_assignments: str = Form(...),
+    project_id: int = Form(...),
 ):
-    """
-    Assign identifiers to dimensions and save within business dimensions structure.
-    Works for both regular validator atoms and template validator atoms.
-    """
+    """Assign identifiers to business dimensions for the given project."""
     
     # Parse identifier_assignments JSON
     try:
@@ -522,138 +511,57 @@ async def assign_identifiers_to_dimensions(
     # Validate assignments structure
     if not isinstance(assignments, dict):
         raise HTTPException(status_code=400, detail="identifier_assignments must be a JSON object")
-    
+
     if not assignments:
         raise HTTPException(status_code=400, detail="identifier_assignments cannot be empty")
-
-    # Check if validator atom exists (MongoDB first)
-    validator_data = get_validator_atom_from_mongo(validator_atom_id)
-    if not validator_data:
-        # Fallback to old method for backward compatibility
-        validator_data = get_validator_from_memory_or_disk(validator_atom_id)
-
-    if not validator_data:
-        raise HTTPException(status_code=404, detail=f"Validator atom '{validator_atom_id}' not found")
-
-    # Check if file_key exists
-    if file_key not in validator_data.get("schemas", {}):
-        available_keys = list(validator_data.get("schemas", {}).keys())
-        raise HTTPException(
-            status_code=400, 
-            detail=f"File key '{file_key}' not found in validator. Available file keys: {available_keys}"
-        )
-
-    # Get business dimensions from MongoDB
-    mongo_dimensions = get_business_dimensions_from_mongo(validator_atom_id, file_key)
-
-    if not mongo_dimensions:
-        raise HTTPException(
-            status_code=400, 
-            detail=f"No business dimensions defined for file key '{file_key}'. Define dimensions first using /define_dimensions."
-        )
-    
-    # Extract available dimension IDs
-    business_dimensions = mongo_dimensions.get("dimensions", {})
-    available_dimension_ids = list(business_dimensions.keys())
-
-    # Validate dimension IDs
-    invalid_dimensions = [dim_id for dim_id in assignments.keys() if dim_id not in available_dimension_ids]
-    if invalid_dimensions:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Invalid dimension IDs: {invalid_dimensions}. Available dimensions: {available_dimension_ids}"
-        )
-
-    # Get available identifiers from MongoDB classification
-    mongo_classification = get_classification_from_mongo(validator_atom_id, file_key)
-    
-    if not mongo_classification:
-        raise HTTPException(
-            status_code=400, 
-            detail=f"No column classification found for file key '{file_key}'. Classify columns first using /classify_columns."
-        )
-
-    available_identifiers = mongo_classification.get("final_classification", {}).get("identifiers", [])
-    if not available_identifiers:
-        raise HTTPException(
-            status_code=400, 
-            detail=f"No identifiers classified for file key '{file_key}'. Classify columns first using /classify_columns."
-        )
 
     # Validate assignments
     all_assigned_identifiers = []
     for dim_id, identifiers in assignments.items():
         if not isinstance(identifiers, list):
             raise HTTPException(status_code=400, detail=f"Identifiers for dimension '{dim_id}' must be a list")
-        
         if not identifiers:
             raise HTTPException(status_code=400, detail=f"Identifiers list for dimension '{dim_id}' cannot be empty")
-        
-        invalid_identifiers = [ident for ident in identifiers if ident not in available_identifiers]
-        if invalid_identifiers:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Invalid identifiers for dimension '{dim_id}': {invalid_identifiers}. Available: {available_identifiers}"
-            )
         all_assigned_identifiers.extend(identifiers)
 
-    # Check for unique assignment
-    if len(all_assigned_identifiers) != len(set(all_assigned_identifiers)):
-        duplicates = [ident for ident in set(all_assigned_identifiers) if all_assigned_identifiers.count(ident) > 1]
-        raise HTTPException(status_code=400, detail=f"Identifiers cannot be assigned to multiple dimensions: {duplicates}")
+    mongo_result = save_project_dimension_mapping(project_id, assignments)
+    in_memory_status = "skipped"
+    message = "Identifiers assigned to project dimensions"
+    validator_type = "project"
+    unassigned_identifiers = []
+    updated_business_dimensions = assignments
 
-    # Update business dimensions structure with assignments
-    updated_business_dimensions = business_dimensions.copy()
-    for dim_id, identifiers in assignments.items():
-        if dim_id in updated_business_dimensions:
-            updated_business_dimensions[dim_id]["assigned_identifiers"] = identifiers
-            updated_business_dimensions[dim_id]["assignment_timestamp"] = datetime.now().isoformat()
-
-    # Save to MongoDB
+    # Push mapping to flight server for project consumption
     try:
-        mongo_result = update_business_dimensions_assignments_in_mongo(validator_atom_id, file_key, assignments)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to save assignments to MongoDB: {str(e)}")
+        rows = [(d, i) for d, ids in assignments.items() for i in ids]
+        if rows:
+            import pandas as pd
 
-    # Safe update in memory (optional for compatibility)
-    try:
-        # Initialize extraction_results entry if it doesn't exist
-        if validator_atom_id not in extraction_results:
-            extraction_results[validator_atom_id] = {}
-        
-        if "business_dimensions" not in extraction_results[validator_atom_id]:
-            extraction_results[validator_atom_id]["business_dimensions"] = {}
-        
-        extraction_results[validator_atom_id]["business_dimensions"][file_key] = updated_business_dimensions
-        in_memory_status = "success"
+            df = pd.DataFrame(rows, columns=["dimension", "identifier"])
+            path = f"{project_id}/dimension_mapping"
+            upload_dataframe(df, path)
+            set_ticket(f"project_{project_id}_dimensions", f"project_{project_id}_dimensions.arrow", path, "project_dimensions.csv")
     except Exception as e:
-        # Log but don't fail - MongoDB save is what matters
-        print(f"Warning: Could not update in-memory results for {validator_atom_id}: {e}")
-        in_memory_status = "warning"
-
-    # Find unassigned identifiers
-    unassigned_identifiers = [ident for ident in available_identifiers if ident not in all_assigned_identifiers]
+        print(f"flight upload failed: {e}")
 
     return AssignIdentifiersResponse(
         status="success",
-        message=f"Identifiers assigned to dimensions and saved in business dimensions structure for file key '{file_key}'",
-        validator_atom_id=validator_atom_id,
-        file_key=file_key,
-        validator_type=validator_data.get("template_type", "custom"),
+        message=message,
+        validator_atom_id="",
+        file_key="",
+        validator_type=validator_type,
+        project_id=project_id,
         updated_business_dimensions=updated_business_dimensions,
         assignment_summary=AssignmentSummary(
-            total_identifiers=len(available_identifiers),
+            total_identifiers=len(all_assigned_identifiers),
             assigned_identifiers=len(all_assigned_identifiers),
-            unassigned_identifiers=len(unassigned_identifiers),
+            unassigned_identifiers=0,
             dimensions_with_assignments=len(assignments),
-            assignment_timestamp=datetime.now().isoformat()
+            assignment_timestamp=datetime.now().isoformat(),
         ),
-        unassigned_identifiers=unassigned_identifiers,
-        dimension_breakdown={dim_id: len(identifiers) for dim_id, identifiers in assignments.items()},
+        unassigned_identifiers=[],
+        dimension_breakdown={dim_id: len(ids) for dim_id, ids in assignments.items()},
         mongodb_updated=mongo_result.get("status") == "success",
         in_memory_updated=in_memory_status,
-        next_steps=NextStepsAssignment(
-            view_complete_setup=f"GET /get_validator_atom_summary/{validator_atom_id}",
-            export_configuration=f"GET /export_validator_atom/{validator_atom_id}"
-        )
+        next_steps=NextStepsAssignment(view_complete_setup="", export_configuration=""),
     )

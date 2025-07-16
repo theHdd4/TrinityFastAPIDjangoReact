@@ -1,9 +1,8 @@
 import React from 'react';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { BarChart3, Eye } from 'lucide-react';
+
 import ColumnClassifierCanvas from './components/ColumnClassifierCanvas';
 import ColumnClassifierVisualisation from './components/ColumnClassifierVisualisation';
-import ColumnClassifierExhibition from './components/ColumnClassifierExhibition';
+import ColumnClassifierDimensionConfig from './components/ColumnClassifierDimensionConfig';
 import {
   useLaboratoryStore,
   DEFAULT_COLUMN_CLASSIFIER_SETTINGS,
@@ -12,6 +11,7 @@ import {
   ColumnClassifierFile,
   ColumnClassifierColumn
 } from '@/components/LaboratoryMode/store/laboratoryStore';
+import { CLASSIFIER_API } from '@/lib/api';
 
 export type ColumnData = ColumnClassifierColumn;
 export type FileClassification = ColumnClassifierFile;
@@ -32,59 +32,57 @@ const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
     updateSettings(atomId, { data: { files: [file], activeFileIndex: 0 } });
   };
 
-  const handleColumnMove = (columnName: string, newCategory: string, fileIndex?: number) => {
-    const targetFileIndex = fileIndex !== undefined ? fileIndex : classifierData.activeFileIndex;
+  const handleColumnMove = (
+    columnName: string,
+    newCategory: string,
+    fileIndex?: number
+  ) => {
+    const targetFileIndex =
+      fileIndex !== undefined ? fileIndex : classifierData.activeFileIndex;
+
     const updated = {
       ...classifierData,
       files: classifierData.files.map((file, index) => {
-        if (index === targetFileIndex) {
-          const updatedCustom = { ...file.customDimensions };
-          Object.keys(updatedCustom).forEach(key => {
-            updatedCustom[key] = updatedCustom[key].filter(col => col !== columnName);
-          });
+        if (index !== targetFileIndex) return file;
 
-          const updatedColumns = file.columns.map(col =>
+        const updatedCustom = { ...file.customDimensions };
+        // remove from all custom dimensions first
+        Object.keys(updatedCustom).forEach(key => {
+          updatedCustom[key] = updatedCustom[key].filter(col => col !== columnName);
+        });
+
+        let updatedColumns = file.columns;
+
+        if (
+          newCategory === 'identifiers' ||
+          newCategory === 'measures' ||
+          newCategory === 'unclassified'
+        ) {
+          // regular category change
+          updatedColumns = file.columns.map(col =>
             col.name === columnName ? { ...col, category: newCategory } : col
           );
-
-          if (newCategory !== 'identifiers' && newCategory !== 'measures' && newCategory !== 'unclassified') {
-            if (!updatedCustom[newCategory]) {
-              updatedCustom[newCategory] = [];
-            }
+        } else {
+          // assigning to a dimension: keep identifier category
+          if (!updatedCustom[newCategory]) {
+            updatedCustom[newCategory] = [];
+          }
+          if (!updatedCustom[newCategory].includes(columnName)) {
             updatedCustom[newCategory].push(columnName);
           }
-
-          return {
-            ...file,
-            columns: updatedColumns,
-            customDimensions: updatedCustom
-          };
         }
-        return file;
+
+        return {
+          ...file,
+          columns: updatedColumns,
+          customDimensions: updatedCustom
+        };
       })
     };
+
     updateSettings(atomId, { data: updated });
   };
 
-  const handleCustomDimensionAdd = (dimensionName: string, fileIndex?: number) => {
-    const targetFileIndex = fileIndex !== undefined ? fileIndex : classifierData.activeFileIndex;
-    const updated = {
-      ...classifierData,
-      files: classifierData.files.map((file, index) => {
-        if (index === targetFileIndex) {
-          return {
-            ...file,
-            customDimensions: {
-              ...file.customDimensions,
-              [dimensionName]: []
-            }
-          };
-        }
-        return file;
-      })
-    };
-    updateSettings(atomId, { data: updated });
-  };
 
   const handleFileDelete = (fileIndex: number) => {
     const newFiles = classifierData.files.filter((_, index) => index !== fileIndex);
@@ -108,41 +106,56 @@ const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
     updateSettings(atomId, { data: { ...classifierData, activeFileIndex: fileIndex } });
   };
 
+  const saveAssignments = async () => {
+    if (!classifierData.files.length) return;
+    const currentFile = classifierData.files[classifierData.activeFileIndex];
+    const stored = localStorage.getItem('current-project');
+    const projectId = stored ? JSON.parse(stored).id : null;
+    const form = new FormData();
+    form.append('identifier_assignments', JSON.stringify(currentFile.customDimensions));
+    if (projectId) {
+      form.append('project_id', String(projectId));
+    }
+    console.log('Saving assignments for project', projectId, currentFile.customDimensions);
+    await fetch(`${CLASSIFIER_API}/assign_identifiers_to_dimensions`, {
+      method: 'POST',
+      body: form,
+      credentials: 'include'
+    });
+  };
+
+  const saveDisabled =
+    !classifierData.files.length ||
+    Object.keys(
+      classifierData.files[classifierData.activeFileIndex]?.customDimensions || {}
+    ).length === 0 ||
+    Object.values(
+      classifierData.files[classifierData.activeFileIndex]?.customDimensions || {}
+    ).every(c => c.length === 0);
+
   return (
-    <div className="w-full h-full bg-white flex">
-      <div className="flex-1">
-        <ColumnClassifierCanvas
+    <div className="w-full h-full bg-white flex flex-col">
+      <div className="flex flex-1">
+        <div className="w-3/5 p-4 overflow-y-auto">
+          <ColumnClassifierCanvas
+            data={classifierData}
+            validatorId={settings.validatorId}
+            onColumnMove={handleColumnMove}
+            onActiveFileChange={setActiveFile}
+            onFileDelete={handleFileDelete}
+          />
+        </div>
+        <div className="w-2/5 border-l border-gray-200 bg-gray-50 p-4 overflow-y-auto">
+          <ColumnClassifierVisualisation data={classifierData} />
+        </div>
+      </div>
+      <div className="border-t p-4 overflow-y-auto">
+        <ColumnClassifierDimensionConfig
           data={classifierData}
           onColumnMove={handleColumnMove}
-          onCustomDimensionAdd={handleCustomDimensionAdd}
-          onActiveFileChange={setActiveFile}
-          onFileDelete={handleFileDelete}
+          onSave={saveAssignments}
+          saveDisabled={saveDisabled}
         />
-      </div>
-
-      <div className="w-80 border-l border-gray-200 bg-gray-50">
-        <Tabs defaultValue="visualisation" className="w-full h-full">
-          <TabsList className="grid w-full grid-cols-2 mx-4 my-4">
-            <TabsTrigger value="visualisation" className="text-xs">
-              <BarChart3 className="w-3 h-3 mr-1" />
-              Charts
-            </TabsTrigger>
-            <TabsTrigger value="exhibition" className="text-xs">
-              <Eye className="w-3 h-3 mr-1" />
-              Export
-            </TabsTrigger>
-          </TabsList>
-
-          <div className="px-4 pb-4 h-[calc(100%-80px)] overflow-y-auto">
-            <TabsContent value="visualisation" className="mt-2">
-              <ColumnClassifierVisualisation data={classifierData} />
-            </TabsContent>
-
-            <TabsContent value="exhibition" className="mt-2">
-              <ColumnClassifierExhibition data={classifierData} />
-            </TabsContent>
-          </div>
-        </Tabs>
       </div>
     </div>
   );

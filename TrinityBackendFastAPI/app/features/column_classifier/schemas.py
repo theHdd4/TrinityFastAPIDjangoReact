@@ -32,19 +32,13 @@ class FinalClassification(BaseModel):
 class ClassifyColumnsResponse(BaseModel):
     status: str
     message: str
-    validator_atom_id: str
-    file_key: str
-    validator_type: str
+    dataframe: str
     auto_classification: AutoClassification
     user_classification: UserClassification
     final_classification: FinalClassification
     user_modified: bool
     summary: ClassificationSummary
-    mongodb_save_status: str
-    in_memory_save_status: str
     
-    
-# Add this to your schemas.py file
 
 class DimensionDetails(BaseModel):
     dimension_ids: List[str]
@@ -67,11 +61,10 @@ class DefineDimensionsResponse(BaseModel):
     dimension_details: DimensionDetails
     mongodb_saved: bool
     in_memory_saved: str
+    project_id: int | None = None
     next_steps: NextSteps
 
 
-
-# Add these to your schemas.py file
 
 class AssignmentSummary(BaseModel):
     total_identifiers: int
@@ -90,6 +83,7 @@ class AssignIdentifiersResponse(BaseModel):
     validator_atom_id: str
     file_key: str
     validator_type: str
+    project_id: int | None = None
     updated_business_dimensions: Dict[str, Any]
     assignment_summary: AssignmentSummary
     unassigned_identifiers: List[str]

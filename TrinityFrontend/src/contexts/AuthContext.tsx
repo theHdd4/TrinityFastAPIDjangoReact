@@ -73,6 +73,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     console.log('Checking backend availability at', `${API_BASE}/users/me/`);
     try {
       const ping = await fetch(`${API_BASE}/users/me/`, { credentials: 'include' });
+      // This request is unauthenticated on first login so a 401/403
+      // response is expected. It merely confirms the API is reachable.
       console.log('Backend check status', ping.status);
     } catch (err) {
       console.log('Backend check failed', err);
