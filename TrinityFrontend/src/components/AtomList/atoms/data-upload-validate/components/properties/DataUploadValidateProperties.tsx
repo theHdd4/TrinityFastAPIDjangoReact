@@ -95,8 +95,6 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
   const [dateColumns, setDateColumns] = useState<string[]>([]);
   const [categoricalColumns, setCategoricalColumns] = useState<string[]>([]);
   const [continuousColumns, setContinuousColumns] = useState<string[]>([]);
-  const [selectedIdentifiers, setSelectedIdentifiers] = useState<string[]>([]);
-  const [selectedMeasures, setSelectedMeasures] = useState<string[]>([]);
 
   // Load existing configuration if validator id already present
   useEffect(() => {
@@ -138,7 +136,6 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
           validatorId,
           requiredFiles: files,
           validations: parsedValidations,
-          classification: cfg.classification || {},
           columnConfig: {
             ...(cfg.column_types || {}),
             ...(settings.columnConfig || {}),
@@ -260,15 +257,9 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
       newValidations[newName] = newValidations[oldName];
       delete newValidations[oldName];
     }
-    const newClassification = { ...(settings.classification || {}) } as Record<string, any>;
-    if (newClassification[oldName]) {
-      newClassification[newName] = newClassification[oldName];
-      delete newClassification[oldName];
-    }
     updateSettings(atomId, {
       columnConfig: newColumnCfg,
       validations: newValidations,
-      classification: newClassification,
       fileKeyMap: newFileKeyMap,
     });
 
@@ -326,11 +317,6 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
           });
         }
 
-        if (cfg.classification?.[selectedMasterFile]) {
-          const cls = cfg.classification[selectedMasterFile];
-          setSelectedIdentifiers(cls.identifiers || []);
-          setSelectedMeasures(cls.measures || []);
-        }
         if (cfg.validations?.[selectedMasterFile]) {
           const list = cfg.validations[selectedMasterFile] as any[];
           const ranges = list
@@ -405,15 +391,7 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
       ]);
     }
 
-    if (selectedMasterFile && settings.classification?.[selectedMasterFile]) {
-      const cls = settings.classification[selectedMasterFile];
-      setSelectedIdentifiers(cls.identifiers);
-      setSelectedMeasures(cls.measures);
-    } else {
-      setSelectedIdentifiers([]);
-      setSelectedMeasures([]);
-    }
-  }, [selectedMasterFile, settings.columnConfig, settings.validations, settings.classification]);
+  }, [selectedMasterFile, settings.columnConfig, settings.validations]);
 
   const addRangeValidation = () => {
     setRangeValidations((prev) => [
@@ -513,16 +491,7 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
         }),
       });
 
-    const classifyForm = new FormData();
-    classifyForm.append("validator_atom_id", validatorId);
-    classifyForm.append("file_key", backendKey);
-    classifyForm.append("identifiers", JSON.stringify(selectedIdentifiers));
-    classifyForm.append("measures", JSON.stringify(selectedMeasures));
-    classifyForm.append("unclassified", JSON.stringify([]));
-      const res3 = await fetch(`${VALIDATE_API}/classify_columns`, {
-        method: "POST",
-        body: classifyForm,
-      });
+    const res3 = { ok: true };
 
     const savedRanges = rangeValidations.filter(
       (r) => r.column && (r.min !== "" || r.max !== ""),
@@ -531,16 +500,11 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
       (p) => p.column && p.periodicity,
     );
     let renamedValidations = { ...(settings.validations || {}) } as Record<string, any>;
-    let renamedClassification = { ...(settings.classification || {}) } as Record<string, any>;
     let renamedColumns = { ...(settings.columnConfig || {}) } as Record<string, Record<string,string>>;
     Object.entries(renameMap).forEach(([oldName, newName]) => {
       if (renamedValidations[oldName]) {
         renamedValidations[newName] = renamedValidations[oldName];
         delete renamedValidations[oldName];
-      }
-      if (renamedClassification[oldName]) {
-        renamedClassification[newName] = renamedClassification[oldName];
-        delete renamedClassification[oldName];
       }
       if (renamedColumns[oldName]) {
         renamedColumns[newName] = renamedColumns[oldName];
@@ -551,17 +515,12 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
       ...renamedValidations,
       [selectedMasterFile]: { ranges: savedRanges, periodicities: savedPeriods },
     };
-    renamedClassification = {
-      ...renamedClassification,
-      [selectedMasterFile]: { identifiers: selectedIdentifiers, measures: selectedMeasures },
-    };
     renamedColumns = {
       ...renamedColumns,
       [selectedMasterFile]: columnDataTypes,
     };
     const finalFiles = allAvailableFiles.map(f => f.name);
     Object.keys(renamedValidations).forEach(k => { if (!finalFiles.includes(k)) delete renamedValidations[k]; });
-    Object.keys(renamedClassification).forEach(k => { if (!finalFiles.includes(k)) delete renamedClassification[k]; });
     Object.keys(renamedColumns).forEach(k => { if (!finalFiles.includes(k)) delete renamedColumns[k]; });
 
     const newKeyMap = allAvailableFiles.reduce<Record<string, string>>(
@@ -572,7 +531,6 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
       validatorId,
       requiredFiles: finalFiles,
       validations: renamedValidations,
-      classification: renamedClassification,
       columnConfig: renamedColumns,
       fileKeyMap: newKeyMap,
     });
@@ -614,7 +572,7 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
               <input
                 type="file"
                 multiple
-                accept=".csv,.xlsx,.xls,.json"
+                accept=".arrow"
                 onChange={handleMasterFileSelect}
                 className="hidden"
                 id="master-file-upload"

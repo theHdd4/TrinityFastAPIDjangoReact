@@ -48,10 +48,6 @@ export interface DataUploadSettings {
   validatorId?: string;
   requiredFiles?: string[];
   validations?: Record<string, any>;
-  classification?: Record<
-    string,
-    { identifiers: string[]; measures: string[] }
-  >;
   fileMappings?: Record<string, string>;
   /** Map of displayed master file names to the original names known by the backend */
   fileKeyMap?: Record<string, string>;
@@ -68,7 +64,6 @@ export const DEFAULT_DATAUPLOAD_SETTINGS: DataUploadSettings = {
   validatorId: undefined,
   requiredFiles: [],
   validations: {},
-  classification: {},
   fileMappings: {},
   fileKeyMap: {},
 };

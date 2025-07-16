@@ -1,9 +1,10 @@
-The Data Upload & Validate atom accepts CSV (.csv) and Excel (.xlsx) files. Each
-file is read into a pandas DataFrame using `read_csv` or `read_excel`. Column
-names are normalised by stripping whitespace, converting to lowercase and
-removing spaces while preserving underscores.
+The Data Upload & Validate atom now expects Arrow (`.arrow`) files rather than
+CSV or Excel. Each file is opened with `pyarrow.ipc.open_file` and converted to
+a pandas DataFrame. Column names are normalised by stripping whitespace,
+lowercasing and removing spaces while preserving underscores.
 
-The base validation step checks that required columns such as `SalesValue` and
-`Volume` exist. Template validators may enforce additional business dimensions
-or date columns. Once validation succeeds the DataFrame is saved as an Apache
-Arrow file using `pyarrow` and uploaded to MinIO for later retrieval.
+After loading the Arrow table, the base validation step ensures required
+columns such as `SalesValue` and `Volume` exist. Template validators may enforce
+additional business dimensions or date columns. When validation succeeds the
+DataFrame is re-saved as an Arrow file and uploaded to MinIO for later
+retrieval.
