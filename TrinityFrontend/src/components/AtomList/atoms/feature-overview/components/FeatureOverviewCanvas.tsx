@@ -91,7 +91,12 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
   }, []);
 
   useEffect(() => {
-    if (Object.keys(dimensionMap).length > 0 && skuRows.length === 0) {
+    if (
+      Object.keys(dimensionMap).length > 0 &&
+      skuRows.length === 0 &&
+      settings.dataSource
+    ) {
+      // prefill SKUs only when a data source is configured
       displaySkus();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -151,6 +156,10 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
   };
 
   const displaySkus = async () => {
+    if (!settings.dataSource) {
+      console.warn("displaySkus called without dataSource");
+      return;
+    }
     setError(null);
     try {
       console.log("🔎 fetching cached dataframe for", settings.dataSource);
