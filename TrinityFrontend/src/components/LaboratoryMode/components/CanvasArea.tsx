@@ -23,6 +23,7 @@ import FeatureOverviewAtom from '@/components/AtomList/atoms/feature-overview/Fe
 import ConcatAtom from '@/components/AtomList/atoms/concat/ConcatAtom';
 import MergeAtom from '@/components/AtomList/atoms/merge/MergeAtom';
 import ColumnClassifierAtom from '@/components/AtomList/atoms/column-classifier/ColumnClassifierAtom';
+import { fetchDimensionMapping } from '@/lib/dimensions';
 
 import {
   useLaboratoryStore,
@@ -142,24 +143,6 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
     }
   };
 
-  const fetchDimensionMapping = async () => {
-    try {
-      const saved = localStorage.getItem('current-project');
-      const projectId = saved ? JSON.parse(saved).id : '';
-      console.log('🔄 fetching dimension mapping for project', projectId);
-      const res = await fetch(
-        `${FEATURE_OVERVIEW_API}/dimension_mapping?project_id=${projectId}`,
-        { credentials: 'include' }
-      );
-      if (res.ok) {
-        const data = await res.json();
-        return data.mapping || {};
-      }
-    } catch (err) {
-      console.warn('dimension mapping fetch failed', err);
-    }
-    return {};
-  };
 
   const findLatestDataSource = async () => {
     console.log('🔎 searching for latest data source');

@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { FEATURE_OVERVIEW_API } from "@/lib/api";
+import { fetchDimensionMapping } from "@/lib/dimensions";
 import { BarChart3, TrendingUp, Maximize2 } from "lucide-react";
 import { Dialog, DialogContent, DialogTrigger } from "@/components/ui/dialog";
 import D3LineChart from "./D3LineChart";
@@ -70,22 +71,9 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
 
   useEffect(() => {
     const loadMapping = async () => {
-      try {
-        const saved = localStorage.getItem("current-project");
-        const projectId = saved ? JSON.parse(saved).id : "";
-        console.log("🔄 fetching dimension mapping for project", projectId);
-        const res = await fetch(
-          `${FEATURE_OVERVIEW_API}/dimension_mapping?project_id=${projectId}`,
-        );
-        if (res.ok) {
-          const data = await res.json();
-          setDimensionMap(data.mapping || {});
-          onUpdateSettings({ dimensionMap: data.mapping || {} });
-          console.log("✅ dimension mapping loaded", data.mapping);
-        }
-      } catch (err) {
-        console.warn("dimension mapping fetch failed", err);
-      }
+      const mapping = await fetchDimensionMapping();
+      setDimensionMap(mapping);
+      onUpdateSettings({ dimensionMap: mapping });
     };
     loadMapping();
   }, []);
