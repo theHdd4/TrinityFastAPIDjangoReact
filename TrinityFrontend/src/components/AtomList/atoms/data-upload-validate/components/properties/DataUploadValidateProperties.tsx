@@ -131,17 +131,23 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
           requiredFiles: files,
           validations: parsedValidations,
           classification: cfg.classification || {},
-          columnConfig: cfg.column_types || {},
+          columnConfig: {
+            ...(cfg.column_types || {}),
+            ...(settings.columnConfig || {}),
+          },
         });
 
         if (files.length > 0) {
           const firstKey = files[0];
           const schemaCols = cfg.schemas?.[firstKey]?.columns || [];
-          const saved = cfg.column_types?.[firstKey] || {};
+          const savedBackend = cfg.column_types?.[firstKey] || {};
+          const savedLocal = (settings.columnConfig || {})[firstKey] || {};
           const merged: Record<string, string> = {};
           schemaCols.forEach((c: any) => {
-            merged[c.column] = saved[c.column]
-              ? mapBackendType(saved[c.column])
+            merged[c.column] = savedLocal[c.column]
+              ? savedLocal[c.column]
+              : savedBackend[c.column]
+              ? mapBackendType(savedBackend[c.column])
               : "not_defined";
           });
           setColumnDataTypes(merged);
@@ -197,7 +203,13 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
         });
       }
       setColumnDataTypes(defaultTypes);
-      updateSettings(atomId, { validatorId: id, columnConfig: { [firstKey]: defaultTypes } });
+      updateSettings(atomId, {
+        validatorId: id,
+        columnConfig: {
+          ...(settings.columnConfig || {}),
+          [firstKey]: defaultTypes,
+        },
+      });
     }
   };
 
@@ -264,11 +276,14 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
       .then((res) => res.json())
       .then((cfg) => {
         const schemaCols = cfg.schemas?.[selectedMasterFile]?.columns || [];
-        const saved = cfg.column_types?.[selectedMasterFile] || {};
+        const savedBackend = cfg.column_types?.[selectedMasterFile] || {};
+        const savedLocal = (settings.columnConfig || {})[selectedMasterFile] || {};
         const merged: Record<string, string> = {};
         schemaCols.forEach((c: any) => {
-          merged[c.column] = saved[c.column]
-            ? mapBackendType(saved[c.column])
+          merged[c.column] = savedLocal[c.column]
+            ? savedLocal[c.column]
+            : savedBackend[c.column]
+            ? mapBackendType(savedBackend[c.column])
             : "not_defined";
         });
         setColumnDataTypes(merged);
