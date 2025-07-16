@@ -477,134 +477,6 @@ async def view_new(validator_atom_id: str):
 #         raise HTTPException(status_code=404, detail=f"Validator atom '{validator_atom_id}' not found")
 
 
-#     # Get column information from existing schema
-#     schema_data = validator_data["schemas"].get(file_key, {})
-#     if not schema_data:
-#         raise HTTPException(status_code=400, detail=f"File key '{file_key}' not found in validator")
-
-#     all_columns = [col["column"] for col in schema_data.get("columns", [])]
-#     column_types = schema_data.get("column_types", {})
-
-#     # Parse user overrides (if provided)
-#     try:
-#         user_identifiers = json.loads(identifiers) if identifiers != "[]" else []
-#         user_measures = json.loads(measures) if measures != "[]" else []
-#         user_unclassified = json.loads(unclassified) if unclassified != "[]" else []
-#     except json.JSONDecodeError:
-#         raise HTTPException(status_code=400, detail="Invalid JSON format for classification lists")
-
-#     # ✅ FIXED LOGIC: Start with user-specified classifications
-#     final_identifiers = user_identifiers.copy()
-#     final_measures = user_measures.copy()
-#     final_unclassified = user_unclassified.copy()
-
-#     # Get columns already classified by user
-#     user_classified_columns = set(final_identifiers + final_measures + final_unclassified)
-
-#     # AUTO-CLASSIFY only the remaining columns
-#     identifier_keywords = ['id', 'name', 'brand', 'market', 'category', 'region', 'channel', 
-#                           'date', 'time', 'year', 'month', 'variant', 'ppg', 'type', 'code', 'packsize']
-#     measure_keywords = ['sales', 'revenue', 'volume', 'amount', 'value', 'price', 'cost', 
-#                        'profit', 'units', 'd1', 'd2', 'd3', 'd4', 'd5', 'd6']
-
-#     auto_identifiers = []
-#     auto_measures = []
-#     auto_unclassified = []
-
-#     # Only auto-classify columns NOT already specified by user
-#     remaining_columns = [col for col in all_columns if col not in user_classified_columns]
-
-#     for col in remaining_columns:
-#         col_lower = col.lower()
-#         col_type = column_types.get(col, "string")
-        
-#         # Auto-classify remaining columns
-#         if any(keyword in col_lower for keyword in identifier_keywords):
-#             auto_identifiers.append(col)
-#             final_identifiers.append(col)
-#         elif any(keyword in col_lower for keyword in measure_keywords):
-#             auto_measures.append(col)
-#             final_measures.append(col)
-#         elif col_type in ["numeric", "integer"]:
-#             auto_measures.append(col)
-#             final_measures.append(col)
-#         else:
-#             auto_unclassified.append(col)
-#             final_unclassified.append(col)
-
-#     # Calculate confidence scores
-#     confidence_scores = {}
-#     for col in all_columns:
-#         col_lower = col.lower()
-#         if col in user_classified_columns:
-#             confidence_scores[col] = 1.0  # User specified = 100% confidence
-#         elif any(keyword in col_lower for keyword in identifier_keywords):
-#             confidence_scores[col] = 0.9
-#         elif any(keyword in col_lower for keyword in measure_keywords):
-#             confidence_scores[col] = 0.9
-#         elif column_types.get(col) in ["numeric", "integer"]:
-#             confidence_scores[col] = 0.7
-#         else:
-#             confidence_scores[col] = 0.5
-
-#     # ✅ FINAL VALIDATION: Check no duplicates (should never happen now)
-#     all_final = final_identifiers + final_measures + final_unclassified
-#     if len(all_final) != len(set(all_final)):
-#         raise HTTPException(status_code=400, detail="Internal error: Column classification conflict")
-
-#     # Save classification
-#     classification_data = {
-#         "auto_classification": {
-#             "identifiers": auto_identifiers,
-#             "measures": auto_measures,
-#             "unclassified": auto_unclassified,
-#             "confidence_scores": confidence_scores
-#         },
-#         "final_classification": {
-#             "identifiers": final_identifiers,
-#             "measures": final_measures,
-#             "unclassified": final_unclassified
-#         },
-#         "user_modified": bool(user_identifiers or user_measures or user_unclassified)
-#     }
-
-#     # ✅ SAVE TO MONGODB
-#     mongo_result = save_classification_to_mongo(validator_atom_id, file_key, classification_data)
-
-
-#     # Update in memory
-#     if "classification" not in extraction_results[validator_atom_id]:
-#         extraction_results[validator_atom_id]["classification"] = {}
-#     extraction_results[validator_atom_id]["classification"][file_key] = classification_data
-
-#     return {
-#         "status": "success",
-#         "message": "Column classification completed successfully",
-#         "validator_atom_id": validator_atom_id,
-#         "file_key": file_key,
-#         "auto_classification": {
-#             "identifiers": auto_identifiers,
-#             "measures": auto_measures,
-#             "unclassified": auto_unclassified,
-#             "confidence_scores": confidence_scores
-#         },
-#         "user_classification": {
-#             "identifiers": user_identifiers,
-#             "measures": user_measures,
-#             "unclassified": user_unclassified
-#         },
-#         "final_classification": {
-#             "identifiers": final_identifiers,
-#             "measures": final_measures,
-#             "unclassified": final_unclassified
-#         },
-#         "user_modified": bool(user_identifiers or user_measures or user_unclassified),
-#         "summary": {
-#             "total_columns": len(all_columns),
-#             "user_specified": len(user_identifiers + user_measures + user_unclassified),
-#             "auto_classified": len(auto_identifiers + auto_measures + auto_unclassified)
-#         }
-#     }
 
 
 # POST: UPDATE_COLUMN_TYPES - Allow user to change column data types
@@ -1066,79 +938,6 @@ async def define_dimensions(
 #     else:
 #         raise HTTPException(status_code=400, detail=f"No business dimensions defined for file key '{file_key}'. Define dimensions first.")
 
-#     # Validate dimension IDs
-#     invalid_dimensions = [dim_id for dim_id in assignments.keys() if dim_id not in available_dimension_ids]
-#     if invalid_dimensions:
-#         raise HTTPException(
-#             status_code=400,
-#             detail=f"Invalid dimension IDs: {invalid_dimensions}. Available dimensions: {available_dimension_ids}"
-#         )
-
-#     # ✅ Get available identifiers from MongoDB classification
-#     mongo_classification = get_classification_from_mongo(validator_atom_id, file_key)
-    
-#     if mongo_classification:
-#         classification_data = mongo_classification
-#     elif validator_data.get("classification", {}).get(file_key, {}):
-#         classification_data = validator_data.get("classification", {}).get(file_key, {})
-#     else:
-#         raise HTTPException(status_code=400, detail=f"No column classification found for file key '{file_key}'. Classify columns first.")
-
-#     available_identifiers = classification_data.get("final_classification", {}).get("identifiers", [])
-#     if not available_identifiers:
-#         raise HTTPException(status_code=400, detail=f"No identifiers classified for file key '{file_key}'. Classify columns first.")
-
-#     # Validate assignments
-#     all_assigned_identifiers = []
-#     for dim_id, identifiers in assignments.items():
-#         if not isinstance(identifiers, list):
-#             raise HTTPException(status_code=400, detail=f"Identifiers for dimension '{dim_id}' must be a list")
-        
-#         invalid_identifiers = [ident for ident in identifiers if ident not in available_identifiers]
-#         if invalid_identifiers:
-#             raise HTTPException(
-#                 status_code=400,
-#                 detail=f"Invalid identifiers for dimension '{dim_id}': {invalid_identifiers}. Available: {available_identifiers}"
-#             )
-#         all_assigned_identifiers.extend(identifiers)
-
-#     # Check for unique assignment
-#     if len(all_assigned_identifiers) != len(set(all_assigned_identifiers)):
-#         duplicates = [ident for ident in set(all_assigned_identifiers) if all_assigned_identifiers.count(ident) > 1]
-#         raise HTTPException(status_code=400, detail=f"Identifiers cannot be assigned to multiple dimensions: {duplicates}")
-
-#     # ✅ UPDATE BUSINESS DIMENSIONS STRUCTURE WITH ASSIGNMENTS
-#     updated_business_dimensions = business_dimensions.copy()
-#     for dim_id, identifiers in assignments.items():
-#         if dim_id in updated_business_dimensions:
-#             updated_business_dimensions[dim_id]["assigned_identifiers"] = identifiers
-
-#     # ✅ Save to MongoDB
-#     mongo_result = update_business_dimensions_assignments_in_mongo(validator_atom_id, file_key, assignments)
-
-#     # Update in memory
-#     if "business_dimensions" not in extraction_results[validator_atom_id]:
-#         extraction_results[validator_atom_id]["business_dimensions"] = {}
-#     extraction_results[validator_atom_id]["business_dimensions"][file_key] = updated_business_dimensions
-
-#     # Find unassigned identifiers
-#     unassigned_identifiers = [ident for ident in available_identifiers if ident not in all_assigned_identifiers]
-
-#     return {
-#         "status": "success",
-#         "message": f"Identifiers assigned to dimensions and saved in business dimensions structure for file key '{file_key}'",
-#         "validator_atom_id": validator_atom_id,
-#         "file_key": file_key,
-#         "updated_business_dimensions": updated_business_dimensions,
-#         "assignment_summary": {
-#             "total_identifiers": len(available_identifiers),
-#             "assigned_identifiers": len(all_assigned_identifiers),
-#             "unassigned_identifiers": len(unassigned_identifiers)
-#         },
-#         "unassigned_identifiers": unassigned_identifiers,
-#         "dimension_breakdown": {dim_id: len(identifiers) for dim_id, identifiers in assignments.items()},
-#         "mongodb_updated": mongo_result["status"] == "success"
-#     }
 
 # POST: ASSIGN_IDENTIFIERS_TO_DIMENSIONS - Complete fixed version for both validator types
 @router.post("/assign_identifiers_to_dimensions", response_model=AssignIdentifiersResponse)
@@ -1207,14 +1006,6 @@ async def assign_identifiers_to_dimensions(
             detail=f"Invalid dimension IDs: {invalid_dimensions}. Available dimensions: {available_dimension_ids}"
         )
 
-    # Identifier information should come from the Column Classifier atom
-    available_identifiers = []
-    if not available_identifiers:
-        raise HTTPException(
-            status_code=400,
-            detail=f"No identifiers classified for file key '{file_key}'."
-        )
-
     # Validate assignments
     all_assigned_identifiers = []
     for dim_id, identifiers in assignments.items():
@@ -1224,12 +1015,6 @@ async def assign_identifiers_to_dimensions(
         if not identifiers:
             raise HTTPException(status_code=400, detail=f"Identifiers list for dimension '{dim_id}' cannot be empty")
         
-        invalid_identifiers = [ident for ident in identifiers if ident not in available_identifiers]
-        if invalid_identifiers:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Invalid identifiers for dimension '{dim_id}': {invalid_identifiers}. Available: {available_identifiers}"
-            )
         all_assigned_identifiers.extend(identifiers)
 
     # Check for unique assignment
@@ -1266,8 +1051,9 @@ async def assign_identifiers_to_dimensions(
         print(f"Warning: Could not update in-memory results for {validator_atom_id}: {e}")
         in_memory_status = "warning"
 
-    # Find unassigned identifiers
-    unassigned_identifiers = [ident for ident in available_identifiers if ident not in all_assigned_identifiers]
+    # In this simplified version identifiers are not validated,
+    # so all provided identifiers are considered assigned
+    unassigned_identifiers: list = []
 
     return {
         "status": "success",
@@ -1277,9 +1063,7 @@ async def assign_identifiers_to_dimensions(
         "validator_type": validator_data.get("template_type", "custom"),
         "updated_business_dimensions": updated_business_dimensions,
         "assignment_summary": {
-            "total_identifiers": len(available_identifiers),
-            "assigned_identifiers": len(all_assigned_identifiers),
-            "unassigned_identifiers": len(unassigned_identifiers),
+            "total_identifiers": len(all_assigned_identifiers),
             "dimensions_with_assignments": len(assignments),
             "assignment_timestamp": datetime.now().isoformat()
         },
@@ -1903,7 +1687,6 @@ async def validate_mmm_endpoint(
     """
     Validate files using MMM (Media Mix Modeling) validation rules and save to MinIO if passed.
     Requires both 'media' and 'sales' datasets.
-    Includes validator atom schema saving for classification workflow.
     """
     try:
         keys = json.loads(file_keys)
@@ -1988,7 +1771,7 @@ async def validate_mmm_endpoint(
                     "minio_upload": upload_result
                 })
             
-            # ✅ NEW: Save validator atom schema to MongoDB for classification
+            # Save validator atom schema to MongoDB
             validator_atom_schema = {
                 "_id": validator_atom_id,
                 "validator_atom_id": validator_atom_id,
@@ -2274,7 +2057,6 @@ async def validate_category_forecasting_endpoint(
     """
     Validate files using Category Forecasting validation rules and save to MinIO if passed.
     Requires one file with category forecasting data.
-    Includes validator atom schema saving for classification workflow.
     """
     try:
         keys = json.loads(file_keys)
@@ -2344,7 +2126,7 @@ async def validate_category_forecasting_endpoint(
                 "minio_upload": upload_result
             })
             
-            # ✅ NEW: Save validator atom schema to MongoDB for classification
+            # Save validator atom schema to MongoDB
             validator_atom_schema = {
                 "_id": validator_atom_id,
                 "validator_atom_id": validator_atom_id,
@@ -2529,7 +2311,7 @@ async def validate_promo_endpoint(
             })
             
             
-            # ✅ ADD THIS: Save validator atom schema to MongoDB for classification
+            # Save validator atom schema to MongoDB
             # ✅ CORRECT: Use the actual key from file_keys
             validator_atom_schema = {
                 "_id": validator_atom_id,
