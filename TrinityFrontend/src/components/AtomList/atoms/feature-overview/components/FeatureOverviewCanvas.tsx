@@ -71,17 +71,17 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
   useEffect(() => {
     const loadMapping = async () => {
       try {
-        const saved = localStorage.getItem('current-project');
-        const projectId = saved ? JSON.parse(saved).id : '';
-        console.log('🔄 fetching dimension mapping for project', projectId);
+        const saved = localStorage.getItem("current-project");
+        const projectId = saved ? JSON.parse(saved).id : "";
+        console.log("🔄 fetching dimension mapping for project", projectId);
         const res = await fetch(
-          `${FEATURE_OVERVIEW_API}/dimension_mapping?project_id=${projectId}`
+          `${FEATURE_OVERVIEW_API}/dimension_mapping?project_id=${projectId}`,
         );
         if (res.ok) {
           const data = await res.json();
           setDimensionMap(data.mapping || {});
           onUpdateSettings({ dimensionMap: data.mapping || {} });
-          console.log('✅ dimension mapping loaded', data.mapping);
+          console.log("✅ dimension mapping loaded", data.mapping);
         }
       } catch (err) {
         console.warn("dimension mapping fetch failed", err);
@@ -89,6 +89,13 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
     };
     loadMapping();
   }, []);
+
+  useEffect(() => {
+    if (Object.keys(dimensionMap).length > 0 && skuRows.length === 0) {
+      displaySkus();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dimensionMap]);
 
   useEffect(() => {
     setSkuRows(Array.isArray(settings.skuTable) ? settings.skuTable : []);
@@ -178,8 +185,8 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
         id: i + 1,
         ...row,
       }));
-      setSkuRows(table);
-      const newSettings: any = { skuTable: table, dimensionMap };
+    setSkuRows(table);
+    const newSettings: any = { skuTable: table };
       if (!settings.yAxes || settings.yAxes.length === 0) {
         const lower = Array.isArray(settings.numericColumns)
           ? settings.numericColumns.map((c) => c.toLowerCase())

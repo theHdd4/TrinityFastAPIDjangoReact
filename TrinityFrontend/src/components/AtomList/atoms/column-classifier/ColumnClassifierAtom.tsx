@@ -123,6 +123,12 @@ const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
       credentials: 'include'
     });
     console.log('✅ dimension assignment response', res.status);
+    try {
+      const json = await res.json();
+      console.log('📝 assignment save result', json);
+    } catch (err) {
+      console.warn('assignment save result parse error', err);
+    }
   };
 
   const saveDisabled =
