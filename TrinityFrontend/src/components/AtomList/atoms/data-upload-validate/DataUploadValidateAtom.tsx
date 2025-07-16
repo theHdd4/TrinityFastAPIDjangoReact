@@ -96,9 +96,14 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
     Object.entries(settings.columnConfig || {}).forEach(([k, v]) => {
       newColumnConfig[k === oldName ? newName : k] = v as Record<string, string>;
     });
+    const newFileKeyMap = { ...(settings.fileKeyMap || {}) } as Record<string, string>;
+    const original = newFileKeyMap[oldName] || oldName;
+    newFileKeyMap[newName] = original;
+    delete newFileKeyMap[oldName];
     updateSettings(atomId, {
       validations: newValidations,
-      columnConfig: newColumnConfig
+      columnConfig: newColumnConfig,
+      fileKeyMap: newFileKeyMap,
     });
     if (openFile === oldName) setOpenFile(newName);
     setRenameTarget(null);
@@ -157,7 +162,10 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
     const form = new FormData();
     form.append('validator_atom_id', settings.validatorId);
     uploadedFiles.forEach(f => form.append('files', f));
-    const keys = uploadedFiles.map(f => fileAssignments[f.name] || '');
+    const keys = uploadedFiles.map(f => {
+      const assigned = fileAssignments[f.name] || '';
+      return settings.fileKeyMap?.[assigned] || assigned;
+    });
     form.append('file_keys', JSON.stringify(keys));
     const res = await fetch(`${VALIDATE_API}/validate`, { method: 'POST', body: form });
     if (res.ok) {
@@ -246,7 +254,10 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
     const form = new FormData();
     form.append('validator_atom_id', settings.validatorId);
     uploadedFiles.forEach(f => form.append('files', f));
-    const keys = uploadedFiles.map(f => fileAssignments[f.name] || '');
+    const keys = uploadedFiles.map(f => {
+      const assigned = fileAssignments[f.name] || '';
+      return settings.fileKeyMap?.[assigned] || assigned;
+    });
     form.append('file_keys', JSON.stringify(keys));
     form.append('overwrite', 'true');
     const res = await fetch(`${VALIDATE_API}/save_dataframes`, { method: 'POST', body: form });

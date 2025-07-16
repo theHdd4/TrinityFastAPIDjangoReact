@@ -53,6 +53,8 @@ export interface DataUploadSettings {
     { identifiers: string[]; measures: string[] }
   >;
   fileMappings?: Record<string, string>;
+  /** Map of displayed master file names to the original names known by the backend */
+  fileKeyMap?: Record<string, string>;
 }
 
 export const DEFAULT_DATAUPLOAD_SETTINGS: DataUploadSettings = {
@@ -68,6 +70,7 @@ export const DEFAULT_DATAUPLOAD_SETTINGS: DataUploadSettings = {
   validations: {},
   classification: {},
   fileMappings: {},
+  fileKeyMap: {},
 };
 
 export interface FeatureOverviewSettings {

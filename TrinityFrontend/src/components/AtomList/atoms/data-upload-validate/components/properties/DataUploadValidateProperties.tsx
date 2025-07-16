@@ -13,6 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { VALIDATE_API } from "@/lib/api";
+import { useToast } from "@/hooks/use-toast";
 import {
   useLaboratoryStore,
   DataUploadSettings,
@@ -27,13 +28,20 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
   const updateSettings = useLaboratoryStore(
     (state) => state.updateAtomSettings,
   );
+  const { toast } = useToast();
   const settings: DataUploadSettings =
     (atom?.settings as DataUploadSettings) || {
       ...DEFAULT_DATAUPLOAD_SETTINGS,
     };
   const [allAvailableFiles, setAllAvailableFiles] = useState<
-    { name: string; source: string }[]
-  >(settings.requiredFiles?.map((name) => ({ name, source: "upload" })) || []);
+    { name: string; source: string; original: string }[]
+  >(
+    settings.requiredFiles?.map((name) => ({
+      name,
+      source: "upload",
+      original: settings.fileKeyMap?.[name] || name,
+    })) || []
+  );
   const [selectedMasterFile, setSelectedMasterFile] = useState<string>("");
   const [uploadedMasterFiles, setUploadedMasterFiles] = useState<File[]>([]);
   const [renameTarget, setRenameTarget] = useState<string | null>(null);
@@ -185,7 +193,7 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
     });
     if (res.ok) {
       setValidatorId(id);
-      setAllAvailableFiles(keys.map((k) => ({ name: k, source: "upload" })));
+      setAllAvailableFiles(keys.map((k) => ({ name: k, source: "upload", original: k })));
       setSelectedMasterFile(keys[0]);
       const cfg = await fetch(
         `${VALIDATE_API}/get_validator_config/${id}`,
@@ -209,6 +217,10 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
           ...(settings.columnConfig || {}),
           [firstKey]: defaultTypes,
         },
+        fileKeyMap: {
+          ...(settings.fileKeyMap || {}),
+          ...keys.reduce((acc, k) => ({ ...acc, [k]: k }), {}),
+        },
       });
     }
   };
@@ -227,6 +239,10 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
     setAllAvailableFiles(prev =>
       prev.map(f => (f.name === oldName ? { ...f, name: newName } : f)),
     );
+    const newFileKeyMap = { ...(settings.fileKeyMap || {}) } as Record<string, string>;
+    const original = newFileKeyMap[oldName] || oldName;
+    newFileKeyMap[newName] = original;
+    delete newFileKeyMap[oldName];
     if (selectedMasterFile === oldName) {
       setSelectedMasterFile(newName);
       setSkipFetch(true);
@@ -253,6 +269,7 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
       columnConfig: newColumnCfg,
       validations: newValidations,
       classification: newClassification,
+      fileKeyMap: newFileKeyMap,
     });
 
     setRenameMap(prev => ({ ...prev, [oldName]: newName }));
@@ -263,6 +280,9 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
     setAllAvailableFiles(prev => prev.filter(f => f.name !== name));
     setUploadedMasterFiles(prev => prev.filter(f => f.name !== name));
     if (selectedMasterFile === name) setSelectedMasterFile('');
+    const newMap = { ...(settings.fileKeyMap || {}) } as Record<string, string>;
+    delete newMap[name];
+    updateSettings(atomId, { fileKeyMap: newMap });
   };
 
   const handleDataTypeChange = (column: string, value: string) => {
@@ -446,12 +466,14 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
     });
     const typeForm = new FormData();
     typeForm.append("validator_atom_id", validatorId);
-    typeForm.append("file_key", selectedMasterFile);
+    const backendKey = settings.fileKeyMap?.[selectedMasterFile] || selectedMasterFile;
+    typeForm.append("file_key", backendKey);
     typeForm.append("column_types", JSON.stringify(definedTypes));
-    await fetch(`${VALIDATE_API}/update_column_types`, {
-      method: "POST",
-      body: typeForm,
-    });
+    try {
+      const res1 = await fetch(`${VALIDATE_API}/update_column_types`, {
+        method: "POST",
+        body: typeForm,
+      });
 
     const columnConditions: Record<string, any[]> = {};
     rangeValidations.forEach((r) => {
@@ -480,27 +502,27 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
         columnFrequencies[p.column] = p.periodicity;
     });
 
-    await fetch(`${VALIDATE_API}/configure_validation_config`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        validator_atom_id: validatorId,
-        file_key: selectedMasterFile,
-        column_conditions: columnConditions,
-        column_frequencies: columnFrequencies,
-      }),
-    });
+      const res2 = await fetch(`${VALIDATE_API}/configure_validation_config`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          validator_atom_id: validatorId,
+          file_key: backendKey,
+          column_conditions: columnConditions,
+          column_frequencies: columnFrequencies,
+        }),
+      });
 
     const classifyForm = new FormData();
     classifyForm.append("validator_atom_id", validatorId);
-    classifyForm.append("file_key", selectedMasterFile);
+    classifyForm.append("file_key", backendKey);
     classifyForm.append("identifiers", JSON.stringify(selectedIdentifiers));
     classifyForm.append("measures", JSON.stringify(selectedMeasures));
     classifyForm.append("unclassified", JSON.stringify([]));
-    await fetch(`${VALIDATE_API}/classify_columns`, {
-      method: "POST",
-      body: classifyForm,
-    });
+      const res3 = await fetch(`${VALIDATE_API}/classify_columns`, {
+        method: "POST",
+        body: classifyForm,
+      });
 
     const savedRanges = rangeValidations.filter(
       (r) => r.column && (r.min !== "" || r.max !== ""),
@@ -542,14 +564,34 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
     Object.keys(renamedClassification).forEach(k => { if (!finalFiles.includes(k)) delete renamedClassification[k]; });
     Object.keys(renamedColumns).forEach(k => { if (!finalFiles.includes(k)) delete renamedColumns[k]; });
 
+    const newKeyMap = allAvailableFiles.reduce<Record<string, string>>(
+      (acc, f) => ({ ...acc, [f.name]: f.original }),
+      {}
+    );
     updateSettings(atomId, {
       validatorId,
       requiredFiles: finalFiles,
       validations: renamedValidations,
       classification: renamedClassification,
       columnConfig: renamedColumns,
+      fileKeyMap: newKeyMap,
     });
     setRenameMap({});
+
+      if (res1.ok && res2.ok && res3.ok) {
+        toast({ title: "Validation Configuration Saved Successfully" });
+      } else {
+        toast({
+          title: "Unable to Save Validation Configuration",
+          variant: "destructive",
+        });
+      }
+    } catch (err) {
+      toast({
+        title: "Unable to Save Validation Configuration",
+        variant: "destructive",
+      });
+    }
   };
 
   return (
