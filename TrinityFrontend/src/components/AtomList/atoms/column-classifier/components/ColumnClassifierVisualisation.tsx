@@ -41,10 +41,7 @@ const ColumnClassifierVisualisation: React.FC<ColumnClassifierVisualisationProps
   const pieData = [
     { name: 'Identifiers', value: categoryCounts.identifiers, color: '#3b82f6' },
     { name: 'Measures', value: categoryCounts.measures, color: '#10b981' },
-    { name: 'Unclassified', value: categoryCounts.unclassified, color: '#f59e0b' },
-    ...(categoryCounts.customDimensions > 0
-      ? [{ name: 'Custom Dimensions', value: categoryCounts.customDimensions, color: '#8b5cf6' }]
-      : [])
+    { name: 'Unclassified', value: categoryCounts.unclassified, color: '#f59e0b' }
   ];
 
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
