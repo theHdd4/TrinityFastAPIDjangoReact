@@ -1,5 +1,5 @@
 
-import React from 'react';
+import React, { useState, useCallback } from 'react';
 import { Card } from '@/components/ui/card';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 import { ClassifierData } from '../ColumnClassifierAtom';
@@ -9,23 +9,6 @@ interface ColumnClassifierVisualisationProps {
 }
 
 const RADIAN = Math.PI / 180;
-const renderPieLabel = ({ cx, cy, midAngle, innerRadius, outerRadius, name, value }: any) => {
-  const radius = innerRadius + (outerRadius - innerRadius) * 0.7;
-  const x = cx + radius * Math.cos(-midAngle * RADIAN);
-  const y = cy + radius * Math.sin(-midAngle * RADIAN);
-  return (
-    <text
-      x={x}
-      y={y}
-      textAnchor="middle"
-      dominantBaseline="central"
-      fontSize={12}
-      fill="#000"
-    >
-      {`${name}: ${value}`}
-    </text>
-  );
-};
 
 const ColumnClassifierVisualisation: React.FC<ColumnClassifierVisualisationProps> = ({ data }) => {
   if (!data.files.length) {
@@ -64,6 +47,30 @@ const ColumnClassifierVisualisation: React.FC<ColumnClassifierVisualisationProps
       : [])
   ];
 
+  const [activeIndex, setActiveIndex] = useState<number | null>(null);
+
+  const renderPieLabel = useCallback(
+    ({ cx, cy, midAngle, innerRadius, outerRadius, name, value, index }: any) => {
+      if (index !== activeIndex) return null;
+      const radius = innerRadius + (outerRadius - innerRadius) * 0.7;
+      const x = cx + radius * Math.cos(-midAngle * RADIAN);
+      const y = cy + radius * Math.sin(-midAngle * RADIAN);
+      return (
+        <text
+          x={x}
+          y={y}
+          textAnchor="middle"
+          dominantBaseline="central"
+          fontSize={12}
+          fill="#000"
+        >
+          {`${name}: ${value}`}
+        </text>
+      );
+    },
+    [activeIndex]
+  );
+
   return (
     <div className="space-y-4">
       <Card className="p-4">
@@ -94,6 +101,8 @@ const ColumnClassifierVisualisation: React.FC<ColumnClassifierVisualisationProps
               dataKey="value"
               label={renderPieLabel}
               labelLine={false}
+              onMouseEnter={(_, index) => setActiveIndex(index)}
+              onMouseLeave={() => setActiveIndex(null)}
             >
               {pieData.map((entry, index) => (
                 <Cell key={`cell-${index}`} fill={entry.color} />
