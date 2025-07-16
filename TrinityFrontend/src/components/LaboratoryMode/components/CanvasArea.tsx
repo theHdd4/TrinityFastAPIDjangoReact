@@ -3,7 +3,7 @@ import { safeStringify } from '@/utils/safeStringify';
 import { Card, Card as AtomBox } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
-import { Plus, Grid3X3, Trash2, Eye, Sliders, ChevronDown, Minus, RefreshCcw } from 'lucide-react';
+import { Plus, Grid3X3, Trash2, Eye, Settings, ChevronDown, Minus, RefreshCcw } from 'lucide-react';
 import { useExhibitionStore } from '../../ExhibitionMode/store/exhibitionStore';
 import { atoms as allAtoms } from '@/components/AtomList/data';
 import { molecules } from '@/components/MoleculeList/data';
@@ -802,9 +802,9 @@ const addNewCard = (moleculeId?: string, position?: number) => {
                                         <button
                                           onClick={e => handleAtomSettingsClick(e, atom.id)}
                                           className="p-1 hover:bg-gray-100 rounded"
-                                          title="Atom Properties"
+                                          title="Atom Settings"
                                         >
-                                          <Sliders className="w-4 h-4 text-gray-400" />
+                                          <Settings className="w-4 h-4 text-gray-400" />
                                         </button>
                                       </div>
                                       <button
@@ -903,9 +903,9 @@ const addNewCard = (moleculeId?: string, position?: number) => {
                   <button
                     onClick={e => handleCardSettingsClick(e, card.id, card.isExhibited)}
                     className="p-1 hover:bg-gray-100 rounded"
-                    title="Card Properties"
+                    title="Card Settings"
                   >
-                    <Sliders className="w-4 h-4 text-gray-400" />
+                    <Settings className="w-4 h-4 text-gray-400" />
                   </button>
                 )}
                 <button
@@ -981,9 +981,9 @@ const addNewCard = (moleculeId?: string, position?: number) => {
                           <button
                             onClick={e => handleAtomSettingsClick(e, atom.id)}
                             className="p-1 hover:bg-gray-100 rounded"
-                            title="Atom Properties"
+                            title="Atom Settings"
                           >
-                            <Sliders className="w-4 h-4 text-gray-400" />
+                            <Settings className="w-4 h-4 text-gray-400" />
                           </button>
                         </div>
                         <button
