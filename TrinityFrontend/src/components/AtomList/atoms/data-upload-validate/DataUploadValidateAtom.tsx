@@ -328,7 +328,7 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
     Object.values(validationResults).every(v => v.includes('Success'));
 
   return (
-    <div className="w-full h-full bg-gradient-to-br from-gray-50 via-white to-gray-50 rounded-xl border border-gray-200 shadow-lg overflow-hidden flex">
+    <div className="w-full h-full bg-gradient-to-br from-slate-50 to-blue-50 rounded-xl border border-gray-200 shadow-xl overflow-hidden flex">
       <div className="flex-1 flex flex-col">
         <div className="bg-gradient-to-r from-blue-500 to-blue-600 text-white p-4 flex-shrink-0">
           <div className="flex items-center space-x-3">

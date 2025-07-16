@@ -35,6 +35,7 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
     { name: string; source: string }[]
   >(settings.requiredFiles?.map((name) => ({ name, source: "upload" })) || []);
   const [selectedMasterFile, setSelectedMasterFile] = useState<string>("");
+  const [uploadedMasterFiles, setUploadedMasterFiles] = useState<File[]>([]);
   const [renameTarget, setRenameTarget] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState<string>("");
   const [renameMap, setRenameMap] = useState<Record<string, string>>({});
@@ -159,13 +160,17 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
     e: React.ChangeEvent<HTMLInputElement>,
   ) => {
     if (!e.target.files) return;
-    const files = Array.from(e.target.files);
+    const newFiles = Array.from(e.target.files);
     if (fileInputRef.current) fileInputRef.current.value = "";
+
+    const allFiles = [...uploadedMasterFiles, ...newFiles];
+    setUploadedMasterFiles(allFiles);
+
     const id = `validator-${Date.now()}`;
     const form = new FormData();
     form.append("validator_atom_id", id);
-    files.forEach((f) => form.append("files", f));
-    const keys = files.map((f) => f.name);
+    allFiles.forEach((f) => form.append("files", f));
+    const keys = allFiles.map((f) => f.name);
     form.append("file_keys", JSON.stringify(keys));
 
     const res = await fetch(`${VALIDATE_API}/create_new`, {
@@ -218,6 +223,7 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
 
   const deleteMasterFile = (name: string) => {
     setAllAvailableFiles(prev => prev.filter(f => f.name !== name));
+    setUploadedMasterFiles(prev => prev.filter(f => f.name !== name));
     if (selectedMasterFile === name) setSelectedMasterFile('');
   };
 
@@ -524,6 +530,29 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
               </label>
             </div>
 
+            {allAvailableFiles.length > 0 && (
+              <div className="space-y-2">
+                {allAvailableFiles.map(file => (
+                  <div key={file.name} className="flex items-center justify-between">
+                    {renameTarget === file.name ? (
+                      <Input
+                        value={renameValue}
+                        onChange={e => setRenameValue(e.target.value)}
+                        onBlur={() => commitRename(file.name)}
+                        className="h-7 text-xs flex-1 mr-2"
+                      />
+                    ) : (
+                      <span className="text-sm truncate flex-1 max-w-[140px]" title={file.name}>{file.name}</span>
+                    )}
+                    <div className="flex items-center space-x-1 ml-2">
+                      <Pencil className="w-4 h-4 text-gray-400 cursor-pointer" onClick={() => startRename(file.name)} />
+                      <Trash2 className="w-4 h-4 text-gray-400 cursor-pointer" onClick={() => deleteMasterFile(file.name)} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
             <div>
               <label className="text-sm font-medium text-gray-700 block mb-2">
                 Select Master File
@@ -553,29 +582,6 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
                 </SelectContent>
               </Select>
             </div>
-
-            {allAvailableFiles.length > 0 && (
-              <div className="space-y-2">
-                {allAvailableFiles.map(file => (
-                  <div key={file.name} className="flex items-center justify-between">
-                    {renameTarget === file.name ? (
-                      <Input
-                        value={renameValue}
-                        onChange={e => setRenameValue(e.target.value)}
-                        onBlur={() => commitRename(file.name)}
-                        className="h-7 text-xs flex-1 mr-2"
-                      />
-                    ) : (
-                      <span className="text-sm truncate flex-1 max-w-[140px]" title={file.name}>{file.name}</span>
-                    )}
-                    <div className="flex items-center space-x-1 ml-2">
-                      <Pencil className="w-4 h-4 text-gray-400 cursor-pointer" onClick={() => startRename(file.name)} />
-                      <Trash2 className="w-4 h-4 text-gray-400 cursor-pointer" onClick={() => deleteMasterFile(file.name)} />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
           </div>
         </div>
 
