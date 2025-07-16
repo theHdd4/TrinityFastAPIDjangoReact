@@ -36,12 +36,14 @@ from app.DataStorageRetrieval.db import fetch_client_app_project
 from app.DataStorageRetrieval.arrow_client import (
     download_dataframe,
     download_table_bytes,
+    upload_dataframe,
 )
 from app.DataStorageRetrieval.flight_registry import (
     get_flight_path_for_csv,
     set_ticket,
 )
 from app.DataStorageRetrieval.db import get_dataset_info
+from app.features.column_classifier.database import get_project_dimension_mapping
 import asyncio
 
 
@@ -237,12 +239,38 @@ async def flight_table(object_name: str):
 
 @router.get("/dimension_mapping")
 async def dimension_mapping(project_id: int = PROJECT_ID):
-    """Return dimension to identifier mapping stored on the Flight server."""
+    """Return dimension to identifier mapping stored on the Flight server.
+    If not present, attempt to load from MongoDB and upload to Flight."""
+    path = f"{project_id}/dimension_mapping"
+    df = None
     try:
-        path = f"{project_id}/dimension_mapping"
         df = download_dataframe(path)
     except Exception as exc:
         print(f"⚠️ dimension_mapping download failed for {path}: {exc}")
+    if df is None:
+        mongo_doc = get_project_dimension_mapping(project_id)
+        if mongo_doc and mongo_doc.get("assignments"):
+            try:
+                rows = [
+                    (d, ident)
+                    for d, ids in mongo_doc["assignments"].items()
+                    for ident in ids
+                ]
+                if rows:
+                    df = pd.DataFrame(rows, columns=["dimension", "identifier"])
+                    upload_dataframe(df, path)
+                    set_ticket(
+                        f"project_{project_id}_dimensions",
+                        f"project_{project_id}_dimensions.arrow",
+                        path,
+                        "project_dimensions.csv",
+                    )
+                    print(
+                        f"🆗 uploaded mapping from mongo to flight for project {project_id}"
+                    )
+            except Exception as exc:
+                print(f"⚠️ failed to upload mongo mapping for {project_id}: {exc}")
+    if df is None:
         raise HTTPException(status_code=404, detail="Mapping not found")
 
     mapping: dict[str, list[str]] = {}

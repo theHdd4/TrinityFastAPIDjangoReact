@@ -296,3 +296,16 @@ def save_project_dimension_mapping(project_id: int, assignments: dict):
     except Exception as e:
         logging.error(f"MongoDB save error for project mapping: {e}")
         return {"status": "error", "error": str(e)}
+
+
+def get_project_dimension_mapping(project_id: int):
+    """Get saved dimension assignments for the given project."""
+    if not check_mongodb_connection():
+        return None
+
+    try:
+        document_id = f"project_{project_id}_dimensions"
+        return db["project_dimension_mappings"].find_one({"_id": document_id})
+    except Exception as exc:  # pragma: no cover
+        logging.error(f"MongoDB read error for project mapping: {exc}")
+        return None
