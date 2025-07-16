@@ -116,12 +116,13 @@ const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
     if (projectId) {
       form.append('project_id', String(projectId));
     }
-    console.log('Saving assignments for project', projectId, currentFile.customDimensions);
-    await fetch(`${CLASSIFIER_API}/assign_identifiers_to_dimensions`, {
+    console.log('📦 sending identifier assignments', projectId, currentFile.customDimensions);
+    const res = await fetch(`${CLASSIFIER_API}/assign_identifiers_to_dimensions`, {
       method: 'POST',
       body: form,
       credentials: 'include'
     });
+    console.log('✅ dimension assignment response', res.status);
   };
 
   const saveDisabled =
