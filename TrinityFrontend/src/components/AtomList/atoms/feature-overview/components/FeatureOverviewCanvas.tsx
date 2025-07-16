@@ -100,7 +100,7 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
       displaySkus();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dimensionMap]);
+  }, [dimensionMap, settings.dataSource]);
 
   useEffect(() => {
     setSkuRows(Array.isArray(settings.skuTable) ? settings.skuTable : []);
@@ -167,6 +167,7 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
         `${FEATURE_OVERVIEW_API}/cached_dataframe?object_name=${encodeURIComponent(
           settings.dataSource,
         )}`,
+        { credentials: 'include' }
       );
       if (!res.ok) {
         console.warn("⚠️ cached dataframe request failed", res.status);

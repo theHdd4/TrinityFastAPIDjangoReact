@@ -119,7 +119,8 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
     try {
       console.log('✈️ fetching flight table', name);
       const fr = await fetch(
-        `${FEATURE_OVERVIEW_API}/flight_table?object_name=${encodeURIComponent(name)}`
+        `${FEATURE_OVERVIEW_API}/flight_table?object_name=${encodeURIComponent(name)}`,
+        { credentials: 'include' }
       );
       if (fr.ok) {
         await fr.arrayBuffer();
@@ -127,7 +128,8 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
       }
       console.log('🔎 prefetching dataframe', name);
       const res = await fetch(
-        `${FEATURE_OVERVIEW_API}/cached_dataframe?object_name=${encodeURIComponent(name)}`
+        `${FEATURE_OVERVIEW_API}/cached_dataframe?object_name=${encodeURIComponent(name)}`,
+        { credentials: 'include' }
       );
       if (res.ok) {
         await res.text();
