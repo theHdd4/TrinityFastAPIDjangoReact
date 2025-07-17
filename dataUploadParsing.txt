@@ -1,11 +1,17 @@
 The Data Upload & Validate atom accepts CSV and Excel (`.xls`/`.xlsx`) files. On
 upload each file is read with pandas using `parse_dates=True`. After loading the
 service scans any string columns whose values resemble date patterns such as
-`yyyy-mm-dd`, `dd-mm-yyyy` or `mm-dd-yyyy`. These columns are converted to
-datetimes so the saved schema reports them with a `date` data type. Column names
+`yyyy-mm-dd`, `dd-mm-yyyy` or `mm-dd-yyyy`. Strings that include a timestamp such
+as `yyyy-mm-dd HH:MM:SS` are recognised as datetimes as well. These columns are
+converted to datetimes so the saved schema reports them with a `date` data type.
+Column names
 are normalised by trimming whitespace, converting to lowercase and removing
 inner spaces while keeping underscores. The resulting DataFrame is used to
 derive a schema and is then stored as an Arrow file for the validator atom.
+When the master file is uploaded its Arrow file name is prefixed with
+`Master_` to avoid clashing with files that are later uploaded for
+validation. The original filename is still shown in the interface so users
+can select it normally.
 
 During validation the service checks that required columns are present and that
 any configured range or periodicity rules pass. Range checks convert the
@@ -27,3 +33,5 @@ settings are stored with the project so they are reapplied whenever the master
 file is used again.
 
 When a column's data type is set to `date` in the properties panel, the validator will reject files where that column is not already typed as a datetime field. Values must parse with `pandas.to_datetime` using common formats such as `YYYY-MM-DD`, `DD-MM-YYYY`, `MM-DD-YYYY` or their slash variants. If the uploaded data stores the column as plain strings, validation will fail even if those strings could be converted to dates.
+
+All other column types are enforced the same way. During validation each column's pandas dtype is compared to the saved type from the master file before any conversion occurs. If the incoming file's dtype differs (for example a numeric column uploaded as strings) the row is considered an error even if the values could be cast. The service still converts the column internally so range, periodicity and other rules run on the correct type, but the mismatch is reported and the file fails validation unless corrected.
