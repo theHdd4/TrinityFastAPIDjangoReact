@@ -147,7 +147,7 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
     name,
     required: true,
     status: settings.uploadedFiles?.includes(name) ? 'uploaded' : 'pending',
-    validations: settings.validations?.[name] || { ranges: [], periodicities: [] }
+    validations: settings.validations?.[name] || { ranges: [], periodicities: [], regex: [], nulls: [], referentials: [] }
   }));
 
   const getStatusIcon = (status: string, required: boolean) => {
@@ -218,6 +218,9 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
             desc = parts.join(' ');
           }
           if (u.validation_type === 'periodicity') desc = u.periodicity;
+          if (u.validation_type === 'regex') desc = u.pattern;
+          if (u.validation_type === 'null_percentage') desc = `${u.value}% null`;
+          if (u.validation_type === 'in_list') desc = `allowed: ${u.value?.join(', ')}`;
 
           let failed = false;
           if (u.validation_type === 'datatype') {
@@ -233,6 +236,12 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
             failed = failures.some((f: any) => f.column === u.column && f.operator === 'date_frequency');
           } else if (u.validation_type === 'range') {
             failed = failures.some((f: any) => f.column === u.column && f.operator !== 'date_frequency');
+          } else if (u.validation_type === 'regex') {
+            failed = failures.some((f: any) => f.column === u.column && f.operator === 'regex_match');
+          } else if (u.validation_type === 'null_percentage') {
+            failed = failures.some((f: any) => f.column === u.column && f.operator === 'null_percentage');
+          } else if (u.validation_type === 'in_list') {
+            failed = failures.some((f: any) => f.column === u.column && f.operator === 'in_list');
           }
 
           fileDetails.push({
