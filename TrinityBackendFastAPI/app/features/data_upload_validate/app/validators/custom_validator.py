@@ -243,6 +243,22 @@ def apply_validation_condition(column_data, operator, value, col_name):
             failed_mask = ~column_data.astype(str).str.contains(str(conv_value), na=False)
         elif operator == "starts_with":
             failed_mask = ~column_data.astype(str).str.startswith(str(conv_value), na=False)
+        elif operator == "regex_match":
+            try:
+                pattern = re.compile(str(conv_value))
+            except re.error:
+                return list(range(len(column_data)))
+            failed_mask = ~column_data.astype(str).str.match(pattern)
+        elif operator == "null_percentage":
+            threshold = float(conv_value)
+            null_mask = column_data.isna()
+            if null_mask.mean() * 100 > threshold:
+                failed_mask = null_mask
+            else:
+                failed_mask = pd.Series([False] * len(column_data), index=column_data.index)
+        elif operator == "in_list":
+            allowed = set(conv_value if isinstance(conv_value, list) else [conv_value])
+            failed_mask = ~column_data.isin(allowed)
         else:
             return []
 

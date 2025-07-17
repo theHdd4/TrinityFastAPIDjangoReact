@@ -17,3 +17,11 @@ When viewing a saved dataframe the CSV text is parsed client-side. Numeric
 values are only converted when a cell consists entirely of digits. Date strings
 remain unchanged so columns like `2025-07-14` or `07/14/2025` display exactly as
 saved.
+
+Advanced validations allow regex checks, null-percentage thresholds and
+referential integrity lists. Regex patterns are evaluated against each row of the
+selected column and must match the entire string. Null percentage checks fail if
+the share of missing values exceeds the configured threshold. Referential
+integrity ensures that column values appear in a predefined list. All validation
+settings are stored with the project so they are reapplied whenever the master
+file is used again.

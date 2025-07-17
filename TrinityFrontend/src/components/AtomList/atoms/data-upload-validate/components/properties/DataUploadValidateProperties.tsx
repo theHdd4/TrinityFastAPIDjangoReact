@@ -1098,7 +1098,7 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
 
                   {/* Regex Validation */}
                   <div className="space-y-4">
-                    <div className="flex items-center justify-between">
+                  <div className="flex items-center justify-between">
                       <h5 className="text-sm font-medium text-gray-700">
                         Regex Check
                       </h5>
@@ -1106,6 +1106,9 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
                         <Plus className="w-3 h-3" />
                       </Button>
                     </div>
+                    <p className="text-[10px] text-gray-500">
+                      Quick Examples:<br />Email: ^[\w\.-]+@[\w\.-]+\.\w{2,5}$<br />Phone (US): ^\d{3}[-.]?\d{3}[-.]?\d{4}$<br />Product Code: ^[A-Z]{3}-\d{4}$<br />Date YYYY-MM-DD: ^\d{4}-\d{2}-\d{2}$
+                    </p>
                     {regexValidations.map((rv) => {
                       const match = (() => {
                         try {
@@ -1114,6 +1117,21 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
                           return false;
                         }
                       })();
+                      const sampleVals = ["ABC-1234", "XYZ-0000", "foo"];
+                      const matches = sampleVals.filter((v) => {
+                        try {
+                          return new RegExp(rv.pattern).test(v);
+                        } catch {
+                          return false;
+                        }
+                      });
+                      const fails = sampleVals.filter((v) => {
+                        try {
+                          return !new RegExp(rv.pattern).test(v);
+                        } catch {
+                          return false;
+                        }
+                      });
                       return (
                         <div key={rv.id} className="p-3 bg-gray-50 rounded-lg border border-gray-200 space-y-3">
                           <div className="flex items-center justify-between">
@@ -1132,8 +1150,26 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
                               ))}
                             </SelectContent>
                           </Select>
-                          <Input value={rv.pattern} onChange={(e) => updateRegexValidation(rv.id, 'pattern', e.target.value)} placeholder="Regex pattern" className="bg-white border-gray-300 h-8 text-xs" />
+                          <div className="relative">
+                            <Input
+                              value={rv.pattern}
+                              onChange={(e) => updateRegexValidation(rv.id, 'pattern', e.target.value)}
+                              placeholder="^ABC-\\d{4}$"
+                              className="bg-white border-gray-300 h-8 text-xs pr-8"
+                            />
+                            <Tooltip>
+                              <TooltipTrigger type="button" className="absolute right-2 top-1">
+                                <Info className="w-3 h-3 text-gray-500" />
+                              </TooltipTrigger>
+                              <TooltipContent className="text-xs max-w-xs">
+                                Enter a full-match regex (use ^...$ anchors).
+                              </TooltipContent>
+                            </Tooltip>
+                          </div>
                           <Input value={rv.sample} onChange={(e) => updateRegexValidation(rv.id, 'sample', e.target.value)} placeholder="Sample value" className="bg-white border-gray-300 h-8 text-xs" />
+                          <div className="text-[10px] text-gray-500">
+                            Matches: {matches.join(', ') || 'none'} | Fails: {fails.join(', ') || 'none'}
+                          </div>
                           {rv.sample && rv.pattern && (
                             <Badge variant={match ? 'default' : 'secondary'} className="w-fit text-xs">
                               {match ? 'Match' : 'No Match'}

@@ -1209,6 +1209,9 @@ async def configure_validation_config(request: Request):
 
     # Build validation units and save
     range_units = []
+    regex_units = []
+    null_units = []
+    ref_units = []
     for col, conds in column_conditions.items():
         min_val = None
         max_val = None
@@ -1218,6 +1221,24 @@ async def configure_validation_config(request: Request):
                 min_val = cond.get("value")
             elif op in ["less_than_or_equal", "less_than"]:
                 max_val = cond.get("value")
+            elif op == "regex_match":
+                regex_units.append({
+                    "column": col,
+                    "validation_type": "regex",
+                    "pattern": cond.get("value"),
+                })
+            elif op == "null_percentage":
+                null_units.append({
+                    "column": col,
+                    "validation_type": "null_percentage",
+                    "value": cond.get("value"),
+                })
+            elif op == "in_list":
+                ref_units.append({
+                    "column": col,
+                    "validation_type": "in_list",
+                    "value": cond.get("value"),
+                })
         if (min_val not in [None, ""] or max_val not in [None, ""]):
             range_units.append({
                 "column": col,
@@ -1241,12 +1262,18 @@ async def configure_validation_config(request: Request):
         other_units = [
             u
             for u in existing_units["validations"]
-            if u.get("validation_type") not in ["range", "periodicity"]
+            if u.get("validation_type")
+            not in ["range", "periodicity", "regex", "null_percentage", "in_list"]
         ]
     save_validation_units_to_mongo(
         validator_atom_id,
         file_key,
-        other_units + range_units + periodicity_units,
+        other_units
+        + range_units
+        + periodicity_units
+        + regex_units
+        + null_units
+        + ref_units,
     )
 
     message = f"Validation config configured successfully for file key '{file_key}' with {total_conditions} conditions"
