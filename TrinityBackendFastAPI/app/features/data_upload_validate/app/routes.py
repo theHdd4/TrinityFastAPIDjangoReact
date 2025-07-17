@@ -360,6 +360,16 @@ async def create_new(
                 df = pd.read_excel(io.BytesIO(content), parse_dates=True)
             else:
                 raise HTTPException(status_code=400, detail="Only CSV and XLSX files supported")
+
+            # Attempt to convert object columns that look like dates
+            date_pat = re.compile(r"^(?:\d{4}[-/]\d{2}[-/]\d{2}|\d{2}[-/]\d{2}[-/]\d{4})$")
+            for col in df.columns:
+                if df[col].dtype == object:
+                    sample = df[col].dropna().astype(str).head(5)
+                    if not sample.empty and all(date_pat.match(v.strip()) for v in sample):
+                        parsed = pd.to_datetime(df[col], errors="coerce", infer_datetime_format=True)
+                        if parsed.notna().sum() >= len(df[col]) * 0.8:
+                            df[col] = parsed
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"Error parsing file {file.filename}: {str(e)}")
 
