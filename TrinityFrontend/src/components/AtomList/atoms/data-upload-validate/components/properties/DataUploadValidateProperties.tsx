@@ -234,13 +234,15 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
     });
     if (res.ok) {
       setValidatorId(id);
-      setAllAvailableFiles(displayNames.map((n) => ({ name: n, source: "upload", original: n })));
-      setSelectedMasterFile(displayNames[0]);
+      setAllAvailableFiles(
+        backendNames.map((n) => ({ name: n, source: "upload", original: n }))
+      );
+      setSelectedMasterFile(backendNames[0]);
       const cfg = await fetch(
         `${VALIDATE_API}/get_validator_config/${id}`,
       ).then((r) => r.json());
       const defaultTypes: Record<string, string> = {};
-      const firstKey = displayNames[0];
+      const firstKey = backendNames[0];
       if (cfg.schemas && cfg.schemas[firstKey]) {
         cfg.schemas[firstKey].columns.forEach((c: any) => {
           defaultTypes[c.column] = "not_defined";
@@ -260,7 +262,7 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
         },
         fileKeyMap: {
           ...(settings.fileKeyMap || {}),
-          ...displayNames.reduce((acc, d, idx) => ({ ...acc, [d]: backendNames[idx] }), {}),
+          ...backendNames.reduce((acc, n) => ({ ...acc, [n]: n }), {}),
         },
       });
     }
