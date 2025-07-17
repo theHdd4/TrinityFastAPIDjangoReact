@@ -4,12 +4,12 @@ import { Button } from '@/components/ui/button';
 import { GripVertical, X, Minimize2, Maximize2 } from 'lucide-react';
 import { useExhibitionStore } from '../../ExhibitionMode/store/exhibitionStore';
 
-interface NavigationListProps {
+interface FloatingNavigationListProps {
   isVisible: boolean;
   onClose: () => void;
 }
 
-const NavigationList: React.FC<NavigationListProps> = ({ isVisible, onClose }) => {
+const FloatingNavigationList: React.FC<FloatingNavigationListProps> = ({ isVisible, onClose }) => {
   const [position, setPosition] = useState({ x: 20, y: 100 });
   const [isDragging, setIsDragging] = useState(false);
   const [isMinimized, setIsMinimized] = useState(false);
@@ -156,4 +156,4 @@ const NavigationList: React.FC<NavigationListProps> = ({ isVisible, onClose }) =
   );
 };
 
-export default NavigationList;
+export default FloatingNavigationList;
