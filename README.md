@@ -49,10 +49,34 @@ Follow the steps below to run all services together.
   cookie. Log in via the correct `/api/accounts/login/` path before calling
   authenticated endpoints like `/api/registry/laboratory-actions/`.
 
-  The frontend performs a preliminary GET request to `/api/accounts/users/me/`
-  during login to verify the API is reachable. Since no session exists yet this
-  check will usually return **401** or **403**. The actual login follows
-  immediately after.
+The frontend performs a preliminary GET request to `/api/accounts/users/me/`
+during login to verify the API is reachable. Since no session exists yet this
+check will usually return **401** or **403**. The actual login follows
+immediately after.
+
+### Debugging login failures
+
+If you still hit **403 Forbidden** after submitting valid credentials:
+
+1. Open the browser developer tools and inspect the network response for
+   `POST /admin/api/accounts/login/`. Confirm the server responds with **200**
+   and includes a `Set-Cookie` header named `sessionid`.
+2. After the request completes, visit `/admin/api/accounts/users/me/` in a new
+   tab or run:
+
+   ```bash
+   curl -b cookies.txt -c cookies.txt \
+     -X GET https://trinity.quantmatrixai.com/admin/api/accounts/users/me/
+   ```
+
+   Replace `cookies.txt` with a file captured from the login response. A JSON
+   payload containing your username confirms the session was stored correctly.
+3. If the endpoint still returns **403**, verify that `CSRF_TRUSTED_ORIGINS` and
+   `CORS_ALLOWED_ORIGINS` in `TrinityBackendDjango/.env` include the public
+   domain. Missing entries can prevent the session cookie from being accepted.
+4. Finally ensure the browser isn't blocking third‑party cookies. Same‑site
+   restrictions may prevent the session from persisting if the frontend and
+   backend live on different domains.
 
   When testing the column classifier endpoints a **404 Not Found** response
   often indicates the specified `validator_atom_id` or `file_key` does not exist
