@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import { Settings, Upload, Table, BarChart3, Minus, Plus, Pencil, Trash2, Wrench } from "lucide-react";
+import { Settings, Upload, Table, BarChart3, Minus, Plus, Pencil, Trash2, Wrench, Info } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Select,
