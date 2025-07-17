@@ -24,9 +24,7 @@ Follow the steps below to run all services together.
    The frontend `.env` includes `VITE_SUBSCRIPTIONS_API` which should point to
    the Django subscription endpoints and `VITE_TRINITY_AI_API` for the AI
    service.
-  When running locally set
-  `VITE_BACKEND_ORIGIN=http://10.2.1.242:8080`. When exposing the app via
-  Cloudflare Tunnel, change it to
+  When exposing the app via Cloudflare Tunnel, set
   `VITE_BACKEND_ORIGIN=https://trinity.quantmatrixai.com` so the frontend sends
   API requests through Traefik. Rebuild the `frontend` service after changing
   this file so Vite picks up the new value:
@@ -35,9 +33,8 @@ Follow the steps below to run all services together.
   docker compose build frontend
   ```
 
-  The frontend runs at `http://10.2.1.242:8080` by default. When the Cloudflare
-  Tunnel is enabled it is exposed at `https://trinity.quantmatrixai.com` while
-  Traefik proxies `/admin/` to the Django container and
+  The frontend is exposed at `https://trinity.quantmatrixai.com` through
+  Cloudflare Tunnel while Traefik proxies `/admin/` to the Django container and
   `/api/` to the FastAPI service. Traefik strips the `/admin` prefix so Django
   receives requests under `/api/` and `/admin/` as defined in `config/urls.py`.
   Login requests therefore go to `/admin/api/accounts/login/` when accessed
@@ -64,6 +61,9 @@ If you still hit **403 Forbidden** after submitting valid credentials:
 1. Open the browser developer tools and inspect the network response for
    `POST /admin/api/accounts/login/`. Confirm the server responds with **200**
    and includes a `Set-Cookie` header named `sessionid`.
+   If the request instead returns **404** or **405**, verify that
+   `VITE_BACKEND_ORIGIN` in `TrinityFrontend/.env` points at the correct
+   host. Use the `/admin` prefix only when requests are routed through Traefik.
 2. After the request completes, visit `/admin/api/accounts/users/me/` in a new
    tab or run:
 

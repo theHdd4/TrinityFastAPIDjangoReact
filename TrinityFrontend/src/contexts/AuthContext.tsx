@@ -88,9 +88,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
     console.log('Login fetch options', options);
     try {
-      const res = await fetch(`${API_BASE}/login/`, options);
+      let res = await fetch(`${API_BASE}/login/`, options);
       console.log('Login response headers', Array.from(res.headers.entries()));
       console.log('Login response status', res.status);
+      if (res.status === 404 || res.status === 405) {
+        const altBase = API_BASE.includes('/admin/api')
+          ? API_BASE.replace('/admin/api', '/api')
+          : API_BASE.replace('/api', '/admin/api');
+        if (altBase !== API_BASE) {
+          console.log('Retrying login via', `${altBase}/login/`);
+          res = await fetch(`${altBase}/login/`, options);
+          console.log('Retry response status', res.status);
+        }
+      }
       if (res.ok) {
         const data = await res.json();
         console.log('Login success, user:', data.username);
