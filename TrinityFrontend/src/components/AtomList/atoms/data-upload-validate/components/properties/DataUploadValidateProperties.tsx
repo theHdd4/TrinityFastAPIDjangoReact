@@ -572,7 +572,7 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
               <input
                 type="file"
                 multiple
-                accept=".arrow"
+                accept=".csv,.xls,.xlsx"
                 onChange={handleMasterFileSelect}
                 className="hidden"
                 id="master-file-upload"
