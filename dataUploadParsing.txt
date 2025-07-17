@@ -8,3 +8,8 @@ stored as an Arrow file for the validator atom.
 During validation the service checks that required columns are present and that
 any configured range or periodicity rules pass. If validation succeeds the
 Arrow version of the file is uploaded to MinIO so other atoms can read it later.
+
+When viewing a saved dataframe the CSV text is parsed client-side. Numeric
+values are only converted when a cell consists entirely of digits. Date strings
+remain unchanged so columns like `2025-07-14` or `07/14/2025` display exactly as
+saved.
