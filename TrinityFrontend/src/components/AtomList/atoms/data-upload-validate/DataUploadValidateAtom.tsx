@@ -71,6 +71,8 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
     if (e.target.files) {
       const files = Array.from(e.target.files);
       handleFileUpload(files);
+      // allow selecting the same file again by resetting the input value
+      e.target.value = '';
     }
   };
 
