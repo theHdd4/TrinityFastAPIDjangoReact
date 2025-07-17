@@ -29,3 +29,5 @@ settings are stored with the project so they are reapplied whenever the master
 file is used again.
 
 When a column's data type is set to `date` in the properties panel, the validator will reject files where that column is not already typed as a datetime field. Values must parse with `pandas.to_datetime` using common formats such as `YYYY-MM-DD`, `DD-MM-YYYY`, `MM-DD-YYYY` or their slash variants. If the uploaded data stores the column as plain strings, validation will fail even if those strings could be converted to dates.
+
+All other column types are enforced the same way. During validation each column's pandas dtype is compared to the saved type from the master file before any conversion occurs. If the incoming file's dtype differs (for example a numeric column uploaded as strings) the row is considered an error even if the values could be cast. The service still converts the column internally so range, periodicity and other rules run on the correct type, but the mismatch is reported and the file fails validation unless corrected.

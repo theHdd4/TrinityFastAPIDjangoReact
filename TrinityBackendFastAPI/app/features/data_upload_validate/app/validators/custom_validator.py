@@ -6,6 +6,19 @@ from typing import List, Dict, Any
 from app.features.data_upload_validate.app.database import get_validation_config_from_mongo
 
 
+def _infer_column_type(series: pd.Series) -> str:
+    """Return simplified type name for a pandas Series."""
+    if pd.api.types.is_bool_dtype(series):
+        return "boolean"
+    if pd.api.types.is_integer_dtype(series) and not pd.api.types.is_bool_dtype(series):
+        return "integer"
+    if pd.api.types.is_float_dtype(series):
+        return "numeric"
+    if pd.api.types.is_datetime64_any_dtype(series):
+        return "date"
+    return "string"
+
+
 def perform_enhanced_validation(files_data: List[tuple], validator_data: Dict[str, Any]) -> Dict[str, Any]:
     """
     Enhanced validation: Check mandatory columns, auto-correct types, and provide detailed messages
@@ -47,11 +60,28 @@ def perform_enhanced_validation(files_data: List[tuple], validator_data: Dict[st
         if extra_columns:
             file_warnings.append(f"Extra columns found (allowed): {extra_columns}")
         
-        # ✅ CHECK 2: Auto-correct column types
+        # ✅ CHECK 2: Strict data type validation and optional conversion
         for col in uploaded_columns:
             if col in expected_types:
                 expected_type = expected_types[col]
-                
+                actual_type = _infer_column_type(df[col])
+                mismatch = False
+
+                if expected_type == "numeric":
+                    if actual_type not in ["numeric", "integer"]:
+                        mismatch = True
+                elif expected_type == "integer":
+                    if actual_type != "integer":
+                        mismatch = True
+                else:
+                    if actual_type != expected_type:
+                        mismatch = True
+
+                if mismatch:
+                    file_errors.append(
+                        f"Column '{col}' expected {expected_type} but got {actual_type}"
+                    )
+
                 try:
                     if expected_type == "numeric":
                         original_dtype = str(df[col].dtype)
@@ -59,27 +89,37 @@ def perform_enhanced_validation(files_data: List[tuple], validator_data: Dict[st
                             df[col] = pd.to_numeric(df[col], errors='coerce')
                             if df[col].isna().any():
                                 failed_rows = df[df[col].isna()].index.tolist()[:5]
-                                file_errors.append(f"Column '{col}' contains non-numeric data that cannot be converted (rows: {failed_rows})")
+                                file_errors.append(
+                                    f"Column '{col}' contains non-numeric data that cannot be converted (rows: {failed_rows})"
+                                )
                             else:
-                                auto_corrections.append(f"Column '{col}' converted from {original_dtype} to numeric")
-                    
+                                auto_corrections.append(
+                                    f"Column '{col}' converted from {original_dtype} to numeric"
+                                )
+
                     elif expected_type == "integer":
                         original_dtype = str(df[col].dtype)
                         if "int" not in original_dtype:
                             numeric_col = pd.to_numeric(df[col], errors='coerce')
                             if numeric_col.isna().any():
                                 failed_rows = df[numeric_col.isna()].index.tolist()[:5]
-                                file_errors.append(f"Column '{col}' contains non-integer data that cannot be converted (rows: {failed_rows})")
+                                file_errors.append(
+                                    f"Column '{col}' contains non-integer data that cannot be converted (rows: {failed_rows})"
+                                )
                             else:
                                 df[col] = numeric_col.astype(int)
-                                auto_corrections.append(f"Column '{col}' converted from {original_dtype} to integer")
-                    
+                                auto_corrections.append(
+                                    f"Column '{col}' converted from {original_dtype} to integer"
+                                )
+
                     elif expected_type == "string":
                         original_dtype = str(df[col].dtype)
                         if "object" not in original_dtype:
                             df[col] = df[col].astype(str)
-                            auto_corrections.append(f"Column '{col}' converted from {original_dtype} to string")
-                    
+                            auto_corrections.append(
+                                f"Column '{col}' converted from {original_dtype} to string"
+                            )
+
                     elif expected_type == "date":
                         original_dtype = str(df[col].dtype)
                         if not pd.api.types.is_datetime64_any_dtype(df[col]):
@@ -90,16 +130,15 @@ def perform_enhanced_validation(files_data: List[tuple], validator_data: Dict[st
                                     f"Column '{col}' contains invalid date formats that cannot be converted (rows: {failed_rows})"
                                 )
                             else:
-                                file_errors.append(
-                                    f"Column '{col}' expected date type but was {original_dtype}"
-                                )
                                 auto_corrections.append(
                                     f"Column '{col}' converted from {original_dtype} to datetime"
                                 )
                             df[col] = converted
-                
+
                 except Exception as e:
-                    file_errors.append(f"Failed to convert column '{col}' to {expected_type}: {str(e)}")
+                    file_errors.append(
+                        f"Failed to convert column '{col}' to {expected_type}: {str(e)}"
+                    )
         
         # ✅ MOVE OUTSIDE LOOP: CUSTOM CONDITIONS VALIDATION
         validator_atom_id = validator_data.get("validator_atom_id", "unknown")
