@@ -94,11 +94,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (res.ok) {
         const data = await res.json();
         console.log('Login success, user:', data.username);
-        setUser(data);
-        localStorage.setItem('isAuthenticated', 'true');
-        setIsAuthenticated(true);
-        await loadProfile();
-        return true;
+
+        // Verify that a session cookie was set by calling the
+        // authenticated endpoint again. Some environments may
+        // reject the cookie due to domain or secure flag issues,
+        // which would cause subsequent API calls to return 403.
+        const verify = await fetch(`${API_BASE}/users/me/`, {
+          credentials: 'include',
+        });
+        if (verify.ok) {
+          setUser(data);
+          localStorage.setItem('isAuthenticated', 'true');
+          setIsAuthenticated(true);
+          await loadProfile();
+          return true;
+        }
+
+        console.log('Session verification failed', verify.status);
       } else {
         const text = await res.text();
         console.log('Login failed:', text);
