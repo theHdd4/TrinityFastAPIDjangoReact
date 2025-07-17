@@ -8,6 +8,10 @@ Column names
 are normalised by trimming whitespace, converting to lowercase and removing
 inner spaces while keeping underscores. The resulting DataFrame is used to
 derive a schema and is then stored as an Arrow file for the validator atom.
+When the master file is uploaded its Arrow file name is prefixed with
+`Master_` to avoid clashing with files that are later uploaded for
+validation. The original filename is still shown in the interface so users
+can select it normally.
 
 During validation the service checks that required columns are present and that
 any configured range or periodicity rules pass. Range checks convert the
