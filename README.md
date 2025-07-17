@@ -96,7 +96,9 @@ If you still hit **403 Forbidden** after submitting valid credentials:
   `https://trinity.quantmatrixai.com` are trusted. This prevents CORS and CSRF
   errors when logging in from either address.
   Set `FASTAPI_CORS_ORIGINS` to the same comma separated list so the FastAPI
-  service accepts requests from both origins as well.
+  service accepts requests from both origins as well. When running inside
+  Docker on Linux this often means adding `http://172.17.48.1:8080` (or whatever
+  the host IP is) so requests from the frontend are allowed.
   When exposing a public hostname also add it, the host IP, and `localhost` to
   the `ADDITIONAL_DOMAINS` variable so Django's tenant middleware accepts all
   three. Run `python create_tenant.py` again after adjusting this list if the
