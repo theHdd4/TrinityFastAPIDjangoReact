@@ -7,8 +7,8 @@ services:
       POSTGRES_PASSWORD: trinity_pass
     volumes:
       - postgres_data:/var/lib/postgresql/data/
-    ports:
-      - "5432:5432"
+    expose:
+      - "5432"
     networks:
       - trinity-net
 
@@ -32,9 +32,9 @@ services:
       MINIO_ROOT_USER: minio
       MINIO_ROOT_PASSWORD: minio123
     command: server /data --console-address ":9001"
-    ports:
-      - "9000:9000"
-      - "9001:9001"
+    expose:
+      - "9000"
+      - "9001"
     volumes:
       - minio_data:/data
     networks:
@@ -45,8 +45,8 @@ services:
     environment:
       PGADMIN_DEFAULT_EMAIL: admin@example.com
       PGADMIN_DEFAULT_PASSWORD: admin
-    ports:
-      - "5050:80"
+    expose:
+      - "80"
     depends_on:
       - postgres
     networks:
@@ -59,8 +59,8 @@ services:
       - ./TrinityBackendDjango:/code
     env_file:
       - ./TrinityBackendDjango/.env
-    ports:
-      - "8000:8000"
+    expose:
+      - "8000"
     depends_on:
       - postgres
       - mongo
@@ -105,8 +105,8 @@ services:
       FLIGHT_HOST: flight
       FLIGHT_PORT: 8815
       FASTAPI_CORS_ORIGINS: ${FASTAPI_CORS_ORIGINS:-http://127.0.0.1:8080,http://10.2.1.242:8080,http://10.2.1.65:8080,https://trinity.quantmatrixai.com}
-    ports:
-      - "8001:8001"
+    expose:
+      - "8001"
     depends_on:
       - postgres
       - mongo
@@ -127,8 +127,8 @@ services:
     command: python app/flight_server.py
     env_file:
       - ./TrinityBackendDjango/.env
-    ports:
-      - "8815:8815"
+    expose:
+      - "8815"
     networks:
       - trinity-net
 
@@ -140,8 +140,8 @@ services:
       - ./TrinityBackendDjango/.env
     environment:
       OLLAMA_IP: 10.2.1.65
-    ports:
-      - "8002:8002"
+    expose:
+      - "8002"
     networks:
       - trinity-net
     labels:
@@ -156,8 +156,8 @@ services:
       context: ./TrinityFrontend
       dockerfile: Dockerfile
     container_name: trinity-frontend
-    ports:
-      - "8080:80"
+    expose:
+      - "80"
     networks:
       - trinity-net
     depends_on:
@@ -173,8 +173,8 @@ services:
       - --providers.docker=true
       - --providers.docker.exposedbydefault=false
       - --entrypoints.web.address=:80
-    ports:
-      - "9080:80"
+    expose:
+      - "80"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     networks:
