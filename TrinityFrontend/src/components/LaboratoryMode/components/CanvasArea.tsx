@@ -819,6 +819,7 @@ const handleAddDragLeave = (e: React.DragEvent) => {
                         return (
                         <Card
                           key={card.id}
+                          data-card-id={card.id}
                           className={`w-full min-h-[200px] bg-white rounded-2xl border-2 transition-all duration-300 flex flex-col overflow-hidden ${
                             dragOver === card.id
                               ? 'border-[#458EE2] bg-gradient-to-br from-blue-50 to-blue-100 shadow-lg'
@@ -965,6 +966,7 @@ const handleAddDragLeave = (e: React.DragEvent) => {
           return (
           <React.Fragment key={card.id}>
           <Card
+            data-card-id={card.id}
             className={`w-full ${collapsedCards[card.id] ? '' : 'min-h-[200px]'} bg-white rounded-2xl border-2 transition-all duration-300 flex flex-col overflow-hidden ${
               dragOver === card.id
                 ? 'border-[#458EE2] bg-gradient-to-br from-blue-50 to-blue-100 shadow-lg'
