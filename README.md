@@ -96,15 +96,14 @@ If you still hit **403 Forbidden** after submitting valid credentials:
   Docker gateway address (`172.x.x.x`) won't work from outside the containers.
 
   Update `CSRF_TRUSTED_ORIGINS` and `CORS_ALLOWED_ORIGINS` in
-  `TrinityBackendDjango/.env` so both the local frontend URL
-  `http://${HOST_IP}:8080` and the public domain
-  `https://trinity.quantmatrixai.com` are trusted. This prevents CORS and CSRF
-  errors when logging in from either address.
+  `TrinityBackendDjango/.env` so the following hosts are trusted:
+  `http://10.2.1.242:8080`, `http://172.17.48.1:8080`,
+  `http://10.2.1.65:8080` and `https://trinity.quantmatrixai.com`.
   Set `FASTAPI_CORS_ORIGINS` to the same comma separated list so the FastAPI
-  service accepts requests from both origins as well. When running inside
+  service accepts requests from any of these origins. When running inside
   Docker on Linux this often means adding `http://172.17.48.1:8080` (or whatever
-  the host IP is) so requests from the frontend are allowed.
-  Include the exact address your browser uses (for example `http://172.17.48.1:8080`) otherwise requests to FastAPI will fail with a CORS error.
+  the host IP is) so requests from the frontend are allowed. Include the exact
+  address your browser uses or CORS headers will be missing.
   When exposing a public hostname also add it, the host IP, and `localhost` to
   the `ADDITIONAL_DOMAINS` variable so Django's tenant middleware accepts all
   three. Run `python create_tenant.py` again after adjusting this list if the
