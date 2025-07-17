@@ -4,12 +4,12 @@ import { Button } from '@/components/ui/button';
 import { GripVertical, X, Minimize2, Maximize2 } from 'lucide-react';
 import { useExhibitionStore } from '../../ExhibitionMode/store/exhibitionStore';
 
-interface FloatingAtomListProps {
+interface NavigationListProps {
   isVisible: boolean;
   onClose: () => void;
 }
 
-const FloatingAtomList: React.FC<FloatingAtomListProps> = ({ isVisible, onClose }) => {
+const NavigationList: React.FC<NavigationListProps> = ({ isVisible, onClose }) => {
   const [position, setPosition] = useState({ x: 20, y: 100 });
   const [isDragging, setIsDragging] = useState(false);
   const [isMinimized, setIsMinimized] = useState(false);
@@ -94,7 +94,7 @@ const FloatingAtomList: React.FC<FloatingAtomListProps> = ({ isVisible, onClose 
         >
           <div className="flex items-center space-x-2">
             <GripVertical className="w-4 h-4 text-gray-400" />
-            <span className="text-sm font-medium text-gray-700">Canvas Atoms</span>
+            <span className="text-sm font-medium text-gray-700">Navigation List</span>
           </div>
           <div className="flex items-center space-x-1">
             <Button
@@ -156,4 +156,4 @@ const FloatingAtomList: React.FC<FloatingAtomListProps> = ({ isVisible, onClose 
   );
 };
 
-export default FloatingAtomList;
+export default NavigationList;

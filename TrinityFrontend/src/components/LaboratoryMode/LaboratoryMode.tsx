@@ -8,7 +8,7 @@ import { safeStringify } from '@/utils/safeStringify';
 import CanvasArea from './components/CanvasArea';
 import AuxiliaryMenu from './components/AuxiliaryMenu';
 import AuxiliaryMenuLeft from './components/AuxiliaryMenuLeft';
-import FloatingAtomList from './components/FloatingAtomList';
+import NavigationList from './components/NavigationList';
 import { useExhibitionStore } from '@/components/ExhibitionMode/store/exhibitionStore';
 import { REGISTRY_API, LAB_ACTIONS_API } from '@/lib/api';
 import { useLaboratoryStore } from './store/laboratoryStore';
@@ -19,7 +19,7 @@ const LaboratoryMode = () => {
   const [cardExhibited, setCardExhibited] = useState<boolean>(false);
   const [auxActive, setAuxActive] = useState<'settings' | 'frames' | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [showFloatingList, setShowFloatingList] = useState(false);
+  const [showNavigationList, setShowNavigationList] = useState(true);
   const { toast } = useToast();
   const { cards, setCards } = useExhibitionStore();
   const setLabCards = useLaboratoryStore(state => state.setCards);
@@ -207,10 +207,10 @@ const LaboratoryMode = () => {
               variant="outline" 
               size="sm" 
               className="border-gray-200 hover:bg-gray-50 text-gray-700 font-medium"
-              onClick={() => setShowFloatingList(!showFloatingList)}
+              onClick={() => setShowNavigationList(!showNavigationList)}
             >
               <List className="w-4 h-4 mr-2" />
-              {showFloatingList ? 'Hide' : 'Show'} List
+              {showNavigationList ? 'Hide' : 'Show'} Navigation List
             </Button>
             <Button variant="outline" size="sm" className="border-gray-200 hover:bg-gray-50 text-gray-700 font-medium">
               <Share2 className="w-4 h-4 mr-2" />
@@ -246,9 +246,9 @@ const LaboratoryMode = () => {
           active={auxActive}
           onActiveChange={setAuxActive}
         />
-        <FloatingAtomList
-          isVisible={showFloatingList}
-          onClose={() => setShowFloatingList(false)}
+        <NavigationList
+          isVisible={showNavigationList}
+          onClose={() => setShowNavigationList(false)}
         />
       </div>
     </div>
