@@ -3,6 +3,17 @@
 This repository uses a base `docker-compose.yml` without host port mappings.
 Each environment provides its own override file with port assignments.
 
+1. Copy the example environment files and adjust ports as needed:
+
+```bash
+cp TrinityBackendDjango/.env.example TrinityBackendDjango/.env
+cp TrinityBackendFastAPI/.env.example TrinityBackendFastAPI/.env
+cp TrinityFrontend/.env.example TrinityFrontend/.env
+```
+
+Edit the `*PORT` variables to match the host ports defined in the compose
+override you plan to use.
+
 ## Development
 Run:
 ```
@@ -13,6 +24,15 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml -p trinity_dev up
 Run:
 ```
 docker compose -f docker-compose.yml -f docker-compose.prod.yml -p trinity_prod up --build
+```
+
+The `-p` flag assigns a unique project name so containers from different
+environments do not conflict. After changing port numbers in your `.env` files
+and override compose file, rebuild the frontend image to embed the new values:
+
+```bash
+cd TrinityFrontend
+npm run build
 ```
 
 Use different project names (`-p`) to run multiple environments simultaneously.
