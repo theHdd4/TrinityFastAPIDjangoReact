@@ -36,3 +36,16 @@ npm run build
 ```
 
 Use different project names (`-p`) to run multiple environments simultaneously.
+
+## Creating the initial tenant
+Run the tenant setup script inside the Django service after starting each environment:
+
+### Development environment
+```bash
+docker compose -f docker-compose.yml -f docker-compose.dev.yml -p trinity_dev run --rm web python create_tenant.py
+```
+
+### Production environment
+```bash
+docker compose -f docker-compose.yml -f docker-compose.prod.yml -p trinity_prod run --rm web python create_tenant.py
+```
