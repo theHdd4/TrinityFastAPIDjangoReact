@@ -86,6 +86,10 @@ If you still hit **403 Forbidden** after submitting valid credentials:
   rather than a missing route. Double-check these parameters if the API returns
   a 404 JSON message like `{"detail": "Validator atom 'demo123' not found in database"}`.
 
+  A **405 Not Allowed** response when uploading a file usually means the
+  `VITE_VALIDATE_API` URL is missing the protocol. Make sure it includes
+  `http://` (or `https://`) like `http://${HOST_IP}:8001/api/data-upload-validate`.
+
   Update `CSRF_TRUSTED_ORIGINS` and `CORS_ALLOWED_ORIGINS` in
   `TrinityBackendDjango/.env` so both the local frontend URL
   `http://${HOST_IP}:8080` and the public domain
