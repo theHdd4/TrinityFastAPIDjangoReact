@@ -90,6 +90,11 @@ If you still hit **403 Forbidden** after submitting valid credentials:
   `VITE_VALIDATE_API` URL is missing the protocol. Make sure it includes
   `http://` (or `https://`) like `http://${HOST_IP}:8001/api/data-upload-validate`.
 
+  If the request instead fails with **Failed to fetch** and the console shows a
+  `net::ERR_FAILED` message with status **202**, verify the API URL points at the
+  host address reachable from your browser (for example `10.2.1.242`). Using the
+  Docker gateway address (`172.x.x.x`) won't work from outside the containers.
+
   Update `CSRF_TRUSTED_ORIGINS` and `CORS_ALLOWED_ORIGINS` in
   `TrinityBackendDjango/.env` so both the local frontend URL
   `http://${HOST_IP}:8080` and the public domain
