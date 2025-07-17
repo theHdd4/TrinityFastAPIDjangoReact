@@ -6,3 +6,7 @@ Added: TrinityBackendFastAPI/.env.example
 Modified: TrinityFrontend/.env.example
 Modified: TrinityFrontend/src/lib/api.ts
 Modified: TrinityBackendDjango/config/settings.py
+Added: TrinityFrontend/src/components/LaboratoryMode/components/FloatingNavigationList.tsx
+Modified: TrinityFrontend/src/components/LaboratoryMode/LaboratoryMode.tsx
+Modified: TrinityFrontend/src/components/LaboratoryMode/components/CanvasArea.tsx
+Modified: EnvironmentUpdateGuide.txt
