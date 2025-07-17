@@ -77,9 +77,7 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
     max: string;
   }
 
-  const [rangeValidations, setRangeValidations] = useState<RangeValidation[]>([
-    { id: 1, column: "", min: "", max: "" },
-  ]);
+  const [rangeValidations, setRangeValidations] = useState<RangeValidation[]>([]);
 
   interface PeriodicityValidation {
     id: number;
@@ -89,7 +87,7 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
 
   const [periodicityValidations, setPeriodicityValidations] = useState<
     PeriodicityValidation[]
-  >([{ id: 1, column: "", periodicity: "" }]);
+  >([]);
 
   const [numericalColumns, setNumericalColumns] = useState<string[]>([]);
   const [dateColumns, setDateColumns] = useState<string[]>([]);
@@ -374,21 +372,13 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
 
     if (selectedMasterFile && settings.validations?.[selectedMasterFile]) {
       const val = settings.validations[selectedMasterFile];
-      setRangeValidations(
-        val.ranges.length > 0
-          ? val.ranges
-          : [{ id: Date.now(), column: "", min: "", max: "" }],
-      );
+      setRangeValidations(val.ranges.length > 0 ? val.ranges : []);
       setPeriodicityValidations(
-        val.periodicities.length > 0
-          ? val.periodicities
-          : [{ id: Date.now(), column: "", periodicity: "" }],
+        val.periodicities.length > 0 ? val.periodicities : [],
       );
     } else {
-      setRangeValidations([{ id: Date.now(), column: "", min: "", max: "" }]);
-      setPeriodicityValidations([
-        { id: Date.now(), column: "", periodicity: "" },
-      ]);
+      setRangeValidations([]);
+      setPeriodicityValidations([]);
     }
 
   }, [selectedMasterFile, settings.columnConfig, settings.validations]);
@@ -738,16 +728,14 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
                           <label className="text-xs font-medium text-gray-700">
                             Column
                           </label>
-                          {rangeValidations.length > 1 && (
-                            <Button
-                              onClick={() => removeRangeValidation(range.id)}
-                              size="sm"
-                              variant="outline"
-                              className="h-6 px-2"
-                            >
-                              <Minus className="w-3 h-3" />
-                            </Button>
-                          )}
+                          <Button
+                            onClick={() => removeRangeValidation(range.id)}
+                            size="sm"
+                            variant="outline"
+                            className="h-6 px-2"
+                          >
+                            <Minus className="w-3 h-3" />
+                          </Button>
                         </div>
                         <Select
                           value={range.column}
@@ -831,18 +819,16 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
                           <label className="text-xs font-medium text-gray-700">
                             Date Column
                           </label>
-                          {periodicityValidations.length > 1 && (
-                            <Button
-                              onClick={() =>
-                                removePeriodicityValidation(periodicity.id)
-                              }
-                              size="sm"
-                              variant="outline"
-                              className="h-6 px-2"
-                            >
-                              <Minus className="w-3 h-3" />
-                            </Button>
-                          )}
+                          <Button
+                            onClick={() =>
+                              removePeriodicityValidation(periodicity.id)
+                            }
+                            size="sm"
+                            variant="outline"
+                            className="h-6 px-2"
+                          >
+                            <Minus className="w-3 h-3" />
+                          </Button>
                         </div>
                         <Select
                           value={periodicity.column}
