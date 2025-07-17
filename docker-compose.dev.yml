@@ -1,0 +1,29 @@
+services:
+  postgres:
+    ports:
+      - "5433:5432"
+  minio:
+    ports:
+      - "9002:9000"
+      - "9003:9001"
+  pgadmin:
+    ports:
+      - "5051:80"
+  web:
+    ports:
+      - "8003:8000"
+  fastapi:
+    ports:
+      - "8004:8001"
+  flight:
+    ports:
+      - "8816:8815"
+  trinity-ai:
+    ports:
+      - "8005:8002"
+  frontend:
+    ports:
+      - "8081:80"
+  traefik:
+    ports:
+      - "9081:80"

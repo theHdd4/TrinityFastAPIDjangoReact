@@ -1,0 +1,18 @@
+# Environment Setup Guide
+
+This repository uses a base `docker-compose.yml` without host port mappings.
+Each environment provides its own override file with port assignments.
+
+## Development
+Run:
+```
+docker compose -f docker-compose.yml -f docker-compose.dev.yml -p trinity_dev up --build
+```
+
+## Production
+Run:
+```
+docker compose -f docker-compose.yml -f docker-compose.prod.yml -p trinity_prod up --build
+```
+
+Use different project names (`-p`) to run multiple environments simultaneously.
