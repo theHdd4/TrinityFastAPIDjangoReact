@@ -104,6 +104,7 @@ If you still hit **403 Forbidden** after submitting valid credentials:
   service accepts requests from both origins as well. When running inside
   Docker on Linux this often means adding `http://172.17.48.1:8080` (or whatever
   the host IP is) so requests from the frontend are allowed.
+  Include the exact address your browser uses (for example `http://172.17.48.1:8080`) otherwise requests to FastAPI will fail with a CORS error.
   When exposing a public hostname also add it, the host IP, and `localhost` to
   the `ADDITIONAL_DOMAINS` variable so Django's tenant middleware accepts all
   three. Run `python create_tenant.py` again after adjusting this list if the

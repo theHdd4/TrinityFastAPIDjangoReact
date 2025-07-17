@@ -9,6 +9,8 @@ To add a new machine so the Trinity services work from its IP address:
    CSRF_TRUSTED_ORIGINS=http://10.2.1.242:8080,http://10.2.1.65:8080
    FASTAPI_CORS_ORIGINS=http://10.2.1.242:8080,http://10.2.1.65:8080
    ```
+Add the Docker gateway address (for example http://172.17.48.1:8080) if requests come from that host.
+
 
 2. Update `HOST_IP` in both `.env` files to match the address the services will
    listen on. Rebuild the frontend container so Vite embeds the updated value.
