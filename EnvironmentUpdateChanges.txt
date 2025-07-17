@@ -1,3 +1,8 @@
 Modified: docker-compose.yml
 Added: docker-compose.dev.yml
 Added: docker-compose.prod.yml
+Added: TrinityBackendDjango/.env.example
+Added: TrinityBackendFastAPI/.env.example
+Modified: TrinityFrontend/.env.example
+Modified: TrinityFrontend/src/lib/api.ts
+Modified: TrinityBackendDjango/config/settings.py
