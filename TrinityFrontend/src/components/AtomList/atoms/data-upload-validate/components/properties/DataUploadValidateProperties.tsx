@@ -12,6 +12,11 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Tooltip,
+  TooltipTrigger,
+  TooltipContent,
+} from "@/components/ui/tooltip";
 import { VALIDATE_API } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import {
@@ -521,7 +526,7 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
   const addReferentialValidation = () => {
     setReferentialValidations((prev) => [
       ...prev,
-      { id: Date.now(), column: "", values: [""] },
+      { id: Date.now(), column: "", values: [] },
     ]);
   };
 
