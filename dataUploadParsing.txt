@@ -1,8 +1,10 @@
 The Data Upload & Validate atom accepts CSV and Excel (`.xls`/`.xlsx`) files. On
 upload each file is read with pandas using `parse_dates=True`. After loading the
 service scans any string columns whose values resemble date patterns such as
-`yyyy-mm-dd`, `dd-mm-yyyy` or `mm-dd-yyyy`. These columns are converted to
-datetimes so the saved schema reports them with a `date` data type. Column names
+`yyyy-mm-dd`, `dd-mm-yyyy` or `mm-dd-yyyy`. Strings that include a timestamp such
+as `yyyy-mm-dd HH:MM:SS` are recognised as datetimes as well. These columns are
+converted to datetimes so the saved schema reports them with a `date` data type.
+Column names
 are normalised by trimming whitespace, converting to lowercase and removing
 inner spaces while keeping underscores. The resulting DataFrame is used to
 derive a schema and is then stored as an Arrow file for the validator atom.

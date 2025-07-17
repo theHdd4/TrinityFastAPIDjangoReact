@@ -361,8 +361,10 @@ async def create_new(
             else:
                 raise HTTPException(status_code=400, detail="Only CSV and XLSX files supported")
 
-            # Attempt to convert object columns that look like dates
-            date_pat = re.compile(r"^(?:\d{4}[-/]\d{2}[-/]\d{2}|\d{2}[-/]\d{2}[-/]\d{4})$")
+            # Attempt to convert object columns that look like dates or datetimes
+            date_pat = re.compile(
+                r"^(?:\d{4}[-/]\d{2}[-/]\d{2}|\d{2}[-/]\d{2}[-/]\d{4})(?:[ T]\d{2}:\d{2}:\d{2}(?:\.\d+)?)?$"
+            )
             for col in df.columns:
                 if df[col].dtype == object:
                     sample = df[col].dropna().astype(str).head(5)
