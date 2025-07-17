@@ -82,13 +82,21 @@ def perform_enhanced_validation(files_data: List[tuple], validator_data: Dict[st
                     
                     elif expected_type == "date":
                         original_dtype = str(df[col].dtype)
-                        if "datetime" not in original_dtype:
-                            df[col] = pd.to_datetime(df[col], errors='coerce')
-                            if df[col].isna().any():
-                                failed_rows = df[df[col].isna()].index.tolist()[:5]
-                                file_errors.append(f"Column '{col}' contains invalid date formats that cannot be converted (rows: {failed_rows})")
+                        if not pd.api.types.is_datetime64_any_dtype(df[col]):
+                            converted = pd.to_datetime(df[col], errors='coerce')
+                            if converted.isna().any():
+                                failed_rows = converted[converted.isna()].index.tolist()[:5]
+                                file_errors.append(
+                                    f"Column '{col}' contains invalid date formats that cannot be converted (rows: {failed_rows})"
+                                )
                             else:
-                                auto_corrections.append(f"Column '{col}' converted from {original_dtype} to datetime")
+                                file_errors.append(
+                                    f"Column '{col}' expected date type but was {original_dtype}"
+                                )
+                                auto_corrections.append(
+                                    f"Column '{col}' converted from {original_dtype} to datetime"
+                                )
+                            df[col] = converted
                 
                 except Exception as e:
                     file_errors.append(f"Failed to convert column '{col}' to {expected_type}: {str(e)}")

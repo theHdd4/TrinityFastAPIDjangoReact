@@ -25,3 +25,5 @@ the share of missing values exceeds the configured threshold. Referential
 integrity ensures that column values appear in a predefined list. All validation
 settings are stored with the project so they are reapplied whenever the master
 file is used again.
+
+When a column's data type is set to `date` in the properties panel, the validator will reject files where that column is not already typed as a datetime field. Values must parse with `pandas.to_datetime` using common formats such as `YYYY-MM-DD`, `DD-MM-YYYY`, `MM-DD-YYYY` or their slash variants. If the uploaded data stores the column as plain strings, validation will fail even if those strings could be converted to dates.
