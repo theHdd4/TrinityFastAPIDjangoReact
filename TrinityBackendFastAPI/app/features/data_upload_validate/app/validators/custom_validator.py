@@ -201,38 +201,57 @@ def perform_enhanced_validation(files_data: List[tuple], validator_data: Dict[st
 def apply_validation_condition(column_data, operator, value, col_name):
     """Apply a single validation condition and return list of failed row indices"""
     failed_rows = []
-    
+
+    def convert(v):
+        if pd.api.types.is_numeric_dtype(column_data):
+            try:
+                return float(v)
+            except Exception:
+                return pd.NA
+        if pd.api.types.is_datetime64_any_dtype(column_data):
+            try:
+                return pd.to_datetime(v, errors="coerce")
+            except Exception:
+                return pd.NaT
+        return v
+
     try:
+        conv_value = None
+        if isinstance(value, list):
+            conv_value = [convert(v) for v in value]
+        else:
+            conv_value = convert(value)
+
         if operator == "greater_than":
-            failed_mask = ~(column_data > value)
+            failed_mask = ~(column_data > conv_value)
         elif operator == "greater_than_or_equal":
-            failed_mask = ~(column_data >= value)
+            failed_mask = ~(column_data >= conv_value)
         elif operator == "less_than":
-            failed_mask = ~(column_data < value)
+            failed_mask = ~(column_data < conv_value)
         elif operator == "less_than_or_equal":
-            failed_mask = ~(column_data <= value)
+            failed_mask = ~(column_data <= conv_value)
         elif operator == "equal_to":
-            failed_mask = ~(column_data == value)
+            failed_mask = ~(column_data == conv_value)
         elif operator == "not_equal_to":
-            failed_mask = ~(column_data != value)
+            failed_mask = ~(column_data != conv_value)
         elif operator == "between":
-            if isinstance(value, list) and len(value) == 2:
-                failed_mask = ~((column_data >= value[0]) & (column_data <= value[1]))
+            if isinstance(conv_value, list) and len(conv_value) == 2:
+                failed_mask = ~((column_data >= conv_value[0]) & (column_data <= conv_value[1]))
             else:
                 return []
         elif operator == "contains":
-            failed_mask = ~column_data.astype(str).str.contains(str(value), na=False)
+            failed_mask = ~column_data.astype(str).str.contains(str(conv_value), na=False)
         elif operator == "starts_with":
-            failed_mask = ~column_data.astype(str).str.startswith(str(value), na=False)
+            failed_mask = ~column_data.astype(str).str.startswith(str(conv_value), na=False)
         else:
             return []
-        
+
         failed_rows = column_data[failed_mask].index.tolist()
-        
+
     except Exception as e:
         print(f"Error applying condition {operator} to column {col_name}: {str(e)}")
         return []
-    
+
     return failed_rows
 
 

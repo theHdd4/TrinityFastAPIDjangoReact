@@ -8,7 +8,9 @@ inner spaces while keeping underscores. The resulting DataFrame is used to
 derive a schema and is then stored as an Arrow file for the validator atom.
 
 During validation the service checks that required columns are present and that
-any configured range or periodicity rules pass. If validation succeeds the
+any configured range or periodicity rules pass. Range checks convert the
+configured min/max values to the column's data type before comparison so numeric
+and date ranges work correctly. If validation succeeds the
 Arrow version of the file is uploaded to MinIO so other atoms can read it later.
 
 When viewing a saved dataframe the CSV text is parsed client-side. Numeric
