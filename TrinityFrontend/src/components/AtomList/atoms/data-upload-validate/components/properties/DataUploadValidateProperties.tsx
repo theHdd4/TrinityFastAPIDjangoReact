@@ -17,7 +17,7 @@ import {
   TooltipTrigger,
   TooltipContent,
 } from "@/components/ui/tooltip";
-import { VALIDATE_API } from "@/lib/api";
+import { VALIDATE_API, FEATURE_OVERVIEW_API } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import {
   useLaboratoryStore,
@@ -534,22 +534,48 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
     setReferentialValidations((prev) => prev.filter((r) => r.id !== id));
   };
 
-  const updateReferentialValidation = (
+  const fetchColumnUniqueValues = async (column: string): Promise<string[]> => {
+    if (!validatorId || !selectedMasterFile) return [];
+    const backendKey = settings.fileKeyMap?.[selectedMasterFile] || selectedMasterFile;
+    try {
+      const ticketRes = await fetch(`${VALIDATE_API}/latest_ticket/${backendKey}`);
+      if (!ticketRes.ok) return [];
+      const ticket = await ticketRes.json();
+      const arrow = ticket.arrow_name;
+      if (!arrow) return [];
+      const sumRes = await fetch(
+        `${FEATURE_OVERVIEW_API}/column_summary?object_name=${encodeURIComponent(arrow)}`,
+      );
+      if (!sumRes.ok) return [];
+      const data = await sumRes.json();
+      const info = (data.summary || []).find((c: any) => c.column === column);
+      return Array.isArray(info?.unique_values)
+        ? info.unique_values.map((v: any) => String(v))
+        : [];
+    } catch {
+      return [];
+    }
+  };
+
+  const updateReferentialValidation = async (
     id: number,
     key: "column" | "values",
     value: any,
   ) => {
-    setReferentialValidations((prev) =>
-      prev.map((r) => {
-        if (r.id !== id) return r;
-        if (key === 'column' && (!r.values || r.values.length === 0)) {
-          const rows = schemaSamples[selectedMasterFile]?.sample_rows || [];
-          const uniq = Array.from(new Set(rows.map((row: any) => row[value]).filter((v: any) => v !== undefined)));
-          return { ...r, column: value, values: uniq.length ? uniq : [''] };
-        }
-        return { ...r, [key]: value };
-      }),
-    );
+    if (key === "column") {
+      const uniq = await fetchColumnUniqueValues(value);
+      setReferentialValidations((prev) =>
+        prev.map((r) =>
+          r.id === id
+            ? { ...r, column: value, values: uniq.length ? uniq : [""] }
+            : r,
+        ),
+      );
+    } else {
+      setReferentialValidations((prev) =>
+        prev.map((r) => (r.id === id ? { ...r, [key]: value } : r)),
+      );
+    }
   };
 
   const addRefValue = (id: number) => {
