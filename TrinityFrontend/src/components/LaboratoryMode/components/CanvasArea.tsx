@@ -32,6 +32,7 @@ import {
   DEFAULT_TEXTBOX_SETTINGS,
   DEFAULT_DATAUPLOAD_SETTINGS,
   DEFAULT_FEATURE_OVERVIEW_SETTINGS,
+  DataUploadSettings,
   ColumnClassifierColumn,
 } from '../store/laboratoryStore';
 
@@ -608,11 +609,18 @@ const handleAddDragLeave = (e: React.DragEvent) => {
 };
 
   const removeAtom = (cardId: string, atomId: string) => {
+    const arr = Array.isArray(layoutCards) ? layoutCards : [];
+    const card = arr.find(c => c.id === cardId);
+    const atom = card?.atoms.find(a => a.id === atomId);
+    if (atom?.atomId === 'data-upload-validate') {
+      const vid = (atom.settings as DataUploadSettings)?.validatorId;
+      if (vid) {
+        fetch(`${VALIDATE_API}/delete_validator_atom/${vid}`, { method: 'DELETE' }).catch(() => {});
+      }
+    }
     setLayoutCards(
-      (Array.isArray(layoutCards) ? layoutCards : []).map(card =>
-        card.id === cardId
-          ? { ...card, atoms: card.atoms.filter(atom => atom.id !== atomId) }
-          : card
+      arr.map(c =>
+        c.id === cardId ? { ...c, atoms: c.atoms.filter(a => a.id !== atomId) } : c
       )
     );
   };
@@ -671,6 +679,11 @@ const handleAddDragLeave = (e: React.DragEvent) => {
       card.atoms.forEach(atom => {
         if (atom.atomId === 'text-box') {
           fetch(`${TEXT_API}/text/${atom.id}`, { method: 'DELETE' }).catch(() => {});
+        } else if (atom.atomId === 'data-upload-validate') {
+          const vid = (atom.settings as DataUploadSettings)?.validatorId;
+          if (vid) {
+            fetch(`${VALIDATE_API}/delete_validator_atom/${vid}`, { method: 'DELETE' }).catch(() => {});
+          }
         }
       });
       fetch(`${CARD_API}/cards/archive`, {

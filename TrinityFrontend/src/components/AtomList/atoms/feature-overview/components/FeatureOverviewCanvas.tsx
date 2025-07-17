@@ -35,6 +35,9 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
   const [dimensionMap, setDimensionMap] = useState<Record<string, string[]>>(
     settings.dimensionMap || {},
   );
+  const hasMappedIdentifiers = Object.values(dimensionMap).some(
+    (ids) => ids.length > 0,
+  );
   const [skuRows, setSkuRows] = useState<any[]>(
     Array.isArray(settings.skuTable) ? settings.skuTable : [],
   );
@@ -79,11 +82,7 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
   }, []);
 
   useEffect(() => {
-    if (
-      Object.keys(dimensionMap).length > 0 &&
-      skuRows.length === 0 &&
-      settings.dataSource
-    ) {
+    if (hasMappedIdentifiers && skuRows.length === 0 && settings.dataSource) {
       // prefill SKUs only when a data source is configured
       displaySkus();
     }
@@ -144,8 +143,8 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
   };
 
   const displaySkus = async () => {
-    if (!settings.dataSource) {
-      console.warn("displaySkus called without dataSource");
+    if (!settings.dataSource || !hasMappedIdentifiers) {
+      console.warn("displaySkus called without data source or mapped identifiers");
       return;
     }
     setError(null);
@@ -393,7 +392,11 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
             )}
           </div>
 
-          <Button onClick={displaySkus} className="mt-4">
+          <Button
+            onClick={displaySkus}
+            disabled={!hasMappedIdentifiers}
+            className="mt-4"
+          >
             Display SKUs
           </Button>
 

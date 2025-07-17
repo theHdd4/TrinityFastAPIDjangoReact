@@ -90,13 +90,13 @@ const DataFrameView = () => {
     const lines = text.split(/\r?\n/).filter(line => line.trim());
     if (lines.length === 0) return { headers: [], rows: [] };
     const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, ''));
+    const numeric = /^-?\d+(?:\.\d+)?$/;
     const rows = lines.slice(1).map(line => {
       const values = line.split(',').map(v => v.trim().replace(/"/g, ''));
       const row: Record<string, any> = {};
       headers.forEach((h, i) => {
-        const value = values[i] || '';
-        const num = parseFloat(value);
-        row[h] = !isNaN(num) && value !== '' ? num : value;
+        const value = values[i] ?? '';
+        row[h] = numeric.test(value) ? parseFloat(value) : value;
       });
       return row;
     });

@@ -12,11 +12,10 @@ DATABASE_NAME = "validator_atoms_db"
 # Collection Names
 COLLECTIONS = {
     "VALIDATOR_ATOMS": "validator_atoms",
-    "COLUMN_CLASSIFICATIONS": "column_classifications", 
     "BUSINESS_DIMENSIONS": "business_dimensions_with_assignments",
     "VALIDATION_LOGS": "validation_logs",
     "VALIDATION_CONFIG": "validation_config",
-    "VALIDATION_UNITS": "validation_units"
+    "VALIDATION_UNITS": "validation_units",
 }
 
 # Initialize MongoDB client with timeout
@@ -37,38 +36,6 @@ def check_mongodb_connection():
     """Check if MongoDB is available"""
     return mongo_client is not None and db is not None
 
-def save_classification_to_mongo(validator_atom_id: str, file_key: str, classification_data: dict):
-    """Save column classification to MongoDB"""
-    if not check_mongodb_connection():
-        return {"status": "error", "error": "MongoDB not connected"}
-    
-    try:
-        document_id = f"{validator_atom_id}_{file_key}_classification"
-        document = {
-            "_id": document_id,
-            "validator_atom_id": validator_atom_id,
-            "file_key": file_key,
-            "created_at": datetime.utcnow(),
-            "updated_at": datetime.utcnow(),
-            **classification_data
-        }
-        
-        result = db[COLLECTIONS["COLUMN_CLASSIFICATIONS"]].replace_one(
-            {"_id": document_id}, 
-            document, 
-            upsert=True
-        )
-        
-        return {
-            "status": "success", 
-            "mongo_id": document_id,
-            "operation": "inserted" if result.upserted_id else "updated",
-            "collection": COLLECTIONS["COLUMN_CLASSIFICATIONS"]
-        }
-        
-    except Exception as e:
-        logging.error(f"MongoDB save error for classification: {e}")
-        return {"status": "error", "error": str(e)}
 
 def save_validator_atom_to_mongo(validator_atom_id: str, validator_data: dict):
     """Save validator atom configuration to MongoDB"""
@@ -123,19 +90,6 @@ def save_validation_log_to_mongo(validation_data: dict):
         logging.error(f"MongoDB save error for validation log: {e}")
         return {"status": "error", "error": str(e)}
 
-def get_classification_from_mongo(validator_atom_id: str, file_key: str):
-    """Retrieve classification data from MongoDB"""
-    if not check_mongodb_connection():
-        return None
-    
-    try:
-        document_id = f"{validator_atom_id}_{file_key}_classification"
-        result = db[COLLECTIONS["COLUMN_CLASSIFICATIONS"]].find_one({"_id": document_id})
-        return result
-        
-    except Exception as e:
-        logging.error(f"MongoDB read error for classification: {e}")
-        return None
 
 def test_mongodb_operations():
     """Test MongoDB connection and basic operations"""

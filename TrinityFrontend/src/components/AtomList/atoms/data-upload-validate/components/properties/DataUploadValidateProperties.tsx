@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import { Settings, Upload, Table, BarChart3, Minus, Plus, Pencil, Trash2 } from "lucide-react";
+import { Settings, Upload, Table, BarChart3, Minus, Plus, Pencil, Trash2, Wrench, Info } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -12,7 +12,12 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
-import { VALIDATE_API } from "@/lib/api";
+import {
+  Tooltip,
+  TooltipTrigger,
+  TooltipContent,
+} from "@/components/ui/tooltip";
+import { VALIDATE_API, FEATURE_OVERVIEW_API } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import {
   useLaboratoryStore,
@@ -77,9 +82,7 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
     max: string;
   }
 
-  const [rangeValidations, setRangeValidations] = useState<RangeValidation[]>([
-    { id: 1, column: "", min: "", max: "" },
-  ]);
+  const [rangeValidations, setRangeValidations] = useState<RangeValidation[]>([]);
 
   interface PeriodicityValidation {
     id: number;
@@ -89,14 +92,40 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
 
   const [periodicityValidations, setPeriodicityValidations] = useState<
     PeriodicityValidation[]
-  >([{ id: 1, column: "", periodicity: "" }]);
+  >([]);
+
+  interface RegexValidation {
+    id: number;
+    column: string;
+    pattern: string;
+    sample: string;
+  }
+
+  const [regexValidations, setRegexValidations] = useState<RegexValidation[]>([]);
+
+  interface NullValidation {
+    id: number;
+    column: string;
+    threshold: string;
+  }
+
+  const [nullValidations, setNullValidations] = useState<NullValidation[]>([]);
+
+  interface ReferentialValidation {
+    id: number;
+    column: string;
+    values: string[];
+  }
+
+  const [referentialValidations, setReferentialValidations] = useState<
+    ReferentialValidation[]
+  >([]);
 
   const [numericalColumns, setNumericalColumns] = useState<string[]>([]);
   const [dateColumns, setDateColumns] = useState<string[]>([]);
   const [categoricalColumns, setCategoricalColumns] = useState<string[]>([]);
   const [continuousColumns, setContinuousColumns] = useState<string[]>([]);
-  const [selectedIdentifiers, setSelectedIdentifiers] = useState<string[]>([]);
-  const [selectedMeasures, setSelectedMeasures] = useState<string[]>([]);
+  const [schemaSamples, setSchemaSamples] = useState<Record<string, any>>({});
 
   // Load existing configuration if validator id already present
   useEffect(() => {
@@ -111,6 +140,8 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
           );
           if (!selectedMasterFile) setSelectedMasterFile(files[0]);
         }
+
+        setSchemaSamples(cfg.schemas || {});
 
         const parsedValidations: Record<string, any> = {};
         if (cfg.validations) {
@@ -130,7 +161,13 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
                 column: v.column,
                 periodicity: v.periodicity || "",
               }));
-            parsedValidations[k] = { ranges, periodicities };
+            parsedValidations[k] = {
+              ranges,
+              periodicities,
+              regex: [],
+              nulls: [],
+              referentials: [],
+            };
           });
         }
 
@@ -138,7 +175,6 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
           validatorId,
           requiredFiles: files,
           validations: parsedValidations,
-          classification: cfg.classification || {},
           columnConfig: {
             ...(cfg.column_types || {}),
             ...(settings.columnConfig || {}),
@@ -183,9 +219,14 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
     const id = `validator-${Date.now()}`;
     const form = new FormData();
     form.append("validator_atom_id", id);
-    allFiles.forEach((f) => form.append("files", f));
-    const keys = allFiles.map((f) => f.name);
-    form.append("file_keys", JSON.stringify(keys));
+    allFiles.forEach((f) => {
+      const prefixed = `Master_${f.name}`;
+      const fileForUpload = new File([f], prefixed, { type: f.type });
+      form.append("files", fileForUpload);
+    });
+    const displayNames = allFiles.map((f) => f.name);
+    const backendNames = allFiles.map((f) => `Master_${f.name}`);
+    form.append("file_keys", JSON.stringify(backendNames));
 
     const res = await fetch(`${VALIDATE_API}/create_new`, {
       method: "POST",
@@ -193,13 +234,15 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
     });
     if (res.ok) {
       setValidatorId(id);
-      setAllAvailableFiles(keys.map((k) => ({ name: k, source: "upload", original: k })));
-      setSelectedMasterFile(keys[0]);
+      setAllAvailableFiles(
+        backendNames.map((n) => ({ name: n, source: "upload", original: n }))
+      );
+      setSelectedMasterFile(backendNames[0]);
       const cfg = await fetch(
         `${VALIDATE_API}/get_validator_config/${id}`,
       ).then((r) => r.json());
       const defaultTypes: Record<string, string> = {};
-      const firstKey = keys[0];
+      const firstKey = backendNames[0];
       if (cfg.schemas && cfg.schemas[firstKey]) {
         cfg.schemas[firstKey].columns.forEach((c: any) => {
           defaultTypes[c.column] = "not_defined";
@@ -219,7 +262,7 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
         },
         fileKeyMap: {
           ...(settings.fileKeyMap || {}),
-          ...keys.reduce((acc, k) => ({ ...acc, [k]: k }), {}),
+          ...backendNames.reduce((acc, n) => ({ ...acc, [n]: n }), {}),
         },
       });
     }
@@ -260,15 +303,9 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
       newValidations[newName] = newValidations[oldName];
       delete newValidations[oldName];
     }
-    const newClassification = { ...(settings.classification || {}) } as Record<string, any>;
-    if (newClassification[oldName]) {
-      newClassification[newName] = newClassification[oldName];
-      delete newClassification[oldName];
-    }
     updateSettings(atomId, {
       columnConfig: newColumnCfg,
       validations: newValidations,
-      classification: newClassification,
       fileKeyMap: newFileKeyMap,
     });
 
@@ -326,11 +363,6 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
           });
         }
 
-        if (cfg.classification?.[selectedMasterFile]) {
-          const cls = cfg.classification[selectedMasterFile];
-          setSelectedIdentifiers(cls.identifiers || []);
-          setSelectedMeasures(cls.measures || []);
-        }
         if (cfg.validations?.[selectedMasterFile]) {
           const list = cfg.validations[selectedMasterFile] as any[];
           const ranges = list
@@ -351,10 +383,17 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
           updateSettings(atomId, {
             validations: {
               ...(settings.validations || {}),
-              [selectedMasterFile]: { ranges, periodicities },
+              [selectedMasterFile]: {
+                ranges,
+                periodicities,
+                regex: [],
+                nulls: [],
+                referentials: [],
+              },
             },
           });
         }
+        setSchemaSamples((prev) => ({ ...prev, [selectedMasterFile]: cfg.schemas?.[selectedMasterFile] || {} }));
       })
       .catch(() => {
         const savedLocal =
@@ -388,32 +427,24 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
 
     if (selectedMasterFile && settings.validations?.[selectedMasterFile]) {
       const val = settings.validations[selectedMasterFile];
-      setRangeValidations(
-        val.ranges.length > 0
-          ? val.ranges
-          : [{ id: Date.now(), column: "", min: "", max: "" }],
-      );
+      setRangeValidations(val.ranges?.length ? val.ranges : []);
       setPeriodicityValidations(
-        val.periodicities.length > 0
-          ? val.periodicities
-          : [{ id: Date.now(), column: "", periodicity: "" }],
+        val.periodicities?.length ? val.periodicities : [],
+      );
+      setRegexValidations(val.regex?.length ? val.regex : []);
+      setNullValidations(val.nulls?.length ? val.nulls : []);
+      setReferentialValidations(
+        val.referentials?.length ? val.referentials : [],
       );
     } else {
-      setRangeValidations([{ id: Date.now(), column: "", min: "", max: "" }]);
-      setPeriodicityValidations([
-        { id: Date.now(), column: "", periodicity: "" },
-      ]);
+      setRangeValidations([]);
+      setPeriodicityValidations([]);
+      setRegexValidations([]);
+      setNullValidations([]);
+      setReferentialValidations([]);
     }
 
-    if (selectedMasterFile && settings.classification?.[selectedMasterFile]) {
-      const cls = settings.classification[selectedMasterFile];
-      setSelectedIdentifiers(cls.identifiers);
-      setSelectedMeasures(cls.measures);
-    } else {
-      setSelectedIdentifiers([]);
-      setSelectedMeasures([]);
-    }
-  }, [selectedMasterFile, settings.columnConfig, settings.validations, settings.classification]);
+  }, [selectedMasterFile, settings.columnConfig, settings.validations]);
 
   const addRangeValidation = () => {
     setRangeValidations((prev) => [
@@ -457,6 +488,131 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
     );
   };
 
+  const addRegexValidation = () => {
+    setRegexValidations((prev) => [
+      ...prev,
+      { id: Date.now(), column: "", pattern: "", sample: "" },
+    ]);
+  };
+
+  const removeRegexValidation = (id: number) => {
+    setRegexValidations((prev) => prev.filter((r) => r.id !== id));
+  };
+
+  const updateRegexValidation = (
+    id: number,
+    key: "column" | "pattern" | "sample",
+    value: string,
+  ) => {
+    setRegexValidations((prev) =>
+      prev.map((r) => (r.id === id ? { ...r, [key]: value } : r)),
+    );
+  };
+
+  const addNullValidation = () => {
+    setNullValidations((prev) => [
+      ...prev,
+      { id: Date.now(), column: "", threshold: "" },
+    ]);
+  };
+
+  const removeNullValidation = (id: number) => {
+    setNullValidations((prev) => prev.filter((n) => n.id !== id));
+  };
+
+  const updateNullValidation = (
+    id: number,
+    key: "column" | "threshold",
+    value: string,
+  ) => {
+    setNullValidations((prev) =>
+      prev.map((n) => (n.id === id ? { ...n, [key]: value } : n)),
+    );
+  };
+
+  const addReferentialValidation = () => {
+    setReferentialValidations((prev) => [
+      ...prev,
+      { id: Date.now(), column: "", values: [] },
+    ]);
+  };
+
+  const removeReferentialValidation = (id: number) => {
+    setReferentialValidations((prev) => prev.filter((r) => r.id !== id));
+  };
+
+  const fetchColumnUniqueValues = async (column: string): Promise<string[]> => {
+    if (!validatorId || !selectedMasterFile) return [];
+    const backendKey = settings.fileKeyMap?.[selectedMasterFile] || selectedMasterFile;
+    try {
+      const ticketRes = await fetch(`${VALIDATE_API}/latest_ticket/${backendKey}`);
+      if (!ticketRes.ok) return [];
+      const ticket = await ticketRes.json();
+      const arrow = ticket.arrow_name;
+      if (!arrow) return [];
+      const sumRes = await fetch(
+        `${FEATURE_OVERVIEW_API}/column_summary?object_name=${encodeURIComponent(arrow)}`,
+      );
+      if (!sumRes.ok) return [];
+      const data = await sumRes.json();
+      const info = (data.summary || []).find((c: any) => c.column === column);
+      return Array.isArray(info?.unique_values)
+        ? info.unique_values.map((v: any) => String(v))
+        : [];
+    } catch {
+      return [];
+    }
+  };
+
+  const updateReferentialValidation = async (
+    id: number,
+    key: "column" | "values",
+    value: any,
+  ) => {
+    if (key === "column") {
+      const uniq = await fetchColumnUniqueValues(value);
+      setReferentialValidations((prev) =>
+        prev.map((r) =>
+          r.id === id
+            ? { ...r, column: value, values: uniq.length ? uniq : [""] }
+            : r,
+        ),
+      );
+    } else {
+      setReferentialValidations((prev) =>
+        prev.map((r) => (r.id === id ? { ...r, [key]: value } : r)),
+      );
+    }
+  };
+
+  const addRefValue = (id: number) => {
+    setReferentialValidations((prev) =>
+      prev.map((r) =>
+        r.id === id ? { ...r, values: [...r.values, ""] } : r,
+      ),
+    );
+  };
+
+  const updateRefValue = (id: number, idx: number, value: string) => {
+    setReferentialValidations((prev) =>
+      prev.map((r) =>
+        r.id === id
+          ? { ...r, values: r.values.map((v, i) => (i === idx ? value : v)) }
+          : r,
+      ),
+    );
+  };
+
+  const removeRefValue = (id: number, idx: number) => {
+    setReferentialValidations((prev) =>
+      prev.map((r) =>
+        r.id === id
+          ? { ...r, values: r.values.filter((_, i) => i !== idx) }
+          : r,
+      ),
+    );
+  };
+
   const handleSaveConfiguration = async () => {
     if (!validatorId || !selectedMasterFile) return;
 
@@ -478,7 +634,7 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
     const columnConditions: Record<string, any[]> = {};
     rangeValidations.forEach((r) => {
       if (!r.column) return;
-      const conds: any[] = [];
+      const conds: any[] = columnConditions[r.column] || [];
       if (r.min !== "") {
         conds.push({
           operator: "greater_than_or_equal",
@@ -502,6 +658,41 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
         columnFrequencies[p.column] = p.periodicity;
     });
 
+    regexValidations.forEach((r) => {
+      if (!r.column || !r.pattern) return;
+      const conds: any[] = columnConditions[r.column] || [];
+      conds.push({
+        operator: "regex_match",
+        value: r.pattern,
+        error_message: "regex check",
+      });
+      columnConditions[r.column] = conds;
+    });
+
+    nullValidations.forEach((n) => {
+      if (!n.column || !n.threshold) return;
+      const conds: any[] = columnConditions[n.column] || [];
+      conds.push({
+        operator: "null_percentage",
+        value: n.threshold,
+        error_message: "null threshold",
+      });
+      columnConditions[n.column] = conds;
+    });
+
+    referentialValidations.forEach((r) => {
+      if (!r.column || r.values.length === 0) return;
+      const allowed = r.values.filter((v) => v !== "");
+      if (allowed.length === 0) return;
+      const conds: any[] = columnConditions[r.column] || [];
+      conds.push({
+        operator: "in_list",
+        value: allowed,
+        error_message: "referential check",
+      });
+      columnConditions[r.column] = conds;
+    });
+
       const res2 = await fetch(`${VALIDATE_API}/configure_validation_config`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -513,16 +704,7 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
         }),
       });
 
-    const classifyForm = new FormData();
-    classifyForm.append("validator_atom_id", validatorId);
-    classifyForm.append("file_key", backendKey);
-    classifyForm.append("identifiers", JSON.stringify(selectedIdentifiers));
-    classifyForm.append("measures", JSON.stringify(selectedMeasures));
-    classifyForm.append("unclassified", JSON.stringify([]));
-      const res3 = await fetch(`${VALIDATE_API}/classify_columns`, {
-        method: "POST",
-        body: classifyForm,
-      });
+    const res3 = { ok: true };
 
     const savedRanges = rangeValidations.filter(
       (r) => r.column && (r.min !== "" || r.max !== ""),
@@ -530,17 +712,21 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
     const savedPeriods = periodicityValidations.filter(
       (p) => p.column && p.periodicity,
     );
+    const savedRegex = regexValidations.filter(
+      (r) => r.column && r.pattern,
+    );
+    const savedNulls = nullValidations.filter(
+      (n) => n.column && n.threshold !== "",
+    );
+    const savedRefs = referentialValidations.filter(
+      (r) => r.column && r.values.some((v) => v !== ""),
+    );
     let renamedValidations = { ...(settings.validations || {}) } as Record<string, any>;
-    let renamedClassification = { ...(settings.classification || {}) } as Record<string, any>;
     let renamedColumns = { ...(settings.columnConfig || {}) } as Record<string, Record<string,string>>;
     Object.entries(renameMap).forEach(([oldName, newName]) => {
       if (renamedValidations[oldName]) {
         renamedValidations[newName] = renamedValidations[oldName];
         delete renamedValidations[oldName];
-      }
-      if (renamedClassification[oldName]) {
-        renamedClassification[newName] = renamedClassification[oldName];
-        delete renamedClassification[oldName];
       }
       if (renamedColumns[oldName]) {
         renamedColumns[newName] = renamedColumns[oldName];
@@ -549,11 +735,13 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
     });
     renamedValidations = {
       ...renamedValidations,
-      [selectedMasterFile]: { ranges: savedRanges, periodicities: savedPeriods },
-    };
-    renamedClassification = {
-      ...renamedClassification,
-      [selectedMasterFile]: { identifiers: selectedIdentifiers, measures: selectedMeasures },
+      [selectedMasterFile]: {
+        ranges: savedRanges,
+        periodicities: savedPeriods,
+        regex: savedRegex,
+        nulls: savedNulls,
+        referentials: savedRefs,
+      },
     };
     renamedColumns = {
       ...renamedColumns,
@@ -561,7 +749,6 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
     };
     const finalFiles = allAvailableFiles.map(f => f.name);
     Object.keys(renamedValidations).forEach(k => { if (!finalFiles.includes(k)) delete renamedValidations[k]; });
-    Object.keys(renamedClassification).forEach(k => { if (!finalFiles.includes(k)) delete renamedClassification[k]; });
     Object.keys(renamedColumns).forEach(k => { if (!finalFiles.includes(k)) delete renamedColumns[k]; });
 
     const newKeyMap = allAvailableFiles.reduce<Record<string, string>>(
@@ -572,7 +759,6 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
       validatorId,
       requiredFiles: finalFiles,
       validations: renamedValidations,
-      classification: renamedClassification,
       columnConfig: renamedColumns,
       fileKeyMap: newKeyMap,
     });
@@ -614,7 +800,7 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
               <input
                 type="file"
                 multiple
-                accept=".csv,.xlsx,.xls,.json"
+                accept=".csv,.xls,.xlsx"
                 onChange={handleMasterFileSelect}
                 className="hidden"
                 id="master-file-upload"
@@ -692,7 +878,7 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
         {/* Tabs Section - Only active when master file is selected */}
         {selectedMasterFile && selectedMasterFile !== "no-files" && (
           <Tabs defaultValue="datatype" className="w-full">
-            <TabsList className="grid w-full grid-cols-2 mx-4 my-4">
+            <TabsList className="grid w-full grid-cols-3 mx-4 my-4">
               <TabsTrigger value="datatype" className="text-xs">
                 <Table className="w-3 h-3 mr-1" />
                 DataType
@@ -700,6 +886,10 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
               <TabsTrigger value="value" className="text-xs">
                 <BarChart3 className="w-3 h-3 mr-1" />
                 Value
+              </TabsTrigger>
+              <TabsTrigger value="advanced" className="text-xs">
+                <Wrench className="w-3 h-3 mr-1" />
+                Advanced
               </TabsTrigger>
             </TabsList>
 
@@ -780,16 +970,14 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
                           <label className="text-xs font-medium text-gray-700">
                             Column
                           </label>
-                          {rangeValidations.length > 1 && (
-                            <Button
-                              onClick={() => removeRangeValidation(range.id)}
-                              size="sm"
-                              variant="outline"
-                              className="h-6 px-2"
-                            >
-                              <Minus className="w-3 h-3" />
-                            </Button>
-                          )}
+                          <Button
+                            onClick={() => removeRangeValidation(range.id)}
+                            size="sm"
+                            variant="outline"
+                            className="h-6 px-2"
+                          >
+                            <Minus className="w-3 h-3" />
+                          </Button>
                         </div>
                         <Select
                           value={range.column}
@@ -873,18 +1061,16 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
                           <label className="text-xs font-medium text-gray-700">
                             Date Column
                           </label>
-                          {periodicityValidations.length > 1 && (
-                            <Button
-                              onClick={() =>
-                                removePeriodicityValidation(periodicity.id)
-                              }
-                              size="sm"
-                              variant="outline"
-                              className="h-6 px-2"
-                            >
-                              <Minus className="w-3 h-3" />
-                            </Button>
-                          )}
+                          <Button
+                            onClick={() =>
+                              removePeriodicityValidation(periodicity.id)
+                            }
+                            size="sm"
+                            variant="outline"
+                            className="h-6 px-2"
+                          >
+                            <Minus className="w-3 h-3" />
+                          </Button>
                         </div>
                         <Select
                           value={periodicity.column}
@@ -936,6 +1122,172 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
                             </SelectContent>
                           </Select>
                         </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </TabsContent>
+
+              <TabsContent value="advanced" className="space-y-4">
+                <div className="pt-4">
+                  <h4 className="text-sm font-medium text-gray-900 mb-4">
+                    Advanced Checks
+                  </h4>
+
+                  {/* Regex Validation */}
+                  <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                      <h5 className="text-sm font-medium text-gray-700">
+                        Regex Check
+                      </h5>
+                      <Button onClick={addRegexValidation} size="sm" variant="outline" className="h-7 px-2">
+                        <Plus className="w-3 h-3" />
+                      </Button>
+                    </div>
+                    <p className="text-[10px] text-gray-500">
+                      Quick Examples:<br />Email: ^[\w\.-]+@[\w\.-]+\.\w{2,5}$<br />Phone (US): ^\d{3}[-.]?\d{3}[-.]?\d{4}$<br />Product Code: ^[A-Z]{3}-\d{4}$<br />Date YYYY-MM-DD: ^\d{4}-\d{2}-\d{2}$
+                    </p>
+                    {regexValidations.map((rv) => {
+                      const match = (() => {
+                        try {
+                          return new RegExp(rv.pattern).test(rv.sample);
+                        } catch {
+                          return false;
+                        }
+                      })();
+                      const sampleVals = ["ABC-1234", "XYZ-0000", "foo"];
+                      const matches = sampleVals.filter((v) => {
+                        try {
+                          return new RegExp(rv.pattern).test(v);
+                        } catch {
+                          return false;
+                        }
+                      });
+                      const fails = sampleVals.filter((v) => {
+                        try {
+                          return !new RegExp(rv.pattern).test(v);
+                        } catch {
+                          return false;
+                        }
+                      });
+                      return (
+                        <div key={rv.id} className="p-3 bg-gray-50 rounded-lg border border-gray-200 space-y-3">
+                          <div className="flex items-center justify-between">
+                            <label className="text-xs font-medium text-gray-700">Column</label>
+                            <Button onClick={() => removeRegexValidation(rv.id)} size="sm" variant="outline" className="h-6 px-2">
+                              <Minus className="w-3 h-3" />
+                            </Button>
+                          </div>
+                          <Select value={rv.column} onValueChange={(v) => updateRegexValidation(rv.id, 'column', v)}>
+                            <SelectTrigger className="bg-white border-gray-300 h-8 text-xs">
+                              <SelectValue placeholder="Select column..." />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {Object.keys(columnDataTypes).map((c) => (
+                                <SelectItem key={c} value={c}>{c}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          <div className="relative">
+                            <Input
+                              value={rv.pattern}
+                              onChange={(e) => updateRegexValidation(rv.id, 'pattern', e.target.value)}
+                              placeholder="^ABC-\\d{4}$"
+                              className="bg-white border-gray-300 h-8 text-xs pr-8"
+                            />
+                            <Tooltip>
+                              <TooltipTrigger type="button" className="absolute right-2 top-1">
+                                <Info className="w-3 h-3 text-gray-500" />
+                              </TooltipTrigger>
+                              <TooltipContent className="text-xs max-w-xs">
+                                Enter a full-match regex (use ^...$ anchors).
+                              </TooltipContent>
+                            </Tooltip>
+                          </div>
+                          <Input value={rv.sample} onChange={(e) => updateRegexValidation(rv.id, 'sample', e.target.value)} placeholder="Sample value" className="bg-white border-gray-300 h-8 text-xs" />
+                          <div className="text-[10px] text-gray-500">
+                            Matches: {matches.join(', ') || 'none'} | Fails: {fails.join(', ') || 'none'}
+                          </div>
+                          {rv.sample && rv.pattern && (
+                            <Badge variant={match ? 'default' : 'secondary'} className="w-fit text-xs">
+                              {match ? 'Match' : 'No Match'}
+                            </Badge>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Null Percentage */}
+                  <div className="space-y-4 mt-6">
+                    <div className="flex items-center justify-between">
+                      <h5 className="text-sm font-medium text-gray-700">
+                        Percentage of Null Values
+                      </h5>
+                      <Button onClick={addNullValidation} size="sm" variant="outline" className="h-7 px-2">
+                        <Plus className="w-3 h-3" />
+                      </Button>
+                    </div>
+                    {nullValidations.map((nv) => (
+                      <div key={nv.id} className="p-3 bg-gray-50 rounded-lg border border-gray-200 space-y-3">
+                        <div className="flex items-center justify-between">
+                          <label className="text-xs font-medium text-gray-700">Column</label>
+                          <Button onClick={() => removeNullValidation(nv.id)} size="sm" variant="outline" className="h-6 px-2">
+                            <Minus className="w-3 h-3" />
+                          </Button>
+                        </div>
+                        <Select value={nv.column} onValueChange={(v) => updateNullValidation(nv.id, 'column', v)}>
+                          <SelectTrigger className="bg-white border-gray-300 h-8 text-xs">
+                            <SelectValue placeholder="Select column..." />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {Object.keys(columnDataTypes).map((c) => (
+                              <SelectItem key={c} value={c}>{c}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <Input type="number" min="0" max="100" value={nv.threshold} onChange={(e) => updateNullValidation(nv.id, 'threshold', e.target.value)} placeholder="Threshold %" className="bg-white border-gray-300 h-8 text-xs" />
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Referential Integrity */}
+                  <div className="space-y-4 mt-6">
+                    <div className="flex items-center justify-between">
+                      <h5 className="text-sm font-medium text-gray-700">Referential Integrity</h5>
+                      <Button onClick={addReferentialValidation} size="sm" variant="outline" className="h-7 px-2">
+                        <Plus className="w-3 h-3" />
+                      </Button>
+                    </div>
+                    {referentialValidations.map((rv) => (
+                      <div key={rv.id} className="p-3 bg-gray-50 rounded-lg border border-gray-200 space-y-3">
+                        <div className="flex items-center justify-between">
+                          <label className="text-xs font-medium text-gray-700">Column</label>
+                          <Button onClick={() => removeReferentialValidation(rv.id)} size="sm" variant="outline" className="h-6 px-2">
+                            <Minus className="w-3 h-3" />
+                          </Button>
+                        </div>
+                        <Select value={rv.column} onValueChange={(v) => updateReferentialValidation(rv.id, 'column', v)}>
+                          <SelectTrigger className="bg-white border-gray-300 h-8 text-xs">
+                            <SelectValue placeholder="Select column..." />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {Object.keys(columnDataTypes).map((c) => (
+                              <SelectItem key={c} value={c}>{c}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        {rv.values.map((val, idx) => (
+                          <div key={idx} className="flex items-center space-x-2">
+                            <Input value={val} onChange={(e) => updateRefValue(rv.id, idx, e.target.value)} placeholder="Allowed value" className="bg-white border-gray-300 h-8 text-xs" />
+                            <Button onClick={() => removeRefValue(rv.id, idx)} size="sm" variant="outline" className="h-6 px-2">
+                              <Minus className="w-3 h-3" />
+                            </Button>
+                          </div>
+                        ))}
+                        <Button onClick={() => addRefValue(rv.id)} size="sm" variant="outline" className="h-6 px-2">
+                          <Plus className="w-3 h-3" />
+                        </Button>
                       </div>
                     ))}
                   </div>

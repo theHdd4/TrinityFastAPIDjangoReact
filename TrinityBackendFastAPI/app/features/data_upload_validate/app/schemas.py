@@ -62,33 +62,6 @@ class CreateValidatorResponse(BaseModel):
     config_saved: bool = Field(..., description="Configuration saved successfully")
 
 
-##############for classifying the columns -
-
-# Add to app/schemas.py
-
-class Classification(BaseModel):
-    identifiers: List[str] = Field(default_factory=list, description="Identifier columns")
-    measures: List[str] = Field(default_factory=list, description="Measure columns") 
-    unclassified: List[str] = Field(default_factory=list, description="Unclassified columns")
-
-class AutoClassification(Classification):
-    confidence_scores: Dict[str, float] = Field(default_factory=dict, description="Confidence scores for auto-classification")
-
-class ClassificationSummary(BaseModel):
-    total_columns: int = Field(..., description="Total number of columns")
-    user_specified: int = Field(..., description="Number of user-specified columns")
-    auto_classified: int = Field(..., description="Number of auto-classified columns")
-
-class ClassifyColumnsResponse(BaseModel):
-    status: str = Field(..., description="Operation status")
-    message: str = Field(..., description="Success message")
-    validator_atom_id: str = Field(..., description="Validator atom ID")
-    file_key: str = Field(..., description="File key")
-    auto_classification: AutoClassification = Field(..., description="Auto-classification results")
-    user_classification: Classification = Field(..., description="User-provided classification")
-    final_classification: Classification = Field(..., description="Final merged classification")
-    user_modified: bool = Field(..., description="Whether user modified the classification")
-    summary: ClassificationSummary = Field(..., description="Classification summary")
 
 
 class MongoDBUpdateStatus(BaseModel):
