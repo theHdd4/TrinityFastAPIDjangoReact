@@ -353,9 +353,11 @@ async def create_new(
         # Parse file to DataFrame
         try:
             if file.filename.lower().endswith(".csv"):
-                df = pd.read_csv(io.BytesIO(content))
+                df = pd.read_csv(
+                    io.BytesIO(content), parse_dates=True, infer_datetime_format=True
+                )
             elif file.filename.lower().endswith(".xlsx"):
-                df = pd.read_excel(io.BytesIO(content))
+                df = pd.read_excel(io.BytesIO(content), parse_dates=True)
             else:
                 raise HTTPException(status_code=400, detail="Only CSV and XLSX files supported")
         except Exception as e:
@@ -1309,9 +1311,11 @@ async def validate(
             
             # Parse file based on extension
             if file.filename.lower().endswith(".csv"):
-                df = pd.read_csv(io.BytesIO(content))
+                df = pd.read_csv(
+                    io.BytesIO(content), parse_dates=True, infer_datetime_format=True
+                )
             elif file.filename.lower().endswith(".xlsx"):
-                df = pd.read_excel(io.BytesIO(content))
+                df = pd.read_excel(io.BytesIO(content), parse_dates=True)
             else:
                 raise HTTPException(status_code=400, detail="Only CSV and XLSX files supported")
             
@@ -1718,9 +1722,11 @@ async def validate_mmm_endpoint(
             
             # Parse file based on extension
             if file.filename.lower().endswith(".csv"):
-                df = pd.read_csv(io.BytesIO(content))
+                df = pd.read_csv(
+                    io.BytesIO(content), parse_dates=True, infer_datetime_format=True
+                )
             elif file.filename.lower().endswith(".xlsx"):
-                df = pd.read_excel(io.BytesIO(content))
+                df = pd.read_excel(io.BytesIO(content), parse_dates=True)
             else:
                 raise HTTPException(status_code=400, detail="Only CSV and XLSX files supported")
             
@@ -2084,9 +2090,11 @@ async def validate_category_forecasting_endpoint(
         
         # Parse file based on extension
         if file.filename.lower().endswith(".csv"):
-            df = pd.read_csv(io.BytesIO(content))
+            df = pd.read_csv(
+                io.BytesIO(content), parse_dates=True, infer_datetime_format=True
+            )
         elif file.filename.lower().endswith(".xlsx"):
-            df = pd.read_excel(io.BytesIO(content))
+            df = pd.read_excel(io.BytesIO(content), parse_dates=True)
         else:
             raise HTTPException(status_code=400, detail="Only CSV and XLSX files supported")
         
@@ -2273,9 +2281,11 @@ async def validate_promo_endpoint(
         
         # Parse file based on extension
         if file.filename.lower().endswith(".csv"):
-            df = pd.read_csv(io.BytesIO(content))
+            df = pd.read_csv(
+                io.BytesIO(content), parse_dates=True, infer_datetime_format=True
+            )
         elif file.filename.lower().endswith(".xlsx"):
-            df = pd.read_excel(io.BytesIO(content))
+            df = pd.read_excel(io.BytesIO(content), parse_dates=True)
         else:
             raise HTTPException(status_code=400, detail="Only CSV and XLSX files supported")
         
@@ -2439,9 +2449,11 @@ async def save_dataframes(
     for file, key in zip(files, keys):
         content = await file.read()
         if file.filename.lower().endswith(".csv"):
-            df = pd.read_csv(io.BytesIO(content))
+            df = pd.read_csv(
+                io.BytesIO(content), parse_dates=True, infer_datetime_format=True
+            )
         elif file.filename.lower().endswith((".xls", ".xlsx")):
-            df = pd.read_excel(io.BytesIO(content))
+            df = pd.read_excel(io.BytesIO(content), parse_dates=True)
         else:
             raise HTTPException(status_code=400, detail="Unsupported file type")
 
