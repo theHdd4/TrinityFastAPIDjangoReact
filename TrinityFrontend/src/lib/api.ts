@@ -28,40 +28,57 @@ const djangoPrefix = usesProxy ? '/admin/api' : '/api';
 
 console.log('Using backend origin', backendOrigin);
 
+const normalizeUrl = (url?: string) => {
+  if (!url) return undefined;
+  return /^https?:\/\//.test(url) ? url : `http://${url}`;
+};
+
 export const ACCOUNTS_API =
-  import.meta.env.VITE_ACCOUNTS_API || `${backendOrigin}${djangoPrefix}/accounts`;
+  normalizeUrl(import.meta.env.VITE_ACCOUNTS_API) ||
+  `${backendOrigin}${djangoPrefix}/accounts`;
 
 export const REGISTRY_API =
-  import.meta.env.VITE_REGISTRY_API || `${backendOrigin}${djangoPrefix}/registry`;
+  normalizeUrl(import.meta.env.VITE_REGISTRY_API) ||
+  `${backendOrigin}${djangoPrefix}/registry`;
 
 export const TENANTS_API =
-  import.meta.env.VITE_TENANTS_API || `${backendOrigin}${djangoPrefix}/tenants`;
+  normalizeUrl(import.meta.env.VITE_TENANTS_API) ||
+  `${backendOrigin}${djangoPrefix}/tenants`;
 
 export const TEXT_API =
-  import.meta.env.VITE_TEXT_API || `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/t`;
+  normalizeUrl(import.meta.env.VITE_TEXT_API) ||
+  `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/t`;
 
 export const CARD_API =
-  import.meta.env.VITE_CARD_API || `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api`;
+  normalizeUrl(import.meta.env.VITE_CARD_API) ||
+  `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api`;
 
 export const SUBSCRIPTIONS_API =
-  import.meta.env.VITE_SUBSCRIPTIONS_API || `${backendOrigin}${djangoPrefix}/subscriptions`;
+  normalizeUrl(import.meta.env.VITE_SUBSCRIPTIONS_API) ||
+  `${backendOrigin}${djangoPrefix}/subscriptions`;
 
 export const VALIDATE_API =
-  import.meta.env.VITE_VALIDATE_API || `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/data-upload-validate`;
+  normalizeUrl(import.meta.env.VITE_VALIDATE_API) ||
+  `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/data-upload-validate`;
 
 export const CONCAT_API =
-  import.meta.env.VITE_CONCAT_API || `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/concat`;
+  normalizeUrl(import.meta.env.VITE_CONCAT_API) ||
+  `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/concat`;
 
 export const MERGE_API =
-  import.meta.env.VITE_MERGE_API || `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/merge`;
+  normalizeUrl(import.meta.env.VITE_MERGE_API) ||
+  `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/merge`;
 
 export const FEATURE_OVERVIEW_API =
-  import.meta.env.VITE_FEATURE_OVERVIEW_API || `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/feature-overview`;
+  normalizeUrl(import.meta.env.VITE_FEATURE_OVERVIEW_API) ||
+  `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/feature-overview`;
 
 export const TRINITY_AI_API =
-  import.meta.env.VITE_TRINITY_AI_API || backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${aiPort}`);
+  normalizeUrl(import.meta.env.VITE_TRINITY_AI_API) ||
+  backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${aiPort}`);
 
 export const LAB_ACTIONS_API = `${REGISTRY_API}/laboratory-actions`;
 
 export const CLASSIFIER_API =
-  import.meta.env.VITE_CLASSIFIER_API || `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/classify`;
+  normalizeUrl(import.meta.env.VITE_CLASSIFIER_API) ||
+  `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/classify`;
