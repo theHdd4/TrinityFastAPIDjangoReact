@@ -38,9 +38,10 @@ Traefik then routes `/`, `/admin/` and `/api/` to the appropriate containers.
 Traefik requires access to the Docker socket to read the labels. The compose file mounts `/var/run/docker.sock` into the Traefik container.
 
 Start the backend stack from the repository root so the `trinity-net` network is
-created:
+created. Pass `prod` if you want the production stack:
 ```bash
-./scripts/start_backend.sh
+./scripts/start_backend.sh       # development
+./scripts/start_backend.sh prod  # production
 ```
 Then launch the tunnel separately:
 ```bash

@@ -1,13 +1,24 @@
 services:
-  cloudflared:
+  cloudflared-prod:
     image: cloudflare/cloudflared:latest
     command: tunnel --config /etc/cloudflared/config.yml run
     volumes:
       - ./tunnelCreds:/etc/cloudflared:ro
     networks:
-      - trinity-net
+      - trinity-prod-net
+
+  cloudflared-dev:
+    image: cloudflare/cloudflared:latest
+    command: tunnel --config /etc/cloudflared/config.dev.yml run
+    volumes:
+      - ./tunnelCreds:/etc/cloudflared:ro
+    networks:
+      - trinity-dev-net
 
 networks:
-  trinity-net:
+  trinity-prod-net:
     external: true
-    name: trinity-net
+    name: trinity_prod_trinity-net
+  trinity-dev-net:
+    external: true
+    name: trinity_dev_trinity-net
