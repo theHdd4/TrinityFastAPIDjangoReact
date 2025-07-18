@@ -49,23 +49,61 @@ Follow the steps below to run all services together.
   cookie. Log in via the correct `/api/accounts/login/` path before calling
   authenticated endpoints like `/api/registry/laboratory-actions/`.
 
-  The frontend performs a preliminary GET request to `/api/accounts/users/me/`
-  during login to verify the API is reachable. Since no session exists yet this
-  check will usually return **401** or **403**. The actual login follows
-  immediately after.
+The frontend performs a preliminary GET request to `/api/accounts/users/me/`
+during login to verify the API is reachable. Since no session exists yet this
+check will usually return **401** or **403**. The actual login follows
+immediately after.
+
+### Debugging login failures
+
+If you still hit **403 Forbidden** after submitting valid credentials:
+
+1. Open the browser developer tools and inspect the network response for
+   `POST /admin/api/accounts/login/`. Confirm the server responds with **200**
+   and includes a `Set-Cookie` header named `sessionid`.
+   If the request instead returns **404** or **405**, verify that
+   `VITE_BACKEND_ORIGIN` in `TrinityFrontend/.env` points at the correct
+   host. Use the `/admin` prefix only when requests are routed through Traefik.
+2. After the request completes, visit `/admin/api/accounts/users/me/` in a new
+   tab or run:
+
+   ```bash
+   curl -b cookies.txt -c cookies.txt \
+     -X GET http://10.2.1.242:8080/admin/api/accounts/users/me/
+   ```
+
+   Replace `cookies.txt` with a file captured from the login response. A JSON
+   payload containing your username confirms the session was stored correctly.
+3. If the endpoint still returns **403**, verify that `CSRF_TRUSTED_ORIGINS` and
+   `CORS_ALLOWED_ORIGINS` in `TrinityBackendDjango/.env` include the public
+   domain. Missing entries can prevent the session cookie from being accepted.
+4. Finally ensure the browser isn't blocking third‑party cookies. Same‑site
+   restrictions may prevent the session from persisting if the frontend and
+   backend live on different domains.
 
   When testing the column classifier endpoints a **404 Not Found** response
   often indicates the specified `validator_atom_id` or `file_key` does not exist
   rather than a missing route. Double-check these parameters if the API returns
   a 404 JSON message like `{"detail": "Validator atom 'demo123' not found in database"}`.
 
+  A **405 Not Allowed** response when uploading a file usually means the
+  `VITE_VALIDATE_API` URL is missing the protocol. Make sure it includes
+  `http://` (or `https://`) like `http://${HOST_IP}:8001/api/data-upload-validate`.
+
+  If the request instead fails with **Failed to fetch** and the console shows a
+  `net::ERR_FAILED` message with status **202**, verify the API URL points at the
+  host address reachable from your browser (for example `10.2.1.242`). Using the
+  Docker gateway address (`172.x.x.x`) won't work from outside the containers.
+
   Update `CSRF_TRUSTED_ORIGINS` and `CORS_ALLOWED_ORIGINS` in
-  `TrinityBackendDjango/.env` so both the local frontend URL
-  `http://${HOST_IP}:8080` and the public domain
-  `https://trinity.quantmatrixai.com` are trusted. This prevents CORS and CSRF
-  errors when logging in from either address.
+  `TrinityBackendDjango/.env` so the following hosts are trusted:
+  `http://10.2.1.242:8080`, `http://172.17.48.1:8080`,
+  `http://10.2.1.65:8080` and `https://trinity.quantmatrixai.com`.
   Set `FASTAPI_CORS_ORIGINS` to the same comma separated list so the FastAPI
-  service accepts requests from both origins as well.
+  service accepts requests from any of these origins. When running inside
+  Docker on Linux this often means adding `http://172.17.48.1:8080` (or whatever
+  the host IP is) so requests from the frontend are allowed. Include the exact
+  address your browser uses or CORS headers will be missing.
   When exposing a public hostname also add it, the host IP, and `localhost` to
   the `ADDITIONAL_DOMAINS` variable so Django's tenant middleware accepts all
   three. Run `python create_tenant.py` again after adjusting this list if the
