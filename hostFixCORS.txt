@@ -21,6 +21,7 @@ Changes made:
 2. Update `HOST_IP` in both `.env` files to match the address the services will
    listen on. Rebuild the frontend container so Vite embeds the updated value.
 
-3. Restart the backend by running `scripts/start_backend.sh`. The Django and
-   FastAPI containers will load the new environment values, enabling requests
+3. Restart the backend by running `scripts/start_backend.sh` (add `prod` to
+   start the production stack). The Django and FastAPI containers will load the
+   new environment values, enabling requests
    from the new host.

@@ -7,7 +7,8 @@ Follow these steps to confirm that the services are reachable via their Cloudfla
 Run the helper script from the repository root which starts all services:
 
 ```bash
-./scripts/start_backend.sh
+./scripts/start_backend.sh       # development
+./scripts/start_backend.sh prod  # production
 ```
 
 Wait until the `cloudflared` container reports `Connected`.

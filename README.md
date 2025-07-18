@@ -124,14 +124,15 @@ database migrations for new tenants.
 
 ## 2. Start the backend containers
 
-From the repository root run the helper script which builds and starts the
-containers:
+From the repository root run the helper script to build and start either the
+development (default) or production stack:
 
 ```bash
-./scripts/start_backend.sh
+./scripts/start_backend.sh         # development
+./scripts/start_backend.sh prod    # production
 ```
 
-This script starts PostgreSQL, MongoDB, Redis, the Django admin API on
+The script starts PostgreSQL, MongoDB, Redis, the Django admin API on
 `localhost:8000` and a FastAPI instance on `localhost:8001`. Uvicorn loads the
 app from
 `apps/orchestration/fastapi_app.py`. A separate AI service from the `TrinityAI`

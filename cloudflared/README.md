@@ -6,9 +6,10 @@ Cloudflare Tunnels used by the Trinity stack. Two services are defined:
 Traefik instance while `cloudflared-dev` forwards
 `trinity-dev.quantmatrixai.com` to the development stack.
 
-Ensure the `trinity-net` network exists. It is created automatically when the
-backend stack is started via `../scripts/start_backend.sh`. If running the
-tunnel before the other containers you can create it manually:
+Ensure the `trinity-net` networks exist. They are created automatically when the
+backend stack is started via `../scripts/start_backend.sh` (for development) or
+`../scripts/start_backend.sh prod` (for production). If running the tunnel
+before the other containers you can create one manually:
 
 ```bash
 docker network create trinity-net
