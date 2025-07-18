@@ -31,6 +31,10 @@ services:
   frontend:
     ports:
       - "8081:80"
+    build:
+      args:
+        VITE_BACKEND_ORIGIN: "http://${HOST_IP:-10.2.1.242}:8081"
+        VITE_FRONTEND_PORT: "8081"
   traefik:
     ports:
       - "9081:80"

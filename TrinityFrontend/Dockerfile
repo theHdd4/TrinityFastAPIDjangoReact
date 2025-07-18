@@ -1,6 +1,10 @@
 # Build the React frontend
 FROM node:20-alpine AS build
 WORKDIR /app
+ARG VITE_BACKEND_ORIGIN
+ARG VITE_FRONTEND_PORT
+ENV VITE_BACKEND_ORIGIN=$VITE_BACKEND_ORIGIN \
+    VITE_FRONTEND_PORT=$VITE_FRONTEND_PORT
 COPY package.json package-lock.json ./
 RUN npm install
 COPY . .
