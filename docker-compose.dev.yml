@@ -41,6 +41,7 @@ services:
         VITE_FRONTEND_PORT: "8081"
         VITE_DJANGO_PORT: "8003"
         VITE_FASTAPI_PORT: "8004"
+        VITE_HOST_IP: "${HOST_IP:-10.2.1.242}"
   traefik:
     ports:
       - "9081:80"
