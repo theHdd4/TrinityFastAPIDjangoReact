@@ -1,0 +1,10 @@
+# Cloudflare tunnel configuration for the development environment
+# Replace TUNNEL_ID_DEV with the UUID of your dev tunnel
+# and ensure the matching credential JSON is present in this folder.
+tunnel: TUNNEL_ID_DEV
+credentials-file: /etc/cloudflared/TUNNEL_ID_DEV.json
+
+ingress:
+  - hostname: trinity-dev.quantmatrixai.com
+    service: http://traefik:80
+  - service: http_status:404

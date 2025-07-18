@@ -18,6 +18,8 @@ services:
       CORS_ALLOWED_ORIGINS: "http://127.0.0.1:8081,http://${HOST_IP:-10.2.1.242}:8081,http://172.17.48.1:8081,http://10.2.1.65:8081,https://trinity.quantmatrixai.com"
       CSRF_TRUSTED_ORIGINS: "http://127.0.0.1:8081,http://${HOST_IP:-10.2.1.242}:8081,http://172.17.48.1:8081,http://10.2.1.65:8081,https://trinity.quantmatrixai.com"
       MONGO_URI: "mongodb://mongo:27017/trinity_dev"
+    labels:
+      - "traefik.http.routers.django.rule=Host(`trinity-dev.quantmatrixai.com`) && PathPrefix(`/admin`)"
   fastapi:
     ports:
       - "8004:8001"
@@ -25,12 +27,16 @@ services:
       HOST_IP: ${HOST_IP:-10.2.1.242}
       FASTAPI_CORS_ORIGINS: "http://127.0.0.1:8081,http://${HOST_IP:-10.2.1.242}:8081,http://172.17.48.1:8081,http://10.2.1.65:8081,https://trinity.quantmatrixai.com"
       MONGO_URI: "mongodb://mongo:27017/trinity_dev"
+    labels:
+      - "traefik.http.routers.fastapi.rule=Host(`trinity-dev.quantmatrixai.com`) && PathPrefix(`/api`)"
   flight:
     ports:
       - "8816:8815"
   trinity-ai:
     ports:
       - "8005:8002"
+    labels:
+      - "traefik.http.routers.trinity-ai.rule=Host(`trinity-dev.quantmatrixai.com`) && PathPrefix(`/chat`)"
   celery:
     environment:
       MONGO_URI: "mongodb://mongo:27017/trinity_dev"
@@ -44,6 +50,8 @@ services:
         VITE_DJANGO_PORT: "8003"
         VITE_FASTAPI_PORT: "8004"
         VITE_HOST_IP: "${HOST_IP:-10.2.1.242}"
+    labels:
+      - "traefik.http.routers.frontend.rule=Host(`trinity-dev.quantmatrixai.com`)"
   traefik:
     ports:
       - "9081:80"

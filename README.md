@@ -25,7 +25,9 @@ Follow the steps below to run all services together.
    the Django subscription endpoints and `VITE_TRINITY_AI_API` for the AI
    service.
   When exposing the app via Cloudflare Tunnel, set
-  `VITE_BACKEND_ORIGIN=https://trinity.quantmatrixai.com` so the frontend sends
+  `VITE_BACKEND_ORIGIN=https://trinity.quantmatrixai.com` for the production
+  environment or `https://trinity-dev.quantmatrixai.com` for the development
+  environment so the frontend sends
   API requests through Traefik. Rebuild the `frontend` service after changing
   this file so Vite picks up the new value:
 
@@ -33,8 +35,8 @@ Follow the steps below to run all services together.
   docker compose build frontend
   ```
 
-  The frontend is exposed at `https://trinity.quantmatrixai.com` through
-  Cloudflare Tunnel while Traefik proxies `/admin/` to the Django container and
+  The frontend is exposed at `https://trinity.quantmatrixai.com` or
+  `https://trinity-dev.quantmatrixai.com` through Cloudflare Tunnel while Traefik proxies `/admin/` to the Django container and
   `/api/` to the FastAPI service. Traefik strips the `/admin` prefix so Django
   receives requests under `/api/` and `/admin/` as defined in `config/urls.py`.
   Login requests therefore go to `/admin/api/accounts/login/` when accessed
@@ -98,7 +100,8 @@ If you still hit **403 Forbidden** after submitting valid credentials:
   Update `CSRF_TRUSTED_ORIGINS` and `CORS_ALLOWED_ORIGINS` in
   `TrinityBackendDjango/.env` so the following hosts are trusted:
   `http://10.2.1.242:8080`, `http://172.17.48.1:8080`,
-  `http://10.2.1.65:8080` and `https://trinity.quantmatrixai.com`.
+  `http://10.2.1.65:8080`, `https://trinity.quantmatrixai.com` and
+  `https://trinity-dev.quantmatrixai.com`.
   Set `FASTAPI_CORS_ORIGINS` to the same comma separated list so the FastAPI
   service accepts requests from any of these origins. When running inside
   Docker on Linux this often means adding `http://172.17.48.1:8080` (or whatever
@@ -139,7 +142,8 @@ successfully. CORS is enabled so the React frontend served from `localhost:8080`
  service is reachable at `http://localhost:8001/api/t` and Trinity AI at
  `http://localhost:8002/chat`. When accessed through the tunnel, Traefik
  proxies `/chat` to the `trinity-ai` container so the frontend posts to
- `https://trinity.quantmatrixai.com/chat`. The router uses a high priority so
+ `https://trinity.quantmatrixai.com/chat` or
+ `https://trinity-dev.quantmatrixai.com/chat`. The router uses a high priority so
  `/chat` requests never fall back to the frontend service. Use
  `python scripts/check_ai_tunnel.py` to verify the chat endpoint responds
  through the tunnel.
@@ -219,6 +223,7 @@ A healthy tunnel prints the HTTP status and server header, for example:
 
 ```
 Checking https://trinity.quantmatrixai.com/admin/login/
+Checking https://trinity-dev.quantmatrixai.com/admin/login/
 Status 200
 Server cloudflare
 ```
