@@ -1,0 +1,32 @@
+# Running Trinity with Cloudflare Tunnels
+
+Follow these steps to launch the full stack with Traefik routing and two Cloudflare tunnels.
+
+1. **Prepare environment files**
+   - Copy `TrinityBackendDjango/.env.example` to `TrinityBackendDjango/.env` and edit `HOST_IP` and other variables as needed.
+   - Copy `TrinityFrontend/.env.example` to `TrinityFrontend/.env`. Set `VITE_BACKEND_ORIGIN` to the public domain you plan to use.
+
+2. **Start the backend containers**
+   - From the repository root run:
+     ```bash
+     ./scripts/start_backend.sh       # development stack
+     ./scripts/start_backend.sh prod  # production stack
+     ```
+   - This command builds the images and launches Traefik along with Django, FastAPI and the other services.
+
+3. **Configure Cloudflare tunnels**
+   - Place your Cloudflare credential JSON files in `cloudflared/tunnelCreds`.
+   - Edit `cloudflared/tunnelCreds/config.yml` for production and `config.dev.yml` for development with the matching tunnel IDs.
+   - Each config forwards its hostname to the `traefik` container inside Docker.
+
+4. **Start the tunnels**
+   ```bash
+   cd cloudflared
+   docker compose up -d
+   ```
+   - Two containers (`cloudflared-prod` and `cloudflared-dev`) will connect using the networks created in step 2.
+
+5. **Access the services**
+   - Development: `https://trinity-dev.quantmatrixai.com`
+   - Production: `https://trinity.quantmatrixai.com`
+   - Use `/admin/` for Django and `/api/` for FastAPI endpoints. The `/chat` path routes to the AI service.

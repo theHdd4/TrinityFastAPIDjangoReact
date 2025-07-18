@@ -19,7 +19,12 @@ services:
       CSRF_TRUSTED_ORIGINS: "http://127.0.0.1:8081,http://${HOST_IP:-10.2.1.242}:8081,http://172.17.48.1:8081,http://10.2.1.65:8081,https://trinity.quantmatrixai.com"
       MONGO_URI: "mongodb://mongo:27017/trinity_dev"
     labels:
-      - "traefik.http.routers.django.rule=Host(`trinity-dev.quantmatrixai.com`) && PathPrefix(`/admin`)"
+      traefik.enable: "true"
+      traefik.http.routers.django.rule: "Host(`trinity-dev.quantmatrixai.com`) && PathPrefix(`/admin`)"
+      traefik.http.routers.django.entrypoints: "web"
+      traefik.http.routers.django.middlewares: "django-strip@docker"
+      traefik.http.middlewares.django-strip.stripprefix.prefixes: "/admin"
+      traefik.http.services.django.loadbalancer.server.port: "8000"
   fastapi:
     ports:
       - "8004:8001"
@@ -28,7 +33,10 @@ services:
       FASTAPI_CORS_ORIGINS: "http://127.0.0.1:8081,http://${HOST_IP:-10.2.1.242}:8081,http://172.17.48.1:8081,http://10.2.1.65:8081,https://trinity.quantmatrixai.com"
       MONGO_URI: "mongodb://mongo:27017/trinity_dev"
     labels:
-      - "traefik.http.routers.fastapi.rule=Host(`trinity-dev.quantmatrixai.com`) && PathPrefix(`/api`)"
+      traefik.enable: "true"
+      traefik.http.routers.fastapi.rule: "Host(`trinity-dev.quantmatrixai.com`) && PathPrefix(`/api`)"
+      traefik.http.routers.fastapi.entrypoints: "web"
+      traefik.http.services.fastapi.loadbalancer.server.port: "8001"
   flight:
     ports:
       - "8816:8815"
@@ -36,7 +44,11 @@ services:
     ports:
       - "8005:8002"
     labels:
-      - "traefik.http.routers.trinity-ai.rule=Host(`trinity-dev.quantmatrixai.com`) && PathPrefix(`/chat`)"
+      traefik.enable: "true"
+      traefik.http.routers.trinity-ai.rule: "Host(`trinity-dev.quantmatrixai.com`) && PathPrefix(`/chat`)"
+      traefik.http.routers.trinity-ai.entrypoints: "web"
+      traefik.http.routers.trinity-ai.priority: "100"
+      traefik.http.services.trinity-ai.loadbalancer.server.port: "8002"
   celery:
     environment:
       MONGO_URI: "mongodb://mongo:27017/trinity_dev"
@@ -51,7 +63,10 @@ services:
         VITE_FASTAPI_PORT: "8004"
         VITE_HOST_IP: "${HOST_IP:-10.2.1.242}"
     labels:
-      - "traefik.http.routers.frontend.rule=Host(`trinity-dev.quantmatrixai.com`)"
+      traefik.enable: "true"
+      traefik.http.routers.frontend.rule: "Host(`trinity-dev.quantmatrixai.com`)"
+      traefik.http.routers.frontend.entrypoints: "web"
+      traefik.http.services.frontend.loadbalancer.server.port: "80"
   traefik:
     ports:
       - "9081:80"
