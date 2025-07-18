@@ -131,6 +131,9 @@ development (default) or production stack:
 ./scripts/start_backend.sh         # development
 ./scripts/start_backend.sh prod    # production
 ```
+The script sets the `TRAEFIK_NETWORK` variable so each Traefik instance
+only watches containers on its own network. Avoid running the two stacks
+simultaneously or Traefik will report router name conflicts.
 
 The script starts PostgreSQL, MongoDB, Redis, the Django admin API on
 `localhost:8000` and a FastAPI instance on `localhost:8001`. Uvicorn loads the

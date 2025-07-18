@@ -7,12 +7,12 @@ Follow these steps to launch the full stack with Traefik routing and two Cloudfl
    - Copy `TrinityFrontend/.env.example` to `TrinityFrontend/.env`. Set `VITE_BACKEND_ORIGIN` to the public domain you plan to use.
 
 2. **Start the backend containers**
-   - From the repository root run:
+ - From the repository root run:
      ```bash
      ./scripts/start_backend.sh       # development stack
      ./scripts/start_backend.sh prod  # production stack
      ```
-   - This command builds the images and launches Traefik along with Django, FastAPI and the other services.
+   - This command builds the images and launches Traefik along with Django, FastAPI and the other services. Only run one environment at a time so Traefik does not see containers from the other stack.
 
 3. **Configure Cloudflare tunnels**
    - Place your Cloudflare credential JSON files in `cloudflared/tunnelCreds`.
