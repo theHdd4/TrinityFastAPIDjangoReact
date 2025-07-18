@@ -154,7 +154,6 @@ services:
     build:
       context: ./TrinityFrontend
       dockerfile: Dockerfile
-    container_name: trinity-frontend
     expose:
       - "80"
     networks:
