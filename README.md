@@ -112,9 +112,10 @@ If you still hit **403 Forbidden** after submitting valid credentials:
   the host IP is) so requests from the frontend are allowed. Include the exact
   address your browser uses or CORS headers will be missing.
   When exposing a public hostname also add it, the host IP, and `localhost` to
-  the `ADDITIONAL_DOMAINS` variable so Django's tenant middleware accepts all
-  three. Run `python create_tenant.py` again after adjusting this list if the
-  entries were not added during the initial setup.
+  the `ADDITIONAL_DOMAINS` variable. Include both `trinity.quantmatrixai.com`
+  and `trinity-dev.quantmatrixai.com` so requests over the tunnel reach the
+  correct tenant. Run `python create_tenant.py` again after adjusting this list
+  if the entries were not added during the initial setup.
 
 Docker and Node.js must be installed locally. The Python dependencies listed in
 `TrinityBackendDjango/requirements.txt` and

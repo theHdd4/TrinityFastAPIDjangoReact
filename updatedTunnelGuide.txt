@@ -77,6 +77,14 @@ containers. Common causes are:
 3. The origin containers might not be running. Check the logs with
    `docker compose logs web fastapi frontend cloudflared` and confirm the
    tunnel container shows `Connected`.
+4. Confirm the domain resolves to your host IP:
+   `nslookup trinity.quantmatrixai.com` and
+   `nslookup trinity-dev.quantmatrixai.com` should report the address
+   used by your containers. Incorrect DNS will prevent the tunnel from
+   routing traffic.
+5. If the domains respond but Django returns **404**, edit `ADDITIONAL_DOMAINS`
+   in `TrinityBackendDjango/.env` to include both hostnames and rerun
+   `python create_tenant.py` so the aliases are registered.
 
 After correcting any issues restart the tunnel service:
 
