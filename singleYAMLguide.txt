@@ -1,0 +1,21 @@
+The Trinity stack now uses a single docker-compose.yml with production ports. Run the services with:
+
+```
+docker compose up --build
+```
+
+Traefik listens on port 9080 and routes traffic from the Cloudflare tunnel at
+https://trinity.quantmatrixai.com to the correct containers:
+
+- `/admin/` -> Django on port 8000
+- `/api/` -> FastAPI on port 8001
+- `/` -> React frontend on port 8080
+
+The `cloudflared` compose file under `cloudflared/` joins the `trinity-net`
+network and forwards the domain to Traefik. Start it separately after the stack
+is running:
+
+```
+cd cloudflared
+docker compose up -d
+```
