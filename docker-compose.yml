@@ -186,7 +186,7 @@ services:
       - --providers.docker=true
       - --providers.docker.exposedbydefault=false
       - --entrypoints.web.address=:80
-      - --providers.docker.constraints=Label(`environment=prod`)
+      - --providers.docker.constraints=Label(`environment`,`prod`)
     ports:
       - "9080:80"
     volumes:
