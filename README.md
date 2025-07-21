@@ -101,10 +101,14 @@ If you still hit **403 Forbidden** after submitting valid credentials:
   Update `CSRF_TRUSTED_ORIGINS` and `CORS_ALLOWED_ORIGINS` in
   `TrinityBackendDjango/.env` so the following hosts are trusted:
   `http://10.2.1.242:8080`, `http://172.17.48.1:8080`,
-  `http://10.2.1.65:8080` and `https://trinity.quantmatrixai.com`.
+  `http://10.2.1.65:8080`, `http://10.2.1.242:8081`,
+  `http://172.17.48.1:8081`, `http://10.2.1.65:8081`,
+  `https://trinity.quantmatrixai.com` and
+  `https://trinity-dev.quantmatrixai.com`.
   Set `FASTAPI_CORS_ORIGINS` to the same comma separated list so the FastAPI
   service accepts requests from any of these origins. When running inside
-  Docker on Linux this often means adding `http://172.17.48.1:8080` (or whatever
+  Docker on Linux this often means adding `http://172.17.48.1:8080` or
+  `http://172.17.48.1:8081` (or whatever
   the host IP is) so requests from the frontend are allowed. Include the exact
   address your browser uses or CORS headers will be missing.
   When exposing a public hostname also add it, the host IP, and `localhost` to
