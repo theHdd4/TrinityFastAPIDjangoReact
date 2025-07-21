@@ -1,3 +1,5 @@
+name: trinity-dev
+
 services:
   postgres:
     image: postgres:15
@@ -75,6 +77,7 @@ services:
     networks:
       - trinity-dev-net
     labels:
+      - "environment=dev"
       - "traefik.enable=true"
       - "traefik.http.routers.django.rule=Host(`trinity-dev.quantmatrixai.com`) && PathPrefix(`/admin`)"
       - "traefik.http.routers.django.entrypoints=web"
@@ -125,6 +128,7 @@ services:
     networks:
       - trinity-dev-net
     labels:
+      - "environment=dev"
       - "traefik.enable=true"
       - "traefik.http.routers.fastapi.rule=Host(`trinity-dev.quantmatrixai.com`) && PathPrefix(`/api`)"
       - "traefik.http.routers.fastapi.entrypoints=web"
@@ -137,6 +141,8 @@ services:
     command: python app/flight_server.py
     env_file:
       - ./TrinityBackendDjango/.env
+    labels:
+      - "environment=dev"
     ports:
       - "8816:8815"
     networks:
@@ -155,6 +161,7 @@ services:
     networks:
       - trinity-dev-net
     labels:
+      - "environment=dev"
       - "traefik.enable=true"
       - "traefik.http.routers.trinity-ai.rule=Host(`trinity-dev.quantmatrixai.com`) && PathPrefix(`/chat`)"
       - "traefik.http.routers.trinity-ai.entrypoints=web"
@@ -172,6 +179,7 @@ services:
     depends_on:
       - web
     labels:
+      - "environment=dev"
       - "traefik.enable=true"
       - "traefik.http.routers.frontend.rule=Host(`trinity-dev.quantmatrixai.com`)"
       - "traefik.http.routers.frontend.entrypoints=web"
@@ -183,6 +191,7 @@ services:
       - --providers.docker=true
       - --providers.docker.exposedbydefault=false
       - --entrypoints.web.address=:80
+      - --providers.docker.constraints=Label(`environment`,`dev`)
     ports:
       - "9081:80"
     volumes:
