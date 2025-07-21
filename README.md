@@ -157,7 +157,19 @@ successfully. CORS is enabled so the React frontend served from `localhost:8080`
  `https://trinity.quantmatrixai.com/chat`. The router uses a high priority so
  `/chat` requests never fall back to the frontend service. Use
  `python scripts/check_ai_tunnel.py` to verify the chat endpoint responds
- through the tunnel.
+through the tunnel.
+
+### Development stack
+
+Use the helper script to launch the dev containers and Cloudflare tunnel on
+ports `8081`, `8003`–`8005`:
+
+```bash
+./scripts/start_dev.sh
+```
+
+After the services report **healthy** the app is reachable at
+`http://localhost:8081` or `https://trinity-dev.quantmatrixai.com`.
 
 ## 3. Start the frontend
 

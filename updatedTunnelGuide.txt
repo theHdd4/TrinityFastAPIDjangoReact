@@ -89,6 +89,9 @@ containers. Common causes are:
 7. If FastAPI logs show `FlightUnavailableError` or "connection refused" make sure the `flight` container is running:
    `docker compose ps flight` should list the container as `Up`. Inspect its logs with
    `docker compose logs flight` for any startup errors.
+8. When testing the development stack, start it with `./scripts/start_dev.sh` so
+   the tunnel container launches alongside the services. Check its status with
+   `docker compose -p trinity-dev logs cloudflared` if the dev domain does not respond.
 After correcting any issues restart the tunnel service:
 
 

@@ -30,7 +30,11 @@ cd cloudflared-dev
 docker compose -p trinity-dev up -d
 ```
 The development compose file no longer includes a `cloudflared`
-service, so launch the tunnel separately as shown above.
+service, so launch the tunnel separately as shown above or simply run
+the helper script which starts both the stack and tunnel:
+```bash
+./scripts/start_dev.sh
+```
 
 ## Running the development stack
 From the repository root run:
