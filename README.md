@@ -171,6 +171,12 @@ ports `8081`, `8003`–`8005`:
 After the services report **healthy** the app is reachable at
 `http://localhost:8081` or `https://trinity-dev.quantmatrixai.com`.
 
+The FastAPI service talks to an Arrow Flight server running in its own
+container. When viewing the logs you'll see the client connect to an IP like
+`172.28.x.x:8815`. This address comes from Docker's internal network and is
+normal. If the connection fails, check that the `flight` container is running
+with `docker compose logs flight`.
+
 ## 3. Start the frontend
 
 ```bash

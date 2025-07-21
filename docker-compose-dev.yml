@@ -74,6 +74,7 @@ services:
       - mongo
       - redis
       - minio
+      - flight
     networks:
       - trinity-dev-net
     labels:
