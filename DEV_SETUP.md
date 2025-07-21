@@ -29,6 +29,12 @@ Start the tunnel:
 cd cloudflared-dev
 docker compose -p trinity-dev up -d
 ```
+The development compose file no longer includes a `cloudflared`
+service, so launch the tunnel separately as shown above or simply run
+the helper script which starts both the stack and tunnel:
+```bash
+./scripts/start_dev.sh
+```
 
 ## Running the development stack
 From the repository root run:
@@ -43,6 +49,11 @@ After the containers report **healthy** you can access the services at:
 - `http://localhost:8003/admin/` – Django admin
 - `http://localhost:8004/api/` – FastAPI
 - `http://localhost:5051` – PgAdmin
+
+The frontend automatically detects when it is served from port `8081` and
+adjusts API calls to the backend ports `8003`–`8005`. If you create a custom
+`.env` file for the frontend these ports can still be overridden with the
+`VITE_DJANGO_PORT`, `VITE_FASTAPI_PORT` and `VITE_AI_PORT` variables.
 
 Requests to `https://trinity-dev.quantmatrixai.com` will reach the
 same services through the Cloudflare tunnel.

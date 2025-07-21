@@ -192,15 +192,6 @@ services:
     depends_on:
       - web
       - fastapi
-
-  cloudflared:
-    image: cloudflare/cloudflared:latest
-    command: tunnel --config /etc/cloudflared/config.yml run
-    volumes:
-      - ./cloudflared-dev/tunnelCreds:/etc/cloudflared:ro
-    networks:
-      - trinity-dev-net
-
 volumes:
   postgres_data:
   mongo_data:

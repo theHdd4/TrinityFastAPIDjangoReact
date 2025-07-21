@@ -24,17 +24,24 @@ Follow the steps below to run all services together.
    The frontend `.env` includes `VITE_SUBSCRIPTIONS_API` which should point to
    the Django subscription endpoints and `VITE_TRINITY_AI_API` for the AI
    service.
-  When exposing the app via Cloudflare Tunnel, you can optionally set
+  When exposing the app via Cloudflare Tunnel, you can set
   `VITE_BACKEND_ORIGIN=https://trinity.quantmatrixai.com` so the frontend sends
-  API requests through Traefik. Leaving this variable **empty** allows the
-  bundled code to detect the host automatically so both
-  `https://trinity.quantmatrixai.com` and `http://10.2.1.65` work without
-  rebuilding. Rebuild the `frontend` service after changing the value so Vite
-  picks it up:
+  API requests through Traefik. The `.env.example` file leaves this variable
+  blank which is recommended for local development. With an empty value the
+  frontend automatically targets `http://${VITE_HOST_IP}:${VITE_DJANGO_PORT}` so
+  both `https://trinity.quantmatrixai.com` and `http://10.2.1.65` work without
+  rebuilding. Avoid pointing this variable at the frontend port `8081`; use
+  `8003` instead if you must override it. Rebuild the `frontend` service after
+  changing the value so Vite picks it up:
 
   ```bash
   docker compose build frontend
   ```
+
+  When the frontend runs on port `8081` (as defined in
+  `docker-compose-dev.yml`) it automatically switches API calls to the backend
+  ports `8003`–`8005`. Custom `.env` files can override these defaults with
+  `VITE_DJANGO_PORT`, `VITE_FASTAPI_PORT` and `VITE_AI_PORT`.
 
   The frontend is exposed at `https://trinity.quantmatrixai.com` through
   Cloudflare Tunnel while Traefik proxies `/admin/` to the Django container and
@@ -101,16 +108,21 @@ If you still hit **403 Forbidden** after submitting valid credentials:
   Update `CSRF_TRUSTED_ORIGINS` and `CORS_ALLOWED_ORIGINS` in
   `TrinityBackendDjango/.env` so the following hosts are trusted:
   `http://10.2.1.242:8080`, `http://172.17.48.1:8080`,
-  `http://10.2.1.65:8080` and `https://trinity.quantmatrixai.com`.
+  `http://10.2.1.65:8080`, `http://10.2.1.242:8081`,
+  `http://172.17.48.1:8081`, `http://10.2.1.65:8081`,
+  `https://trinity.quantmatrixai.com` and
+  `https://trinity-dev.quantmatrixai.com`.
   Set `FASTAPI_CORS_ORIGINS` to the same comma separated list so the FastAPI
   service accepts requests from any of these origins. When running inside
-  Docker on Linux this often means adding `http://172.17.48.1:8080` (or whatever
+  Docker on Linux this often means adding `http://172.17.48.1:8080` or
+  `http://172.17.48.1:8081` (or whatever
   the host IP is) so requests from the frontend are allowed. Include the exact
   address your browser uses or CORS headers will be missing.
   When exposing a public hostname also add it, the host IP, and `localhost` to
-  the `ADDITIONAL_DOMAINS` variable so Django's tenant middleware accepts all
-  three. Run `python create_tenant.py` again after adjusting this list if the
-  entries were not added during the initial setup.
+  the `ADDITIONAL_DOMAINS` variable. Include both `trinity.quantmatrixai.com`
+  and `trinity-dev.quantmatrixai.com` so requests over the tunnel reach the
+  correct tenant. Run `python create_tenant.py` again after adjusting this list
+  if the entries were not added during the initial setup.
 
 Docker and Node.js must be installed locally. The Python dependencies listed in
 `TrinityBackendDjango/requirements.txt` and
@@ -145,7 +157,19 @@ successfully. CORS is enabled so the React frontend served from `localhost:8080`
  `https://trinity.quantmatrixai.com/chat`. The router uses a high priority so
  `/chat` requests never fall back to the frontend service. Use
  `python scripts/check_ai_tunnel.py` to verify the chat endpoint responds
- through the tunnel.
+through the tunnel.
+
+### Development stack
+
+Use the helper script to launch the dev containers and Cloudflare tunnel on
+ports `8081`, `8003`–`8005`:
+
+```bash
+./scripts/start_dev.sh
+```
+
+After the services report **healthy** the app is reachable at
+`http://localhost:8081` or `https://trinity-dev.quantmatrixai.com`.
 
 ## 3. Start the frontend
 
@@ -249,6 +273,8 @@ through the tunnel and routed to the AI container.
 Use `docker compose logs traefik` and `docker compose logs fastapi` for
 additional details. Use `docker compose logs cloudflared` to confirm the tunnel
 is connected if you suspect connectivity issues.
+If the domain names fail to resolve to your host IP, check the Cloudflare DNS records and ensure only one tunnel container is running.
+Run `nslookup trinity.quantmatrixai.com` and `nslookup trinity-dev.quantmatrixai.com` to confirm they return your server address.
 
 For tips on reducing startup times and improving responsiveness see
 [performance_tips.md](performance_tips.md).
