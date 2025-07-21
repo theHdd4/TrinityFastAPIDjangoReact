@@ -1,3 +1,5 @@
+name: trinity-dev
+
 services:
   postgres:
     image: postgres:15
@@ -139,6 +141,8 @@ services:
     command: python app/flight_server.py
     env_file:
       - ./TrinityBackendDjango/.env
+    labels:
+      - "environment=dev"
     ports:
       - "8816:8815"
     networks:
