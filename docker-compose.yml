@@ -126,6 +126,7 @@ services:
       - mongo
       - redis
       - minio
+      - flight
     networks:
       - trinity-net
     labels:
