@@ -165,12 +165,6 @@ services:
     build:
       context: ./TrinityFrontend
       dockerfile: Dockerfile
-      args:
-        VITE_BACKEND_ORIGIN: "http://${HOST_IP:-10.2.1.242}:8000"
-        VITE_FRONTEND_PORT: "8080"
-        VITE_DJANGO_PORT: "8000"
-        VITE_FASTAPI_PORT: "8001"
-        VITE_HOST_IP: "${HOST_IP:-10.2.1.242}"
     ports:
       - "8080:80"
     networks:

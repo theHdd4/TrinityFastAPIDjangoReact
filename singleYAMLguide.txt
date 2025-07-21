@@ -19,3 +19,8 @@ is running:
 cd cloudflared
 docker compose up -d
 ```
+
+The frontend image is built without a fixed `VITE_BACKEND_ORIGIN` so it picks up
+the host from the browser address bar. This means you can open the site via
+`https://trinity.quantmatrixai.com` or directly from `http://10.2.1.65:8080`
+without rebuilding.
