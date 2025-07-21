@@ -144,7 +144,7 @@ services:
 
   trinity-ai:
     build:
-      context: ./TrinityAI/Agent_fetch_atom
+      context: ./TrinityAI
       dockerfile: Dockerfile
     env_file:
       - ./TrinityBackendDjango/.env
