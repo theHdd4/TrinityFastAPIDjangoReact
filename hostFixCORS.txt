@@ -28,3 +28,6 @@ Changes made:
    with `docker compose logs fastapi`. A 500 status from the endpoint can
    prevent the `Access-Control-Allow-Origin` header from appearing even when the
    origin is allowed.
+5. A repeated `FlightUnavailableError` in the FastAPI logs usually means the
+   `flight` service is not running. Verify with `docker compose ps flight` and
+   restart it if necessary.

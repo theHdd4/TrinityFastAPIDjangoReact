@@ -85,8 +85,10 @@ containers. Common causes are:
 5. If the domains respond but Django returns **404**, edit `ADDITIONAL_DOMAINS`
    in `TrinityBackendDjango/.env` to include both hostnames and rerun
    `python create_tenant.py` so the aliases are registered.
-
 6. Ensure only one cloudflared container is running. If you accidentally start the tunnel from both `docker-compose-dev.yml` and `cloudflared-dev/`, stop the extra container to avoid conflicts.
+7. If FastAPI logs show `FlightUnavailableError` or "connection refused" make sure the `flight` container is running:
+   `docker compose ps flight` should list the container as `Up`. Inspect its logs with
+   `docker compose logs flight` for any startup errors.
 After correcting any issues restart the tunnel service:
 
 
