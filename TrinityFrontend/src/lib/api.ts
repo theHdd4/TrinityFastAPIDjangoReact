@@ -25,6 +25,14 @@ if (!backendOrigin) {
   } else {
     backendOrigin = `http://localhost:${djangoPort}`;
   }
+} else if (isDevStack && backendOrigin.endsWith(`:${frontendPort}`)) {
+  // When the dev stack is running the frontend uses port 8081 while
+  // Django listens on 8003. Avoid hitting the nginx container by correcting
+  // the port if the backend origin matches the frontend port.
+  backendOrigin = backendOrigin.replace(
+    new RegExp(`:${frontendPort}$`),
+    `:${djangoPort}`,
+  );
 }
 
 // When hosting through Traefik the Django service is exposed under the

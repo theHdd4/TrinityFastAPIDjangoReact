@@ -24,13 +24,15 @@ Follow the steps below to run all services together.
    The frontend `.env` includes `VITE_SUBSCRIPTIONS_API` which should point to
    the Django subscription endpoints and `VITE_TRINITY_AI_API` for the AI
    service.
-  When exposing the app via Cloudflare Tunnel, you can optionally set
+  When exposing the app via Cloudflare Tunnel, you can set
   `VITE_BACKEND_ORIGIN=https://trinity.quantmatrixai.com` so the frontend sends
-  API requests through Traefik. Leaving this variable **empty** allows the
-  bundled code to detect the host automatically so both
-  `https://trinity.quantmatrixai.com` and `http://10.2.1.65` work without
-  rebuilding. Rebuild the `frontend` service after changing the value so Vite
-  picks it up:
+  API requests through Traefik. The `.env.example` file leaves this variable
+  blank which is recommended for local development. With an empty value the
+  frontend automatically targets `http://${VITE_HOST_IP}:${VITE_DJANGO_PORT}` so
+  both `https://trinity.quantmatrixai.com` and `http://10.2.1.65` work without
+  rebuilding. Avoid pointing this variable at the frontend port `8081`; use
+  `8003` instead if you must override it. Rebuild the `frontend` service after
+  changing the value so Vite picks it up:
 
   ```bash
   docker compose build frontend
