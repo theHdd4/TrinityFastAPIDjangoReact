@@ -36,6 +36,11 @@ Follow the steps below to run all services together.
   docker compose build frontend
   ```
 
+  When the frontend runs on port `8081` (as defined in
+  `docker-compose-dev.yml`) it automatically switches API calls to the backend
+  ports `8003`–`8005`. Custom `.env` files can override these defaults with
+  `VITE_DJANGO_PORT`, `VITE_FASTAPI_PORT` and `VITE_AI_PORT`.
+
   The frontend is exposed at `https://trinity.quantmatrixai.com` through
   Cloudflare Tunnel while Traefik proxies `/admin/` to the Django container and
   `/api/` to the FastAPI service. Traefik strips the `/admin` prefix so Django
