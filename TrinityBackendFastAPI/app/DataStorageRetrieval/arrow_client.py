@@ -7,18 +7,15 @@ import pyarrow.ipc as ipc
 from minio import Minio
 from .flight_registry import get_arrow_for_flight_path
 
-_client: flight.FlightClient | None = None
 logger = logging.getLogger("trinity.flight")
 
 
 def _get_client() -> flight.FlightClient:
-    """Return a cached Flight client configured from environment variables."""
-    global _client
-    host = os.getenv("FLIGHT_HOST", "localhost")
+    """Return a Flight client configured from environment variables."""
+    host = os.getenv("FLIGHT_HOST") or os.getenv("HOST_IP", "localhost")
     port = int(os.getenv("FLIGHT_PORT", "8815"))
-    if _client is None:
-        _client = flight.FlightClient(f"grpc://{host}:{port}")
-    return _client
+    logger.debug("Connecting to Flight server %s:%s", host, port)
+    return flight.FlightClient(f"grpc://{host}:{port}")
 
 
 def upload_dataframe(df: pd.DataFrame, path: str) -> str:

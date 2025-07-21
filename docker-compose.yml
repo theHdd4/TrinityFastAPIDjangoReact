@@ -74,6 +74,7 @@ services:
       - mongo
       - redis
       - minio
+      - flight
     networks:
       - trinity-net
     labels:
@@ -125,6 +126,7 @@ services:
       - mongo
       - redis
       - minio
+      - flight
     networks:
       - trinity-net
     labels:
