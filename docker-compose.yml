@@ -75,6 +75,7 @@ services:
     networks:
       - trinity-net
     labels:
+      - "environment=prod"
       - "traefik.enable=true"
       - "traefik.http.routers.django.rule=Host(`trinity.quantmatrixai.com`) && PathPrefix(`/admin`)"
       - "traefik.http.routers.django.entrypoints=web"
@@ -125,6 +126,7 @@ services:
     networks:
       - trinity-net
     labels:
+      - "environment=prod"
       - "traefik.enable=true"
       - "traefik.http.routers.fastapi.rule=Host(`trinity.quantmatrixai.com`) && PathPrefix(`/api`)"
       - "traefik.http.routers.fastapi.entrypoints=web"
@@ -155,6 +157,7 @@ services:
     networks:
       - trinity-net
     labels:
+      - "environment=prod"
       - "traefik.enable=true"
       - "traefik.http.routers.trinity-ai.rule=Host(`trinity.quantmatrixai.com`) && PathPrefix(`/chat`)"
       - "traefik.http.routers.trinity-ai.entrypoints=web"
@@ -172,6 +175,7 @@ services:
     depends_on:
       - web
     labels:
+      - "environment=prod"
       - "traefik.enable=true"
       - "traefik.http.routers.frontend.rule=Host(`trinity.quantmatrixai.com`)"
       - "traefik.http.routers.frontend.entrypoints=web"
@@ -182,6 +186,7 @@ services:
       - --providers.docker=true
       - --providers.docker.exposedbydefault=false
       - --entrypoints.web.address=:80
+      - --providers.docker.constraints=Label(`environment=prod`)
     ports:
       - "9080:80"
     volumes:
