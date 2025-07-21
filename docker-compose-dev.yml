@@ -144,7 +144,7 @@ services:
     labels:
       - "environment=dev"
     ports:
-      - "8816:8815"  # use distinct host port to avoid conflicts with prod
+      - "8815:8815"
     networks:
       - trinity-dev-net
 
