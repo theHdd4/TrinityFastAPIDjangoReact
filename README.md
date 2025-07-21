@@ -261,6 +261,8 @@ through the tunnel and routed to the AI container.
 Use `docker compose logs traefik` and `docker compose logs fastapi` for
 additional details. Use `docker compose logs cloudflared` to confirm the tunnel
 is connected if you suspect connectivity issues.
+If the domain names fail to resolve to your host IP, check the Cloudflare DNS records and ensure only one tunnel container is running.
+Run `nslookup trinity.quantmatrixai.com` and `nslookup trinity-dev.quantmatrixai.com` to confirm they return your server address.
 
 For tips on reducing startup times and improving responsiveness see
 [performance_tips.md](performance_tips.md).

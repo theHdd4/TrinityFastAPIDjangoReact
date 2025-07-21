@@ -86,7 +86,9 @@ containers. Common causes are:
    in `TrinityBackendDjango/.env` to include both hostnames and rerun
    `python create_tenant.py` so the aliases are registered.
 
+6. Ensure only one cloudflared container is running. If you accidentally start the tunnel from both `docker-compose-dev.yml` and `cloudflared-dev/`, stop the extra container to avoid conflicts.
 After correcting any issues restart the tunnel service:
+
 
 ```bash
 docker compose restart cloudflared
