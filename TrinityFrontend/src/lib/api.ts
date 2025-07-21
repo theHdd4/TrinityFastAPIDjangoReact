@@ -1,8 +1,18 @@
 const hostIp = import.meta.env.VITE_HOST_IP;
-const djangoPort = import.meta.env.VITE_DJANGO_PORT || '8000';
-const fastapiPort = import.meta.env.VITE_FASTAPI_PORT || '8001';
-const aiPort = import.meta.env.VITE_AI_PORT || '8002';
-const frontendPort = import.meta.env.VITE_FRONTEND_PORT || '8080';
+// When running the dev stack the frontend listens on port 8081 while
+// Django/FASTAPI are published on 8003/8004/8005 respectively. Detect this
+// scenario using the current browser port so the correct defaults are used when
+// no explicit environment variables are provided.
+const isDevStack =
+  typeof window !== 'undefined' && window.location.port === '8081';
+
+const djangoPort =
+  import.meta.env.VITE_DJANGO_PORT || (isDevStack ? '8003' : '8000');
+const fastapiPort =
+  import.meta.env.VITE_FASTAPI_PORT || (isDevStack ? '8004' : '8001');
+const aiPort = import.meta.env.VITE_AI_PORT || (isDevStack ? '8005' : '8002');
+const frontendPort =
+  import.meta.env.VITE_FRONTEND_PORT || (isDevStack ? '8081' : '8080');
 let backendOrigin = import.meta.env.VITE_BACKEND_ORIGIN;
 
 if (!backendOrigin) {
