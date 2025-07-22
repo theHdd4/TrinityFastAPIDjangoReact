@@ -916,11 +916,12 @@ const handleAddDragLeave = (e: React.DragEvent) => {
                                             atomId={atom.id}
                                             atomType={atom.atomId}
                                             atomTitle={atom.title}
+                                            className="opacity-0 group-hover:opacity-100 transition-all duration-200"
                                           />
                                         )}
                                         <button
                                           onClick={e => handleAtomSettingsClick(e, atom.id)}
-                                          className="p-1 hover:bg-gray-100 rounded"
+                                          className="opacity-0 group-hover:opacity-100 transition-all duration-200 p-1 hover:bg-gray-100 rounded"
                                           title="Atom Settings"
                                         >
                                           <Settings className="w-4 h-4 text-gray-400" />
@@ -1113,11 +1114,12 @@ const handleAddDragLeave = (e: React.DragEvent) => {
                               atomId={atom.id}
                               atomType={atom.atomId}
                               atomTitle={atom.title}
+                              className="opacity-0 group-hover:opacity-100 transition-all duration-200"
                             />
                           )}
                           <button
                             onClick={e => handleAtomSettingsClick(e, atom.id)}
-                            className="p-1 hover:bg-gray-100 rounded"
+                            className="opacity-0 group-hover:opacity-100 transition-all duration-200 p-1 hover:bg-gray-100 rounded"
                             title="Atom Settings"
                           >
                             <Settings className="w-4 h-4 text-gray-400" />

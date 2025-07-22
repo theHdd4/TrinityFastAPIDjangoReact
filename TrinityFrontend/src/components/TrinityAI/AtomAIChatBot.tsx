@@ -19,6 +19,7 @@ interface AtomAIChatBotProps {
   atomId: string;
   atomType: string;
   atomTitle: string;
+  className?: string;
 }
 
 const ENDPOINTS: Record<string, string> = {
@@ -27,7 +28,9 @@ const ENDPOINTS: Record<string, string> = {
   'chart-maker': `${TRINITY_AI_API}/chart-maker`,
 };
 
-const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTitle }) => {
+import { cn } from '@/lib/utils';
+
+const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTitle, className }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [messages, setMessages] = useState<Message[]>([
     {
@@ -92,7 +95,7 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
   return (
     <Popover open={isOpen} onOpenChange={setIsOpen}>
       <PopoverTrigger asChild>
-        <button className="p-1 hover:bg-gray-100 rounded" title="Atom AI">
+        <button className={cn("p-1 hover:bg-gray-100 rounded", className)} title="Atom AI">
           <Sparkles className="w-3.5 h-3.5 text-purple-500" />
         </button>
       </PopoverTrigger>
