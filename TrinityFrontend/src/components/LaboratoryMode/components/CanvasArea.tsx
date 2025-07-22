@@ -366,14 +366,15 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
         const atomInfo =
           allAtoms.find(a => a.id === atom.atomName || a.title === atom.atomName) ||
           ({} as any);
+        const atomId = atomInfo.id || atom.atomName;
         const dropped: DroppedAtom = {
           id: `${atom.atomName}-${Date.now()}-${Math.random()}`,
-          atomId: atomInfo.id || atom.atomName,
+          atomId,
           title: atomInfo.title || atom.atomName,
           category: atomInfo.category || 'Atom',
           color: atomInfo.color || 'bg-gray-400',
           source: 'manual',
-          llm: undefined,
+          llm: LLM_MAP[atomId],
         };
         return {
           id: `card-${atom.atomName}-${Date.now()}-${Math.random()}`,
@@ -498,7 +499,7 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
         category: info?.category || atom.category || 'Atom',
         color: info?.color || atom.color || 'bg-gray-400',
         source: 'manual',
-        llm: undefined,
+        llm: LLM_MAP[atom.id],
         settings:
           atom.id === 'text-box'
             ? { ...DEFAULT_TEXTBOX_SETTINGS }
@@ -561,7 +562,7 @@ const addNewCardWithAtom = (
     category: atomInfo?.category || 'Atom',
     color: atomInfo?.color || 'bg-gray-400',
     source: 'manual',
-    llm: undefined,
+    llm: LLM_MAP[atomId],
     settings:
       atomId === 'text-box'
         ? { ...DEFAULT_TEXTBOX_SETTINGS }
@@ -899,7 +900,7 @@ const handleAddDragLeave = (e: React.DragEvent) => {
                                     <div className="flex items-center justify-between mb-3">
                                       <div className="flex items-center space-x-1">
                                         <div className={`w-3 h-3 ${atom.color} rounded-full`}></div>
-                                        {atom.source === 'ai' && (
+                                        {atom.llm && (
                                           <Sparkles
                                             className="w-3.5 h-3.5 text-purple-500 transform hover:scale-110 transition-transform"
                                             title={atom.llm || 'AI generated'}
