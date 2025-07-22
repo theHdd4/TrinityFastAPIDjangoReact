@@ -167,6 +167,8 @@ export interface DroppedAtom {
   title: string;
   category: string;
   color: string;
+  llm?: string;
+  source?: 'ai' | 'manual';
   settings?: any;
 }
 

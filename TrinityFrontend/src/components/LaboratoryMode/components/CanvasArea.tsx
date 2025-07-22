@@ -3,7 +3,7 @@ import { safeStringify } from '@/utils/safeStringify';
 import { Card, Card as AtomBox } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
-import { Plus, Grid3X3, Trash2, Eye, Settings, ChevronDown, Minus, RefreshCcw } from 'lucide-react';
+import { Plus, Grid3X3, Trash2, Eye, Settings, ChevronDown, Minus, RefreshCcw, Sparkles } from 'lucide-react';
 import { useExhibitionStore } from '../../ExhibitionMode/store/exhibitionStore';
 import { atoms as allAtoms } from '@/components/AtomList/data';
 import { molecules } from '@/components/MoleculeList/data';
@@ -71,6 +71,12 @@ const deriveWorkflowMolecules = (cards: LayoutCard[]): WorkflowMolecule[] => {
 };
 
 const STORAGE_KEY = 'laboratory-layout-cards';
+
+const LLM_MAP: Record<string, string> = {
+  concat: 'Agent Concat',
+  'chart-maker': 'Agent Chart Maker',
+  merge: 'Agent Merge',
+};
 
 const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, selectedCardId, onToggleSettingsPanel }) => {
   const { cards: layoutCards, setCards: setLayoutCards, updateAtomSettings } = useLaboratoryStore();
@@ -365,7 +371,9 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
           atomId: atomInfo.id || atom.atomName,
           title: atomInfo.title || atom.atomName,
           category: atomInfo.category || 'Atom',
-          color: atomInfo.color || 'bg-gray-400'
+          color: atomInfo.color || 'bg-gray-400',
+          source: 'manual',
+          llm: undefined,
         };
         return {
           id: `card-${atom.atomName}-${Date.now()}-${Math.random()}`,
@@ -489,6 +497,8 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
         title: info?.title || atom.title || atom.id,
         category: info?.category || atom.category || 'Atom',
         color: info?.color || atom.color || 'bg-gray-400',
+        source: 'manual',
+        llm: undefined,
         settings:
           atom.id === 'text-box'
             ? { ...DEFAULT_TEXTBOX_SETTINGS }
@@ -550,6 +560,8 @@ const addNewCardWithAtom = (
     title: atomInfo?.title || atomId,
     category: atomInfo?.category || 'Atom',
     color: atomInfo?.color || 'bg-gray-400',
+    source: 'manual',
+    llm: undefined,
     settings:
       atomId === 'text-box'
         ? { ...DEFAULT_TEXTBOX_SETTINGS }
@@ -640,6 +652,8 @@ const handleAddDragLeave = (e: React.DragEvent) => {
       title: info.title,
       category: info.category,
       color: info.color,
+      source: 'ai',
+      llm: LLM_MAP[info.id] || info.id,
       settings:
         info.id === 'text-box'
           ? { ...DEFAULT_TEXTBOX_SETTINGS }
@@ -885,6 +899,12 @@ const handleAddDragLeave = (e: React.DragEvent) => {
                                     <div className="flex items-center justify-between mb-3">
                                       <div className="flex items-center space-x-1">
                                         <div className={`w-3 h-3 ${atom.color} rounded-full`}></div>
+                                        {atom.source === 'ai' && (
+                                          <Sparkles
+                                            className="w-3.5 h-3.5 text-purple-500 transform hover:scale-110 transition-transform"
+                                            title={atom.llm || 'AI generated'}
+                                          />
+                                        )}
                                         <button
                                           onClick={e => handleAtomSettingsClick(e, atom.id)}
                                           className="p-1 hover:bg-gray-100 rounded"
