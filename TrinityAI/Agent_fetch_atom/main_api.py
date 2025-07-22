@@ -146,4 +146,6 @@ async def list_available_atoms():
         return {"error": str(e)}
 
 if __name__ == "__main__":
-    uvicorn.run("main_single_llm:app", host="0.0.0.0", port=8002, reload=True)
+    # Run the FastAPI application. Using the `app` instance directly
+    # avoids import issues when executing the module via `python main_api.py`.
+    uvicorn.run(app, host="0.0.0.0", port=8002, reload=False)
