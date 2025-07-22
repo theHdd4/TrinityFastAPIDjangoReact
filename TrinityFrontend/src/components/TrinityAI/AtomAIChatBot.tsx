@@ -5,7 +5,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Sparkles, Bot, User, X, MessageSquare, Send } from 'lucide-react';
-import { TRINITY_AI_API } from '@/lib/api';
+import { TRINITY_AI_API, CONCAT_API, MERGE_API } from '@/lib/api';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 
 interface Message {
@@ -29,6 +29,11 @@ const ENDPOINTS: Record<string, string> = {
   'chart-maker': `${TRINITY_AI_API}/chart-maker`,
 };
 
+const PERFORM_ENDPOINTS: Record<string, string> = {
+  concat: `${CONCAT_API}/perform`,
+  merge: `${MERGE_API}/perform`,
+};
+
 import { cn } from '@/lib/utils';
 
 const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTitle, className, disabled }) => {
@@ -48,6 +53,7 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
 
   const handleSendMessage = async () => {
     const endpoint = ENDPOINTS[atomType];
+    const performEndpoint = PERFORM_ENDPOINTS[atomType];
     if (!inputValue.trim() || !endpoint) return;
 
     const userMsg: Message = { id: Date.now().toString(), content: inputValue, sender: 'user', timestamp: new Date() };
@@ -68,11 +74,91 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
         setMessages(prev => [...prev, aiMsg]);
         if (atomType === 'concat' && data.concat_json) {
           const cfg = data.concat_json;
-          updateAtomSettings(atomId, {
-            file1: Array.isArray(cfg.file1) ? cfg.file1[0] : cfg.file1,
-            file2: Array.isArray(cfg.file2) ? cfg.file2[0] : cfg.file2,
-            direction: cfg.concat_direction || 'vertical',
-          });
+          const file1 = Array.isArray(cfg.file1) ? cfg.file1[0] : cfg.file1;
+          const file2 = Array.isArray(cfg.file2) ? cfg.file2[0] : cfg.file2;
+          const direction = cfg.concat_direction || 'vertical';
+          try {
+            if (performEndpoint) {
+              const res2 = await fetch(performEndpoint, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  file1,
+                  file2,
+                  concat_direction: direction,
+                }),
+              });
+              if (res2.ok) {
+                const result = await res2.json();
+                updateAtomSettings(atomId, {
+                  file1,
+                  file2,
+                  direction,
+                  concatResults: result,
+                  concatId: result.concat_id,
+                });
+              } else {
+                updateAtomSettings(atomId, { file1, file2, direction });
+              }
+            }
+          } catch {
+            updateAtomSettings(atomId, { file1, file2, direction });
+          }
+        } else if (atomType === 'merge' && data.merge_json) {
+          const cfg = data.merge_json;
+          const file1 = Array.isArray(cfg.file1) ? cfg.file1[0] : cfg.file1;
+          const file2 = Array.isArray(cfg.file2) ? cfg.file2[0] : cfg.file2;
+          const joinColumns = Array.isArray(cfg.join_columns)
+            ? cfg.join_columns
+            : [];
+          const joinType = cfg.join_type || 'inner';
+          try {
+            if (performEndpoint) {
+              const params = new URLSearchParams({
+                file1,
+                file2,
+                bucket_name: cfg.bucket_name || 'trinity',
+                join_columns: JSON.stringify(joinColumns),
+                join_type: joinType,
+              });
+              const res2 = await fetch(performEndpoint, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: params,
+              });
+              if (res2.ok) {
+                const result = await res2.json();
+                updateAtomSettings(atomId, {
+                  file1,
+                  file2,
+                  joinColumns,
+                  joinType,
+                  availableColumns: joinColumns,
+                  mergeResults: {
+                    ...result,
+                    result_file: null,
+                    unsaved_data: result.data,
+                  },
+                });
+              } else {
+                updateAtomSettings(atomId, {
+                  file1,
+                  file2,
+                  joinColumns,
+                  joinType,
+                  availableColumns: joinColumns,
+                });
+              }
+            }
+          } catch {
+            updateAtomSettings(atomId, {
+              file1,
+              file2,
+              joinColumns,
+              joinType,
+              availableColumns: joinColumns,
+            });
+          }
         }
       } else {
         const aiMsg: Message = { id: (Date.now() + 1).toString(), content: 'Request failed', sender: 'ai', timestamp: new Date() };
