@@ -10,3 +10,7 @@ The frontend references these URLs directly so the host and port must match your
 - **Agent_chart_maker** – internal helpers for chart making (no standalone API).
 
 See the individual READMEs for details and exact endpoints.
+
+The AI agents read `MINIO_ENDPOINT`, `MINIO_ACCESS_KEY` and
+`MINIO_SECRET_KEY` from the environment to fetch files. By default the
+endpoint resolves to `minio:9000` which matches the compose setup.

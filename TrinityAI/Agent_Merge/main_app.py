@@ -1,3 +1,4 @@
+import os
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import Optional, Dict, Any
@@ -16,11 +17,11 @@ LLM_API_URL = "http://10.2.1.65:11434/api/chat"
 LLM_MODEL_NAME = "deepseek-r1:32b"
 LLM_BEARER_TOKEN = "aakash_api_key"
 
-MINIO_ENDPOINT = "10.2.1.65:9000"
-MINIO_ACCESS_KEY = "minio"
-MINIO_SECRET_KEY = "minio123"
-MINIO_BUCKET = "trinity"
-MINIO_PREFIX = "default_client/default_app/default_project/"
+MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "minio:9000")
+MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY", "minio")
+MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY", "minio123")
+MINIO_BUCKET = os.getenv("MINIO_BUCKET", "trinity")
+MINIO_PREFIX = os.getenv("MINIO_PREFIX", "default_client/default_app/default_project/")
 
 # Initialize FastAPI app
 app = FastAPI(
