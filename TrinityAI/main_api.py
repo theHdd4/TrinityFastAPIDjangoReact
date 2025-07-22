@@ -24,14 +24,16 @@ def get_llm_config() -> Dict[str, str]:
 
 def get_minio_config() -> Dict[str, str]:
     """Return MinIO configuration from environment variables."""
+    client = os.getenv("CURRENT_CLIENT_NAME", os.getenv("CLIENT_NAME", "default_client"))
+    app = os.getenv("CURRENT_APP_NAME", os.getenv("APP_NAME", "default_app"))
+    project = os.getenv("CURRENT_PROJECT_NAME", os.getenv("PROJECT_NAME", "default_project"))
+    prefix_default = f"{client}/{app}/{project}/"
     return {
         "endpoint": os.getenv("MINIO_ENDPOINT", "minio:9000"),
         "access_key": os.getenv("MINIO_ACCESS_KEY", "minio"),
         "secret_key": os.getenv("MINIO_SECRET_KEY", "minio123"),
         "bucket": os.getenv("MINIO_BUCKET", "trinity"),
-        "prefix": os.getenv(
-            "MINIO_PREFIX", "default_client/default_app/default_project/"
-        ),
+        "prefix": os.getenv("MINIO_PREFIX", prefix_default),
     }
 
 # Ensure the Agent_fetch_atom folder is on the Python path so we can import its modules
