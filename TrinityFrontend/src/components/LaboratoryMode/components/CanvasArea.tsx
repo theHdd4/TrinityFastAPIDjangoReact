@@ -911,14 +911,13 @@ const handleAddDragLeave = (e: React.DragEvent) => {
                                     <div className="flex items-center justify-between mb-3">
                                       <div className="flex items-center space-x-1">
                                         <div className={`w-3 h-3 ${atom.color} rounded-full`}></div>
-                                        {atom.llm && (
-                                          <AtomAIChatBot
-                                            atomId={atom.id}
-                                            atomType={atom.atomId}
-                                            atomTitle={atom.title}
-                                            className="opacity-0 group-hover:opacity-100 transition-all duration-200"
-                                          />
-                                        )}
+                                        <AtomAIChatBot
+                                          atomId={atom.id}
+                                          atomType={atom.atomId}
+                                          atomTitle={atom.title}
+                                          disabled={!LLM_MAP[atom.atomId]}
+                                          className="opacity-0 group-hover:opacity-100 transition-all duration-200"
+                                        />
                                         <button
                                           onClick={e => handleAtomSettingsClick(e, atom.id)}
                                           className="opacity-0 group-hover:opacity-100 transition-all duration-200 p-1 hover:bg-gray-100 rounded"
@@ -1018,12 +1017,6 @@ const handleAddDragLeave = (e: React.DragEvent) => {
                 <span className="text-sm font-medium text-gray-700">
                   {cardTitle}
                 </span>
-                <AIChatBot
-                  cardId={card.id}
-                  cardTitle={cardTitle}
-                  onAddAtom={(id, atom) => addAtomByName(id, atom)}
-                  disabled={card.atoms.length > 0}
-                />
                 {card.atoms.some(a => a.llm) && (
                   <Sparkles
                     className="w-3.5 h-3.5 text-purple-500"
@@ -1109,14 +1102,13 @@ const handleAddDragLeave = (e: React.DragEvent) => {
                       <div className="flex items-center justify-between mb-3">
                         <div className="flex items-center space-x-1">
                           <div className={`w-3 h-3 ${atom.color} rounded-full`}></div>
-                          {atom.llm && (
-                            <AtomAIChatBot
-                              atomId={atom.id}
-                              atomType={atom.atomId}
-                              atomTitle={atom.title}
-                              className="opacity-0 group-hover:opacity-100 transition-all duration-200"
-                            />
-                          )}
+                          <AtomAIChatBot
+                            atomId={atom.id}
+                            atomType={atom.atomId}
+                            atomTitle={atom.title}
+                            disabled={!LLM_MAP[atom.atomId]}
+                            className="opacity-0 group-hover:opacity-100 transition-all duration-200"
+                          />
                           <button
                             onClick={e => handleAtomSettingsClick(e, atom.id)}
                             className="opacity-0 group-hover:opacity-100 transition-all duration-200 p-1 hover:bg-gray-100 rounded"

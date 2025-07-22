@@ -20,6 +20,7 @@ interface AtomAIChatBotProps {
   atomType: string;
   atomTitle: string;
   className?: string;
+  disabled?: boolean;
 }
 
 const ENDPOINTS: Record<string, string> = {
@@ -30,7 +31,7 @@ const ENDPOINTS: Record<string, string> = {
 
 import { cn } from '@/lib/utils';
 
-const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTitle, className }) => {
+const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTitle, className, disabled }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [messages, setMessages] = useState<Message[]>([
     {
@@ -93,10 +94,18 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
   };
 
   return (
-    <Popover open={isOpen} onOpenChange={setIsOpen}>
+    <Popover open={isOpen} onOpenChange={o => !disabled && setIsOpen(o)}>
       <PopoverTrigger asChild>
-        <button className={cn("p-1 hover:bg-gray-100 rounded", className)} title="Atom AI">
-          <Sparkles className="w-3.5 h-3.5 text-purple-500" />
+        <button
+          className={cn(
+            'p-1 hover:bg-gray-100 rounded',
+            disabled ? 'cursor-not-allowed opacity-50' : '',
+            className,
+          )}
+          title="Atom AI"
+          disabled={disabled}
+        >
+          <Sparkles className={cn('w-3.5 h-3.5', disabled ? 'text-gray-300' : 'text-purple-500')} />
         </button>
       </PopoverTrigger>
       <PopoverContent className="w-80 h-72 p-0 flex flex-col" align="start" side="bottom" sideOffset={8}>
