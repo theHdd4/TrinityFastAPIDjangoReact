@@ -856,6 +856,12 @@ const handleAddDragLeave = (e: React.DragEvent) => {
                                 onAddAtom={(id, atom) => addAtomByName(id, atom)}
                                 disabled={card.atoms.length > 0}
                               />
+                              {card.atoms.some(a => a.llm) && (
+                                <Sparkles
+                                  className="w-3.5 h-3.5 text-purple-500"
+                                  title={card.atoms.find(a => a.llm)?.llm || 'AI generated'}
+                                />
+                              )}
                             </div>
                             <div className="flex items-center space-x-2">
                               <span className="text-xs text-gray-500">Exhibit the Card</span>
@@ -1011,6 +1017,12 @@ const handleAddDragLeave = (e: React.DragEvent) => {
                   onAddAtom={(id, atom) => addAtomByName(id, atom)}
                   disabled={card.atoms.length > 0}
                 />
+                {card.atoms.some(a => a.llm) && (
+                  <Sparkles
+                    className="w-3.5 h-3.5 text-purple-500"
+                    title={card.atoms.find(a => a.llm)?.llm || 'AI generated'}
+                  />
+                )}
                 {card.atoms.length > 0 && (
                   <button
                     onClick={e => handleCardSettingsClick(e, card.id, card.isExhibited)}
@@ -1090,6 +1102,12 @@ const handleAddDragLeave = (e: React.DragEvent) => {
                       <div className="flex items-center justify-between mb-3">
                         <div className="flex items-center space-x-1">
                           <div className={`w-3 h-3 ${atom.color} rounded-full`}></div>
+                          {atom.llm && (
+                            <Sparkles
+                              className="w-3.5 h-3.5 text-purple-500 transform hover:scale-110 transition-transform"
+                              title={atom.llm || 'AI generated'}
+                            />
+                          )}
                           <button
                             onClick={e => handleAtomSettingsClick(e, atom.id)}
                             className="p-1 hover:bg-gray-100 rounded"
