@@ -397,10 +397,15 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
           initialCards = Array.isArray(raw)
             ? raw.map((c: any) => ({
                 id: c.id,
-                atoms: Array.isArray(c.atoms) ? c.atoms.map((a: any) => ({ ...a })) : [],
+                atoms: Array.isArray(c.atoms)
+                  ? c.atoms.map((a: any) => ({
+                      ...a,
+                      llm: a.llm || LLM_MAP[a.atomId],
+                    }))
+                  : [],
                 isExhibited: !!c.isExhibited,
                 moleculeId: c.moleculeId,
-                moleculeTitle: c.moleculeTitle
+                moleculeTitle: c.moleculeTitle,
               }))
             : null;
           if (initialCards) {
