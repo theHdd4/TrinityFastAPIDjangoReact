@@ -334,6 +334,7 @@
 import requests
 import json
 import re
+from pathlib import Path
 from minio import Minio
 from minio.error import S3Error
 from datetime import datetime
@@ -360,12 +361,32 @@ class SmartConcatAgent:
         self._load_files()
     
     def _load_files(self):
-        """Load all files from MinIO"""
+        """Load available Arrow files from registry or MinIO."""
         try:
-            objects = self.minio_client.list_objects(self.bucket, prefix=self.prefix, recursive=True)
-            self.available_files = [obj.object_name.split('/')[-1] for obj in objects 
-                                  if obj.object_name.endswith(('.xlsx', '.xls', '.csv'))]
-            print(f"[SYSTEM] Loaded {len(self.available_files)} files from MinIO")
+            from DataStorageRetrieval.flight_registry import ARROW_TO_ORIGINAL, REGISTRY_PATH
+
+            arrow_objects = list(ARROW_TO_ORIGINAL.keys())
+            if not arrow_objects and REGISTRY_PATH.exists():
+                with REGISTRY_PATH.open("r") as f:
+                    data = json.load(f)
+                    arrow_objects = list(data.get("arrow_to_original", {}).keys())
+            if arrow_objects:
+                self.available_files = [Path(a).name for a in arrow_objects]
+                print(f"[SYSTEM] Loaded {len(self.available_files)} arrow files from registry")
+                return
+        except Exception as e:
+            print(f"[WARN] Failed to read arrow registry: {e}")
+
+        try:
+            objects = self.minio_client.list_objects(
+                self.bucket, prefix=self.prefix, recursive=True
+            )
+            self.available_files = [
+                obj.object_name.split("/")[-1]
+                for obj in objects
+                if obj.object_name.endswith(".arrow")
+            ]
+            print(f"[SYSTEM] Loaded {len(self.available_files)} arrow files from MinIO")
         except S3Error as e:
             print(f"[ERROR] MinIO connection failed: {e}")
             self.available_files = []

@@ -1,5 +1,6 @@
 import os
 import sys
+import asyncio
 from pathlib import Path
 import uvicorn
 from fastapi import FastAPI
@@ -22,11 +23,36 @@ def get_llm_config() -> Dict[str, str]:
     }
 
 
+# Path to Django backend for DB helpers
+BACKEND_APP = Path(__file__).resolve().parents[1] / "TrinityBackendFastAPI" / "app"
+sys.path.append(str(BACKEND_APP))
+
+
+def _fetch_names_from_db() -> tuple[str, str, str]:
+    """Retrieve client, app and project names from the backend database."""
+    user_id = int(os.getenv("USER_ID", "0"))
+    project_id = int(os.getenv("PROJECT_ID", "0"))
+    client = os.getenv("CLIENT_NAME", "default_client")
+    app = os.getenv("APP_NAME", "default_app")
+    project = os.getenv("PROJECT_NAME", "default_project")
+    if user_id and project_id:
+        try:
+            from DataStorageRetrieval.db import fetch_client_app_project
+
+            client_db, app_db, project_db = asyncio.run(
+                fetch_client_app_project(user_id, project_id)
+            )
+            client = client_db or client
+            app = app_db or app
+            project = project_db or project
+        except Exception as exc:
+            print(f"⚠️ Failed to load names from DB: {exc}")
+    return client, app, project
+
+
 def get_minio_config() -> Dict[str, str]:
-    """Return MinIO configuration from environment variables."""
-    client = os.getenv("CURRENT_CLIENT_NAME", os.getenv("CLIENT_NAME", "default_client"))
-    app = os.getenv("CURRENT_APP_NAME", os.getenv("APP_NAME", "default_app"))
-    project = os.getenv("CURRENT_PROJECT_NAME", os.getenv("PROJECT_NAME", "default_project"))
+    """Return MinIO configuration using database names when available."""
+    client, app, project = _fetch_names_from_db()
     prefix_default = f"{client}/{app}/{project}/"
     return {
         "endpoint": os.getenv("MINIO_ENDPOINT", "minio:9000"),
