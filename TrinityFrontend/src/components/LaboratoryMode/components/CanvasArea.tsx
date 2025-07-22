@@ -3,7 +3,7 @@ import { safeStringify } from '@/utils/safeStringify';
 import { Card, Card as AtomBox } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
-import { Plus, Grid3X3, Trash2, Eye, Settings, ChevronDown, Minus, RefreshCcw, Sparkles } from 'lucide-react';
+import { Plus, Grid3X3, Trash2, Eye, Settings, ChevronDown, Minus, RefreshCcw } from 'lucide-react';
 import { useExhibitionStore } from '../../ExhibitionMode/store/exhibitionStore';
 import { atoms as allAtoms } from '@/components/AtomList/data';
 import { molecules } from '@/components/MoleculeList/data';
@@ -861,12 +861,6 @@ const handleAddDragLeave = (e: React.DragEvent) => {
                                 onAddAtom={(id, atom) => addAtomByName(id, atom)}
                                 disabled={card.atoms.length > 0}
                               />
-                              {card.atoms.some(a => a.llm) && (
-                                <Sparkles
-                                  className="w-3.5 h-3.5 text-purple-500"
-                                  title={card.atoms.find(a => a.llm)?.llm || 'AI generated'}
-                                />
-                              )}
                             </div>
                             <div className="flex items-center space-x-2">
                               <span className="text-xs text-gray-500">Exhibit the Card</span>
@@ -1017,12 +1011,12 @@ const handleAddDragLeave = (e: React.DragEvent) => {
                 <span className="text-sm font-medium text-gray-700">
                   {cardTitle}
                 </span>
-                {card.atoms.some(a => a.llm) && (
-                  <Sparkles
-                    className="w-3.5 h-3.5 text-purple-500"
-                    title={card.atoms.find(a => a.llm)?.llm || 'AI generated'}
-                  />
-                )}
+                <AIChatBot
+                  cardId={card.id}
+                  cardTitle={cardTitle}
+                  onAddAtom={(id, atom) => addAtomByName(id, atom)}
+                  disabled={card.atoms.length > 0}
+                />
                 {card.atoms.length > 0 && (
                   <button
                     onClick={e => handleCardSettingsClick(e, card.id, card.isExhibited)}
