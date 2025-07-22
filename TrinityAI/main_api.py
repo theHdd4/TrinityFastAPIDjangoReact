@@ -13,7 +13,15 @@ import numpy as np
 AGENT_PATH = Path(__file__).resolve().parent / "Agent_fetch_atom"
 sys.path.append(str(AGENT_PATH))
 
+# Include other agents so their APIs can be mounted
+CONCAT_PATH = Path(__file__).resolve().parent / "Agent_concat"
+MERGE_PATH = Path(__file__).resolve().parent / "Agent_Merge"
+sys.path.append(str(CONCAT_PATH))
+sys.path.append(str(MERGE_PATH))
+
 from single_llm_processor import SingleLLMProcessor
+from Agent_concat.main_app import app as concat_app
+from Agent_Merge.main_app import app as merge_app
 
 def convert_numpy(obj):
     if isinstance(obj, dict):
@@ -52,6 +60,10 @@ app = FastAPI(
     description="API endpoint using single LLM for domain checking, query enhancement, and atom extraction",
     version="7.0"
 )
+
+# Expose the concat and merge agent APIs alongside the chat endpoints
+app.include_router(concat_app.router)
+app.include_router(merge_app.router)
 
 # Enable CORS for browser-based clients
 app.add_middleware(

@@ -289,11 +289,12 @@ async def get_merged_data(
     bucket_name: str = Query(...)
 ):
     try:
-        merged_key = f"{merge_id}_merged.csv"
+        merged_key = f"{merge_id}_merge.arrow"
 
-        # Read the merged file back from MinIO
         merged_obj = minio_client.get_object(bucket_name, merged_key)
-        merged_df = pd.read_csv(io.BytesIO(merged_obj.read()))
+        data = merged_obj.read()
+        reader = ipc.RecordBatchFileReader(pa.BufferReader(data))
+        merged_df = reader.read_all().to_pandas()
 
         clean_df = merged_df.replace({np.nan: None, np.inf: None, -np.inf: None})
 
