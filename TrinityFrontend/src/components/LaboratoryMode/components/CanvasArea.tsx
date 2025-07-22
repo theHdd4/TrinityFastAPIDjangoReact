@@ -916,11 +916,11 @@ const handleAddDragLeave = (e: React.DragEvent) => {
                                           atomType={atom.atomId}
                                           atomTitle={atom.title}
                                           disabled={!LLM_MAP[atom.atomId]}
-                                          className="opacity-0 group-hover:opacity-100 transition-all duration-200"
+                                          className="transition-transform hover:scale-110"
                                         />
                                         <button
                                           onClick={e => handleAtomSettingsClick(e, atom.id)}
-                                          className="opacity-0 group-hover:opacity-100 transition-all duration-200 p-1 hover:bg-gray-100 rounded"
+                                          className="p-1 hover:bg-gray-100 rounded transition-transform hover:scale-110"
                                           title="Atom Settings"
                                         >
                                           <Settings className="w-4 h-4 text-gray-400" />
@@ -931,7 +931,7 @@ const handleAddDragLeave = (e: React.DragEvent) => {
                                           e.stopPropagation();
                                           removeAtom(card.id, atom.id);
                                         }}
-                                        className="opacity-0 group-hover:opacity-100 transition-all duration-200 p-1 hover:bg-gray-100 rounded"
+                                        className="p-1 hover:bg-gray-100 rounded transition-transform hover:scale-110"
                                       >
                                         <Trash2 className="w-4 h-4 text-gray-400" />
                                       </button>
@@ -1107,11 +1107,11 @@ const handleAddDragLeave = (e: React.DragEvent) => {
                             atomType={atom.atomId}
                             atomTitle={atom.title}
                             disabled={!LLM_MAP[atom.atomId]}
-                            className="opacity-0 group-hover:opacity-100 transition-all duration-200"
+                            className="transition-transform hover:scale-110"
                           />
                           <button
                             onClick={e => handleAtomSettingsClick(e, atom.id)}
-                            className="opacity-0 group-hover:opacity-100 transition-all duration-200 p-1 hover:bg-gray-100 rounded"
+                            className="p-1 hover:bg-gray-100 rounded transition-transform hover:scale-110"
                             title="Atom Settings"
                           >
                             <Settings className="w-4 h-4 text-gray-400" />
@@ -1122,7 +1122,7 @@ const handleAddDragLeave = (e: React.DragEvent) => {
                             e.stopPropagation();
                             removeAtom(card.id, atom.id);
                           }}
-                          className="opacity-0 group-hover:opacity-100 transition-all duration-200 p-1 hover:bg-gray-100 rounded"
+                          className="p-1 hover:bg-gray-100 rounded transition-transform hover:scale-110"
                         >
                           <Trash2 className="w-4 h-4 text-gray-400" />
                         </button>
