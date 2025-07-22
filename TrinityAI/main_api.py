@@ -9,6 +9,31 @@ from pydantic import BaseModel
 from typing import Dict, Any
 import numpy as np
 
+
+def get_llm_config() -> Dict[str, str]:
+    """Return LLM configuration from environment variables."""
+    ollama_ip = os.getenv("OLLAMA_IP", os.getenv("HOST_IP", "127.0.0.1"))
+    llm_port = os.getenv("OLLAMA_PORT", "11434")
+    api_url = os.getenv("LLM_API_URL", f"http://{ollama_ip}:{llm_port}/api/chat")
+    return {
+        "api_url": api_url,
+        "model_name": os.getenv("LLM_MODEL_NAME", "deepseek-r1:32b"),
+        "bearer_token": os.getenv("LLM_BEARER_TOKEN", "aakash_api_key"),
+    }
+
+
+def get_minio_config() -> Dict[str, str]:
+    """Return MinIO configuration from environment variables."""
+    return {
+        "endpoint": os.getenv("MINIO_ENDPOINT", "minio:9000"),
+        "access_key": os.getenv("MINIO_ACCESS_KEY", "minio"),
+        "secret_key": os.getenv("MINIO_SECRET_KEY", "minio123"),
+        "bucket": os.getenv("MINIO_BUCKET", "trinity"),
+        "prefix": os.getenv(
+            "MINIO_PREFIX", "default_client/default_app/default_project/"
+        ),
+    }
+
 # Ensure the Agent_fetch_atom folder is on the Python path so we can import its modules
 AGENT_PATH = Path(__file__).resolve().parent / "Agent_fetch_atom"
 sys.path.append(str(AGENT_PATH))
@@ -39,11 +64,11 @@ def convert_numpy(obj):
 
 def initialize_single_llm_system():
     try:
-        ollama_ip = os.getenv("OLLAMA_IP", os.getenv("HOST_IP", "127.0.0.1"))
+        cfg = get_llm_config()
         processor = SingleLLMProcessor(
-            api_url=f"http://{ollama_ip}:11434/api/chat",
-            model_name="deepseek-r1:32b",
-            bearer_token="aakash_api_key"
+            api_url=cfg["api_url"],
+            model_name=cfg["model_name"],
+            bearer_token=cfg["bearer_token"],
         )
         return processor
     except Exception as e:
@@ -167,4 +192,9 @@ async def list_available_atoms():
 if __name__ == "__main__":
     # Run the FastAPI application. Using the `app` instance directly
     # avoids import issues when executing the module via `python main_api.py`.
-    uvicorn.run(app, host="0.0.0.0", port=8002, reload=False)
+    uvicorn.run(
+        app,
+        host="0.0.0.0",
+        port=int(os.getenv("AI_PORT", 8002)),
+        reload=False,
+    )
