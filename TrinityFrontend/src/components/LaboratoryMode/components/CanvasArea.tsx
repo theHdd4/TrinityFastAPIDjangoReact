@@ -16,7 +16,7 @@ import {
   FEATURE_OVERVIEW_API,
   CLASSIFIER_API,
 } from '@/lib/api';
-import { AIChatBot } from '@/components/TrinityAI';
+import { AIChatBot, AtomAIChatBot } from '@/components/TrinityAI';
 import TextBoxEditor from '@/components/AtomList/atoms/text-box/TextBoxEditor';
 import DataUploadValidateAtom from '@/components/AtomList/atoms/data-upload-validate/DataUploadValidateAtom';
 import FeatureOverviewAtom from '@/components/AtomList/atoms/feature-overview/FeatureOverviewAtom';
@@ -907,9 +907,10 @@ const handleAddDragLeave = (e: React.DragEvent) => {
                                       <div className="flex items-center space-x-1">
                                         <div className={`w-3 h-3 ${atom.color} rounded-full`}></div>
                                         {atom.llm && (
-                                          <Sparkles
-                                            className="w-3.5 h-3.5 text-purple-500 transform hover:scale-110 transition-transform"
-                                            title={atom.llm || 'AI generated'}
+                                          <AtomAIChatBot
+                                            atomId={atom.id}
+                                            atomType={atom.atomId}
+                                            atomTitle={atom.title}
                                           />
                                         )}
                                         <button
@@ -1103,9 +1104,10 @@ const handleAddDragLeave = (e: React.DragEvent) => {
                         <div className="flex items-center space-x-1">
                           <div className={`w-3 h-3 ${atom.color} rounded-full`}></div>
                           {atom.llm && (
-                            <Sparkles
-                              className="w-3.5 h-3.5 text-purple-500 transform hover:scale-110 transition-transform"
-                              title={atom.llm || 'AI generated'}
+                            <AtomAIChatBot
+                              atomId={atom.id}
+                              atomType={atom.atomId}
+                              atomTitle={atom.title}
                             />
                           )}
                           <button
