@@ -6,4 +6,4 @@ COPY requirements.txt ./
 RUN pip install --no-cache-dir --timeout 1000 -r requirements.txt
 COPY . .
 RUN python Agent_fetch_atom/download_model.py
-CMD ["uvicorn", "Agent_fetch_atom.main_api:app", "--host", "0.0.0.0", "--port", "8002"]
+CMD ["uvicorn", "main_api:app", "--host", "0.0.0.0", "--port", "8002"]

@@ -1,3 +1,6 @@
+import os
+import sys
+from pathlib import Path
 import uvicorn
 from fastapi import FastAPI
 from fastapi.encoders import jsonable_encoder
@@ -5,8 +8,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Dict, Any
 import numpy as np
+
+# Ensure the Agent_fetch_atom folder is on the Python path so we can import its modules
+AGENT_PATH = Path(__file__).resolve().parent / "Agent_fetch_atom"
+sys.path.append(str(AGENT_PATH))
+
 from single_llm_processor import SingleLLMProcessor
-import os
 
 def convert_numpy(obj):
     if isinstance(obj, dict):
