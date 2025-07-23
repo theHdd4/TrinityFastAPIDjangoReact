@@ -32,6 +32,7 @@ class Project(models.Model):
     previous_name = models.CharField(
         max_length=150,
         blank=True,
+        default="",
         help_text="Previous project name if renamed or deleted",
     )
     description = models.TextField(blank=True)

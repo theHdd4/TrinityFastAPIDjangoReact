@@ -9,11 +9,23 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name='project',
             name='previous_name',
-            field=models.CharField(blank=True, max_length=150, help_text='Previous project name if renamed or deleted'),
+            field=models.CharField(
+                max_length=150,
+                blank=True,
+                default='',
+                help_text='Previous project name if renamed or deleted',
+            ),
+            preserve_default=False,
         ),
         migrations.AddField(
             model_name='historicalproject',
             name='previous_name',
-            field=models.CharField(blank=True, max_length=150, help_text='Previous project name if renamed or deleted'),
+            field=models.CharField(
+                max_length=150,
+                blank=True,
+                default='',
+                help_text='Previous project name if renamed or deleted',
+            ),
+            preserve_default=False,
         ),
     ]
