@@ -1,4 +1,5 @@
 from django.contrib.auth import authenticate, login, logout
+import os
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
 from rest_framework import viewsets, permissions, status
@@ -68,6 +69,9 @@ class LoginView(APIView):
         user = authenticate(request, username=username, password=password)
         if user is not None:
             login(request, user)
+            tenant = getattr(request, "tenant", None)
+            if tenant is not None:
+                os.environ["CLIENT_NAME"] = getattr(tenant, "schema_name", tenant.name if hasattr(tenant, "name") else str(tenant))
             return Response(UserSerializer(user).data)
         return Response({"detail": "Invalid credentials"}, status=status.HTTP_400_BAD_REQUEST)
 
