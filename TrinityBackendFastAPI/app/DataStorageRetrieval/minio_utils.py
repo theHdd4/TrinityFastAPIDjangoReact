@@ -39,6 +39,16 @@ ARROW_DIR = Path("arrow_data")
 ARROW_DIR.mkdir(exist_ok=True)
 
 
+def get_arrow_dir() -> Path:
+    """Return the arrow directory for the current client/app/project."""
+    client = os.getenv("CLIENT_NAME", "default_client")
+    app = os.getenv("APP_NAME", "default_app")
+    project = os.getenv("PROJECT_NAME", "default_project")
+    dir_path = ARROW_DIR / client / app / project
+    dir_path.mkdir(parents=True, exist_ok=True)
+    return dir_path
+
+
 def save_arrow_table(df: pd.DataFrame, path: Path) -> None:
     """Save a DataFrame to a local Arrow file."""
     table = pa.Table.from_pandas(df)

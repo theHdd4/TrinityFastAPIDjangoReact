@@ -117,6 +117,7 @@ from app.DataStorageRetrieval.minio_utils import (
     upload_to_minio,
     get_client,
     ARROW_DIR,
+    get_arrow_dir,
 )
 import pyarrow as pa
 import pyarrow.ipc as ipc
@@ -134,17 +135,12 @@ MINIO_BUCKET = os.getenv("MINIO_BUCKET", "trinity")
 USER_ID = int(os.getenv("USER_ID", "0"))
 PROJECT_ID = int(os.getenv("PROJECT_ID", "0"))
 
-DEFAULT_CLIENT = os.getenv("CLIENT_NAME", "default_client")
-DEFAULT_APP = os.getenv("APP_NAME", "default_app")
-DEFAULT_PROJECT = os.getenv("PROJECT_NAME", "default_project")
-
-
 async def get_object_prefix() -> str:
     """Return the MinIO prefix for the current client/app/project."""
 
-    client = DEFAULT_CLIENT
-    app = DEFAULT_APP
-    project = DEFAULT_PROJECT
+    client = os.getenv("CLIENT_NAME", "default_client")
+    app = os.getenv("APP_NAME", "default_app")
+    project = os.getenv("PROJECT_NAME", "default_project")
     if USER_ID and PROJECT_ID:
         try:
             client_db, app_db, project_db = await fetch_client_app_project(
@@ -1379,7 +1375,7 @@ async def validate(
     flight_uploads: list = []
     if validation_results["overall_status"] in ["passed", "passed_with_warnings"]:
         for (_, filename, key), (_, df) in zip(file_contents, files_data):
-            arrow_file = ARROW_DIR / f"{validator_atom_id}_{key}.arrow"
+            arrow_file = get_arrow_dir() / f"{validator_atom_id}_{key}.arrow"
             save_arrow_table(df, arrow_file)
 
             flight_path = f"{validator_atom_id}/{key}"
