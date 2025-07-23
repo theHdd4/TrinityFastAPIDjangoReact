@@ -6,6 +6,8 @@ import pyarrow as pa
 import pyarrow.ipc as ipc
 from minio import Minio
 from minio.error import S3Error
+import asyncio
+from .db import fetch_client_app_project
 
 MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "minio:9000")
 MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY", "minio")
@@ -35,6 +37,39 @@ def ensure_minio_bucket() -> bool:
         return False
 
 
+def ensure_prefix(prefix: str) -> None:
+    """Create a placeholder object so the prefix appears in MinIO."""
+    if not ensure_minio_bucket():
+        return
+    key = prefix.rstrip("/") + "/.keep"
+    try:
+        _client.put_object(MINIO_BUCKET, key, io.BytesIO(b""), length=0)
+    except S3Error:
+        pass
+
+
+async def get_object_prefix(
+    user_id: int | None = None, project_id: int | None = None
+) -> str:
+    """Return the ``client/app/project/`` prefix for the given IDs."""
+    user_id = user_id or int(os.getenv("USER_ID", "0") or 0)
+    project_id = project_id or int(os.getenv("PROJECT_ID", "0") or 0)
+    client = os.getenv("CLIENT_NAME", "default_client")
+    app = os.getenv("APP_NAME", "default_app")
+    project = os.getenv("PROJECT_NAME", "default_project")
+    if user_id and project_id and fetch_client_app_project is not None:
+        try:
+            client_db, app_db, project_db = await fetch_client_app_project(
+                user_id, project_id
+            )
+            client = client_db or client
+            app = app_db or app
+            project = project_db or project
+        except Exception:
+            pass
+    return f"{client}/{app}/{project}/"
+
+
 ARROW_DIR = Path("arrow_data")
 ARROW_DIR.mkdir(exist_ok=True)
 
@@ -51,6 +86,7 @@ def save_arrow_table(df: pd.DataFrame, path: Path) -> None:
 def upload_to_minio(file_content_bytes: bytes, filename: str, object_prefix: str) -> dict:
     """Upload bytes to MinIO using the object prefix."""
     try:
+        ensure_prefix(object_prefix)
         timestamp = pd.Timestamp.now().strftime("%Y%m%d_%H%M%S")
         object_name = f"{object_prefix}{timestamp}_{filename}"
         file_content = io.BytesIO(file_content_bytes)

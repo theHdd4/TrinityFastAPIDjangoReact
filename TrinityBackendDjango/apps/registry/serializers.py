@@ -26,6 +26,7 @@ class ProjectSerializer(serializers.ModelSerializer):
             "id",
             "name",
             "slug",
+            "previous_name",
             "description",
             "owner",
             "app",

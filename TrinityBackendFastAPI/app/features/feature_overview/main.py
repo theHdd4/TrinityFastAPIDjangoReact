@@ -16,3 +16,8 @@ app.add_middleware(
 # Register routes
 app.include_router(feature_overview_router, prefix="/feature-overview", tags=["Feature Overview"])
 
+@app.on_event("startup")
+async def startup_event() -> None:
+    from . import routes
+    await routes.init_object_prefix()
+

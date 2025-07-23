@@ -33,6 +33,7 @@ from .feature_overview.base import (
     unique_count,
 )
 from app.DataStorageRetrieval.db import fetch_client_app_project
+from app.DataStorageRetrieval.minio_utils import get_object_prefix
 from app.DataStorageRetrieval.arrow_client import (
     download_dataframe,
     download_table_bytes,
@@ -61,21 +62,21 @@ APP_NAME = os.getenv("APP_NAME", "default_app")
 PROJECT_NAME = os.getenv("PROJECT_NAME", "default_project")
 
 
-def load_names_from_db() -> None:
-    global CLIENT_NAME, APP_NAME, PROJECT_NAME
+async def init_object_prefix() -> None:
+    """Load names and prefix from Postgres."""
+    global CLIENT_NAME, APP_NAME, PROJECT_NAME, OBJECT_PREFIX
     if USER_ID and PROJECT_ID:
         try:
-            CLIENT_NAME_DB, APP_NAME_DB, PROJECT_NAME_DB = asyncio.run(
-                fetch_client_app_project(USER_ID, PROJECT_ID)
+            CLIENT_NAME_DB, APP_NAME_DB, PROJECT_NAME_DB = await fetch_client_app_project(
+                USER_ID, PROJECT_ID
             )
             CLIENT_NAME = CLIENT_NAME_DB or CLIENT_NAME
             APP_NAME = APP_NAME_DB or APP_NAME
             PROJECT_NAME = PROJECT_NAME_DB or PROJECT_NAME
         except Exception as exc:
             print(f"⚠️ Failed to load names from DB: {exc}")
+    OBJECT_PREFIX = await get_object_prefix(USER_ID, PROJECT_ID)
 
-
-load_names_from_db()
 
 OBJECT_PREFIX = f"{CLIENT_NAME}/{APP_NAME}/{PROJECT_NAME}/"
 

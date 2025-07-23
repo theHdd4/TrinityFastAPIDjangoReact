@@ -27,20 +27,21 @@ REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))
 redis_client = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, decode_responses=False)
 
 
-def load_names_from_db() -> None:
-    global CLIENT_NAME, APP_NAME, PROJECT_NAME
+async def init_object_prefix() -> None:
+    """Initialize names and prefix from Postgres."""
+    global CLIENT_NAME, APP_NAME, PROJECT_NAME, OBJECT_PREFIX
     if USER_ID and PROJECT_ID:
         try:
-            CLIENT_NAME_DB, APP_NAME_DB, PROJECT_NAME_DB = asyncio.run(
-                fetch_client_app_project(USER_ID, PROJECT_ID)
+            CLIENT_NAME_DB, APP_NAME_DB, PROJECT_NAME_DB = await fetch_client_app_project(
+                USER_ID, PROJECT_ID
             )
             CLIENT_NAME = CLIENT_NAME_DB or CLIENT_NAME
             APP_NAME = APP_NAME_DB or APP_NAME
             PROJECT_NAME = PROJECT_NAME_DB or PROJECT_NAME
         except Exception as exc:
             print(f"⚠️ Failed to load names from DB: {exc}")
+    OBJECT_PREFIX = f"{CLIENT_NAME}/{APP_NAME}/{PROJECT_NAME}/"
 
-load_names_from_db()
 
 OBJECT_PREFIX = f"{CLIENT_NAME}/{APP_NAME}/{PROJECT_NAME}/"
 
@@ -141,4 +142,5 @@ __all__ = [
     'OBJECT_PREFIX',
     'MINIO_BUCKET',
     'redis_client',
+    'init_object_prefix',
 ]

@@ -51,6 +51,8 @@ async def startup_event():
     print("🚀 Validate Atom API starting up...")
     print("📊 Available validators: base, price_elasticity, mmm, innovation, custom")
     print("📖 API Documentation: http://localhost:8000/docs")
+    from . import routes
+    await routes.init_object_prefix()
 
 @app.on_event("shutdown")
 async def shutdown_event():

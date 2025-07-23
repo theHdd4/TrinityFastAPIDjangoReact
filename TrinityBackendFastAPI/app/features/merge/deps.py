@@ -3,7 +3,9 @@ import pandas as pd
 import io
 from minio import Minio
 import redis
+import asyncio
 from io import BytesIO
+from app.DataStorageRetrieval.minio_utils import get_object_prefix
 
 # MinIO config
 MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "minio:9000")
@@ -22,6 +24,12 @@ PROJECT_NAME = os.getenv("PROJECT_NAME", "default_project")
 REDIS_HOST = os.getenv("REDIS_HOST", "redis")
 REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))
 redis_client = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, decode_responses=False)
+
+async def init_object_prefix() -> None:
+    """Load object prefix from Postgres."""
+    global OBJECT_PREFIX
+    OBJECT_PREFIX = await get_object_prefix(USER_ID, PROJECT_ID)
+
 
 OBJECT_PREFIX = f"{CLIENT_NAME}/{APP_NAME}/{PROJECT_NAME}/"
 
@@ -54,5 +62,6 @@ __all__ = [
     'OBJECT_PREFIX',
     'MINIO_BUCKET',
     'redis_client',
+    'init_object_prefix',
 ]
 

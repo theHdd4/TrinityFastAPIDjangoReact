@@ -49,3 +49,18 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml -p trinity_dev ru
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.prod.yml -p trinity_prod run --rm web python create_tenant.py
 ```
+
+## Applying updates
+If you pull new commits that include Django migrations, run the tenant setup script again so the changes apply to both the public and tenant schemas before restarting the containers.
+
+### Development environment
+```bash
+docker compose -f docker-compose.yml -f docker-compose.dev.yml -p trinity_dev run --rm web python create_tenant.py
+```
+
+### Production environment
+```bash
+docker compose -f docker-compose.yml -f docker-compose.prod.yml -p trinity_prod run --rm web python create_tenant.py
+```
+
+Running this step ensures new columns like `Project.previous_name` are added and avoids errors when fetching or creating projects.
