@@ -6,7 +6,7 @@ from minio.commonconfig import CopySource
 from pathlib import Path
 import sys
 import asyncio
-from .models import ArrowDataset
+from .models import ArrowDataset, Project
 from asgiref.sync import async_to_sync
 
 # Ensure FastAPI utilities are importable for DB helpers
@@ -50,17 +50,29 @@ def ensure_prefix(prefix: str) -> None:
         pass
 
 def project_prefix(user_id: int, project_id: int) -> str:
-    """Return storage prefix for given user and project."""
+    """Return storage prefix for the given user and project using the ORM."""
     client = os.getenv("CLIENT_NAME", "default_client")
     app = os.getenv("APP_NAME", "default_app")
     project = os.getenv("PROJECT_NAME", "default_project")
-    if fetch_client_app_project is not None:
-        try:
-            client, app, project = async_to_sync(fetch_client_app_project)(
-                user_id, project_id
-            )
-        except Exception:
-            pass
+
+    try:
+        proj = (
+            Project.objects.select_related("owner", "app")
+            .only("slug", "owner__username", "app__slug")
+            .get(id=project_id, owner_id=user_id)
+        )
+        client = proj.owner.username or client
+        app = proj.app.slug or app
+        project = proj.slug or project
+    except Exception:
+        if fetch_client_app_project is not None:
+            try:
+                client, app, project = async_to_sync(fetch_client_app_project)(
+                    user_id, project_id
+                )
+            except Exception:
+                pass
+
     return f"{client}/{app}/{project}/"
 
 def rename_prefix(old_prefix: str, new_prefix: str) -> None:
