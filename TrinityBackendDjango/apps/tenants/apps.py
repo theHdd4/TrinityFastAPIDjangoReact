@@ -6,3 +6,7 @@ class TenantsConfig(AppConfig):
     name = "apps.tenants"
     verbose_name = "Tenant & Workspace Isolation"
     label = "tenants"
+
+    def ready(self):
+        """Import signal handlers."""
+        from . import signals  # noqa: F401
