@@ -8,26 +8,9 @@ from apps.tenants.models import Tenant
 
 
 def _current_tenant_name() -> str:
-    """Return the client folder for all MinIO prefixes.
+    """Return the shared client folder for all MinIO prefixes."""
 
-    If the ``CLIENT_NAME`` environment variable is set use that value. This
-    lets single-tenant deployments share one bucket path. Otherwise fall back
-    to looking up the current tenant's name from the database using the active
-    schema. This preserves the previous behaviour for multi-tenant setups.
-    """
-
-    env_name = os.getenv("CLIENT_NAME")
-    if env_name:
-        return env_name.replace(" ", "_")
-
-    schema = connection.schema_name
-    with connection.cursor() as cur:
-        cur.execute("SET search_path TO public")
-        try:
-            name = Tenant.objects.get(schema_name=schema).name
-        finally:
-            cur.execute(f"SET search_path TO {schema}")
-    return name.replace(" ", "_")
+    return os.getenv("CLIENT_NAME", "default_client").replace(" ", "_")
 
 
 @receiver(post_save, sender=Project)
