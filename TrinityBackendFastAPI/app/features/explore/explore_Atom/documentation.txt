@@ -1,0 +1,364 @@
+Explore Atom API Documentation
+Overview
+The Explore Atom API provides multi-dimensional data analysis capabilities with support for various aggregations, chart types, and intelligent caching using Redis and MongoDB.
+
+1. Root Endpoint
+GET /explore/
+Returns API information and available endpoints.
+
+Response:
+
+json
+{
+  "message": "Explore Atom API Active",
+  "system": "explore_atom",
+  "version": "1.0.0",
+  "status": "operational",
+  "architecture": "dual_database_setup",
+  "working_endpoints": [...],
+  "features": [...]
+}
+
+2. Get Dimensions and Identifiers
+GET /explore/get-dimensions-and-identifiers/{validator_atom_id}
+Retrieves all business dimensions with assignments from the validator_atoms_db database.
+
+Parameters:
+
+validator_atom_id (path) - Required: The ID of the validator atom
+
+Response:
+
+json
+{
+  "status": "success",
+  "validator_atom_id": "validator_20250101_120000",
+  "dimensions": {
+    "file1.csv": {
+      "product": ["Brand", "Category", "Variant"],
+      "market": ["Channel", "Region"],
+      "time": ["Month", "Year"]
+    }
+  }
+}
+Error Response (404):
+
+json
+{
+  "detail": "Validator atom not found"
+}
+3. Get Measures
+GET /explore/get-measures/{validator_atom_id}
+Retrieves column classifications to identify available measures from the validator_atoms_db database.
+
+Parameters:
+
+validator_atom_id (path) - Required: The ID of the validator atom
+
+Response:
+
+json
+{
+  "status": "success",
+  "validator_atom_id": "validator_20250101_120000",
+  "measures": {
+    "file1.csv": ["sales_value", "volume", "revenue"],
+    "file2.csv": ["cost", "profit_margin"]
+  }
+}
+
+
+4. Select Dimensions and Measures
+POST /explore/select-dimensions-and-measures
+Creates a new explore conifg by selecting specific dimensions and measures for analysis which you will use for exploring.
+
+Form Data:
+
+validator_atom_id - Required: Source validator atom ID
+
+atom_name - Required: Name for the new explore atom
+
+selected_dimensions - Required: JSON string of selected dimensions
+
+selected_measures - Required: JSON string of selected measures
+
+Example Request:
+
+python
+form_data = {
+    "validator_atom_id": "validator_20250101_120000",
+    "atom_name": "Sales Analysis Q1",
+    "selected_dimensions": '{"file1.csv": {"product": ["Brand", "Variant"], "market": ["Channel"]}}',
+    "selected_measures": '{"file1.csv": ["sales_value", "volume"]}'
+}
+Response:
+
+json
+{
+  "status": "success",
+  "message": "Explore atom 'Sales Analysis Q1' created and saved successfully",
+  "explore_atom_id": "explore_20250117_143025",
+  "validator_atom_id": "validator_20250101_120000",
+  "selected_dimensions": {...},
+  "selected_measures": {...},
+  "summary": {
+    "dimensions_selected": 3,
+    "measures_selected": 2,
+    "file_keys": ["file1.csv"]
+  },
+  "mongodb_saved": true,
+  "mongo_id": "65c7d8f9...",
+  "next_step": "Define operations using POST /explore/specify-operations with explore_atom_id: explore_20250117_143025"
+}
+5. Specify Operations
+POST /explore/specify-operations
+Defines data processing operations including filters, grouping, aggregations, and chart type.
+
+Form Data:
+
+explore_atom_id - Required: ID of the explore atom
+
+operations - Required: JSON string of operations configuration
+
+Operations Structure:
+
+json
+{
+  "file_key": "file1.csv",
+  "filters": {
+    "Channel": "Modern Trade",
+    "Year": "2024"
+  },
+  "group_by": ["Brand", "Month"],
+  "measures_config": {
+    "sales_value": "sum",
+    "volume": "weighted_avg"
+  },
+  "chart_type": "line_chart",
+  "x_axis": "Month",           // Required for line_chart
+  "weight_column": "units"     // Required for weighted_avg
+}
+Supported Aggregations:
+
+sum - Sum of values
+
+avg - Simple average
+
+count - Count of records
+
+min - Minimum value
+
+max - Maximum value
+
+weighted_avg - Weighted average (requires weight_column)
+
+Supported Chart Types:
+
+bar_chart
+
+line_chart (requires x_axis)
+
+pie_chart
+
+table
+
+Response:
+
+json
+{
+  "status": "success",
+  "message": "Operations specified successfully",
+  "explore_atom_id": "explore_20250117_143025",
+  "operations": {...},
+  "data_source": "MongoDB",
+  "mongodb_updated": true,
+  "operation_summary": {
+    "file_key": "file1.csv",
+    "filters_count": 2,
+    "group_by_dimensions": ["Brand", "Month"],
+    "measures_count": 2,
+    "chart_type": "line_chart",
+    "weighted_avg_used": true,
+    "weight_column": "units",
+    "x_axis": "Month"
+  },
+  "validation_passed": {
+    "weighted_avg_validation": true,
+    "line_chart_validation": true
+  },
+  "next_step": "Get chart data using GET /explore/chart-data-multidim/explore_20250117_143025"
+}
+6. Get Chart Data
+GET /explore/chart-data-multidim/{explore_atom_id}
+Processes data according to specified operations and returns chart-ready data with Redis caching.
+
+Parameters:
+
+explore_atom_id (path) - Required: The explore atom ID
+
+Features:
+
+Smart Redis caching for 30-minute data persistence
+
+Case-insensitive column matching
+
+Multi-dimensional grouping support
+
+Weighted average calculations
+
+MongoDB storage of results
+
+Response (Table Format):
+
+json
+{
+  "status": "success",
+  "explore_atom_id": "explore_20250117_143025",
+  "chart_type": "table",
+  "data": [
+    {
+      "brand": "Brand A",
+      "month": "January",
+      "sales_value": 150000.50
+    },
+    {
+      "brand": "Brand B",
+      "month": "January",
+      "sales_value": 120000.75
+    }
+  ],
+  "metadata": {
+    "x_axis": null,
+    "weight_column": null,
+    "grouped_by": ["Brand", "Month"],
+    "measure": "Sales_Value",
+    "aggregation": "sum",
+    "original_rows": 50000,
+    "filtered_rows": 12000,
+    "grouped_combinations": 24,
+    "filter_debug": {...},
+    "chart_data_points": 20,
+    "chart_type": "table"
+  },
+  "cache_info": {
+    "redis_enabled": true,
+    "cache_hit": false,
+    "cache_key": "csv_cache_a7c3d...",
+    "redis_host": "10.2.1.65:9002"
+  },
+  "saved_to_mongodb": true,
+  "chart_result_id": "chart_20250117_143045",
+  "mongo_save_message": "Chart result saved successfully"
+}
+Response (Line Chart Format):
+
+json
+{
+  "status": "success",
+  "chart_type": "line_chart",
+  "data": [
+    {
+      "x": ["Jan", "Feb", "Mar"],
+      "y": [100, 120, 150],
+      "name": "Brand A | Modern Trade",
+      "type": "scatter",
+      "mode": "lines+markers"
+    },
+    {
+      "x": ["Jan", "Feb", "Mar"],
+      "y": [80, 90, 110],
+      "name": "Brand B | Modern Trade",
+      "type": "scatter",
+      "mode": "lines+markers"
+    }
+  ]
+}
+7. Test Database Connection
+GET /explore/test-connection
+Tests connectivity to both MongoDB databases (source and destination).
+
+Response:
+
+json
+{
+  "status": "success",
+  "message": "Both database connections successful",
+  "details": {
+    "source_db": {
+      "connected": true,
+      "database": "validator_atoms_db",
+      "collections": 5
+    },
+    "destination_db": {
+      "connected": true,
+      "database": "Explore_atom",
+      "collections": 2
+    }
+  }
+}
+8. List Saved Atoms
+GET /explore/list-saved-atoms
+Retrieves all saved explore atoms from the destination database.
+
+Response:
+
+json
+{
+  "status": "success",
+  "message": "Found 3 explore atoms",
+  "count": 3,
+  "atoms": [
+    {
+      "explore_atom_id": "explore_20250117_143025",
+      "atom_name": "Sales Analysis Q1",
+      "validator_atom_id": "validator_20250101_120000",
+      "created_at": "2025-01-17T14:30:25",
+      "status": "ready_for_processing"
+    }
+  ]
+}
+9. Redis Health Check
+GET /explore/redis-health
+Checks Redis connection health and status.
+
+Response:
+
+json
+{
+  "status": "connected",
+  "host": "10.2.1.65",
+  "port": 9002,
+  "ping_response": true,
+  "info": {
+    "redis_version": "7.0.11",
+    "used_memory_human": "1.2M",
+    "connected_clients": 5
+  }
+}
+Error Response (503):
+
+json
+{
+  "status": "error",
+  "message": "Redis connection failed",
+  "host": "10.2.1.65",
+  "port": 9002,
+  "error": "Connection refused"
+}
+Error Handling
+All endpoints follow consistent error handling:
+
+400 Bad Request: Invalid input parameters or JSON format
+
+404 Not Found: Resource not found (validator atom, explore atom)
+
+500 Internal Server Error: Database connection or processing errors
+
+503 Service Unavailable: External service unavailable (Redis, MongoDB)
+
+Standard Error Response:
+
+json
+{
+  "detail": "Error message describing the issue"
+}
