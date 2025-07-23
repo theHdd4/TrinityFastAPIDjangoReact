@@ -69,7 +69,9 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
       });
       if (res.ok) {
         const data = await res.json();
-        const aiText = data.message || data.response || data.final_response || 'AI response';
+        const aiText = Array.isArray(data.suggestions) && data.suggestions.length
+          ? data.suggestions.join('\n')
+          : (data.message || data.response || data.final_response || 'AI response');
         const aiMsg: Message = { id: (Date.now() + 1).toString(), content: aiText, sender: 'ai', timestamp: new Date() };
         setMessages(prev => [...prev, aiMsg]);
         if (atomType === 'concat' && data.concat_json) {
@@ -194,7 +196,13 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
           <Sparkles className={cn('w-3.5 h-3.5', disabled ? 'text-gray-300' : 'text-purple-500')} />
         </button>
       </PopoverTrigger>
-      <PopoverContent className="w-80 h-72 p-0 flex flex-col" align="start" side="bottom" sideOffset={8}>
+      <PopoverContent
+        className="w-96 h-80 p-0 flex flex-col"
+        align="start"
+        side="bottom"
+        sideOffset={8}
+        style={{ resize: 'both', overflow: 'auto' }}
+      >
         <div className="p-2 border-b border-gray-200 bg-white rounded-t-md flex items-center justify-between">
           <div className="flex items-center space-x-2">
             <MessageSquare className="w-4 h-4 text-purple-600" />

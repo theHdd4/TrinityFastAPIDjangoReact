@@ -1,4 +1,6 @@
 import os
+import sys
+from pathlib import Path
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import Optional, Dict, Any
@@ -12,16 +14,13 @@ import uvicorn
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Configuration
-LLM_API_URL = "http://10.2.1.65:11434/api/chat"
-LLM_MODEL_NAME = "deepseek-r1:32b"
-LLM_BEARER_TOKEN = "aakash_api_key"
+# Configuration shared via main_api
+PARENT_DIR = Path(__file__).resolve().parent.parent
+sys.path.append(str(PARENT_DIR))
+from main_api import get_llm_config, get_minio_config
 
-MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "minio:9000")
-MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY", "minio")
-MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY", "minio123")
-MINIO_BUCKET = os.getenv("MINIO_BUCKET", "trinity")
-MINIO_PREFIX = os.getenv("MINIO_PREFIX", "default_client/default_app/default_project/")
+cfg_llm = get_llm_config()
+cfg_minio = get_minio_config()
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -33,14 +32,14 @@ app = FastAPI(
 # Initialize agent
 try:
     agent = JSONHistoryAgent(
-        LLM_API_URL, 
-        LLM_MODEL_NAME, 
-        LLM_BEARER_TOKEN,
-        MINIO_ENDPOINT, 
-        MINIO_ACCESS_KEY, 
-        MINIO_SECRET_KEY,
-        MINIO_BUCKET, 
-        MINIO_PREFIX
+        cfg_llm["api_url"],
+        cfg_llm["model_name"],
+        cfg_llm["bearer_token"],
+        cfg_minio["endpoint"],
+        cfg_minio["access_key"],
+        cfg_minio["secret_key"],
+        cfg_minio["bucket"],
+        cfg_minio["prefix"],
     )
     logger.info("JSONHistoryAgent initialized successfully")
 except Exception as e:
@@ -272,9 +271,9 @@ async def internal_error_handler(request, exc):
 if __name__ == "__main__":
     # Run the application
     uvicorn.run(
-        app, 
-        host="0.0.0.0", 
-        port=8001,
+        app,
+        host="0.0.0.0",
+        port=int(os.getenv("AI_PORT", 8002)),
         log_level="info",
         reload=False
     )

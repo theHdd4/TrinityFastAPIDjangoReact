@@ -1,5 +1,6 @@
 import os
 import sys
+import asyncio
 from pathlib import Path
 import uvicorn
 from fastapi import FastAPI
@@ -8,6 +9,58 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Dict, Any
 import numpy as np
+
+
+def get_llm_config() -> Dict[str, str]:
+    """Return LLM configuration from environment variables."""
+    ollama_ip = os.getenv("OLLAMA_IP", os.getenv("HOST_IP", "127.0.0.1"))
+    llm_port = os.getenv("OLLAMA_PORT", "11434")
+    api_url = os.getenv("LLM_API_URL", f"http://{ollama_ip}:{llm_port}/api/chat")
+    return {
+        "api_url": api_url,
+        "model_name": os.getenv("LLM_MODEL_NAME", "deepseek-r1:32b"),
+        "bearer_token": os.getenv("LLM_BEARER_TOKEN", "aakash_api_key"),
+    }
+
+
+# Path to Django backend for DB helpers
+BACKEND_APP = Path(__file__).resolve().parents[1] / "TrinityBackendFastAPI" / "app"
+sys.path.append(str(BACKEND_APP))
+
+
+def _fetch_names_from_db() -> tuple[str, str, str]:
+    """Retrieve client, app and project names from the backend database."""
+    user_id = int(os.getenv("USER_ID", "0"))
+    project_id = int(os.getenv("PROJECT_ID", "0"))
+    client = os.getenv("CLIENT_NAME", "default_client")
+    app = os.getenv("APP_NAME", "default_app")
+    project = os.getenv("PROJECT_NAME", "default_project")
+    if user_id and project_id:
+        try:
+            from DataStorageRetrieval.db import fetch_client_app_project
+
+            client_db, app_db, project_db = asyncio.run(
+                fetch_client_app_project(user_id, project_id)
+            )
+            client = client_db or client
+            app = app_db or app
+            project = project_db or project
+        except Exception as exc:
+            print(f"⚠️ Failed to load names from DB: {exc}")
+    return client, app, project
+
+
+def get_minio_config() -> Dict[str, str]:
+    """Return MinIO configuration using database names when available."""
+    client, app, project = _fetch_names_from_db()
+    prefix_default = f"{client}/{app}/{project}/"
+    return {
+        "endpoint": os.getenv("MINIO_ENDPOINT", "minio:9000"),
+        "access_key": os.getenv("MINIO_ACCESS_KEY", "minio"),
+        "secret_key": os.getenv("MINIO_SECRET_KEY", "minio123"),
+        "bucket": os.getenv("MINIO_BUCKET", "trinity"),
+        "prefix": os.getenv("MINIO_PREFIX", prefix_default),
+    }
 
 # Ensure the Agent_fetch_atom folder is on the Python path so we can import its modules
 AGENT_PATH = Path(__file__).resolve().parent / "Agent_fetch_atom"
@@ -39,11 +92,11 @@ def convert_numpy(obj):
 
 def initialize_single_llm_system():
     try:
-        ollama_ip = os.getenv("OLLAMA_IP", os.getenv("HOST_IP", "127.0.0.1"))
+        cfg = get_llm_config()
         processor = SingleLLMProcessor(
-            api_url=f"http://{ollama_ip}:11434/api/chat",
-            model_name="deepseek-r1:32b",
-            bearer_token="aakash_api_key"
+            api_url=cfg["api_url"],
+            model_name=cfg["model_name"],
+            bearer_token=cfg["bearer_token"],
         )
         return processor
     except Exception as e:
@@ -167,4 +220,9 @@ async def list_available_atoms():
 if __name__ == "__main__":
     # Run the FastAPI application. Using the `app` instance directly
     # avoids import issues when executing the module via `python main_api.py`.
-    uvicorn.run(app, host="0.0.0.0", port=8002, reload=False)
+    uvicorn.run(
+        app,
+        host="0.0.0.0",
+        port=int(os.getenv("AI_PORT", 8002)),
+        reload=False,
+    )

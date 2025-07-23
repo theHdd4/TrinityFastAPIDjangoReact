@@ -92,9 +92,11 @@ export const FEATURE_OVERVIEW_API =
   normalizeUrl(import.meta.env.VITE_FEATURE_OVERVIEW_API) ||
   `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/feature-overview`;
 
-export const TRINITY_AI_API =
+const aiBase =
   normalizeUrl(import.meta.env.VITE_TRINITY_AI_API) ||
   backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${aiPort}`);
+
+export const TRINITY_AI_API = usesProxy ? `${aiBase}/chat` : aiBase;
 
 export const LAB_ACTIONS_API = `${REGISTRY_API}/laboratory-actions`;
 

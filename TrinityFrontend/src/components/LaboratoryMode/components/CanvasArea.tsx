@@ -645,9 +645,13 @@ const handleAddDragLeave = (e: React.DragEvent) => {
 
 
   const normalizeName = (s: string) => s.toLowerCase().replace(/[\s_-]/g, '');
+  const aliasMap: Record<string, string> = {
+    concatenate: 'concat',
+  };
 
   const addAtomByName = (cardId: string, atomName: string) => {
-    const norm = normalizeName(atomName);
+    let norm = normalizeName(atomName);
+    norm = aliasMap[norm] || norm;
     const info = allAtoms.find(
       a => normalizeName(a.id) === norm || normalizeName(a.title) === norm
     );

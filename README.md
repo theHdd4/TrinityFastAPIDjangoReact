@@ -22,8 +22,8 @@ Follow the steps below to run all services together.
    Ensure `DEBUG=true` in the Django `.env` file so error messages appear if
    tenant creation fails.
    The frontend `.env` includes `VITE_SUBSCRIPTIONS_API` which should point to
-   the Django subscription endpoints and `VITE_TRINITY_AI_API` for the AI
-   service.
+  the Django subscription endpoints and `VITE_TRINITY_AI_API` for the AI
+  service.
   When exposing the app via Cloudflare Tunnel, you can set
   `VITE_BACKEND_ORIGIN=https://trinity.quantmatrixai.com` so the frontend sends
   API requests through Traefik. The `.env.example` file leaves this variable
@@ -33,6 +33,10 @@ Follow the steps below to run all services together.
   rebuilding. Avoid pointing this variable at the frontend port `8081`; use
   `8003` instead if you must override it. Rebuild the `frontend` service after
   changing the value so Vite picks it up:
+
+  When `VITE_BACKEND_ORIGIN` points at the public hostname the AI endpoints are
+  automatically prefixed with `/chat`. This ensures requests like `/concat` or
+  `/merge` reach the `trinity-ai` container through Traefik.
 
   ```bash
   docker compose build frontend

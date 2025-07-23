@@ -1,29 +1,33 @@
 # main_concat.py
 
 import os
+import sys
+from pathlib import Path
 from fastapi import FastAPI
 from pydantic import BaseModel
 from typing import Optional
 import time
 from llm_concat import SmartConcatAgent
 
-# Configuration
-LLM_API_URL = "http://10.2.1.65:11434/api/chat"
-LLM_MODEL_NAME = "deepseek-r1:32b"
-LLM_BEARER_TOKEN = "aakash_api_key"
+# Allow importing helpers from the parent folder
+PARENT_DIR = Path(__file__).resolve().parent.parent
+sys.path.append(str(PARENT_DIR))
+from main_api import get_llm_config, get_minio_config
 
-MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "minio:9000")
-MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY", "admin_dev")
-MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY", "pass_dev")
-MINIO_BUCKET = os.getenv("MINIO_BUCKET", "trinity")
-MINIO_PREFIX = os.getenv("MINIO_PREFIX", "data_setss/")
+cfg_llm = get_llm_config()
+cfg_minio = get_minio_config()
 
 # Initialize app and agent
 app = FastAPI(title="Smart Concatenation Agent", version="1.0.0")
 agent = SmartConcatAgent(
-    LLM_API_URL, LLM_MODEL_NAME, LLM_BEARER_TOKEN,
-    MINIO_ENDPOINT, MINIO_ACCESS_KEY, MINIO_SECRET_KEY,
-    MINIO_BUCKET, MINIO_PREFIX
+    cfg_llm["api_url"],
+    cfg_llm["model_name"],
+    cfg_llm["bearer_token"],
+    cfg_minio["endpoint"],
+    cfg_minio["access_key"],
+    cfg_minio["secret_key"],
+    cfg_minio["bucket"],
+    cfg_minio["prefix"],
 )
 
 class ConcatRequest(BaseModel):
@@ -103,4 +107,4 @@ def health_check():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8001)
+    uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("AI_PORT", 8002)))
