@@ -117,6 +117,7 @@ from app.DataStorageRetrieval.minio_utils import (
     upload_to_minio,
     get_client,
     ARROW_DIR,
+    get_object_prefix,
 )
 import pyarrow as pa
 import pyarrow.ipc as ipc
@@ -154,7 +155,7 @@ def load_names_from_db() -> None:
 
 load_names_from_db()
 
-OBJECT_PREFIX = f"{CLIENT_NAME}/{APP_NAME}/{PROJECT_NAME}/"
+OBJECT_PREFIX = asyncio.run(get_object_prefix(USER_ID, PROJECT_ID))
 
 # Initialize MinIO client
 minio_client = get_client()

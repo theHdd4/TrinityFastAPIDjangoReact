@@ -3,7 +3,9 @@ import pandas as pd
 import io
 from minio import Minio
 import redis
+import asyncio
 from io import BytesIO
+from app.DataStorageRetrieval.minio_utils import get_object_prefix
 
 # MinIO config
 MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "minio:9000")
@@ -23,7 +25,7 @@ REDIS_HOST = os.getenv("REDIS_HOST", "redis")
 REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))
 redis_client = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, decode_responses=False)
 
-OBJECT_PREFIX = f"{CLIENT_NAME}/{APP_NAME}/{PROJECT_NAME}/"
+OBJECT_PREFIX = asyncio.run(get_object_prefix(USER_ID, PROJECT_ID))
 
 minio_client = Minio(
     MINIO_ENDPOINT,

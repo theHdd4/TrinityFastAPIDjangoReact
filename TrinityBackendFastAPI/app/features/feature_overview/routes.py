@@ -33,6 +33,7 @@ from .feature_overview.base import (
     unique_count,
 )
 from app.DataStorageRetrieval.db import fetch_client_app_project
+from app.DataStorageRetrieval.minio_utils import get_object_prefix
 from app.DataStorageRetrieval.arrow_client import (
     download_dataframe,
     download_table_bytes,
@@ -77,7 +78,7 @@ def load_names_from_db() -> None:
 
 load_names_from_db()
 
-OBJECT_PREFIX = f"{CLIENT_NAME}/{APP_NAME}/{PROJECT_NAME}/"
+OBJECT_PREFIX = asyncio.run(get_object_prefix(USER_ID, PROJECT_ID))
 
 minio_client = Minio(
     MINIO_ENDPOINT,
