@@ -1,4 +1,6 @@
 from rest_framework import viewsets, permissions
+from rest_framework.response import Response
+import os
 from apps.accounts.views import CsrfExemptSessionAuthentication
 from .models import App, Project, Session, LaboratoryAction, ArrowDataset
 from .serializers import (
@@ -24,6 +26,19 @@ class AppViewSet(viewsets.ModelViewSet):
         if self.action in ("create", "update", "partial_update", "destroy"):
             return [permissions.IsAdminUser()]
         return super().get_permissions()
+
+    def retrieve(self, request, *args, **kwargs):
+        app_obj = self.get_object()
+        os.environ["APP_NAME"] = app_obj.slug
+        print(f"✅ app selected: APP_NAME={os.environ['APP_NAME']}")
+        serializer = self.get_serializer(app_obj)
+        data = serializer.data
+        data["environment"] = {
+            "CLIENT_NAME": os.environ.get("CLIENT_NAME"),
+            "APP_NAME": os.environ.get("APP_NAME"),
+            "PROJECT_NAME": os.environ.get("PROJECT_NAME"),
+        }
+        return Response(data)
 
 
 class ProjectViewSet(viewsets.ModelViewSet):
@@ -56,6 +71,22 @@ class ProjectViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         serializer.save(owner=self.request.user)
+
+    def retrieve(self, request, *args, **kwargs):
+        project_obj = self.get_object()
+        os.environ["PROJECT_NAME"] = project_obj.slug
+        os.environ["PROJECT_ID"] = str(project_obj.id)
+        print(
+            f"✅ project selected: PROJECT_ID={os.environ['PROJECT_ID']} PROJECT_NAME={os.environ['PROJECT_NAME']}"
+        )
+        serializer = self.get_serializer(project_obj)
+        data = serializer.data
+        data["environment"] = {
+            "CLIENT_NAME": os.environ.get("CLIENT_NAME"),
+            "APP_NAME": os.environ.get("APP_NAME"),
+            "PROJECT_NAME": os.environ.get("PROJECT_NAME"),
+        }
+        return Response(data)
 
 
 class SessionViewSet(viewsets.ModelViewSet):

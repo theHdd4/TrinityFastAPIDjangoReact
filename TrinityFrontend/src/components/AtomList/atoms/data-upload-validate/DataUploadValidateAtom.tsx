@@ -277,6 +277,12 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
     const res = await fetch(`${VALIDATE_API}/save_dataframes`, { method: 'POST', body: form });
     if (res.ok) {
       const data = await res.json();
+      if (data.environment) {
+        console.log('Save dataframes env', data.environment);
+      }
+      if (data.prefix) {
+        console.log('Saving to MinIO prefix', data.prefix);
+      }
       const newStatus: Record<string, string> = {};
       data.minio_uploads.forEach((r: any, idx: number) => {
         if (r.already_saved) {
