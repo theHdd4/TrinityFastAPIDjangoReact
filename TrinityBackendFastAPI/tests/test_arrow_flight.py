@@ -269,7 +269,9 @@ def test_rename_dataframe_route(monkeypatch):
     monkeypatch.setattr(routes, "minio_client", DummyMinio())
     monkeypatch.setattr(routes, "redis_client", DummyRedis())
     monkeypatch.setattr(routes, "MINIO_BUCKET", "bucket")
-    monkeypatch.setattr(routes, "OBJECT_PREFIX", "pref/")
+    async def dummy_prefix():
+        return "pref/"
+    monkeypatch.setattr(routes, "get_object_prefix", dummy_prefix)
     monkeypatch.setattr(routes, "rename_arrow_dataset", dummy_db)
     monkeypatch.setattr(routes, "rename_arrow_object", lambda o, n: None)
 
@@ -314,7 +316,9 @@ def test_delete_dataframe_route(monkeypatch):
     monkeypatch.setattr(routes, "minio_client", DummyMinio())
     monkeypatch.setattr(routes, "redis_client", DummyRedis())
     monkeypatch.setattr(routes, "MINIO_BUCKET", "bucket")
-    monkeypatch.setattr(routes, "OBJECT_PREFIX", "pref/")
+    async def dummy_prefix():
+        return "pref/"
+    monkeypatch.setattr(routes, "get_object_prefix", dummy_prefix)
     monkeypatch.setattr(routes, "delete_arrow_dataset", dummy_db_delete)
     monkeypatch.setattr(routes, "remove_arrow_object", lambda o: None)
 
@@ -357,7 +361,9 @@ def test_save_dataframe_skip_existing(monkeypatch):
     monkeypatch.setattr(routes, "minio_client", DummyMinio())
     monkeypatch.setattr(routes, "redis_client", DummyRedis())
     monkeypatch.setattr(routes, "MINIO_BUCKET", "bucket")
-    monkeypatch.setattr(routes, "OBJECT_PREFIX", "pref/")
+    async def dummy_prefix():
+        return "pref/"
+    monkeypatch.setattr(routes, "get_object_prefix", dummy_prefix)
     monkeypatch.setattr(routes, "arrow_dataset_exists", dummy_exists)
     monkeypatch.setattr(routes, "record_arrow_dataset", lambda *a, **k: None)
     monkeypatch.setattr(routes, "upload_dataframe", lambda df, path: None)

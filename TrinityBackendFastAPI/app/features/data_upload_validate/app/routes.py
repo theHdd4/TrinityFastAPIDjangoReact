@@ -134,27 +134,33 @@ MINIO_BUCKET = os.getenv("MINIO_BUCKET", "trinity")
 USER_ID = int(os.getenv("USER_ID", "0"))
 PROJECT_ID = int(os.getenv("PROJECT_ID", "0"))
 
-CLIENT_NAME = os.getenv("CLIENT_NAME", "default_client")
-APP_NAME = os.getenv("APP_NAME", "default_app")
-PROJECT_NAME = os.getenv("PROJECT_NAME", "default_project")
+DEFAULT_CLIENT = os.getenv("CLIENT_NAME", "default_client")
+DEFAULT_APP = os.getenv("APP_NAME", "default_app")
+DEFAULT_PROJECT = os.getenv("PROJECT_NAME", "default_project")
 
-def load_names_from_db() -> None:
-    """Lookup client/app/project names from Postgres if ids are provided."""
-    global CLIENT_NAME, APP_NAME, PROJECT_NAME
+
+async def get_object_prefix() -> str:
+    """Return the MinIO prefix for the current client/app/project."""
+
+    client = DEFAULT_CLIENT
+    app = DEFAULT_APP
+    project = DEFAULT_PROJECT
     if USER_ID and PROJECT_ID:
         try:
-            CLIENT_NAME_DB, APP_NAME_DB, PROJECT_NAME_DB = asyncio.run(
-                fetch_client_app_project(USER_ID, PROJECT_ID)
+            client_db, app_db, project_db = await fetch_client_app_project(
+                USER_ID, PROJECT_ID
             )
-            CLIENT_NAME = CLIENT_NAME_DB or CLIENT_NAME
-            APP_NAME = APP_NAME_DB or APP_NAME
-            PROJECT_NAME = PROJECT_NAME_DB or PROJECT_NAME
-        except Exception as exc:
+            client = client_db or client
+            app = app_db or app
+            project = project_db or project
+        except Exception as exc:  # pragma: no cover - database unreachable
             print(f"⚠️ Failed to load names from DB: {exc}")
 
-load_names_from_db()
+    os.environ["CLIENT_NAME"] = client
+    os.environ["APP_NAME"] = app
+    os.environ["PROJECT_NAME"] = project
 
-OBJECT_PREFIX = f"{CLIENT_NAME}/{APP_NAME}/{PROJECT_NAME}/"
+    return f"{client}/{app}/{project}/"
 
 # Initialize MinIO client
 minio_client = get_client()
@@ -1808,8 +1814,9 @@ async def validate_mmm_endpoint(
         validator_atom_result = {"status": "skipped", "reason": "validation_failed"}
         
         if validation_report.status == "success":
+            prefix = await get_object_prefix()
             for content, filename, key in file_contents:
-                upload_result = upload_to_minio(content, filename, OBJECT_PREFIX)
+                upload_result = upload_to_minio(content, filename, prefix)
                 minio_uploads.append({
                     "file_key": key,
                     "filename": filename,
@@ -2166,7 +2173,8 @@ async def validate_category_forecasting_endpoint(
         validator_atom_result = {"status": "skipped", "reason": "validation_failed"}
         
         if validation_report.status == "success":
-            upload_result = upload_to_minio(content, file.filename, OBJECT_PREFIX)
+            prefix = await get_object_prefix()
+            upload_result = upload_to_minio(content, file.filename, prefix)
             minio_uploads.append({
                 "file_key": key,
                 "filename": file.filename,
@@ -2352,7 +2360,8 @@ async def validate_promo_endpoint(
         mongo_log_result = {"status": "skipped", "reason": "validation_failed"}
         
         if validation_report.status == "success":
-            upload_result = upload_to_minio(content, file.filename, OBJECT_PREFIX)
+            prefix = await get_object_prefix()
+            upload_result = upload_to_minio(content, file.filename, prefix)
             minio_uploads.append({
                 "file_key": key,
                 "filename": file.filename,
@@ -2509,7 +2518,8 @@ async def save_dataframes(
         with ipc.new_file(arrow_buf, table.schema) as writer:
             writer.write_table(table)
 
-        result = upload_to_minio(arrow_buf.getvalue(), arrow_name, OBJECT_PREFIX)
+        prefix = await get_object_prefix()
+        result = upload_to_minio(arrow_buf.getvalue(), arrow_name, prefix)
         saved_name = Path(result.get("object_name", "")).name or arrow_name
         flight_path = f"{validator_atom_id}/{saved_name}"
         upload_dataframe(df, flight_path)
@@ -2545,7 +2555,7 @@ async def save_dataframes(
 @router.get("/list_saved_dataframes")
 async def list_saved_dataframes():
     """List saved Arrow dataframes sorted by newest first."""
-    prefix = OBJECT_PREFIX
+    prefix = await get_object_prefix()
     try:
         objects = minio_client.list_objects(MINIO_BUCKET, prefix=prefix, recursive=True)
         latest: dict[str, tuple[datetime, str]] = {}
@@ -2598,7 +2608,8 @@ async def latest_ticket(file_key: str):
 @router.get("/download_dataframe")
 async def download_dataframe(object_name: str):
     """Return a presigned URL to download a dataframe"""
-    if not object_name.startswith(OBJECT_PREFIX):
+    prefix = await get_object_prefix()
+    if not object_name.startswith(prefix):
         raise HTTPException(status_code=400, detail="Invalid object name")
     try:
         url = minio_client.presigned_get_object(MINIO_BUCKET, object_name)
@@ -2615,7 +2626,8 @@ async def download_dataframe(object_name: str):
 @router.delete("/delete_dataframe")
 async def delete_dataframe(object_name: str):
     """Delete a single saved dataframe"""
-    if not object_name.startswith(OBJECT_PREFIX):
+    prefix = await get_object_prefix()
+    if not object_name.startswith(prefix):
         raise HTTPException(status_code=400, detail="Invalid object name")
     try:
         try:
@@ -2636,7 +2648,7 @@ async def delete_dataframe(object_name: str):
 @router.delete("/delete_all_dataframes")
 async def delete_all_dataframes():
     """Delete all saved dataframes for the current project"""
-    prefix = OBJECT_PREFIX
+    prefix = await get_object_prefix()
     deleted = []
     try:
         objects = minio_client.list_objects(MINIO_BUCKET, prefix=prefix, recursive=True)
@@ -2662,9 +2674,10 @@ async def delete_all_dataframes():
 @router.post("/rename_dataframe")
 async def rename_dataframe(object_name: str = Form(...), new_filename: str = Form(...)):
     """Rename a saved dataframe"""
-    if not object_name.startswith(OBJECT_PREFIX):
+    prefix = await get_object_prefix()
+    if not object_name.startswith(prefix):
         raise HTTPException(status_code=400, detail="Invalid object name")
-    new_object = f"{OBJECT_PREFIX}{new_filename}"
+    new_object = f"{prefix}{new_filename}"
     if new_object == object_name:
         # Nothing to do if the name hasn't changed
         return {"old_name": object_name, "new_name": object_name}

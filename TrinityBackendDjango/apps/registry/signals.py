@@ -1,20 +1,16 @@
+import os
 from django.db.models.signals import post_save, pre_save
 from django.dispatch import receiver
 from django.db import connection
 from .models import Project
-from apps.tenants.models import Tenant
 from common.minio_utils import create_prefix, rename_prefix
+from apps.tenants.models import Tenant
 
 
 def _current_tenant_name() -> str:
-    schema = connection.schema_name
-    with connection.cursor() as cur:
-        cur.execute("SET search_path TO public")
-        try:
-            name = Tenant.objects.get(schema_name=schema).name
-        finally:
-            cur.execute(f"SET search_path TO {schema}")
-    return name.replace(" ", "_")
+    """Return the shared client folder for all MinIO prefixes."""
+
+    return os.getenv("CLIENT_NAME", "default_client").replace(" ", "_")
 
 
 @receiver(post_save, sender=Project)
