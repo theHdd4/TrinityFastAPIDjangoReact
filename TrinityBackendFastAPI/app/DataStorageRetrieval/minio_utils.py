@@ -46,6 +46,9 @@ def get_arrow_dir() -> Path:
     project = os.getenv("PROJECT_NAME", "default_project")
     dir_path = ARROW_DIR / client / app / project
     dir_path.mkdir(parents=True, exist_ok=True)
+    print(
+        f"📁 arrow dir {dir_path} (client={client} app={app} project={project})"
+    )
     return dir_path
 
 
@@ -63,6 +66,7 @@ def upload_to_minio(file_content_bytes: bytes, filename: str, object_prefix: str
     try:
         timestamp = pd.Timestamp.now().strftime("%Y%m%d_%H%M%S")
         object_name = f"{object_prefix}{timestamp}_{filename}"
+        print(f"⬆️ uploading to minio: {object_name}")
         file_content = io.BytesIO(file_content_bytes)
         file_content.seek(0, os.SEEK_END)
         size = file_content.tell()

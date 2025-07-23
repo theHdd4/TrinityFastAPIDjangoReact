@@ -155,8 +155,11 @@ async def get_object_prefix() -> str:
     os.environ["CLIENT_NAME"] = client
     os.environ["APP_NAME"] = app
     os.environ["PROJECT_NAME"] = project
-
-    return f"{client}/{app}/{project}/"
+    prefix = f"{client}/{app}/{project}/"
+    print(
+        f"📦 prefix {prefix} (USER_ID={USER_ID} PROJECT_ID={PROJECT_ID})"
+    )
+    return prefix
 
 # Initialize MinIO client
 minio_client = get_client()
@@ -1376,6 +1379,7 @@ async def validate(
     if validation_results["overall_status"] in ["passed", "passed_with_warnings"]:
         for (_, filename, key), (_, df) in zip(file_contents, files_data):
             arrow_file = get_arrow_dir() / f"{validator_atom_id}_{key}.arrow"
+            print(f"📝 saving arrow {arrow_file}")
             save_arrow_table(df, arrow_file)
 
             flight_path = f"{validator_atom_id}/{key}"
@@ -2515,6 +2519,7 @@ async def save_dataframes(
             writer.write_table(table)
 
         prefix = await get_object_prefix()
+        print(f"📤 saving to prefix {prefix}")
         result = upload_to_minio(arrow_buf.getvalue(), arrow_name, prefix)
         saved_name = Path(result.get("object_name", "")).name or arrow_name
         flight_path = f"{validator_atom_id}/{saved_name}"

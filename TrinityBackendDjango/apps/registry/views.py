@@ -30,6 +30,7 @@ class AppViewSet(viewsets.ModelViewSet):
     def retrieve(self, request, *args, **kwargs):
         app_obj = self.get_object()
         os.environ["APP_NAME"] = app_obj.slug
+        print(f"✅ app selected: APP_NAME={os.environ['APP_NAME']}")
         serializer = self.get_serializer(app_obj)
         return Response(serializer.data)
 
@@ -68,6 +69,10 @@ class ProjectViewSet(viewsets.ModelViewSet):
     def retrieve(self, request, *args, **kwargs):
         project_obj = self.get_object()
         os.environ["PROJECT_NAME"] = project_obj.slug
+        os.environ["PROJECT_ID"] = str(project_obj.id)
+        print(
+            f"✅ project selected: PROJECT_ID={os.environ['PROJECT_ID']} PROJECT_NAME={os.environ['PROJECT_NAME']}"
+        )
         serializer = self.get_serializer(project_obj)
         return Response(serializer.data)
 
