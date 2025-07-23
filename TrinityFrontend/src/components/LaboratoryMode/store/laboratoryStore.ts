@@ -189,15 +189,18 @@ export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
     set({ cards });
   },
 
-  updateAtomSettings: (atomId: string, settings: any) => {
+  updateAtomSettings: (atomId: string, newSettings: any) => {
     set(state => {
       const updatedCards = state.cards.map(card => ({
         ...card,
-        atoms: card.atoms.map(atom =>
-          atom.id === atomId
-            ? { ...atom, settings: { ...(atom.settings || {}), ...settings } }
-            : atom
-        )
+        atoms: card.atoms.map(atom => {
+          if (atom.id === atomId) {
+            // Deep clone atom and settings to ensure new references
+            const clonedSettings = JSON.parse(JSON.stringify(newSettings));
+            return { ...atom, settings: clonedSettings };
+          }
+          return atom;
+        })
       }));
       return { cards: updatedCards };
     });

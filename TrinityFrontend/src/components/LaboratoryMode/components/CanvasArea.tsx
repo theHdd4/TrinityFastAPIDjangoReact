@@ -23,6 +23,7 @@ import FeatureOverviewAtom from '@/components/AtomList/atoms/feature-overview/Fe
 import ConcatAtom from '@/components/AtomList/atoms/concat/ConcatAtom';
 import MergeAtom from '@/components/AtomList/atoms/merge/MergeAtom';
 import ColumnClassifierAtom from '@/components/AtomList/atoms/column-classifier/ColumnClassifierAtom';
+import DataFrameOperationsAtom from '@/components/AtomList/atoms/dataframe-operations/DataFrameOperationsAtom';
 
 import {
   useLaboratoryStore,
@@ -970,6 +971,8 @@ const addNewCard = (moleculeId?: string, position?: number) => {
                         <MergeAtom atomId={atom.id} />
                       ) : atom.atomId === 'column-classifier' ? (
                         <ColumnClassifierAtom atomId={atom.id} />
+                      ) : atom.atomId === 'dataframe-operations' ? (
+                        <DataFrameOperationsAtom atomId={atom.id} />
                       ) : (
                         <div>
                           <h4 className="font-semibold text-gray-900 mb-1 text-sm">{atom.title}</h4>

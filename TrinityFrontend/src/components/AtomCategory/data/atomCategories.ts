@@ -58,6 +58,7 @@ import atomMaker from '@/components/AtomList/atoms/atom-maker';
 import readPresentationSummarize from '@/components/AtomList/atoms/read-presentation-summarize';
 import basePriceEstimator from '@/components/AtomList/atoms/base-price-estimator';
 import promoEstimator from '@/components/AtomList/atoms/promo-estimator';
+import dataframeOperations from '@/components/AtomList/atoms/dataframe-operations';
 
 export interface Atom {
   id: string;
@@ -99,7 +100,8 @@ export const atomCategories: AtomCategory[] = [
       featureCreateTransform,
       scopeSelector,
       rowOperations,
-      columnClassifier
+      columnClassifier,
+      dataframeOperations
     ]
   },
   {

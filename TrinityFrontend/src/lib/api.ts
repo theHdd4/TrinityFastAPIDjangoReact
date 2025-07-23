@@ -60,3 +60,6 @@ export const LAB_ACTIONS_API = `${REGISTRY_API}/laboratory-actions`;
 
 export const CLASSIFIER_API =
   import.meta.env.VITE_CLASSIFIER_API || `${backendOrigin.replace(/:8000$/, ':8001')}/api/classify`;
+
+export const DATAFRAME_OPERATIONS_API =
+  import.meta.env.VITE_DATAFRAME_OPERATIONS_API || `${backendOrigin.replace(/:8000$/, ':8001')}/api/dataframe-operations`;
