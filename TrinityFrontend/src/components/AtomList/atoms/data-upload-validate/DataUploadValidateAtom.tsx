@@ -278,7 +278,7 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
     if (res.ok) {
       const data = await res.json();
       if (data.environment) {
-        console.log('Save dataframes env', data.environment);
+        console.log('Fetched env vars', data.environment);
       }
       if (data.prefix) {
         console.log('Saving to MinIO prefix', data.prefix);
@@ -288,7 +288,9 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
         const name = uploadedFiles[idx]?.name || r.file_key;
         const obj = r.minio_upload?.object_name;
         if (obj) {
-          console.log(`File ${name} stored as ${obj}`);
+          const env = data.environment || {};
+          const loc = `/${env.CLIENT_NAME}/${env.APP_NAME}/${env.PROJECT_NAME}`;
+          console.log(`File ${name} saved as ${obj} in ${loc}`);
         }
         if (r.already_saved && name) {
           newStatus[name] = 'File is already saved';
