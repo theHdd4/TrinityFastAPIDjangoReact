@@ -5,6 +5,7 @@ import json
 import pandas as pd
 import io
 import os
+from app.core.utils import get_env_vars
 from pathlib import Path
 import re
 
@@ -134,14 +135,17 @@ MINIO_BUCKET = os.getenv("MINIO_BUCKET", "trinity")
 # Database driven folder names
 USER_ID = int(os.getenv("USER_ID", "0"))
 PROJECT_ID = int(os.getenv("PROJECT_ID", "0"))
+CLIENT_ID = os.getenv("CLIENT_ID", "")
+APP_ID = os.getenv("APP_ID", "")
 
 async def get_object_prefix() -> str:
     """Return the MinIO prefix for the current client/app/project."""
+    env = await get_env_vars(CLIENT_ID, APP_ID, os.getenv("PROJECT_ID", ""))
+    client = env.get("CLIENT_NAME", os.getenv("CLIENT_NAME", "default_client"))
+    app = env.get("APP_NAME", os.getenv("APP_NAME", "default_app"))
+    project = env.get("PROJECT_NAME", os.getenv("PROJECT_NAME", "default_project"))
 
-    client = os.getenv("CLIENT_NAME", "default_client")
-    app = os.getenv("APP_NAME", "default_app")
-    project = os.getenv("PROJECT_NAME", "default_project")
-    if USER_ID and PROJECT_ID:
+    if USER_ID and PROJECT_ID and (client == "default_client" or app == "default_app" or project == "default_project"):
         try:
             client_db, app_db, project_db = await fetch_client_app_project(
                 USER_ID, PROJECT_ID
@@ -157,7 +161,7 @@ async def get_object_prefix() -> str:
     os.environ["PROJECT_NAME"] = project
     prefix = f"{client}/{app}/{project}/"
     print(
-        f"📦 prefix {prefix} (USER_ID={USER_ID} PROJECT_ID={PROJECT_ID})"
+        f"📦 prefix {prefix} (CLIENT_ID={CLIENT_ID} APP_ID={APP_ID} PROJECT_ID={PROJECT_ID})"
     )
     return prefix
 
