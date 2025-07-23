@@ -54,17 +54,35 @@ def _query_env_vars(client_id: str, app_id: str, project_id: str):
     return {e.key: e.value for e in qs}
 
 
+@sync_to_async
+def _query_env_vars_by_names(client_name: str, project_name: str):
+    qs = UserEnvironmentVariable.objects.filter(
+        client_name=client_name, project_name=project_name
+    )
+    return {e.key: e.value for e in qs}
+
+
 async def get_env_vars(
-    client_id: str, app_id: str, project_id: str, use_cache: bool = True
+    client_id: str = "",
+    app_id: str = "",
+    project_id: str = "",
+    *,
+    client_name: str = "",
+    project_name: str = "",
+    use_cache: bool = True,
 ) -> dict:
-    """Fetch environment variables for the given IDs using Django ORM."""
-    cache_key = f"env:{client_id}:{app_id}:{project_id}"
+    """Fetch environment variables by IDs or names using Django ORM."""
+    cache_key = f"env:{client_id}:{app_id}:{project_id}:{client_name}:{project_name}"
     if use_cache:
         cached = cache.get(cache_key)
         if cached is not None:
             return cached
 
-    env = await _query_env_vars(client_id, app_id, project_id)
+    env = {}
+    if client_id or app_id or project_id:
+        env = await _query_env_vars(client_id, app_id, project_id)
+    if not env and client_name and project_name:
+        env = await _query_env_vars_by_names(client_name, project_name)
     if not env:
         env = {
             "CLIENT_NAME": os.getenv("CLIENT_NAME", "default_client"),

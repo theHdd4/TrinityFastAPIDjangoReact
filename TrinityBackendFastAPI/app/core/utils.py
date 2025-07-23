@@ -22,7 +22,7 @@ POSTGRES_DB = os.getenv("POSTGRES_DB", "trinity_db")
 POSTGRES_USER = os.getenv("POSTGRES_USER", "trinity_user")
 POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD", "trinity_pass")
 
-_ENV_CACHE: Dict[Tuple[str, str, str], Dict[str, str]] = {}
+_ENV_CACHE: Dict[Tuple[str, str, str, str, str], Dict[str, str]] = {}
 
 
 async def _query_env_vars(client_id: str, app_id: str, project_id: str) -> Dict[str, str] | None:
@@ -53,25 +53,70 @@ async def _query_env_vars(client_id: str, app_id: str, project_id: str) -> Dict[
         await conn.close()
 
 
+async def _query_env_vars_by_names(client_name: str, project_name: str) -> Dict[str, str] | None:
+    if asyncpg is None:
+        return None
+    try:
+        conn = await asyncpg.connect(
+            host=POSTGRES_HOST,
+            user=POSTGRES_USER,
+            password=POSTGRES_PASSWORD,
+            database=POSTGRES_DB,
+        )
+    except Exception:
+        return None
+    try:
+        rows = await conn.fetch(
+            """
+            SELECT key, value FROM accounts_userenvironmentvariable
+            WHERE client_name = $1 AND project_name = $2
+            """,
+            client_name,
+            project_name,
+        )
+        return {r["key"]: r["value"] for r in rows}
+    finally:
+        await conn.close()
+
+
 async def get_env_vars(
-    client_id: str, app_id: str, project_id: str, use_cache: bool = True
+    client_id: str = "",
+    app_id: str = "",
+    project_id: str = "",
+    *,
+    client_name: str = "",
+    project_name: str = "",
+    use_cache: bool = True,
 ) -> Dict[str, str]:
     """Return environment variables for a client/app/project combo."""
     if django_get_env_vars is not None:
         try:
-            env = await django_get_env_vars(client_id, app_id, project_id, use_cache)
-            print(f"🔧 django_get_env_vars({client_id}, {app_id}, {project_id}) -> {env}")
+            env = await django_get_env_vars(
+                client_id,
+                app_id,
+                project_id,
+                client_name=client_name,
+                project_name=project_name,
+                use_cache=use_cache,
+            )
+            print(
+                f"🔧 django_get_env_vars({client_id},{app_id},{project_id},{client_name},{project_name}) -> {env}"
+            )
             return env
         except Exception:  # pragma: no cover - Django misconfigured
             pass
 
-    key = (client_id, app_id, project_id)
+    key = (client_id, app_id, project_id, client_name, project_name)
     if use_cache and key in _ENV_CACHE:
         env = _ENV_CACHE[key]
-        print(f"🔧 cached_env_vars({client_id}, {app_id}, {project_id}) -> {env}")
+        print(f"🔧 cached_env_vars{key} -> {env}")
         return env
 
-    env = await _query_env_vars(client_id, app_id, project_id)
+    env = {}
+    if client_id or app_id or project_id:
+        env = await _query_env_vars(client_id, app_id, project_id)
+    if not env and client_name and project_name:
+        env = await _query_env_vars_by_names(client_name, project_name)
     if not env:
         env = {
             "CLIENT_NAME": os.getenv("CLIENT_NAME", "default_client"),
@@ -80,7 +125,7 @@ async def get_env_vars(
         }
     if use_cache:
         _ENV_CACHE[key] = env
-    print(f"🔧 db_env_vars({client_id}, {app_id}, {project_id}) -> {env}")
+    print(f"🔧 db_env_vars{key} -> {env}")
     return env
 
 

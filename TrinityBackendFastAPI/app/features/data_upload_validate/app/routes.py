@@ -140,7 +140,13 @@ APP_ID = os.getenv("APP_ID", "")
 
 async def get_object_prefix() -> str:
     """Return the MinIO prefix for the current client/app/project."""
-    env = await get_env_vars(CLIENT_ID, APP_ID, os.getenv("PROJECT_ID", ""))
+    env = await get_env_vars(
+        CLIENT_ID,
+        APP_ID,
+        os.getenv("PROJECT_ID", ""),
+        client_name=os.getenv("CLIENT_NAME", ""),
+        project_name=os.getenv("PROJECT_NAME", ""),
+    )
     print("🔧 fetched env", env)
     client = env.get("CLIENT_NAME", os.getenv("CLIENT_NAME", "default_client"))
     app = env.get("APP_NAME", os.getenv("APP_NAME", "default_app"))
