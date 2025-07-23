@@ -8,5 +8,5 @@ class TenantsConfig(AppConfig):
     label = "tenants"
 
     def ready(self):
-        """Placeholder for future startup logic."""
-        pass
+        # Register signal handlers for tenant folder management
+        from . import signals  # noqa: F401

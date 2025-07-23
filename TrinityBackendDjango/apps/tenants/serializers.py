@@ -123,7 +123,6 @@ class TenantSerializer(serializers.ModelSerializer):
                     TenantConfig.objects.create(tenant=tenant, key="apps_allowed", value=apps_allowed)
 
         print("Tenant creation complete")
-        create_prefix(tenant.name.replace(" ", "_"))
         return tenant
 
 
