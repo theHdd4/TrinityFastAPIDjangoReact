@@ -3,6 +3,7 @@ from django.utils import timezone
 from django_tenants.utils import schema_context
 from django.core.management import call_command
 from django.db import transaction, connection
+from common.minio_utils import create_prefix
 import os
 import re
 from .models import Tenant, Domain
