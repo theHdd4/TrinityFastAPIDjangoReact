@@ -1,0 +1,37 @@
+PostgreSQL database: trinity_db
+
+Tables created during initial setup (via migrations):
+
+Public schema (shared across tenants):
+- tenants_tenant
+- tenants_domain
+- accounts_user
+- accounts_user_groups (join table)
+- accounts_user_user_permissions (join table)
+- accounts_userprofile
+- config_store_siteconfig
+- roles_roledefinition
+- audit_revision
+- django_* (auth, contenttypes, sessions, admin, etc.)
+
+Tenant schema tables (duplicated per tenant):
+- subscriptions_company
+- subscriptions_subscriptionplan
+- config_store_tenantconfig
+- atoms_atomcategory
+- atoms_atom
+- atoms_atomversion
+- atom_configs_atomconfig
+- registry_app
+- registry_project
+- registry_session
+- registry_laboratoryaction
+- registry_historicallaboratoryaction
+- registry_arrowdataset
+- workflows_workflow
+- workflows_workflowatom
+- workflows_workflowrun
+- orchestration_engineregistry
+- orchestration_taskrun
+
+These tables are migrated for each tenant schema created (e.g. via create_tenant.py) in the database `trinity_db`.
