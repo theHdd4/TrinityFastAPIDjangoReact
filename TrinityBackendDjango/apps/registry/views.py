@@ -33,6 +33,7 @@ class AppViewSet(viewsets.ModelViewSet):
         os.environ["APP_NAME"] = app_obj.slug
         print(f"✅ app selected: APP_NAME={os.environ['APP_NAME']}")
         save_env_var(request.user, "APP_NAME", os.environ.get("APP_NAME", ""))
+        print("Current env vars after app select", get_env_dict(request.user))
         serializer = self.get_serializer(app_obj)
         data = serializer.data
         data["environment"] = get_env_dict(request.user)
@@ -72,17 +73,30 @@ class ProjectViewSet(viewsets.ModelViewSet):
 
     def retrieve(self, request, *args, **kwargs):
         project_obj = self.get_object()
-        os.environ["PROJECT_NAME"] = project_obj.slug
-        os.environ["PROJECT_ID"] = str(project_obj.id)
+        os.environ["PROJECT_NAME"] = project_obj.name
+        os.environ["PROJECT_ID"] = f"{project_obj.name}_{project_obj.id}"
         print(
             f"✅ project selected: PROJECT_ID={os.environ['PROJECT_ID']} PROJECT_NAME={os.environ['PROJECT_NAME']}"
         )
-        save_env_var(request.user, "PROJECT_NAME", os.environ.get("PROJECT_NAME", ""))
-        save_env_var(request.user, "PROJECT_ID", os.environ.get("PROJECT_ID", ""))
+        save_env_var(request.user, "PROJECT_NAME", os.environ["PROJECT_NAME"])
+        save_env_var(request.user, "PROJECT_ID", os.environ["PROJECT_ID"])
+        print("Current env vars after project select", get_env_dict(request.user))
         serializer = self.get_serializer(project_obj)
         data = serializer.data
         data["environment"] = get_env_dict(request.user)
         return Response(data)
+
+    def perform_update(self, serializer):
+        project = serializer.save()
+        if "name" in serializer.validated_data:
+            os.environ["PROJECT_NAME"] = project.name
+            os.environ["PROJECT_ID"] = f"{project.name}_{project.id}"
+            print(
+                f"✅ project renamed: PROJECT_ID={os.environ['PROJECT_ID']} PROJECT_NAME={os.environ['PROJECT_NAME']}"
+            )
+            save_env_var(self.request.user, "PROJECT_NAME", os.environ["PROJECT_NAME"])
+            save_env_var(self.request.user, "PROJECT_ID", os.environ["PROJECT_ID"])
+            print("Current env vars after project rename", get_env_dict(self.request.user))
 
 
 class SessionViewSet(viewsets.ModelViewSet):

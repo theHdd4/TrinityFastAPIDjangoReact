@@ -35,7 +35,9 @@ async def fetch_client_app_project(user_id: int, project_id: int):
             """
             SELECT client_name, app_name, project_name
             FROM accounts_userenvironmentvariable
-            WHERE user_id = $1 AND project_id = $2 AND key = 'PROJECT_NAME'
+            WHERE user_id = $1 AND key = 'PROJECT_NAME'
+              AND project_id LIKE '%' || $2
+            ORDER BY updated_at DESC
             LIMIT 1
             """,
             user_id,
