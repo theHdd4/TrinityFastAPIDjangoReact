@@ -7,6 +7,7 @@ from pathlib import Path
 import sys
 import asyncio
 from .models import ArrowDataset, Project
+from django.db import connection
 from asgiref.sync import async_to_sync
 
 # Ensure FastAPI utilities are importable for DB helpers
@@ -61,7 +62,11 @@ def project_prefix(user_id: int, project_id: int) -> str:
             .only("slug", "owner__username", "app__slug")
             .get(id=project_id, owner_id=user_id)
         )
-        client = proj.owner.username or client
+        tenant = getattr(connection, "tenant", None)
+        if tenant is not None:
+            client = getattr(tenant, "name", None) or tenant.schema_name or client
+        else:
+            client = proj.owner.username or client
         app = proj.app.slug or app
         project = proj.slug or project
     except Exception:
