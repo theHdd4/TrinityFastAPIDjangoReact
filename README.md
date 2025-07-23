@@ -239,7 +239,9 @@ a duplicate domain. Ensure the request is sent to the public host (e.g.
    form parsing, are installed from `TrinityBackendDjango/requirements.txt`.
    When a project is created the backend ensures a corresponding
    `client/app/project/` folder exists in the `trinity` bucket so atoms operate
-   solely within that directory.
+   solely within that directory. Renaming or deleting a project also updates the
+   folder and stores the previous name in the new `previous_name` column so
+   history is preserved.
 
 With these steps the Django orchestration layer, FastAPI features and the
 React frontend are fully connected.
