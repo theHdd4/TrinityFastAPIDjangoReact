@@ -265,6 +265,7 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
 
   const handleSaveDataFrames = async () => {
     if (!settings.validatorId) return;
+    console.log('🔧 Running save dataframes util');
     const form = new FormData();
     form.append('validator_atom_id', settings.validatorId);
     uploadedFiles.forEach(f => form.append('files', f));

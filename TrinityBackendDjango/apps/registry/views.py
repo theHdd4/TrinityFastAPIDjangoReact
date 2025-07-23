@@ -32,7 +32,10 @@ class AppViewSet(viewsets.ModelViewSet):
         app_obj = self.get_object()
         os.environ["APP_NAME"] = app_obj.slug
         print(f"✅ app selected: APP_NAME={os.environ['APP_NAME']}")
+        save_env_var(request.user, "CLIENT_NAME", os.environ.get("CLIENT_NAME", ""))
+        save_env_var(request.user, "CLIENT_ID", os.environ.get("CLIENT_ID", ""))
         save_env_var(request.user, "APP_NAME", os.environ.get("APP_NAME", ""))
+        save_env_var(request.user, "APP_ID", os.environ.get("APP_ID", ""))
         print("Current env vars after app select", get_env_dict(request.user))
         serializer = self.get_serializer(app_obj)
         data = serializer.data
@@ -78,6 +81,10 @@ class ProjectViewSet(viewsets.ModelViewSet):
         print(
             f"✅ project selected: PROJECT_ID={os.environ['PROJECT_ID']} PROJECT_NAME={os.environ['PROJECT_NAME']}"
         )
+        save_env_var(request.user, "CLIENT_NAME", os.environ.get("CLIENT_NAME", ""))
+        save_env_var(request.user, "CLIENT_ID", os.environ.get("CLIENT_ID", ""))
+        save_env_var(request.user, "APP_NAME", os.environ.get("APP_NAME", ""))
+        save_env_var(request.user, "APP_ID", os.environ.get("APP_ID", ""))
         save_env_var(request.user, "PROJECT_NAME", os.environ["PROJECT_NAME"])
         save_env_var(request.user, "PROJECT_ID", os.environ["PROJECT_ID"])
         print("Current env vars after project select", get_env_dict(request.user))
@@ -94,6 +101,10 @@ class ProjectViewSet(viewsets.ModelViewSet):
             print(
                 f"✅ project renamed: PROJECT_ID={os.environ['PROJECT_ID']} PROJECT_NAME={os.environ['PROJECT_NAME']}"
             )
+            save_env_var(self.request.user, "CLIENT_NAME", os.environ.get("CLIENT_NAME", ""))
+            save_env_var(self.request.user, "CLIENT_ID", os.environ.get("CLIENT_ID", ""))
+            save_env_var(self.request.user, "APP_NAME", os.environ.get("APP_NAME", ""))
+            save_env_var(self.request.user, "APP_ID", os.environ.get("APP_ID", ""))
             save_env_var(self.request.user, "PROJECT_NAME", os.environ["PROJECT_NAME"])
             save_env_var(self.request.user, "PROJECT_ID", os.environ["PROJECT_ID"])
             print("Current env vars after project rename", get_env_dict(self.request.user))

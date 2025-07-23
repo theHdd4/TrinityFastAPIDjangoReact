@@ -83,6 +83,7 @@ class LoginView(APIView):
                 f"✅ login: USER_ID={os.environ['USER_ID']} CLIENT_NAME={os.environ.get('CLIENT_NAME')}"
             )
             save_env_var(user, "CLIENT_NAME", os.environ.get("CLIENT_NAME", ""))
+            save_env_var(user, "CLIENT_ID", os.environ.get("CLIENT_ID", ""))
             save_env_var(user, "USER_NAME", os.environ.get("USER_NAME", ""))
             print("Current env vars after login", get_env_dict(user))
             data = UserSerializer(user).data

@@ -53,17 +53,23 @@ async def _query_env_vars(client_id: str, app_id: str, project_id: str) -> Dict[
         await conn.close()
 
 
-async def get_env_vars(client_id: str, app_id: str, project_id: str, use_cache: bool = True) -> Dict[str, str]:
+async def get_env_vars(
+    client_id: str, app_id: str, project_id: str, use_cache: bool = True
+) -> Dict[str, str]:
     """Return environment variables for a client/app/project combo."""
     if django_get_env_vars is not None:
         try:
-            return await django_get_env_vars(client_id, app_id, project_id, use_cache)
+            env = await django_get_env_vars(client_id, app_id, project_id, use_cache)
+            print(f"🔧 django_get_env_vars({client_id}, {app_id}, {project_id}) -> {env}")
+            return env
         except Exception:  # pragma: no cover - Django misconfigured
             pass
 
     key = (client_id, app_id, project_id)
     if use_cache and key in _ENV_CACHE:
-        return _ENV_CACHE[key]
+        env = _ENV_CACHE[key]
+        print(f"🔧 cached_env_vars({client_id}, {app_id}, {project_id}) -> {env}")
+        return env
 
     env = await _query_env_vars(client_id, app_id, project_id)
     if not env:
@@ -74,6 +80,7 @@ async def get_env_vars(client_id: str, app_id: str, project_id: str, use_cache: 
         }
     if use_cache:
         _ENV_CACHE[key] = env
+    print(f"🔧 db_env_vars({client_id}, {app_id}, {project_id}) -> {env}")
     return env
 
 
