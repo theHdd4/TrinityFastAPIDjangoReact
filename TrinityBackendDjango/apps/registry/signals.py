@@ -1,20 +1,19 @@
+import os
 from django.db.models.signals import post_save, pre_save
 from django.dispatch import receiver
-from django.db import connection
 from .models import Project
-from apps.tenants.models import Tenant
 from common.minio_utils import create_prefix, rename_prefix
+
+# Folder names should live under a shared client directory
+CLIENT_NAME = os.getenv("CLIENT_NAME", "default_client").replace(" ", "_")
 
 
 def _current_tenant_name() -> str:
-    schema = connection.schema_name
-    with connection.cursor() as cur:
-        cur.execute("SET search_path TO public")
-        try:
-            name = Tenant.objects.get(schema_name=schema).name
-        finally:
-            cur.execute(f"SET search_path TO {schema}")
-    return name.replace(" ", "_")
+    """Return the shared client folder name used for all projects."""
+    # Historically this looked up the current tenant from the DB and used its
+    # name for the MinIO prefix. The new behavior stores everything under a
+    # single client directory so we simply return the configured CLIENT_NAME.
+    return CLIENT_NAME
 
 
 @receiver(post_save, sender=Project)
