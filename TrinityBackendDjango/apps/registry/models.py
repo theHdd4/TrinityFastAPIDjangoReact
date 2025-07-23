@@ -29,6 +29,11 @@ class Project(models.Model):
     """
     name = models.CharField(max_length=150)
     slug = models.SlugField(max_length=150)
+    previous_name = models.CharField(
+        max_length=150,
+        blank=True,
+        help_text="Previous project name if renamed or deleted",
+    )
     description = models.TextField(blank=True)
     owner = models.ForeignKey(
         User, on_delete=models.CASCADE, related_name="projects"

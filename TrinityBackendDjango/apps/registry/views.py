@@ -8,6 +8,7 @@ from .serializers import (
     LaboratoryActionSerializer,
     ArrowDatasetSerializer,
 )
+from .storage_utils import rename_prefix, delete_prefix, project_prefix
 
 
 class AppViewSet(viewsets.ModelViewSet):
@@ -56,6 +57,33 @@ class ProjectViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         serializer.save(owner=self.request.user)
+
+    def perform_update(self, serializer):
+        instance = self.get_object()
+        old_name = instance.name
+        user_id = instance.owner_id
+        project_id = instance.id
+        old_prefix = project_prefix(user_id, project_id)
+        serializer.save()
+        new_name = serializer.instance.name
+        if old_name != new_name:
+            serializer.instance.previous_name = old_name
+            serializer.instance.save(update_fields=["previous_name"])
+            new_prefix = project_prefix(user_id, project_id)
+            try:
+                rename_prefix(old_prefix, new_prefix)
+            except Exception:
+                pass
+
+    def perform_destroy(self, instance):
+        instance.previous_name = instance.name
+        instance.save(update_fields=["previous_name"])
+        prefix = project_prefix(instance.owner_id, instance.id)
+        try:
+            delete_prefix(prefix)
+        except Exception:
+            pass
+        super().perform_destroy(instance)
 
 
 class SessionViewSet(viewsets.ModelViewSet):
