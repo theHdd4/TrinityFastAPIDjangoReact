@@ -285,9 +285,13 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
       }
       const newStatus: Record<string, string> = {};
       data.minio_uploads.forEach((r: any, idx: number) => {
-        if (r.already_saved) {
-          const name = uploadedFiles[idx]?.name;
-          if (name) newStatus[name] = 'File is already saved';
+        const name = uploadedFiles[idx]?.name || r.file_key;
+        const obj = r.minio_upload?.object_name;
+        if (obj) {
+          console.log(`File ${name} stored as ${obj}`);
+        }
+        if (r.already_saved && name) {
+          newStatus[name] = 'File is already saved';
         }
       });
       setSaveStatus(prev => ({ ...prev, ...newStatus }));
