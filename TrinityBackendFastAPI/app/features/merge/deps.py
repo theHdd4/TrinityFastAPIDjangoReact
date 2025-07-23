@@ -25,7 +25,13 @@ REDIS_HOST = os.getenv("REDIS_HOST", "redis")
 REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))
 redis_client = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, decode_responses=False)
 
-OBJECT_PREFIX = asyncio.run(get_object_prefix(USER_ID, PROJECT_ID))
+async def init_object_prefix() -> None:
+    """Load object prefix from Postgres."""
+    global OBJECT_PREFIX
+    OBJECT_PREFIX = await get_object_prefix(USER_ID, PROJECT_ID)
+
+
+OBJECT_PREFIX = f"{CLIENT_NAME}/{APP_NAME}/{PROJECT_NAME}/"
 
 minio_client = Minio(
     MINIO_ENDPOINT,
@@ -56,5 +62,6 @@ __all__ = [
     'OBJECT_PREFIX',
     'MINIO_BUCKET',
     'redis_client',
+    'init_object_prefix',
 ]
 

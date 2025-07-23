@@ -139,23 +139,23 @@ CLIENT_NAME = os.getenv("CLIENT_NAME", "default_client")
 APP_NAME = os.getenv("APP_NAME", "default_app")
 PROJECT_NAME = os.getenv("PROJECT_NAME", "default_project")
 
-def load_names_from_db() -> None:
-    """Lookup client/app/project names from Postgres if ids are provided."""
-    global CLIENT_NAME, APP_NAME, PROJECT_NAME
+async def init_object_prefix() -> None:
+    """Initialize the names and object prefix from Postgres."""
+    global CLIENT_NAME, APP_NAME, PROJECT_NAME, OBJECT_PREFIX
     if USER_ID and PROJECT_ID:
         try:
-            CLIENT_NAME_DB, APP_NAME_DB, PROJECT_NAME_DB = asyncio.run(
-                fetch_client_app_project(USER_ID, PROJECT_ID)
+            CLIENT_NAME_DB, APP_NAME_DB, PROJECT_NAME_DB = await fetch_client_app_project(
+                USER_ID, PROJECT_ID
             )
             CLIENT_NAME = CLIENT_NAME_DB or CLIENT_NAME
             APP_NAME = APP_NAME_DB or APP_NAME
             PROJECT_NAME = PROJECT_NAME_DB or PROJECT_NAME
         except Exception as exc:
             print(f"⚠️ Failed to load names from DB: {exc}")
+    OBJECT_PREFIX = await get_object_prefix(USER_ID, PROJECT_ID)
 
-load_names_from_db()
 
-OBJECT_PREFIX = asyncio.run(get_object_prefix(USER_ID, PROJECT_ID))
+OBJECT_PREFIX = f"{CLIENT_NAME}/{APP_NAME}/{PROJECT_NAME}/"
 
 # Initialize MinIO client
 minio_client = get_client()

@@ -7,6 +7,7 @@ from pathlib import Path
 import sys
 import asyncio
 from .models import ArrowDataset
+from asgiref.sync import async_to_sync
 
 # Ensure FastAPI utilities are importable for DB helpers
 FASTAPI_APP = Path(__file__).resolve().parents[3] / "TrinityBackendFastAPI" / "app"
@@ -55,7 +56,9 @@ def project_prefix(user_id: int, project_id: int) -> str:
     project = os.getenv("PROJECT_NAME", "default_project")
     if fetch_client_app_project is not None:
         try:
-            client, app, project = asyncio.run(fetch_client_app_project(user_id, project_id))
+            client, app, project = async_to_sync(fetch_client_app_project)(
+                user_id, project_id
+            )
         except Exception:
             pass
     return f"{client}/{app}/{project}/"
