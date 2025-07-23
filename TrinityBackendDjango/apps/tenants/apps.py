@@ -8,5 +8,5 @@ class TenantsConfig(AppConfig):
     label = "tenants"
 
     def ready(self):
-        """Import signal handlers."""
-        from . import signals  # noqa: F401
+        """Placeholder for future startup logic."""
+        pass
