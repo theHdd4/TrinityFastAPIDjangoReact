@@ -35,3 +35,6 @@ Tenant schema tables (duplicated per tenant):
 - orchestration_taskrun
 
 These tables are migrated for each tenant schema created (e.g. via create_tenant.py) in the database `trinity_db`.
+
+Additional table for per-user environment variables:
+- accounts_userenvironmentvariable (stores CLIENT_NAME, APP_NAME, PROJECT_NAME etc.)

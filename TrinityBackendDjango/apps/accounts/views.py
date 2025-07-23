@@ -9,6 +9,7 @@ from rest_framework.views import APIView
 from rest_framework.decorators import action
 from .models import User, UserProfile
 from .serializers import UserSerializer, UserProfileSerializer
+from .utils import save_env_var, get_env_dict
 
 
 class CsrfExemptSessionAuthentication(SessionAuthentication):
@@ -77,15 +78,14 @@ class LoginView(APIView):
                     tenant.name if hasattr(tenant, "name") else str(tenant),
                 )
             os.environ["USER_ID"] = str(user.id)
+            os.environ["USER_NAME"] = user.username
             print(
                 f"✅ login: USER_ID={os.environ['USER_ID']} CLIENT_NAME={os.environ.get('CLIENT_NAME')}"
             )
+            save_env_var(user, "CLIENT_NAME", os.environ.get("CLIENT_NAME", ""))
+            save_env_var(user, "USER_NAME", os.environ.get("USER_NAME", ""))
             data = UserSerializer(user).data
-            data["environment"] = {
-                "CLIENT_NAME": os.environ.get("CLIENT_NAME"),
-                "APP_NAME": os.environ.get("APP_NAME"),
-                "PROJECT_NAME": os.environ.get("PROJECT_NAME"),
-            }
+            data["environment"] = get_env_dict(user)
             return Response(data)
         return Response({"detail": "Invalid credentials"}, status=status.HTTP_400_BAD_REQUEST)
 

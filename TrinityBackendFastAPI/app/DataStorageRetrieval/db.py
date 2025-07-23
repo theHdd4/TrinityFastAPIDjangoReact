@@ -13,9 +13,9 @@ POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD", "trinity_pass")
 async def fetch_client_app_project(user_id: int, project_id: int):
     """Fetch client, app and project names from Postgres.
 
-    If ``asyncpg`` is not installed the function falls back to the environment
-    variables ``CLIENT_NAME``, ``APP_NAME`` and ``PROJECT_NAME`` instead of
-    querying the database.
+    The function looks up values stored in ``user_environment_variables`` if
+    available. If ``asyncpg`` is not installed it falls back to environment
+    variables.
     """
     if asyncpg is None:
         return (
@@ -31,6 +31,19 @@ async def fetch_client_app_project(user_id: int, project_id: int):
         database=POSTGRES_DB,
     )
     try:
+        row = await conn.fetchrow(
+            """
+            SELECT client_name, app_name, project_name
+            FROM accounts_userenvironmentvariable
+            WHERE user_id = $1 AND project_id = $2 AND key = 'PROJECT_NAME'
+            LIMIT 1
+            """,
+            user_id,
+            str(project_id),
+        )
+        if row:
+            return row["client_name"], row["app_name"], row["project_name"]
+
         client_name = await conn.fetchval(
             """
             SELECT t.name
@@ -40,9 +53,7 @@ async def fetch_client_app_project(user_id: int, project_id: int):
             LIMIT 1
             """,
             user_id,
-        )
-        if not client_name:
-            client_name = "default_client"
+        ) or "default_client"
 
         app_name = await conn.fetchval(
             """

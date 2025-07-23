@@ -2,6 +2,7 @@ from rest_framework import viewsets, permissions
 from rest_framework.response import Response
 import os
 from apps.accounts.views import CsrfExemptSessionAuthentication
+from apps.accounts.utils import save_env_var, get_env_dict
 from .models import App, Project, Session, LaboratoryAction, ArrowDataset
 from .serializers import (
     AppSerializer,
@@ -31,13 +32,10 @@ class AppViewSet(viewsets.ModelViewSet):
         app_obj = self.get_object()
         os.environ["APP_NAME"] = app_obj.slug
         print(f"✅ app selected: APP_NAME={os.environ['APP_NAME']}")
+        save_env_var(request.user, "APP_NAME", os.environ.get("APP_NAME", ""))
         serializer = self.get_serializer(app_obj)
         data = serializer.data
-        data["environment"] = {
-            "CLIENT_NAME": os.environ.get("CLIENT_NAME"),
-            "APP_NAME": os.environ.get("APP_NAME"),
-            "PROJECT_NAME": os.environ.get("PROJECT_NAME"),
-        }
+        data["environment"] = get_env_dict(request.user)
         return Response(data)
 
 
@@ -79,13 +77,11 @@ class ProjectViewSet(viewsets.ModelViewSet):
         print(
             f"✅ project selected: PROJECT_ID={os.environ['PROJECT_ID']} PROJECT_NAME={os.environ['PROJECT_NAME']}"
         )
+        save_env_var(request.user, "PROJECT_NAME", os.environ.get("PROJECT_NAME", ""))
+        save_env_var(request.user, "PROJECT_ID", os.environ.get("PROJECT_ID", ""))
         serializer = self.get_serializer(project_obj)
         data = serializer.data
-        data["environment"] = {
-            "CLIENT_NAME": os.environ.get("CLIENT_NAME"),
-            "APP_NAME": os.environ.get("APP_NAME"),
-            "PROJECT_NAME": os.environ.get("PROJECT_NAME"),
-        }
+        data["environment"] = get_env_dict(request.user)
         return Response(data)
 
 
