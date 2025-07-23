@@ -71,12 +71,22 @@ class LoginView(APIView):
             login(request, user)
             tenant = getattr(request, "tenant", None)
             if tenant is not None:
-                os.environ["CLIENT_NAME"] = getattr(tenant, "schema_name", tenant.name if hasattr(tenant, "name") else str(tenant))
+                os.environ["CLIENT_NAME"] = getattr(
+                    tenant,
+                    "schema_name",
+                    tenant.name if hasattr(tenant, "name") else str(tenant),
+                )
             os.environ["USER_ID"] = str(user.id)
             print(
                 f"✅ login: USER_ID={os.environ['USER_ID']} CLIENT_NAME={os.environ.get('CLIENT_NAME')}"
             )
-            return Response(UserSerializer(user).data)
+            data = UserSerializer(user).data
+            data["environment"] = {
+                "CLIENT_NAME": os.environ.get("CLIENT_NAME"),
+                "APP_NAME": os.environ.get("APP_NAME"),
+                "PROJECT_NAME": os.environ.get("PROJECT_NAME"),
+            }
+            return Response(data)
         return Response({"detail": "Invalid credentials"}, status=status.HTTP_400_BAD_REQUEST)
 
 

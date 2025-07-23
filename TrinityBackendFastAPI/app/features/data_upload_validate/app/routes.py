@@ -2494,6 +2494,8 @@ async def save_dataframes(
 
     uploads = []
     flights = []
+    prefix = await get_object_prefix()
+    print(f"📤 saving to prefix {prefix}")
     for file, key in zip(files, keys):
         content = await file.read()
         if file.filename.lower().endswith(".csv"):
@@ -2518,8 +2520,6 @@ async def save_dataframes(
         with ipc.new_file(arrow_buf, table.schema) as writer:
             writer.write_table(table)
 
-        prefix = await get_object_prefix()
-        print(f"📤 saving to prefix {prefix}")
         result = upload_to_minio(arrow_buf.getvalue(), arrow_name, prefix)
         saved_name = Path(result.get("object_name", "")).name or arrow_name
         flight_path = f"{validator_atom_id}/{saved_name}"
@@ -2550,7 +2550,17 @@ async def save_dataframes(
         })
         flights.append({"file_key": key, "flight_path": flight_path})
 
-    return {"minio_uploads": uploads, "flight_uploads": flights}
+    env = {
+        "CLIENT_NAME": os.getenv("CLIENT_NAME"),
+        "APP_NAME": os.getenv("APP_NAME"),
+        "PROJECT_NAME": os.getenv("PROJECT_NAME"),
+    }
+    return {
+        "minio_uploads": uploads,
+        "flight_uploads": flights,
+        "prefix": prefix,
+        "environment": env,
+    }
 
 
 @router.get("/list_saved_dataframes")

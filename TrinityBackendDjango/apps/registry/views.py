@@ -32,7 +32,13 @@ class AppViewSet(viewsets.ModelViewSet):
         os.environ["APP_NAME"] = app_obj.slug
         print(f"✅ app selected: APP_NAME={os.environ['APP_NAME']}")
         serializer = self.get_serializer(app_obj)
-        return Response(serializer.data)
+        data = serializer.data
+        data["environment"] = {
+            "CLIENT_NAME": os.environ.get("CLIENT_NAME"),
+            "APP_NAME": os.environ.get("APP_NAME"),
+            "PROJECT_NAME": os.environ.get("PROJECT_NAME"),
+        }
+        return Response(data)
 
 
 class ProjectViewSet(viewsets.ModelViewSet):
@@ -74,7 +80,13 @@ class ProjectViewSet(viewsets.ModelViewSet):
             f"✅ project selected: PROJECT_ID={os.environ['PROJECT_ID']} PROJECT_NAME={os.environ['PROJECT_NAME']}"
         )
         serializer = self.get_serializer(project_obj)
-        return Response(serializer.data)
+        data = serializer.data
+        data["environment"] = {
+            "CLIENT_NAME": os.environ.get("CLIENT_NAME"),
+            "APP_NAME": os.environ.get("APP_NAME"),
+            "PROJECT_NAME": os.environ.get("PROJECT_NAME"),
+        }
+        return Response(data)
 
 
 class SessionViewSet(viewsets.ModelViewSet):

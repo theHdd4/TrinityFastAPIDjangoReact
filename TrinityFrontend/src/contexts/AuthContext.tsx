@@ -104,6 +104,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (res.ok) {
         const data = await res.json();
         console.log('Login success, user:', data.username);
+        if (data.environment) {
+          console.log('Environment after login', data.environment);
+          localStorage.setItem('env', JSON.stringify(data.environment));
+        }
 
         // Verify that a session cookie was actually set. Without a
         // valid session further requests (like fetching the apps list)
