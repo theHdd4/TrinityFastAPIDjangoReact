@@ -8,7 +8,12 @@ from .serializers import (
     LaboratoryActionSerializer,
     ArrowDatasetSerializer,
 )
-from .storage_utils import rename_prefix, delete_prefix, project_prefix
+from .storage_utils import (
+    rename_prefix,
+    delete_prefix,
+    project_prefix,
+    ensure_prefix,
+)
 
 
 class AppViewSet(viewsets.ModelViewSet):
@@ -57,6 +62,11 @@ class ProjectViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         serializer.save(owner=self.request.user)
+        prefix = project_prefix(serializer.instance.owner_id, serializer.instance.id)
+        try:
+            ensure_prefix(prefix)
+        except Exception:
+            pass
 
     def perform_update(self, serializer):
         instance = self.get_object()

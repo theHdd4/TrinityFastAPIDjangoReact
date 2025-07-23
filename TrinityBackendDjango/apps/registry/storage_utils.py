@@ -1,4 +1,5 @@
 import os
+import io
 from minio import Minio
 from minio.error import S3Error
 from minio.commonconfig import CopySource
@@ -28,6 +29,25 @@ _client = Minio(
     secure=False,
 )
 
+
+def ensure_bucket() -> None:
+    """Create the bucket if it does not exist."""
+    try:
+        if not _client.bucket_exists(MINIO_BUCKET):
+            _client.make_bucket(MINIO_BUCKET)
+    except Exception:
+        pass
+
+
+def ensure_prefix(prefix: str) -> None:
+    """Create an empty object to ensure the prefix exists."""
+    ensure_bucket()
+    key = prefix.rstrip("/") + "/.keep"
+    try:
+        _client.put_object(MINIO_BUCKET, key, io.BytesIO(b""), length=0)
+    except S3Error:
+        pass
+
 def project_prefix(user_id: int, project_id: int) -> str:
     """Return storage prefix for given user and project."""
     client = os.getenv("CLIENT_NAME", "default_client")
@@ -42,6 +62,7 @@ def project_prefix(user_id: int, project_id: int) -> str:
 
 def rename_prefix(old_prefix: str, new_prefix: str) -> None:
     """Rename all objects under ``old_prefix`` to ``new_prefix``."""
+    ensure_prefix(new_prefix)
     for obj in _client.list_objects(MINIO_BUCKET, prefix=old_prefix, recursive=True):
         new_name = new_prefix + obj.object_name[len(old_prefix):]
         _client.copy_object(MINIO_BUCKET, new_name, CopySource(MINIO_BUCKET, obj.object_name))

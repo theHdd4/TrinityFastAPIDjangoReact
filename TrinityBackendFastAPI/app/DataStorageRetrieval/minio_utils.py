@@ -35,6 +35,17 @@ def ensure_minio_bucket() -> bool:
         return False
 
 
+def ensure_prefix(prefix: str) -> None:
+    """Create a placeholder object so the prefix appears in MinIO."""
+    if not ensure_minio_bucket():
+        return
+    key = prefix.rstrip("/") + "/.keep"
+    try:
+        _client.put_object(MINIO_BUCKET, key, io.BytesIO(b""), length=0)
+    except S3Error:
+        pass
+
+
 ARROW_DIR = Path("arrow_data")
 ARROW_DIR.mkdir(exist_ok=True)
 
@@ -51,6 +62,7 @@ def save_arrow_table(df: pd.DataFrame, path: Path) -> None:
 def upload_to_minio(file_content_bytes: bytes, filename: str, object_prefix: str) -> dict:
     """Upload bytes to MinIO using the object prefix."""
     try:
+        ensure_prefix(object_prefix)
         timestamp = pd.Timestamp.now().strftime("%Y%m%d_%H%M%S")
         object_name = f"{object_prefix}{timestamp}_{filename}"
         file_content = io.BytesIO(file_content_bytes)

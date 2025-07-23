@@ -237,6 +237,9 @@ a duplicate domain. Ensure the request is sent to the public host (e.g.
 2. The FastAPI container also relies on the MinIO client. The required Python
    packages, including `motor` for MongoDB access and `python-multipart` for
    form parsing, are installed from `TrinityBackendDjango/requirements.txt`.
+   When a project is created the backend ensures a corresponding
+   `client/app/project/` folder exists in the `trinity` bucket so atoms operate
+   solely within that directory.
 
 With these steps the Django orchestration layer, FastAPI features and the
 React frontend are fully connected.
