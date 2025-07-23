@@ -15,7 +15,6 @@ class Migration(migrations.Migration):
                 default='',
                 help_text='Previous project name if renamed or deleted',
             ),
-            preserve_default=False,
         ),
         migrations.AddField(
             model_name='historicalproject',
@@ -26,6 +25,5 @@ class Migration(migrations.Migration):
                 default='',
                 help_text='Previous project name if renamed or deleted',
             ),
-            preserve_default=False,
         ),
     ]
