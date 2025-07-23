@@ -1,5 +1,16 @@
+"""Utilities for FastAPI that read environment variables from Django or Postgres."""
+
+from pathlib import Path
+import sys
 import os
 from typing import Dict, Tuple
+
+try:
+    DJANGO_ROOT = Path(__file__).resolve().parents[3] / "TrinityBackendDjango"
+    sys.path.append(str(DJANGO_ROOT))
+    from apps.accounts.utils import get_env_vars as django_get_env_vars  # type: ignore
+except Exception:  # pragma: no cover - Django not available
+    django_get_env_vars = None
 
 try:
     import asyncpg  # type: ignore
@@ -13,8 +24,9 @@ POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD", "trinity_pass")
 
 _ENV_CACHE: Dict[Tuple[str, str, str], Dict[str, str]] = {}
 
+
 async def _query_env_vars(client_id: str, app_id: str, project_id: str) -> Dict[str, str] | None:
-    """Fetch environment variables for the given IDs from Postgres."""
+    """Fetch environment variables from Postgres."""
     if asyncpg is None:
         return None
     try:
@@ -40,11 +52,15 @@ async def _query_env_vars(client_id: str, app_id: str, project_id: str) -> Dict[
     finally:
         await conn.close()
 
-async def get_env_vars(client_id: str, app_id: str, project_id: str, use_cache: bool = True) -> Dict[str, str]:
-    """Return environment variables for a client/app/project combo.
 
-    Falls back to ``os.environ`` if the database lookup fails.
-    """
+async def get_env_vars(client_id: str, app_id: str, project_id: str, use_cache: bool = True) -> Dict[str, str]:
+    """Return environment variables for a client/app/project combo."""
+    if django_get_env_vars is not None:
+        try:
+            return await django_get_env_vars(client_id, app_id, project_id, use_cache)
+        except Exception:  # pragma: no cover - Django misconfigured
+            pass
+
     key = (client_id, app_id, project_id)
     if use_cache and key in _ENV_CACHE:
         return _ENV_CACHE[key]
@@ -59,3 +75,6 @@ async def get_env_vars(client_id: str, app_id: str, project_id: str, use_cache: 
     if use_cache:
         _ENV_CACHE[key] = env
     return env
+
+
+__all__ = ["get_env_vars"]

@@ -1,6 +1,8 @@
 import os
 import time
 from django.utils import timezone
+from django.core.cache import cache
+from asgiref.sync import sync_to_async
 from .models import UserEnvironmentVariable
 
 
@@ -42,3 +44,33 @@ def get_env_dict(user):
     """Return the user's environment variables as a simple dict."""
     envs = UserEnvironmentVariable.objects.filter(user=user)
     return {e.key: e.value for e in envs}
+
+
+@sync_to_async
+def _query_env_vars(client_id: str, app_id: str, project_id: str):
+    qs = UserEnvironmentVariable.objects.filter(
+        client_id=client_id, app_id=app_id, project_id=project_id
+    )
+    return {e.key: e.value for e in qs}
+
+
+async def get_env_vars(
+    client_id: str, app_id: str, project_id: str, use_cache: bool = True
+) -> dict:
+    """Fetch environment variables for the given IDs using Django ORM."""
+    cache_key = f"env:{client_id}:{app_id}:{project_id}"
+    if use_cache:
+        cached = cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+    env = await _query_env_vars(client_id, app_id, project_id)
+    if not env:
+        env = {
+            "CLIENT_NAME": os.getenv("CLIENT_NAME", "default_client"),
+            "APP_NAME": os.getenv("APP_NAME", "default_app"),
+            "PROJECT_NAME": os.getenv("PROJECT_NAME", "default_project"),
+        }
+    if use_cache:
+        cache.set(cache_key, env, 60)
+    return env
