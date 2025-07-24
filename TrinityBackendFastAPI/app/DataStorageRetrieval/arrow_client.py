@@ -54,7 +54,7 @@ def download_dataframe(path: str) -> pd.DataFrame:
         try:
             bucket = os.getenv("MINIO_BUCKET", "trinity")
             m_client = Minio(
-                os.getenv("MINIO_ENDPOINT", "minio:9000"),
+                os.getenv("MINIO_ENDPOINT"),
                 access_key=os.getenv("MINIO_ACCESS_KEY", "admin_dev"),
                 secret_key=os.getenv("MINIO_SECRET_KEY", "pass_dev"),
                 secure=False,
@@ -113,7 +113,7 @@ def download_table_bytes(path: str) -> bytes:
         try:
             bucket = os.getenv("MINIO_BUCKET", "trinity")
             m_client = Minio(
-                os.getenv("MINIO_ENDPOINT", "minio:9000"),
+                os.getenv("MINIO_ENDPOINT"),
                 access_key=os.getenv("MINIO_ACCESS_KEY", "admin_dev"),
                 secret_key=os.getenv("MINIO_SECRET_KEY", "pass_dev"),
                 secure=False,
