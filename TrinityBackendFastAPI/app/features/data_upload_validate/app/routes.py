@@ -5,6 +5,7 @@ import json
 import pandas as pd
 import io
 import os
+from app.core.utils import get_env_vars
 from pathlib import Path
 import re
 
@@ -131,20 +132,45 @@ MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY", "minio")
 MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY", "minio123")
 MINIO_BUCKET = os.getenv("MINIO_BUCKET", "trinity")
 
-# Database driven folder names
-USER_ID = int(os.getenv("USER_ID", "0"))
-PROJECT_ID = int(os.getenv("PROJECT_ID", "0"))
 
-async def get_object_prefix() -> str:
+def _parse_numeric_id(value: str | int | None) -> int:
+    """Return the numeric component of an ID string like "name_123"."""
+    if value is None:
+        return 0
+    try:
+        return int(str(value).split("_")[-1])
+    except Exception:
+        return 0
+
+async def get_object_prefix(
+    client_id: str = "",
+    app_id: str = "",
+    project_id: str = "",
+    *,
+    client_name: str = "",
+    app_name: str = "",
+    project_name: str = "",
+) -> str:
     """Return the MinIO prefix for the current client/app/project."""
+    USER_ID = _parse_numeric_id(os.getenv("USER_ID"))
+    PROJECT_ID = _parse_numeric_id(project_id or os.getenv("PROJECT_ID", "0"))
+    env = await get_env_vars(
+        client_id or os.getenv("CLIENT_ID", ""),
+        app_id or os.getenv("APP_ID", ""),
+        project_id or os.getenv("PROJECT_ID", ""),
+        client_name=client_name or os.getenv("CLIENT_NAME", ""),
+        app_name=app_name or os.getenv("APP_NAME", ""),
+        project_name=project_name or os.getenv("PROJECT_NAME", ""),
+    )
+    print("🔧 fetched env", env)
+    client = env.get("CLIENT_NAME", os.getenv("CLIENT_NAME", "default_client"))
+    app = env.get("APP_NAME", os.getenv("APP_NAME", "default_app"))
+    project = env.get("PROJECT_NAME", os.getenv("PROJECT_NAME", "default_project"))
 
-    client = os.getenv("CLIENT_NAME", "default_client")
-    app = os.getenv("APP_NAME", "default_app")
-    project = os.getenv("PROJECT_NAME", "default_project")
-    if USER_ID and PROJECT_ID:
+    if PROJECT_ID and (client == "default_client" or app == "default_app" or project == "default_project"):
         try:
             client_db, app_db, project_db = await fetch_client_app_project(
-                USER_ID, PROJECT_ID
+                USER_ID if USER_ID else None, PROJECT_ID
             )
             client = client_db or client
             app = app_db or app
@@ -157,7 +183,7 @@ async def get_object_prefix() -> str:
     os.environ["PROJECT_NAME"] = project
     prefix = f"{client}/{app}/{project}/"
     print(
-        f"📦 prefix {prefix} (USER_ID={USER_ID} PROJECT_ID={PROJECT_ID})"
+        f"📦 prefix {prefix} (CLIENT_ID={client_id or os.getenv('CLIENT_ID','')} APP_ID={app_id or os.getenv('APP_ID','')} PROJECT_ID={PROJECT_ID})"
     )
     return prefix
 
@@ -2483,6 +2509,12 @@ async def save_dataframes(
     files: List[UploadFile] = File(...),
     file_keys: str = Form(...),
     overwrite: bool = Form(False),
+    client_id: str = Form(""),
+    app_id: str = Form(""),
+    project_id: str = Form(""),
+    client_name: str = Form(""),
+    app_name: str = Form(""),
+    project_name: str = Form(""),
 ):
     """Save validated dataframes as Arrow tables and upload via Flight."""
     try:
@@ -2494,7 +2526,20 @@ async def save_dataframes(
 
     uploads = []
     flights = []
+    if client_id:
+        os.environ["CLIENT_ID"] = client_id
+    if app_id:
+        os.environ["APP_ID"] = app_id
+    if project_id:
+        os.environ["PROJECT_ID"] = project_id
+    if client_name:
+        os.environ["CLIENT_NAME"] = client_name
+    if app_name:
+        os.environ["APP_NAME"] = app_name
+    if project_name:
+        os.environ["PROJECT_NAME"] = project_name
     prefix = await get_object_prefix()
+    numeric_pid = _parse_numeric_id(project_id or os.getenv("PROJECT_ID", "0"))
     print(f"📤 saving to prefix {prefix}")
     for file, key in zip(files, keys):
         content = await file.read()
@@ -2509,7 +2554,7 @@ async def save_dataframes(
 
 
         arrow_name = Path(file.filename).stem + ".arrow"
-        exists = await arrow_dataset_exists(PROJECT_ID, validator_atom_id, key)
+        exists = await arrow_dataset_exists(numeric_pid, validator_atom_id, key)
         if exists and not overwrite:
             uploads.append({"file_key": key, "already_saved": True})
             flights.append({"file_key": key})
@@ -2534,7 +2579,7 @@ async def save_dataframes(
         redis_client.set(f"flight:{flight_path}", result.get("object_name", ""))
 
         await record_arrow_dataset(
-            PROJECT_ID,
+            numeric_pid,
             validator_atom_id,
             key,
             result.get("object_name", ""),

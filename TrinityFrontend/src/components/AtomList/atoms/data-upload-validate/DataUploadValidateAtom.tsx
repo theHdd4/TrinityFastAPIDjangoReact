@@ -265,8 +265,23 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
 
   const handleSaveDataFrames = async () => {
     if (!settings.validatorId) return;
+    console.log('🔧 Running save dataframes util');
     const form = new FormData();
     form.append('validator_atom_id', settings.validatorId);
+    const envStr = localStorage.getItem('env');
+    if (envStr) {
+      try {
+        const env = JSON.parse(envStr);
+        form.append('client_id', env.CLIENT_ID || '');
+        form.append('app_id', env.APP_ID || '');
+        form.append('project_id', env.PROJECT_ID || '');
+        form.append('client_name', env.CLIENT_NAME || '');
+        form.append('app_name', env.APP_NAME || '');
+        form.append('project_name', env.PROJECT_NAME || '');
+      } catch {
+        /* ignore */
+      }
+    }
     uploadedFiles.forEach(f => form.append('files', f));
     const keys = uploadedFiles.map(f => {
       const assigned = fileAssignments[f.name] || '';
@@ -274,20 +289,30 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
     });
     form.append('file_keys', JSON.stringify(keys));
     form.append('overwrite', 'true');
-    const res = await fetch(`${VALIDATE_API}/save_dataframes`, { method: 'POST', body: form });
+    const res = await fetch(`${VALIDATE_API}/save_dataframes`, {
+      method: 'POST',
+      body: form,
+      credentials: 'include'
+    });
     if (res.ok) {
       const data = await res.json();
       if (data.environment) {
-        console.log('Save dataframes env', data.environment);
+        console.log('Fetched env vars', data.environment);
       }
       if (data.prefix) {
         console.log('Saving to MinIO prefix', data.prefix);
       }
       const newStatus: Record<string, string> = {};
       data.minio_uploads.forEach((r: any, idx: number) => {
-        if (r.already_saved) {
-          const name = uploadedFiles[idx]?.name;
-          if (name) newStatus[name] = 'File is already saved';
+        const name = uploadedFiles[idx]?.name || r.file_key;
+        const obj = r.minio_upload?.object_name;
+        if (obj) {
+          const env = data.environment || {};
+          const loc = `/${env.CLIENT_NAME}/${env.APP_NAME}/${env.PROJECT_NAME}`;
+          console.log(`File ${name} saved as ${obj} in ${loc}`);
+        }
+        if (r.already_saved && name) {
+          newStatus[name] = 'File is already saved';
         }
       });
       setSaveStatus(prev => ({ ...prev, ...newStatus }));

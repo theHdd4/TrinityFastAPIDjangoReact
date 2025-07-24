@@ -56,3 +56,26 @@ class UserProfile(models.Model):
 
     def __str__(self):
         return f"Profile for {self.user.username}"
+
+class UserEnvironmentVariable(models.Model):
+    """Per-user environment variable scoped to client, app and project."""
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="env_vars")
+    client_id = models.CharField(max_length=255)
+    client_name = models.CharField(max_length=255, blank=True)
+    app_id = models.CharField(max_length=255, blank=True)
+    app_name = models.CharField(max_length=255, blank=True)
+    project_id = models.CharField(max_length=255, blank=True)
+    project_name = models.CharField(max_length=255, blank=True)
+    key = models.CharField(max_length=255)
+    value = models.TextField()
+    value_type = models.CharField(max_length=50, default="string")
+    is_encrypted = models.BooleanField(default=False)
+    last_used = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ("client_id", "app_id", "project_id", "key")
+
+    def __str__(self):
+        return f"{self.user.username}: {self.key}"
