@@ -267,7 +267,26 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
     if (!settings.validatorId) return;
     console.log('🔧 Running save dataframes util');
     try {
-      const check = await fetch(`${VALIDATE_API}/list_saved_dataframes`);
+      let query = '';
+      const envStr = localStorage.getItem('env');
+      if (envStr) {
+        try {
+          const env = JSON.parse(envStr);
+          query =
+            '?' +
+            new URLSearchParams({
+              client_id: env.CLIENT_ID || '',
+              app_id: env.APP_ID || '',
+              project_id: env.PROJECT_ID || '',
+              client_name: env.CLIENT_NAME || '',
+              app_name: env.APP_NAME || '',
+              project_name: env.PROJECT_NAME || ''
+            }).toString();
+        } catch {
+          /* ignore */
+        }
+      }
+      const check = await fetch(`${VALIDATE_API}/list_saved_dataframes${query}`);
       if (check.ok) {
         const data = await check.json();
         const existing = new Set(
@@ -311,7 +330,7 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
       return settings.fileKeyMap?.[assigned] || assigned;
     });
     form.append('file_keys', JSON.stringify(keys));
-    form.append('overwrite', 'true');
+    form.append('overwrite', 'false');
     const res = await fetch(`${VALIDATE_API}/save_dataframes`, {
       method: 'POST',
       body: form,
@@ -326,6 +345,7 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
         console.log('Saving to MinIO prefix', data.prefix);
       }
       const newStatus: Record<string, string> = {};
+      const duplicates: string[] = [];
       data.minio_uploads.forEach((r: any, idx: number) => {
         const name = uploadedFiles[idx]?.name || r.file_key;
         const obj = r.minio_upload?.object_name;
@@ -336,10 +356,18 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
         }
         if (r.already_saved && name) {
           newStatus[name] = 'File is already saved';
+          duplicates.push(name);
         }
       });
       setSaveStatus(prev => ({ ...prev, ...newStatus }));
-      toast({ title: 'Dataframes Saved Successfully' });
+      if (duplicates.length > 0) {
+        toast({
+          title: `File with the name ${duplicates[0]} already exists`,
+          variant: 'destructive'
+        });
+      } else {
+        toast({ title: 'Dataframes Saved Successfully' });
+      }
     } else {
       toast({ title: 'Unable to Save Dataframes', variant: 'destructive' });
     }

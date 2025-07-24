@@ -17,7 +17,26 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle }) => {
 
   useEffect(() => {
     if (!isOpen) return;
-    fetch(`${VALIDATE_API}/list_saved_dataframes`)
+    let query = '';
+    const envStr = localStorage.getItem('env');
+    if (envStr) {
+      try {
+        const env = JSON.parse(envStr);
+        query =
+          '?' +
+          new URLSearchParams({
+            client_id: env.CLIENT_ID || '',
+            app_id: env.APP_ID || '',
+            project_id: env.PROJECT_ID || '',
+            client_name: env.CLIENT_NAME || '',
+            app_name: env.APP_NAME || '',
+            project_name: env.PROJECT_NAME || ''
+          }).toString();
+      } catch {
+        /* ignore */
+      }
+    }
+    fetch(`${VALIDATE_API}/list_saved_dataframes${query}`)
       .then(res => res.json())
       .then(data => setFiles(Array.isArray(data.files) ? data.files : []))
       .catch(() => setFiles([]));

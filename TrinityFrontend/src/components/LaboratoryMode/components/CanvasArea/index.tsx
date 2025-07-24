@@ -186,7 +186,26 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
     }
 
     try {
-      const res = await fetch(`${VALIDATE_API}/list_saved_dataframes`);
+      let query = '';
+      const envStr = localStorage.getItem('env');
+      if (envStr) {
+        try {
+          const env = JSON.parse(envStr);
+          query =
+            '?' +
+            new URLSearchParams({
+              client_id: env.CLIENT_ID || '',
+              app_id: env.APP_ID || '',
+              project_id: env.PROJECT_ID || '',
+              client_name: env.CLIENT_NAME || '',
+              app_name: env.APP_NAME || '',
+              project_name: env.PROJECT_NAME || ''
+            }).toString();
+        } catch {
+          /* ignore */
+        }
+      }
+      const res = await fetch(`${VALIDATE_API}/list_saved_dataframes${query}`);
       if (res.ok) {
         const data = await res.json();
         const file = Array.isArray(data.files) ? data.files[0] : null;

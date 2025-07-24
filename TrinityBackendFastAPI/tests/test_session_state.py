@@ -20,11 +20,22 @@ sys.modules["app.features.feature_overview.deps"] = fo_deps_stub
 db_stub = types.ModuleType("app.DataStorageRetrieval.db")
 db_stub.upsert_project_state = lambda *a, **k: None
 db_stub.fetch_project_state = lambda *a, **k: None
+db_stub.fetch_client_app_project = lambda *a, **k: ("c","a","p")
+db_stub.record_arrow_dataset = lambda *a, **k: None
+db_stub.rename_arrow_dataset = lambda *a, **k: None
+db_stub.delete_arrow_dataset = lambda *a, **k: None
+db_stub.arrow_dataset_exists = lambda *a, **k: False
+db_stub.get_dataset_info = lambda *a, **k: None
 sys.modules["app.DataStorageRetrieval.db"] = db_stub
 
 minio_stub = types.ModuleType("app.DataStorageRetrieval.minio_utils")
 minio_stub.get_client = lambda: None
 minio_stub.MINIO_BUCKET = "bucket"
+minio_stub.ensure_minio_bucket = lambda *a, **k: None
+minio_stub.save_arrow_table = lambda *a, **k: {"object_name": "obj"}
+minio_stub.upload_to_minio = lambda *a, **k: {"object_name": "obj"}
+minio_stub.get_arrow_dir = lambda: "dir"
+minio_stub.ARROW_DIR = "dir"
 sys.modules["app.DataStorageRetrieval.minio_utils"] = minio_stub
 
 spec = importlib.util.spec_from_file_location(
