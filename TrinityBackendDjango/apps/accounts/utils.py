@@ -4,6 +4,10 @@ from django.utils import timezone
 from django.core.cache import cache
 from asgiref.sync import sync_to_async
 from .models import UserEnvironmentVariable
+from redis_store.env_cache import (
+    set_env_var as cache_set_env_var,
+    get_env_vars as cache_get_env_vars,
+)
 
 
 def load_env_vars(user) -> dict:
@@ -47,6 +51,18 @@ def save_env_var(user, key, value) -> None:
             "last_used": timezone.now(),
         },
     )
+    # Write-through to Redis
+    cache_set_env_var(
+        user,
+        client_id or "",
+        app_id or "",
+        project_id or "",
+        key,
+        value,
+        client_name=client_name,
+        app_name=app_name,
+        project_name=project_name,
+    )
 
 def get_env_dict(user):
     """Return the user's environment variables as a simple dict."""
@@ -82,24 +98,20 @@ async def get_env_vars(
     project_name: str = "",
     use_cache: bool = True,
 ) -> dict:
-    """Fetch environment variables by IDs or names using Django ORM."""
-    cache_key = f"env:{client_id}:{app_id}:{project_id}:{client_name}:{app_name}:{project_name}"
-    if use_cache:
-        cached = cache.get(cache_key)
-        if cached is not None:
-            return cached
-
-    env = {}
-    if client_id or app_id or project_id:
-        env = await _query_env_vars(client_id, app_id, project_id)
-    if not env and client_name and project_name:
-        env = await _query_env_vars_by_names(client_name, app_name, project_name)
+    """Fetch environment variables using Redis-backed cache."""
+    env = await sync_to_async(cache_get_env_vars)(
+        client_id,
+        app_id,
+        project_id,
+        client_name=client_name,
+        app_name=app_name,
+        project_name=project_name,
+        use_cache=use_cache,
+    )
     if not env:
         env = {
             "CLIENT_NAME": os.getenv("CLIENT_NAME", "default_client"),
             "APP_NAME": os.getenv("APP_NAME", "default_app"),
             "PROJECT_NAME": os.getenv("PROJECT_NAME", "default_project"),
         }
-    if use_cache:
-        cache.set(cache_key, env, 60)
     return env
