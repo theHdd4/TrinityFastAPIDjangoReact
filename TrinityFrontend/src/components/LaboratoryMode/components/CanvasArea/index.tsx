@@ -29,13 +29,13 @@ import {
   useLaboratoryStore,
   LayoutCard,
   DroppedAtom,
-import { deriveWorkflowMolecules, WorkflowMolecule } from "./helpers";
   DEFAULT_TEXTBOX_SETTINGS,
   DEFAULT_DATAUPLOAD_SETTINGS,
   DEFAULT_FEATURE_OVERVIEW_SETTINGS,
   DataUploadSettings,
   ColumnClassifierColumn,
 } from '../store/laboratoryStore';
+import { deriveWorkflowMolecules, WorkflowMolecule } from './helpers';
 
 
 interface CanvasAreaProps {
