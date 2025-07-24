@@ -26,7 +26,7 @@ def create_project_folder(sender, instance, created, **kwargs):
 
 
 @receiver(pre_save, sender=Project)
-def rename_project_folder(sender, instance, **kwargs):
+def rename_project_folder_signal(sender, instance, **kwargs):
     if not instance.pk:
         return
     try:
@@ -36,6 +36,10 @@ def rename_project_folder(sender, instance, **kwargs):
     if old.slug != instance.slug:
         tenant = _current_tenant_name()
         app_slug = instance.app.slug
+        # perform the folder rename in MinIO and log the update
+        print(
+            f"🚚 Project slug changed: renaming MinIO folder {old.slug} -> {instance.slug}"
+        )
         rename_project_folder(tenant, app_slug, old.slug, instance.slug)
 
 
