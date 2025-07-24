@@ -6,6 +6,7 @@ from .models import Project
 from common.minio_utils import create_prefix, rename_prefix
 from apps.tenants.models import Tenant
 from apps.accounts.models import UserEnvironmentVariable
+from redis_store.env_cache import invalidate_env
 
 
 def _current_tenant_name() -> str:
@@ -52,6 +53,26 @@ def update_env_vars_on_rename(sender, instance, **kwargs):
         old_pid = f"{old.name}_{old.pk}"
         new_pid = f"{instance.name}_{instance.pk}"
         qs = UserEnvironmentVariable.objects.filter(project_id=old_pid)
+        cache_entries = list(
+            qs.values(
+                "user_id",
+                "client_id",
+                "app_id",
+                "client_name",
+                "app_name",
+                "project_name",
+            ).distinct()
+        )
         qs.update(project_name=instance.name, project_id=new_pid)
         qs.filter(key="PROJECT_NAME").update(value=instance.name)
         qs.filter(key="PROJECT_ID").update(value=new_pid)
+        for entry in cache_entries:
+            invalidate_env(
+                str(entry["user_id"]),
+                entry["client_id"],
+                entry["app_id"],
+                old_pid,
+                client_name=entry["client_name"],
+                app_name=entry["app_name"],
+                project_name=entry["project_name"],
+            )
