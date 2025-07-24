@@ -2684,9 +2684,9 @@ async def list_saved_dataframes(
     except S3Error as e:
         if getattr(e, "code", "") == "NoSuchBucket":
             return {"files": []}
-        raise HTTPException(status_code=500, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        return {"files": [], "error": str(e)}
+    except Exception as e:  # pragma: no cover - unexpected error
+        return {"files": [], "error": str(e)}
 
 
 @router.get("/latest_ticket/{file_key}")
