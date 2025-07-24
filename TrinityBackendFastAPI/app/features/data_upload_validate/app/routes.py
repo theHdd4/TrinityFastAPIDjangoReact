@@ -132,6 +132,16 @@ MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY", "minio")
 MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY", "minio123")
 MINIO_BUCKET = os.getenv("MINIO_BUCKET", "trinity")
 
+
+def _parse_numeric_id(value: str | int | None) -> int:
+    """Return the numeric component of an ID string like "name_123"."""
+    if value is None:
+        return 0
+    try:
+        return int(str(value).split("_")[-1])
+    except Exception:
+        return 0
+
 async def get_object_prefix(
     client_id: str = "",
     app_id: str = "",
@@ -141,8 +151,8 @@ async def get_object_prefix(
     project_name: str = "",
 ) -> str:
     """Return the MinIO prefix for the current client/app/project."""
-    USER_ID = int(os.getenv("USER_ID", "0"))
-    PROJECT_ID = int(project_id or os.getenv("PROJECT_ID", "0"))
+    USER_ID = _parse_numeric_id(os.getenv("USER_ID"))
+    PROJECT_ID = _parse_numeric_id(project_id or os.getenv("PROJECT_ID", "0"))
     env = await get_env_vars(
         client_id or os.getenv("CLIENT_ID", ""),
         app_id or os.getenv("APP_ID", ""),
@@ -2527,7 +2537,7 @@ async def save_dataframes(
     if project_name:
         os.environ["PROJECT_NAME"] = project_name
     prefix = await get_object_prefix()
-    numeric_pid = int(project_id or os.getenv("PROJECT_ID", "0"))
+    numeric_pid = _parse_numeric_id(project_id or os.getenv("PROJECT_ID", "0"))
     print(f"📤 saving to prefix {prefix}")
     for file, key in zip(files, keys):
         content = await file.read()
