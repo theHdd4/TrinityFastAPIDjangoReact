@@ -494,16 +494,6 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
                           if (previewTypes[chart.id]) setPreviewTypes(prev => ({ ...prev, [chart.id]: null }));
                           onChartTypeChange?.(chart.id, type);
                         }}
-                        onMouseEnter={() => {
-                          debounce(() => {
-                            setPreviewTypes(prev => prev[chart.id] === type ? prev : { ...prev, [chart.id]: type });
-                          }, 100, chart.id);
-                        }}
-                        onMouseLeave={() => {
-                          debounce(() => {
-                            setPreviewTypes(prev => prev[chart.id] ? { ...prev, [chart.id]: null } : prev);
-                          }, 100, chart.id);
-                        }}
                       >
                         <Icon className="h-4 w-4" />
                         {chartTypeLabels[type]}
