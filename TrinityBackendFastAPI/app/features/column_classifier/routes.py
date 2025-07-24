@@ -377,7 +377,9 @@ async def define_dimensions(
     validator_atom_id: str = Form(...),
     file_key: str = Form(...),
     dimensions: str = Form(...),
-    project_id: int = Form(None)
+    project_id: int = Form(None),
+    user_id: str = Form(""),
+    client_id: str = Form("")
 ):
     """
     Endpoint to define business dimensions for a specific file key in a validator atom.
@@ -450,7 +452,12 @@ async def define_dimensions(
     # Save to MongoDB
     try:
         mongo_result = save_business_dimensions_to_mongo(
-            validator_atom_id, file_key, dims_dict, project_id
+            validator_atom_id,
+            file_key,
+            dims_dict,
+            project_id,
+            user_id=user_id,
+            client_id=client_id,
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to save dimensions to MongoDB: {str(e)}")
@@ -499,6 +506,8 @@ async def define_dimensions(
 async def assign_identifiers_to_dimensions(
     identifier_assignments: str = Form(...),
     project_id: int = Form(...),
+    user_id: str = Form(""),
+    client_id: str = Form(""),
 ):
     """Assign identifiers to business dimensions for the given project."""
     
@@ -524,7 +533,12 @@ async def assign_identifiers_to_dimensions(
             raise HTTPException(status_code=400, detail=f"Identifiers list for dimension '{dim_id}' cannot be empty")
         all_assigned_identifiers.extend(identifiers)
 
-    mongo_result = save_project_dimension_mapping(project_id, assignments)
+    mongo_result = save_project_dimension_mapping(
+        project_id,
+        assignments,
+        user_id=user_id,
+        client_id=client_id,
+    )
     in_memory_status = "skipped"
     message = "Identifiers assigned to project dimensions"
     validator_type = "project"

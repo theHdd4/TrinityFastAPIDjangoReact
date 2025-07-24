@@ -48,7 +48,15 @@ def get_validator_atom_from_mongo(validator_atom_id: str):
         logging.error(f"MongoDB read error for validator atom: {e}")
         return None
 
-def save_classification_to_mongo(validator_atom_id: str, file_key: str, classification_data: dict):
+def save_classification_to_mongo(
+    validator_atom_id: str,
+    file_key: str,
+    classification_data: dict,
+    *,
+    user_id: str = "",
+    client_id: str = "",
+    project_id: int | None = None,
+):
     """Save column classification to MongoDB - USED BY classify_columns endpoint"""
     if not check_mongodb_connection():
         return {"status": "error", "error": "MongoDB not connected"}
@@ -62,7 +70,10 @@ def save_classification_to_mongo(validator_atom_id: str, file_key: str, classifi
             "classification_type": "column_classification",
             "created_at": datetime.utcnow(),
             "updated_at": datetime.utcnow(),
-            **classification_data
+            "user_id": user_id,
+            "client_id": client_id,
+            "project_id": project_id,
+            **classification_data,
         }
         
         # Save to column_classifications collection
@@ -100,7 +111,13 @@ def get_classification_from_mongo(validator_atom_id: str, file_key: str):
         logging.error(f"MongoDB read error for classification: {e}")
         return None
 
-def save_business_dimension_to_mongo(dimension_data: dict):
+def save_business_dimension_to_mongo(
+    dimension_data: dict,
+    *,
+    user_id: str = "",
+    client_id: str = "",
+    project_id: int | None = None,
+):
     """Save business dimension data to MongoDB"""
     if not check_mongodb_connection():
         return {"status": "error", "error": "MongoDB not connected"}
@@ -109,7 +126,10 @@ def save_business_dimension_to_mongo(dimension_data: dict):
         document = {
             "created_at": datetime.utcnow(),
             "updated_at": datetime.utcnow(),
-            **dimension_data
+            "user_id": user_id,
+            "client_id": client_id,
+            "project_id": project_id,
+            **dimension_data,
         }
         
         # Save to business_dimensions collection
@@ -173,6 +193,9 @@ def save_business_dimensions_to_mongo(
     file_key: str,
     dimensions_dict: dict,
     project_id: int | None = None,
+    *,
+    user_id: str = "",
+    client_id: str = "",
 ):
     """Save business dimensions for a specific file key to MongoDB"""
     if not check_mongodb_connection():
@@ -185,6 +208,8 @@ def save_business_dimensions_to_mongo(
             "validator_atom_id": validator_atom_id,
             "file_key": file_key,
             "project_id": project_id,
+            "user_id": user_id,
+            "client_id": client_id,
             "dimensions_type": "business_dimensions",
             "dimensions": dimensions_dict,
             "dimensions_count": len(dimensions_dict),
@@ -233,6 +258,9 @@ def update_business_dimensions_assignments_in_mongo(
     file_key: str,
     assignments: dict,
     project_id: int | None = None,
+    *,
+    user_id: str = "",
+    client_id: str = "",
 ):
     """Update business dimensions with identifier assignments in MongoDB"""
     if not check_mongodb_connection():
@@ -260,6 +288,8 @@ def update_business_dimensions_assignments_in_mongo(
             "updated_at": datetime.utcnow(),
             "assignment_completed": True,
             "project_id": project_id,
+            "user_id": user_id,
+            "client_id": client_id,
         }
         
         result = db["business_dimensions_with_assignments"].update_one(
@@ -282,7 +312,13 @@ def update_business_dimensions_assignments_in_mongo(
         return {"status": "error", "error": str(e)}
 
 
-def save_project_dimension_mapping(project_id: int, assignments: dict):
+def save_project_dimension_mapping(
+    project_id: int,
+    assignments: dict,
+    *,
+    user_id: str = "",
+    client_id: str = "",
+):
     """Save identifier assignments per project"""
     if not check_mongodb_connection():
         return {"status": "error", "error": "MongoDB not connected"}
@@ -293,6 +329,8 @@ def save_project_dimension_mapping(project_id: int, assignments: dict):
             "project_id": project_id,
             "assignments": assignments,
             "updated_at": datetime.utcnow(),
+            "user_id": user_id,
+            "client_id": client_id,
         }
         result = db["project_dimension_mappings"].replace_one(
             {"_id": document_id}, document, upsert=True
