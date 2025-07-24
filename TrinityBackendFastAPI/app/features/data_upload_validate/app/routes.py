@@ -61,7 +61,8 @@ from app.features.data_upload_validate.app.database import (
 
 from app.features.data_upload_validate.app.database import (
     get_validator_atom_from_mongo,  # Fallback function
-    save_validation_log_to_mongo
+    save_validation_log_to_mongo,
+    log_operation_to_mongo,
 )
 
 # Add this import
@@ -1336,7 +1337,9 @@ async def validate(
     validator_atom_id: str = Form(...),
     files: List[UploadFile] = File(...),
     file_keys: str = Form(...),
-    date_frequency: str = Form(default=None)
+    date_frequency: str = Form(default=None),
+    user_id: str = Form(""),
+    client_id: str = Form("")
 ):
     """
     Enhanced validation: mandatory columns + type check + auto-correction + custom conditions + MongoDB logging
@@ -1447,6 +1450,13 @@ async def validate(
     
     # ✅ Save to MongoDB validation logs collection
     mongo_log_result = save_validation_log_to_mongo(validation_log_data)
+    log_operation_to_mongo(
+        user_id=user_id,
+        client_id=client_id,
+        validator_atom_id=validator_atom_id,
+        operation="validate",
+        details={"overall_status": validation_results["overall_status"]},
+    )
 
     return {
         "overall_status": validation_results["overall_status"],
@@ -2511,6 +2521,7 @@ async def save_dataframes(
     file_keys: str = Form(...),
     overwrite: bool = Form(False),
     client_id: str = Form(""),
+    user_id: str = Form(""),
     app_id: str = Form(""),
     project_id: str = Form(""),
     client_name: str = Form(""),
@@ -2601,6 +2612,13 @@ async def save_dataframes(
         "APP_NAME": os.getenv("APP_NAME"),
         "PROJECT_NAME": os.getenv("PROJECT_NAME"),
     }
+    log_operation_to_mongo(
+        user_id=user_id,
+        client_id=client_id,
+        validator_atom_id=validator_atom_id,
+        operation="save_dataframes",
+        details={"files_saved": uploads, "prefix": prefix},
+    )
     return {
         "minio_uploads": uploads,
         "flight_uploads": flights,

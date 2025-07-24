@@ -16,6 +16,7 @@ COLLECTIONS = {
     "VALIDATION_LOGS": "validation_logs",
     "VALIDATION_CONFIG": "validation_config",
     "VALIDATION_UNITS": "validation_units",
+    "OPERATION_LOGS": "operation_logs",
 }
 
 # Initialize MongoDB client with timeout
@@ -384,3 +385,32 @@ def get_validation_units_from_mongo(validator_atom_id: str, file_key: str):
     except Exception as e:
         logging.error(f"MongoDB read error for validation units: {e}")
         return None
+
+
+def log_operation_to_mongo(user_id: str, client_id: str, validator_atom_id: str, operation: str, details: dict):
+    """Record a high level operation performed by a user."""
+    if not check_mongodb_connection():
+        return {"status": "error", "error": "MongoDB not connected"}
+
+    try:
+        document = {
+            "user_id": user_id,
+            "client_id": client_id,
+            "validator_atom_id": validator_atom_id,
+            "operation": operation,
+            "timestamp": datetime.utcnow(),
+            "details": details,
+        }
+
+        result = db[COLLECTIONS["OPERATION_LOGS"]].insert_one(document)
+        print(f"📦 Stored in {COLLECTIONS['OPERATION_LOGS']}: {document}")
+
+        return {
+            "status": "success",
+            "mongo_id": str(result.inserted_id),
+            "collection": COLLECTIONS["OPERATION_LOGS"],
+        }
+
+    except Exception as e:
+        logging.error(f"MongoDB save error for operation log: {e}")
+        return {"status": "error", "error": str(e)}
