@@ -56,6 +56,8 @@ from app.features.data_upload_validate.app.database import (
     get_validation_units_from_mongo,
 )
 
+from app.redis_cache import cache_master_config
+
 
 
 
@@ -1309,6 +1311,14 @@ async def configure_validation_config(request: Request):
         + regex_units
         + null_units
         + ref_units,
+    )
+
+    client_id = os.getenv("CLIENT_ID", "")
+    app_id = os.getenv("APP_ID", "")
+    project_id = os.getenv("PROJECT_ID", "")
+    cache_master_config(client_id, app_id, project_id, file_key, config_data)
+    print(
+        f"📦 Stored in redis namespace {client_id}:{app_id}:{project_id}:{file_key}"
     )
 
     message = f"Validation config configured successfully for file key '{file_key}' with {total_conditions} conditions"
