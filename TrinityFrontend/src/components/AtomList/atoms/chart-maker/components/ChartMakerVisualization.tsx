@@ -24,7 +24,7 @@ const ChartMakerVisualization: React.FC<ChartMakerVisualizationProps> = ({
   onRenderCharts
 }) => {
   const handleNumberOfChartsChange = (change: number) => {
-    const newNumber = Math.max(1, Math.min(5, settings.numberOfCharts + change));
+    const newNumber = Math.max(1, Math.min(3, settings.numberOfCharts + change));
     const newCharts = [...settings.charts];
     
     if (newNumber > settings.numberOfCharts) {
@@ -144,7 +144,7 @@ const ChartMakerVisualization: React.FC<ChartMakerVisualizationProps> = ({
         <CardContent>
           <div className="space-y-4">
             <div>
-              <Label className="text-xs">Number of Charts (Max 5)</Label>
+              <Label className="text-xs">Number of Charts (Max 3)</Label>
               <div className="flex items-center gap-2 mt-1">
                 <Button
                   variant="outline"
@@ -159,7 +159,7 @@ const ChartMakerVisualization: React.FC<ChartMakerVisualizationProps> = ({
                   variant="outline"
                   size="sm"
                   onClick={() => handleNumberOfChartsChange(1)}
-                  disabled={settings.numberOfCharts >= 5}
+                  disabled={settings.numberOfCharts >= 3}
                 >
                   <Plus className="w-3 h-3" />
                 </Button>
