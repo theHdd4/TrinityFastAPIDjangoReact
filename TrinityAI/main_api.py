@@ -55,7 +55,8 @@ def get_minio_config() -> Dict[str, str]:
     client, app, project = _fetch_names_from_db()
     prefix_default = f"{client}/{app}/{project}/"
     return {
-        "endpoint": os.getenv("MINIO_ENDPOINT"),
+        # Default to the development MinIO service if not explicitly configured
+        "endpoint": os.getenv("MINIO_ENDPOINT", "minio:9000"),
         "access_key": os.getenv("MINIO_ACCESS_KEY", "minio"),
         "secret_key": os.getenv("MINIO_SECRET_KEY", "minio123"),
         "bucket": os.getenv("MINIO_BUCKET", "trinity"),

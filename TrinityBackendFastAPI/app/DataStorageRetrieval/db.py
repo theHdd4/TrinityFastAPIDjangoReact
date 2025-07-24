@@ -250,7 +250,7 @@ async def arrow_dataset_exists(project_id: int, atom_id: str, file_key: str) -> 
 
             bucket = os.getenv("MINIO_BUCKET", "trinity")
             client = Minio(
-                os.getenv("MINIO_ENDPOINT"),
+                os.getenv("MINIO_ENDPOINT", "minio:9000"),
                 access_key=os.getenv("MINIO_ACCESS_KEY", "minio"),
                 secret_key=os.getenv("MINIO_SECRET_KEY", "minio123"),
                 secure=False,
