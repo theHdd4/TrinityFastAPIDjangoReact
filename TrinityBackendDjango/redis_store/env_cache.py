@@ -197,3 +197,37 @@ def invalidate_env(
     if keys:
         redis_client.delete(*keys)
     redis_client.delete(set_key)
+
+
+CURRENT_ENV_PREFIX = "currentenv"
+
+
+def set_current_env(
+    user_id: str,
+    *,
+    client_id: str = "",
+    app_id: str = "",
+    project_id: str = "",
+    client_name: str = "",
+    app_name: str = "",
+    project_name: str = "",
+) -> None:
+    """Persist the latest environment selection for a user."""
+    key = f"{CURRENT_ENV_PREFIX}:{user_id}"
+    redis_client.hset(
+        key,
+        mapping={
+            "client_id": client_id,
+            "app_id": app_id,
+            "project_id": project_id,
+            "client_name": client_name,
+            "app_name": app_name,
+            "project_name": project_name,
+        },
+    )
+
+
+def get_current_env(user_id: str) -> Dict[str, str]:
+    """Return the last stored environment selection for a user."""
+    key = f"{CURRENT_ENV_PREFIX}:{user_id}"
+    return redis_client.hgetall(key)

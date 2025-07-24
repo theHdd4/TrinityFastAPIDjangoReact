@@ -7,22 +7,28 @@ from .models import UserEnvironmentVariable
 from redis_store.env_cache import (
     set_env_var as cache_set_env_var,
     get_env_vars as cache_get_env_vars,
+    set_current_env,
+    get_current_env,
 )
 
 
 def load_env_vars(user) -> dict:
     """Load saved environment variables for the current context from Redis."""
+    user_id = str(getattr(user, "id", user))
+    current = get_current_env(user_id)
     envs = cache_get_env_vars(
-        os.getenv("CLIENT_ID", ""),
-        os.getenv("APP_ID", ""),
-        os.getenv("PROJECT_ID", ""),
-        user_id=str(getattr(user, "id", user)),
-        client_name=os.getenv("CLIENT_NAME", ""),
-        app_name=os.getenv("APP_NAME", ""),
-        project_name=os.getenv("PROJECT_NAME", ""),
+        current.get("client_id", os.getenv("CLIENT_ID", "")),
+        current.get("app_id", os.getenv("APP_ID", "")),
+        current.get("project_id", os.getenv("PROJECT_ID", "")),
+        user_id=user_id,
+        client_name=current.get("client_name", os.getenv("CLIENT_NAME", "")),
+        app_name=current.get("app_name", os.getenv("APP_NAME", "")),
+        project_name=current.get("project_name", os.getenv("PROJECT_NAME", "")),
     )
-    for k, v in envs.items():
-        os.environ[k] = v
+    combined = {**current, **envs}
+    for k, v in combined.items():
+        env_key = k.upper()
+        os.environ[env_key] = v
     return envs
 
 
@@ -71,17 +77,28 @@ def save_env_var(user, key, value) -> None:
         app_name=app_name,
         project_name=project_name,
     )
+    set_current_env(
+        str(getattr(user, "id", user)),
+        client_id=client_id or "",
+        app_id=app_id or "",
+        project_id=project_id or "",
+        client_name=client_name,
+        app_name=app_name,
+        project_name=project_name,
+    )
 
 def get_env_dict(user):
     """Return environment variables for the current client/app/project from Redis."""
+    user_id = str(getattr(user, "id", user))
+    current = get_current_env(user_id)
     return cache_get_env_vars(
-        os.getenv("CLIENT_ID", ""),
-        os.getenv("APP_ID", ""),
-        os.getenv("PROJECT_ID", ""),
-        user_id=str(getattr(user, "id", user)),
-        client_name=os.getenv("CLIENT_NAME", ""),
-        app_name=os.getenv("APP_NAME", ""),
-        project_name=os.getenv("PROJECT_NAME", ""),
+        current.get("client_id", os.getenv("CLIENT_ID", "")),
+        current.get("app_id", os.getenv("APP_ID", "")),
+        current.get("project_id", os.getenv("PROJECT_ID", "")),
+        user_id=user_id,
+        client_name=current.get("client_name", os.getenv("CLIENT_NAME", "")),
+        app_name=current.get("app_name", os.getenv("APP_NAME", "")),
+        project_name=current.get("project_name", os.getenv("PROJECT_NAME", "")),
     )
 
 
@@ -117,6 +134,14 @@ async def get_env_vars(
     """Fetch environment variables using Redis-backed cache."""
     if user_id is None:
         user_id = os.getenv("USER_ID", "")
+    if not any([client_id, app_id, project_id, client_name, app_name, project_name]):
+        current = get_current_env(user_id)
+        client_id = current.get("client_id", client_id)
+        app_id = current.get("app_id", app_id)
+        project_id = current.get("project_id", project_id)
+        client_name = current.get("client_name", client_name)
+        app_name = current.get("app_name", app_name)
+        project_name = current.get("project_name", project_name)
     env = await sync_to_async(cache_get_env_vars)(
         client_id,
         app_id,
