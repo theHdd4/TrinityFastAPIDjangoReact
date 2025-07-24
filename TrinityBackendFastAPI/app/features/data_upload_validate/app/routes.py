@@ -2638,9 +2638,23 @@ async def save_dataframes(
 
 
 @router.get("/list_saved_dataframes")
-async def list_saved_dataframes():
+async def list_saved_dataframes(
+    client_id: str = "",
+    app_id: str = "",
+    project_id: str = "",
+    client_name: str = "",
+    app_name: str = "",
+    project_name: str = "",
+):
     """List saved Arrow dataframes sorted by newest first."""
-    prefix = await get_object_prefix()
+    prefix = await get_object_prefix(
+        client_id,
+        app_id,
+        project_id,
+        client_name=client_name,
+        app_name=app_name,
+        project_name=project_name,
+    )
     try:
         objects = minio_client.list_objects(MINIO_BUCKET, prefix=prefix, recursive=True)
         latest: dict[str, tuple[datetime, str]] = {}
@@ -2670,9 +2684,9 @@ async def list_saved_dataframes():
     except S3Error as e:
         if getattr(e, "code", "") == "NoSuchBucket":
             return {"files": []}
-        raise HTTPException(status_code=500, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        return {"files": [], "error": str(e)}
+    except Exception as e:  # pragma: no cover - unexpected error
+        return {"files": [], "error": str(e)}
 
 
 @router.get("/latest_ticket/{file_key}")

@@ -389,3 +389,53 @@ def test_save_dataframe_skip_existing(monkeypatch):
     assert resp.status_code == 200
     assert resp.json()["minio_uploads"][0]["already_saved"] is True
 
+
+def test_list_saved_dataframes_env(monkeypatch):
+    routes = load_routes()
+
+    class DummyMinio:
+        def __init__(self):
+            self.objects = {
+                "pref/a.arrow": b"",
+                "pref/b.arrow": b"",
+            }
+
+        def list_objects(self, bucket, prefix="", recursive=False):
+            for name in self.objects:
+                if name.startswith(prefix):
+                    yield types.SimpleNamespace(object_name=name)
+
+        def stat_object(self, bucket, name):
+            return types.SimpleNamespace(last_modified=0)
+
+    monkeypatch.setattr(routes, "minio_client", DummyMinio())
+    monkeypatch.setattr(routes, "MINIO_BUCKET", "bucket")
+
+    async def dummy_prefix(*a, **k):
+        return "pref/"
+
+    monkeypatch.setattr(routes, "get_object_prefix", dummy_prefix)
+
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    app = FastAPI()
+    app.include_router(routes.router)
+    client = TestClient(app)
+
+    resp = client.get(
+        "/list_saved_dataframes",
+        params={
+            "client_id": "c_1",
+            "app_id": "a_1",
+            "project_id": "p_1",
+            "client_name": "c",
+            "app_name": "a",
+            "project_name": "p",
+        },
+    )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data["files"]) == 2
+

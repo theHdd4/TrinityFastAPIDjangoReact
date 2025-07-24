@@ -14,7 +14,7 @@ import {
   DEFAULT_DATAUPLOAD_SETTINGS,
   FeatureOverviewSettings,
   DEFAULT_FEATURE_OVERVIEW_SETTINGS,
-} from '../store/laboratoryStore';
+} from '../../store/laboratoryStore';
 import DataUploadValidateProperties from '@/components/AtomList/atoms/data-upload-validate/components/properties/DataUploadValidateProperties';
 import FeatureOverviewProperties from '@/components/AtomList/atoms/feature-overview/components/properties/FeatureOverviewProperties';
 import ConcatProperties from '@/components/AtomList/atoms/concat/components/properties/ConcatProperties';
