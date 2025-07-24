@@ -49,7 +49,7 @@ After the containers report **healthy** you can access the services at:
 - `http://localhost:8003/admin/` – Django admin
 - `http://localhost:8004/api/` – FastAPI
 - `http://localhost:5051` – PgAdmin
-- `http://localhost:8082` – Mongo Express
+- `http://localhost:8083` – Mongo Express
 
 The frontend automatically detects when it is served from port `8081` and
 adjusts API calls to the backend ports `8003`–`8005`. If you create a custom

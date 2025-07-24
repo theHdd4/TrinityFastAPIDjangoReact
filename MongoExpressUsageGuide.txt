@@ -7,8 +7,8 @@ MongoDB databases used by the Django and FastAPI services.
 
 ## Accessing Mongo Express
 
-* **Development**: http://localhost:8082
-* **Production**: http://localhost:8083
+* **Development**: http://localhost:8083
+* **Production**: http://localhost:8082
 
 When prompted for credentials use:
 

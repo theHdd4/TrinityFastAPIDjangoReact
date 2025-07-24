@@ -62,7 +62,7 @@ services:
       ME_CONFIG_BASICAUTH_USERNAME: admin
       ME_CONFIG_BASICAUTH_PASSWORD: admin
     ports:
-      - "8083:8081"
+      - "8082:8081"
     depends_on:
       - mongo
     networks:
