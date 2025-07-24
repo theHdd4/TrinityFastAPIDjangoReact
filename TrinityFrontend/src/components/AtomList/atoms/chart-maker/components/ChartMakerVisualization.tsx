@@ -139,7 +139,7 @@ const ChartMakerVisualization: React.FC<ChartMakerVisualizationProps> = ({
     <div className="space-y-4 h-full flex flex-col">
       <Card>
         <CardHeader>
-          <CardTitle className="text-sm">Chart Configuration 12</CardTitle>
+          <CardTitle className="text-sm">Chart Configuration</CardTitle>
         </CardHeader>
         <CardContent>
           <div className="space-y-4">
