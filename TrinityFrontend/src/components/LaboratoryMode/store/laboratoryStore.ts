@@ -175,6 +175,8 @@ export interface ChartMakerConfig {
   filteredData?: Record<string, any>[]; // Store filtered data for this specific chart
   chartConfig?: any; // Store the recharts config returned from backend
   lastUpdateTime?: number; // Timestamp of last update (optional)
+  chartRendered?: boolean; // Whether the chart has been rendered (per chart)
+  chartLoading?: boolean;  // Whether the chart is loading (per chart)
 }
 
 export interface ChartMakerSettings {
