@@ -2,6 +2,7 @@ import React, { useRef } from 'react';
 import ChartMakerCanvas from './components/ChartMakerCanvas';
 import { useLaboratoryStore, DEFAULT_CHART_MAKER_SETTINGS, ChartMakerSettings as SettingsType, ChartMakerConfig } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { chartMakerApi } from '@/services/chartMakerApi';
+import { useToast } from '@/hooks/use-toast';
 
 export interface ChartData {
   columns: string[];
@@ -30,6 +31,7 @@ const ChartMakerAtom: React.FC<Props> = ({ atomId }) => {
   const atom = useLaboratoryStore(state => state.getAtom(atomId));
   const updateSettings = useLaboratoryStore(state => state.updateAtomSettings);
   const settings: SettingsType = (atom?.settings as SettingsType) || { ...DEFAULT_CHART_MAKER_SETTINGS };
+  const { toast } = useToast();
 
   // Store per-chart loading timers
   const chartLoadingTimers = useRef<Record<string, NodeJS.Timeout | number | null>>({});
@@ -164,6 +166,30 @@ const ChartMakerAtom: React.FC<Props> = ({ atomId }) => {
     }));
     updateSettings(atomId, { charts: updatedCharts });
   };
+
+  // Grouped notification for rendering chart (chartLoading)
+  React.useEffect(() => {
+    const anyChartLoading = settings.charts.some(chart => chart.chartLoading);
+    if (anyChartLoading) {
+      toast({
+        title: 'Rendering chart...',
+        description: 'Applying settings and generating chart.',
+        variant: 'default',
+      });
+    } else if (!anyChartLoading && settings.charts.length > 0 && settings.charts.every(chart => chart.chartRendered) && !settings.error) {
+      toast({
+        title: 'Chart rendered',
+        description: 'Your chart is ready.',
+        variant: 'default',
+      });
+    } else if (settings.error) {
+      toast({
+        title: 'Rendering failed',
+        description: settings.error,
+        variant: 'destructive',
+      });
+    }
+  }, [settings.charts, settings.error, toast]);
 
   // Only show rendered charts if they've been marked as rendered
   const chartsToShow = settings.uploadedData ? settings.charts : [];

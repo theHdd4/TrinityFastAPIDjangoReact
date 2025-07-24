@@ -6,6 +6,7 @@ import ChartMakerVisualization from '../ChartMakerVisualization';
 import { useLaboratoryStore, DEFAULT_CHART_MAKER_SETTINGS, ChartMakerSettings as SettingsType } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { chartMakerApi } from '@/services/chartMakerApi';
 import { ChartData } from '../../ChartMakerAtom';
+import { useToast } from '@/hooks/use-toast';
 
 interface Props {
   atomId: string;
@@ -16,6 +17,7 @@ const ChartMakerProperties: React.FC<Props> = ({ atomId }) => {
   const atom = useLaboratoryStore(state => state.getAtom(atomId));
   const updateSettings = useLaboratoryStore(state => state.updateAtomSettings);
   const settings: SettingsType = (atom?.settings as SettingsType) || { ...DEFAULT_CHART_MAKER_SETTINGS };
+  const { toast } = useToast();
 
   const handleSettingsChange = (newSettings: Partial<SettingsType>) => {
     // Always get the latest atom from the store, not from the render closure
@@ -184,6 +186,53 @@ const ChartMakerProperties: React.FC<Props> = ({ atomId }) => {
       setLoading({ filtering: false });
     }
   };
+
+  // Grouped notification for processing file
+  React.useEffect(() => {
+    const isProcessing = settings.loading.uploading || settings.loading.fetchingColumns || settings.loading.fetchingUniqueValues;
+    if (isProcessing) {
+      toast({
+        title: 'Processing file...',
+        description: 'Your data is being processed.',
+        variant: 'default',
+      });
+    } else if (!isProcessing && settings.uploadedData && !settings.error) {
+      toast({
+        title: 'File processed',
+        description: 'Data is ready for charting.',
+        variant: 'default',
+      });
+    } else if (settings.error) {
+      toast({
+        title: 'Processing failed',
+        description: settings.error,
+        variant: 'destructive',
+      });
+    }
+  }, [settings.loading.uploading, settings.loading.fetchingColumns, settings.loading.fetchingUniqueValues, settings.uploadedData, settings.error, toast]);
+
+  // Grouped notification for rendering chart (filtering)
+  React.useEffect(() => {
+    if (settings.loading.filtering) {
+      toast({
+        title: 'Rendering chart...',
+        description: 'Applying settings and generating chart.',
+        variant: 'default',
+      });
+    } else if (!settings.loading.filtering && !settings.error) {
+      toast({
+        title: 'Chart rendered',
+        description: 'Your chart is ready.',
+        variant: 'default',
+      });
+    } else if (settings.error) {
+      toast({
+        title: 'Rendering failed',
+        description: settings.error,
+        variant: 'destructive',
+      });
+    }
+  }, [settings.loading.filtering, settings.error, toast]);
 
   return (
     <Tabs value={tab} onValueChange={setTab} className="w-full">
