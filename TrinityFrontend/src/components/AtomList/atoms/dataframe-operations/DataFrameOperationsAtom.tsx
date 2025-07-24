@@ -1,0 +1,213 @@
+import React, { useState, useEffect } from 'react';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Card, CardContent } from '@/components/ui/card';
+import { Settings, BarChart3, Eye, Table } from 'lucide-react';
+import DataFrameOperationsCanvas from './components/DataFrameOperationsCanvas';
+import DataFrameOperationsSettings from './components/DataFrameOperationsSettings';
+import DataFrameOperationsVisualisation from './components/DataFrameOperationsVisualisation';
+import DataFrameOperationsExhibition from './components/DataFrameOperationsExhibition';
+import { useLaboratoryStore, DEFAULT_FEATURE_OVERVIEW_SETTINGS } from '@/components/LaboratoryMode/store/laboratoryStore';
+import { Button } from '@/components/ui/button';
+
+export interface DataFrameRow {
+  [key: string]: string | number | null;
+}
+
+export interface DataFrameData {
+  headers: string[];
+  rows: DataFrameRow[];
+  fileName: string;
+  columnTypes: { [key: string]: 'text' | 'number' | 'date' };
+  pinnedColumns: string[];
+  frozenColumns: number;
+  cellColors: { [key: string]: string }; // key format: "row-col"
+}
+
+export interface DataFrameSettings {
+  rowsPerPage: number;
+  searchTerm: string;
+  sortColumns: Array<{ column: string; direction: 'asc' | 'desc' }>;
+  filters: { [key: string]: any };
+  selectedColumns: string[];
+  showRowNumbers: boolean;
+  enableEditing: boolean;
+  uploadedFile?: string; // Added for file upload
+  selectedFile?: string; // Added for file selection
+  tableData?: DataFrameData; // Added for table data
+}
+
+interface Props {
+  atomId: string;
+}
+
+// Error Boundary Component
+class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean; error: any }> {
+  constructor(props: any) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+  static getDerivedStateFromError(error: any) {
+    return { hasError: true, error };
+  }
+  componentDidCatch(error: any, errorInfo: any) {
+    // You can log error here
+  }
+  render() {
+    if (this.state.hasError) {
+      return <div style={{ color: 'red', padding: 16 }}>Something went wrong: {this.state.error?.toString()}</div>;
+    }
+    return this.props.children;
+  }
+}
+
+const DataFrameOperationsAtom: React.FC<Props> = ({ atomId }) => {
+  const cards = useLaboratoryStore(state => state.cards);
+  console.log('Cards:', cards);
+  const atom = cards.flatMap(card => card.atoms).find(a => a.id === atomId);
+  const updateSettings = useLaboratoryStore(state => state.updateAtomSettings);
+  const settings: DataFrameSettings = atom?.settings || {
+    rowsPerPage: 15,
+    searchTerm: '',
+    sortColumns: [],
+    filters: {},
+    selectedColumns: [],
+    showRowNumbers: true,
+    enableEditing: true
+  };
+  // Always use tableData as the source of truth
+  const data = settings.tableData || null;
+
+  // 1. Store the original uploaded data
+  const [originalData, setOriginalData] = useState<DataFrameData | null>(null);
+  useEffect(() => {
+    if (data && !originalData) {
+      setOriginalData(JSON.parse(JSON.stringify(data)));
+    }
+  }, [data, originalData]);
+  console.log('DataFrameOperationsAtom atom:', atom);
+  console.log('DataFrameOperationsAtom data:', data);
+  const [fileId, setFileId] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<'table' | 'chart'>('table');
+  const [chartConfig, setChartConfig] = useState<any>(null);
+
+  // Update handleDataUpload to always set selectedColumns to newData.headers
+  const handleDataUpload = (newData: DataFrameData, backendFileId?: string) => {
+    if (backendFileId) setFileId(backendFileId);
+    setOriginalData(JSON.parse(JSON.stringify(newData)));
+    const newSettings = { 
+      ...settings,
+      selectedColumns: newData.headers,
+      searchTerm: '',
+      filters: {}
+    };
+    updateSettings(atomId, newSettings);
+  };
+
+  // In handleSettingsChange, always update tableData and selectedColumns if headers are present
+  const handleSettingsChange = (newSettings: Partial<DataFrameSettings>) => {
+    let mergedSettings = { ...settings, ...newSettings };
+    if ('filters' in newSettings) {
+      // If filters is present, fully replace it (do not merge with old filters)
+      mergedSettings.filters = newSettings.filters;
+    }
+    if (data && (!mergedSettings.selectedColumns || mergedSettings.selectedColumns.length === 0)) {
+      mergedSettings.selectedColumns = data.headers;
+    }
+    // Always update tableData if data is present
+    if (data) {
+      mergedSettings.tableData = data;
+    }
+    console.log('handleSettingsChange called with:', newSettings, 'mergedSettings:', mergedSettings);
+    updateSettings(atomId, mergedSettings);
+  };
+
+  // In handleDataChange, always update tableData and selectedColumns
+  const handleDataChange = (newData: DataFrameData) => {
+    // Deep clone to ensure new references for Zustand/React
+    const clonedData = JSON.parse(JSON.stringify(newData));
+    // Merge with existing settings to preserve properties like selectedFile
+    updateSettings(atomId, {
+      ...settings,
+      tableData: clonedData,
+      selectedColumns: [...clonedData.headers],
+    });
+  };
+
+  // 2. Update Reset button handler to restore original data and settings
+  const handleReset = () => {
+    if (originalData) {
+      updateSettings(atomId, {
+        ...settings,
+        tableData: JSON.parse(JSON.stringify(originalData)),
+        data: JSON.parse(JSON.stringify(originalData)),
+        selectedColumns: originalData.headers,
+        searchTerm: '',
+        filters: {},
+        sortColumns: [],
+        rowsPerPage: 15,
+        showRowNumbers: true,
+        enableEditing: true
+      });
+    }
+  };
+
+  // Only show table/chart after file selection (like concat atom)
+  const fileSelected = settings.selectedFile;
+
+  // Log the data passed to DataFrameOperationsCanvas
+  console.log('Data passed to DataFrameOperationsCanvas:', data);
+
+  return (
+    <ErrorBoundary>
+      <div className="w-full h-full bg-gradient-to-br from-green-50 via-white to-green-50 rounded-xl border border-green-200 shadow-lg overflow-hidden">
+        <div className="bg-gradient-to-r from-green-500 to-green-600 text-white p-4 flex-shrink-0">
+          <div className="flex items-center space-x-3">
+            <div className="w-10 h-10 bg-white/20 rounded-lg flex items-center justify-center backdrop-blur-sm">
+              <Table className="w-5 h-5" />
+            </div>
+            <div>
+              <h2 className="text-lg font-semibold">DataFrame Operations</h2>
+              <p className="text-green-100 text-sm">Excel-like operations on data frames with editing, filtering, sorting</p>
+            </div>
+          </div>
+        </div>
+        <div className="flex-1 h-[calc(100%-80px)]">
+          {fileSelected && data && data.headers && data.rows && data.headers.length > 0 && data.rows.length > 0 ? (
+            <div className="h-full">
+              {/* File name above the table, small font */}
+              <div className="px-6 pt-2 pb-1">
+                <span className="text-xs font-medium text-gray-600" style={{ fontSize: '0.85rem' }}>{data.fileName}</span>
+              </div>
+              {viewMode === 'table' && (
+                <DataFrameOperationsCanvas 
+                  data={data} 
+                  settings={settings}
+                  onSettingsChange={handleSettingsChange}
+                  onDataUpload={handleDataUpload}
+                  onDataChange={handleDataChange}
+                  onClearAll={handleReset}
+                  fileId={fileId}
+                />
+              )}
+              {viewMode === 'chart' && chartConfig && (
+                <div className="flex items-center justify-center h-full text-green-800 text-lg font-semibold">
+                  [Chart will be rendered here]
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="p-4 w-full h-full flex items-center justify-center">
+              <Card>
+                <CardContent className="p-4">
+                  <p className="text-gray-500">No DataFrame available. Upload a CSV or Excel file to see results here.</p>
+                </CardContent>
+              </Card>
+            </div>
+          )}
+        </div>
+      </div>
+    </ErrorBoundary>
+  );
+};
+
+export default DataFrameOperationsAtom;
