@@ -47,6 +47,13 @@ const ChartMakerAtom: React.FC<Props> = ({ atomId }) => {
           chart.id === chartId ? { ...chart, chartLoading: true } : chart
         ),
       });
+      // Notification logic here
+      toast({
+        title: 'Rendering chart...',
+        description: 'Applying settings and generating chart.',
+        variant: 'default',
+        duration: 2000,
+      });
     }, 1000);
 
     const updatedCharts = await Promise.all(settings.charts.map(async chart => {
@@ -112,6 +119,13 @@ const ChartMakerAtom: React.FC<Props> = ({ atomId }) => {
           chart.id === chartId ? { ...chart, chartLoading: true } : chart
         ),
       });
+      // Notification logic here
+      toast({
+        title: 'Rendering chart...',
+        description: 'Applying settings and generating chart.',
+        variant: 'default',
+        duration: 2000,
+      });
     }, 1000);
 
     const updatedCharts = await Promise.all(settings.charts.map(async chart => {
@@ -167,33 +181,6 @@ const ChartMakerAtom: React.FC<Props> = ({ atomId }) => {
     updateSettings(atomId, { charts: updatedCharts });
   };
 
-  // Grouped notification for rendering chart (chartLoading)
-  React.useEffect(() => {
-    const anyChartLoading = settings.charts.some(chart => chart.chartLoading);
-    if (anyChartLoading) {
-      toast({
-        title: 'Rendering chart...',
-        description: 'Applying settings and generating chart.',
-        variant: 'default',
-        duration: 2000,
-      });
-    } else if (!anyChartLoading && settings.charts.length > 0 && settings.charts.every(chart => chart.chartRendered) && !settings.error) {
-      toast({
-        title: 'Chart rendered',
-        description: 'Your chart is ready.',
-        variant: 'default',
-        duration: 2000,
-      });
-    } else if (settings.error) {
-      toast({
-        title: 'Rendering failed',
-        description: settings.error,
-        variant: 'destructive',
-        duration: 2000,
-      });
-    }
-  }, [settings.charts, settings.error, toast]);
-
   // Auto-render charts when all filter columns have values selected and chartRendered is false
   useEffect(() => {
     if (!settings.fileId) return;
@@ -244,6 +231,12 @@ const ChartMakerAtom: React.FC<Props> = ({ atomId }) => {
                     : c
                 ),
               });
+              toast({
+                title: 'Chart rendered',
+                description: 'Your chart is ready.',
+                variant: 'default',
+                duration: 2000,
+              });
             } catch (error) {
               updateSettings(atomId, {
                 charts: settings.charts.map(c =>
@@ -251,6 +244,12 @@ const ChartMakerAtom: React.FC<Props> = ({ atomId }) => {
                     ? { ...c, chartRendered: false, chartLoading: false }
                     : c
                 ),
+              });
+              toast({
+                title: 'Rendering failed',
+                description: error instanceof Error ? error.message : 'Failed to render chart',
+                variant: 'destructive',
+                duration: 2000,
               });
             }
           }

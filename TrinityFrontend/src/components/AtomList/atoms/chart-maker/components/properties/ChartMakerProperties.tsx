@@ -45,10 +45,35 @@ const ChartMakerProperties: React.FC<Props> = ({ atomId }) => {
         ...loadingState
       }
     });
+    // Notification logic moved here
+    const isProcessing = loadingState.uploading || loadingState.fetchingColumns || loadingState.fetchingUniqueValues;
+    if (isProcessing) {
+      toast({
+        title: 'Processing file...',
+        description: 'Your data is being processed.',
+        variant: 'default',
+        duration: 2000,
+      });
+    } else if (loadingState.uploading === false && loadingState.fetchingColumns === false && loadingState.fetchingUniqueValues === false && settings.uploadedData && !settings.error) {
+      toast({
+        title: 'File processed',
+        description: 'Data is ready for charting.',
+        variant: 'default',
+        duration: 2000,
+      });
+    }
   };
 
   const setError = (error?: string) => {
     handleSettingsChange({ error });
+    if (error) {
+      toast({
+        title: 'Processing failed',
+        description: error,
+        variant: 'destructive',
+        duration: 2000,
+      });
+    }
   };
 
   const handleDataUpload = async (data: ChartData, fileId: string) => {
@@ -135,10 +160,8 @@ const ChartMakerProperties: React.FC<Props> = ({ atomId }) => {
       return;
     }
 
+    setLoading({ filtering: true });
     try {
-      setLoading({ filtering: true });
-      setError(undefined);
-
       // Process each chart independently
       const updatedCharts = await Promise.all(
         settings.charts.map(async (chart) => {
@@ -188,6 +211,12 @@ const ChartMakerProperties: React.FC<Props> = ({ atomId }) => {
       });
 
       setLoading({ filtering: false });
+      toast({
+        title: 'Chart rendered',
+        description: 'Your chart is ready.',
+        variant: 'default',
+        duration: 2000,
+      });
 
     } catch (error) {
       console.error('Error rendering charts:', error);
@@ -196,78 +225,7 @@ const ChartMakerProperties: React.FC<Props> = ({ atomId }) => {
     }
   };
 
-  // Grouped notification for processing file
-  React.useEffect(() => {
-    // Only proceed if this is not the initial mount to prevent false notifications
-    if (isInitialMount.current) {
-      return;
-    }
-    
-    const isProcessing = settings.loading.uploading || settings.loading.fetchingColumns || settings.loading.fetchingUniqueValues;
-    if (isProcessing) {
-      toast({
-        title: 'Processing file...',
-        description: 'Your data is being processed.',
-        variant: 'default',
-        duration: 2000,
-      });
-    } else if (!isProcessing && settings.uploadedData && !settings.error) {
-      toast({
-        title: 'File processed',
-        description: 'Data is ready for charting.',
-        variant: 'default',
-        duration: 2000,
-      });
-    } else if (settings.error) {
-      toast({
-        title: 'Processing failed',
-        description: settings.error,
-        variant: 'destructive',
-        duration: 2000,
-      });
-    }
-  }, [settings.loading.uploading, settings.loading.fetchingColumns, settings.loading.fetchingUniqueValues, settings.uploadedData, settings.error, toast]);
-
-  // Grouped notification for rendering chart (filtering)
-  React.useEffect(() => {
-    const currentFilteringState = settings.loading?.filtering;
-    
-    // Only proceed if this is not the initial mount
-    if (isInitialMount.current) {
-      previousFilteringState.current = currentFilteringState;
-      return;
-    }
-    
-    // Only show notifications when there's an actual state change
-    const filteringStateChanged = previousFilteringState.current !== currentFilteringState;
-    
-    if (currentFilteringState) {
-      toast({
-        title: 'Rendering chart...',
-        description: 'Applying settings and generating chart.',
-        variant: 'default',
-        duration: 2000,
-      });
-    } else if (filteringStateChanged && previousFilteringState.current === true && !currentFilteringState && !settings.error) {
-      // Only show "Chart rendered" if we transitioned from filtering=true to filtering=false
-      toast({
-        title: 'Chart rendered',
-        description: 'Your chart is ready.',
-        variant: 'default',
-        duration: 2000,
-      });
-    } else if (settings.error) {
-      toast({
-        title: 'Rendering failed',
-        description: settings.error,
-        variant: 'destructive',
-        duration: 2000,
-      });
-    }
-    
-    // Update the previous state
-    previousFilteringState.current = currentFilteringState;
-  }, [settings.loading?.filtering, settings.error, toast]);
+  // REMOVE notification useEffects
 
   return (
     <Tabs value={tab} onValueChange={setTab} className="w-full">
