@@ -63,3 +63,16 @@ def rename_prefix(old_prefix: str, new_prefix: str) -> None:
         dest = obj.object_name.replace(old_prefix, new_prefix, 1)
         _client.copy_object(MINIO_BUCKET, dest, CopySource(MINIO_BUCKET, obj.object_name))
         _client.remove_object(MINIO_BUCKET, obj.object_name)
+
+
+def rename_project_folder(
+    client_slug: str,
+    app_slug: str,
+    old_project_slug: str,
+    new_project_slug: str,
+) -> None:
+    """Rename a project's folder prefix when the project is renamed."""
+    old_prefix = f"{client_slug}/{app_slug}/{old_project_slug}"
+    new_prefix = f"{client_slug}/{app_slug}/{new_project_slug}"
+    rename_prefix(old_prefix, new_prefix)
+

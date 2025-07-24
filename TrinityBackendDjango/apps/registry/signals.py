@@ -3,7 +3,7 @@ from django.db.models.signals import post_save, pre_save
 from django.dispatch import receiver
 from django.db import connection
 from .models import Project
-from common.minio_utils import create_prefix, rename_prefix
+from common.minio_utils import create_prefix, rename_prefix, rename_project_folder
 from apps.tenants.models import Tenant
 from apps.accounts.models import UserEnvironmentVariable
 from redis_store.env_cache import invalidate_env
@@ -36,9 +36,7 @@ def rename_project_folder(sender, instance, **kwargs):
     if old.slug != instance.slug:
         tenant = _current_tenant_name()
         app_slug = instance.app.slug
-        old_prefix = f"{tenant}/{app_slug}/{old.slug}"
-        new_prefix = f"{tenant}/{app_slug}/{instance.slug}"
-        rename_prefix(old_prefix, new_prefix)
+        rename_project_folder(tenant, app_slug, old.slug, instance.slug)
 
 
 @receiver(pre_save, sender=Project)
