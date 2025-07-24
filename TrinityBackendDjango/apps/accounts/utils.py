@@ -11,8 +11,15 @@ from redis_store.env_cache import (
 
 
 def load_env_vars(user) -> dict:
-    """Load saved environment variables for the user into ``os.environ``."""
-    envs = get_env_dict(user)
+    """Load saved environment variables for the current context from Redis."""
+    envs = cache_get_env_vars(
+        os.getenv("CLIENT_ID", ""),
+        os.getenv("APP_ID", ""),
+        os.getenv("PROJECT_ID", ""),
+        client_name=os.getenv("CLIENT_NAME", ""),
+        app_name=os.getenv("APP_NAME", ""),
+        project_name=os.getenv("PROJECT_NAME", ""),
+    )
     for k, v in envs.items():
         os.environ[k] = v
     return envs
@@ -65,9 +72,15 @@ def save_env_var(user, key, value) -> None:
     )
 
 def get_env_dict(user):
-    """Return the user's environment variables as a simple dict."""
-    envs = UserEnvironmentVariable.objects.filter(user=user)
-    return {e.key: e.value for e in envs}
+    """Return environment variables for the current client/app/project from Redis."""
+    return cache_get_env_vars(
+        os.getenv("CLIENT_ID", ""),
+        os.getenv("APP_ID", ""),
+        os.getenv("PROJECT_ID", ""),
+        client_name=os.getenv("CLIENT_NAME", ""),
+        app_name=os.getenv("APP_NAME", ""),
+        project_name=os.getenv("PROJECT_NAME", ""),
+    )
 
 
 @sync_to_async
