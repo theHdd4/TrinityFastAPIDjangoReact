@@ -198,6 +198,11 @@ const ChartMakerProperties: React.FC<Props> = ({ atomId }) => {
 
   // Grouped notification for processing file
   React.useEffect(() => {
+    // Only proceed if this is not the initial mount to prevent false notifications
+    if (isInitialMount.current) {
+      return;
+    }
+    
     const isProcessing = settings.loading.uploading || settings.loading.fetchingColumns || settings.loading.fetchingUniqueValues;
     if (isProcessing) {
       toast({
