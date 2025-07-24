@@ -132,20 +132,23 @@ MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY", "minio")
 MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY", "minio123")
 MINIO_BUCKET = os.getenv("MINIO_BUCKET", "trinity")
 
-# Database driven folder names
-USER_ID = int(os.getenv("USER_ID", "0"))
-PROJECT_ID = int(os.getenv("PROJECT_ID", "0"))
-CLIENT_ID = os.getenv("CLIENT_ID", "")
-APP_ID = os.getenv("APP_ID", "")
-
-async def get_object_prefix() -> str:
+async def get_object_prefix(
+    client_id: str = "",
+    app_id: str = "",
+    project_id: str = "",
+    *,
+    client_name: str = "",
+    project_name: str = "",
+) -> str:
     """Return the MinIO prefix for the current client/app/project."""
+    USER_ID = int(os.getenv("USER_ID", "0"))
+    PROJECT_ID = int(project_id or os.getenv("PROJECT_ID", "0"))
     env = await get_env_vars(
-        CLIENT_ID,
-        APP_ID,
-        os.getenv("PROJECT_ID", ""),
-        client_name=os.getenv("CLIENT_NAME", ""),
-        project_name=os.getenv("PROJECT_NAME", ""),
+        client_id or os.getenv("CLIENT_ID", ""),
+        app_id or os.getenv("APP_ID", ""),
+        project_id or os.getenv("PROJECT_ID", ""),
+        client_name=client_name or os.getenv("CLIENT_NAME", ""),
+        project_name=project_name or os.getenv("PROJECT_NAME", ""),
     )
     print("🔧 fetched env", env)
     client = env.get("CLIENT_NAME", os.getenv("CLIENT_NAME", "default_client"))
@@ -168,7 +171,7 @@ async def get_object_prefix() -> str:
     os.environ["PROJECT_NAME"] = project
     prefix = f"{client}/{app}/{project}/"
     print(
-        f"📦 prefix {prefix} (CLIENT_ID={CLIENT_ID} APP_ID={APP_ID} PROJECT_ID={PROJECT_ID})"
+        f"📦 prefix {prefix} (CLIENT_ID={client_id or os.getenv('CLIENT_ID','')} APP_ID={app_id or os.getenv('APP_ID','')} PROJECT_ID={PROJECT_ID})"
     )
     return prefix
 
@@ -2494,6 +2497,12 @@ async def save_dataframes(
     files: List[UploadFile] = File(...),
     file_keys: str = Form(...),
     overwrite: bool = Form(False),
+    client_id: str = Form(""),
+    app_id: str = Form(""),
+    project_id: str = Form(""),
+    client_name: str = Form(""),
+    app_name: str = Form(""),
+    project_name: str = Form(""),
 ):
     """Save validated dataframes as Arrow tables and upload via Flight."""
     try:
@@ -2505,7 +2514,20 @@ async def save_dataframes(
 
     uploads = []
     flights = []
+    if client_id:
+        os.environ["CLIENT_ID"] = client_id
+    if app_id:
+        os.environ["APP_ID"] = app_id
+    if project_id:
+        os.environ["PROJECT_ID"] = project_id
+    if client_name:
+        os.environ["CLIENT_NAME"] = client_name
+    if app_name:
+        os.environ["APP_NAME"] = app_name
+    if project_name:
+        os.environ["PROJECT_NAME"] = project_name
     prefix = await get_object_prefix()
+    numeric_pid = int(project_id or os.getenv("PROJECT_ID", "0"))
     print(f"📤 saving to prefix {prefix}")
     for file, key in zip(files, keys):
         content = await file.read()
@@ -2520,7 +2542,7 @@ async def save_dataframes(
 
 
         arrow_name = Path(file.filename).stem + ".arrow"
-        exists = await arrow_dataset_exists(PROJECT_ID, validator_atom_id, key)
+        exists = await arrow_dataset_exists(numeric_pid, validator_atom_id, key)
         if exists and not overwrite:
             uploads.append({"file_key": key, "already_saved": True})
             flights.append({"file_key": key})
@@ -2545,7 +2567,7 @@ async def save_dataframes(
         redis_client.set(f"flight:{flight_path}", result.get("object_name", ""))
 
         await record_arrow_dataset(
-            PROJECT_ID,
+            numeric_pid,
             validator_atom_id,
             key,
             result.get("object_name", ""),

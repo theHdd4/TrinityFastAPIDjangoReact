@@ -268,6 +268,20 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
     console.log('🔧 Running save dataframes util');
     const form = new FormData();
     form.append('validator_atom_id', settings.validatorId);
+    const envStr = localStorage.getItem('env');
+    if (envStr) {
+      try {
+        const env = JSON.parse(envStr);
+        form.append('client_id', env.CLIENT_ID || '');
+        form.append('app_id', env.APP_ID || '');
+        form.append('project_id', env.PROJECT_ID || '');
+        form.append('client_name', env.CLIENT_NAME || '');
+        form.append('app_name', env.APP_NAME || '');
+        form.append('project_name', env.PROJECT_NAME || '');
+      } catch {
+        /* ignore */
+      }
+    }
     uploadedFiles.forEach(f => form.append('files', f));
     const keys = uploadedFiles.map(f => {
       const assigned = fileAssignments[f.name] || '';
@@ -275,7 +289,11 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
     });
     form.append('file_keys', JSON.stringify(keys));
     form.append('overwrite', 'true');
-    const res = await fetch(`${VALIDATE_API}/save_dataframes`, { method: 'POST', body: form });
+    const res = await fetch(`${VALIDATE_API}/save_dataframes`, {
+      method: 'POST',
+      body: form,
+      credentials: 'include'
+    });
     if (res.ok) {
       const data = await res.json();
       if (data.environment) {
