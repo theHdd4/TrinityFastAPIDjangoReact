@@ -195,18 +195,21 @@ const ChartMakerProperties: React.FC<Props> = ({ atomId }) => {
         title: 'Processing file...',
         description: 'Your data is being processed.',
         variant: 'default',
+        duration: 2000,
       });
     } else if (!isProcessing && settings.uploadedData && !settings.error) {
       toast({
         title: 'File processed',
         description: 'Data is ready for charting.',
         variant: 'default',
+        duration: 2000,
       });
     } else if (settings.error) {
       toast({
         title: 'Processing failed',
         description: settings.error,
         variant: 'destructive',
+        duration: 2000,
       });
     }
   }, [settings.loading.uploading, settings.loading.fetchingColumns, settings.loading.fetchingUniqueValues, settings.uploadedData, settings.error, toast]);
@@ -218,18 +221,21 @@ const ChartMakerProperties: React.FC<Props> = ({ atomId }) => {
         title: 'Rendering chart...',
         description: 'Applying settings and generating chart.',
         variant: 'default',
+        duration: 2000,
       });
     } else if (!settings.loading.filtering && !settings.error) {
       toast({
         title: 'Chart rendered',
         description: 'Your chart is ready.',
         variant: 'default',
+        duration: 2000,
       });
     } else if (settings.error) {
       toast({
         title: 'Rendering failed',
         description: settings.error,
         variant: 'destructive',
+        duration: 2000,
       });
     }
   }, [settings.loading.filtering, settings.error, toast]);

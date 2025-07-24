@@ -1,4 +1,4 @@
-import React, { useRef } from 'react';
+import React, { useRef, useEffect } from 'react';
 import ChartMakerCanvas from './components/ChartMakerCanvas';
 import { useLaboratoryStore, DEFAULT_CHART_MAKER_SETTINGS, ChartMakerSettings as SettingsType, ChartMakerConfig } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { chartMakerApi } from '@/services/chartMakerApi';
@@ -175,21 +175,92 @@ const ChartMakerAtom: React.FC<Props> = ({ atomId }) => {
         title: 'Rendering chart...',
         description: 'Applying settings and generating chart.',
         variant: 'default',
+        duration: 2000,
       });
     } else if (!anyChartLoading && settings.charts.length > 0 && settings.charts.every(chart => chart.chartRendered) && !settings.error) {
       toast({
         title: 'Chart rendered',
         description: 'Your chart is ready.',
         variant: 'default',
+        duration: 2000,
       });
     } else if (settings.error) {
       toast({
         title: 'Rendering failed',
         description: settings.error,
         variant: 'destructive',
+        duration: 2000,
       });
     }
   }, [settings.charts, settings.error, toast]);
+
+  // Auto-render charts when all filter columns have values selected and chartRendered is false
+  useEffect(() => {
+    if (!settings.fileId) return;
+    settings.charts.forEach(async (chart) => {
+      // Only consider charts that are not rendered yet
+      if (!chart.chartRendered && chart.xAxis && chart.yAxis) {
+        const filterColumns = Object.keys(chart.filters || {});
+        // If there are filters, all must have at least one value selected
+        const allFiltersSelected = filterColumns.length === 0 || filterColumns.every(
+          (col) => Array.isArray(chart.filters[col]) && chart.filters[col].length > 0
+        );
+        if (allFiltersSelected) {
+          // Trigger chart rendering for this chart
+          // Use the same logic as handleChartTypeChange, but for current type
+          // Prevent duplicate renders by setting chartLoading
+          if (!chart.chartLoading) {
+            // Set chartLoading to true for this chart
+            updateSettings(atomId, {
+              charts: settings.charts.map(c =>
+                c.id === chart.id ? { ...c, chartLoading: true } : c
+              ),
+            });
+            try {
+              const chartRequest = {
+                file_id: settings.fileId,
+                chart_type: chart.type,
+                traces: [{
+                  x_column: chart.xAxis,
+                  y_column: chart.yAxis,
+                  name: chart.title,
+                  chart_type: chart.type,
+                  aggregation: 'sum' as const,
+                }],
+                title: chart.title,
+                filters: filterColumns.length > 0 ? chart.filters : undefined,
+                filtered_data: chart.filteredData,
+              };
+              const chartResponse = await chartMakerApi.generateChart(chartRequest);
+              updateSettings(atomId, {
+                charts: settings.charts.map(c =>
+                  c.id === chart.id
+                    ? {
+                        ...c,
+                        chartConfig: chartResponse.chart_config,
+                        filteredData: chartResponse.chart_config.data,
+                        lastUpdateTime: Date.now(),
+                        chartRendered: true,
+                        chartLoading: false,
+                      }
+                    : c
+                ),
+              });
+            } catch (error) {
+              updateSettings(atomId, {
+                charts: settings.charts.map(c =>
+                  c.id === chart.id
+                    ? { ...c, chartRendered: false, chartLoading: false }
+                    : c
+                ),
+              });
+            }
+          }
+        }
+      }
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settings.charts, settings.fileId, atomId, updateSettings]);
 
   // Only show rendered charts if they've been marked as rendered
   const chartsToShow = settings.uploadedData ? settings.charts : [];
