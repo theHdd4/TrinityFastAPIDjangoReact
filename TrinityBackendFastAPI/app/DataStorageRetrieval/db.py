@@ -10,7 +10,7 @@ POSTGRES_DB = os.getenv("POSTGRES_DB", "trinity_db")
 POSTGRES_USER = os.getenv("POSTGRES_USER", "trinity_user")
 POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD", "trinity_pass")
 
-async def fetch_client_app_project(user_id: int, project_id: int):
+async def fetch_client_app_project(user_id: int | None, project_id: int):
     """Fetch client, app and project names from Postgres.
 
     The function looks up values stored in ``user_environment_variables`` if
@@ -31,42 +31,70 @@ async def fetch_client_app_project(user_id: int, project_id: int):
         database=POSTGRES_DB,
     )
     try:
-        row = await conn.fetchrow(
-            """
-            SELECT client_name, app_name, project_name
-            FROM accounts_userenvironmentvariable
-            WHERE user_id = $1 AND key = 'PROJECT_NAME'
-              AND project_id LIKE '%' || $2
-            ORDER BY updated_at DESC
-            LIMIT 1
-            """,
-            user_id,
-            str(project_id),
-        )
+        if user_id:
+            row = await conn.fetchrow(
+                """
+                SELECT client_name, app_name, project_name
+                FROM accounts_userenvironmentvariable
+                WHERE user_id = $1 AND key = 'PROJECT_NAME'
+                  AND project_id LIKE '%' || $2
+                ORDER BY updated_at DESC
+                LIMIT 1
+                """,
+                user_id,
+                str(project_id),
+            )
+        else:
+            row = await conn.fetchrow(
+                """
+                SELECT client_name, app_name, project_name
+                FROM accounts_userenvironmentvariable
+                WHERE key = 'PROJECT_NAME' AND project_id LIKE '%' || $1
+                ORDER BY updated_at DESC
+                LIMIT 1
+                """,
+                str(project_id),
+            )
         if row:
             return row["client_name"], row["app_name"], row["project_name"]
 
-        client_name = await conn.fetchval(
+        row = await conn.fetchrow(
             """
-            SELECT t.name
-            FROM tenants_tenant t
-            JOIN subscriptions_company c ON c.tenant_id = t.id
-            JOIN accounts_user u ON u.id = $1
+            SELECT client_name, app_name
+            FROM accounts_userenvironmentvariable
+            WHERE project_id LIKE '%' || $1
+            ORDER BY updated_at DESC
             LIMIT 1
             """,
-            user_id,
-        ) or "default_client"
-
-        app_name = await conn.fetchval(
-            """
-            SELECT a.name
-            FROM registry_app a
-            JOIN registry_project p ON p.app_id = a.id
-            WHERE p.id = $1
-            LIMIT 1
-            """,
-            project_id,
+            str(project_id),
         )
+        if row:
+            client_name = row["client_name"]
+            app_name = row["app_name"]
+        else:
+            if user_id:
+                client_name = await conn.fetchval(
+                    """
+                    SELECT t.name
+                    FROM tenants_tenant t
+                    JOIN subscriptions_company c ON c.tenant_id = t.id
+                    JOIN accounts_user u ON u.id = $1
+                    LIMIT 1
+                    """,
+                    user_id,
+                ) or "default_client"
+            else:
+                client_name = "default_client"
+            app_name = await conn.fetchval(
+                """
+                SELECT a.name
+                FROM registry_app a
+                JOIN registry_project p ON p.app_id = a.id
+                WHERE p.id = $1
+                LIMIT 1
+                """,
+                project_id,
+            )
 
         project_name = await conn.fetchval(
             "SELECT name FROM registry_project WHERE id = $1",

@@ -53,7 +53,7 @@ async def _query_env_vars(client_id: str, app_id: str, project_id: str) -> Dict[
         await conn.close()
 
 
-async def _query_env_vars_by_names(client_name: str, project_name: str) -> Dict[str, str] | None:
+async def _query_env_vars_by_names(client_name: str, app_name: str, project_name: str) -> Dict[str, str] | None:
     if asyncpg is None:
         return None
     try:
@@ -69,9 +69,11 @@ async def _query_env_vars_by_names(client_name: str, project_name: str) -> Dict[
         rows = await conn.fetch(
             """
             SELECT key, value FROM accounts_userenvironmentvariable
-            WHERE client_name = $1 AND project_name = $2
+            WHERE client_name = $1 AND project_name = $3
+              AND ($2 = '' OR app_name = $2)
             """,
             client_name,
+            app_name,
             project_name,
         )
         return {r["key"]: r["value"] for r in rows}
@@ -85,6 +87,7 @@ async def get_env_vars(
     project_id: str = "",
     *,
     client_name: str = "",
+    app_name: str = "",
     project_name: str = "",
     use_cache: bool = True,
 ) -> Dict[str, str]:
@@ -96,17 +99,18 @@ async def get_env_vars(
                 app_id,
                 project_id,
                 client_name=client_name,
+                app_name=app_name,
                 project_name=project_name,
                 use_cache=use_cache,
             )
             print(
-                f"🔧 django_get_env_vars({client_id},{app_id},{project_id},{client_name},{project_name}) -> {env}"
+                f"🔧 django_get_env_vars({client_id},{app_id},{project_id},{client_name},{app_name},{project_name}) -> {env}"
             )
             return env
         except Exception:  # pragma: no cover - Django misconfigured
             pass
 
-    key = (client_id, app_id, project_id, client_name, project_name)
+    key = (client_id, app_id, project_id, client_name, app_name, project_name)
     if use_cache and key in _ENV_CACHE:
         env = _ENV_CACHE[key]
         print(f"🔧 cached_env_vars{key} -> {env}")
@@ -116,7 +120,7 @@ async def get_env_vars(
     if client_id or app_id or project_id:
         env = await _query_env_vars(client_id, app_id, project_id)
     if not env and client_name and project_name:
-        env = await _query_env_vars_by_names(client_name, project_name)
+        env = await _query_env_vars_by_names(client_name, app_name, project_name)
     if not env:
         env = {
             "CLIENT_NAME": os.getenv("CLIENT_NAME", "default_client"),

@@ -158,6 +158,7 @@ async def get_object_prefix(
         app_id or os.getenv("APP_ID", ""),
         project_id or os.getenv("PROJECT_ID", ""),
         client_name=client_name or os.getenv("CLIENT_NAME", ""),
+        app_name=app_name or os.getenv("APP_NAME", ""),
         project_name=project_name or os.getenv("PROJECT_NAME", ""),
     )
     print("🔧 fetched env", env)
@@ -165,10 +166,10 @@ async def get_object_prefix(
     app = env.get("APP_NAME", os.getenv("APP_NAME", "default_app"))
     project = env.get("PROJECT_NAME", os.getenv("PROJECT_NAME", "default_project"))
 
-    if USER_ID and PROJECT_ID and (client == "default_client" or app == "default_app" or project == "default_project"):
+    if PROJECT_ID and (client == "default_client" or app == "default_app" or project == "default_project"):
         try:
             client_db, app_db, project_db = await fetch_client_app_project(
-                USER_ID, PROJECT_ID
+                USER_ID if USER_ID else None, PROJECT_ID
             )
             client = client_db or client
             app = app_db or app
