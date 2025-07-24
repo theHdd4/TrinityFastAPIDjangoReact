@@ -162,7 +162,8 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
     const key = chart.lastUpdateTime || chart.id;
 
     // Dynamic height based on layout
-    const chartHeight = isCompact ? 'h-40' : layoutConfig.layout === 'vertical' ? 'h-48' : 'h-56';
+    // Increase panel height for larger charts
+    const chartHeight = isCompact ? 'h-40' : layoutConfig.layout === 'vertical' ? 'h-72' : 'h-96';
 
     if (!chartData.length || !xAxisConfig.dataKey || !yAxisConfig.dataKey) {
       return (
@@ -308,8 +309,8 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
   }
 
   return (
-    <div ref={containerRef} className="w-full h-full p-6 bg-gradient-to-br from-slate-50 to-blue-50 overflow-hidden">
-      <div className="mb-6">
+    <div ref={containerRef} className="w-full h-full flex flex-col bg-gradient-to-br from-slate-50 to-blue-50">
+      <div className="flex-shrink-0 p-6 pb-0">
         <div className="flex items-center mb-4">
           <div className="w-1 h-8 bg-gradient-to-b from-blue-500 to-blue-600 rounded-full mr-4"></div>
           <h2 className="text-2xl font-bold text-gray-900">Chart Maker</h2>
@@ -317,26 +318,21 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
         <p className="text-gray-600">Interactive data visualization dashboard</p>
       </div>
       
-      <div className="flex-1 overflow-auto">
+      <div className="flex-1 p-6 pt-4 overflow-hidden">
         <div 
-          className={`grid gap-6 ${layoutConfig.containerClass} transition-all duration-300 ease-in-out`}
+          className={`grid gap-6 ${layoutConfig.containerClass} transition-all duration-300 ease-in-out h-full`}
           style={{
-            gridTemplateRows: layoutConfig.rows > 1 ? `repeat(${layoutConfig.rows}, ${layoutConfig.cardHeight})` : layoutConfig.cardHeight,
-            minHeight: 'fit-content'
+            gridTemplateRows: layoutConfig.rows > 1 ? `repeat(${layoutConfig.rows}, 1fr)` : '1fr'
           }}
         >
           {charts.map((chart, index) => {
             const colors = getChartColors(index);
             
-            // For mixed layout (3 charts on medium screens), handle special positioning
-            const gridColumnSpan = layoutConfig.layout === 'mixed' && charts.length === 3 ? 
-              (index === 2 ? 'col-span-2' : 'col-span-1') : '';
-            
             return (
               <ContextMenu key={chart.id}>
                  <ContextMenuTrigger>
-                   <Card className={`border-0 shadow-xl bg-white/90 backdrop-blur-sm overflow-hidden transform hover:scale-105 transition-all duration-300 relative ${gridColumnSpan}`}>
-                     <div className={`bg-gradient-to-r ${colors.gradient} p-4 relative`}>
+                   <Card className="border-0 shadow-xl bg-white/90 backdrop-blur-sm overflow-hidden transform hover:scale-105 transition-all duration-300 relative flex flex-col h-full">
+                     <div className={`bg-gradient-to-r ${colors.gradient} p-4 relative flex-shrink-0`}>
                        <CardTitle className={`font-bold text-white flex items-center ${isCompact ? 'text-base' : 'text-lg'}`}>
                          <BarChart3 className={`mr-2 ${isCompact ? 'w-4 h-4' : 'w-5 h-5'}`} />
                          {chart.title}
@@ -491,8 +487,8 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
                         </div>
                       )}
                      
-                     <CardContent className={`overflow-hidden ${isCompact ? 'p-2' : 'p-4'}`}>
-                       <div className="overflow-hidden h-full">
+                     <CardContent className={`flex-1 overflow-hidden ${isCompact ? 'p-2' : 'p-4'} flex flex-col`}>
+                       <div className="flex-1 overflow-hidden min-h-0">
                          {renderChart(chart, index)}
                        </div>
                      </CardContent>

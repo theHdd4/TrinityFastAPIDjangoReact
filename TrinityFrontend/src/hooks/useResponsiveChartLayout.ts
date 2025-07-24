@@ -41,11 +41,11 @@ export const useResponsiveChartLayout = (
   const calculateLayout = useCallback((width: number, height: number, chartCount: number): LayoutConfig => {
     const aspectRatio = width / height;
     const availableWidth = width - 48; // Account for padding (24px each side)
-    const availableHeight = height - 120; // Account for header and padding
+    const availableHeight = height - 160; // Account for header (120px) + margins (40px)
     
     // Minimum card dimensions for readability
     const minCardWidth = 300;
-    const minCardHeight = 250;
+    const minCardHeight = 200;
     
     if (chartCount === 1) {
       return {
@@ -53,74 +53,44 @@ export const useResponsiveChartLayout = (
         rows: 1,
         layout: 'horizontal',
         cardWidth: '1fr',
-        cardHeight: `${Math.min(availableHeight, 500)}px`,
+        cardHeight: `${Math.max(availableHeight, minCardHeight)}px`,
         containerClass: 'grid-cols-1'
       };
     }
     
     if (chartCount === 2) {
-      // For 2 charts, prefer side-by-side if width allows
+      // For 2 charts, prefer side-by-side and use full available height
       if (availableWidth >= minCardWidth * 2 + 24) { // 24px gap
         return {
           columns: 2,
           rows: 1,
           layout: 'horizontal',
           cardWidth: '1fr',
-          cardHeight: `${Math.min(availableHeight, 400)}px`,
+          cardHeight: `${Math.max(availableHeight, minCardHeight)}px`, // Use full height, no cap
           containerClass: 'grid-cols-2'
         };
       } else {
+        // Stack vertically but give generous height to each
+        const cardHeight = Math.max((availableHeight - 24) / 2, minCardHeight);
         return {
           columns: 1,
           rows: 2,
           layout: 'vertical',
           cardWidth: '1fr',
-          cardHeight: `${Math.min((availableHeight - 24) / 2, 350)}px`,
+          cardHeight: `${cardHeight}px`,
           containerClass: 'grid-cols-1'
         };
       }
     }
     
-    if (chartCount === 3) {
-      // For 3 charts, multiple layout options based on screen size
-      if (availableWidth >= minCardWidth * 3 + 48) { // Wide screen: 3x1
-        return {
-          columns: 3,
-          rows: 1,
-          layout: 'horizontal',
-          cardWidth: '1fr',
-          cardHeight: `${Math.min(availableHeight, 350)}px`,
-          containerClass: 'grid-cols-3'
-        };
-      } else if (availableWidth >= minCardWidth * 2 + 24) { // Medium screen: 2x1 + 1x1
-        return {
-          columns: 2,
-          rows: 2,
-          layout: 'mixed',
-          cardWidth: '1fr',
-          cardHeight: `${Math.min((availableHeight - 24) / 2, 300)}px`,
-          containerClass: 'grid-cols-2'
-        };
-      } else { // Narrow screen: 1x3
-        return {
-          columns: 1,
-          rows: 3,
-          layout: 'vertical',
-          cardWidth: '1fr',
-          cardHeight: `${Math.min((availableHeight - 48) / 3, 280)}px`,
-          containerClass: 'grid-cols-1'
-        };
-      }
-    }
-    
-    // Fallback
+    // Fallback for any other case (shouldn't happen with max 2 charts)
     return {
-      columns: Math.min(chartCount, 3),
-      rows: Math.ceil(chartCount / 3),
+      columns: Math.min(chartCount, 2),
+      rows: Math.ceil(chartCount / 2),
       layout: 'horizontal',
       cardWidth: '1fr',
-      cardHeight: '300px',
-      containerClass: `grid-cols-${Math.min(chartCount, 3)}`
+      cardHeight: `${Math.max(availableHeight / Math.ceil(chartCount / 2), minCardHeight)}px`,
+      containerClass: `grid-cols-${Math.min(chartCount, 2)}`
     };
   }, []);
 
