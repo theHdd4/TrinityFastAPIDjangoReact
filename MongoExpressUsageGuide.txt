@@ -1,0 +1,50 @@
+Mongo Express Usage Guide
+=========================
+
+This project now includes a `mongo-express` container for both the development
+and production stacks. Mongo Express provides a simple web UI for inspecting the
+MongoDB databases used by the Django and FastAPI services.
+
+## Accessing Mongo Express
+
+* **Development**: http://localhost:8082
+* **Production**: http://localhost:8083
+
+When prompted for credentials use:
+
+```
+username: admin
+password: admin
+```
+
+These credentials protect the web interface only. The underlying MongoDB
+instances currently run without authentication so Mongo Express connects
+straight to the `mongo` service defined in `docker-compose`.
+
+## Browsing databases and collections
+
+1. After logging in you will see a list of available databases. The main
+   application databases are `trinity_dev` for the development stack and
+   `trinity_prod` in production.
+2. Click the desired database name to view its collections. Collections are
+   equivalent to tables in relational databases.
+3. Selecting a collection shows its documents. Use the **Filter** box at the top
+   to run ad-hoc queries by entering a JSON filter object. For example:
+
+   ```json
+   {"status": "active"}
+   ```
+
+   filters documents where the `status` field equals `active`.
+4. Click **New Document** to insert records or **Delete** to remove them.
+   Mongo Express also allows editing individual fields by clicking the **Edit**
+   button next to a document.
+
+## Exporting collections
+
+Each collection page includes options to export all documents as JSON. This can
+be useful for backups or migrating data between environments.
+
+Refer to the official Mongo Express documentation for additional features such
+as indexing and gridFS support. The interface is quite intuitive and mirrors the
+structure of the underlying MongoDB instance.

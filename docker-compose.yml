@@ -54,6 +54,20 @@ services:
     networks:
       - trinity-net
 
+  mongo-express:
+    image: mongo-express
+    environment:
+      ME_CONFIG_MONGODB_SERVER: mongo
+      ME_CONFIG_MONGODB_ENABLE_ADMIN: 'true'
+      ME_CONFIG_BASICAUTH_USERNAME: admin
+      ME_CONFIG_BASICAUTH_PASSWORD: admin
+    ports:
+      - "8083:8081"
+    depends_on:
+      - mongo
+    networks:
+      - trinity-net
+
   web:
     build: ./TrinityBackendDjango
     command: gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 3
