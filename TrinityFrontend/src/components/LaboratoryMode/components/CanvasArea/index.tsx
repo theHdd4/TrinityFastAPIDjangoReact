@@ -29,6 +29,7 @@ import {
   useLaboratoryStore,
   LayoutCard,
   DroppedAtom,
+import { deriveWorkflowMolecules, WorkflowMolecule } from "./helpers";
   DEFAULT_TEXTBOX_SETTINGS,
   DEFAULT_DATAUPLOAD_SETTINGS,
   DEFAULT_FEATURE_OVERVIEW_SETTINGS,
@@ -37,15 +38,6 @@ import {
 } from '../store/laboratoryStore';
 
 
-interface WorkflowMolecule {
-  moleculeId: string;
-  moleculeTitle: string;
-  atoms: Array<{
-    atomName: string;
-    order: number;
-  }>;
-}
-
 interface CanvasAreaProps {
   onAtomSelect?: (atomId: string) => void;
   onCardSelect?: (cardId: string, exhibited: boolean) => void;
@@ -53,22 +45,6 @@ interface CanvasAreaProps {
   onToggleSettingsPanel?: () => void;
 }
 
-const deriveWorkflowMolecules = (cards: LayoutCard[]): WorkflowMolecule[] => {
-  const map = new Map<string, WorkflowMolecule>();
-  cards.forEach(card => {
-    if (card.moleculeId) {
-      const info = molecules.find(m => m.id === card.moleculeId);
-      if (!map.has(card.moleculeId)) {
-        map.set(card.moleculeId, {
-          moleculeId: card.moleculeId,
-          moleculeTitle: card.moleculeTitle || (info ? info.title : card.moleculeId),
-          atoms: []
-        });
-      }
-    }
-  });
-  return Array.from(map.values());
-};
 
 const STORAGE_KEY = 'laboratory-layout-cards';
 

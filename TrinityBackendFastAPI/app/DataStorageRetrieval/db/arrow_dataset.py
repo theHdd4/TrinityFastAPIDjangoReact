@@ -1,110 +1,5 @@
 import os
-import json
-
-try:
-    import asyncpg  # type: ignore
-except ModuleNotFoundError:  # pragma: no cover - optional dependency
-    asyncpg = None
-
-POSTGRES_HOST = os.getenv("POSTGRES_HOST", "postgres")
-POSTGRES_DB = os.getenv("POSTGRES_DB", "trinity_db")
-POSTGRES_USER = os.getenv("POSTGRES_USER", "trinity_user")
-POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD", "trinity_pass")
-
-async def fetch_client_app_project(user_id: int | None, project_id: int):
-    """Fetch client, app and project names from Postgres.
-
-    The function looks up values stored in ``user_environment_variables`` if
-    available. If ``asyncpg`` is not installed it falls back to environment
-    variables.
-    """
-    if asyncpg is None:
-        return (
-            os.getenv("CLIENT_NAME", "default_client"),
-            os.getenv("APP_NAME", "default_app"),
-            os.getenv("PROJECT_NAME", "default_project"),
-        )
-
-    conn = await asyncpg.connect(
-        host=POSTGRES_HOST,
-        user=POSTGRES_USER,
-        password=POSTGRES_PASSWORD,
-        database=POSTGRES_DB,
-    )
-    try:
-        if user_id:
-            row = await conn.fetchrow(
-                """
-                SELECT client_name, app_name, project_name
-                FROM accounts_userenvironmentvariable
-                WHERE user_id = $1 AND key = 'PROJECT_NAME'
-                  AND project_id LIKE '%' || $2
-                ORDER BY updated_at DESC
-                LIMIT 1
-                """,
-                user_id,
-                str(project_id),
-            )
-        else:
-            row = await conn.fetchrow(
-                """
-                SELECT client_name, app_name, project_name
-                FROM accounts_userenvironmentvariable
-                WHERE key = 'PROJECT_NAME' AND project_id LIKE '%' || $1
-                ORDER BY updated_at DESC
-                LIMIT 1
-                """,
-                str(project_id),
-            )
-        if row:
-            return row["client_name"], row["app_name"], row["project_name"]
-
-        row = await conn.fetchrow(
-            """
-            SELECT client_name, app_name
-            FROM accounts_userenvironmentvariable
-            WHERE project_id LIKE '%' || $1
-            ORDER BY updated_at DESC
-            LIMIT 1
-            """,
-            str(project_id),
-        )
-        if row:
-            client_name = row["client_name"]
-            app_name = row["app_name"]
-        else:
-            if user_id:
-                client_name = await conn.fetchval(
-                    """
-                    SELECT t.name
-                    FROM tenants_tenant t
-                    JOIN subscriptions_company c ON c.tenant_id = t.id
-                    JOIN accounts_user u ON u.id = $1
-                    LIMIT 1
-                    """,
-                    user_id,
-                ) or "default_client"
-            else:
-                client_name = "default_client"
-            app_name = await conn.fetchval(
-                """
-                SELECT a.name
-                FROM registry_app a
-                JOIN registry_project p ON p.app_id = a.id
-                WHERE p.id = $1
-                LIMIT 1
-                """,
-                project_id,
-            )
-
-        project_name = await conn.fetchval(
-            "SELECT name FROM registry_project WHERE id = $1",
-            project_id,
-        )
-
-        return client_name, app_name or "default_app", project_name or "default_project"
-    finally:
-        await conn.close()
+from .connection import POSTGRES_HOST, POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB
 
 async def record_arrow_dataset(
     project_id: int,
@@ -116,10 +11,10 @@ async def record_arrow_dataset(
     descriptor: str | None = None,
 ) -> None:
     """Insert a saved dataset entry into Postgres if asyncpg is available."""
-    if asyncpg is None:
+    if __import__("DataStorageRetrieval.db", fromlist=["db"]).asyncpg is None:
         return
     try:
-        conn = await asyncpg.connect(
+        conn = await (__import__("DataStorageRetrieval.db", fromlist=["db"]).asyncpg).connect(
             host=POSTGRES_HOST,
             user=POSTGRES_USER,
             password=POSTGRES_PASSWORD,
@@ -154,10 +49,10 @@ async def rename_arrow_dataset(old_object: str, new_object: str) -> None:
     """Update arrow_object for saved datasets when a file is renamed."""
     if old_object == new_object:
         return
-    if asyncpg is None:
+    if __import__("DataStorageRetrieval.db", fromlist=["db"]).asyncpg is None:
         return
     try:
-        conn = await asyncpg.connect(
+        conn = await (__import__("DataStorageRetrieval.db", fromlist=["db"]).asyncpg).connect(
             host=POSTGRES_HOST,
             user=POSTGRES_USER,
             password=POSTGRES_PASSWORD,
@@ -177,10 +72,10 @@ async def rename_arrow_dataset(old_object: str, new_object: str) -> None:
 
 async def delete_arrow_dataset(arrow_object: str) -> None:
     """Remove a dataset entry when a file is deleted."""
-    if asyncpg is None:
+    if __import__("DataStorageRetrieval.db", fromlist=["db"]).asyncpg is None:
         return
     try:
-        conn = await asyncpg.connect(
+        conn = await (__import__("DataStorageRetrieval.db", fromlist=["db"]).asyncpg).connect(
             host=POSTGRES_HOST,
             user=POSTGRES_USER,
             password=POSTGRES_PASSWORD,
@@ -203,9 +98,9 @@ async def arrow_dataset_exists(project_id: int, atom_id: str, file_key: str) -> 
     arrow_object: str | None = None
     flight_path: str | None = None
 
-    if asyncpg is not None:
+    if __import__("DataStorageRetrieval.db", fromlist=["db"]).asyncpg is not None:
         try:
-            conn = await asyncpg.connect(
+            conn = await (__import__("DataStorageRetrieval.db", fromlist=["db"]).asyncpg).connect(
                 host=POSTGRES_HOST,
                 user=POSTGRES_USER,
                 password=POSTGRES_PASSWORD,
@@ -261,7 +156,7 @@ async def arrow_dataset_exists(project_id: int, atom_id: str, file_key: str) -> 
             if getattr(exc, "code", "") in {"NoSuchKey", "NoSuchBucket"}:
                 exists = False
                 try:
-                    await delete_arrow_dataset(arrow_object)
+                    await __import__("DataStorageRetrieval.db", fromlist=["db"]).delete_arrow_dataset(arrow_object)
                 finally:
                     try:
                         from DataStorageRetrieval.flight_registry import remove_arrow_object
@@ -282,7 +177,7 @@ async def arrow_dataset_exists(project_id: int, atom_id: str, file_key: str) -> 
                 exists = False
                 if arrow_object:
                     try:
-                        await delete_arrow_dataset(arrow_object)
+                        await __import__("DataStorageRetrieval.db", fromlist=["db"]).delete_arrow_dataset(arrow_object)
                     finally:
                         try:
                             from DataStorageRetrieval.flight_registry import remove_arrow_object
@@ -298,10 +193,10 @@ async def arrow_dataset_exists(project_id: int, atom_id: str, file_key: str) -> 
 
 async def get_dataset_info(arrow_object: str):
     """Return dataset info for a stored Arrow object if available."""
-    if asyncpg is None:
+    if __import__("DataStorageRetrieval.db", fromlist=["db"]).asyncpg is None:
         return None
     try:
-        conn = await asyncpg.connect(
+        conn = await (__import__("DataStorageRetrieval.db", fromlist=["db"]).asyncpg).connect(
             host=POSTGRES_HOST,
             user=POSTGRES_USER,
             password=POSTGRES_PASSWORD,
@@ -320,83 +215,4 @@ async def get_dataset_info(arrow_object: str):
         await conn.close()
     return None
 
-
-# ---------------------- Project State Persistence ----------------------
-
-async def upsert_project_state(
-    client_id: str, app_id: str, project_id: str, state: dict
-) -> None:
-    """Persist project state JSON in Postgres."""
-    if asyncpg is None:
-        return
-    try:
-        conn = await asyncpg.connect(
-            host=POSTGRES_HOST,
-            user=POSTGRES_USER,
-            password=POSTGRES_PASSWORD,
-            database=POSTGRES_DB,
-        )
-    except Exception:
-        return
-    try:
-        await conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS registry_projectstate (
-                project_id TEXT PRIMARY KEY,
-                client_id TEXT,
-                app_id TEXT,
-                state JSONB,
-                updated_at TIMESTAMP
-            )
-            """,
-        )
-        await conn.execute(
-            """
-            INSERT INTO registry_projectstate
-                (project_id, client_id, app_id, state, updated_at)
-            VALUES ($1,$2,$3,$4,NOW())
-            ON CONFLICT (project_id) DO UPDATE
-              SET client_id=EXCLUDED.client_id,
-                  app_id=EXCLUDED.app_id,
-                  state=EXCLUDED.state,
-                  updated_at=EXCLUDED.updated_at
-            """,
-            project_id,
-            client_id,
-            app_id,
-            asyncpg.Json(state),
-        )
-    finally:
-        await conn.close()
-
-
-async def fetch_project_state(project_id: str) -> dict | None:
-    """Load stored project state JSON from Postgres if available."""
-    if asyncpg is None:
-        return None
-    try:
-        conn = await asyncpg.connect(
-            host=POSTGRES_HOST,
-            user=POSTGRES_USER,
-            password=POSTGRES_PASSWORD,
-            database=POSTGRES_DB,
-        )
-    except Exception:
-        return None
-    try:
-        row = await conn.fetchrow(
-            "SELECT state FROM registry_projectstate WHERE project_id=$1",
-            project_id,
-        )
-        if row:
-            state = row["state"]
-            if isinstance(state, str):
-                try:
-                    return json.loads(state)
-                except Exception:
-                    return None
-            return state
-    finally:
-        await conn.close()
-    return None
 
