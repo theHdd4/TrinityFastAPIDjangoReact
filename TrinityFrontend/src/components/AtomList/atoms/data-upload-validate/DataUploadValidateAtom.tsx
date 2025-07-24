@@ -266,6 +266,29 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
   const handleSaveDataFrames = async () => {
     if (!settings.validatorId) return;
     console.log('🔧 Running save dataframes util');
+    try {
+      const check = await fetch(`${VALIDATE_API}/list_saved_dataframes`);
+      if (check.ok) {
+        const data = await check.json();
+        const existing = new Set(
+          Array.isArray(data.files)
+            ? data.files.map((f: any) => (f.csv_name || '').toLowerCase())
+            : []
+        );
+        const duplicates = uploadedFiles.filter(f =>
+          existing.has(f.name.replace(/\.[^/.]+$/, '').toLowerCase())
+        );
+        if (duplicates.length > 0) {
+          toast({
+            title: `File with the name ${duplicates[0].name} already exists`,
+            variant: 'destructive'
+          });
+          return;
+        }
+      }
+    } catch {
+      /* ignore */
+    }
     const form = new FormData();
     form.append('validator_atom_id', settings.validatorId);
     const envStr = localStorage.getItem('env');
