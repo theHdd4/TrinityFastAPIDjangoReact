@@ -67,9 +67,12 @@ def save_classification_to_mongo(validator_atom_id: str, file_key: str, classifi
         
         # Save to column_classifications collection
         result = db[COLLECTIONS["COLUMN_CLASSIFICATIONS"]].replace_one(
-            {"_id": document_id}, 
-            document, 
+            {"_id": document_id},
+            document,
             upsert=True
+        )
+        print(
+            f"📦 Stored in {COLLECTIONS['COLUMN_CLASSIFICATIONS']}: {document}"
         )
         
         return {
@@ -111,9 +114,10 @@ def save_business_dimension_to_mongo(dimension_data: dict):
         
         # Save to business_dimensions collection
         result = db[COLLECTIONS["BUSINESS_DIMENSIONS"]].insert_one(document)
-        
+        print(f"📦 Stored in {COLLECTIONS['BUSINESS_DIMENSIONS']}: {document}")
+
         return {
-            "status": "success", 
+            "status": "success",
             "mongo_id": str(result.inserted_id),
             "collection": COLLECTIONS["BUSINESS_DIMENSIONS"]
         }
@@ -190,9 +194,12 @@ def save_business_dimensions_to_mongo(
         
         # ✅ Save to business_dimensions_with_assignments collection
         result = db["business_dimensions_with_assignments"].replace_one(
-            {"_id": document_id}, 
-            document, 
+            {"_id": document_id},
+            document,
             upsert=True
+        )
+        print(
+            f"📦 Stored in business_dimensions_with_assignments: {document}"
         )
         
         return {
@@ -259,6 +266,9 @@ def update_business_dimensions_assignments_in_mongo(
             {"_id": document_id},
             {"$set": update_data}
         )
+        print(
+            f"📦 Stored in business_dimensions_with_assignments: {update_data}"
+        )
         
         return {
             "status": "success",
@@ -287,6 +297,7 @@ def save_project_dimension_mapping(project_id: int, assignments: dict):
         result = db["project_dimension_mappings"].replace_one(
             {"_id": document_id}, document, upsert=True
         )
+        print(f"📦 Stored in project_dimension_mappings: {document}")
         return {
             "status": "success",
             "mongo_id": document_id,

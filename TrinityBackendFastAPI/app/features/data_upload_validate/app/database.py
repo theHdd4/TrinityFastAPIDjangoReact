@@ -51,10 +51,11 @@ def save_validator_atom_to_mongo(validator_atom_id: str, validator_data: dict):
         }
         
         result = db[COLLECTIONS["VALIDATOR_ATOMS"]].replace_one(
-            {"_id": validator_atom_id}, 
-            document, 
+            {"_id": validator_atom_id},
+            document,
             upsert=True
         )
+        print(f"📦 Stored in {COLLECTIONS['VALIDATOR_ATOMS']}: {document}")
         
         return {
             "status": "success", 
@@ -79,9 +80,10 @@ def save_validation_log_to_mongo(validation_data: dict):
         }
         
         result = db[COLLECTIONS["VALIDATION_LOGS"]].insert_one(document)
-        
+        print(f"📦 Stored in {COLLECTIONS['VALIDATION_LOGS']}: {document}")
+
         return {
-            "status": "success", 
+            "status": "success",
             "mongo_id": str(result.inserted_id),
             "collection": COLLECTIONS["VALIDATION_LOGS"]
         }
@@ -152,6 +154,7 @@ def update_validator_atom_in_mongo(validator_atom_id: str, update_data: dict):
                 }
             }
         )
+        print(f"📦 Stored in {COLLECTIONS['VALIDATOR_ATOMS']}: {update_data}")
         
         if result.matched_count == 0:
             return {"status": "error", "error": "Validator atom not found"}
@@ -197,10 +200,11 @@ def save_business_dimensions_to_mongo(validator_atom_id: str, file_key: str, dim
         }
         
         result = db[COLLECTIONS["BUSINESS_DIMENSIONS"]].replace_one(
-            {"_id": document_id}, 
-            document, 
+            {"_id": document_id},
+            document,
             upsert=True
         )
+        print(f"📦 Stored in {COLLECTIONS['BUSINESS_DIMENSIONS']}: {document}")
         
         return {
             "status": "success", 
@@ -259,6 +263,9 @@ def update_business_dimensions_assignments_in_mongo(validator_atom_id: str, file
                 "updated_at": datetime.utcnow()
             }
         )
+        print(
+            f"📦 Stored in {COLLECTIONS['BUSINESS_DIMENSIONS']}: {updated_dimensions}"
+        )
         
         print(f"🔍 MongoDB update result: matched={result.matched_count}, modified={result.modified_count}")
         
@@ -298,10 +305,11 @@ def save_validation_config_to_mongo(validator_atom_id: str, file_key: str, confi
         }
         
         result = db[COLLECTIONS["VALIDATION_CONFIG"]].replace_one(
-            {"_id": document_id}, 
-            document, 
+            {"_id": document_id},
+            document,
             upsert=True
         )
+        print(f"📦 Stored in {COLLECTIONS['VALIDATION_CONFIG']}: {document}")
         
         return {
             "status": "success", 
@@ -350,6 +358,7 @@ def save_validation_units_to_mongo(validator_atom_id: str, file_key: str, units:
         result = db[COLLECTIONS["VALIDATION_UNITS"]].replace_one(
             {"_id": document_id}, document, upsert=True
         )
+        print(f"📦 Stored in {COLLECTIONS['VALIDATION_UNITS']}: {document}")
 
         return {
             "status": "success",
