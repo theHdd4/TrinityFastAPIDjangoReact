@@ -78,3 +78,11 @@ def update_env_vars_on_rename(sender, instance, **kwargs):
                 app_name=entry["app_name"],
                 project_name=entry["project_name"],
             )
+        tenant = _current_tenant_name()
+        app_slug = instance.app.slug
+        old_slug = old.name.replace(" ", "_")
+        new_slug = instance.name.replace(" ", "_")
+        print(
+            f"🚚 Project renamed: renaming MinIO folder {old_slug} -> {new_slug}"
+        )
+        rename_project_folder(tenant, app_slug, old_slug, new_slug)
