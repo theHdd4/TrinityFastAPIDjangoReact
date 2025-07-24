@@ -37,7 +37,8 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # Security
 # ------------------------------------------------------------------
 HOST_IP = os.getenv("HOST_IP", "10.2.1.242")
-FRONTEND_URL = os.getenv("FRONTEND_URL", f"http://{HOST_IP}:8080")
+FRONTEND_PORT = os.getenv("FRONTEND_PORT", "8080")
+FRONTEND_URL = os.getenv("FRONTEND_URL", f"http://{HOST_IP}:{FRONTEND_PORT}")
 SECRET_KEY = os.getenv("SECRET_KEY", "change-me-in-production")
 DEBUG = os.getenv("DEBUG", "False") == "True"
 # Allow requests from the provided comma separated list of hosts. Use "*" to
@@ -47,8 +48,10 @@ ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS", "*").split(",")
 # Explicitly trust these origins for CSRF-protected requests such as the login
 # form. When deploying behind Cloudflare or another proxy, add your external
 # domain (e.g. "https://example.com") here so browser POSTs are accepted.
-_default_csrf = (
-    f"http://10.2.1.242:8080,http://10.2.1.65:8080,https://trinity.quantmatrixai.com"
+_frontend_origin = f"http://{HOST_IP}:{FRONTEND_PORT}"
+_default_csrf = os.getenv(
+    "CSRF_DEFAULT",
+    f"{_frontend_origin},https://trinity.quantmatrixai.com",
 )
 _trusted = os.getenv("CSRF_TRUSTED_ORIGINS", _default_csrf)
 CSRF_TRUSTED_ORIGINS = [o.strip() for o in _trusted.split(",") if o.strip()]
@@ -57,8 +60,9 @@ ADDITIONAL_DOMAINS = os.getenv("ADDITIONAL_DOMAINS", HOST_IP)
 # ------------------------------------------------------------------
 # CORS configuration
 # ------------------------------------------------------------------
-_default_cors = (
-    "http://10.2.1.242:8080,http://10.2.1.65:8080,https://trinity.quantmatrixai.com",
+_default_cors = os.getenv(
+    "CORS_DEFAULT",
+    f"{_frontend_origin},https://trinity.quantmatrixai.com",
 )
 CORS_ALLOWED_ORIGINS = [
     o.strip()

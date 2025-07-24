@@ -3,7 +3,7 @@ import { safeStringify } from '@/utils/safeStringify';
 import { Card, Card as AtomBox } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
-import { Plus, Grid3X3, Trash2, Eye, Settings, ChevronDown, Minus } from 'lucide-react';
+import { Plus, Grid3X3, Trash2, Eye, Settings, ChevronDown, Minus, RefreshCcw } from 'lucide-react';
 import { useExhibitionStore } from '../../ExhibitionMode/store/exhibitionStore';
 import { atoms as allAtoms } from '@/components/AtomList/data';
 import { molecules } from '@/components/MoleculeList/data';
@@ -16,7 +16,7 @@ import {
   FEATURE_OVERVIEW_API,
   CLASSIFIER_API,
 } from '@/lib/api';
-import { AIChatBot } from '@/components/TrinityAI';
+import { AIChatBot, AtomAIChatBot } from '@/components/TrinityAI';
 import TextBoxEditor from '@/components/AtomList/atoms/text-box/TextBoxEditor';
 import DataUploadValidateAtom from '@/components/AtomList/atoms/data-upload-validate/DataUploadValidateAtom';
 import FeatureOverviewAtom from '@/components/AtomList/atoms/feature-overview/FeatureOverviewAtom';
@@ -24,6 +24,7 @@ import ConcatAtom from '@/components/AtomList/atoms/concat/ConcatAtom';
 import MergeAtom from '@/components/AtomList/atoms/merge/MergeAtom';
 import ColumnClassifierAtom from '@/components/AtomList/atoms/column-classifier/ColumnClassifierAtom';
 import DataFrameOperationsAtom from '@/components/AtomList/atoms/dataframe-operations/DataFrameOperationsAtom';
+import { fetchDimensionMapping } from '@/lib/dimensions';
 
 import {
   useLaboratoryStore,
@@ -32,6 +33,7 @@ import {
   DEFAULT_TEXTBOX_SETTINGS,
   DEFAULT_DATAUPLOAD_SETTINGS,
   DEFAULT_FEATURE_OVERVIEW_SETTINGS,
+  DataUploadSettings,
   ColumnClassifierColumn,
 } from '../store/laboratoryStore';
 
@@ -71,12 +73,19 @@ const deriveWorkflowMolecules = (cards: LayoutCard[]): WorkflowMolecule[] => {
 
 const STORAGE_KEY = 'laboratory-layout-cards';
 
+const LLM_MAP: Record<string, string> = {
+  concat: 'Agent Concat',
+  'chart-maker': 'Agent Chart Maker',
+  merge: 'Agent Merge',
+};
+
 const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, selectedCardId, onToggleSettingsPanel }) => {
   const { cards: layoutCards, setCards: setLayoutCards, updateAtomSettings } = useLaboratoryStore();
   const [workflowMolecules, setWorkflowMolecules] = useState<WorkflowMolecule[]>([]);
   const [activeTab, setActiveTab] = useState<string>('');
   const [dragOver, setDragOver] = useState<string | null>(null);
   const [collapsedCards, setCollapsedCards] = useState<Record<string, boolean>>({});
+  const [addDragTarget, setAddDragTarget] = useState<string | null>(null);
   const prevLayout = React.useRef<LayoutCard[] | null>(null);
   const initialLoad = React.useRef(true);
   
@@ -120,7 +129,8 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
     try {
       console.log('✈️ fetching flight table', name);
       const fr = await fetch(
-        `${FEATURE_OVERVIEW_API}/flight_table?object_name=${encodeURIComponent(name)}`
+        `${FEATURE_OVERVIEW_API}/flight_table?object_name=${encodeURIComponent(name)}`,
+        { credentials: 'include' }
       );
       if (fr.ok) {
         await fr.arrayBuffer();
@@ -128,7 +138,8 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
       }
       console.log('🔎 prefetching dataframe', name);
       const res = await fetch(
-        `${FEATURE_OVERVIEW_API}/cached_dataframe?object_name=${encodeURIComponent(name)}`
+        `${FEATURE_OVERVIEW_API}/cached_dataframe?object_name=${encodeURIComponent(name)}`,
+        { credentials: 'include' }
       );
       if (res.ok) {
         await res.text();
@@ -140,6 +151,7 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
       console.error('⚠️ prefetch dataframe error', err);
     }
   };
+
 
   const findLatestDataSource = async () => {
     console.log('🔎 searching for latest data source');
@@ -225,6 +237,7 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
     }
     console.log('ℹ️ prefill data source details', prev);
     await prefetchDataframe(prev.csv);
+    const mapping = await fetchDimensionMapping();
     console.log('✅ pre-filling feature overview with', prev.csv);
     const summary = Array.isArray(prev.summary) ? prev.summary : [];
     const identifiers = Array.isArray(prev.identifiers) ? prev.identifiers : [];
@@ -244,6 +257,7 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
       columnSummary: filtered,
       selectedColumns: selected,
       numericColumns: Array.isArray(prev.numeric) ? prev.numeric : [],
+      dimensionMap: mapping,
       xAxis: prev.xField || 'date',
     });
   };
@@ -353,12 +367,15 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
         const atomInfo =
           allAtoms.find(a => a.id === atom.atomName || a.title === atom.atomName) ||
           ({} as any);
+        const atomId = atomInfo.id || atom.atomName;
         const dropped: DroppedAtom = {
           id: `${atom.atomName}-${Date.now()}-${Math.random()}`,
-          atomId: atomInfo.id || atom.atomName,
+          atomId,
           title: atomInfo.title || atom.atomName,
           category: atomInfo.category || 'Atom',
-          color: atomInfo.color || 'bg-gray-400'
+          color: atomInfo.color || 'bg-gray-400',
+          source: 'manual',
+          llm: LLM_MAP[atomId],
         };
         return {
           id: `card-${atom.atomName}-${Date.now()}-${Math.random()}`,
@@ -381,10 +398,15 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
           initialCards = Array.isArray(raw)
             ? raw.map((c: any) => ({
                 id: c.id,
-                atoms: Array.isArray(c.atoms) ? c.atoms.map((a: any) => ({ ...a })) : [],
+                atoms: Array.isArray(c.atoms)
+                  ? c.atoms.map((a: any) => ({
+                      ...a,
+                      llm: a.llm || LLM_MAP[a.atomId],
+                    }))
+                  : [],
                 isExhibited: !!c.isExhibited,
                 moleculeId: c.moleculeId,
-                moleculeTitle: c.moleculeTitle
+                moleculeTitle: c.moleculeTitle,
               }))
             : null;
           if (initialCards) {
@@ -482,6 +504,8 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
         title: info?.title || atom.title || atom.id,
         category: info?.category || atom.category || 'Atom',
         color: info?.color || atom.color || 'bg-gray-400',
+        source: 'manual',
+        llm: LLM_MAP[atom.id],
         settings:
           atom.id === 'text-box'
             ? { ...DEFAULT_TEXTBOX_SETTINGS }
@@ -530,12 +554,92 @@ const addNewCard = (moleculeId?: string, position?: number) => {
   setCollapsedCards(prev => ({ ...prev, [newCard.id]: false }));
 };
 
+const addNewCardWithAtom = (
+  atomId: string,
+  moleculeId?: string,
+  position?: number
+) => {
+  const cardInfo = moleculeId ? molecules.find(m => m.id === moleculeId) : undefined;
+  const atomInfo = allAtoms.find(a => a.id === atomId);
+  const newAtom: DroppedAtom = {
+    id: `${atomId}-${Date.now()}`,
+    atomId,
+    title: atomInfo?.title || atomId,
+    category: atomInfo?.category || 'Atom',
+    color: atomInfo?.color || 'bg-gray-400',
+    source: 'manual',
+    llm: LLM_MAP[atomId],
+    settings:
+      atomId === 'text-box'
+        ? { ...DEFAULT_TEXTBOX_SETTINGS }
+        : atomId === 'data-upload-validate'
+        ? { ...DEFAULT_DATAUPLOAD_SETTINGS }
+        : atomId === 'feature-overview'
+        ? { ...DEFAULT_FEATURE_OVERVIEW_SETTINGS }
+        : undefined,
+  };
+  const newCard: LayoutCard = {
+    id: `card-${Date.now()}`,
+    atoms: [newAtom],
+    isExhibited: false,
+    moleculeId,
+    moleculeTitle: cardInfo?.title,
+  };
+  const arr = Array.isArray(layoutCards) ? layoutCards : [];
+  const insertIndex =
+    position === undefined || position >= arr.length ? arr.length : position;
+  setLayoutCards([
+    ...arr.slice(0, insertIndex),
+    newCard,
+    ...arr.slice(insertIndex),
+  ]);
+  setCollapsedCards(prev => ({ ...prev, [newCard.id]: false }));
+
+  if (atomId === 'feature-overview') {
+    prefillFeatureOverview(newCard.id, newAtom.id);
+  } else if (atomId === 'column-classifier') {
+    prefillColumnClassifier(newAtom.id);
+  }
+};
+
+const handleDropNewCard = (
+  e: React.DragEvent,
+  moleculeId?: string,
+  position?: number
+) => {
+  e.preventDefault();
+  setDragOver(null);
+  setAddDragTarget(null);
+  const atomData = e.dataTransfer.getData('application/json');
+  if (!atomData) return;
+  const atom = JSON.parse(atomData);
+  if (!atom?.id) return;
+  addNewCardWithAtom(atom.id, moleculeId, position);
+};
+
+const handleAddDragEnter = (e: React.DragEvent, targetId: string) => {
+  e.preventDefault();
+  setAddDragTarget(targetId);
+};
+
+const handleAddDragLeave = (e: React.DragEvent) => {
+  e.preventDefault();
+  setAddDragTarget(null);
+};
+
   const removeAtom = (cardId: string, atomId: string) => {
+    const arr = Array.isArray(layoutCards) ? layoutCards : [];
+    const card = arr.find(c => c.id === cardId);
+    const atom = card?.atoms.find(a => a.id === atomId);
+    if (atom?.atomId === 'data-upload-validate') {
+      const vid = (atom.settings as DataUploadSettings)?.validatorId;
+      if (vid) {
+        fetch(`${VALIDATE_API}/delete_validator_atom/${vid}`, { method: 'DELETE' }).catch(() => {});
+      }
+    }
     setLayoutCards(
-      (Array.isArray(layoutCards) ? layoutCards : []).map(card =>
-        card.id === cardId
-          ? { ...card, atoms: card.atoms.filter(atom => atom.id !== atomId) }
-          : card
+      arr.map(c =>
+        c.id === cardId ? { ...c, atoms: c.atoms.filter(a => a.id !== atomId) } : c
       )
     );
   };
@@ -555,6 +659,8 @@ const addNewCard = (moleculeId?: string, position?: number) => {
       title: info.title,
       category: info.category,
       color: info.color,
+      source: 'ai',
+      llm: LLM_MAP[info.id] || info.id,
       settings:
         info.id === 'text-box'
           ? { ...DEFAULT_TEXTBOX_SETTINGS }
@@ -594,6 +700,11 @@ const addNewCard = (moleculeId?: string, position?: number) => {
       card.atoms.forEach(atom => {
         if (atom.atomId === 'text-box') {
           fetch(`${TEXT_API}/text/${atom.id}`, { method: 'DELETE' }).catch(() => {});
+        } else if (atom.atomId === 'data-upload-validate') {
+          const vid = (atom.settings as DataUploadSettings)?.validatorId;
+          if (vid) {
+            fetch(`${VALIDATE_API}/delete_validator_atom/${vid}`, { method: 'DELETE' }).catch(() => {});
+          }
         }
       });
       fetch(`${CARD_API}/cards/archive`, {
@@ -634,6 +745,18 @@ const addNewCard = (moleculeId?: string, position?: number) => {
     onToggleSettingsPanel?.();
   };
 
+  const handleCardSettingsClick = (
+    e: React.MouseEvent,
+    cardId: string,
+    exhibited: boolean
+  ) => {
+    e.stopPropagation();
+    if (onCardSelect) {
+      onCardSelect(cardId, exhibited);
+    }
+    onToggleSettingsPanel?.();
+  };
+
   const handleCardClick = (
     e: React.MouseEvent,
     cardId: string,
@@ -656,6 +779,18 @@ const addNewCard = (moleculeId?: string, position?: number) => {
 
     setLayoutCards(updated);
     setCards(updated);
+  };
+
+  const refreshCardAtoms = async (cardId: string) => {
+    const card = (Array.isArray(layoutCards) ? layoutCards : []).find(c => c.id === cardId);
+    if (!card) return;
+    for (const atom of card.atoms) {
+      if (atom.atomId === 'feature-overview') {
+        await prefillFeatureOverview(cardId, atom.id);
+      } else if (atom.atomId === 'column-classifier') {
+        await prefillColumnClassifier(atom.id);
+      }
+    }
   };
 
   if (workflowMolecules.length > 0) {
@@ -705,6 +840,7 @@ const addNewCard = (moleculeId?: string, position?: number) => {
                         return (
                         <Card
                           key={card.id}
+                          data-card-id={card.id}
                           className={`w-full min-h-[200px] bg-white rounded-2xl border-2 transition-all duration-300 flex flex-col overflow-hidden ${
                             dragOver === card.id
                               ? 'border-[#458EE2] bg-gradient-to-br from-blue-50 to-blue-100 shadow-lg'
@@ -770,9 +906,16 @@ const addNewCard = (moleculeId?: string, position?: number) => {
                                     <div className="flex items-center justify-between mb-3">
                                       <div className="flex items-center space-x-1">
                                         <div className={`w-3 h-3 ${atom.color} rounded-full`}></div>
+                                        <AtomAIChatBot
+                                          atomId={atom.id}
+                                          atomType={atom.atomId}
+                                          atomTitle={atom.title}
+                                          disabled={!LLM_MAP[atom.atomId]}
+                                          className="transition-transform hover:scale-110"
+                                        />
                                         <button
                                           onClick={e => handleAtomSettingsClick(e, atom.id)}
-                                          className="p-1 hover:bg-gray-100 rounded"
+                                          className="p-1 hover:bg-gray-100 rounded transition-transform hover:scale-110"
                                           title="Atom Settings"
                                         >
                                           <Settings className="w-4 h-4 text-gray-400" />
@@ -783,7 +926,7 @@ const addNewCard = (moleculeId?: string, position?: number) => {
                                           e.stopPropagation();
                                           removeAtom(card.id, atom.id);
                                         }}
-                                        className="opacity-0 group-hover:opacity-100 transition-all duration-200 p-1 hover:bg-gray-100 rounded"
+                                        className="p-1 hover:bg-gray-100 rounded transition-transform hover:scale-110"
                                       >
                                         <Trash2 className="w-4 h-4 text-gray-400" />
                                       </button>
@@ -814,9 +957,13 @@ const addNewCard = (moleculeId?: string, position?: number) => {
                     <div className="flex justify-center">
                       <button
                         onClick={() => addNewCard(molecule.moleculeId)}
-                        className="flex items-center px-2 py-2 bg-white border-2 border-dashed border-gray-300 rounded-xl hover:border-[#458EE2] hover:bg-blue-50 transition-all duration-500 ease-in-out group"
+                        onDragEnter={e => handleAddDragEnter(e, `m-${molecule.moleculeId}`)}
+                        onDragLeave={handleAddDragLeave}
+                        onDragOver={e => e.preventDefault()}
+                        onDrop={e => handleDropNewCard(e, molecule.moleculeId)}
+                        className={`flex flex-col items-center justify-center px-2 py-2 bg-white border-2 border-dashed rounded-xl hover:border-[#458EE2] hover:bg-blue-50 transition-all duration-500 ease-in-out group ${addDragTarget === `m-${molecule.moleculeId}` ? 'min-h-[160px] w-full border-[#458EE2] bg-blue-50' : 'border-gray-300'}`}
                       >
-                        <Plus className="w-5 h-5 text-gray-400 group-hover:text-[#458EE2]" />
+                        <Plus className={`w-5 h-5 text-gray-400 group-hover:text-[#458EE2] transition-transform duration-500 ${addDragTarget === `m-${molecule.moleculeId}` ? 'scale-125 mb-2' : ''}`} />
                         <span
                           className="max-w-0 overflow-hidden ml-0 group-hover:ml-2 group-hover:max-w-[120px] text-gray-600 group-hover:text-[#458EE2] font-medium whitespace-nowrap transition-all duration-500 ease-in-out"
                         >
@@ -847,6 +994,7 @@ const addNewCard = (moleculeId?: string, position?: number) => {
           return (
           <React.Fragment key={card.id}>
           <Card
+            data-card-id={card.id}
             className={`w-full ${collapsedCards[card.id] ? '' : 'min-h-[200px]'} bg-white rounded-2xl border-2 transition-all duration-300 flex flex-col overflow-hidden ${
               dragOver === card.id
                 ? 'border-[#458EE2] bg-gradient-to-br from-blue-50 to-blue-100 shadow-lg'
@@ -872,13 +1020,23 @@ const addNewCard = (moleculeId?: string, position?: number) => {
                 />
                 {card.atoms.length > 0 && (
                   <button
-                    onClick={e => handleAtomSettingsClick(e, card.atoms[0].id)}
+                    onClick={e => handleCardSettingsClick(e, card.id, card.isExhibited)}
                     className="p-1 hover:bg-gray-100 rounded"
-                    title="Atom Settings"
+                    title="Card Settings"
                   >
                     <Settings className="w-4 h-4 text-gray-400" />
                   </button>
                 )}
+                <button
+                  onClick={e => {
+                    e.stopPropagation();
+                    refreshCardAtoms(card.id);
+                  }}
+                  className="p-1 hover:bg-gray-100 rounded"
+                  title="Refresh Atom"
+                >
+                  <RefreshCcw className="w-4 h-4 text-gray-400" />
+                </button>
               </div>
               <div className="flex items-center space-x-2">
                 <span className="text-xs text-gray-500">Exhibit the Card</span>
@@ -939,9 +1097,16 @@ const addNewCard = (moleculeId?: string, position?: number) => {
                       <div className="flex items-center justify-between mb-3">
                         <div className="flex items-center space-x-1">
                           <div className={`w-3 h-3 ${atom.color} rounded-full`}></div>
+                          <AtomAIChatBot
+                            atomId={atom.id}
+                            atomType={atom.atomId}
+                            atomTitle={atom.title}
+                            disabled={!LLM_MAP[atom.atomId]}
+                            className="transition-transform hover:scale-110"
+                          />
                           <button
                             onClick={e => handleAtomSettingsClick(e, atom.id)}
-                            className="p-1 hover:bg-gray-100 rounded"
+                            className="p-1 hover:bg-gray-100 rounded transition-transform hover:scale-110"
                             title="Atom Settings"
                           >
                             <Settings className="w-4 h-4 text-gray-400" />
@@ -952,7 +1117,7 @@ const addNewCard = (moleculeId?: string, position?: number) => {
                             e.stopPropagation();
                             removeAtom(card.id, atom.id);
                           }}
-                          className="opacity-0 group-hover:opacity-100 transition-all duration-200 p-1 hover:bg-gray-100 rounded"
+                          className="p-1 hover:bg-gray-100 rounded transition-transform hover:scale-110"
                         >
                           <Trash2 className="w-4 h-4 text-gray-400" />
                         </button>
@@ -992,10 +1157,14 @@ const addNewCard = (moleculeId?: string, position?: number) => {
             <div className="flex justify-center my-4">
               <button
                 onClick={() => addNewCard(undefined, index + 1)}
-                className="flex items-center px-2 py-2 bg-white border-2 border-dashed border-gray-300 rounded-xl hover:border-[#458EE2] hover:bg-blue-50 transition-all duration-500 ease-in-out group"
+                onDragEnter={e => handleAddDragEnter(e, `p-${index}`)}
+                onDragLeave={handleAddDragLeave}
+                onDragOver={e => e.preventDefault()}
+                onDrop={e => handleDropNewCard(e, undefined, index + 1)}
+                className={`flex flex-col items-center justify-center px-2 py-2 bg-white border-2 border-dashed rounded-xl hover:border-[#458EE2] hover:bg-blue-50 transition-all duration-500 ease-in-out group ${addDragTarget === `p-${index}` ? 'min-h-[160px] w-full border-[#458EE2] bg-blue-50' : 'border-gray-300'}`}
                 title="Add new card"
               >
-                <Plus className="w-5 h-5 text-gray-400 group-hover:text-[#458EE2]" />
+                <Plus className={`w-5 h-5 text-gray-400 group-hover:text-[#458EE2] transition-transform duration-500 ${addDragTarget === `p-${index}` ? 'scale-125 mb-2' : ''}`} />
                 <span
                   className="max-w-0 overflow-hidden ml-0 group-hover:ml-2 group-hover:max-w-[120px] text-gray-600 group-hover:text-[#458EE2] font-medium whitespace-nowrap transition-all duration-500 ease-in-out"
                 >
@@ -1012,9 +1181,13 @@ const addNewCard = (moleculeId?: string, position?: number) => {
         <div className="flex justify-center">
           <button
             onClick={() => addNewCard()}
-            className="flex items-center px-2 py-2 bg-white border-2 border-dashed border-gray-300 rounded-xl hover:border-[#458EE2] hover:bg-blue-50 transition-all duration-500 ease-in-out group"
+            onDragEnter={e => handleAddDragEnter(e, 'end')}
+            onDragLeave={handleAddDragLeave}
+            onDragOver={e => e.preventDefault()}
+            onDrop={e => handleDropNewCard(e)}
+            className={`flex flex-col items-center justify-center px-2 py-2 bg-white border-2 border-dashed rounded-xl hover:border-[#458EE2] hover:bg-blue-50 transition-all duration-500 ease-in-out group ${addDragTarget === 'end' ? 'min-h-[160px] w-full border-[#458EE2] bg-blue-50' : 'border-gray-300'}`}
           >
-            <Plus className="w-5 h-5 text-gray-400 group-hover:text-[#458EE2]" />
+            <Plus className={`w-5 h-5 text-gray-400 group-hover:text-[#458EE2] transition-transform duration-500 ${addDragTarget === 'end' ? 'scale-125 mb-2' : ''}`} />
             <span
               className="max-w-0 overflow-hidden ml-0 group-hover:ml-2 group-hover:max-w-[120px] text-gray-600 group-hover:text-[#458EE2] font-medium whitespace-nowrap transition-all duration-500 ease-in-out"
             >

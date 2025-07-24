@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useToast } from '@/hooks/use-toast';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -21,6 +22,7 @@ const ColumnClassifierDimensions: React.FC<Props> = ({ atomId }) => {
   const settings: SettingsType = (atom?.settings as SettingsType) || {
     ...DEFAULT_COLUMN_CLASSIFIER_SETTINGS
   };
+  const { toast } = useToast();
 
   const [options, setOptions] = useState<string[]>(
     Array.from(new Set(['market', 'product', ...(settings.dimensions || [])]))
@@ -72,8 +74,10 @@ const ColumnClassifierDimensions: React.FC<Props> = ({ atomId }) => {
         }));
         updateSettings(atomId, { data: { ...settings.data, files: updatedFiles } });
       }
+      toast({ title: 'Dimensions Saved Successfully' });
     } catch (e: any) {
       setError(e.message);
+      toast({ title: 'Unable to Save Dimensions', variant: 'destructive' });
     } finally {
       setLoading(false);
     }

@@ -10,6 +10,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { useLaboratoryStore, DEFAULT_DATAUPLOAD_SETTINGS, DataUploadSettings } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { VALIDATE_API } from '@/lib/api';
+import { useToast } from '@/hooks/use-toast';
 import UploadSection from './components/upload/UploadSection';
 import RequiredFilesSection from './components/required-files/RequiredFilesSection';
 
@@ -21,6 +22,8 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
   const atom = useLaboratoryStore((state) => state.getAtom(atomId));
   const updateSettings = useLaboratoryStore((state) => state.updateAtomSettings);
   const settings: DataUploadSettings = atom?.settings || { ...DEFAULT_DATAUPLOAD_SETTINGS };
+
+  const { toast } = useToast();
 
   const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
   const [isDragOver, setIsDragOver] = useState(false);
@@ -68,6 +71,8 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
     if (e.target.files) {
       const files = Array.from(e.target.files);
       handleFileUpload(files);
+      // allow selecting the same file again by resetting the input value
+      e.target.value = '';
     }
   };
 
@@ -88,7 +93,6 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
       return;
     }
     const newName = renameValue.trim();
-    const newRequired = (settings.requiredFiles || []).map(n => (n === oldName ? newName : n));
     const newValidations: Record<string, any> = {};
     Object.entries(settings.validations || {}).forEach(([k, v]) => {
       newValidations[k === oldName ? newName : k] = v;
@@ -97,10 +101,14 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
     Object.entries(settings.columnConfig || {}).forEach(([k, v]) => {
       newColumnConfig[k === oldName ? newName : k] = v as Record<string, string>;
     });
+    const newFileKeyMap = { ...(settings.fileKeyMap || {}) } as Record<string, string>;
+    const original = newFileKeyMap[oldName] || oldName;
+    newFileKeyMap[newName] = original;
+    delete newFileKeyMap[oldName];
     updateSettings(atomId, {
-      requiredFiles: newRequired,
       validations: newValidations,
-      columnConfig: newColumnConfig
+      columnConfig: newColumnConfig,
+      fileKeyMap: newFileKeyMap,
     });
     if (openFile === oldName) setOpenFile(newName);
     setRenameTarget(null);
@@ -139,7 +147,7 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
     name,
     required: true,
     status: settings.uploadedFiles?.includes(name) ? 'uploaded' : 'pending',
-    validations: settings.validations?.[name] || { ranges: [], periodicities: [] }
+    validations: settings.validations?.[name] || { ranges: [], periodicities: [], regex: [], nulls: [], referentials: [] }
   }));
 
   const getStatusIcon = (status: string, required: boolean) => {
@@ -159,7 +167,10 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
     const form = new FormData();
     form.append('validator_atom_id', settings.validatorId);
     uploadedFiles.forEach(f => form.append('files', f));
-    const keys = uploadedFiles.map(f => fileAssignments[f.name] || '');
+    const keys = uploadedFiles.map(f => {
+      const assigned = fileAssignments[f.name] || '';
+      return settings.fileKeyMap?.[assigned] || assigned;
+    });
     form.append('file_keys', JSON.stringify(keys));
     const res = await fetch(`${VALIDATE_API}/validate`, { method: 'POST', body: form });
     if (res.ok) {
@@ -207,6 +218,9 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
             desc = parts.join(' ');
           }
           if (u.validation_type === 'periodicity') desc = u.periodicity;
+          if (u.validation_type === 'regex') desc = u.pattern;
+          if (u.validation_type === 'null_percentage') desc = `${u.value}% null`;
+          if (u.validation_type === 'in_list') desc = `allowed: ${u.value?.join(', ')}`;
 
           let failed = false;
           if (u.validation_type === 'datatype') {
@@ -222,6 +236,12 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
             failed = failures.some((f: any) => f.column === u.column && f.operator === 'date_frequency');
           } else if (u.validation_type === 'range') {
             failed = failures.some((f: any) => f.column === u.column && f.operator !== 'date_frequency');
+          } else if (u.validation_type === 'regex') {
+            failed = failures.some((f: any) => f.column === u.column && f.operator === 'regex_match');
+          } else if (u.validation_type === 'null_percentage') {
+            failed = failures.some((f: any) => f.column === u.column && f.operator === 'null_percentage');
+          } else if (u.validation_type === 'in_list') {
+            failed = failures.some((f: any) => f.column === u.column && f.operator === 'in_list');
           }
 
           fileDetails.push({
@@ -248,7 +268,10 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
     const form = new FormData();
     form.append('validator_atom_id', settings.validatorId);
     uploadedFiles.forEach(f => form.append('files', f));
-    const keys = uploadedFiles.map(f => fileAssignments[f.name] || '');
+    const keys = uploadedFiles.map(f => {
+      const assigned = fileAssignments[f.name] || '';
+      return settings.fileKeyMap?.[assigned] || assigned;
+    });
     form.append('file_keys', JSON.stringify(keys));
     form.append('overwrite', 'true');
     const res = await fetch(`${VALIDATE_API}/save_dataframes`, { method: 'POST', body: form });
@@ -262,6 +285,9 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
         }
       });
       setSaveStatus(prev => ({ ...prev, ...newStatus }));
+      toast({ title: 'Dataframes Saved Successfully' });
+    } else {
+      toast({ title: 'Unable to Save Dataframes', variant: 'destructive' });
     }
   };
 
@@ -330,7 +356,7 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
     Object.values(validationResults).every(v => v.includes('Success'));
 
   return (
-    <div className="w-full h-full bg-gradient-to-br from-gray-50 via-white to-gray-50 rounded-xl border border-gray-200 shadow-lg overflow-hidden flex">
+    <div className="w-full h-full bg-gradient-to-br from-slate-50 to-blue-50 rounded-xl border border-gray-200 shadow-xl overflow-hidden flex">
       <div className="flex-1 flex flex-col">
         <div className="bg-gradient-to-r from-blue-500 to-blue-600 text-white p-4 flex-shrink-0">
           <div className="flex items-center space-x-3">
@@ -367,6 +393,7 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
                 requiredOptions={settings.requiredFiles || []}
                 onDeleteFile={handleDeleteFile}
                 saveStatus={saveStatus}
+                disabled={(settings.requiredFiles || []).length === 0}
               />
             </div>
 

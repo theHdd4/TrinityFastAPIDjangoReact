@@ -1,49 +1,90 @@
 
-import React from 'react';
+import React, { useState, useCallback } from 'react';
 import { Card } from '@/components/ui/card';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+  PieChart,
+  Pie,
+  Cell,
+} from 'recharts';
 import { ClassifierData } from '../ColumnClassifierAtom';
 
 interface ColumnClassifierVisualisationProps {
   data: ClassifierData;
 }
 
+const RADIAN = Math.PI / 180;
+
 const ColumnClassifierVisualisation: React.FC<ColumnClassifierVisualisationProps> = ({ data }) => {
-  if (!data.files.length) {
+  const [activeIndex, setActiveIndex] = useState<number | null>(null);
+
+  const hasData = data.files.length > 0;
+  const currentFile = hasData ? data.files[data.activeFileIndex] : undefined;
+  const displayName = currentFile?.fileName.split('/').pop() || '';
+
+  const categoryCounts = hasData
+    ? {
+        identifiers: currentFile!.columns.filter(col => col.category === 'identifiers').length,
+        measures: currentFile!.columns.filter(col => col.category === 'measures').length,
+        unclassified: currentFile!.columns.filter(col => col.category === 'unclassified').length,
+        customDimensions: Object.keys(currentFile!.customDimensions).length,
+      }
+    : { identifiers: 0, measures: 0, unclassified: 0, customDimensions: 0 };
+
+  const barData = hasData
+    ? [
+        { name: 'Identifiers', count: categoryCounts.identifiers },
+        { name: 'Measures', count: categoryCounts.measures },
+        { name: 'Unclassified', count: categoryCounts.unclassified },
+        ...(categoryCounts.customDimensions > 0
+          ? [{ name: 'Custom Dimensions', count: categoryCounts.customDimensions }]
+          : []),
+      ]
+    : [];
+
+  const pieData = hasData
+    ? [
+        { name: 'Identifiers', value: categoryCounts.identifiers, color: '#3b82f6' },
+        { name: 'Measures', value: categoryCounts.measures, color: '#10b981' },
+        { name: 'Unclassified', value: categoryCounts.unclassified, color: '#f59e0b' },
+      ]
+    : [];
+
+  const renderPieLabel = useCallback(
+    ({ cx, cy, midAngle, innerRadius, outerRadius, name, value, index }: any) => {
+      if (index !== activeIndex) return null;
+      const radius = innerRadius + (outerRadius - innerRadius) * 0.7;
+      const x = cx + radius * Math.cos(-midAngle * RADIAN);
+      const y = cy + radius * Math.sin(-midAngle * RADIAN);
+      return (
+        <text
+          x={x}
+          y={y}
+          textAnchor="middle"
+          dominantBaseline="central"
+          fontSize={12}
+          fill="#000"
+        >
+          {`${name}: ${value}`}
+        </text>
+      );
+    },
+    [activeIndex]
+  );
+
+  if (!hasData) {
     return (
       <div className="text-center p-8">
         <p className="text-gray-500">Upload and classify data to see visualizations</p>
       </div>
     );
   }
-
-  const currentFile = data.files[data.activeFileIndex];
-  const displayName = currentFile.fileName.split('/').pop();
-  
-  const categoryCounts = {
-    identifiers: currentFile.columns.filter(col => col.category === 'identifiers').length,
-    measures: currentFile.columns.filter(col => col.category === 'measures').length,
-    unclassified: currentFile.columns.filter(col => col.category === 'unclassified').length,
-    customDimensions: Object.keys(currentFile.customDimensions).length
-  };
-
-  const barData = [
-    { name: 'Identifiers', count: categoryCounts.identifiers },
-    { name: 'Measures', count: categoryCounts.measures },
-    { name: 'Unclassified', count: categoryCounts.unclassified },
-    ...(categoryCounts.customDimensions > 0
-      ? [{ name: 'Custom Dimensions', count: categoryCounts.customDimensions }]
-      : [])
-  ];
-
-  const pieData = [
-    { name: 'Identifiers', value: categoryCounts.identifiers, color: '#3b82f6' },
-    { name: 'Measures', value: categoryCounts.measures, color: '#10b981' },
-    { name: 'Unclassified', value: categoryCounts.unclassified, color: '#f59e0b' },
-    ...(categoryCounts.customDimensions > 0
-      ? [{ name: 'Custom Dimensions', value: categoryCounts.customDimensions, color: '#8b5cf6' }]
-      : [])
-  ];
 
   return (
     <div className="space-y-4">
@@ -53,7 +94,7 @@ const ColumnClassifierVisualisation: React.FC<ColumnClassifierVisualisationProps
         
         <h5 className="font-medium text-gray-900 mb-4">Column Distribution</h5>
         <ResponsiveContainer width="100%" height={160}>
-          <BarChart data={barData}>
+          <BarChart data={barData} margin={{ left: -20 }}>
             <CartesianGrid strokeDasharray="3 3" />
             <XAxis dataKey="name" />
             <YAxis />
@@ -73,7 +114,10 @@ const ColumnClassifierVisualisation: React.FC<ColumnClassifierVisualisationProps
               cy="50%"
               outerRadius={80}
               dataKey="value"
-              label={({ name, value }) => `${name}: ${value}`}
+              label={renderPieLabel}
+              labelLine={false}
+              onMouseEnter={(_, index) => setActiveIndex(index)}
+              onMouseLeave={() => setActiveIndex(null)}
             >
               {pieData.map((entry, index) => (
                 <Cell key={`cell-${index}`} fill={entry.color} />
