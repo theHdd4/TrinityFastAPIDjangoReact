@@ -9,7 +9,7 @@ from rest_framework.views import APIView
 from rest_framework.decorators import action
 from .models import User, UserProfile
 from .serializers import UserSerializer, UserProfileSerializer
-from .utils import save_env_var, get_env_dict
+from .utils import save_env_var, get_env_dict, load_env_vars
 
 
 class CsrfExemptSessionAuthentication(SessionAuthentication):
@@ -70,6 +70,10 @@ class LoginView(APIView):
         user = authenticate(request, username=username, password=password)
         if user is not None:
             login(request, user)
+            # Ensure environment variables are loaded from Redis or backend
+            loaded_envs = load_env_vars(user)
+            if loaded_envs:
+                print("Loaded env vars from cache", loaded_envs)
             tenant = getattr(request, "tenant", None)
             if tenant is not None:
                 os.environ["CLIENT_NAME"] = getattr(
