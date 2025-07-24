@@ -1,37 +1,185 @@
-
 import React, { useState } from 'react';
-import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { Edit2, X, FileText, Trash2, TrendingUp, BarChart3, Tag } from 'lucide-react';
-import { ClassifierData, ColumnData } from '../ColumnClassifierAtom';
+import { Database, FileText, GripVertical } from 'lucide-react';
+import { ClassifierData } from '../ColumnClassifierAtom';
+import {
+  DndContext,
+  DragEndEvent,
+  DragOverlay,
+  DragStartEvent,
+  PointerSensor,
+  closestCenter,
+  useDraggable,
+  useDroppable,
+  useSensor,
+  useSensors,
+} from '@dnd-kit/core';
 
 interface ColumnClassifierCanvasProps {
   data: ClassifierData;
-  validatorId?: string;
-  onColumnMove: (columnName: string, newCategory: string, fileIndex?: number) => void;
+  onColumnMove: (
+    columnName: string,
+    newCategory: string,
+    fileIndex?: number
+  ) => void;
   onActiveFileChange: (fileIndex: number) => void;
   onFileDelete?: (fileIndex: number) => void;
-  // only handles column movements; saving handled separately
 }
 
 const ColumnClassifierCanvas: React.FC<ColumnClassifierCanvasProps> = ({
   data,
-  validatorId,
   onColumnMove,
   onActiveFileChange,
   onFileDelete,
-  // save functionality removed from this component
 }) => {
-  const [showDropdowns, setShowDropdowns] = useState<{ [key: string]: boolean }>({});
-  const getDisplayName = (name: string) => name.split('/').pop() || name;
+  const [activeId, setActiveId] = useState<string | null>(null);
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: { distance: 8 },
+    })
+  );
+
+  const currentFile = data.files[data.activeFileIndex];
+  const columnsByCategory = {
+    unclassified:
+      currentFile?.columns
+        .filter(c => c.category === 'unclassified')
+        .map(c => c.name) || [],
+    identifiers:
+      currentFile?.columns
+        .filter(c => c.category === 'identifiers')
+        .map(c => c.name) || [],
+    measures:
+      currentFile?.columns
+        .filter(c => c.category === 'measures')
+        .map(c => c.name) || [],
+  } as const;
+
+  const DraggableColumnPill: React.FC<{ name: string; section: string }> = ({
+    name,
+    section,
+  }) => {
+    const { attributes, listeners, setNodeRef, transform, isDragging } =
+      useDraggable({ id: `${section}-${name}`, data: { column: name, section } });
+
+    const style = transform
+      ? { transform: `translate3d(${transform.x}px, ${transform.y}px, 0)` }
+      : undefined;
+
+    const sectionColors = {
+      unclassified:
+        'from-slate-100/80 to-slate-50/60 border-slate-200/70 text-slate-700 hover:from-slate-200/90 hover:to-slate-100/70 hover:border-slate-300 hover:text-slate-800',
+      identifiers:
+        'from-blue-100/80 to-blue-50/60 border-blue-200/70 text-blue-700 hover:from-blue-200/90 hover:to-blue-100/70 hover:border-blue-300 hover:text-blue-800',
+      measures:
+        'from-emerald-100/80 to-emerald-50/60 border-emerald-200/70 text-emerald-700 hover:from-emerald-200/90 hover:to-emerald-100/70 hover:border-emerald-300 hover:text-emerald-800',
+    } as const;
+
+    return (
+      <div
+        ref={setNodeRef}
+        style={style}
+        {...listeners}
+        {...attributes}
+        className={`group relative flex items-center gap-2 px-3 py-2 bg-gradient-to-r ${
+          sectionColors[section as keyof typeof sectionColors]
+        } border rounded-full text-sm font-medium cursor-grab active:cursor-grabbing transition-all duration-200 hover:scale-[1.02] hover:shadow-lg backdrop-blur-sm min-w-0 w-full ${
+          isDragging ? 'opacity-70 shadow-2xl scale-105 rotate-2' : 'hover:shadow-md'
+        }`}
+      >
+        <GripVertical className="w-3 h-3 opacity-40 group-hover:opacity-60 transition-opacity flex-shrink-0" />
+        <span
+          className="select-none font-medium tracking-wide truncate flex-1 min-w-0"
+          title={name}
+        >
+          {name}
+        </span>
+        <div className="absolute inset-0 rounded-full bg-gradient-to-r from-transparent via-white/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+      </div>
+    );
+  };
+
+  const DroppableSection: React.FC<{
+    id: string;
+    title: string;
+    columns: string[];
+    gradient: string;
+    accentColor: string;
+  }> = ({ id, title, columns, gradient, accentColor }) => {
+    const { setNodeRef, isOver } = useDroppable({ id });
+
+    return (
+      <div
+        ref={setNodeRef}
+        className={`relative overflow-hidden bg-gradient-to-br ${gradient} border-2 ${
+          isOver ? `border-${accentColor} shadow-2xl scale-105` : 'border-border/50'
+        } rounded-2xl transition-all duration-300 hover:shadow-xl`}
+      >
+        <div
+          className={`absolute inset-0 bg-gradient-to-br ${gradient} opacity-10 transition-opacity duration-300 ${
+            isOver ? 'opacity-30' : ''
+          }`}
+        />
+        <div
+          className={`relative px-6 py-4 border-b border-border/30 bg-gradient-to-r ${gradient}`}
+        >
+          <h3 className="text-lg font-bold text-foreground flex items-center gap-2">
+            <div className={`w-3 h-3 rounded-full bg-${accentColor} animate-pulse`} />
+            {title}
+          </h3>
+        </div>
+        <div
+          className={`relative p-6 min-h-[450px] bg-card/50 backdrop-blur-sm transition-all duration-300 ${
+            isOver ? 'bg-primary/5' : ''
+          }`}
+        >
+          <div className="grid grid-cols-2 gap-3">
+            {columns.map((column, index) => (
+              <DraggableColumnPill
+                key={`${id}-${column}-${index}`}
+                name={column}
+                section={id}
+              />
+            ))}
+          </div>
+          {columns.length === 0 && (
+            <div className="flex items-center justify-center h-32 text-muted-foreground">
+              <span className="text-sm italic">No columns assigned</span>
+            </div>
+          )}
+          {isOver && (
+            <div className="absolute inset-6 border-2 border-dashed border-primary/50 rounded-xl bg-primary/5 flex items-center justify-center animate-pulse">
+              <span className="text-primary font-medium">Drop here</span>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  const handleDragStart = (event: DragStartEvent) => {
+    setActiveId(event.active.id as string);
+  };
+
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    setActiveId(null);
+    if (!over) return;
+    const activeData = active.data.current;
+    const overSection = over.id as string;
+    if (activeData?.section !== overSection) {
+      const columnName = activeData.column as string;
+      onColumnMove(columnName, overSection, data.activeFileIndex);
+    }
+  };
 
   if (!data.files.length) {
     return (
       <div className="w-full h-full flex items-center justify-center bg-gray-50">
         <div className="text-center p-8">
           <div className="w-16 h-16 mx-auto mb-4 bg-gray-200 rounded-full flex items-center justify-center">
-            <Edit2 className="w-8 h-8 text-gray-400" />
+            <Database className="w-8 h-8 text-gray-400" />
           </div>
           <h3 className="text-lg font-semibold text-gray-700 mb-2">Column Classifier</h3>
           <p className="text-gray-500">Use the Properties panel to upload files and classify columns</p>
@@ -40,194 +188,92 @@ const ColumnClassifierCanvas: React.FC<ColumnClassifierCanvasProps> = ({
     );
   }
 
-  const currentFile = data.files[data.activeFileIndex];
-  const identifiers = currentFile?.columns.filter(col => col.category === 'identifiers') || [];
-  const measures = currentFile?.columns.filter(col => col.category === 'measures') || [];
-
-  const getUnclassifiedColumns = () => {
-    if (!currentFile) return [];
-    return currentFile.columns.filter(col => col.category === 'unclassified');
-  };
-
-  const getAvailableUnclassified = () => {
-    if (!currentFile) return [];
-    return currentFile.columns.filter(col => col.category === 'unclassified');
-  };
-
-  const toggleDropdown = (category: string) => {
-    setShowDropdowns(prev => ({
-      ...prev,
-      [category]: !prev[category]
-    }));
-  };
-
-  const handleColumnSelect = (columnName: string, category: string) => {
-    onColumnMove(columnName, category, data.activeFileIndex);
-    setShowDropdowns(prev => ({ ...prev, [category]: false }));
-  };
-
-
-  const handleFileDelete = (fileIndex: number, e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (onFileDelete) {
-      onFileDelete(fileIndex);
-    }
-  };
-
-  const DimensionCard: React.FC<{
-    title: string;
-    icon: React.ReactNode;
-    gradient: string;
-    columns: ColumnData[];
-    category: string;
-    onRemove: (columnName: string) => void;
-  }> = ({ title, icon, gradient, columns, category, onRemove }) => (
-    <Card className="border-0 shadow-xl bg-white/90 backdrop-blur-sm overflow-hidden transform hover:scale-105 transition-all duration-300">
-      <div className={`${gradient} p-3`}>
-        <h4 className="font-bold text-white text-lg flex items-center">
-          {icon}
-          {title}
-        </h4>
-      </div>
-      <div className="p-4">
-        <div className="flex flex-wrap gap-3">
-          {columns.map(column => (
-            <Badge
-              key={column.name}
-              className={`${gradient.replace('bg-gradient-to-r', 'bg-gradient-to-r')} text-white px-4 py-2 font-medium flex items-center gap-1`}
-            >
-              {column.name}
-              <X
-                className="w-3 h-3 cursor-pointer hover:text-red-200"
-                onClick={() => onRemove(column.name)}
-              />
-            </Badge>
-          ))}
-          <div className="flex items-center gap-2">
-            {showDropdowns[category] && (
-              <select
-                className="p-2 border rounded bg-white text-sm min-w-[120px]"
-                onChange={(e) => {
-                  const val = e.target.value;
-                  if (val) {
-                    handleColumnSelect(val, category);
-                  }
-                }}
-                value=""
-              >
-                <option value="">Select...</option>
-                {getAvailableUnclassified().map(column => (
-                  <option key={column.name} value={column.name}>
-                    {column.name}
-                  </option>
-                ))}
-              </select>
-            )}
-            <div
-              className={`flex items-center justify-center w-10 h-10 ${gradient} text-white rounded-full font-bold text-lg shadow-lg cursor-pointer hover:scale-110 transition-transform`}
-              onClick={() => toggleDropdown(category)}
-            >
-              +
+  return (
+    <DndContext
+      sensors={sensors}
+      collisionDetection={closestCenter}
+      onDragStart={handleDragStart}
+      onDragEnd={handleDragEnd}
+    >
+      <div className="h-full bg-gradient-to-br from-background via-muted/30 to-background">
+        <div className="border-b border-border bg-gradient-to-r from-card via-card/95 to-card backdrop-blur-sm">
+          <div className="flex items-center justify-between p-6">
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-gradient-to-br from-primary/20 to-primary/10 rounded-xl">
+                <Database className="w-6 h-6 text-primary" />
+              </div>
+              <h2 className="text-2xl font-bold bg-gradient-to-r from-foreground to-foreground/70 bg-clip-text text-transparent">
+                Column Classifier
+              </h2>
             </div>
+            <Badge
+              variant="secondary"
+              className="bg-gradient-to-r from-primary/10 to-primary/5 text-primary border-primary/20"
+            >
+              Interactive
+            </Badge>
+          </div>
+          <div className="flex items-center px-6 pb-4 space-x-3">
+            {data.files.map((file, index) => (
+              <div key={index} className="relative">
+                <button
+                  onClick={() => onActiveFileChange(index)}
+                  className={`flex items-center space-x-2 px-5 py-3 rounded-t-xl text-sm font-medium border-t border-l border-r transition-all duration-200 hover:scale-105 ${
+                    index === data.activeFileIndex
+                      ? 'bg-gradient-to-b from-card to-card/90 text-foreground border-border/50 border-b-card -mb-px shadow-lg'
+                      : 'bg-gradient-to-b from-muted/50 to-muted/30 text-muted-foreground hover:from-muted/70 hover:to-muted/50 border-border/30'
+                  }`}
+                >
+                  <FileText className="w-4 h-4" />
+                  <span>{file.fileName}</span>
+                  {index === data.activeFileIndex && (
+                    <div className="w-2 h-2 rounded-full bg-primary animate-pulse" />
+                  )}
+                </button>
+              </div>
+            ))}
           </div>
         </div>
-      </div>
-    </Card>
-  );
-
-  return (
-    <div className="w-full h-full p-4 bg-gradient-to-br from-gray-50 to-gray-100 flex flex-col">
-      <div className="mb-6">
-        <h2 className="text-2xl font-bold text-gray-900 mb-4">
-          Column <span className="bg-yellow-200 px-2 py-1 rounded">Classifier</span>
-        </h2>
-        
-        {/* File Tabs */}
-        <div className="flex space-x-2 mb-6">
-          {data.files.map((file, index) => (
-            <div
-              key={index}
-              className={`flex items-center space-x-2 px-4 py-3 rounded-lg border-2 transition-all duration-200 ${
-                index === data.activeFileIndex 
-                  ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white border-blue-500 shadow-lg' 
-                  : 'bg-white border-gray-300 hover:bg-gray-50 hover:border-gray-400'
-              }`}
-            >
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => onActiveFileChange(index)}
-                className={`flex items-center space-x-2 p-0 h-auto whitespace-normal ${
-                  index === data.activeFileIndex ? 'text-white hover:text-white' : ''
-                }`}
-              >
-                <FileText className="w-4 h-4" />
-                <span className="font-medium break-all whitespace-normal">{getDisplayName(file.fileName)}</span>
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={(e) => handleFileDelete(index, e)}
-                className={`p-1 h-auto rounded hover:bg-red-500 hover:text-white transition-colors ${
-                  index === data.activeFileIndex ? 'text-white' : 'text-gray-500'
-                }`}
-              >
-                <Trash2 className="w-3 h-3" />
-              </Button>
+        <div className="p-8 h-[calc(100%-160px)] overflow-auto">
+          <div className="grid grid-cols-3 gap-8 max-w-7xl mx-auto">
+            <DroppableSection
+              id="unclassified"
+              title="Unclassified Columns"
+              columns={columnsByCategory.unclassified}
+              gradient="from-slate-50 to-gray-50"
+              accentColor="gray-400"
+            />
+            <DroppableSection
+              id="identifiers"
+              title="Identifiers"
+              columns={columnsByCategory.identifiers}
+              gradient="from-blue-50 to-indigo-50"
+              accentColor="blue-500"
+            />
+            <DroppableSection
+              id="measures"
+              title="Measures"
+              columns={columnsByCategory.measures}
+              gradient="from-emerald-50 to-green-50"
+              accentColor="emerald-500"
+            />
+          </div>
+        </div>
+        <DragOverlay>
+          {activeId ? (
+            <div className="group relative inline-flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-primary/20 to-primary/10 text-primary border border-primary/30 rounded-full text-sm font-medium shadow-2xl backdrop-blur-sm scale-110 rotate-3">
+              <GripVertical className="w-3 h-3 opacity-60" />
+              <span className="select-none font-medium tracking-wide">
+                {activeId.split('-').slice(1).join('-')}
+              </span>
+              <div className="absolute inset-0 rounded-full bg-gradient-to-r from-transparent via-white/30 to-transparent opacity-100 animate-pulse" />
             </div>
-          ))}
-        </div>
+          ) : null}
+        </DragOverlay>
       </div>
-
-      <div className="flex-1 flex flex-col overflow-hidden">
-        <div className="flex-1 overflow-y-auto space-y-4">
-          {/* Identifiers Section */}
-          <DimensionCard
-            title="Identifiers"
-            icon={<Tag className="w-5 h-5 mr-2" />}
-            gradient="bg-gradient-to-r from-blue-500 to-blue-600"
-            columns={identifiers}
-            category="identifiers"
-            onRemove={(columnName) => onColumnMove(columnName, 'unclassified', data.activeFileIndex)}
-          />
-
-          {/* Measures Section */}
-          <DimensionCard
-            title="Measures"
-            icon={<BarChart3 className="w-5 h-5 mr-2" />}
-            gradient="bg-gradient-to-r from-green-500 to-green-600"
-            columns={measures}
-            category="measures"
-            onRemove={(columnName) => onColumnMove(columnName, 'unclassified', data.activeFileIndex)}
-          />
-
-          {/* Unclassified Columns - if any */}
-          {getUnclassifiedColumns().length > 0 && (
-            <Card className="border-2 border-dashed border-orange-300 bg-orange-50">
-              <div className="p-4">
-                <h4 className="font-semibold text-orange-800 mb-3 flex items-center">
-                  <Edit2 className="w-4 h-4 mr-2" />
-                  Unclassified Columns
-                </h4>
-                <div className="flex flex-wrap gap-2">
-                  {getUnclassifiedColumns().map(column => (
-                    <Badge
-                      key={column.name}
-                      variant="outline"
-                      className="bg-white border-orange-300 text-orange-700"
-                    >
-                      {column.name}
-                    </Badge>
-                  ))}
-                </div>
-              </div>
-            </Card>
-          )}
-
-        </div>
-      </div>
-    </div>
+    </DndContext>
   );
 };
 
 export default ColumnClassifierCanvas;
+
