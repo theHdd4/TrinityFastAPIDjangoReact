@@ -259,6 +259,7 @@ const Projects = () => {
       });
       if (res.ok) {
         const updated = await res.json();
+        console.log('Project renamed from projects page', updated);
         setProjects(prev =>
           prev.map(p =>
             p.id === updated.id
@@ -266,6 +267,20 @@ const Projects = () => {
               : p
           )
         );
+        try {
+          const envRes = await fetch(`${REGISTRY_API}/projects/${updated.id}/`, {
+            credentials: 'include'
+          });
+          if (envRes.ok) {
+            const envData = await envRes.json();
+            if (envData.environment) {
+              console.log('Environment after project rename', envData.environment);
+              localStorage.setItem('env', JSON.stringify(envData.environment));
+            }
+          }
+        } catch (err) {
+          console.log('Rename env fetch error', err);
+        }
       }
     } catch {
       /* ignore */

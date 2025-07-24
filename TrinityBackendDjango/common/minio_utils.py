@@ -4,6 +4,7 @@ from minio import Minio
 from minio.error import S3Error
 from minio.commonconfig import CopySource
 
+# Default to the development MinIO service if not explicitly configured
 MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "minio:9000")
 MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY", "minio")
 MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY", "minio123")
@@ -58,7 +59,26 @@ def rename_prefix(old_prefix: str, new_prefix: str) -> None:
         except S3Error:
             pass
         return
+    print(f"🔄 Renaming prefix in MinIO: {old_prefix} -> {new_prefix}")
     for obj in objects:
         dest = obj.object_name.replace(old_prefix, new_prefix, 1)
         _client.copy_object(MINIO_BUCKET, dest, CopySource(MINIO_BUCKET, obj.object_name))
         _client.remove_object(MINIO_BUCKET, obj.object_name)
+    print(f"✅ Prefix renamed to {new_prefix}")
+
+
+def rename_project_folder(
+    client_slug: str,
+    app_slug: str,
+    old_project_slug: str,
+    new_project_slug: str,
+) -> None:
+    """Rename a project's folder prefix when the project is renamed."""
+    old_prefix = f"{client_slug}/{app_slug}/{old_project_slug}"
+    new_prefix = f"{client_slug}/{app_slug}/{new_project_slug}"
+    print(
+        f"📁 Renaming project folder in MinIO: {old_prefix} -> {new_prefix}"
+    )
+    rename_prefix(old_prefix, new_prefix)
+    print(f"📁 MinIO project folder updated: {new_prefix}")
+

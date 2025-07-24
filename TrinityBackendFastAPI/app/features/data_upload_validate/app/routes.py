@@ -127,6 +127,7 @@ import asyncio
 import os
 
 # ✅ MINIO CONFIGURATION - values come from docker-compose/.env
+# Default to the development MinIO service if not explicitly configured
 MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "minio:9000")
 MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY", "minio")
 MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY", "minio123")
