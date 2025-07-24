@@ -16,6 +16,7 @@ import { ChartData, ChartConfig } from '../ChartMakerAtom';
 import { ChartMakerConfig } from '@/components/LaboratoryMode/store/laboratoryStore';
 import './ChartMakerCanvas.css';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
+import { useResponsiveChartLayout } from '@/hooks/useResponsiveChartLayout';
 
 // Extend ChartData type to include uniqueValuesByColumn for type safety
 interface ChartDataWithUniqueValues extends ChartData {
@@ -36,6 +37,12 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
   const [lastSelectedIdx, setLastSelectedIdx] = useState<number | null>(null);
   const [previewTypes, setPreviewTypes] = useState<Record<string, ChartConfig['type'] | null>>({});
   const debounceTimers = useRef<Record<string, NodeJS.Timeout | number | null>>({});
+  
+  // Container ref for responsive layout
+  const containerRef = useRef<HTMLDivElement>(null);
+  
+  // Get responsive layout configuration
+  const { layoutConfig, isCompact } = useResponsiveChartLayout(charts.length, containerRef);
 
   // Cleanup timers on unmount
   useEffect(() => {
@@ -132,8 +139,9 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
   const renderChart = (chart: ChartMakerConfig, index: number) => {
     // Show loading spinner if chart is loading
     if ((chart as any).chartLoading) {
+      const loadingHeight = isCompact ? 'h-40' : 'h-64';
       return (
-        <div className="flex items-center justify-center h-64">
+        <div className={`flex items-center justify-center ${loadingHeight}`}>
           <svg className="animate-spin h-8 w-8 text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
             <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
@@ -153,9 +161,12 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
     const colors = getChartColors(index);
     const key = chart.lastUpdateTime || chart.id;
 
+    // Dynamic height based on layout
+    const chartHeight = isCompact ? 'h-40' : layoutConfig.layout === 'vertical' ? 'h-48' : 'h-56';
+
     if (!chartData.length || !xAxisConfig.dataKey || !yAxisConfig.dataKey) {
       return (
-        <div className="flex items-center justify-center h-64 text-muted-foreground">
+        <div className={`flex items-center justify-center ${chartHeight} text-muted-foreground`}>
           <div className="text-center">
             <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-gradient-to-br from-slate-100 to-slate-200 flex items-center justify-center">
               <LineChart className="w-8 h-8 text-slate-400" />
@@ -170,7 +181,7 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
     switch (chartType) {
       case 'line':
         return (
-          <ChartContainer key={key} config={config} className="h-56 w-full">
+          <ChartContainer key={key} config={config} className={`${chartHeight} w-full`}>
             <LineChart data={chartData}>
               <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
               <XAxis {...xAxisConfig} />
@@ -186,7 +197,7 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
         );
       case 'bar':
         return (
-          <ChartContainer key={key} config={config} className="h-56 w-full">
+          <ChartContainer key={key} config={config} className={`${chartHeight} w-full`}>
             <BarChart data={chartData}>
               <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
               <XAxis {...xAxisConfig} />
@@ -202,7 +213,7 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
         );
       case 'area':
         return (
-          <ChartContainer key={key} config={config} className="h-56 w-full">
+          <ChartContainer key={key} config={config} className={`${chartHeight} w-full`}>
             <AreaChart data={chartData}>
               <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
               <XAxis {...xAxisConfig} />
@@ -218,7 +229,7 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
         );
       case 'scatter':
         return (
-          <ChartContainer key={key} config={config} className="h-56 w-full">
+          <ChartContainer key={key} config={config} className={`${chartHeight} w-full`}>
             <ScatterChart data={chartData}>
               <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
               <XAxis {...xAxisConfig} />
@@ -246,14 +257,14 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
           return acc;
         }, []);
         return (
-          <ChartContainer key={key} config={config} className="h-56 w-full">
+          <ChartContainer key={key} config={config} className={`${chartHeight} w-full`}>
             <PieChart>
               <Pie
                 data={pieData}
                 cx="50%"
                 cy="50%"
-                outerRadius={90}
-                innerRadius={30}
+                outerRadius={isCompact ? 60 : 90}
+                innerRadius={isCompact ? 20 : 30}
                 fill={colors.primary}
                 dataKey="value"
                 label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
@@ -297,7 +308,7 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
   }
 
   return (
-    <div className="w-full h-full p-6 bg-gradient-to-br from-slate-50 to-blue-50 overflow-y-auto">
+    <div ref={containerRef} className="w-full h-full p-6 bg-gradient-to-br from-slate-50 to-blue-50 overflow-hidden">
       <div className="mb-6">
         <div className="flex items-center mb-4">
           <div className="w-1 h-8 bg-gradient-to-b from-blue-500 to-blue-600 rounded-full mr-4"></div>
@@ -306,23 +317,28 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
         <p className="text-gray-600">Interactive data visualization dashboard</p>
       </div>
       
-      <div className="flex-1">
+      <div className="flex-1 overflow-auto">
         <div 
-          className="flex gap-6 overflow-x-auto pb-6"
-          style={{ 
-            scrollbarWidth: 'thin',
-            scrollbarColor: '#cbd5e1 transparent'
+          className={`grid gap-6 ${layoutConfig.containerClass} transition-all duration-300 ease-in-out`}
+          style={{
+            gridTemplateRows: layoutConfig.rows > 1 ? `repeat(${layoutConfig.rows}, ${layoutConfig.cardHeight})` : layoutConfig.cardHeight,
+            minHeight: 'fit-content'
           }}
         >
           {charts.map((chart, index) => {
             const colors = getChartColors(index);
+            
+            // For mixed layout (3 charts on medium screens), handle special positioning
+            const gridColumnSpan = layoutConfig.layout === 'mixed' && charts.length === 3 ? 
+              (index === 2 ? 'col-span-2' : 'col-span-1') : '';
+            
             return (
               <ContextMenu key={chart.id}>
                  <ContextMenuTrigger>
-                   <Card className="flex-shrink-0 w-96 border-0 shadow-xl bg-white/90 backdrop-blur-sm overflow-hidden transform hover:scale-105 transition-all duration-300 relative">
+                   <Card className={`border-0 shadow-xl bg-white/90 backdrop-blur-sm overflow-hidden transform hover:scale-105 transition-all duration-300 relative ${gridColumnSpan}`}>
                      <div className={`bg-gradient-to-r ${colors.gradient} p-4 relative`}>
-                       <CardTitle className="text-lg font-bold text-white flex items-center">
-                         <BarChart3 className="w-5 h-5 mr-2" />
+                       <CardTitle className={`font-bold text-white flex items-center ${isCompact ? 'text-base' : 'text-lg'}`}>
+                         <BarChart3 className={`mr-2 ${isCompact ? 'w-4 h-4' : 'w-5 h-5'}`} />
                          {chart.title}
                        </CardTitle>
                        {/* Transparent overlay for Alt+Click fullscreen */}
@@ -339,7 +355,7 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
                        />
                      </div>
                      
-                      {/* Filter Controls */}
+                      {/* Filter Controls - Compact version for small screens */}
                       {Object.keys(chart.filters).length > 0 && (
                         <div className="bg-gray-50 p-3 border-b">
                           <div className="space-y-2">
@@ -347,7 +363,7 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
                               const uniqueValues = getUniqueValuesForColumn(column);
                               return (
                                 <div key={column} className="flex items-center gap-2">
-                                  <Label className="text-xs font-medium text-gray-700 min-w-fit">
+                                  <Label className={`font-medium text-gray-700 min-w-fit ${isCompact ? 'text-xs' : 'text-xs'}`}>
                                     {column}:
                                   </Label>
                                   <Popover>
@@ -355,7 +371,7 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
                                       <Button
                                         variant="outline"
                                         size="sm"
-                                        className="h-7 text-xs justify-between flex-1 font-normal"
+                                        className={`justify-between flex-1 font-normal ${isCompact ? 'h-6 text-xs' : 'h-7 text-xs'}`}
                                       >
                                         <span className="truncate">
                                           {selectedValues.length === 0
@@ -475,8 +491,8 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
                         </div>
                       )}
                      
-                     <CardContent className="p-4">
-                       <div className="overflow-hidden">
+                     <CardContent className={`overflow-hidden ${isCompact ? 'p-2' : 'p-4'}`}>
+                       <div className="overflow-hidden h-full">
                          {renderChart(chart, index)}
                        </div>
                      </CardContent>

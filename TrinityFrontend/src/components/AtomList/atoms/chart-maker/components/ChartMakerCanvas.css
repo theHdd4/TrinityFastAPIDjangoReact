@@ -5,4 +5,66 @@
 
 .filter-scroll-area [data-radix-scroll-area-viewport] {
   max-height: 200px;
-} 
+}
+
+/* Responsive Chart Grid */
+.chart-grid-container {
+  transition: grid-template-columns 0.3s ease-in-out, grid-template-rows 0.3s ease-in-out;
+}
+
+.chart-card {
+  transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+}
+
+.chart-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+}
+
+/* Smooth layout transitions */
+@media (prefers-reduced-motion: no-preference) {
+  .chart-grid-container {
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  
+  .chart-card {
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+}
+
+/* Grid responsive utilities */
+.responsive-chart-grid {
+  display: grid;
+  gap: 1.5rem;
+  width: 100%;
+}
+
+/* Ensure charts don't overflow their containers */
+.chart-container {
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* Responsive text scaling */
+@media (max-width: 768px) {
+  .chart-title {
+    font-size: 0.875rem;
+  }
+  
+  .chart-header {
+    padding: 0.75rem;
+  }
+  
+  .chart-content {
+    padding: 0.5rem;
+  }
+}
+
+/* Accessibility improvements */
+@media (prefers-reduced-motion: reduce) {
+  .chart-grid-container,
+  .chart-card {
+    transition: none;
+  }
+}
