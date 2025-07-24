@@ -199,18 +199,16 @@ const ChartMakerAtom: React.FC<Props> = ({ atomId }) => {
     if (!settings.fileId) return;
     settings.charts.forEach(async (chart) => {
       // Only consider charts that are not rendered yet
-      if (!chart.chartRendered && chart.xAxis && chart.yAxis) {
-        const filterColumns = Object.keys(chart.filters || {});
-        // If there are filters, all must have at least one value selected
-        const allFiltersSelected = filterColumns.length === 0 || filterColumns.every(
+      const filterColumns = Object.keys(chart.filters || {});
+      // Only auto-render if at least one filter column is selected
+      if (!chart.chartRendered && chart.xAxis && chart.yAxis && filterColumns.length > 0) {
+        // All filter columns must have at least one value selected
+        const allFiltersSelected = filterColumns.every(
           (col) => Array.isArray(chart.filters[col]) && chart.filters[col].length > 0
         );
         if (allFiltersSelected) {
           // Trigger chart rendering for this chart
-          // Use the same logic as handleChartTypeChange, but for current type
-          // Prevent duplicate renders by setting chartLoading
           if (!chart.chartLoading) {
-            // Set chartLoading to true for this chart
             updateSettings(atomId, {
               charts: settings.charts.map(c =>
                 c.id === chart.id ? { ...c, chartLoading: true } : c
