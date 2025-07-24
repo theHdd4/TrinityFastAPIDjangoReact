@@ -34,7 +34,7 @@ import {
   DEFAULT_FEATURE_OVERVIEW_SETTINGS,
   DataUploadSettings,
   ColumnClassifierColumn,
-} from '../store/laboratoryStore';
+} from '../../store/laboratoryStore';
 import { deriveWorkflowMolecules, WorkflowMolecule } from './helpers';
 
 

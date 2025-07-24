@@ -1,8 +1,38 @@
-import asyncio, json, types, sys
+import asyncio, json, types, importlib.util, sys
 from pathlib import Path
+
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "app"))
-import app.session_state as ss
+
+# Create stub modules so session_state can resolve its package imports without
+# pulling in the full FastAPI application on import.
+sys.modules.setdefault("app", types.ModuleType("app"))
+sys.modules.setdefault("app.features", types.ModuleType("app.features"))
+sys.modules.setdefault(
+    "app.features.feature_overview", types.ModuleType("app.features.feature_overview")
+)
+sys.modules.setdefault(
+    "app.DataStorageRetrieval", types.ModuleType("app.DataStorageRetrieval")
+)
+fo_deps_stub = types.ModuleType("app.features.feature_overview.deps")
+fo_deps_stub.redis_client = None
+sys.modules["app.features.feature_overview.deps"] = fo_deps_stub
+
+db_stub = types.ModuleType("app.DataStorageRetrieval.db")
+db_stub.upsert_project_state = lambda *a, **k: None
+db_stub.fetch_project_state = lambda *a, **k: None
+sys.modules["app.DataStorageRetrieval.db"] = db_stub
+
+minio_stub = types.ModuleType("app.DataStorageRetrieval.minio_utils")
+minio_stub.get_client = lambda: None
+minio_stub.MINIO_BUCKET = "bucket"
+sys.modules["app.DataStorageRetrieval.minio_utils"] = minio_stub
+
+spec = importlib.util.spec_from_file_location(
+    "app.session_state", ROOT / "app" / "session_state.py"
+)
+ss = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = ss
+spec.loader.exec_module(ss)
 
 class DummyRedis:
     def __init__(self):

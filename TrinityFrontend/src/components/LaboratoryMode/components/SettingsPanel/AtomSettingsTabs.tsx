@@ -3,7 +3,7 @@ import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Sliders, Eye, BarChart2 } from 'lucide-react';
-import { TextBoxSettings } from '../store/laboratoryStore';
+import { TextBoxSettings } from '../../store/laboratoryStore';
 
 interface Props {
   tab: string;

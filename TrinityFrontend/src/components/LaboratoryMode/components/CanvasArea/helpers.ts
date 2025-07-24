@@ -1,5 +1,5 @@
 import { molecules } from '@/components/MoleculeList/data';
-import { LayoutCard } from '../store/laboratoryStore';
+import { LayoutCard } from '../../store/laboratoryStore';
 
 export interface WorkflowMolecule {
   moleculeId: string;
