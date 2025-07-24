@@ -148,6 +148,7 @@ async def get_object_prefix(
     project_id: str = "",
     *,
     client_name: str = "",
+    app_name: str = "",
     project_name: str = "",
 ) -> str:
     """Return the MinIO prefix for the current client/app/project."""
