@@ -1,5 +1,6 @@
 """Redis based environment variable store with namespacing."""
 
+import os
 from typing import Dict, Optional
 
 from django.db import transaction
@@ -14,13 +15,23 @@ SET_NAMESPACE = "envkeys"
 TTL = 3600  # 1 hour TTL for cache entries
 
 
-def _ns(client_id: str, app_id: str, project_id: str,
-        client_name: str = "", app_name: str = "", project_name: str = "") -> str:
+def _ns(
+    user_id: str,
+    client_id: str,
+    app_id: str,
+    project_id: str,
+    client_name: str = "",
+    app_name: str = "",
+    project_name: str = "",
+) -> str:
     """Return namespace string for the environment."""
-    return f"{client_id}:{app_id}:{project_id}:{client_name}:{app_name}:{project_name}"
+    return (
+        f"{user_id}:{client_id}:{app_id}:{project_id}:{client_name}:{app_name}:{project_name}"
+    )
 
 
 def _env_key(
+    user_id: str,
     client_id: str,
     app_id: str,
     project_id: str,
@@ -29,11 +40,12 @@ def _env_key(
     app_name: str = "",
     project_name: str = "",
 ) -> str:
-    ns = _ns(client_id, app_id, project_id, client_name, app_name, project_name)
+    ns = _ns(user_id, client_id, app_id, project_id, client_name, app_name, project_name)
     return f"{ENV_NAMESPACE}:{ns}:{key}"
 
 
 def _set_key(
+    user_id: str,
     client_id: str,
     app_id: str,
     project_id: str,
@@ -41,11 +53,12 @@ def _set_key(
     app_name: str = "",
     project_name: str = "",
 ) -> str:
-    ns = _ns(client_id, app_id, project_id, client_name, app_name, project_name)
+    ns = _ns(user_id, client_id, app_id, project_id, client_name, app_name, project_name)
     return f"{SET_NAMESPACE}:{ns}"
 
 
 def _fetch_from_db(
+    user_id: str,
     client_id: str,
     app_id: str,
     project_id: str,
@@ -53,7 +66,7 @@ def _fetch_from_db(
     app_name: str = "",
     project_name: str = "",
 ) -> Dict[str, str]:
-    qs = UserEnvironmentVariable.objects.all()
+    qs = UserEnvironmentVariable.objects.filter(user_id=user_id)
     if client_id or app_id or project_id:
         qs = qs.filter(client_id=client_id, app_id=app_id, project_id=project_id)
     elif client_name and project_name:
@@ -71,13 +84,16 @@ def get_env_vars(
     app_id: str = "",
     project_id: str = "",
     *,
+    user_id: str | None = None,
     client_name: str = "",
     app_name: str = "",
     project_name: str = "",
     use_cache: bool = True,
 ) -> Dict[str, str]:
     """Read environment variables using read-through cache pattern."""
-    set_key = _set_key(client_id, app_id, project_id, client_name, app_name, project_name)
+    if user_id is None:
+        user_id = os.getenv("USER_ID", "")
+    set_key = _set_key(user_id, client_id, app_id, project_id, client_name, app_name, project_name)
     if use_cache:
         keys = list(redis_client.smembers(set_key))
         if keys:
@@ -90,11 +106,11 @@ def get_env_vars(
                 return result
 
     # Fallback to DB
-    env = _fetch_from_db(client_id, app_id, project_id, client_name, app_name, project_name)
+    env = _fetch_from_db(user_id, client_id, app_id, project_id, client_name, app_name, project_name)
     if env and use_cache:
         pipe = redis_client.pipeline()
         for k, v in env.items():
-            full_key = _env_key(client_id, app_id, project_id, k, client_name, app_name, project_name)
+            full_key = _env_key(user_id, client_id, app_id, project_id, k, client_name, app_name, project_name)
             pipe.set(full_key, v, ex=TTL)
             pipe.sadd(set_key, full_key)
         pipe.expire(set_key, TTL)
@@ -115,6 +131,7 @@ def set_env_var(
     project_name: str = "",
 ) -> UserEnvironmentVariable:
     """Write-through cache update for environment variables."""
+    user_id = str(getattr(user, "id", user))
     with transaction.atomic():
         obj, _ = UserEnvironmentVariable.objects.update_or_create(
             user=user,
@@ -131,8 +148,8 @@ def set_env_var(
             },
         )
 
-    full_key = _env_key(client_id, app_id, project_id, key, client_name, app_name, project_name)
-    set_key = _set_key(client_id, app_id, project_id, client_name, app_name, project_name)
+    full_key = _env_key(user_id, client_id, app_id, project_id, key, client_name, app_name, project_name)
+    set_key = _set_key(user_id, client_id, app_id, project_id, client_name, app_name, project_name)
     redis_client.set(full_key, value, ex=TTL)
     redis_client.sadd(set_key, full_key)
     redis_client.expire(set_key, TTL)
@@ -140,6 +157,7 @@ def set_env_var(
 
 
 def delete_env_var(
+    user_id: str,
     client_id: str,
     app_id: str,
     project_id: str,
@@ -151,15 +169,20 @@ def delete_env_var(
 ) -> None:
     """Delete an environment variable from DB and cache."""
     UserEnvironmentVariable.objects.filter(
-        client_id=client_id, app_id=app_id, project_id=project_id, key=key
+        user_id=user_id,
+        client_id=client_id,
+        app_id=app_id,
+        project_id=project_id,
+        key=key,
     ).delete()
-    full_key = _env_key(client_id, app_id, project_id, key, client_name, app_name, project_name)
-    set_key = _set_key(client_id, app_id, project_id, client_name, app_name, project_name)
+    full_key = _env_key(user_id, client_id, app_id, project_id, key, client_name, app_name, project_name)
+    set_key = _set_key(user_id, client_id, app_id, project_id, client_name, app_name, project_name)
     redis_client.delete(full_key)
     redis_client.srem(set_key, full_key)
 
 
 def invalidate_env(
+    user_id: str,
     client_id: str,
     app_id: str,
     project_id: str,
@@ -169,7 +192,7 @@ def invalidate_env(
     project_name: str = "",
 ) -> None:
     """Remove all cached keys for given namespace."""
-    set_key = _set_key(client_id, app_id, project_id, client_name, app_name, project_name)
+    set_key = _set_key(user_id, client_id, app_id, project_id, client_name, app_name, project_name)
     keys = list(redis_client.smembers(set_key))
     if keys:
         redis_client.delete(*keys)

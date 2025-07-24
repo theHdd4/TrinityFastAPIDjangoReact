@@ -16,6 +16,7 @@ def load_env_vars(user) -> dict:
         os.getenv("CLIENT_ID", ""),
         os.getenv("APP_ID", ""),
         os.getenv("PROJECT_ID", ""),
+        user_id=str(getattr(user, "id", user)),
         client_name=os.getenv("CLIENT_NAME", ""),
         app_name=os.getenv("APP_NAME", ""),
         project_name=os.getenv("PROJECT_NAME", ""),
@@ -77,6 +78,7 @@ def get_env_dict(user):
         os.getenv("CLIENT_ID", ""),
         os.getenv("APP_ID", ""),
         os.getenv("PROJECT_ID", ""),
+        user_id=str(getattr(user, "id", user)),
         client_name=os.getenv("CLIENT_NAME", ""),
         app_name=os.getenv("APP_NAME", ""),
         project_name=os.getenv("PROJECT_NAME", ""),
@@ -106,16 +108,20 @@ async def get_env_vars(
     app_id: str = "",
     project_id: str = "",
     *,
+    user_id: str | None = None,
     client_name: str = "",
     app_name: str = "",
     project_name: str = "",
     use_cache: bool = True,
 ) -> dict:
     """Fetch environment variables using Redis-backed cache."""
+    if user_id is None:
+        user_id = os.getenv("USER_ID", "")
     env = await sync_to_async(cache_get_env_vars)(
         client_id,
         app_id,
         project_id,
+        user_id=user_id,
         client_name=client_name,
         app_name=app_name,
         project_name=project_name,
