@@ -15,7 +15,8 @@ async def create_text(
     now = datetime.now(timezone.utc)
     doc["createdAt"] = doc["updatedAt"] = now
     try:
-        result = await texts.insert_one(doc)  
+        result = await texts.insert_one(doc)
+        print(f"📦 Stored in {texts.name}: {doc}")
         return {
             "_id": str(result.inserted_id),
             "message": "Submitted Successfully"
@@ -41,10 +42,11 @@ async def update_text(
 ):
     doc = payload.model_dump(exclude_unset=True)
     doc["updatedAt"] = datetime.now(timezone.utc)
-    result = await texts.update_one(  
-        {"textId": text_id, "status": {"$ne": "archived"}},  
+    result = await texts.update_one(
+        {"textId": text_id, "status": {"$ne": "archived"}},
         {"$set": doc}
     )
+    print(f"📦 Stored in {texts.name}: {doc}")
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Not found")
 
@@ -55,10 +57,12 @@ async def delete_text(
     text_id: str,
     texts: AsyncIOMotorCollection = Depends(get_texts)
 ):
+    now = datetime.now(timezone.utc)
     result = await texts.update_one(
         {"textId": text_id, "status": {"$ne": "archived"}},
-        {"$set": {"status": "archived", "updatedAt": datetime.now(timezone.utc)}}
+        {"$set": {"status": "archived", "updatedAt": now}}
     )
+    print(f"📦 Stored in {texts.name}: {{'status': 'archived', 'updatedAt': now}}")
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Not found")
     return {"message": "Data deleted successfully"}

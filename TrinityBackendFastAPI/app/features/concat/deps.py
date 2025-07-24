@@ -132,6 +132,7 @@ def save_concat_result_to_minio(key: str, df: pd.DataFrame):
 
 async def save_concat_metadata_to_mongo(collection, metadata: dict):
     await collection.insert_one(metadata)
+    print(f"📦 Stored in {collection.name}: {metadata}")
 
 __all__ = [
     'minio_client',

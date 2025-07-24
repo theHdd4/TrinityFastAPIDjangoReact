@@ -11,6 +11,7 @@ async def archive_card(card: dict, collection: AsyncIOMotorCollection = Depends(
     doc = card.copy()
     doc["archivedAt"] = datetime.utcnow()
     await collection.insert_one(doc)
+    print(f"📦 Stored in deleted_cards: {doc}")
     return {"archived": True}
 
 @router.get("/cards/archive/{card_id}")

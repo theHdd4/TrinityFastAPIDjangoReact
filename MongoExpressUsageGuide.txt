@@ -1,0 +1,28 @@
+# Mongo Express Usage Guide
+
+Mongo Express provides a web interface for inspecting your MongoDB databases.
+Both the development and production stacks include a `mongo-express` service
+that connects to the `mongo` container.
+
+## Accessing the UI
+- **Production**: `http://localhost:8082`
+- **Development**: `http://localhost:8083`
+
+Log in with the credentials `admin`/`admin`.
+These are configured via the `ME_CONFIG_BASICAUTH_USERNAME` and
+`ME_CONFIG_BASICAUTH_PASSWORD` variables in the compose files.
+
+## Browsing databases and collections
+After logging in you will see the list of databases on the left sidebar.
+Select either `trinity_prod` or `trinity_dev` depending on which stack is
+running. Expanding a database reveals all collections (tables).
+
+Click a collection name to view documents. Use the **Query** box at the top of
+ the page to filter results with standard MongoDB query syntax, for example:
+```json
+{ "user": "alice" }
+```
+The **Add Document** button lets you insert JSON directly.
+
+Mongo Express communicates directly with MongoDB so any changes you make are
+immediately reflected in the running containers.

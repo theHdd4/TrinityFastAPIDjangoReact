@@ -24,10 +24,12 @@ def _ns(
     app_name: str = "",
     project_name: str = "",
 ) -> str:
-    """Return namespace string for the environment."""
-    return (
-        f"{user_id}:{client_id}:{app_id}:{project_id}:{client_name}:{app_name}:{project_name}"
-    )
+    """Return namespace string for the environment.
+
+    The key is composed purely from the identifiers so caches are
+    shared across users for the same client/app/project.
+    """
+    return f"{client_id}:{app_id}:{project_id}"
 
 
 def _env_key(

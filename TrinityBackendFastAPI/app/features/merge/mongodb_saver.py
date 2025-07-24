@@ -10,3 +10,4 @@ db = client[settings.MONGO_DB]
 
 async def save_merged_data(collection_name: str, data: dict):
     await db[collection_name].insert_one(data)
+    print(f"📦 Stored in {collection_name}: {data}")
