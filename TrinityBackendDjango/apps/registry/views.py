@@ -2,7 +2,7 @@ from rest_framework import viewsets, permissions
 from rest_framework.response import Response
 import os
 from apps.accounts.views import CsrfExemptSessionAuthentication
-from apps.accounts.utils import save_env_var, get_env_dict
+from apps.accounts.utils import save_env_var, get_env_dict, load_env_vars
 from .models import App, Project, Session, LaboratoryAction, ArrowDataset
 from .serializers import (
     AppSerializer,
@@ -29,8 +29,10 @@ class AppViewSet(viewsets.ModelViewSet):
         return super().get_permissions()
 
     def retrieve(self, request, *args, **kwargs):
+        load_env_vars(request.user)
         app_obj = self.get_object()
         os.environ["APP_NAME"] = app_obj.slug
+        os.environ["APP_ID"] = os.environ.get("APP_ID") or f"{app_obj.slug}_{app_obj.id}"
         print(f"✅ app selected: APP_NAME={os.environ['APP_NAME']}")
         save_env_var(request.user, "CLIENT_NAME", os.environ.get("CLIENT_NAME", ""))
         save_env_var(request.user, "CLIENT_ID", os.environ.get("CLIENT_ID", ""))
@@ -75,6 +77,7 @@ class ProjectViewSet(viewsets.ModelViewSet):
         serializer.save(owner=self.request.user)
 
     def retrieve(self, request, *args, **kwargs):
+        load_env_vars(request.user)
         project_obj = self.get_object()
         os.environ["PROJECT_NAME"] = project_obj.name
         os.environ["PROJECT_ID"] = f"{project_obj.name}_{project_obj.id}"
@@ -94,6 +97,7 @@ class ProjectViewSet(viewsets.ModelViewSet):
         return Response(data)
 
     def perform_update(self, serializer):
+        load_env_vars(self.request.user)
         project = serializer.save()
         if "name" in serializer.validated_data:
             os.environ["PROJECT_NAME"] = project.name

@@ -6,6 +6,14 @@ from asgiref.sync import sync_to_async
 from .models import UserEnvironmentVariable
 
 
+def load_env_vars(user) -> dict:
+    """Load saved environment variables for the user into ``os.environ``."""
+    envs = get_env_dict(user)
+    for k, v in envs.items():
+        os.environ[k] = v
+    return envs
+
+
 def save_env_var(user, key, value) -> None:
     """Create or update an environment variable record for the user."""
     client_name = os.environ.get("CLIENT_NAME", "")
