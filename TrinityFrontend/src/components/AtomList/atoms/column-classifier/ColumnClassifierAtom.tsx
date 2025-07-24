@@ -1,5 +1,4 @@
 import React from 'react';
-import { useToast } from '@/hooks/use-toast';
 
 import ColumnClassifierCanvas from './components/ColumnClassifierCanvas';
 import ColumnClassifierVisualisation from './components/ColumnClassifierVisualisation';
@@ -13,7 +12,6 @@ import {
   ColumnClassifierColumn
 } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { CLASSIFIER_API } from '@/lib/api';
-import { fetchDimensionMapping } from '@/lib/dimensions';
 
 export type ColumnData = ColumnClassifierColumn;
 export type FileClassification = ColumnClassifierFile;
@@ -29,27 +27,6 @@ const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
     ...DEFAULT_COLUMN_CLASSIFIER_SETTINGS
   };
   const classifierData = settings.data;
-  const { toast } = useToast();
-
-  React.useEffect(() => {
-    const loadMapping = async () => {
-      const mapping = await fetchDimensionMapping();
-      if (Object.keys(mapping).length && classifierData.files.length > 0) {
-        const file = classifierData.files[0];
-        const updatedFile: ColumnClassifierFile = {
-          ...file,
-          customDimensions: mapping,
-        };
-        updateSettings(atomId, {
-          data: { files: [updatedFile], activeFileIndex: 0 },
-          dimensions: Object.keys(mapping),
-        });
-      }
-    };
-    if (classifierData.files.length > 0) {
-      loadMapping();
-    }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleClassification = (file: FileClassification) => {
     updateSettings(atomId, { data: { files: [file], activeFileIndex: 0 } });
@@ -139,30 +116,12 @@ const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
     if (projectId) {
       form.append('project_id', String(projectId));
     }
-    console.log('📦 sending identifier assignments', projectId, currentFile.customDimensions);
-    const res = await fetch(`${CLASSIFIER_API}/assign_identifiers_to_dimensions`, {
+    console.log('Saving assignments for project', projectId, currentFile.customDimensions);
+    await fetch(`${CLASSIFIER_API}/assign_identifiers_to_dimensions`, {
       method: 'POST',
       body: form,
       credentials: 'include'
     });
-    console.log('✅ dimension assignment response', res.status);
-    if (res.ok) {
-      toast({ title: 'Dimensions Saved Successfully' });
-      try {
-        const json = await res.json();
-        console.log('📝 assignment save result', json);
-      } catch (err) {
-        console.warn('assignment save result parse error', err);
-      }
-    } else {
-      toast({ title: 'Unable to Save Dimensions', variant: 'destructive' });
-      try {
-        const txt = await res.text();
-        console.warn('assignment save error response', txt);
-      } catch (err) {
-        console.warn('assignment save error parse fail', err);
-      }
-    }
   };
 
   const saveDisabled =

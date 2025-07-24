@@ -1,14 +1,13 @@
 
 import React, { useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { Play, Save, Share2, Undo2, AlertTriangle, List } from 'lucide-react';
+import { Play, Save, Share2, Undo2, AlertTriangle } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import Header from '@/components/Header';
 import { safeStringify } from '@/utils/safeStringify';
 import CanvasArea from './components/CanvasArea';
 import AuxiliaryMenu from './components/AuxiliaryMenu';
 import AuxiliaryMenuLeft from './components/AuxiliaryMenuLeft';
-import FloatingNavigationList from './components/FloatingNavigationList';
 import { useExhibitionStore } from '@/components/ExhibitionMode/store/exhibitionStore';
 import { REGISTRY_API, LAB_ACTIONS_API } from '@/lib/api';
 import { useLaboratoryStore } from './store/laboratoryStore';
@@ -19,7 +18,6 @@ const LaboratoryMode = () => {
   const [cardExhibited, setCardExhibited] = useState<boolean>(false);
   const [auxActive, setAuxActive] = useState<'settings' | 'frames' | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [showFloatingNavigationList, setShowFloatingNavigationList] = useState(true);
   const { toast } = useToast();
   const { cards, setCards } = useExhibitionStore();
   const setLabCards = useLaboratoryStore(state => state.setCards);
@@ -107,8 +105,6 @@ const LaboratoryMode = () => {
               state: { laboratory_config: labConfig },
             }),
           });
-          localStorage.setItem('laboratory-layout-cards', safeStringify(cards));
-          localStorage.setItem('laboratory-config', safeStringify(labConfig));
         } catch (apiError) {
           console.error('API error during save:', apiError);
           // Don't show error for API failures, just log them
@@ -203,15 +199,6 @@ const LaboratoryMode = () => {
               <Save className="w-4 h-4 mr-2" />
               Save
             </Button>
-            <Button 
-              variant="outline" 
-              size="sm" 
-              className="border-gray-200 hover:bg-gray-50 text-gray-700 font-medium"
-              onClick={() => setShowFloatingNavigationList(!showFloatingNavigationList)}
-            >
-              <List className="w-4 h-4 mr-2" />
-              {showFloatingNavigationList ? 'Hide' : 'Show'} Navigation List
-            </Button>
             <Button variant="outline" size="sm" className="border-gray-200 hover:bg-gray-50 text-gray-700 font-medium">
               <Share2 className="w-4 h-4 mr-2" />
               Share
@@ -245,10 +232,6 @@ const LaboratoryMode = () => {
           cardExhibited={cardExhibited}
           active={auxActive}
           onActiveChange={setAuxActive}
-        />
-        <FloatingNavigationList
-          isVisible={showFloatingNavigationList}
-          onClose={() => setShowFloatingNavigationList(false)}
         />
       </div>
     </div>

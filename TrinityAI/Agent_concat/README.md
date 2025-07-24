@@ -4,11 +4,11 @@ Smart concatenation helper for the Concat atom. It uses an LLM to suggest files 
 
 ## Endpoints
 
-- `POST http://10.2.1.242:8002/concat` – process a prompt and return concatenation instructions.
-- `GET http://10.2.1.242:8002/history/{session_id}` – retrieve chat history for a session.
-- `GET http://10.2.1.242:8002/session_details/{session_id}` – debug details for a session.
-- `GET http://10.2.1.242:8002/files` – list available files from storage.
-- `GET http://10.2.1.242:8002/health` – service health status.
+- `POST http://192.168.1.98:8002/concat` – process a prompt and return concatenation instructions.
+- `GET http://192.168.1.98:8002/history/{session_id}` – retrieve chat history for a session.
+- `GET http://192.168.1.98:8002/session_details/{session_id}` – debug details for a session.
+- `GET http://192.168.1.98:8002/files` – list available files from storage.
+- `GET http://192.168.1.98:8002/health` – service health status.
 
 ## Usage
 

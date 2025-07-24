@@ -20,6 +20,7 @@ import FeatureOverviewProperties from '@/components/AtomList/atoms/feature-overv
 import ConcatProperties from '@/components/AtomList/atoms/concat/components/properties/ConcatProperties';
 import MergeProperties from '@/components/AtomList/atoms/merge/components/properties/MergeProperties';
 import ColumnClassifierProperties from '@/components/AtomList/atoms/column-classifier/components/properties/ColumnClassifierProperties';
+import ChartMakerProperties from '@/components/AtomList/atoms/chart-maker/components/properties/ChartMakerProperties';
 
 interface SettingsPanelProps {
   isCollapsed: boolean;
@@ -100,6 +101,8 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
             <MergeProperties atomId={selectedAtomId} />
           ) : selectedAtomId && atom?.atomId === 'column-classifier' ? (
             <ColumnClassifierProperties atomId={selectedAtomId} />
+          ) : selectedAtomId && atom?.atomId === 'chart-maker' ? (
+            <ChartMakerProperties atomId={selectedAtomId} />
           ) : (
           <>
           <Tabs value={tab} onValueChange={setTab} className="w-full">

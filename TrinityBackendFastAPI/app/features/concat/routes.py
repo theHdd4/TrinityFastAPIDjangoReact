@@ -340,13 +340,18 @@ async def get_concat_data(
 ):
     """Retrieve concatenated data by concat_id."""
     try:
-        concat_key = f"{concat_id}_concat.arrow"
+        concat_key = f"{concat_id}_concat.csv"
 
         # Try Redis cache first
         content = redis_client.get(concat_key)
         if content is not None:
-            reader = ipc.RecordBatchFileReader(pa.BufferReader(content))
-            concat_df = reader.read_all().to_pandas()
+            # Fix linter error: ensure content is bytes
+            if isinstance(content, bytes):
+                concat_df = pd.read_csv(io.BytesIO(content))
+            elif isinstance(content, str):
+                concat_df = pd.read_csv(io.BytesIO(content.encode('utf-8')))
+            else:
+                raise HTTPException(status_code=500, detail="Unknown content type in Redis cache")
             concat_df.columns = concat_df.columns.str.lower()
             return {
                 "row_count": len(concat_df),
@@ -355,9 +360,7 @@ async def get_concat_data(
 
         # Fallback to MinIO
         concat_obj = minio_client.get_object(MINIO_BUCKET, concat_key)
-        data = concat_obj.read()
-        reader = ipc.RecordBatchFileReader(pa.BufferReader(data))
-        concat_df = reader.read_all().to_pandas()
+        concat_df = pd.read_csv(io.BytesIO(concat_obj.read()))
         concat_df.columns = concat_df.columns.str.lower()
 
         return {

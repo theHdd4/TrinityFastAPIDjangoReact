@@ -1,12 +1,12 @@
-import { create } from "zustand";
-import { safeStringify } from "@/utils/safeStringify";
+import { create } from 'zustand';
+import { safeStringify } from '@/utils/safeStringify';
 
 export interface TextBoxSettings {
-  format: "quill-delta" | "markdown" | "html" | "plain";
+  format: 'quill-delta' | 'markdown' | 'html' | 'plain';
   content: string;
   allow_variables: boolean;
   max_chars: number;
-  text_align: "left" | "center" | "right" | "justify";
+  text_align: 'left' | 'center' | 'right' | 'justify';
   font_size: number;
   font_family: string;
   text_color: string;
@@ -14,26 +14,26 @@ export interface TextBoxSettings {
   italics: boolean;
   underline: boolean;
   headline: string;
-  slide_layout: "full" | "sidebar" | "note-callout";
-  transition_effect: "none" | "fade" | "typewriter";
+  slide_layout: 'full' | 'sidebar' | 'note-callout';
+  transition_effect: 'none' | 'fade' | 'typewriter';
   lock_content: boolean;
 }
 
 export const DEFAULT_TEXTBOX_SETTINGS: TextBoxSettings = {
-  format: "plain",
-  content: "",
+  format: 'plain',
+  content: '',
   allow_variables: false,
   max_chars: 100,
-  text_align: "left",
+  text_align: 'left',
   font_size: 14,
-  font_family: "Inter",
-  text_color: "#000000",
+  font_family: 'Inter',
+  text_color: '#000000',
   bold: false,
   italics: false,
   underline: false,
-  headline: "",
-  slide_layout: "full",
-  transition_effect: "none",
+  headline: '',
+  slide_layout: 'full',
+  transition_effect: 'none',
   lock_content: false,
 };
 
@@ -48,24 +48,23 @@ export interface DataUploadSettings {
   validatorId?: string;
   requiredFiles?: string[];
   validations?: Record<string, any>;
+  classification?: Record<string, { identifiers: string[]; measures: string[] }>;
   fileMappings?: Record<string, string>;
-  /** Map of displayed master file names to the original names known by the backend */
-  fileKeyMap?: Record<string, string>;
 }
 
 export const DEFAULT_DATAUPLOAD_SETTINGS: DataUploadSettings = {
-  masterFile: "",
+  masterFile: '',
   fileValidation: true,
   columnConfig: {},
-  frequency: "monthly",
+  frequency: 'monthly',
   dimensions: {},
   measures: {},
   uploadedFiles: [],
   validatorId: undefined,
   requiredFiles: [],
   validations: {},
-  fileMappings: {},
-  fileKeyMap: {},
+  classification: {},
+  fileMappings: {}
 };
 
 export interface FeatureOverviewSettings {
@@ -85,14 +84,13 @@ export interface FeatureOverviewSettings {
   statDataMap?: Record<string, any>;
   activeMetric?: string;
   activeRow?: number | null;
-  dimensionMap?: Record<string, string[]>;
 }
 
 export const DEFAULT_FEATURE_OVERVIEW_SETTINGS: FeatureOverviewSettings = {
   selectedColumns: [],
   hierarchicalView: true,
-  dataSource: "",
-  csvDisplay: "",
+  dataSource: '',
+  csvDisplay: '',
   filterCriteria: {},
   columnSummary: [],
   allColumns: [],
@@ -100,12 +98,11 @@ export const DEFAULT_FEATURE_OVERVIEW_SETTINGS: FeatureOverviewSettings = {
   marketDims: [],
   productDims: [],
   yAxes: [],
-  xAxis: "date",
+  xAxis: 'date',
   skuTable: [],
   statDataMap: {},
-  activeMetric: "",
-  activeRow: null,
-  dimensionMap: {},
+  activeMetric: '',
+  activeRow: null
 };
 
 export interface ConcatSettings {
@@ -120,15 +117,15 @@ export interface ConcatSettings {
 export const DEFAULT_CONCAT_SETTINGS: ConcatSettings = {
   file1: null,
   file2: null,
-  direction: "vertical",
+  direction: 'vertical',
   performConcat: false,
   concatResults: undefined,
-  concatId: undefined,
+  concatId: undefined
 };
 
 export interface ColumnClassifierColumn {
   name: string;
-  category: "identifiers" | "measures" | "unclassified" | string;
+  category: 'identifiers' | 'measures' | 'unclassified' | string;
 }
 
 export interface ColumnClassifierFile {
@@ -153,12 +150,74 @@ export interface ColumnClassifierSettings {
 export const DEFAULT_COLUMN_CLASSIFIER_SETTINGS: ColumnClassifierSettings = {
   data: {
     files: [],
-    activeFileIndex: 0,
+    activeFileIndex: 0
   },
-  validatorId: "",
-  fileKey: "",
+  validatorId: '',
+  fileKey: '',
   dimensions: [],
-  assignments: {},
+  assignments: {}
+};
+
+export interface ChartMakerData {
+  file: File;
+  columns: string[];
+  allColumns: string[];
+  uniqueValuesByColumn: Record<string, string[]>;
+}
+
+export interface ChartMakerConfig {
+  id: string;
+  title: string;
+  type: 'line' | 'bar' | 'area' | 'pie' | 'scatter';
+  xAxis: string;
+  yAxis: string;
+  filters: Record<string, string[]>;
+  filteredData?: Record<string, any>[]; // Store filtered data for this specific chart
+  chartConfig?: any; // Store the recharts config returned from backend
+  lastUpdateTime?: number; // Timestamp of last update (optional)
+}
+
+export interface ChartMakerSettings {
+  uploadedData: any; // File, columns, and uniqueValuesByColumn
+  fileId?: string; // Backend file ID for API calls
+  numberOfCharts: number;
+  charts: ChartMakerConfig[];
+  chartResponse?: any; // Raw response from the chart API
+  processedChartData?: any[]; // Processed data for recharts
+  chartRendered?: boolean; // Whether the chart has been rendered
+  lastUpdateTime?: number; // Timestamp of last update
+  loading?: {
+    uploading: boolean;
+    fetchingColumns: boolean;
+    fetchingUniqueValues: boolean;
+    filtering: boolean;
+  };
+  error?: string; // Error message if any operation fails
+}
+
+export const DEFAULT_CHART_MAKER_SETTINGS: ChartMakerSettings = {
+  uploadedData: null,
+  fileId: undefined,
+  numberOfCharts: 1,
+  charts: [{
+    id: '1',
+    title: 'Chart 1',
+    type: 'line',
+    xAxis: '',
+    yAxis: '',
+    filters: {}
+  }],
+  chartResponse: null,
+  processedChartData: [],
+  chartRendered: false,
+  lastUpdateTime: 0,
+  loading: {
+    uploading: false,
+    fetchingColumns: false,
+    fetchingUniqueValues: false,
+    filtering: false,
+  },
+  error: undefined
 };
 
 export interface DroppedAtom {
@@ -167,8 +226,6 @@ export interface DroppedAtom {
   title: string;
   category: string;
   color: string;
-  llm?: string;
-  source?: 'ai' | 'manual';
   settings?: any;
 }
 
@@ -195,26 +252,26 @@ export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
   },
 
   updateAtomSettings: (atomId: string, settings: any) => {
-    set((state) => {
-      const updatedCards = state.cards.map((card) => ({
+    set(state => {
+      const updatedCards = state.cards.map(card => ({
         ...card,
-        atoms: card.atoms.map((atom) =>
+        atoms: card.atoms.map(atom =>
           atom.id === atomId
             ? { ...atom, settings: { ...(atom.settings || {}), ...settings } }
-            : atom,
-        ),
+            : atom
+        )
       }));
       return { cards: updatedCards };
     });
   },
   getAtom: (atomId) => {
     for (const card of get().cards) {
-      const atom = card.atoms.find((a) => a.id === atomId);
+      const atom = card.atoms.find(a => a.id === atomId);
       if (atom) return atom;
     }
     return undefined;
   },
   reset: () => {
     set({ cards: [] });
-  },
+  }
 }));

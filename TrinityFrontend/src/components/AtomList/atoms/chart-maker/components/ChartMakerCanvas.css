@@ -1,0 +1,8 @@
+.filter-scroll-area {
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.filter-scroll-area [data-radix-scroll-area-viewport] {
+  max-height: 200px;
+} 

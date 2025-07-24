@@ -1,0 +1,86 @@
+{
+  "validator_atom_id": "validator-1753182554478",
+  "created_from_files": [
+    "csvFile.csv"
+  ],
+  "file_keys": [
+    "csvFile.csv"
+  ],
+  "schemas": {
+    "csvFile.csv": {
+      "columns": [
+        {
+          "column": "student",
+          "type": "string"
+        },
+        {
+          "column": "class",
+          "type": "numeric"
+        },
+        {
+          "column": "mathsmarks",
+          "type": "numeric"
+        },
+        {
+          "column": "engmarks",
+          "type": "numeric"
+        },
+        {
+          "column": "sciencemarks",
+          "type": "numeric"
+        },
+        {
+          "column": "month",
+          "type": "string"
+        }
+      ],
+      "sample_rows": [
+        {
+          "student": "Student_1",
+          "class": "10",
+          "mathsmarks": "88",
+          "engmarks": "92",
+          "sciencemarks": "85",
+          "month": "Jan"
+        },
+        {
+          "student": "Student_2",
+          "class": "10",
+          "mathsmarks": "76",
+          "engmarks": "85",
+          "sciencemarks": "80",
+          "month": "Jan"
+        },
+        {
+          "student": "Student_3",
+          "class": "10",
+          "mathsmarks": "90",
+          "engmarks": "87",
+          "sciencemarks": "89",
+          "month": "Jan"
+        }
+      ],
+      "total_rows": 20,
+      "total_columns": 6,
+      "column_types": {
+        "student": "string",
+        "class": "integer",
+        "mathsmarks": "integer",
+        "engmarks": "integer",
+        "sciencemarks": "integer",
+        "month": "string"
+      }
+    }
+  },
+  "column_types": {
+    "csvFile.csv": {
+      "student": "string",
+      "class": "integer",
+      "mathsmarks": "integer",
+      "engmarks": "integer",
+      "sciencemarks": "integer",
+      "month": "string"
+    }
+  },
+  "validation_mode": "simple"
+}

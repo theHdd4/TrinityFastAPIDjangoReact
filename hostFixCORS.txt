@@ -5,9 +5,9 @@ To add a new machine so the Trinity services work from its IP address:
    `FASTAPI_CORS_ORIGINS` variables. Use a comma separated list. Example:
 
    ```
-   CORS_ALLOWED_ORIGINS=http://10.2.1.242:8080,http://10.2.1.242:8081,http://172.17.48.1:8080,http://172.17.48.1:8081,http://10.2.1.65:8080,http://10.2.1.65:8081,https://trinity.quantmatrixai.com,https://trinity-dev.quantmatrixai.com
-   CSRF_TRUSTED_ORIGINS=http://10.2.1.242:8080,http://10.2.1.242:8081,http://172.17.48.1:8080,http://172.17.48.1:8081,http://10.2.1.65:8080,http://10.2.1.65:8081,https://trinity.quantmatrixai.com,https://trinity-dev.quantmatrixai.com
-   FASTAPI_CORS_ORIGINS=http://10.2.1.242:8080,http://10.2.1.242:8081,http://172.17.48.1:8080,http://172.17.48.1:8081,http://10.2.1.65:8080,http://10.2.1.65:8081,https://trinity.quantmatrixai.com,https://trinity-dev.quantmatrixai.com
+   CORS_ALLOWED_ORIGINS=http://192.168.1.98:8080,http://192.168.1.98:8081,http://172.17.48.1:8080,http://172.17.48.1:8081,http://10.2.1.65:8080,http://10.2.1.65:8081,https://trinity.quantmatrixai.com,https://trinity-dev.quantmatrixai.com
+   CSRF_TRUSTED_ORIGINS=http://192.168.1.98:8080,http://192.168.1.98:8081,http://172.17.48.1:8080,http://172.17.48.1:8081,http://10.2.1.65:8080,http://10.2.1.65:8081,https://trinity.quantmatrixai.com,https://trinity-dev.quantmatrixai.com
+   FASTAPI_CORS_ORIGINS=http://192.168.1.98:8080,http://192.168.1.98:8081,http://172.17.48.1:8080,http://172.17.48.1:8081,http://10.2.1.65:8080,http://10.2.1.65:8081,https://trinity.quantmatrixai.com,https://trinity-dev.quantmatrixai.com
    ```
 Add the Docker gateway address (`http://172.17.48.1:8080` or `http://172.17.48.1:8081`) if requests come from
 that host. The example above already lists both ports so no additional edits are needed when using these hosts.

@@ -1,0 +1,183 @@
+import React, { useRef } from 'react';
+import ChartMakerCanvas from './components/ChartMakerCanvas';
+import { useLaboratoryStore, DEFAULT_CHART_MAKER_SETTINGS, ChartMakerSettings as SettingsType, ChartMakerConfig } from '@/components/LaboratoryMode/store/laboratoryStore';
+import { chartMakerApi } from '@/services/chartMakerApi';
+
+export interface ChartData {
+  columns: string[];
+  rows: Record<string, any>[];
+  numeric_columns?: string[];
+  categorical_columns?: string[];
+  unique_values?: Record<string, string[]>;
+  file_id?: string;
+  row_count?: number;
+}
+
+export interface ChartConfig {
+  id: string;
+  title: string;
+  type: 'line' | 'bar' | 'area' | 'pie' | 'scatter';
+  xAxis: string;
+  yAxis: string;
+  filters: Record<string, string[]>;
+}
+
+interface Props {
+  atomId: string;
+}
+
+const ChartMakerAtom: React.FC<Props> = ({ atomId }) => {
+  const atom = useLaboratoryStore(state => state.getAtom(atomId));
+  const updateSettings = useLaboratoryStore(state => state.updateAtomSettings);
+  const settings: SettingsType = (atom?.settings as SettingsType) || { ...DEFAULT_CHART_MAKER_SETTINGS };
+
+  // Store per-chart loading timers
+  const chartLoadingTimers = useRef<Record<string, NodeJS.Timeout | number | null>>({});
+
+  const handleChartTypeChange = async (chartId: string, newType: ChartConfig['type']) => {
+    // Start debounce timer for loading spinner
+    if (chartLoadingTimers.current[chartId]) clearTimeout(chartLoadingTimers.current[chartId]!);
+    let setLoading = false;
+    chartLoadingTimers.current[chartId] = setTimeout(() => {
+      setLoading = true;
+      updateSettings(atomId, {
+        charts: settings.charts.map(chart =>
+          chart.id === chartId ? { ...chart, chartLoading: true } : chart
+        ),
+      });
+    }, 1000);
+
+    const updatedCharts = await Promise.all(settings.charts.map(async chart => {
+      if (chart.id === chartId) {
+        if ((chart as any).chartRendered && settings.fileId && chart.xAxis && chart.yAxis) {
+          try {
+            const chartRequest = {
+              file_id: settings.fileId,
+              chart_type: newType,
+              traces: [{
+                x_column: chart.xAxis,
+                y_column: chart.yAxis,
+                name: chart.title,
+                chart_type: newType,
+                aggregation: 'sum' as const,
+              }],
+              title: chart.title,
+              filters: Object.keys(chart.filters).length > 0 ? chart.filters : undefined,
+              filtered_data: chart.filteredData,
+            };
+            const chartResponse = await chartMakerApi.generateChart(chartRequest);
+            if (chartLoadingTimers.current[chartId]) {
+              clearTimeout(chartLoadingTimers.current[chartId]!);
+              chartLoadingTimers.current[chartId] = null;
+            }
+            return {
+              ...chart,
+              type: newType,
+              chartConfig: chartResponse.chart_config,
+              filteredData: chartResponse.chart_config.data,
+              lastUpdateTime: Date.now(),
+              chartRendered: true,
+              chartLoading: false,
+            };
+          } catch (error) {
+            if (chartLoadingTimers.current[chartId]) {
+              clearTimeout(chartLoadingTimers.current[chartId]!);
+              chartLoadingTimers.current[chartId] = null;
+            }
+            return { ...chart, type: newType, chartRendered: false, chartLoading: false };
+          }
+        } else {
+          if (chartLoadingTimers.current[chartId]) {
+            clearTimeout(chartLoadingTimers.current[chartId]!);
+            chartLoadingTimers.current[chartId] = null;
+          }
+          return { ...chart, type: newType, chartLoading: false };
+        }
+      }
+      return chart;
+    }));
+    updateSettings(atomId, { charts: updatedCharts });
+  };
+
+  const handleChartFilterChange = async (chartId: string, column: string, values: string[]) => {
+    // Start debounce timer for loading spinner
+    if (chartLoadingTimers.current[chartId]) clearTimeout(chartLoadingTimers.current[chartId]!);
+    let setLoading = false;
+    chartLoadingTimers.current[chartId] = setTimeout(() => {
+      setLoading = true;
+      updateSettings(atomId, {
+        charts: settings.charts.map(chart =>
+          chart.id === chartId ? { ...chart, chartLoading: true } : chart
+        ),
+      });
+    }, 1000);
+
+    const updatedCharts = await Promise.all(settings.charts.map(async chart => {
+      if (chart.id === chartId) {
+        const newFilters = { ...chart.filters, [column]: values };
+        if ((chart as any).chartRendered && settings.fileId && chart.xAxis && chart.yAxis) {
+          try {
+            const chartRequest = {
+              file_id: settings.fileId,
+              chart_type: chart.type,
+              traces: [{
+                x_column: chart.xAxis,
+                y_column: chart.yAxis,
+                name: chart.title,
+                chart_type: chart.type,
+                aggregation: 'sum' as const,
+              }],
+              title: chart.title,
+              filters: Object.keys(newFilters).length > 0 ? newFilters : undefined,
+              filtered_data: chart.filteredData,
+            };
+            const chartResponse = await chartMakerApi.generateChart(chartRequest);
+            if (chartLoadingTimers.current[chartId]) {
+              clearTimeout(chartLoadingTimers.current[chartId]!);
+              chartLoadingTimers.current[chartId] = null;
+            }
+            return {
+              ...chart,
+              filters: newFilters,
+              chartConfig: chartResponse.chart_config,
+              filteredData: chartResponse.chart_config.data,
+              lastUpdateTime: Date.now(),
+              chartRendered: true,
+              chartLoading: false,
+            };
+          } catch (error) {
+            if (chartLoadingTimers.current[chartId]) {
+              clearTimeout(chartLoadingTimers.current[chartId]!);
+              chartLoadingTimers.current[chartId] = null;
+            }
+            return { ...chart, filters: newFilters, chartRendered: false, chartLoading: false };
+          }
+        } else {
+          if (chartLoadingTimers.current[chartId]) {
+            clearTimeout(chartLoadingTimers.current[chartId]!);
+            chartLoadingTimers.current[chartId] = null;
+          }
+          return { ...chart, filters: newFilters, chartLoading: false };
+        }
+      }
+      return chart;
+    }));
+    updateSettings(atomId, { charts: updatedCharts });
+  };
+
+  // Only show rendered charts if they've been marked as rendered
+  const chartsToShow = settings.uploadedData ? settings.charts : [];
+
+  return (
+    <div className="w-full h-full">
+      <ChartMakerCanvas 
+        charts={chartsToShow}
+        data={settings.uploadedData}
+        onChartTypeChange={handleChartTypeChange}
+        onChartFilterChange={handleChartFilterChange}
+      />
+    </div>
+  );
+};
+
+export default ChartMakerAtom;
