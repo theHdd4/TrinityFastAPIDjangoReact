@@ -1,7 +1,6 @@
 import os
 import time
 from django.utils import timezone
-from django.core.cache import cache
 from asgiref.sync import sync_to_async
 from .models import UserEnvironmentVariable
 from redis_store.env_cache import (
@@ -100,25 +99,6 @@ def get_env_dict(user):
         app_name=current.get("app_name", os.getenv("APP_NAME", "")),
         project_name=current.get("project_name", os.getenv("PROJECT_NAME", "")),
     )
-
-
-@sync_to_async
-def _query_env_vars(client_id: str, app_id: str, project_id: str):
-    qs = UserEnvironmentVariable.objects.filter(
-        client_id=client_id, app_id=app_id, project_id=project_id
-    )
-    return {e.key: e.value for e in qs}
-
-
-@sync_to_async
-def _query_env_vars_by_names(client_name: str, app_name: str, project_name: str):
-    qs = UserEnvironmentVariable.objects.filter(
-        client_name=client_name, project_name=project_name
-    )
-    if app_name:
-        qs = qs.filter(app_name=app_name)
-    return {e.key: e.value for e in qs}
-
 
 async def get_env_vars(
     client_id: str = "",
