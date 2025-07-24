@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Settings, BarChart3 } from 'lucide-react';
 import ChartMakerSettings from '../ChartMakerSettings';
@@ -18,6 +18,15 @@ const ChartMakerProperties: React.FC<Props> = ({ atomId }) => {
   const updateSettings = useLaboratoryStore(state => state.updateAtomSettings);
   const settings: SettingsType = (atom?.settings as SettingsType) || { ...DEFAULT_CHART_MAKER_SETTINGS };
   const { toast } = useToast();
+  
+  // Track if this is the initial mount to prevent false notifications
+  const isInitialMount = useRef(true);
+  const previousFilteringState = useRef(settings.loading?.filtering);
+
+  // Reset initial mount flag after first render
+  useEffect(() => {
+    isInitialMount.current = false;
+  }, []);
 
   const handleSettingsChange = (newSettings: Partial<SettingsType>) => {
     // Always get the latest atom from the store, not from the render closure
@@ -216,14 +225,26 @@ const ChartMakerProperties: React.FC<Props> = ({ atomId }) => {
 
   // Grouped notification for rendering chart (filtering)
   React.useEffect(() => {
-    if (settings.loading.filtering) {
+    const currentFilteringState = settings.loading?.filtering;
+    
+    // Only proceed if this is not the initial mount
+    if (isInitialMount.current) {
+      previousFilteringState.current = currentFilteringState;
+      return;
+    }
+    
+    // Only show notifications when there's an actual state change
+    const filteringStateChanged = previousFilteringState.current !== currentFilteringState;
+    
+    if (currentFilteringState) {
       toast({
         title: 'Rendering chart...',
         description: 'Applying settings and generating chart.',
         variant: 'default',
         duration: 2000,
       });
-    } else if (!settings.loading.filtering && !settings.error) {
+    } else if (filteringStateChanged && previousFilteringState.current === true && !currentFilteringState && !settings.error) {
+      // Only show "Chart rendered" if we transitioned from filtering=true to filtering=false
       toast({
         title: 'Chart rendered',
         description: 'Your chart is ready.',
@@ -238,7 +259,10 @@ const ChartMakerProperties: React.FC<Props> = ({ atomId }) => {
         duration: 2000,
       });
     }
-  }, [settings.loading.filtering, settings.error, toast]);
+    
+    // Update the previous state
+    previousFilteringState.current = currentFilteringState;
+  }, [settings.loading?.filtering, settings.error, toast]);
 
   return (
     <Tabs value={tab} onValueChange={setTab} className="w-full">
