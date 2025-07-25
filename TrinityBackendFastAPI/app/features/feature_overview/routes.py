@@ -34,6 +34,16 @@ from .feature_overview.base import (
 )
 from app.DataStorageRetrieval.db import fetch_client_app_project
 from app.core.utils import get_env_vars
+
+
+def _parse_numeric_id(value: str | int | None) -> int:
+    """Return the numeric component of an ID string like "name_123"."""
+    if value is None:
+        return 0
+    try:
+        return int(str(value).split("_")[-1])
+    except Exception:
+        return 0
 from app.DataStorageRetrieval.arrow_client import (
     download_dataframe,
     download_table_bytes,
@@ -257,7 +267,7 @@ async def dimension_mapping(project_id: int | None = None):
                 app_name=APP_NAME,
                 project_name=PROJECT_NAME,
             )
-            project_id = int(env.get("PROJECT_ID", PROJECT_ID))
+            project_id = _parse_numeric_id(env.get("PROJECT_ID")) or PROJECT_ID
         except Exception as exc:
             print(f"⚠️ env PROJECT_ID fetch failed: {exc}")
             project_id = PROJECT_ID
