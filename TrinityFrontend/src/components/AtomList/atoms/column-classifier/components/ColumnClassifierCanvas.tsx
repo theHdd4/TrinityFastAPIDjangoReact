@@ -68,11 +68,11 @@ const ColumnClassifierCanvas: React.FC<ColumnClassifierCanvasProps> = ({
 
     const sectionColors = {
       unclassified:
-        'from-slate-100/80 to-slate-50/60 border-slate-200/70 text-slate-700 hover:from-slate-200/90 hover:to-slate-100/70 hover:border-slate-300 hover:text-slate-800',
+        'bg-white border-[#fec107] text-gray-800 hover:bg-[#fec107]/10',
       identifiers:
-        'from-blue-100/80 to-blue-50/60 border-blue-200/70 text-blue-700 hover:from-blue-200/90 hover:to-blue-100/70 hover:border-blue-300 hover:text-blue-800',
+        'bg-white border-blue-400 text-blue-700 hover:bg-blue-50',
       measures:
-        'from-emerald-100/80 to-emerald-50/60 border-emerald-200/70 text-emerald-700 hover:from-emerald-200/90 hover:to-emerald-100/70 hover:border-emerald-300 hover:text-emerald-800',
+        'bg-white border-emerald-400 text-emerald-700 hover:bg-emerald-50',
     } as const;
 
     return (
@@ -81,9 +81,9 @@ const ColumnClassifierCanvas: React.FC<ColumnClassifierCanvasProps> = ({
         style={style}
         {...listeners}
         {...attributes}
-        className={`group relative flex items-center gap-2 px-3 py-2 bg-gradient-to-r ${
+        className={`group relative flex items-center gap-2 px-3 py-2 ${
           sectionColors[section as keyof typeof sectionColors]
-        } border rounded-full text-sm font-medium cursor-grab active:cursor-grabbing transition-all duration-200 hover:scale-[1.02] hover:shadow-lg backdrop-blur-sm min-w-0 w-full ${
+        } rounded-full text-sm font-medium cursor-grab active:cursor-grabbing transition-all duration-200 hover:scale-[1.02] hover:shadow-lg backdrop-blur-sm min-w-0 w-full ${
           isDragging ? 'opacity-70 shadow-2xl scale-105 rotate-2' : 'hover:shadow-md'
         }`}
       >
@@ -94,7 +94,7 @@ const ColumnClassifierCanvas: React.FC<ColumnClassifierCanvasProps> = ({
         >
           {name}
         </span>
-        <div className="absolute inset-0 rounded-full bg-gradient-to-r from-transparent via-white/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+        <div className="absolute inset-0 rounded-full bg-black/5 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
       </div>
     );
   };
@@ -110,7 +110,7 @@ const ColumnClassifierCanvas: React.FC<ColumnClassifierCanvasProps> = ({
       unclassified: {
         gradient: 'from-gray-400 to-gray-500',
         bg: 'bg-gray-50',
-        border: 'border-gray-200',
+        border: 'border-[#fec107]',
       },
       identifiers: {
         gradient: 'from-blue-500 to-blue-600',
