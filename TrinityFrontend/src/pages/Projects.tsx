@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import Header from '@/components/Header';
 import { REGISTRY_API, CLASSIFIER_API } from '@/lib/api';
+import { fetchDimensionMapping } from '@/lib/dimensions';
 import { molecules } from '@/components/MoleculeList/data/molecules';
 import { safeStringify } from '@/utils/safeStringify';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
@@ -332,17 +333,7 @@ const Projects = () => {
           }
         }
         try {
-          const env = data.environment || {};
-          const cfgRes = await fetch(
-            `${CLASSIFIER_API}/get_config?client_name=${env.CLIENT_NAME || ''}&app_name=${env.APP_NAME || ''}&project_name=${env.PROJECT_NAME || ''}`,
-            { credentials: 'include' }
-          );
-          if (cfgRes.ok) {
-            const cfgJson = await cfgRes.json();
-            localStorage.setItem('column-classifier-config', JSON.stringify(cfgJson.data));
-          } else {
-            localStorage.removeItem('column-classifier-config');
-          }
+          await fetchDimensionMapping();
         } catch (err) {
           console.warn('config prefetch failed', err);
           localStorage.removeItem('column-classifier-config');

@@ -263,33 +263,37 @@ async def flight_table(object_name: str):
 @router.get("/dimension_mapping")
 async def dimension_mapping(project_id: int | None = None):
     """Return dimension to identifier mapping from Redis or MongoDB."""
-    if not project_id:
-        try:
-            env = await get_env_vars(
-                client_name=CLIENT_NAME,
-                app_name=APP_NAME,
-                project_name=PROJECT_NAME,
-            )
-            project_id = _parse_numeric_id(env.get("PROJECT_ID")) or PROJECT_ID
-        except Exception as exc:
-            print(f"⚠️ env PROJECT_ID fetch failed: {exc}")
-            project_id = PROJECT_ID
+    try:
+        env = await get_env_vars(
+            client_name=CLIENT_NAME,
+            app_name=APP_NAME,
+            project_name=PROJECT_NAME,
+        )
+    except Exception as exc:
+        print(f"⚠️ env vars fetch failed: {exc}")
+        env = {}
 
-    key = f"{CLIENT_NAME}/{APP_NAME}/{PROJECT_NAME}/column_classifier_config"
+    if not project_id:
+        project_id = _parse_numeric_id(env.get("PROJECT_ID")) or PROJECT_ID
+
+    client = env.get("CLIENT_NAME", CLIENT_NAME)
+    app = env.get("APP_NAME", APP_NAME)
+    project = env.get("PROJECT_NAME", PROJECT_NAME)
+    key = f"{client}/{app}/{project}/column_classifier_config"
     cached = redis_client.get(key)
     if cached:
         try:
             cfg = json.loads(cached)
             dims = cfg.get("dimensions")
             if isinstance(dims, dict):
-                return {"mapping": dims}
+                return {"mapping": dims, "config": cfg}
         except Exception as exc:
             print(f"⚠️ dimension_mapping redis parse error: {exc}")
 
-    mongo_cfg = get_classifier_config_from_mongo(CLIENT_NAME, APP_NAME, PROJECT_NAME)
+    mongo_cfg = get_classifier_config_from_mongo(client, app, project)
     if mongo_cfg and mongo_cfg.get("dimensions"):
         redis_client.setex(key, 3600, json.dumps(mongo_cfg))
-        return {"mapping": mongo_cfg["dimensions"]}
+        return {"mapping": mongo_cfg["dimensions"], "config": mongo_cfg}
 
     mongo_map = get_project_dimension_mapping(project_id)
     if not mongo_map or not mongo_map.get("assignments"):
@@ -305,7 +309,7 @@ async def dimension_mapping(project_id: int | None = None):
         print(f"⚠️ dimension_mapping parse error: {exc}")
 
     redis_client.setex(key, 3600, json.dumps({**mongo_map, "dimensions": mapping}))
-    return {"mapping": mapping}
+    return {"mapping": mapping, "config": {**mongo_map, "dimensions": mapping}}
 
 
 @router.get("/sku_stats")
