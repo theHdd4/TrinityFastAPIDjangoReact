@@ -4,22 +4,17 @@ export async function fetchDimensionMapping(): Promise<Record<string, string[]>>
   try {
     console.log('🔄 fetching dimension mapping');
     const envStr = localStorage.getItem('env');
-    let client = '';
-    let app = '';
-    let project = '';
+    let projectId = 0;
     if (envStr) {
       try {
         const env = JSON.parse(envStr);
-        client = env.CLIENT_NAME || '';
-        app = env.APP_NAME || '';
-        project = env.PROJECT_NAME || '';
-        const key = `${client}/${app}/${project}/column_classifier_config`;
-        console.log('🔍 looking up mapping with key', key);
+        projectId = parseInt(env.PROJECT_ID || '0', 10);
+        console.log('🔍 looking up mapping for project', projectId);
       } catch (err) {
         console.warn('⚠️ env parse failed for mapping lookup', err);
       }
     }
-    const payload = { client_name: client, app_name: app, project_name: project };
+    const payload = { project_id: projectId };
     console.log('📦 calling dimension_mapping with', payload);
     const res = await fetch(`${FEATURE_OVERVIEW_API}/dimension_mapping`, {
       method: 'POST',

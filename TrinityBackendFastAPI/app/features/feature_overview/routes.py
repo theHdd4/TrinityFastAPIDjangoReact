@@ -45,6 +45,8 @@ def _parse_numeric_id(value: str | int | None) -> int:
         return int(str(value).split("_")[-1])
     except Exception:
         return 0
+
+
 from app.DataStorageRetrieval.arrow_client import (
     download_dataframe,
     download_table_bytes,
@@ -110,9 +112,7 @@ def ensure_minio_bucket():
             minio_client.make_bucket(MINIO_BUCKET)
             print(f"📁 Created MinIO bucket '{MINIO_BUCKET}' for feature overview")
         else:
-            print(
-                f"✅ MinIO bucket '{MINIO_BUCKET}' is accessible for feature overview"
-            )
+            print(f"✅ MinIO bucket '{MINIO_BUCKET}' is accessible for feature overview")
     except Exception as e:
         print(f"⚠️ MinIO connection error: {e}")
 
@@ -145,7 +145,9 @@ async def column_summary(object_name: str):
             try:
                 df = download_dataframe(flight_path)
             except Exception as e:
-                print(f"⚠️ column_summary flight download failed for {object_name}: {e}")
+                print(
+                    f"⚠️ column_summary flight download failed for {object_name}: {e}"
+                )
         if df is None:
             if not object_name.endswith(".arrow"):
                 raise ValueError("Unsupported file format")
@@ -262,46 +264,21 @@ async def flight_table(object_name: str):
 
 
 class DimensionMappingRequest(BaseModel):
-    client_name: str | None = None
-    app_name: str | None = None
-    project_name: str | None = None
+    project_id: int
 
 
 @router.post("/dimension_mapping")
 async def dimension_mapping(req: DimensionMappingRequest):
-    print(f"🛰️ dimension_mapping payload: {req.dict()}")
-    client = req.client_name or CLIENT_NAME
-    app = req.app_name or APP_NAME
-    project = req.project_name or PROJECT_NAME
-    project_id = 0
     """Return dimension to identifier mapping from Redis or MongoDB."""
+    print(f"🛰️ dimension_mapping payload: {req.dict()}")
+    project_id = req.project_id
+    env = await get_env_vars(project_id=str(project_id))
+    client = env.get("CLIENT_NAME", CLIENT_NAME)
+    app = env.get("APP_NAME", APP_NAME)
+    project = env.get("PROJECT_NAME", PROJECT_NAME)
     redis_env_key = f"env:{client}:{app}:{project}"
     print(f"🔑 env key {redis_env_key}")
-    cached_env = redis_client.get(redis_env_key)
-    if cached_env:
-        try:
-            env = json.loads(cached_env)
-            print(f"🔧 cached env {redis_env_key} -> {env}")
-        except Exception:
-            env = {}
-    else:
-        try:
-            print(f"📡 fetching env vars for {client}/{app}/{project}")
-            env = await get_env_vars(
-                client_name=client,
-                app_name=app,
-                project_name=project,
-            )
-        except Exception as exc:
-            print(f"⚠️ env vars fetch failed: {exc}")
-            env = {}
-
-    project_id = _parse_numeric_id(env.get("PROJECT_ID")) or PROJECT_ID
-    print(f"🆔 resolved project_id {project_id}")
-
-    client = env.get("CLIENT_NAME", client)
-    app = env.get("APP_NAME", app)
-    project = env.get("PROJECT_NAME", project)
+    redis_client.setex(redis_env_key, 3600, json.dumps(env))
     key = f"{client}/{app}/{project}/column_classifier_config"
     print(f"🔑 config key {key}")
     cached = redis_client.get(key)
@@ -476,7 +453,6 @@ async def feature_overview_uniquecountendpoint(
     ),
 ):
     try:
-
         dimensions = await fetch_dimensions_dict(
             validator_atom_id, file_key, validator_collection
         )
@@ -538,7 +514,6 @@ async def feature_overview_summaryendpoint(
     ),
 ):
     try:
-
         dimensions = await fetch_dimensions_dict(
             validator_atom_id, file_key, validator_collection
         )

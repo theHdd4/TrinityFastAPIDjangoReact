@@ -2,13 +2,11 @@
 
 **Endpoint**: `/api/feature-overview/dimension_mapping`
 
-Send a POST request with JSON payload containing the names used for the project:
+Send a POST request with JSON payload containing the project ID:
 
 ```json
 {
-  "client_name": "ACME",
-  "app_name": "Orders",
-  "project_name": "Revenue"
+  "project_id": 1
 }
 ```
 
@@ -16,11 +14,13 @@ The server will log each step while resolving the environment, loading from
 Redis, and falling back to MongoDB. The lookup key is constructed as
 `<client_name>/<app_name>/<project_name>/column_classifier_config`.
 
-When saving a configuration via `/api/column-classifier/save_config`, the same
-names are required. The backend will fetch the full set of environment
-variables using these names, store them together with the identifiers, measures
-and dimensions, and cache the result in Redis under the same lookup key. The
-document is persisted in the `column_classifier_configs` collection in MongoDB.
+When saving a configuration via `/api/column-classifier/save_config`, include
+`client_name`, `app_name`, and `project_name` along with the identifiers,
+measures, and dimensions. The backend resolves the environment variables and
+caches everything in Redis under `<client_name>/<app_name>/<project_name>/column_classifier_config`.
+This stored configuration includes the environment values so feature overview
+can later resolve the mapping using only `project_id`. The document is also
+persisted in the `column_classifier_configs` collection in MongoDB.
 
 Example payload for `/api/column-classifier/save_config`:
 
