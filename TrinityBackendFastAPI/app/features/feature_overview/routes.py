@@ -12,6 +12,7 @@ import pyarrow.ipc as ipc
 from datetime import date, datetime
 from typing import List
 from fastapi import Depends
+from pydantic import BaseModel
 from motor.motor_asyncio import AsyncIOMotorCollection
 from .deps import (
     get_unique_dataframe_results_collection,
@@ -260,8 +261,13 @@ async def flight_table(object_name: str):
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@router.get("/dimension_mapping")
-async def dimension_mapping(project_id: int | None = None):
+class DimensionMappingRequest(BaseModel):
+    project_id: int | None = None
+
+
+@router.post("/dimension_mapping")
+async def dimension_mapping(req: DimensionMappingRequest):
+    project_id = req.project_id
     """Return dimension to identifier mapping from Redis or MongoDB."""
     redis_env_key = f"env:{CLIENT_NAME}:{APP_NAME}:{PROJECT_NAME}"
     cached_env = redis_client.get(redis_env_key)

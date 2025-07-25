@@ -539,6 +539,8 @@ async def assign_identifiers_to_dimensions(
         user_id=user_id,
         client_id=client_id,
     )
+    map_key = f"project:{project_id}:dimensions"
+    redis_client.setex(map_key, 3600, json.dumps(assignments))
     in_memory_status = "skipped"
     message = "Identifiers assigned to project dimensions"
     validator_type = "project"
@@ -605,6 +607,9 @@ async def save_config(req: SaveConfigRequest):
         "dimensions": req.dimensions,
     }
     redis_client.setex(key, 3600, json.dumps(data))
+    if req.project_id:
+        map_key = f"project:{req.project_id}:dimensions"
+        redis_client.setex(map_key, 3600, json.dumps(req.dimensions))
     mongo_result = save_classifier_config_to_mongo(data)
     return {"status": "success", "key": key, "data": data, "mongo": mongo_result}
 
