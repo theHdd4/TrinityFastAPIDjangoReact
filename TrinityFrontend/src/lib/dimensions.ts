@@ -4,13 +4,17 @@ export async function fetchDimensionMapping(): Promise<Record<string, string[]>>
   try {
     console.log('🔄 fetching dimension mapping');
     const envStr = localStorage.getItem('env');
-    let projectId: number | null = null;
+    let client = '';
+    let app = '';
+    let project = '';
     if (envStr) {
       try {
         const env = JSON.parse(envStr);
-        const key = `${env.CLIENT_NAME || ''}/${env.APP_NAME || ''}/${env.PROJECT_NAME || ''}/column_classifier_config`;
+        client = env.CLIENT_NAME || '';
+        app = env.APP_NAME || '';
+        project = env.PROJECT_NAME || '';
+        const key = `${client}/${app}/${project}/column_classifier_config`;
         console.log('🔍 looking up mapping with key', key);
-        projectId = env.PROJECT_ID ? parseInt(env.PROJECT_ID, 10) : null;
       } catch (err) {
         console.warn('⚠️ env parse failed for mapping lookup', err);
       }
@@ -19,7 +23,7 @@ export async function fetchDimensionMapping(): Promise<Record<string, string[]>>
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
-      body: JSON.stringify({ project_id: projectId })
+      body: JSON.stringify({ client_name: client, app_name: app, project_name: project })
     });
     if (res.ok) {
       const data = await res.json();

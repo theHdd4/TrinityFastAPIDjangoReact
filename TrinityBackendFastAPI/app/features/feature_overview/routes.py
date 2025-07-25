@@ -262,14 +262,19 @@ async def flight_table(object_name: str):
 
 
 class DimensionMappingRequest(BaseModel):
-    project_id: int | None = None
+    client_name: str | None = None
+    app_name: str | None = None
+    project_name: str | None = None
 
 
 @router.post("/dimension_mapping")
 async def dimension_mapping(req: DimensionMappingRequest):
-    project_id = req.project_id
+    client = req.client_name or CLIENT_NAME
+    app = req.app_name or APP_NAME
+    project = req.project_name or PROJECT_NAME
+    project_id = 0
     """Return dimension to identifier mapping from Redis or MongoDB."""
-    redis_env_key = f"env:{CLIENT_NAME}:{APP_NAME}:{PROJECT_NAME}"
+    redis_env_key = f"env:{client}:{app}:{project}"
     cached_env = redis_client.get(redis_env_key)
     if cached_env:
         try:
@@ -280,20 +285,19 @@ async def dimension_mapping(req: DimensionMappingRequest):
     else:
         try:
             env = await get_env_vars(
-                client_name=CLIENT_NAME,
-                app_name=APP_NAME,
-                project_name=PROJECT_NAME,
+                client_name=client,
+                app_name=app,
+                project_name=project,
             )
         except Exception as exc:
             print(f"⚠️ env vars fetch failed: {exc}")
             env = {}
 
-    if not project_id:
-        project_id = _parse_numeric_id(env.get("PROJECT_ID")) or PROJECT_ID
+    project_id = _parse_numeric_id(env.get("PROJECT_ID")) or PROJECT_ID
 
-    client = env.get("CLIENT_NAME", CLIENT_NAME)
-    app = env.get("APP_NAME", APP_NAME)
-    project = env.get("PROJECT_NAME", PROJECT_NAME)
+    client = env.get("CLIENT_NAME", client)
+    app = env.get("APP_NAME", app)
+    project = env.get("PROJECT_NAME", project)
     key = f"{client}/{app}/{project}/column_classifier_config"
     cached = redis_client.get(key)
     if cached:
@@ -301,6 +305,7 @@ async def dimension_mapping(req: DimensionMappingRequest):
             cfg = json.loads(cached)
             dims = cfg.get("dimensions")
             if isinstance(dims, dict):
+                project_id = cfg.get("project_id", project_id)
                 return {"mapping": dims, "config": cfg}
         except Exception as exc:
             print(f"⚠️ dimension_mapping redis parse error: {exc}")
@@ -331,11 +336,13 @@ async def dimension_mapping(req: DimensionMappingRequest):
     mongo_cfg = get_classifier_config_from_mongo(client, app, project)
     if mongo_cfg and mongo_cfg.get("dimensions"):
         redis_client.setex(key, 3600, json.dumps(mongo_cfg))
+        project_id = mongo_cfg.get("project_id", project_id)
         return {"mapping": mongo_cfg["dimensions"], "config": mongo_cfg}
 
     mongo_map = get_project_dimension_mapping(project_id)
     if not mongo_map or not mongo_map.get("assignments"):
         raise HTTPException(status_code=404, detail="Mapping not found")
+    project_id = mongo_map.get("project_id", project_id)
 
     mapping: dict[str, list[str]] = {}
     try:
