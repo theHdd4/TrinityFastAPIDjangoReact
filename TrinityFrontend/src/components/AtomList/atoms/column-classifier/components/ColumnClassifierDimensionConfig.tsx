@@ -44,9 +44,9 @@ const ColumnClassifierDimensionConfig: React.FC<Props> = ({ data, onColumnMove, 
 
           return (
             <Card key={dimensionName} className="border-0 shadow-xl bg-white/90 backdrop-blur-sm overflow-hidden">
-              <div className="bg-white p-3 border-b-2 border-[#fec107]">
+              <div className="p-3 bg-[#fec107] border border-black rounded-sm">
                 <h4 className="font-bold text-black text-lg flex items-center">
-                  <TrendingUp className="w-5 h-5 mr-2 text-[#fec107]" />
+                  <TrendingUp className="w-5 h-5 mr-2 text-black" />
                   {dimensionName}
                 </h4>
               </div>

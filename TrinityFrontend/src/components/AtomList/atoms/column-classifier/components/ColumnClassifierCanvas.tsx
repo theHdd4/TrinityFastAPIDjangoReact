@@ -127,19 +127,19 @@ const ColumnClassifierCanvas: React.FC<ColumnClassifierCanvasProps> = ({
     return (
       <Card
         ref={setNodeRef}
-        className={`border-0 shadow-xl bg-white/80 backdrop-blur-sm overflow-hidden transform transition-all duration-300 ${
+        className={`h-full border-0 shadow-xl bg-white/80 backdrop-blur-sm overflow-hidden transform transition-all duration-300 ${
           isOver ? 'scale-105 shadow-2xl' : 'hover:shadow-xl'
         }`}
       >
-        <div className={`bg-gradient-to-r ${styles.gradient} p-1`}>
-          <div className="bg-white rounded-sm">
-            <div className="p-6">
+        <div className={`bg-gradient-to-r ${styles.gradient} p-1 h-full`}>
+          <div className="bg-white rounded-sm h-full flex flex-col">
+            <div className="p-6 flex flex-col h-full">
               <div className="flex items-center mb-4">
                 <div className={`w-1 h-8 bg-gradient-to-b ${styles.gradient} rounded-full mr-3`} />
                 <h4 className="text-lg font-bold text-gray-900">{title}</h4>
               </div>
               <div
-                className={`relative min-h-[450px] p-4 rounded-lg border ${styles.bg} ${styles.border} transition-all duration-300 ${
+                className={`relative flex-1 min-h-[450px] p-4 rounded-lg border ${styles.bg} ${styles.border} transition-all duration-300 ${
                   isOver ? 'bg-primary/5' : ''
                 }`}
               >
