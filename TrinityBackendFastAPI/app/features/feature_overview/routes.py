@@ -290,6 +290,29 @@ async def dimension_mapping(project_id: int | None = None):
         except Exception as exc:
             print(f"⚠️ dimension_mapping redis parse error: {exc}")
 
+    old_key = f"project:{project_id}:dimensions"
+    old_cached = redis_client.get(old_key)
+    if old_cached:
+        try:
+            old_dims = json.loads(old_cached)
+            if isinstance(old_dims, dict):
+                mapping = {
+                    d: [str(i) for i in ids] for d, ids in old_dims.items() if ids
+                }
+                cfg = {
+                    "project_id": project_id,
+                    "client_name": client,
+                    "app_name": app,
+                    "project_name": project,
+                    "identifiers": [],
+                    "measures": [],
+                    "dimensions": mapping,
+                }
+                redis_client.setex(key, 3600, json.dumps(cfg))
+                return {"mapping": mapping, "config": cfg}
+        except Exception as exc:
+            print(f"⚠️ dimension_mapping old redis parse error: {exc}")
+
     mongo_cfg = get_classifier_config_from_mongo(client, app, project)
     if mongo_cfg and mongo_cfg.get("dimensions"):
         redis_client.setex(key, 3600, json.dumps(mongo_cfg))
