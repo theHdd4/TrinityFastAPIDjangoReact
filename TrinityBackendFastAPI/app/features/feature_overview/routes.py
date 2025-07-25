@@ -263,15 +263,24 @@ async def flight_table(object_name: str):
 @router.get("/dimension_mapping")
 async def dimension_mapping(project_id: int | None = None):
     """Return dimension to identifier mapping from Redis or MongoDB."""
-    try:
-        env = await get_env_vars(
-            client_name=CLIENT_NAME,
-            app_name=APP_NAME,
-            project_name=PROJECT_NAME,
-        )
-    except Exception as exc:
-        print(f"⚠️ env vars fetch failed: {exc}")
-        env = {}
+    redis_env_key = f"env:{CLIENT_NAME}:{APP_NAME}:{PROJECT_NAME}"
+    cached_env = redis_client.get(redis_env_key)
+    if cached_env:
+        try:
+            env = json.loads(cached_env)
+            print(f"🔧 cached env {redis_env_key} -> {env}")
+        except Exception:
+            env = {}
+    else:
+        try:
+            env = await get_env_vars(
+                client_name=CLIENT_NAME,
+                app_name=APP_NAME,
+                project_name=PROJECT_NAME,
+            )
+        except Exception as exc:
+            print(f"⚠️ env vars fetch failed: {exc}")
+            env = {}
 
     if not project_id:
         project_id = _parse_numeric_id(env.get("PROJECT_ID")) or PROJECT_ID
