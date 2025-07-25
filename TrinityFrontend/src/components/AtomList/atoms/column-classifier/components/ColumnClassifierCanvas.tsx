@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Badge } from '@/components/ui/badge';
+import { Card } from '@/components/ui/card';
 import { Database, FileText, GripVertical } from 'lucide-react';
 import { ClassifierData } from '../ColumnClassifierAtom';
 import {
@@ -108,28 +109,22 @@ const ColumnClassifierCanvas: React.FC<ColumnClassifierCanvasProps> = ({
     const { setNodeRef, isOver } = useDroppable({ id });
 
     return (
-      <div
+      <Card
         ref={setNodeRef}
-        className={`relative overflow-hidden bg-gradient-to-br ${gradient} border-2 ${
-          isOver ? `border-${accentColor} shadow-2xl scale-105` : 'border-border/50'
-        } rounded-2xl transition-all duration-300 hover:shadow-xl`}
+        className={`relative overflow-hidden border-0 shadow-xl bg-white/90 backdrop-blur-sm transform transition-all duration-300 ${
+          isOver ? 'scale-105 shadow-2xl' : 'hover:shadow-xl'
+        }`}
       >
-        <div
-          className={`absolute inset-0 bg-gradient-to-br ${gradient} opacity-10 transition-opacity duration-300 ${
-            isOver ? 'opacity-30' : ''
-          }`}
-        />
-        <div
-          className={`relative px-6 py-4 border-b border-border/30 bg-gradient-to-r ${gradient}`}
-        >
-          <h3 className="text-lg font-bold text-foreground flex items-center gap-2">
-            <div className={`w-3 h-3 rounded-full bg-${accentColor} animate-pulse`} />
+        <div className={`absolute inset-0 bg-gradient-to-br ${gradient} opacity-10`} />
+        <div className={`relative p-4 border-b bg-gradient-to-r ${gradient}`}>
+          <h4 className="font-bold text-white text-lg flex items-center">
+            <span className={`w-3 h-3 rounded-full bg-${accentColor} mr-2`} />
             {title}
-          </h3>
+          </h4>
         </div>
         <div
-          className={`relative p-6 min-h-[450px] bg-card/50 backdrop-blur-sm transition-all duration-300 ${
-            isOver ? 'bg-primary/5' : ''
+          className={`relative p-6 min-h-[450px] transition-all duration-300 ${
+            isOver ? 'bg-primary/5' : 'bg-card/50'
           }`}
         >
           <div className="grid grid-cols-2 gap-3">
@@ -152,7 +147,7 @@ const ColumnClassifierCanvas: React.FC<ColumnClassifierCanvasProps> = ({
             </div>
           )}
         </div>
-      </div>
+      </Card>
     );
   };
 
@@ -193,7 +188,7 @@ const ColumnClassifierCanvas: React.FC<ColumnClassifierCanvasProps> = ({
       onDragStart={handleDragStart}
       onDragEnd={handleDragEnd}
     >
-      <div className="h-full bg-gradient-to-br from-background via-muted/30 to-background">
+      <div className="w-full h-full p-6 pb-[50px] bg-gradient-to-br from-slate-50 to-blue-50 overflow-y-auto">
         <div className="border-b border-border bg-gradient-to-r from-card via-card/95 to-card backdrop-blur-sm">
           <div className="flex items-center justify-between p-6">
             <div className="flex items-center gap-3">
