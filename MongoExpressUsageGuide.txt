@@ -14,8 +14,9 @@ These are configured via the `ME_CONFIG_BASICAUTH_USERNAME` and
 
 ## Browsing databases and collections
 After logging in you will see the list of databases on the left sidebar.
-Select either `trinity_prod` or `trinity_dev` depending on which stack is
-running. Expanding a database reveals all collections (tables).
+The application stores data in the `validator_atoms_db` database
+(`feature_overview_db` contains results for the feature overview screens).
+Expand the desired database to see all available collections.
 
 Click a collection name to view documents. Use the **Query** box at the top of
  the page to filter results with standard MongoDB query syntax, for example:
