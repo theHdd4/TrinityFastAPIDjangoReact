@@ -2,7 +2,6 @@ import React from 'react';
 import { useToast } from '@/hooks/use-toast';
 
 import ColumnClassifierCanvas from './components/ColumnClassifierCanvas';
-import ColumnClassifierVisualisation from './components/ColumnClassifierVisualisation';
 import ColumnClassifierDimensionConfig from './components/ColumnClassifierDimensionConfig';
 import {
   useLaboratoryStore,
@@ -177,7 +176,7 @@ const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
   return (
     <div className="w-full h-full bg-white flex flex-col">
       <div className="flex flex-1">
-        <div className="w-3/5 p-4 overflow-y-auto">
+        <div className="w-full p-4 overflow-y-auto">
           <ColumnClassifierCanvas
             data={classifierData}
             validatorId={settings.validatorId}
@@ -185,9 +184,6 @@ const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
             onActiveFileChange={setActiveFile}
             onFileDelete={handleFileDelete}
           />
-        </div>
-        <div className="w-2/5 border-l border-gray-200 bg-gray-50 p-4 overflow-y-auto">
-          <ColumnClassifierVisualisation data={classifierData} />
         </div>
       </div>
       <div className="border-t p-4 overflow-y-auto">
