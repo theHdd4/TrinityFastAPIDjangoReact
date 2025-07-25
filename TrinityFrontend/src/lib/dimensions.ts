@@ -19,11 +19,13 @@ export async function fetchDimensionMapping(): Promise<Record<string, string[]>>
         console.warn('⚠️ env parse failed for mapping lookup', err);
       }
     }
+    const payload = { client_name: client, app_name: app, project_name: project };
+    console.log('📦 calling dimension_mapping with', payload);
     const res = await fetch(`${FEATURE_OVERVIEW_API}/dimension_mapping`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
-      body: JSON.stringify({ client_name: client, app_name: app, project_name: project })
+      body: JSON.stringify(payload)
     });
     if (res.ok) {
       const data = await res.json();

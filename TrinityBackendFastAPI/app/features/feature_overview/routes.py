@@ -269,12 +269,14 @@ class DimensionMappingRequest(BaseModel):
 
 @router.post("/dimension_mapping")
 async def dimension_mapping(req: DimensionMappingRequest):
+    print(f"🛰️ dimension_mapping payload: {req.dict()}")
     client = req.client_name or CLIENT_NAME
     app = req.app_name or APP_NAME
     project = req.project_name or PROJECT_NAME
     project_id = 0
     """Return dimension to identifier mapping from Redis or MongoDB."""
     redis_env_key = f"env:{client}:{app}:{project}"
+    print(f"🔑 env key {redis_env_key}")
     cached_env = redis_client.get(redis_env_key)
     if cached_env:
         try:
@@ -284,6 +286,7 @@ async def dimension_mapping(req: DimensionMappingRequest):
             env = {}
     else:
         try:
+            print(f"📡 fetching env vars for {client}/{app}/{project}")
             env = await get_env_vars(
                 client_name=client,
                 app_name=app,
@@ -294,13 +297,16 @@ async def dimension_mapping(req: DimensionMappingRequest):
             env = {}
 
     project_id = _parse_numeric_id(env.get("PROJECT_ID")) or PROJECT_ID
+    print(f"🆔 resolved project_id {project_id}")
 
     client = env.get("CLIENT_NAME", client)
     app = env.get("APP_NAME", app)
     project = env.get("PROJECT_NAME", project)
     key = f"{client}/{app}/{project}/column_classifier_config"
+    print(f"🔑 config key {key}")
     cached = redis_client.get(key)
     if cached:
+        print("✅ found cached config")
         try:
             cfg = json.loads(cached)
             dims = cfg.get("dimensions")
@@ -309,10 +315,14 @@ async def dimension_mapping(req: DimensionMappingRequest):
                 return {"mapping": dims, "config": cfg}
         except Exception as exc:
             print(f"⚠️ dimension_mapping redis parse error: {exc}")
+    else:
+        print("🔍 config not in redis")
 
     old_key = f"project:{project_id}:dimensions"
+    print(f"🔑 old key {old_key}")
     old_cached = redis_client.get(old_key)
     if old_cached:
+        print("✅ found legacy mapping")
         try:
             old_dims = json.loads(old_cached)
             if isinstance(old_dims, dict):
@@ -332,9 +342,12 @@ async def dimension_mapping(req: DimensionMappingRequest):
                 return {"mapping": mapping, "config": cfg}
         except Exception as exc:
             print(f"⚠️ dimension_mapping old redis parse error: {exc}")
+    else:
+        print("❌ legacy mapping not found")
 
     mongo_cfg = get_classifier_config_from_mongo(client, app, project)
     if mongo_cfg and mongo_cfg.get("dimensions"):
+        print("📦 loaded mapping from Mongo config")
         redis_client.setex(key, 3600, json.dumps(mongo_cfg))
         project_id = mongo_cfg.get("project_id", project_id)
         return {"mapping": mongo_cfg["dimensions"], "config": mongo_cfg}
@@ -343,6 +356,8 @@ async def dimension_mapping(req: DimensionMappingRequest):
     if not mongo_map or not mongo_map.get("assignments"):
         raise HTTPException(status_code=404, detail="Mapping not found")
     project_id = mongo_map.get("project_id", project_id)
+
+    print("📦 loaded mapping from project mapping store")
 
     mapping: dict[str, list[str]] = {}
     try:
@@ -354,6 +369,7 @@ async def dimension_mapping(req: DimensionMappingRequest):
         print(f"⚠️ dimension_mapping parse error: {exc}")
 
     redis_client.setex(key, 3600, json.dumps({**mongo_map, "dimensions": mapping}))
+    print("✅ returning mapping from Mongo project mapping")
     return {"mapping": mapping, "config": {**mongo_map, "dimensions": mapping}}
 
 

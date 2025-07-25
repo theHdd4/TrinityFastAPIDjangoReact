@@ -1,0 +1,17 @@
+# Dimension Mapping Endpoint
+
+**Endpoint**: `/api/feature-overview/dimension_mapping`
+
+Send a POST request with JSON payload containing the names used for the project:
+
+```json
+{
+  "client_name": "ACME",
+  "app_name": "Orders",
+  "project_name": "Revenue"
+}
+```
+
+The server will log each step while resolving the environment, loading from
+Redis, and falling back to MongoDB. The lookup key is constructed as
+`<client_name>/<app_name>/<project_name>/column_classifier_config`.
