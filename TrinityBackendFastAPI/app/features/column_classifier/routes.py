@@ -597,6 +597,12 @@ class SaveConfigRequest(BaseModel):
 async def save_config(req: SaveConfigRequest):
     """Save column classifier configuration to Redis and MongoDB."""
     key = f"{req.client_name}/{req.app_name}/{req.project_name}/column_classifier_config"
+    env = await get_env_vars(
+        client_name=req.client_name,
+        app_name=req.app_name,
+        project_name=req.project_name,
+    )
+    print(f"🔧 save_config env {env}")
     data = {
         "project_id": req.project_id,
         "client_name": req.client_name,
@@ -605,6 +611,7 @@ async def save_config(req: SaveConfigRequest):
         "identifiers": req.identifiers,
         "measures": req.measures,
         "dimensions": req.dimensions,
+        "env": env,
     }
     redis_client.setex(key, 3600, json.dumps(data))
     if req.project_id:

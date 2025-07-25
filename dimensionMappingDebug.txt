@@ -15,3 +15,28 @@ Send a POST request with JSON payload containing the names used for the project:
 The server will log each step while resolving the environment, loading from
 Redis, and falling back to MongoDB. The lookup key is constructed as
 `<client_name>/<app_name>/<project_name>/column_classifier_config`.
+
+When saving a configuration via `/api/column-classifier/save_config`, the same
+names are required. The backend will fetch the full set of environment
+variables using these names, store them together with the identifiers, measures
+and dimensions, and cache the result in Redis under the same lookup key. The
+document is persisted in the `column_classifier_configs` collection in MongoDB.
+
+Example payload for `/api/column-classifier/save_config`:
+
+```json
+{
+  "client_name": "ACME",
+  "app_name": "Orders",
+  "project_name": "Revenue",
+  "identifiers": ["sku"],
+  "measures": ["amount"],
+  "dimensions": {
+    "product": ["sku"],
+    "finance": ["amount"]
+  }
+}
+```
+
+The backend resolves the environment variables and returns a JSON response
+confirming the MongoDB save result.
