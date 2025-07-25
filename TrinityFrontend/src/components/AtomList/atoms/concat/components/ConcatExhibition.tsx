@@ -6,9 +6,10 @@ import { useToast } from '@/hooks/use-toast';
 
 interface ConcatExhibitionProps {
   settings: any;
+  onPerformConcat?: () => void;
 }
 
-const ConcatExhibition: React.FC<ConcatExhibitionProps> = ({ settings }) => {
+const ConcatExhibition: React.FC<ConcatExhibitionProps> = ({ settings, onPerformConcat }) => {
   const { toast } = useToast();
 
   const handleExportCSV = async () => {
@@ -149,6 +150,8 @@ const ConcatExhibition: React.FC<ConcatExhibitionProps> = ({ settings }) => {
               </p>
             </div>
           )}
+          
+
         </div>
       )}
     </div>

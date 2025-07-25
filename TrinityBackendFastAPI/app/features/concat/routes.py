@@ -215,23 +215,18 @@ async def perform_concat(
             result = pd.concat([df1, df2], axis=0, ignore_index=True)
         elif concat_direction == "horizontal":
             # Handle duplicate column names for horizontal concatenation
-            # Add suffixes to distinguish columns from different files
             df1_suffix = df1.copy()
             df2_suffix = df2.copy()
-            
-            # Get common columns
             common_cols = set(df1.columns) & set(df2.columns)
-            
-            # Add suffixes to common columns
             if common_cols:
-                # Rename columns in df1 with "_file1" suffix
                 df1_suffix.columns = [f"{col}_file1" if col in common_cols else col for col in df1.columns]
-                # Rename columns in df2 with "_file2" suffix  
                 df2_suffix.columns = [f"{col}_file2" if col in common_cols else col for col in df2.columns]
-            
             result = pd.concat([df1_suffix, df2_suffix], axis=1)
         else:
             raise ValueError("Invalid concat direction")
+
+        # Prepare full CSV for response (used later by /save to persist full data)
+        csv_text_full = result.to_csv(index=False)
 
         # Generate auto concat ID
         concat_id = str(uuid.uuid4())[:8]  # Shorten UUID for readability
@@ -239,7 +234,7 @@ async def perform_concat(
 
         print('Received:', file1, file2, concat_direction)
 
-        # Save as Arrow file instead of CSV
+        # Save as Arrow file for efficient storage
         import pyarrow as pa
         table = pa.Table.from_pandas(result)
         arrow_buffer = pa.BufferOutputStream()
@@ -276,6 +271,7 @@ async def perform_concat(
             "result_shape": result.shape,
             "columns": list(result.columns),
             "result_file": concat_key,
+            "data": csv_text_full,
             "message": "Concatenation completed successfully"
         }
 
@@ -285,35 +281,33 @@ async def perform_concat(
 @router.post("/save")
 async def save_concat_dataframe(
     csv_data: str = Body(..., embed=True),
-    filename: str = Body(..., embed=True)
+    filename: str = Body("", embed=True)
 ):
-    """Save a concatenated dataframe (CSV) to MinIO as Arrow file and return file info."""
-    import pandas as pd
-    import pyarrow as pa
-    import pyarrow.ipc as ipc
-    import io
-    import datetime
-    import uuid
+    """Save full concatenated dataframe to MinIO as Arrow (mirrors merge save)."""
+    import pandas as pd, io, uuid
+    import pyarrow as pa, pyarrow.ipc as ipc
 
     try:
-        # Parse CSV to DataFrame
+        # 1. Load dataframe from CSV payload (expected full data, not a preview)
         df = pd.read_csv(io.StringIO(csv_data))
-        # Generate unique file key if not provided
+
+        # 2. Determine output filename
         if not filename:
             concat_id = str(uuid.uuid4())[:8]
             filename = f"{concat_id}_concat.arrow"
-        if not filename.endswith('.arrow'):
-            filename += '.arrow'
-        # Prepend OBJECT_PREFIX if not already present
+        if not filename.endswith(".arrow"):
+            filename += ".arrow"
         if not filename.startswith(OBJECT_PREFIX):
             filename = OBJECT_PREFIX + filename
-        # Convert to Arrow
+
+        # 3. Convert to Arrow bytes
         table = pa.Table.from_pandas(df)
-        arrow_buffer = pa.BufferOutputStream()
-        with ipc.new_file(arrow_buffer, table.schema) as writer:
+        buf = pa.BufferOutputStream()
+        with ipc.new_file(buf, table.schema) as writer:
             writer.write_table(table)
-        arrow_bytes = arrow_buffer.getvalue().to_pybytes()
-        # Save to MinIO
+        arrow_bytes = buf.getvalue().to_pybytes()
+
+        # 4. Upload to MinIO & cache in Redis
         minio_client.put_object(
             MINIO_BUCKET,
             filename,
@@ -321,9 +315,8 @@ async def save_concat_dataframe(
             length=len(arrow_bytes),
             content_type="application/octet-stream",
         )
-        # Optionally, cache in Redis
         redis_client.setex(filename, 3600, arrow_bytes)
-        # Return file info
+
         return {
             "result_file": filename,
             "shape": df.shape,
@@ -338,35 +331,54 @@ async def save_concat_dataframe(
 async def get_concat_data(
     concat_id: str = Query(...)
 ):
-    """Retrieve concatenated data by concat_id."""
+    """Retrieve concatenated data by concat_id.
+
+    Priority order:
+    1. Try to fetch the Arrow file (preferred new format) from Redis, then MinIO.
+    2. Fall back to the legacy CSV file name if the Arrow object is not found. This
+       maintains backward-compatibility with previously saved results.
+    """
     try:
-        concat_key = f"{concat_id}_concat.csv"
+        arrow_key = f"{concat_id}_concat.arrow"
+        csv_key = f"{concat_id}_concat.csv"  # legacy
 
-        # Try Redis cache first
-        content = redis_client.get(concat_key)
-        if content is not None:
-            # Fix linter error: ensure content is bytes
-            if isinstance(content, bytes):
-                concat_df = pd.read_csv(io.BytesIO(content))
-            elif isinstance(content, str):
-                concat_df = pd.read_csv(io.BytesIO(content.encode('utf-8')))
+        # Helper to load DataFrame from raw bytes depending on extension
+        def _bytes_to_df(key: str, raw: bytes) -> pd.DataFrame:
+            if key.endswith(".arrow"):
+                import pyarrow as pa, pyarrow.ipc as ipc
+                reader = ipc.RecordBatchFileReader(pa.BufferReader(raw))
+                return reader.read_all().to_pandas()
             else:
-                raise HTTPException(status_code=500, detail="Unknown content type in Redis cache")
-            concat_df.columns = concat_df.columns.str.lower()
-            return {
-                "row_count": len(concat_df),
-                "concat_data": concat_df.to_dict(orient="records")
-            }
+                return pd.read_csv(io.BytesIO(raw))
 
-        # Fallback to MinIO
-        concat_obj = minio_client.get_object(MINIO_BUCKET, concat_key)
-        concat_df = pd.read_csv(io.BytesIO(concat_obj.read()))
-        concat_df.columns = concat_df.columns.str.lower()
+        # 1️⃣ Attempt Redis cache (Arrow first)
+        for key in (arrow_key, csv_key):
+            raw = redis_client.get(key)
+            if raw is not None:
+                df = _bytes_to_df(key, raw if isinstance(raw, bytes) else raw.encode("utf-8"))
+                df.columns = df.columns.str.lower()
+                return {
+                    "row_count": len(df),
+                    "concat_data": df.to_dict(orient="records")
+                }
 
-        return {
-            "row_count": len(concat_df),
-            "concat_data": concat_df.to_dict(orient="records")
-        }
+        # 2️⃣ Attempt MinIO storage
+        for key in (arrow_key, csv_key):
+            try:
+                obj = minio_client.get_object(MINIO_BUCKET, key)
+                raw = obj.read()
+                # Cache for future use
+                redis_client.setex(key, 3600, raw)
+                df = _bytes_to_df(key, raw)
+                df.columns = df.columns.str.lower()
+                return {
+                    "row_count": len(df),
+                    "concat_data": df.to_dict(orient="records")
+                }
+            except Exception:
+                continue  # try next key
+
+        raise HTTPException(status_code=404, detail="Concat result not found")
 
     except Exception as e:
         raise HTTPException(status_code=404, detail=f"Unable to fetch concat data: {str(e)}")

@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Button } from '@/components/ui/button';
 import { VALIDATE_API } from '@/lib/api';
 
 interface ConcatInputFilesProps {
@@ -10,11 +11,12 @@ interface ConcatInputFilesProps {
     performConcat: boolean;
   };
   onSettingsChange: (settings: any) => void;
+  onPerformConcat?: () => void;
 }
 
 interface Frame { object_name: string; csv_name: string; }
 
-const ConcatInputFiles: React.FC<ConcatInputFilesProps> = ({ settings, onSettingsChange }) => {
+const ConcatInputFiles: React.FC<ConcatInputFilesProps> = ({ settings, onSettingsChange, onPerformConcat }) => {
   const [frames, setFrames] = useState<Frame[]>([]);
 
   useEffect(() => {
@@ -61,6 +63,17 @@ const ConcatInputFiles: React.FC<ConcatInputFilesProps> = ({ settings, onSetting
               ))}
             </SelectContent>
           </Select>
+        </div>
+        
+        {/* Perform Concat Button */}
+        <div className="pt-6">
+          <Button
+            className="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 text-base font-medium disabled:bg-gray-400 disabled:cursor-not-allowed"
+            onClick={onPerformConcat}
+            disabled={!settings.file1 || !settings.file2 || !settings.direction}
+          >
+            Perform Concatinate
+          </Button>
         </div>
       </div>
     </div>

@@ -1,18 +1,21 @@
 import React, { useEffect, useState } from 'react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Button } from '@/components/ui/button';
 import { MERGE_API, VALIDATE_API } from '@/lib/api';
 
 interface MergeInputFilesProps {
   settings: {
     file1: string;
     file2: string;
+    joinColumns: string[];
   };
   onSettingsChange: (settings: any) => void;
+  onPerformMerge?: () => void;
 }
 
 interface Frame { object_name: string; csv_name: string; }
 
-const MergeInputFiles: React.FC<MergeInputFilesProps> = ({ settings, onSettingsChange }) => {
+const MergeInputFiles: React.FC<MergeInputFilesProps> = ({ settings, onSettingsChange, onPerformMerge }) => {
   const [frames, setFrames] = useState<Frame[]>([]);
 
   useEffect(() => {
@@ -63,6 +66,17 @@ const MergeInputFiles: React.FC<MergeInputFilesProps> = ({ settings, onSettingsC
               ))}
             </SelectContent>
           </Select>
+        </div>
+        
+        {/* Perform Merge Button */}
+        <div className="pt-6">
+          <Button
+            className="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 text-base font-medium disabled:bg-gray-400 disabled:cursor-not-allowed"
+            onClick={onPerformMerge}
+            disabled={!settings.file1 || !settings.file2 || !settings.joinColumns || settings.joinColumns.length === 0}
+          >
+            Perform Merge
+          </Button>
         </div>
       </div>
     </div>

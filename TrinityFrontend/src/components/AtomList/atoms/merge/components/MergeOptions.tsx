@@ -3,6 +3,8 @@ import { Button } from '@/components/ui/button';
 
 interface MergeOptionsProps {
   settings: {
+    file1: string;
+    file2: string;
     joinColumns: string[];
     joinType: string;
     availableColumns: string[];
@@ -33,6 +35,8 @@ const MergeOptions: React.FC<MergeOptionsProps> = ({ settings, onSettingsChange,
 
   return (
     <div className="w-full h-full p-6 bg-gradient-to-br from-slate-50 to-blue-50 overflow-y-auto">
+    {/* <div className="w-full h-full p-6 bg-white overflow-y-auto"> */}
+    
       {/* <div className="mb-6">
         <h4 className="text-lg font-semibold text-gray-900 mb-4">Merge Options</h4>
       </div> */}
@@ -70,24 +74,6 @@ const MergeOptions: React.FC<MergeOptionsProps> = ({ settings, onSettingsChange,
                 </button>
               ))}
             </div>
-            {/* Custom scrollbar styling */}
-            <style jsx>{`
-              .overflow-y-auto::-webkit-scrollbar {
-                width: 8px;
-              }
-              .overflow-y-auto::-webkit-scrollbar-track {
-                background: rgba(241, 245, 249, 0.5);
-                border-radius: 4px;
-              }
-              .overflow-y-auto::-webkit-scrollbar-thumb {
-                background: linear-gradient(135deg, #3b82f6, #1d4ed8);
-                border-radius: 4px;
-                border: 1px solid rgba(59, 130, 246, 0.2);
-              }
-              .overflow-y-auto::-webkit-scrollbar-thumb:hover {
-                background: linear-gradient(135deg, #2563eb, #1e40af);
-              }
-            `}</style>
           </div>
           {settings.joinColumns.length > 0 && (
             <div className="mt-2 text-sm text-gray-600">
@@ -102,7 +88,7 @@ const MergeOptions: React.FC<MergeOptionsProps> = ({ settings, onSettingsChange,
             <div className="w-full border-t border-gray-200"></div>
           </div>
           <div className="relative flex justify-center text-xs uppercase">
-            <span className="bg-gradient-to-br from-slate-50 to-blue-50 px-3 text-gray-500 font-medium">Join Configuration</span>
+            <span className="bg-white px-3 text-gray-500 font-medium">Join Configuration</span>
           </div>
         </div>
         
@@ -151,8 +137,9 @@ const MergeOptions: React.FC<MergeOptionsProps> = ({ settings, onSettingsChange,
         </div>
         <div className="pt-4">
           <Button
-            className="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 text-base font-medium"
+            className="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 text-base font-medium disabled:bg-gray-400 disabled:cursor-not-allowed"
             onClick={onPerformMerge}
+            disabled={!settings.file1 || !settings.file2 || !settings.joinColumns || settings.joinColumns.length === 0}
           >
             Perform Merge
           </Button>

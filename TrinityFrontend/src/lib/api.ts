@@ -53,6 +53,12 @@ export const MERGE_API =
 export const FEATURE_OVERVIEW_API =
   import.meta.env.VITE_FEATURE_OVERVIEW_API || `${backendOrigin.replace(/:8000$/, ':8001')}/api/feature-overview`;
 
+export const CREATECOLUMN_API =
+  import.meta.env.VITE_CREATECOLUMN_API || `${backendOrigin.replace(/:8000$/, ':8001')}/api/create`;
+
+export const GROUPBY_API =
+  import.meta.env.VITE_GROUPBY_API || `${backendOrigin.replace(/:8000$/, ':8001')}/api/groupby`;
+
 export const TRINITY_AI_API =
   import.meta.env.VITE_TRINITY_AI_API || backendOrigin.replace(/:8000$/, ':8002');
 

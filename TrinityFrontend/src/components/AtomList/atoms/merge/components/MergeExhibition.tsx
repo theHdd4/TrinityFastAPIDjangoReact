@@ -5,9 +5,10 @@ import { MERGE_API } from '@/lib/api';
 
 interface MergeExhibitionProps {
   settings: any;
+  onPerformMerge?: () => void;
 }
 
-const MergeExhibition: React.FC<MergeExhibitionProps> = ({ settings }) => {
+const MergeExhibition: React.FC<MergeExhibitionProps> = ({ settings, onPerformMerge }) => {
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
@@ -43,9 +44,9 @@ const MergeExhibition: React.FC<MergeExhibitionProps> = ({ settings }) => {
 
   return (
     <div className="w-full h-full p-6 bg-gradient-to-br from-slate-50 to-blue-50 overflow-y-auto">
-      <div className="mb-6">
+      {/* <div className="mb-6">
         <h4 className="text-lg font-semibold text-gray-900 mb-4">Export Results</h4>
-      </div>
+      </div> */}
       {!hasResults ? (
         <div className="bg-gray-50 p-8 rounded-lg text-center">
           <div className="text-gray-500 mb-4">
@@ -94,6 +95,8 @@ const MergeExhibition: React.FC<MergeExhibitionProps> = ({ settings }) => {
               </p>
             </div>
           )}
+          
+
         </div>
       )}
     </div>

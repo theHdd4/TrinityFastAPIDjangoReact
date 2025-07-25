@@ -63,13 +63,28 @@ def ensure_minio_bucket():
 
 ensure_minio_bucket()
 
-# MongoDB config
-MONGO_URI = os.getenv("MONGO_URI", "mongodb://mongo:27017/trinity")
-mongo_client = AsyncIOMotorClient(MONGO_URI)
-concat_db = mongo_client[os.getenv("CONCAT_DB_NAME", "concat_db")]
+# MongoDB (optional). Only enabled when CONCAT_USE_MONGO env is 'true'.
+_USE_MONGO = os.getenv("CONCAT_USE_MONGO", "false").lower() == "true"
+mongo_client = None
+concat_db = None
+if _USE_MONGO:
+    MONGO_URI = os.getenv("MONGO_URI")
+    if not MONGO_URI:
+        print("⚠️ CONCAT_USE_MONGO=true but MONGO_URI is not set; Mongo features disabled.")
+    else:
+        try:
+            mongo_client = AsyncIOMotorClient(MONGO_URI)
+            concat_db = mongo_client[os.getenv("MONGO_DB", "trinity")]
+        except Exception as exc:
+            print(f"⚠️ Mongo connection failed: {exc}; continuing without Mongo.")
+            mongo_client = None
+            concat_db = None
 
 def get_concat_results_collection():
-    return concat_db[os.getenv("CONCAT_RESULTS_COLLECTION", "concat_results")]
+    """Return MongoDB collection if Mongo is configured, else None."""
+    if concat_db is not None:
+        return concat_db[os.getenv("CONCAT_RESULTS_COLLECTION", "concat_results")]
+    return None
 
 def load_dataframe(object_name: str) -> pd.DataFrame:
     """
@@ -130,6 +145,10 @@ def save_concat_result_to_minio(key: str, df: pd.DataFrame):
     redis_client.setex(key, 3600, csv_bytes)
 
 async def save_concat_metadata_to_mongo(collection, metadata: dict):
+    """Insert metadata when collection is available; otherwise silently skip."""
+    if collection is None:
+        # Mongo not configured – behave like merge atom and do nothing.
+        return
     await collection.insert_one(metadata)
 
 __all__ = [

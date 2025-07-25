@@ -58,8 +58,9 @@ const ConcatOptions: React.FC<ConcatOptionsProps> = ({ settings, onSettingsChang
         
         <div className="pt-4">
           <Button 
-            className="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 text-base font-medium"
+            className="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 text-base font-medium disabled:bg-gray-400 disabled:cursor-not-allowed"
             onClick={onPerformConcat}
+            disabled={!settings.file1 || !settings.file2 || !settings.direction}
           >
             Perform Concatenate
           </Button>

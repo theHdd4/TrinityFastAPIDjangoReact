@@ -256,7 +256,7 @@ const MergeCanvas: React.FC<MergeCanvasProps> = ({
       <div className="p-4">
         <Card>
           <CardContent className="p-4">
-            <p className="text-gray-500">No merge results available. Perform a merge to see results here.</p>
+            <p className="text-gray-500">Please Configure merge options</p>
           </CardContent>
         </Card>
       </div>
@@ -282,8 +282,10 @@ const MergeCanvas: React.FC<MergeCanvasProps> = ({
                   </div>
                   <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
                     <div className="flex items-center space-x-2">
-                      <Database className="w-4 h-4 text-blue-600" />
-                      <span className="text-sm font-medium text-gray-800">{file1 ? file1.split('/').pop() : 'N/A'}</span>
+                      <Database className="w-4 h-4 text-blue-600 flex-shrink-0" />
+                      <span className="text-sm font-medium text-gray-800 truncate" title={file1 ? file1.split('/').pop() : 'N/A'}>
+                        {file1 ? file1.split('/').pop() : 'N/A'}
+                      </span>
                     </div>
                   </div>
                 </div>
@@ -294,8 +296,10 @@ const MergeCanvas: React.FC<MergeCanvasProps> = ({
                   </div>
                   <div className="bg-green-50 border border-green-200 rounded-lg p-3">
                     <div className="flex items-center space-x-2">
-                      <Database className="w-4 h-4 text-green-600" />
-                      <span className="text-sm font-medium text-gray-800">{file2 ? file2.split('/').pop() : 'N/A'}</span>
+                      <Database className="w-4 h-4 text-green-600 flex-shrink-0" />
+                      <span className="text-sm font-medium text-gray-800 truncate" title={file2 ? file2.split('/').pop() : 'N/A'}>
+                        {file2 ? file2.split('/').pop() : 'N/A'}
+                      </span>
                     </div>
                   </div>
                 </div>
@@ -374,13 +378,7 @@ const MergeCanvas: React.FC<MergeCanvasProps> = ({
                       {data.map((row, rowIndex) => (
                         <TableRow
                           key={rowIndex}
-                          className={`
-                            ${rowIndex < 4
-                              ? 'bg-yellow-50 hover:bg-yellow-100'
-                              : 'bg-white hover:bg-gray-50'
-                            }
-                            transition-all duration-200 border-b border-gray-100
-                          `}
+                          className="bg-white hover:bg-gray-50 transition-all duration-200 border-b border-gray-100"
                         >
                           {headers.map((header, colIndex) => (
                             <TableCell key={colIndex} className="py-4 text-center font-medium text-gray-700">

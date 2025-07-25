@@ -85,9 +85,14 @@ const MergeProperties: React.FC<Props> = ({ atomId }) => {
       }
     }, [settings.file1, settings.file2]);
 
+    // Helper function to check if all required options are selected
+    const isMergeReady = () => {
+      return settings.file1 && settings.file2 && settings.joinColumns.length > 0;
+    };
+
     const handlePerformMerge = async () => {
       console.log('🔧 MergeProperties: handlePerformMerge called with settings:', settings);
-      if (!settings.file1 || !settings.file2 || settings.joinColumns.length === 0) {
+      if (!isMergeReady()) {
         toast({
           title: "Error",
           description: "Please select both files and at least one join column before performing merge.",
@@ -191,6 +196,7 @@ const MergeProperties: React.FC<Props> = ({ atomId }) => {
               <MergeInputFiles
                 settings={settings}
                 onSettingsChange={handleChange}
+                onPerformMerge={handlePerformMerge}
               />
             </TabsContent>
             <TabsContent value="options" className="space-y-4" forceMount>
@@ -201,7 +207,10 @@ const MergeProperties: React.FC<Props> = ({ atomId }) => {
               />
             </TabsContent>
             <TabsContent value="exhibition" className="space-y-4" forceMount>
-              <MergeExhibition settings={settings} />
+              <MergeExhibition 
+                settings={settings} 
+                onPerformMerge={handlePerformMerge}
+              />
             </TabsContent>
           </div>
         </Tabs>
