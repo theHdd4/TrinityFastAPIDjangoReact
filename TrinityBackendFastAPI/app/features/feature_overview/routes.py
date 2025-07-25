@@ -179,7 +179,8 @@ async def column_summary(object_name: str):
 
 @router.get("/cached_dataframe")
 async def cached_dataframe(object_name: str):
-    """Return the saved dataframe as CSV text from Redis or MinIO."""
+    """Return the saved dataframe as CSV text.
+    Prefers Arrow Flight for the latest data, then falls back to Redis/MinIO."""
     object_name = unquote(object_name)
     print(f"➡️ cached_dataframe request: {object_name}")
     if not object_name.startswith(OBJECT_PREFIX):
@@ -187,6 +188,13 @@ async def cached_dataframe(object_name: str):
             f"⚠️ cached_dataframe prefix mismatch: {object_name} (expected {OBJECT_PREFIX})"
         )
     try:
+        try:
+            df = download_dataframe(object_name)
+            csv_text = df.to_csv(index=False)
+            return Response(csv_text, media_type="text/csv")
+        except Exception as exc:
+            print(f"⚠️ flight dataframe error for {object_name}: {exc}")
+
         content = redis_client.get(object_name)
         if content is None:
             response = minio_client.get_object(MINIO_BUCKET, object_name)
@@ -240,8 +248,7 @@ async def flight_table(object_name: str):
 
 @router.get("/dimension_mapping")
 async def dimension_mapping(project_id: int = PROJECT_ID):
-    """Return dimension to identifier mapping.
-    Uses Redis cache, then Flight, then MongoDB."""
+    """Return dimension to identifier mapping from Redis or MongoDB."""
     cache_key = f"project:{project_id}:dimensions"
     cached = redis_client.get(cache_key)
     if cached:
@@ -250,47 +257,19 @@ async def dimension_mapping(project_id: int = PROJECT_ID):
         except Exception:
             pass
 
-    path = f"{project_id}/dimension_mapping"
-    df = None
-    try:
-        df = download_dataframe(path)
-    except Exception as exc:
-        print(f"⚠️ dimension_mapping download failed for {path}: {exc}")
-    if df is None:
-        mongo_doc = get_project_dimension_mapping(project_id)
-        if mongo_doc and mongo_doc.get("assignments"):
-            try:
-                rows = [
-                    (d, ident)
-                    for d, ids in mongo_doc["assignments"].items()
-                    for ident in ids
-                ]
-                if rows:
-                    df = pd.DataFrame(rows, columns=["dimension", "identifier"])
-                    upload_dataframe(df, path)
-                    set_ticket(
-                        f"project_{project_id}_dimensions",
-                        f"project_{project_id}_dimensions.arrow",
-                        path,
-                        "project_dimensions.csv",
-                    )
-                    print(
-                        f"🆗 uploaded mapping from mongo to flight for project {project_id}"
-                    )
-            except Exception as exc:
-                print(f"⚠️ failed to upload mongo mapping for {project_id}: {exc}")
-    if df is None:
+    mongo_doc = get_project_dimension_mapping(project_id)
+    if not mongo_doc or not mongo_doc.get("assignments"):
         raise HTTPException(status_code=404, detail="Mapping not found")
 
     mapping: dict[str, list[str]] = {}
     try:
-        for _, row in df.iterrows():
-            dim = str(row.get("dimension", "")).strip()
-            ident = str(row.get("identifier", "")).strip()
-            if dim:
-                mapping.setdefault(dim, []).append(ident)
+        for dim, ids in mongo_doc["assignments"].items():
+            if not ids:
+                continue
+            mapping[dim] = [str(i) for i in ids]
     except Exception as exc:
         print(f"⚠️ dimension_mapping parse error: {exc}")
+
     redis_client.setex(cache_key, 3600, json.dumps(mapping))
     return {"mapping": mapping}
 
