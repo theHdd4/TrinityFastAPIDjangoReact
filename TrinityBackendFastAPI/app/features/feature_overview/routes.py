@@ -33,6 +33,7 @@ from .feature_overview.base import (
     unique_count,
 )
 from app.DataStorageRetrieval.db import fetch_client_app_project
+from app.core.utils import get_env_vars
 from app.DataStorageRetrieval.arrow_client import (
     download_dataframe,
     download_table_bytes,
@@ -247,8 +248,20 @@ async def flight_table(object_name: str):
 
 
 @router.get("/dimension_mapping")
-async def dimension_mapping(project_id: int = PROJECT_ID):
+async def dimension_mapping(project_id: int | None = None):
     """Return dimension to identifier mapping from Redis or MongoDB."""
+    if not project_id:
+        try:
+            env = await get_env_vars(
+                client_name=CLIENT_NAME,
+                app_name=APP_NAME,
+                project_name=PROJECT_NAME,
+            )
+            project_id = int(env.get("PROJECT_ID", PROJECT_ID))
+        except Exception as exc:
+            print(f"⚠️ env PROJECT_ID fetch failed: {exc}")
+            project_id = PROJECT_ID
+
     cache_key = f"project:{project_id}:dimensions"
     cached = redis_client.get(cache_key)
     if cached:
