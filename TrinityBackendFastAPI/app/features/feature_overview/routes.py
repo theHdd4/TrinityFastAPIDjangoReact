@@ -240,8 +240,16 @@ async def flight_table(object_name: str):
 
 @router.get("/dimension_mapping")
 async def dimension_mapping(project_id: int = PROJECT_ID):
-    """Return dimension to identifier mapping stored on the Flight server.
-    If not present, attempt to load from MongoDB and upload to Flight."""
+    """Return dimension to identifier mapping.
+    Uses Redis cache, then Flight, then MongoDB."""
+    cache_key = f"project:{project_id}:dimensions"
+    cached = redis_client.get(cache_key)
+    if cached:
+        try:
+            return {"mapping": json.loads(cached)}
+        except Exception:
+            pass
+
     path = f"{project_id}/dimension_mapping"
     df = None
     try:
@@ -283,6 +291,7 @@ async def dimension_mapping(project_id: int = PROJECT_ID):
                 mapping.setdefault(dim, []).append(ident)
     except Exception as exc:
         print(f"⚠️ dimension_mapping parse error: {exc}")
+    redis_client.setex(cache_key, 3600, json.dumps(mapping))
     return {"mapping": mapping}
 
 

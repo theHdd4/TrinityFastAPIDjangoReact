@@ -315,6 +315,21 @@ const Projects = () => {
         if (data.environment) {
           console.log('Environment after project select', data.environment);
           localStorage.setItem('env', JSON.stringify(data.environment));
+          try {
+            await fetch(`${CLASSIFIER_API}/cache_project`, {
+              method: 'POST',
+              credentials: 'include',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                client_name: data.environment.CLIENT_NAME || '',
+                app_name: data.environment.APP_NAME || '',
+                project_name: data.environment.PROJECT_NAME || '',
+                project_id: project.id,
+              }),
+            });
+          } catch (err) {
+            console.warn('cache_project failed', err);
+          }
         }
         try {
           const env = data.environment || {};

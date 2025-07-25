@@ -24,8 +24,10 @@ from app.features.column_classifier.database import (
     save_project_dimension_mapping,
     save_classifier_config_to_mongo,
     get_classifier_config_from_mongo,
+    get_project_dimension_mapping,
 )
 from app.features.column_classifier.config import settings
+from app.core.utils import get_env_vars
 
 
 from app.features.column_classifier.schemas import (
@@ -621,3 +623,44 @@ async def get_config(client_name: str, app_name: str, project_name: str):
         return {"status": "success", "source": "mongo", "data": mongo_data}
 
     raise HTTPException(status_code=404, detail="Configuration not found")
+
+
+class CacheProjectRequest(BaseModel):
+    client_name: str
+    app_name: str = ""
+    project_name: str
+    project_id: int
+
+
+@router.post("/cache_project")
+async def cache_project(req: CacheProjectRequest):
+    """Load project environment and classifier data into Redis."""
+    env = await get_env_vars(
+        client_name=req.client_name,
+        app_name=req.app_name,
+        project_name=req.project_name,
+    )
+    env_key = f"env:{req.client_name}:{req.app_name}:{req.project_name}"
+    redis_client.setex(env_key, 3600, json.dumps(env))
+
+    cfg = get_classifier_config_from_mongo(
+        req.client_name, req.app_name, req.project_name
+    )
+    if cfg:
+        cfg_key = (
+            f"{req.client_name}/{req.app_name}/{req.project_name}/"
+            "column_classifier_config"
+        )
+        redis_client.setex(cfg_key, 3600, json.dumps(cfg))
+
+    mapping = get_project_dimension_mapping(req.project_id)
+    if mapping and mapping.get("assignments"):
+        map_key = f"project:{req.project_id}:dimensions"
+        redis_client.setex(map_key, 3600, json.dumps(mapping["assignments"]))
+
+    return {
+        "status": "cached",
+        "env_cached": bool(env),
+        "config_cached": bool(cfg),
+        "mapping_cached": bool(mapping),
+    }
