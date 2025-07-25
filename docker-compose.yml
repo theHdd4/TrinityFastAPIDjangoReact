@@ -1,3 +1,5 @@
+name: trinity-prod
+
 services:
   postgres:
     image: postgres:15
@@ -70,6 +72,19 @@ services:
     networks:
       - trinity-net
 
+  mongo-express:
+    image: mongo-express:latest
+    environment:
+      ME_CONFIG_MONGODB_URL: "mongodb://mongo:27017"
+      ME_CONFIG_BASICAUTH_USERNAME: admin
+      ME_CONFIG_BASICAUTH_PASSWORD: admin
+    ports:
+      - "8082:8081"
+    depends_on:
+      - mongo
+    networks:
+      - trinity-net
+
   web:
     build: ./TrinityBackendDjango
     command: gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 3
@@ -79,14 +94,22 @@ services:
       - ./TrinityBackendDjango/.env
     ports:
       - "8000:8000"
+    environment:
+      HOST_IP: ${HOST_IP:-10.2.1.242}
+      FRONTEND_PORT: "8080"
+      CORS_ALLOWED_ORIGINS: "http://127.0.0.1:8080,http://${HOST_IP:-10.2.1.242}:8080,http://172.17.48.1:8080,http://10.2.1.65:8080,https://trinity.quantmatrixai.com"
+      CSRF_TRUSTED_ORIGINS: "http://127.0.0.1:8080,http://${HOST_IP:-10.2.1.242}:8080,http://172.17.48.1:8080,http://10.2.1.65:8080,https://trinity.quantmatrixai.com"
+      MONGO_URI: "mongodb://mongo:27017/trinity_prod"
     depends_on:
       - postgres
       - mongo
       - redis
       - minio
+      - flight
     networks:
       - trinity-net
     labels:
+      - "environment=prod"
       - "traefik.enable=true"
       - "traefik.http.routers.django.rule=Host(`trinity.quantmatrixai.com`) && PathPrefix(`/admin`)"
       - "traefik.http.routers.django.entrypoints=web"
@@ -107,6 +130,8 @@ services:
       - mongo
     networks:
       - trinity-net
+    environment:
+      MONGO_URI: "mongodb://mongo:27017/trinity_prod"
 
   fastapi:
     build: ./TrinityBackendDjango
@@ -122,7 +147,9 @@ services:
       MINIO_SECRET_KEY: minio123
       FLIGHT_HOST: flight
       FLIGHT_PORT: 8815
-      FASTAPI_CORS_ORIGINS: ${FASTAPI_CORS_ORIGINS:-http://127.0.0.1:8080,http://10.2.1.242:8080,http://10.2.1.65:8080,https://trinity.quantmatrixai.com}
+      HOST_IP: ${HOST_IP:-10.2.1.242}
+      FASTAPI_CORS_ORIGINS: "http://127.0.0.1:8080,http://${HOST_IP:-10.2.1.242}:8080,http://172.17.48.1:8080,http://10.2.1.65:8080,https://trinity.quantmatrixai.com"
+      MONGO_URI: "mongodb://mongo:27017/trinity_prod"
     ports:
       - "8001:8001"
     depends_on:
@@ -130,9 +157,11 @@ services:
       - mongo
       - redis
       - minio
+      - flight
     networks:
       - trinity-net
     labels:
+      - "environment=prod"
       - "traefik.enable=true"
       - "traefik.http.routers.fastapi.rule=Host(`trinity.quantmatrixai.com`) && PathPrefix(`/api`)"
       - "traefik.http.routers.fastapi.entrypoints=web"
@@ -145,6 +174,8 @@ services:
     command: python app/flight_server.py
     env_file:
       - ./TrinityBackendDjango/.env
+    labels:
+      - "environment=prod"
     ports:
       - "8815:8815"
     networks:
@@ -152,7 +183,7 @@ services:
 
   trinity-ai:
     build:
-      context: ./TrinityAI/Agent_fetch_atom
+      context: ./TrinityAI
       dockerfile: Dockerfile
     env_file:
       - ./TrinityBackendDjango/.env
@@ -163,6 +194,7 @@ services:
     networks:
       - trinity-net
     labels:
+      - "environment=prod"
       - "traefik.enable=true"
       - "traefik.http.routers.trinity-ai.rule=Host(`trinity.quantmatrixai.com`) && PathPrefix(`/chat`)"
       - "traefik.http.routers.trinity-ai.entrypoints=web"
@@ -173,7 +205,6 @@ services:
     build:
       context: ./TrinityFrontend
       dockerfile: Dockerfile
-    container_name: trinity-frontend
     ports:
       - "8080:80"
     networks:
@@ -181,6 +212,7 @@ services:
     depends_on:
       - web
     labels:
+      - "environment=prod"
       - "traefik.enable=true"
       - "traefik.http.routers.frontend.rule=Host(`trinity.quantmatrixai.com`)"
       - "traefik.http.routers.frontend.entrypoints=web"
@@ -191,6 +223,7 @@ services:
       - --providers.docker=true
       - --providers.docker.exposedbydefault=false
       - --entrypoints.web.address=:80
+      - --providers.docker.constraints=Label(`environment`,`prod`)
     ports:
       - "9080:80"
     volumes:

@@ -1,5 +1,5 @@
 
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { safeStringify } from '@/utils/safeStringify';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
@@ -22,6 +22,18 @@ const WorkflowMode = () => {
   const [canvasMolecules, setCanvasMolecules] = useState<any[]>([]);
   const { toast } = useToast();
   const navigate = useNavigate();
+
+  useEffect(() => {
+    const envStr = localStorage.getItem('env');
+    if (envStr) {
+      try {
+        const env = JSON.parse(envStr);
+        console.log('Environment in app', env);
+      } catch {
+        /* ignore */
+      }
+    }
+  }, []);
 
   const handleMoleculeSelect = (moleculeId: string) => {
     setSelectedMoleculeId(moleculeId);

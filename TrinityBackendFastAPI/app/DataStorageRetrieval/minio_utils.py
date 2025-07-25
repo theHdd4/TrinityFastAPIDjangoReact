@@ -7,6 +7,7 @@ import pyarrow.ipc as ipc
 from minio import Minio
 from minio.error import S3Error
 
+# Default to the development MinIO service if not explicitly configured
 MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "minio:9000")
 MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY", "minio")
 MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY", "minio123")
@@ -39,6 +40,19 @@ ARROW_DIR = Path("arrow_data")
 ARROW_DIR.mkdir(exist_ok=True)
 
 
+def get_arrow_dir() -> Path:
+    """Return the arrow directory for the current client/app/project."""
+    client = os.getenv("CLIENT_NAME", "default_client")
+    app = os.getenv("APP_NAME", "default_app")
+    project = os.getenv("PROJECT_NAME", "default_project")
+    dir_path = ARROW_DIR / client / app / project
+    dir_path.mkdir(parents=True, exist_ok=True)
+    print(
+        f"📁 arrow dir {dir_path} (client={client} app={app} project={project})"
+    )
+    return dir_path
+
+
 def save_arrow_table(df: pd.DataFrame, path: Path) -> None:
     """Save a DataFrame to a local Arrow file."""
     table = pa.Table.from_pandas(df)
@@ -53,6 +67,7 @@ def upload_to_minio(file_content_bytes: bytes, filename: str, object_prefix: str
     try:
         timestamp = pd.Timestamp.now().strftime("%Y%m%d_%H%M%S")
         object_name = f"{object_prefix}{timestamp}_{filename}"
+        print(f"⬆️ uploading to minio: {object_name}")
         file_content = io.BytesIO(file_content_bytes)
         file_content.seek(0, os.SEEK_END)
         size = file_content.tell()

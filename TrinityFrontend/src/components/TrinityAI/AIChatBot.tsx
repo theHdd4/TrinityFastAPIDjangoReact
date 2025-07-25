@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Send, X, MessageSquare, Bot, User, Zap } from 'lucide-react';
+import { Send, X, MessageSquare, Bot, User, Sparkles } from 'lucide-react';
 import ChatSuggestions from './ChatSuggestions';
 import { TRINITY_AI_API } from '@/lib/api';
 
@@ -61,7 +61,7 @@ const AIChatBot: React.FC<AIChatBotProps> = ({ cardId, cardTitle, onAddAtom, dis
     setShowSuggestions(false);
 
     try {
-      const res = await fetch(`${TRINITY_AI_API}/chat`, {
+      const res = await fetch(TRINITY_AI_API, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ query: userMessage.content })
@@ -126,10 +126,10 @@ const AIChatBot: React.FC<AIChatBotProps> = ({ cardId, cardTitle, onAddAtom, dis
     <Popover open={isOpen} onOpenChange={(open) => !disabled && setIsOpen(open)}>
       <PopoverTrigger asChild>
         <button
-          className={`p-1 rounded ${disabled ? 'opacity-50 cursor-not-allowed' : 'hover:bg-gray-100'}`}
+          className={`p-1 rounded ${disabled ? 'opacity-50 cursor-not-allowed' : 'hover:bg-gray-100'} transition-transform`}
           title="Use Trinity AI"
         >
-          <Zap className="w-4 h-4 text-gray-400" />
+          <Sparkles className="w-4 h-4 text-purple-500 hover:scale-110" />
         </button>
       </PopoverTrigger>
       <PopoverContent 

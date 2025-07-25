@@ -5,5 +5,5 @@ COPY requirements.txt ./
 # downloading large dependencies like PyTorch
 RUN pip install --no-cache-dir --timeout 1000 -r requirements.txt
 COPY . .
-RUN python download_model.py
+RUN python Agent_fetch_atom/download_model.py
 CMD ["uvicorn", "main_api:app", "--host", "0.0.0.0", "--port", "8002"]

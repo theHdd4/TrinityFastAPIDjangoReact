@@ -9,6 +9,7 @@ import asyncio
 import redis  # <-- Add Redis import
 
 # MinIO config
+# Default to the development MinIO service if not explicitly configured
 MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "minio:9000")
 MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY", "admin_dev")
 MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY", "pass_dev")
@@ -150,6 +151,7 @@ async def save_concat_metadata_to_mongo(collection, metadata: dict):
         # Mongo not configured – behave like merge atom and do nothing.
         return
     await collection.insert_one(metadata)
+    print(f"📦 Stored in {collection.name}: {metadata}")
 
 __all__ = [
     'minio_client',

@@ -31,6 +31,7 @@ interface UploadSectionProps {
   requiredOptions: string[];
   onDeleteFile: (name: string) => void;
   saveStatus: Record<string, string>;
+  disabled?: boolean;
 }
 
 const UploadSection: React.FC<UploadSectionProps> = ({
@@ -52,7 +53,8 @@ const UploadSection: React.FC<UploadSectionProps> = ({
   isDragOver,
   requiredOptions,
   onDeleteFile,
-  saveStatus
+  saveStatus,
+  disabled = false
 }) => (
   <Card className="h-full flex flex-col shadow-sm border-0 bg-white">
     <div className="p-4 border-b border-gray-100">
@@ -120,19 +122,19 @@ const UploadSection: React.FC<UploadSectionProps> = ({
       ))}
 
       <div
-        className={`border-2 border-dashed rounded-lg p-8 text-center transition-all duration-300 ${isDragOver ? 'border-blue-400 bg-blue-50' : 'border-gray-300 hover:border-blue-300'}`}
-        onDrop={onDrop}
-        onDragOver={onDragOver}
-        onDragLeave={onDragLeave}
+        className={`border-2 border-dashed rounded-lg p-8 text-center transition-all duration-300 ${disabled ? 'opacity-50 cursor-not-allowed' : isDragOver ? 'border-blue-400 bg-blue-50' : 'border-gray-300 hover:border-blue-300'}`}
+        onDrop={disabled ? undefined : onDrop}
+        onDragOver={disabled ? undefined : onDragOver}
+        onDragLeave={disabled ? undefined : onDragLeave}
       >
         <div className="mb-4">
           <Upload className={`w-8 h-8 mx-auto mb-2 ${isDragOver ? 'text-blue-600' : 'text-gray-400'}`} />
           <p className="text-sm font-medium text-gray-900 mb-1">{isDragOver ? 'Drop files here' : 'Drag and Drop your File'}</p>
           <p className="text-xs text-gray-600 mb-4">OR</p>
         </div>
-        <input type="file" multiple accept=".csv,.xlsx,.xls,.json" onChange={onFileSelect} className="hidden" id="file-upload" />
+        <input type="file" multiple accept=".csv,.xlsx,.xls,.json" onChange={onFileSelect} className="hidden" id="file-upload" disabled={disabled} />
         <label htmlFor="file-upload">
-          <Button asChild className="cursor-pointer">
+          <Button asChild className={`cursor-pointer ${disabled ? 'pointer-events-none opacity-70' : ''}`} disabled={disabled}>
             <span>Browse</span>
           </Button>
         </label>

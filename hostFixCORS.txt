@@ -3,12 +3,20 @@ To add a new machine so the Trinity services work from its IP address:
 1. Edit `TrinityBackendDjango/.env` and `TrinityFrontend/.env` and append the new
    host IP to the `CORS_ALLOWED_ORIGINS`, `CSRF_TRUSTED_ORIGINS` and
    `FASTAPI_CORS_ORIGINS` variables. Use a comma separated list. Example:
-   
+
    ```
-   CORS_ALLOWED_ORIGINS=http://10.2.1.242:8080,http://10.2.1.65:8080
-   CSRF_TRUSTED_ORIGINS=http://10.2.1.242:8080,http://10.2.1.65:8080
-   FASTAPI_CORS_ORIGINS=http://10.2.1.242:8080,http://10.2.1.65:8080
+   CORS_ALLOWED_ORIGINS=http://10.2.1.242:8080,http://10.2.1.242:8081,http://172.17.48.1:8080,http://172.17.48.1:8081,http://10.2.1.65:8080,http://10.2.1.65:8081,https://trinity.quantmatrixai.com,https://trinity-dev.quantmatrixai.com
+   CSRF_TRUSTED_ORIGINS=http://10.2.1.242:8080,http://10.2.1.242:8081,http://172.17.48.1:8080,http://172.17.48.1:8081,http://10.2.1.65:8080,http://10.2.1.65:8081,https://trinity.quantmatrixai.com,https://trinity-dev.quantmatrixai.com
+   FASTAPI_CORS_ORIGINS=http://10.2.1.242:8080,http://10.2.1.242:8081,http://172.17.48.1:8080,http://172.17.48.1:8081,http://10.2.1.65:8080,http://10.2.1.65:8081,https://trinity.quantmatrixai.com,https://trinity-dev.quantmatrixai.com
    ```
+Add the Docker gateway address (`http://172.17.48.1:8080` or `http://172.17.48.1:8081`) if requests come from
+that host. The example above already lists both ports so no additional edits are needed when using these hosts.
+
+Changes made:
+- Updated `.env.example` files and docker-compose defaults so these four hosts are included by default.
+- Added 172.17.48.1 to `FASTAPI_CORS_ORIGINS` in `app/main.py`.
+- Documented the exact host list in the README for clarity.
+
 
 2. Update `HOST_IP` in both `.env` files to match the address the services will
    listen on. Rebuild the frontend container so Vite embeds the updated value.
@@ -16,3 +24,10 @@ To add a new machine so the Trinity services work from its IP address:
 3. Restart the backend by running `scripts/start_backend.sh`. The Django and
    FastAPI containers will load the new environment values, enabling requests
    from the new host.
+4. If the browser still reports a CORS error, check the FastAPI container logs
+   with `docker compose logs fastapi`. A 500 status from the endpoint can
+   prevent the `Access-Control-Allow-Origin` header from appearing even when the
+   origin is allowed.
+5. A repeated `FlightUnavailableError` in the FastAPI logs usually means the
+   `flight` service is not running. Verify with `docker compose ps flight` and
+   restart it if necessary.

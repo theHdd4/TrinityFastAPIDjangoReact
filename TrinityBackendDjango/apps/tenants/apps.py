@@ -6,3 +6,7 @@ class TenantsConfig(AppConfig):
     name = "apps.tenants"
     verbose_name = "Tenant & Workspace Isolation"
     label = "tenants"
+
+    def ready(self):
+        # Register signal handlers for tenant folder management
+        from . import signals  # noqa: F401

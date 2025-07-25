@@ -33,7 +33,22 @@ const AppIdentity: React.FC<AppIdentityProps> = ({ projectName, onGoBack, onRena
         });
         if (res.ok) {
           const updated = await res.json();
+          console.log('Project renamed from primary menu', updated);
           localStorage.setItem('current-project', JSON.stringify(updated));
+          try {
+            const envRes = await fetch(`${REGISTRY_API}/projects/${proj.id}/`, {
+              credentials: 'include'
+            });
+            if (envRes.ok) {
+              const envData = await envRes.json();
+              if (envData.environment) {
+                console.log('Environment after project rename', envData.environment);
+                localStorage.setItem('env', JSON.stringify(envData.environment));
+              }
+            }
+          } catch (err) {
+            console.log('Rename env fetch error', err);
+          }
           onRename?.(updated.name);
           return;
         }

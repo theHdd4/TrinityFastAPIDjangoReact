@@ -1,68 +1,5 @@
 import os
-
-try:
-    import asyncpg  # type: ignore
-except ModuleNotFoundError:  # pragma: no cover - optional dependency
-    asyncpg = None
-
-POSTGRES_HOST = os.getenv("POSTGRES_HOST", "postgres")
-POSTGRES_DB = os.getenv("POSTGRES_DB", "trinity_db")
-POSTGRES_USER = os.getenv("POSTGRES_USER", "trinity_user")
-POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD", "trinity_pass")
-
-async def fetch_client_app_project(user_id: int, project_id: int):
-    """Fetch client, app and project names from Postgres.
-
-    If ``asyncpg`` is not installed the function falls back to the environment
-    variables ``CLIENT_NAME``, ``APP_NAME`` and ``PROJECT_NAME`` instead of
-    querying the database.
-    """
-    if asyncpg is None:
-        return (
-            os.getenv("CLIENT_NAME", "default_client"),
-            os.getenv("APP_NAME", "default_app"),
-            os.getenv("PROJECT_NAME", "default_project"),
-        )
-
-    conn = await asyncpg.connect(
-        host=POSTGRES_HOST,
-        user=POSTGRES_USER,
-        password=POSTGRES_PASSWORD,
-        database=POSTGRES_DB,
-    )
-    try:
-        client_name = await conn.fetchval(
-            """
-            SELECT t.name
-            FROM tenants_tenant t
-            JOIN subscriptions_company c ON c.tenant_id = t.id
-            JOIN accounts_user u ON u.id = $1
-            LIMIT 1
-            """,
-            user_id,
-        )
-        if not client_name:
-            client_name = "default_client"
-
-        app_name = await conn.fetchval(
-            """
-            SELECT a.name
-            FROM registry_app a
-            JOIN registry_project p ON p.app_id = a.id
-            WHERE p.id = $1
-            LIMIT 1
-            """,
-            project_id,
-        )
-
-        project_name = await conn.fetchval(
-            "SELECT name FROM registry_project WHERE id = $1",
-            project_id,
-        )
-
-        return client_name, app_name or "default_app", project_name or "default_project"
-    finally:
-        await conn.close()
+from .connection import POSTGRES_HOST, POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB
 
 async def record_arrow_dataset(
     project_id: int,
@@ -74,10 +11,10 @@ async def record_arrow_dataset(
     descriptor: str | None = None,
 ) -> None:
     """Insert a saved dataset entry into Postgres if asyncpg is available."""
-    if asyncpg is None:
+    if __import__("DataStorageRetrieval.db", fromlist=["db"]).asyncpg is None:
         return
     try:
-        conn = await asyncpg.connect(
+        conn = await (__import__("DataStorageRetrieval.db", fromlist=["db"]).asyncpg).connect(
             host=POSTGRES_HOST,
             user=POSTGRES_USER,
             password=POSTGRES_PASSWORD,
@@ -112,10 +49,10 @@ async def rename_arrow_dataset(old_object: str, new_object: str) -> None:
     """Update arrow_object for saved datasets when a file is renamed."""
     if old_object == new_object:
         return
-    if asyncpg is None:
+    if __import__("DataStorageRetrieval.db", fromlist=["db"]).asyncpg is None:
         return
     try:
-        conn = await asyncpg.connect(
+        conn = await (__import__("DataStorageRetrieval.db", fromlist=["db"]).asyncpg).connect(
             host=POSTGRES_HOST,
             user=POSTGRES_USER,
             password=POSTGRES_PASSWORD,
@@ -135,10 +72,10 @@ async def rename_arrow_dataset(old_object: str, new_object: str) -> None:
 
 async def delete_arrow_dataset(arrow_object: str) -> None:
     """Remove a dataset entry when a file is deleted."""
-    if asyncpg is None:
+    if __import__("DataStorageRetrieval.db", fromlist=["db"]).asyncpg is None:
         return
     try:
-        conn = await asyncpg.connect(
+        conn = await (__import__("DataStorageRetrieval.db", fromlist=["db"]).asyncpg).connect(
             host=POSTGRES_HOST,
             user=POSTGRES_USER,
             password=POSTGRES_PASSWORD,
@@ -161,9 +98,9 @@ async def arrow_dataset_exists(project_id: int, atom_id: str, file_key: str) -> 
     arrow_object: str | None = None
     flight_path: str | None = None
 
-    if asyncpg is not None:
+    if __import__("DataStorageRetrieval.db", fromlist=["db"]).asyncpg is not None:
         try:
-            conn = await asyncpg.connect(
+            conn = await (__import__("DataStorageRetrieval.db", fromlist=["db"]).asyncpg).connect(
                 host=POSTGRES_HOST,
                 user=POSTGRES_USER,
                 password=POSTGRES_PASSWORD,
@@ -219,7 +156,7 @@ async def arrow_dataset_exists(project_id: int, atom_id: str, file_key: str) -> 
             if getattr(exc, "code", "") in {"NoSuchKey", "NoSuchBucket"}:
                 exists = False
                 try:
-                    await delete_arrow_dataset(arrow_object)
+                    await __import__("DataStorageRetrieval.db", fromlist=["db"]).delete_arrow_dataset(arrow_object)
                 finally:
                     try:
                         from DataStorageRetrieval.flight_registry import remove_arrow_object
@@ -240,7 +177,7 @@ async def arrow_dataset_exists(project_id: int, atom_id: str, file_key: str) -> 
                 exists = False
                 if arrow_object:
                     try:
-                        await delete_arrow_dataset(arrow_object)
+                        await __import__("DataStorageRetrieval.db", fromlist=["db"]).delete_arrow_dataset(arrow_object)
                     finally:
                         try:
                             from DataStorageRetrieval.flight_registry import remove_arrow_object
@@ -256,10 +193,10 @@ async def arrow_dataset_exists(project_id: int, atom_id: str, file_key: str) -> 
 
 async def get_dataset_info(arrow_object: str):
     """Return dataset info for a stored Arrow object if available."""
-    if asyncpg is None:
+    if __import__("DataStorageRetrieval.db", fromlist=["db"]).asyncpg is None:
         return None
     try:
-        conn = await asyncpg.connect(
+        conn = await (__import__("DataStorageRetrieval.db", fromlist=["db"]).asyncpg).connect(
             host=POSTGRES_HOST,
             user=POSTGRES_USER,
             password=POSTGRES_PASSWORD,
@@ -277,4 +214,5 @@ async def get_dataset_info(arrow_object: str):
     finally:
         await conn.close()
     return None
+
 
