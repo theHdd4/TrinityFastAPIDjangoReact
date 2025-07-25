@@ -23,14 +23,12 @@ interface ColumnClassifierCanvasProps {
     fileIndex?: number
   ) => void;
   onActiveFileChange: (fileIndex: number) => void;
-  onFileDelete?: (fileIndex: number) => void;
 }
 
 const ColumnClassifierCanvas: React.FC<ColumnClassifierCanvasProps> = ({
   data,
   onColumnMove,
   onActiveFileChange,
-  onFileDelete,
 }) => {
   const [activeId, setActiveId] = useState<string | null>(null);
 

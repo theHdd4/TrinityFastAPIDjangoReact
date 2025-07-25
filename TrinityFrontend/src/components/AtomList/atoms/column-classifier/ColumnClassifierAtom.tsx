@@ -50,9 +50,6 @@ const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const handleClassification = (file: FileClassification) => {
-    updateSettings(atomId, { data: { files: [file], activeFileIndex: 0 } });
-  };
 
   const handleColumnMove = (
     columnName: string,
@@ -106,23 +103,6 @@ const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
   };
 
 
-  const handleFileDelete = (fileIndex: number) => {
-    const newFiles = classifierData.files.filter((_, index) => index !== fileIndex);
-    const newActiveIndex =
-      fileIndex === classifierData.activeFileIndex
-        ? Math.max(0, classifierData.activeFileIndex - 1)
-        : classifierData.activeFileIndex > fileIndex
-        ? classifierData.activeFileIndex - 1
-        : classifierData.activeFileIndex;
-
-    updateSettings(atomId, {
-      data: {
-        files: newFiles,
-        activeFileIndex:
-          newFiles.length > 0 ? Math.min(newActiveIndex, newFiles.length - 1) : 0
-      }
-    });
-  };
 
   const setActiveFile = (fileIndex: number) => {
     updateSettings(atomId, { data: { ...classifierData, activeFileIndex: fileIndex } });
@@ -197,10 +177,8 @@ const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
         <div className="w-full p-4 overflow-y-auto">
           <ColumnClassifierCanvas
             data={classifierData}
-            validatorId={settings.validatorId}
             onColumnMove={handleColumnMove}
             onActiveFileChange={setActiveFile}
-            onFileDelete={handleFileDelete}
           />
         </div>
       </div>

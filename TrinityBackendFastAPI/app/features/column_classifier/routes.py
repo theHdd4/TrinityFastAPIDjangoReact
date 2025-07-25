@@ -19,12 +19,8 @@ from app.features.feature_overview.deps import redis_client
 # Change these lines at the top of routes.py:
 from app.features.column_classifier.database import (
     get_validator_atom_from_mongo,
-    save_classification_to_mongo,
-    get_classification_from_mongo,
     get_validator_from_memory_or_disk,
     save_business_dimensions_to_mongo,
-    update_business_dimensions_assignments_in_mongo,
-    get_business_dimensions_from_mongo,
     save_project_dimension_mapping,
 )
 from app.features.column_classifier.config import settings
