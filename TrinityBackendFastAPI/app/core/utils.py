@@ -4,6 +4,14 @@ from pathlib import Path
 import sys
 import os
 from typing import Dict, Tuple
+import json
+from app.features.feature_overview.deps import redis_client
+
+ENV_TTL = 3600
+ENV_NAMESPACE = "env"
+
+def _redis_env_key(client: str, app: str, project: str) -> str:
+    return f"{ENV_NAMESPACE}:{client}:{app}:{project}"
 
 try:
     DJANGO_ROOT = Path(__file__).resolve().parents[3] / "TrinityBackendDjango"
@@ -116,6 +124,18 @@ async def get_env_vars(
         print(f"🔧 cached_env_vars{key} -> {env}")
         return env
 
+    if use_cache and client_name and project_name:
+        redis_key = _redis_env_key(client_name, app_name, project_name)
+        cached = redis_client.get(redis_key)
+        if cached:
+            try:
+                env = json.loads(cached)
+                _ENV_CACHE[key] = env
+                print(f"🔧 redis_env_vars{redis_key} -> {env}")
+                return env
+            except Exception:
+                pass
+
     env = {}
     if client_id or app_id or project_id:
         env = await _query_env_vars(client_id, app_id, project_id)
@@ -127,8 +147,17 @@ async def get_env_vars(
             "APP_NAME": os.getenv("APP_NAME", "default_app"),
             "PROJECT_NAME": os.getenv("PROJECT_NAME", "default_project"),
         }
+
     if use_cache:
         _ENV_CACHE[key] = env
+        if env.get("CLIENT_NAME") and env.get("PROJECT_NAME"):
+            redis_key = _redis_env_key(
+                env.get("CLIENT_NAME", ""),
+                env.get("APP_NAME", ""),
+                env.get("PROJECT_NAME", ""),
+            )
+            redis_client.setex(redis_key, ENV_TTL, json.dumps(env))
+
     print(f"🔧 db_env_vars{key} -> {env}")
     return env
 
