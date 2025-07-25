@@ -419,15 +419,35 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
         if (current) {
           fetch(`${REGISTRY_API}/projects/${JSON.parse(current).id}/`, { credentials: 'include' })
             .then(res => res.ok ? res.json() : null)
-            .then(data => {
-              if (data && data.state && data.state.laboratory_config) {
-                const cfg = data.state.laboratory_config;
-                localStorage.setItem(STORAGE_KEY, safeStringify(cfg.cards));
-                localStorage.setItem('laboratory-config', safeStringify(cfg));
-                if (!storedAtoms && data.state.workflow_selected_atoms) {
-                  localStorage.setItem('workflow-selected-atoms', safeStringify(data.state.workflow_selected_atoms));
+            .then(async data => {
+              if (data) {
+                if (data.environment) {
+                  try {
+                    const env = data.environment || {};
+                    const cfgRes = await fetch(
+                      `${CLASSIFIER_API}/get_config?client_name=${env.CLIENT_NAME || ''}&app_name=${env.APP_NAME || ''}&project_name=${env.PROJECT_NAME || ''}`,
+                      { credentials: 'include' }
+                    );
+                    if (cfgRes.ok) {
+                      const cfgJson = await cfgRes.json();
+                      localStorage.setItem('column-classifier-config', JSON.stringify(cfgJson.data));
+                    } else {
+                      localStorage.removeItem('column-classifier-config');
+                    }
+                  } catch (err) {
+                    console.warn('config prefetch failed', err);
+                    localStorage.removeItem('column-classifier-config');
+                  }
                 }
-                window.location.reload();
+                if (data.state && data.state.laboratory_config) {
+                  const cfg = data.state.laboratory_config;
+                  localStorage.setItem(STORAGE_KEY, safeStringify(cfg.cards));
+                  localStorage.setItem('laboratory-config', safeStringify(cfg));
+                  if (!storedAtoms && data.state.workflow_selected_atoms) {
+                    localStorage.setItem('workflow-selected-atoms', safeStringify(data.state.workflow_selected_atoms));
+                  }
+                  window.location.reload();
+                }
               }
             })
             .catch(() => {});
