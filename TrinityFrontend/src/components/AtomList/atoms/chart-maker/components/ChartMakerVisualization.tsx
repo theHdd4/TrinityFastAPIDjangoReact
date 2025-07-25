@@ -16,12 +16,14 @@ interface ChartMakerVisualizationProps {
   settings: ChartMakerSettings;
   onSettingsChange: (newSettings: Partial<ChartMakerSettings>) => void;
   onRenderCharts: () => void;
+  onChartSettingsImmediateChange?: (chartIndex: number, updates: Partial<ChartMakerConfig>) => void;
 }
 
 const ChartMakerVisualization: React.FC<ChartMakerVisualizationProps> = ({
   settings,
   onSettingsChange,
-  onRenderCharts
+  onRenderCharts,
+  onChartSettingsImmediateChange
 }) => {
   const handleNumberOfChartsChange = (change: number) => {
     const newNumber = Math.max(1, Math.min(2, settings.numberOfCharts + change));
@@ -52,8 +54,13 @@ const ChartMakerVisualization: React.FC<ChartMakerVisualizationProps> = ({
 
   const updateChart = (index: number, updates: Partial<ChartMakerConfig>) => {
     const newCharts = [...settings.charts];
-    newCharts[index] = { ...newCharts[index], ...updates };
+    const prevChart = newCharts[index];
+    newCharts[index] = { ...prevChart, ...updates };
     onSettingsChange({ charts: newCharts });
+    // If chartRendered is true, trigger immediate backend re-render
+    if (prevChart.chartRendered && onChartSettingsImmediateChange) {
+      onChartSettingsImmediateChange(index, { ...prevChart, ...updates });
+    }
   };
 
   const getUniqueValues = (column: string) => {
