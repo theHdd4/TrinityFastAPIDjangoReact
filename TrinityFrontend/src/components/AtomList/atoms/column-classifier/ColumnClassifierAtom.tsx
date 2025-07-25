@@ -160,6 +160,10 @@ const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
       dimensions: currentFile.customDimensions
     };
 
+    const key = `${payload.client_name}/${payload.app_name}/${payload.project_name}/column_classifier_config`;
+    console.log('🆔 identifiers', identifiers);
+    console.log('🏷️ dimensions', payload.dimensions);
+    console.log('📁 will save configuration to', key);
     console.log('📦 saving configuration', payload);
     const res = await fetch(`${CLASSIFIER_API}/save_config`, {
       method: 'POST',

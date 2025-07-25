@@ -86,6 +86,7 @@ export interface FeatureOverviewSettings {
   activeMetric?: string;
   activeRow?: number | null;
   dimensionMap?: Record<string, string[]>;
+  filterUnique?: boolean;
 }
 
 export const DEFAULT_FEATURE_OVERVIEW_SETTINGS: FeatureOverviewSettings = {
@@ -106,6 +107,7 @@ export const DEFAULT_FEATURE_OVERVIEW_SETTINGS: FeatureOverviewSettings = {
   activeMetric: "",
   activeRow: null,
   dimensionMap: {},
+  filterUnique: false,
 };
 
 export interface ConcatSettings {
