@@ -40,3 +40,13 @@ Example payload for `/api/column-classifier/save_config`:
 
 The backend resolves the environment variables and returns a JSON response
 confirming the MongoDB save result.
+
+## Checking the saved configuration in Mongo Express
+
+1. Ensure the Docker stack is running (`docker compose up -d` or `docker-compose-dev.yml`).
+2. Open your browser to `http://localhost:8083` (development) or `http://localhost:8082` (production).
+3. Log in with the credentials `admin` / `admin`.
+4. In the sidebar select the `validator_atoms_db` database.
+5. Click the `column_classifier_configs` collection.
+6. Locate the document whose **_id** matches `<client_name>/<app_name>/<project_name>`.
+7. Opening the document reveals the stored identifiers, measures, dimensions and environment values.

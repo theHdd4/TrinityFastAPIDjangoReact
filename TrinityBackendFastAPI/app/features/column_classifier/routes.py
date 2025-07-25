@@ -618,6 +618,7 @@ async def save_config(req: SaveConfigRequest):
         map_key = f"project:{req.project_id}:dimensions"
         redis_client.setex(map_key, 3600, json.dumps(req.dimensions))
     mongo_result = save_classifier_config_to_mongo(data)
+    print(f"📦 mongo save result {mongo_result}")
     return {"status": "success", "key": key, "data": data, "mongo": mongo_result}
 
 
