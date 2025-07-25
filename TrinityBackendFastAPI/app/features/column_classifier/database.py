@@ -13,8 +13,9 @@ DATABASE_NAME = settings.classification_database
 # Use settings for consistency
 COLLECTIONS = {
     "VALIDATOR_ATOMS": settings.validator_atoms_collection,
-    "COLUMN_CLASSIFICATIONS": settings.column_classifications_collection, 
-    "BUSINESS_DIMENSIONS": settings.business_dimensions_collection
+    "COLUMN_CLASSIFICATIONS": settings.column_classifications_collection,
+    "BUSINESS_DIMENSIONS": settings.business_dimensions_collection,
+    "CLASSIFIER_CONFIGS": settings.classifier_configs_collection,
 }
 
 # Initialize MongoDB client with timeout
@@ -357,4 +358,47 @@ def get_project_dimension_mapping(project_id: int):
         return db["project_dimension_mappings"].find_one({"_id": document_id})
     except Exception as exc:  # pragma: no cover
         logging.error(f"MongoDB read error for project mapping: {exc}")
+        return None
+
+
+def save_classifier_config_to_mongo(config: dict):
+    """Persist column classifier configuration."""
+    if not check_mongodb_connection():
+        return {"status": "error", "error": "MongoDB not connected"}
+
+    try:
+        document_id = (
+            f"{config.get('client_name','')}/"
+            f"{config.get('app_name','')}/"
+            f"{config.get('project_name','')}"
+        )
+        document = {
+            "_id": document_id,
+            **config,
+            "updated_at": datetime.utcnow(),
+        }
+        result = db[COLLECTIONS["CLASSIFIER_CONFIGS"]].replace_one(
+            {"_id": document_id}, document, upsert=True
+        )
+        return {
+            "status": "success",
+            "mongo_id": document_id,
+            "operation": "inserted" if result.upserted_id else "updated",
+            "collection": COLLECTIONS["CLASSIFIER_CONFIGS"],
+        }
+    except Exception as exc:
+        logging.error(f"MongoDB save error for classifier config: {exc}")
+        return {"status": "error", "error": str(exc)}
+
+
+def get_classifier_config_from_mongo(client: str, app: str, project: str):
+    """Retrieve saved classifier configuration."""
+    if not check_mongodb_connection():
+        return None
+
+    try:
+        document_id = f"{client}/{app}/{project}"
+        return db[COLLECTIONS["CLASSIFIER_CONFIGS"]].find_one({"_id": document_id})
+    except Exception as exc:
+        logging.error(f"MongoDB read error for classifier config: {exc}")
         return None

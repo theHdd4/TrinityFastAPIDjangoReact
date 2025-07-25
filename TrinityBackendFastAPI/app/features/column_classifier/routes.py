@@ -22,6 +22,8 @@ from app.features.column_classifier.database import (
     get_validator_from_memory_or_disk,
     save_business_dimensions_to_mongo,
     save_project_dimension_mapping,
+    save_classifier_config_to_mongo,
+    get_classifier_config_from_mongo,
 )
 from app.features.column_classifier.config import settings
 
@@ -589,13 +591,33 @@ class SaveConfigRequest(BaseModel):
 
 @router.post("/save_config")
 async def save_config(req: SaveConfigRequest):
-    """Save column classifier configuration to Redis."""
+    """Save column classifier configuration to Redis and MongoDB."""
     key = f"{req.client_name}/{req.app_name}/{req.project_name}/column_classifier_config"
     data = {
         "project_id": req.project_id,
+        "client_name": req.client_name,
+        "app_name": req.app_name,
+        "project_name": req.project_name,
         "identifiers": req.identifiers,
         "measures": req.measures,
         "dimensions": req.dimensions,
     }
     redis_client.setex(key, 3600, json.dumps(data))
-    return {"status": "success", "key": key, "data": data}
+    mongo_result = save_classifier_config_to_mongo(data)
+    return {"status": "success", "key": key, "data": data, "mongo": mongo_result}
+
+
+@router.get("/get_config")
+async def get_config(client_name: str, app_name: str, project_name: str):
+    """Retrieve saved column classifier configuration."""
+    key = f"{client_name}/{app_name}/{project_name}/column_classifier_config"
+    cached = redis_client.get(key)
+    if cached:
+        return {"status": "success", "source": "redis", "data": json.loads(cached)}
+
+    mongo_data = get_classifier_config_from_mongo(client_name, app_name, project_name)
+    if mongo_data:
+        redis_client.setex(key, 3600, json.dumps(mongo_data))
+        return {"status": "success", "source": "mongo", "data": mongo_data}
+
+    raise HTTPException(status_code=404, detail="Configuration not found")

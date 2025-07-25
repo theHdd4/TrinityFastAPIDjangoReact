@@ -50,6 +50,45 @@ const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  React.useEffect(() => {
+    const fetchConfig = async () => {
+      if (!classifierData.files.length) return;
+      const envStr = localStorage.getItem('env');
+      const env = envStr ? JSON.parse(envStr) : {};
+      const url = `${CLASSIFIER_API}/get_config?client_name=${env.CLIENT_NAME || ''}&app_name=${env.APP_NAME || ''}&project_name=${env.PROJECT_NAME || ''}`;
+      try {
+        const res = await fetch(url, { credentials: 'include' });
+        if (res.ok) {
+          const json = await res.json();
+          console.log('📥 loaded configuration', json);
+          const cfg = json.data;
+          if (cfg) {
+            const file = classifierData.files[0];
+            const updatedFile: ColumnClassifierFile = {
+              ...file,
+              columns: file.columns.map(col => ({
+                ...col,
+                category: cfg.identifiers.includes(col.name)
+                  ? 'identifiers'
+                  : cfg.measures.includes(col.name)
+                  ? 'measures'
+                  : 'unclassified',
+              })),
+              customDimensions: cfg.dimensions || {},
+            };
+            updateSettings(atomId, {
+              data: { files: [updatedFile], activeFileIndex: 0 },
+              dimensions: Object.keys(cfg.dimensions || {}),
+            });
+          }
+        }
+      } catch (err) {
+        console.warn('config fetch failed', err);
+      }
+    };
+    fetchConfig();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
 
   const handleColumnMove = (
     columnName: string,
