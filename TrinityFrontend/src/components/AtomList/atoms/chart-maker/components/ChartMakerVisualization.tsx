@@ -131,6 +131,33 @@ const ChartMakerVisualization: React.FC<ChartMakerVisualizationProps> = ({
     onSettingsChange({ charts: newCharts });
   };
 
+  // Exclude columns with only one unique value, and those selected as xAxis or yAxis
+  const getAvailableFilterColumns = () => {
+    if (!settings.uploadedData) return [];
+    const allCategorical = getCategoricalColumns();
+    return allCategorical.filter(column => {
+      // Exclude if only one unique value
+      const uniqueVals = getUniqueValues(column);
+      if (uniqueVals.length <= 1) return false;
+      // Exclude if selected as xAxis or yAxis
+      if (settings.charts.some(chart => chart.xAxis === column || chart.yAxis === column)) return false;
+      return true;
+    });
+  };
+
+  // Remove filters for columns that are now excluded (e.g., selected as xAxis/yAxis)
+  React.useEffect(() => {
+    settings.charts.forEach((chart, chartIndex) => {
+      const available = getAvailableFilterColumns();
+      Object.keys(chart.filters).forEach(col => {
+        if (!available.includes(col)) {
+          removeFilter(chartIndex, col);
+        }
+      });
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settings.charts.map(c => c.xAxis), settings.charts.map(c => c.yAxis)]);
+
   if (!settings.uploadedData) {
     return (
       <div className="text-center py-8">
@@ -265,7 +292,17 @@ const ChartMakerVisualization: React.FC<ChartMakerVisualizationProps> = ({
                       
                       <Popover>
                         <PopoverTrigger asChild>
-                          <Button variant="outline" size="sm" className="w-full">
+                          <Button 
+                            variant="outline" 
+                            size="sm" 
+                            className="w-full"
+                            disabled={
+                              !chart.xAxis || !chart.yAxis || chart.xAxis === 'None' || chart.yAxis === 'None' || getAvailableFilterColumns().length === 0
+                            }
+                            style={{
+                              opacity: (!chart.xAxis || !chart.yAxis || chart.xAxis === 'None' || chart.yAxis === 'None' || getAvailableFilterColumns().length === 0) ? 0.5 : 1
+                            }}
+                          >
                             <Filter className="w-3 h-3 mr-1" />
                             Add Filter
                           </Button>
@@ -273,11 +310,11 @@ const ChartMakerVisualization: React.FC<ChartMakerVisualizationProps> = ({
                          <PopoverContent className="w-64" align="start">
                            <div className="space-y-3">
                              <Label className="text-xs font-medium">Select Categorical Column to Filter</Label>
-                             {getCategoricalColumns().length === 0 ? (
+                             {getAvailableFilterColumns().length === 0 ? (
                                <p className="text-xs text-muted-foreground">No categorical columns available for filtering</p>
                              ) : (
                                <div style={{ maxHeight: '224px', overflowY: 'auto' }}>
-                                 {getCategoricalColumns().map((column) => (
+                                 {getAvailableFilterColumns().map((column) => (
                                    <div key={column}>
                                      <Button
                                        variant="ghost"
