@@ -2,11 +2,13 @@
 
 **Endpoint**: `/api/feature-overview/dimension_mapping`
 
-Send a POST request with JSON payload containing the project ID:
+Send a POST request with JSON payload containing the client, app, and project names:
 
 ```json
 {
-  "project_id": 1
+  "client_name": "ACME",
+  "app_name": "Orders",
+  "project_name": "Revenue"
 }
 ```
 
@@ -17,9 +19,8 @@ Redis, and falling back to MongoDB. The lookup key is constructed as
 When saving a configuration via `/api/column-classifier/save_config`, include
 `client_name`, `app_name`, and `project_name` along with the identifiers,
 measures, and dimensions. The backend resolves the environment variables and
-caches everything in Redis under `<client_name>/<app_name>/<project_name>/column_classifier_config`.
-This stored configuration includes the environment values so feature overview
-can later resolve the mapping using only `project_id`. The document is also
+and caches everything in Redis under `<client_name>/<app_name>/<project_name>/column_classifier_config`.
+Feature overview reads the mapping using these names and falls back to MongoDB if Redis is empty. The document is
 persisted in the `column_classifier_configs` collection in MongoDB.
 
 Example payload for `/api/column-classifier/save_config`:
