@@ -602,4 +602,4 @@ async def save_config(req: SaveConfigRequest):
         "dimensions": req.dimensions,
     }
     redis_client.setex(key, 3600, json.dumps(data))
-    return {"status": "success", "key": key}
+    return {"status": "success", "key": key, "data": data}

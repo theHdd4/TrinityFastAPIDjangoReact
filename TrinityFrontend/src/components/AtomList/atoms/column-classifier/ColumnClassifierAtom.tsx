@@ -165,7 +165,9 @@ const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
       toast({ title: 'Configuration Saved Successfully' });
       try {
         const json = await res.json();
-        console.log('📝 assignment save result', json);
+        console.log('📝 configuration save result', json);
+        console.log('🔑 redis namespace', json.key);
+        console.log('📂 saved data', json.data);
       } catch (err) {
         console.warn('assignment save result parse error', err);
       }
