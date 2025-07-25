@@ -54,7 +54,10 @@ from app.DataStorageRetrieval.flight_registry import (
     set_ticket,
 )
 from app.DataStorageRetrieval.db import get_dataset_info
-from app.features.column_classifier.database import get_project_dimension_mapping
+from app.features.column_classifier.database import (
+    get_project_dimension_mapping,
+    get_classifier_config_from_mongo,
+)
 import asyncio
 
 
@@ -272,28 +275,36 @@ async def dimension_mapping(project_id: int | None = None):
             print(f"⚠️ env PROJECT_ID fetch failed: {exc}")
             project_id = PROJECT_ID
 
-    cache_key = f"project:{project_id}:dimensions"
-    cached = redis_client.get(cache_key)
+    key = f"{CLIENT_NAME}/{APP_NAME}/{PROJECT_NAME}/column_classifier_config"
+    cached = redis_client.get(key)
     if cached:
         try:
-            return {"mapping": json.loads(cached)}
-        except Exception:
-            pass
+            cfg = json.loads(cached)
+            dims = cfg.get("dimensions")
+            if isinstance(dims, dict):
+                return {"mapping": dims}
+        except Exception as exc:
+            print(f"⚠️ dimension_mapping redis parse error: {exc}")
 
-    mongo_doc = get_project_dimension_mapping(project_id)
-    if not mongo_doc or not mongo_doc.get("assignments"):
+    mongo_cfg = get_classifier_config_from_mongo(CLIENT_NAME, APP_NAME, PROJECT_NAME)
+    if mongo_cfg and mongo_cfg.get("dimensions"):
+        redis_client.setex(key, 3600, json.dumps(mongo_cfg))
+        return {"mapping": mongo_cfg["dimensions"]}
+
+    mongo_map = get_project_dimension_mapping(project_id)
+    if not mongo_map or not mongo_map.get("assignments"):
         raise HTTPException(status_code=404, detail="Mapping not found")
 
     mapping: dict[str, list[str]] = {}
     try:
-        for dim, ids in mongo_doc["assignments"].items():
+        for dim, ids in mongo_map["assignments"].items():
             if not ids:
                 continue
             mapping[dim] = [str(i) for i in ids]
     except Exception as exc:
         print(f"⚠️ dimension_mapping parse error: {exc}")
 
-    redis_client.setex(cache_key, 3600, json.dumps(mapping))
+    redis_client.setex(key, 3600, json.dumps({**mongo_map, "dimensions": mapping}))
     return {"mapping": mapping}
 
 
