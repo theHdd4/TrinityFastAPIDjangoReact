@@ -94,7 +94,7 @@ const ColumnClassifierDimensionConfig: React.FC<Props> = ({ data, onColumnMove, 
         onClick={onSave}
         className="w-full h-12 text-sm font-semibold bg-gradient-to-r from-gray-800 to-gray-900 hover:from-gray-900 hover:to-black"
       >
-        Save Dimensions
+        Save Configuration
       </Button>
     </div>
   );

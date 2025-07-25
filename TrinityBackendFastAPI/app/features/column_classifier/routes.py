@@ -579,3 +579,27 @@ async def assign_identifiers_to_dimensions(
         in_memory_updated=in_memory_status,
         next_steps=NextStepsAssignment(view_complete_setup="", export_configuration=""),
     )
+
+
+class SaveConfigRequest(BaseModel):
+    project_id: int | None = None
+    client_name: str = ""
+    app_name: str = ""
+    project_name: str = ""
+    identifiers: List[str]
+    measures: List[str]
+    dimensions: Dict[str, List[str]]
+
+
+@router.post("/save_config")
+async def save_config(req: SaveConfigRequest):
+    """Save column classifier configuration to Redis."""
+    key = f"{req.client_name}/{req.app_name}/{req.project_name}/column_classifier_config"
+    data = {
+        "project_id": req.project_id,
+        "identifiers": req.identifiers,
+        "measures": req.measures,
+        "dimensions": req.dimensions,
+    }
+    redis_client.setex(key, 3600, json.dumps(data))
+    return {"status": "success", "key": key}

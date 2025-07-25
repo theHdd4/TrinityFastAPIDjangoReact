@@ -132,21 +132,37 @@ const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
     if (!classifierData.files.length) return;
     const currentFile = classifierData.files[classifierData.activeFileIndex];
     const stored = localStorage.getItem('current-project');
-    const projectId = stored ? JSON.parse(stored).id : null;
-    const form = new FormData();
-    form.append('identifier_assignments', JSON.stringify(currentFile.customDimensions));
-    if (projectId) {
-      form.append('project_id', String(projectId));
-    }
-    console.log('📦 sending identifier assignments', projectId, currentFile.customDimensions);
-    const res = await fetch(`${CLASSIFIER_API}/assign_identifiers_to_dimensions`, {
+    const envStr = localStorage.getItem('env');
+    const project = stored ? JSON.parse(stored) : {};
+    const env = envStr ? JSON.parse(envStr) : {};
+
+    const identifiers = currentFile.columns
+      .filter(c => c.category === 'identifiers')
+      .map(c => c.name);
+    const measures = currentFile.columns
+      .filter(c => c.category === 'measures')
+      .map(c => c.name);
+
+    const payload = {
+      project_id: project.id || null,
+      client_name: env.CLIENT_NAME || '',
+      app_name: env.APP_NAME || '',
+      project_name: env.PROJECT_NAME || '',
+      identifiers,
+      measures,
+      dimensions: currentFile.customDimensions
+    };
+
+    console.log('📦 saving configuration', payload);
+    const res = await fetch(`${CLASSIFIER_API}/save_config`, {
       method: 'POST',
-      body: form,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
       credentials: 'include'
     });
-    console.log('✅ dimension assignment response', res.status);
+    console.log('✅ save configuration response', res.status);
     if (res.ok) {
-      toast({ title: 'Dimensions Saved Successfully' });
+      toast({ title: 'Configuration Saved Successfully' });
       try {
         const json = await res.json();
         console.log('📝 assignment save result', json);
@@ -154,7 +170,7 @@ const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
         console.warn('assignment save result parse error', err);
       }
     } else {
-      toast({ title: 'Unable to Save Dimensions', variant: 'destructive' });
+      toast({ title: 'Unable to Save Configuration', variant: 'destructive' });
       try {
         const txt = await res.text();
         console.warn('assignment save error response', txt);
