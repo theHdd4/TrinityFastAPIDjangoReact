@@ -68,11 +68,11 @@ const ColumnClassifierCanvas: React.FC<ColumnClassifierCanvasProps> = ({
 
     const sectionColors = {
       unclassified:
-        'bg-white border-[#fec107] text-gray-800 hover:bg-[#fec107]/10',
+        'bg-white border-[#fec107] text-black hover:bg-[#fec107]/10',
       identifiers:
-        'bg-white border-blue-400 text-blue-700 hover:bg-blue-50',
+        'bg-white border-blue-400 text-black hover:bg-blue-50',
       measures:
-        'bg-white border-emerald-400 text-emerald-700 hover:bg-emerald-50',
+        'bg-white border-emerald-400 text-black hover:bg-emerald-50',
     } as const;
 
     return (
@@ -250,7 +250,7 @@ const ColumnClassifierCanvas: React.FC<ColumnClassifierCanvasProps> = ({
           <div className="grid grid-cols-3 gap-8 max-w-7xl mx-auto">
             <DroppableSection
               id="unclassified"
-              title="Unclassified Columns"
+              title="Unclassified"
               columns={columnsByCategory.unclassified}
             />
             <DroppableSection
