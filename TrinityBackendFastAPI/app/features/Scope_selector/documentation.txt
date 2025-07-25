@@ -1,0 +1,395 @@
+API Documentation - Scope Selector Atom API v2.0.0
+Table of Contents
+Health Check Endpoints
+
+Validator Atom Endpoints
+
+Scope Management Endpoints
+
+Health Check Endpoints
+1. Basic Health Check
+Endpoint: GET /health
+
+Description: Basic API health check without external dependencies. Returns the current status of the API service.
+
+Response:
+
+json
+{
+  "status": "healthy",
+  "service": "Scope Selector Atom API",
+  "version": "2.0.0",
+  "timestamp": "2025-07-25T10:24:00.000Z",
+  "environment": "development"
+}
+2. Detailed Health Check
+Endpoint: GET /health/detailed
+
+Description: Comprehensive health check for all external services including MongoDB, Redis, and MinIO.
+
+Response:
+
+json
+{
+  "timestamp": "2025-07-25T10:24:00.000Z",
+  "overall_status": "healthy",
+  "services": {
+    "mongodb": {
+      "status": "connected",
+      "databases": {...}
+    },
+    "redis": {
+      "status": "connected",
+      "connection_details": {...}
+    },
+    "minio": {
+      "status": "connected",
+      "bucket_info": {...}
+    }
+  },
+  "configuration": {
+    "environment": "development",
+    "debug_mode": false,
+    "api_version": "2.0.0"
+  }
+}
+3. MongoDB Health Check
+Endpoint: GET /health/mongodb
+
+Description: Check MongoDB connection status and database access. Verifies both validator_atoms_db and Scope_selection databases.
+
+Response:
+
+json
+{
+  "status": "connected",
+  "databases": {
+    "validator_atoms_db": {
+      "collections": ["column_classifications"],
+      "count": 1
+    },
+    "Scope_selection": {
+      "collections": ["Scopes", "Processing_jobs"],
+      "count": 2
+    }
+  },
+  "missing_collections": [],
+  "connection_details": {
+    "host": "10.2.1.65:9005",
+    "auth_source": "admin"
+  }
+}
+4. Redis Health Check
+Endpoint: GET /health/redis
+
+Description: Check Redis connection and cache functionality. Tests basic operations and returns server information.
+
+Response:
+
+json
+{
+  "status": "connected",
+  "connection_details": {
+    "host": "localhost:6379",
+    "database": 0,
+    "max_connections": 50
+  },
+  "server_info": {
+    "version": "7.0.0",
+    "memory_used": "1.5M",
+    "connected_clients": 2,
+    "total_connections": 150
+  },
+  "cache_test": "success",
+  "ttl_settings": {
+    "default_ttl": 3600,
+    "stats_ttl": 7200,
+    "results_ttl": 86400
+  }
+}
+5. MinIO Health Check
+Endpoint: GET /health/minio
+
+Description: Check MinIO connection and bucket access. Provides information about stored objects by prefix.
+
+Response:
+
+json
+{
+  "status": "connected",
+  "connection_details": {
+    "endpoint": "10.2.1.53:9000",
+    "bucket": "scope-selection",
+    "ssl_enabled": false,
+    "secure_url": "http://10.2.1.53:9000"
+  },
+  "bucket_info": {
+    "exists": true,
+    "data_structure": {
+      "raw_data_objects": 150,
+      "filtered_data_objects": 75,
+      "processed_data_objects": 50,
+      "total_objects": 275
+    }
+  },
+  "data_prefixes": {
+    "raw_data": "raw-data/",
+    "filtered_data": "filtered-data/",
+    "processed_data": "processed-data/"
+  }
+}
+6. System Information
+Endpoint: GET /health/system-info
+
+Description: Get comprehensive system configuration information including application settings and infrastructure details.
+
+Response:
+
+json
+{
+  "application": {
+    "name": "Scope Selector Atom API",
+    "version": "2.0.0",
+    "environment": "development",
+    "debug_mode": false
+  },
+  "api_configuration": {
+    "host": "0.0.0.0",
+    "port": 8000,
+    "reload_enabled": true
+  },
+  "infrastructure": {
+    "mongodb": {
+      "host": "10.2.1.65:9005",
+      "source_database": "validator_atoms_db",
+      "scope_database": "Scope_selection"
+    },
+    "redis": {
+      "host": "localhost:6379",
+      "database": 0,
+      "url": "redis://localhost:6379/0"
+    },
+    "minio": {
+      "endpoint": "10.2.1.53:9000",
+      "bucket": "scope-selection",
+      "secure_url": "http://10.2.1.53:9000"
+    }
+  },
+  "data_pipeline": {
+    "workflow_stages": ["raw-data", "filtered-data", "processed-data"],
+    "cache_strategy": "Redis → MinIO → MongoDB fallback"
+  }
+}
+Validator Atom Endpoints
+7. Get Column Classifications
+Endpoint: GET /validator-atoms/{validator_atom_id}/classifications
+
+Description: Retrieve column classifications for a specific validator atom ID. Returns identified columns with their data types and classifications.
+
+Parameters:
+
+validator_atom_id (path, required): Validator atom identifier
+
+include_metadata (query, optional): Include classification metadata (default: true)
+
+Example Request:
+
+text
+GET /validator-atoms/heinz_validated/classifications?include_metadata=true
+Response:
+
+json
+{
+  "validator_atom_id": "heinz_validated",
+  "classification_status": "completed",
+  "file_key": "raw-data/heinz_data.csv",
+  "total_columns": 15,
+  "classification_summary": {
+    "total_columns": 15,
+    "identifiers": ["customer_id", "product_name", "date", "region"]
+  },
+  "detailed_classifications": [
+    {
+      "column_name": "customer_id",
+      "data_type": "string",
+      "classification_type": "identifier",
+      "confidence_score": 0.95,
+      "sample_values": ["C001", "C002", "C003", "C004", "C005"]
+    }
+  ],
+  "metadata": {
+    "file_key": "raw-data/heinz_data.csv",
+    "created_at": "2025-07-25T09:00:00Z",
+    "updated_at": "2025-07-25T09:15:00Z",
+    "classification_metadata": {...}
+  },
+  "retrieved_at": "2025-07-25T10:24:00Z"
+}
+Scope Management Endpoints
+8. Create Scope
+Endpoint: POST /scopes/{validator_id}
+
+Description: Create a new scope by selecting specific identifiers and optionally a time column from a validated dataset.
+
+Parameters:
+
+validator_id (path, required): Validator atom identifier
+
+Request Body:
+
+json
+{
+  "name": "Customer Product Analysis",
+  "description": "Scope for analyzing customer product purchases",
+  "identifiers": ["customer_id", "product_name"],
+  "time_column": "date"
+}
+Example Request:
+
+text
+POST /scopes/heinz_validated
+Response:
+
+json
+{
+  "success": true,
+  "scope_id": "heinz_validated_20250725_102400",
+  "name": "Customer Product Analysis",
+  "identifiers": ["customer_id", "product_name"],
+  "time_column": "date",
+  "created_at": "2025-07-25T10:24:00Z"
+}
+
+
+9. Create Multi-Filtered Scope
+Endpoint: POST /scopes/{scope_id}/create-multi-filtered-scope
+
+Description: Create multiple filtered scopes with different identifier combinations and optional time ranges. Supports up to 5 filter sets. Files with less than 12 records are flagged with a low data warning.
+
+Parameters:
+
+scope_id (path, required): Base scope identifier
+
+Request Body:
+
+json
+{
+  "file_key": "raw-data/heinz_data.csv",
+  "description": "Multi-region analysis with time filters",
+  "identifier_filters_1": {
+    "region": ["North", "South"],
+    "product_category": ["Beverages"]
+  },
+  "start_date_1": "2025-01-01",
+  "end_date_1": "2025-03-31",
+  "identifier_filters_2": {
+    "region": ["East", "West"],
+    "product_category": ["Snacks", "Dairy"]
+  },
+  "start_date_2": "2025-04-01",
+  "end_date_2": "2025-06-30"
+}
+Example Request:
+
+text
+POST /scopes/heinz_validated_20250725_102400/create-multi-filtered-scope
+Response:
+
+json
+{
+  "success": true,
+  "scope_id": "heinz_validated_multifilter_20250725_103000",
+  "scope_name": "MultiFilter_Scope_1_Scope_2_20250725_103000",
+  "filter_set_results": [
+    {
+      "set_name": "Scope_1",
+      "identifier_filters": {
+        "region": ["North", "South"],
+        "product_category": ["Beverages"]
+      },
+      "start_date": "2025-01-01",
+      "end_date": "2025-03-31",
+      "combination_files": [
+        {
+          "combination": {
+            "region": "North",
+            "product_category": "Beverages"
+          },
+          "file_key": "filtered-data/heinz_validated_multifilter_20250725_103000/Scope_1_region_North_product_category_Beverages_20250725_103000.csv",
+          "filename": "Scope_1_region_North_product_category_Beverages_20250725_103000.csv",
+          "record_count": 1250,
+          "low_data_warning": false  // ← ADD THIS
+        },
+        {
+          "combination": {
+            "region": "South",
+            "product_category": "Beverages"
+          },
+          "file_key": "filtered-data/heinz_validated_multifilter_20250725_103000/Scope_1_region_South_product_category_Beverages_20250725_103000.csv",
+          "filename": "Scope_1_region_South_product_category_Beverages_20250725_103000.csv",
+          "record_count": 8,
+          "low_data_warning": true  // ← ADD THIS (example with < 12 records)
+        }
+      ],
+      "filtered_records_count": 3500
+    },
+    {
+      "set_name": "Scope_2",
+      "identifier_filters": {
+        "region": ["East", "West"],
+        "product_category": ["Snacks", "Dairy"]
+      },
+      "start_date": "2025-04-01",
+      "end_date": "2025-06-30",
+      "combination_files": [...],
+      "filtered_records_count": 4200
+    }
+  ],
+  "total_filter_sets": 2,
+  "overall_filtered_records": 7700,
+  "original_records_count": 50000,
+  "created_at": "2025-07-25T10:30:00Z"
+}
+
+
+
+Notes:
+
+Time filtering is optional - filter sets can work with just identifier filters
+
+If time filtering is used, both start_date and end_date must be provided
+
+The API automatically generates filtered data files in MinIO for each combination
+
+Column names are case-insensitive for matching
+
+Error Responses
+All endpoints follow a consistent error response format:
+
+json
+{
+  "detail": "Error description message"
+}
+Common HTTP Status Codes:
+
+400 Bad Request: Invalid request parameters or data
+
+404 Not Found: Resource not found
+
+500 Internal Server Error: Server-side error
+
+Data Flow
+Validator Atom → Contains column classifications from the validator service
+
+Scope Creation → Selects specific identifiers and time columns
+
+Multi-Filter Scope → Creates filtered datasets based on identifier combinations
+
+Storage → Filtered data stored in MinIO, metadata in MongoDB
+
+Infrastructure Dependencies
+MongoDB: Stores validator atom classifications and scope metadata
+
+Redis: Caching layer for performance optimization
+
+MinIO: Object storage for data files (raw, filtered, processed)
