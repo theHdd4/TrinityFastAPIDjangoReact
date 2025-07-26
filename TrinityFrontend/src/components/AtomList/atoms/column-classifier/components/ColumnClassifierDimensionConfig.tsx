@@ -55,7 +55,7 @@ const ColumnClassifierDimensionConfig: React.FC<Props> = ({ data, onColumnMove, 
                   {dimensionColumns.map(column => (
                     <Badge
                       key={column.name}
-                      className="bg-gradient-to-r from-purple-500 to-purple-600 text-white px-4 py-2 font-medium flex items-center gap-1"
+                      className="bg-gradient-to-r from-blue-500 to-blue-600 text-white px-4 py-2 font-medium flex items-center gap-1"
                     >
                       {column.name}
                       <X className="w-3 h-3 cursor-pointer hover:text-red-200" onClick={() => onColumnMove(column.name, 'identifiers', data.activeFileIndex)} />
@@ -77,7 +77,7 @@ const ColumnClassifierDimensionConfig: React.FC<Props> = ({ data, onColumnMove, 
                       </select>
                     )}
                     <div
-                      className="flex items-center justify-center w-10 h-10 bg-gradient-to-r from-purple-500 to-purple-600 text-white rounded-full font-bold text-lg shadow-lg cursor-pointer hover:scale-110 transition-transform"
+                      className="flex items-center justify-center w-10 h-10 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-full font-bold text-lg shadow-lg cursor-pointer hover:scale-110 transition-transform"
                       onClick={() => toggle(dimensionName)}
                     >
                       +

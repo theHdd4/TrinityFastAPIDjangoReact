@@ -109,17 +109,17 @@ const ColumnClassifierCanvas: React.FC<ColumnClassifierCanvasProps> = ({
     const styles = {
       unclassified: {
         gradient: 'from-gray-400 to-gray-500',
-        bg: 'bg-gray-50',
+        bg: 'bg-white',
         border: 'border-[#fec107]',
       },
       identifiers: {
         gradient: 'from-blue-500 to-blue-600',
-        bg: 'bg-blue-50',
+        bg: 'bg-white',
         border: 'border-blue-200',
       },
       measures: {
         gradient: 'from-emerald-500 to-emerald-600',
-        bg: 'bg-emerald-50',
+        bg: 'bg-white',
         border: 'border-emerald-200',
       },
     }[id];
@@ -139,7 +139,7 @@ const ColumnClassifierCanvas: React.FC<ColumnClassifierCanvasProps> = ({
                 <h4 className="text-lg font-bold text-gray-900">{title}</h4>
               </div>
               <div
-                className={`relative flex-1 min-h-[450px] p-4 rounded-lg border ${styles.bg} ${styles.border} transition-all duration-300 ${
+                className={`relative flex-1 min-h-[450px] p-4 rounded-lg ${styles.bg} border ${styles.border} transition-all duration-300 ${
                   isOver ? 'bg-primary/5' : ''
                 }`}
               >
