@@ -539,6 +539,8 @@ async def assign_identifiers_to_dimensions(
         user_id=user_id,
         client_id=client_id,
     )
+    map_key = f"project:{project_id}:dimensions"
+    redis_client.setex(map_key, 3600, json.dumps(assignments))
     in_memory_status = "skipped"
     message = "Identifiers assigned to project dimensions"
     validator_type = "project"
@@ -595,6 +597,12 @@ class SaveConfigRequest(BaseModel):
 async def save_config(req: SaveConfigRequest):
     """Save column classifier configuration to Redis and MongoDB."""
     key = f"{req.client_name}/{req.app_name}/{req.project_name}/column_classifier_config"
+    env = await get_env_vars(
+        client_name=req.client_name,
+        app_name=req.app_name,
+        project_name=req.project_name,
+    )
+    print(f"🔧 save_config env {env}")
     data = {
         "project_id": req.project_id,
         "client_name": req.client_name,
@@ -603,9 +611,14 @@ async def save_config(req: SaveConfigRequest):
         "identifiers": req.identifiers,
         "measures": req.measures,
         "dimensions": req.dimensions,
+        "env": env,
     }
     redis_client.setex(key, 3600, json.dumps(data))
+    if req.project_id:
+        map_key = f"project:{req.project_id}:dimensions"
+        redis_client.setex(map_key, 3600, json.dumps(req.dimensions))
     mongo_result = save_classifier_config_to_mongo(data)
+    print(f"📦 mongo save result {mongo_result}")
     return {"status": "success", "key": key, "data": data, "mongo": mongo_result}
 
 

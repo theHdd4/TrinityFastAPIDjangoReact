@@ -2676,7 +2676,8 @@ async def list_saved_dataframes(
         files = [
             {
                 "object_name": name,
-                "csv_name": Path(name).stem,
+                "arrow_name": Path(name).name,
+                "csv_name": Path(name).stem.split("_", 2)[-1],
             }
             for _, name in entries
         ]

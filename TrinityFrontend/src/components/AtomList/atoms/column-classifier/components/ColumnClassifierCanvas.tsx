@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Badge } from '@/components/ui/badge';
+import { Card } from '@/components/ui/card';
 import { Database, FileText, GripVertical } from 'lucide-react';
 import { ClassifierData } from '../ColumnClassifierAtom';
 import {
@@ -67,11 +68,11 @@ const ColumnClassifierCanvas: React.FC<ColumnClassifierCanvasProps> = ({
 
     const sectionColors = {
       unclassified:
-        'from-slate-100/80 to-slate-50/60 border-slate-200/70 text-slate-700 hover:from-slate-200/90 hover:to-slate-100/70 hover:border-slate-300 hover:text-slate-800',
+        'bg-white border-[#fec107] text-black hover:bg-[#fec107]/10',
       identifiers:
-        'from-blue-100/80 to-blue-50/60 border-blue-200/70 text-blue-700 hover:from-blue-200/90 hover:to-blue-100/70 hover:border-blue-300 hover:text-blue-800',
+        'bg-white border-blue-400 text-black hover:bg-blue-50',
       measures:
-        'from-emerald-100/80 to-emerald-50/60 border-emerald-200/70 text-emerald-700 hover:from-emerald-200/90 hover:to-emerald-100/70 hover:border-emerald-300 hover:text-emerald-800',
+        'bg-white border-emerald-400 text-black hover:bg-emerald-50',
     } as const;
 
     return (
@@ -80,9 +81,9 @@ const ColumnClassifierCanvas: React.FC<ColumnClassifierCanvasProps> = ({
         style={style}
         {...listeners}
         {...attributes}
-        className={`group relative flex items-center gap-2 px-3 py-2 bg-gradient-to-r ${
+        className={`group relative flex items-center gap-2 px-3 py-2 ${
           sectionColors[section as keyof typeof sectionColors]
-        } border rounded-full text-sm font-medium cursor-grab active:cursor-grabbing transition-all duration-200 hover:scale-[1.02] hover:shadow-lg backdrop-blur-sm min-w-0 w-full ${
+        } rounded-full text-sm font-medium cursor-grab active:cursor-grabbing transition-all duration-200 hover:scale-[1.02] hover:shadow-lg backdrop-blur-sm min-w-0 w-full ${
           isDragging ? 'opacity-70 shadow-2xl scale-105 rotate-2' : 'hover:shadow-md'
         }`}
       >
@@ -93,66 +94,79 @@ const ColumnClassifierCanvas: React.FC<ColumnClassifierCanvasProps> = ({
         >
           {name}
         </span>
-        <div className="absolute inset-0 rounded-full bg-gradient-to-r from-transparent via-white/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+        <div className="absolute inset-0 rounded-full bg-black/5 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
       </div>
     );
   };
 
   const DroppableSection: React.FC<{
-    id: string;
+    id: 'unclassified' | 'identifiers' | 'measures';
     title: string;
     columns: string[];
-    gradient: string;
-    accentColor: string;
-  }> = ({ id, title, columns, gradient, accentColor }) => {
+  }> = ({ id, title, columns }) => {
     const { setNodeRef, isOver } = useDroppable({ id });
 
+    const styles = {
+      unclassified: {
+        gradient: 'from-gray-400 to-gray-500',
+        bg: 'bg-white',
+        border: 'border-[#fec107]',
+      },
+      identifiers: {
+        gradient: 'from-blue-500 to-blue-600',
+        bg: 'bg-white',
+        border: 'border-blue-200',
+      },
+      measures: {
+        gradient: 'from-emerald-500 to-emerald-600',
+        bg: 'bg-white',
+        border: 'border-emerald-200',
+      },
+    }[id];
+
     return (
-      <div
+      <Card
         ref={setNodeRef}
-        className={`relative overflow-hidden bg-gradient-to-br ${gradient} border-2 ${
-          isOver ? `border-${accentColor} shadow-2xl scale-105` : 'border-border/50'
-        } rounded-2xl transition-all duration-300 hover:shadow-xl`}
+        className={`h-full border-0 shadow-xl bg-white/80 backdrop-blur-sm overflow-hidden transform transition-all duration-300 ${
+          isOver ? 'scale-105 shadow-2xl' : 'hover:shadow-xl'
+        }`}
       >
-        <div
-          className={`absolute inset-0 bg-gradient-to-br ${gradient} opacity-10 transition-opacity duration-300 ${
-            isOver ? 'opacity-30' : ''
-          }`}
-        />
-        <div
-          className={`relative px-6 py-4 border-b border-border/30 bg-gradient-to-r ${gradient}`}
-        >
-          <h3 className="text-lg font-bold text-foreground flex items-center gap-2">
-            <div className={`w-3 h-3 rounded-full bg-${accentColor} animate-pulse`} />
-            {title}
-          </h3>
-        </div>
-        <div
-          className={`relative p-6 min-h-[450px] bg-card/50 backdrop-blur-sm transition-all duration-300 ${
-            isOver ? 'bg-primary/5' : ''
-          }`}
-        >
-          <div className="grid grid-cols-2 gap-3">
-            {columns.map((column, index) => (
-              <DraggableColumnPill
-                key={`${id}-${column}-${index}`}
-                name={column}
-                section={id}
-              />
-            ))}
+        <div className={`bg-gradient-to-r ${styles.gradient} p-1 h-full`}>
+          <div className="bg-white rounded-sm h-full flex flex-col">
+            <div className="p-6 flex flex-col h-full">
+              <div className="flex items-center mb-4">
+                <div className={`w-1 h-8 bg-gradient-to-b ${styles.gradient} rounded-full mr-3`} />
+                <h4 className="text-lg font-bold text-gray-900">{title}</h4>
+              </div>
+              <div
+                className={`relative flex-1 min-h-[450px] p-4 rounded-lg ${styles.bg} border ${styles.border} transition-all duration-300 ${
+                  isOver ? 'bg-primary/5' : ''
+                }`}
+              >
+                <div className="grid grid-cols-2 gap-3">
+                  {columns.map((column, index) => (
+                    <DraggableColumnPill
+                      key={`${id}-${column}-${index}`}
+                      name={column}
+                      section={id}
+                    />
+                  ))}
+                </div>
+                {columns.length === 0 && (
+                  <div className="flex items-center justify-center h-32 text-muted-foreground">
+                    <span className="text-sm italic">No columns assigned</span>
+                  </div>
+                )}
+                {isOver && (
+                  <div className="absolute inset-4 border-2 border-dashed border-primary/50 rounded-lg bg-primary/5 flex items-center justify-center animate-pulse">
+                    <span className="text-primary font-medium">Drop here</span>
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
-          {columns.length === 0 && (
-            <div className="flex items-center justify-center h-32 text-muted-foreground">
-              <span className="text-sm italic">No columns assigned</span>
-            </div>
-          )}
-          {isOver && (
-            <div className="absolute inset-6 border-2 border-dashed border-primary/50 rounded-xl bg-primary/5 flex items-center justify-center animate-pulse">
-              <span className="text-primary font-medium">Drop here</span>
-            </div>
-          )}
         </div>
-      </div>
+      </Card>
     );
   };
 
@@ -193,7 +207,7 @@ const ColumnClassifierCanvas: React.FC<ColumnClassifierCanvasProps> = ({
       onDragStart={handleDragStart}
       onDragEnd={handleDragEnd}
     >
-      <div className="h-full bg-gradient-to-br from-background via-muted/30 to-background">
+      <div className="w-full h-full p-6 pb-[50px] bg-gradient-to-br from-slate-50 to-blue-50 overflow-y-auto">
         <div className="border-b border-border bg-gradient-to-r from-card via-card/95 to-card backdrop-blur-sm">
           <div className="flex items-center justify-between p-6">
             <div className="flex items-center gap-3">
@@ -236,24 +250,18 @@ const ColumnClassifierCanvas: React.FC<ColumnClassifierCanvasProps> = ({
           <div className="grid grid-cols-3 gap-8 max-w-7xl mx-auto">
             <DroppableSection
               id="unclassified"
-              title="Unclassified Columns"
+              title="Unclassified"
               columns={columnsByCategory.unclassified}
-              gradient="from-slate-50 to-gray-50"
-              accentColor="gray-400"
             />
             <DroppableSection
               id="identifiers"
               title="Identifiers"
               columns={columnsByCategory.identifiers}
-              gradient="from-blue-50 to-indigo-50"
-              accentColor="blue-500"
             />
             <DroppableSection
               id="measures"
               title="Measures"
               columns={columnsByCategory.measures}
-              gradient="from-emerald-50 to-green-50"
-              accentColor="emerald-500"
             />
           </div>
         </div>
