@@ -10,7 +10,7 @@ interface Props {
 }
 
 const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle }) => {
-  interface Frame { object_name: string; csv_name: string }
+  interface Frame { object_name: string; csv_name: string; arrow_name?: string }
   const [files, setFiles] = useState<Frame[]>([]);
   const [renameTarget, setRenameTarget] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
@@ -79,7 +79,9 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle }) => {
       const base = filename.replace(/\.arrow$/, '');
       setFiles(prev =>
         prev.map(f =>
-          f.object_name === obj ? { ...f, object_name: data.new_name, csv_name: base } : f
+          f.object_name === obj
+            ? { ...f, object_name: data.new_name, csv_name: base, arrow_name: filename }
+            : f
         )
       );
     }
@@ -133,11 +135,11 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle }) => {
               />
             ) : (
               <button onClick={() => handleOpen(f.object_name)} className="text-sm text-blue-600 hover:underline flex-1 text-left">
-                {f.csv_name.split('/').pop()}
+                {f.arrow_name ? f.arrow_name.split('/').pop() : f.csv_name.split('/').pop()}
               </button>
             )}
             <div className="flex items-center space-x-2 ml-2">
-              <Pencil className="w-4 h-4 text-gray-400 cursor-pointer" onClick={() => startRename(f.object_name, f.csv_name)} />
+              <Pencil className="w-4 h-4 text-gray-400 cursor-pointer" onClick={() => startRename(f.object_name, f.arrow_name || f.csv_name)} />
               <Trash2 className="w-4 h-4 text-gray-400 cursor-pointer" onClick={() => deleteOne(f.object_name)} />
             </div>
           </div>

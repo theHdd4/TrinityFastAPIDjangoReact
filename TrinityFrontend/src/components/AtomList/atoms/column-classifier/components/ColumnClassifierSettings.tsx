@@ -11,7 +11,7 @@ import {
   DEFAULT_COLUMN_CLASSIFIER_SETTINGS
 } from '@/components/LaboratoryMode/store/laboratoryStore';
 
-interface Frame { object_name: string; csv_name: string; }
+interface Frame { object_name: string; csv_name: string; arrow_name?: string }
 
 interface ClassificationResponse {
   final_classification: {
@@ -107,7 +107,7 @@ const ColumnClassifierSettings: React.FC<ColumnClassifierSettingsProps> = ({ ato
             <SelectContent>
               {frames.map(f => (
                 <SelectItem key={f.object_name} value={f.object_name}>
-                  {f.csv_name.split('/').pop()}
+                  {f.arrow_name ? f.arrow_name.split('/').pop() : f.csv_name.split('/').pop()}
                 </SelectItem>
               ))}
             </SelectContent>
