@@ -423,17 +423,7 @@ def test_list_saved_dataframes_env(monkeypatch):
     app.include_router(routes.router)
     client = TestClient(app)
 
-    resp = client.get(
-        "/list_saved_dataframes",
-        params={
-            "client_id": "c_1",
-            "app_id": "a_1",
-            "project_id": "p_1",
-            "client_name": "c",
-            "app_name": "a",
-            "project_name": "p",
-        },
-    )
+    resp = client.get("/list_saved_dataframes")
 
     assert resp.status_code == 200
     data = resp.json()

@@ -2638,23 +2638,13 @@ async def save_dataframes(
 
 
 @router.get("/list_saved_dataframes")
-async def list_saved_dataframes(
-    client_id: str = "",
-    app_id: str = "",
-    project_id: str = "",
-    client_name: str = "",
-    app_name: str = "",
-    project_name: str = "",
-):
-    """List saved Arrow dataframes sorted by newest first."""
-    prefix = await get_object_prefix(
-        client_id,
-        app_id,
-        project_id,
-        client_name=client_name,
-        app_name=app_name,
-        project_name=project_name,
-    )
+async def list_saved_dataframes() -> dict:
+    """List saved Arrow dataframes sorted by newest first.
+
+    The client, app and project names are loaded from environment
+    variables via :func:`get_object_prefix`.
+    """
+    prefix = await get_object_prefix()
     try:
         objects = minio_client.list_objects(MINIO_BUCKET, prefix=prefix, recursive=True)
         latest: dict[str, tuple[datetime, str]] = {}
