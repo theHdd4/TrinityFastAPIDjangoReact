@@ -20,7 +20,7 @@ interface ColumnInfo {
 }
 
 const FeatureOverviewSettings: React.FC<FeatureOverviewSettingsProps> = ({ settings, onSettingsChange }) => {
-  interface Frame { object_name: string; csv_name: string }
+  interface Frame { object_name: string; csv_name: string; arrow_name?: string }
   const [frames, setFrames] = useState<Frame[]>([]);
   const [columns, setColumns] = useState<ColumnInfo[]>(
     Array.isArray(settings.allColumns) ? settings.allColumns.filter(Boolean) : []
@@ -150,7 +150,7 @@ const FeatureOverviewSettings: React.FC<FeatureOverviewSettingsProps> = ({ setti
           <SelectContent>
             {(Array.isArray(frames) ? frames : []).map(f => (
               <SelectItem key={f.object_name} value={f.object_name}>
-                {f.csv_name.split('/').pop()}
+                {f.arrow_name ? f.arrow_name.split('/').pop() : f.csv_name.split('/').pop()}
               </SelectItem>
             ))}
           </SelectContent>
