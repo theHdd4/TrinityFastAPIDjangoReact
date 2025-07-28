@@ -31,6 +31,19 @@ Trinity Django Admin Guide
    of the credentials above. Use `harsha` for full superuser access. The role‑based
    accounts demonstrate the Architect, Editor and Viewer permissions.
 
+   If you hit a *500 Internal Server Error* on the login page make sure the
+   database is running and that migrations have been applied:
+
+   ```bash
+   docker compose exec web python manage.py migrate
+   ```
+
+   After migrating collect static files so CSS/JS assets load correctly:
+
+   ```bash
+   docker compose exec web python manage.py collectstatic --noinput
+   ```
+
 4. **Managing tenants**
    The admin interface exposes models for Users, Roles and Tenants. When adding
    extra domains be sure to update `ADDITIONAL_DOMAINS` and `CSRF_TRUSTED_ORIGINS`

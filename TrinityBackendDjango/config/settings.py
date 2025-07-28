@@ -262,3 +262,6 @@ SIMPLE_HISTORY_HISTORY_ID_USE_UUID = True
 # Misc
 # ------------------------------------------------------------------
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+# Disable COOP header for local HTTP access to the admin
+SECURE_CROSS_ORIGIN_OPENER_POLICY = None
