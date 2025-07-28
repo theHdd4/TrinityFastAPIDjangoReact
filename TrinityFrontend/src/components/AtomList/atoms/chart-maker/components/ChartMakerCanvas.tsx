@@ -255,10 +255,6 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
             <LineChart 
               data={chartData} 
               margin={{ top: 20, right: 30, left: 20, bottom: 20 }}
-              onClick={() => {
-                // Reset emphasis when clicking on empty space
-                setEmphasizedTrace(prev => ({ ...prev, [chart.id]: null }));
-              }}
             >
               <defs>
                 <linearGradient id={`lineGradient-${chart.id}`} x1="0" y1="0" x2="0" y2="1">
@@ -312,6 +308,30 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
                 const isOtherEmphasized = emphasizedTrace[chart.id] && emphasizedTrace[chart.id] !== trace.dataKey;
                 const traceColor = trace.stroke || trace.fill || DEFAULT_TRACE_COLORS[i % DEFAULT_TRACE_COLORS.length];
                 
+                // Custom dot component that handles clicks
+                const CustomActiveDot = (props: any) => {
+                  const { cx, cy, fill } = props;
+                  return (
+                    <circle
+                      cx={cx}
+                      cy={cy}
+                      r={6}
+                      fill={fill}
+                      stroke="white"
+                      strokeWidth={3}
+                      style={{ cursor: 'pointer' }}
+                      filter={`url(#lineShadow-${chart.id})`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setEmphasizedTrace(prev => ({
+                          ...prev,
+                          [chart.id]: prev[chart.id] === trace.dataKey ? null : trace.dataKey
+                        }));
+                      }}
+                    />
+                  );
+                };
+                
                 return (
                   <Line 
                     key={trace.dataKey || i} 
@@ -327,22 +347,8 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
                       r: 0,
                       filter: `url(#lineShadow-${chart.id})`
                     }}
-                    activeDot={{ 
-                      r: 6, 
-                      fill: traceColor, 
-                      stroke: 'white', 
-                      strokeWidth: 3,
-                      filter: `url(#lineShadow-${chart.id})`,
-                      style: { cursor: 'pointer' }
-                    }}
+                    activeDot={<CustomActiveDot fill={traceColor} />}
                     filter={isEmphasized ? `url(#lineShadow-${chart.id})` : undefined}
-                    onClick={() => {
-                      setEmphasizedTrace(prev => ({
-                        ...prev,
-                        [chart.id]: prev[chart.id] === trace.dataKey ? null : trace.dataKey
-                      }));
-                    }}
-                    style={{ cursor: 'pointer' }}
                   />
                 );
               }) : (
@@ -393,11 +399,6 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
             <BarChart 
               data={processedBarData} 
               margin={{ top: 20, right: 30, left: 20, bottom: 20 }}
-              onClick={() => {
-                // Reset emphasis when clicking on empty space
-                setEmphasizedTrace(prev => ({ ...prev, [chart.id]: null }));
-                setEmphasizedXValue(prev => ({ ...prev, [chart.id]: null }));
-              }}
             >
               <defs>
                 <linearGradient id={`barGradient-${chart.id}`} x1="0" y1="0" x2="0" y2="1">
@@ -461,6 +462,50 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
                 const isOtherEmphasized = emphasizedTrace[chart.id] && emphasizedTrace[chart.id] !== trace.dataKey;
                 const traceColor = trace.stroke || trace.fill || DEFAULT_TRACE_COLORS[i % DEFAULT_TRACE_COLORS.length];
                 
+                // Custom bar shape that handles clicks
+                const CustomBar = (props: any) => {
+                  const { x, y, width, height, payload } = props;
+                  const isXDimmed = emphasizedXValue[chart.id] && payload && payload[`${trace.dataKey}_dimmed`];
+                  const finalColor = isXDimmed ? `${traceColor}60` : traceColor;
+                  const finalOpacity = isXDimmed ? 0.4 : (isOtherEmphasized ? 0.3 : 0.8);
+                  
+                  return (
+                    <rect
+                      x={x}
+                      y={y}
+                      width={width}
+                      height={height}
+                      fill={finalColor}
+                      fillOpacity={finalOpacity}
+                      stroke={traceColor}
+                      strokeWidth={isEmphasized ? 2 : 0}
+                      rx={6}
+                      ry={6}
+                      style={{ cursor: 'pointer' }}
+                      filter={isEmphasized ? `url(#barShadow-${chart.id})` : undefined}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (e.ctrlKey || e.metaKey) {
+                          // Ctrl/Cmd + click for x-axis emphasis
+                          const xValue = payload[xAxisConfig.dataKey];
+                          setEmphasizedXValue(prev => ({
+                            ...prev,
+                            [chart.id]: prev[chart.id] === xValue ? null : xValue
+                          }));
+                          setEmphasizedTrace(prev => ({ ...prev, [chart.id]: null }));
+                        } else {
+                          // Regular click for trace emphasis
+                          setEmphasizedTrace(prev => ({
+                            ...prev,
+                            [chart.id]: prev[chart.id] === trace.dataKey ? null : trace.dataKey
+                          }));
+                          setEmphasizedXValue(prev => ({ ...prev, [chart.id]: null }));
+                        }
+                      }}
+                    />
+                  );
+                };
+                
                 return (
                   <Bar 
                     key={trace.dataKey || i} 
@@ -472,35 +517,8 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
                     radius={[6, 6, 0, 0]}
                     filter={isEmphasized ? `url(#barShadow-${chart.id})` : undefined}
                     style={{ cursor: 'pointer' }}
-                    onClick={(data, index) => {
-                      if (data && data.payload) {
-                        const xValue = data.payload[xAxisConfig.dataKey];
-                        setEmphasizedXValue(prev => ({
-                          ...prev,
-                          [chart.id]: prev[chart.id] === xValue ? null : xValue
-                        }));
-                        setEmphasizedTrace(prev => ({ ...prev, [chart.id]: null }));
-                      } else {
-                        setEmphasizedTrace(prev => ({
-                          ...prev,
-                          [chart.id]: prev[chart.id] === trace.dataKey ? null : trace.dataKey
-                        }));
-                        setEmphasizedXValue(prev => ({ ...prev, [chart.id]: null }));
-                      }
-                    }}
-                  >
-                    {/* Custom Cell components for x-axis emphasis */}
-                    {emphasizedXValue[chart.id] && processedBarData.map((entry, index) => {
-                      const isXDimmed = entry[`${trace.dataKey}_dimmed`];
-                      return (
-                        <Cell 
-                          key={`cell-${index}`} 
-                          fill={isXDimmed ? `${traceColor}60` : traceColor}
-                          fillOpacity={isXDimmed ? 0.4 : (isOtherEmphasized ? 0.3 : 0.8)}
-                        />
-                      );
-                    })}
-                  </Bar>
+                    shape={<CustomBar />}
+                  />
                 );
               }) : (
                 <Bar 
@@ -520,10 +538,6 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
             <AreaChart 
               data={chartData} 
               margin={{ top: 20, right: 30, left: 20, bottom: 20 }}
-              onClick={() => {
-                // Reset emphasis when clicking on empty space
-                setEmphasizedTrace(prev => ({ ...prev, [chart.id]: null }));
-              }}
             >
               <defs>
                 <linearGradient id={`areaGradient-${chart.id}`} x1="0" y1="0" x2="0" y2="1">
@@ -578,6 +592,29 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
                 const isOtherEmphasized = emphasizedTrace[chart.id] && emphasizedTrace[chart.id] !== trace.dataKey;
                 const traceColor = trace.stroke || trace.fill || DEFAULT_TRACE_COLORS[i % DEFAULT_TRACE_COLORS.length];
                 
+                // Custom active dot for area charts
+                const CustomActiveDot = (props: any) => {
+                  const { cx, cy, fill } = props;
+                  return (
+                    <circle
+                      cx={cx}
+                      cy={cy}
+                      r={6}
+                      fill={fill}
+                      stroke="white"
+                      strokeWidth={3}
+                      style={{ cursor: 'pointer' }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setEmphasizedTrace(prev => ({
+                          ...prev,
+                          [chart.id]: prev[chart.id] === trace.dataKey ? null : trace.dataKey
+                        }));
+                      }}
+                    />
+                  );
+                };
+                
                 return (
                   <Area 
                     key={trace.dataKey || i} 
@@ -594,20 +631,7 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
                       strokeWidth: 0, 
                       r: 0
                     }}
-                    activeDot={{ 
-                      r: 6, 
-                      fill: traceColor, 
-                      stroke: 'white', 
-                      strokeWidth: 3,
-                      style: { cursor: 'pointer' }
-                    }}
-                    onClick={() => {
-                      setEmphasizedTrace(prev => ({
-                        ...prev,
-                        [chart.id]: prev[chart.id] === trace.dataKey ? null : trace.dataKey
-                      }));
-                    }}
-                    style={{ cursor: 'pointer' }}
+                    activeDot={<CustomActiveDot fill={traceColor} />}
                   />
                 );
               }) : (
@@ -641,10 +665,6 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
             <ScatterChart 
               data={chartData} 
               margin={{ top: 20, right: 30, left: 20, bottom: 20 }}
-              onClick={() => {
-                // Reset emphasis when clicking on empty space
-                setEmphasizedTrace(prev => ({ ...prev, [chart.id]: null }));
-              }}
             >
               <defs>
                 <radialGradient id={`scatterGradient-${chart.id}`} cx="50%" cy="50%" r="50%">
@@ -697,6 +717,32 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
                 const isOtherEmphasized = emphasizedTrace[chart.id] && emphasizedTrace[chart.id] !== trace.dataKey;
                 const traceColor = trace.stroke || trace.fill || DEFAULT_TRACE_COLORS[i % DEFAULT_TRACE_COLORS.length];
                 
+                // Custom scatter shape that handles clicks
+                const CustomScatter = (props: any) => {
+                  const { cx, cy } = props;
+                  const radius = isEmphasized ? 6 : 4;
+                  const opacity = isOtherEmphasized ? 0.3 : 0.8;
+                  
+                  return (
+                    <circle
+                      cx={cx}
+                      cy={cy}
+                      r={radius}
+                      fill={traceColor}
+                      fillOpacity={opacity}
+                      style={{ cursor: 'pointer' }}
+                      filter={isEmphasized ? `url(#scatterShadow-${chart.id})` : undefined}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setEmphasizedTrace(prev => ({
+                          ...prev,
+                          [chart.id]: prev[chart.id] === trace.dataKey ? null : trace.dataKey
+                        }));
+                      }}
+                    />
+                  );
+                };
+                
                 return (
                   <Scatter 
                     key={trace.dataKey || i} 
@@ -705,13 +751,8 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
                     fillOpacity={isOtherEmphasized ? 0.3 : 0.8}
                     r={isEmphasized ? 6 : 4}
                     filter={isEmphasized ? `url(#scatterShadow-${chart.id})` : undefined}
-                    onClick={() => {
-                      setEmphasizedTrace(prev => ({
-                        ...prev,
-                        [chart.id]: prev[chart.id] === trace.dataKey ? null : trace.dataKey
-                      }));
-                    }}
                     style={{ cursor: 'pointer' }}
+                    shape={<CustomScatter />}
                   />
                 );
               }) : (
@@ -889,8 +930,17 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
                          {/* Interaction hint for multi-trace charts */}
                          {(chart.chartConfig?.traces && chart.chartConfig.traces.length > 1) && (
                            <div className="flex items-center text-xs opacity-80 bg-white/20 rounded-full px-2 py-1">
-                             <span className="hidden sm:inline">Click traces to emphasize</span>
-                             <span className="sm:hidden">Click to emphasize</span>
+                             {chart.chartConfig.chart_type === 'bar' ? (
+                               <>
+                                 <span className="hidden sm:inline">Click: trace, Ctrl+Click: x-axis</span>
+                                 <span className="sm:hidden">Click to emphasize</span>
+                               </>
+                             ) : (
+                               <>
+                                 <span className="hidden sm:inline">Click traces to emphasize</span>
+                                 <span className="sm:hidden">Click to emphasize</span>
+                               </>
+                             )}
                            </div>
                          )}
                        </CardTitle>
