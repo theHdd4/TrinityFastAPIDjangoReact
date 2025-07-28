@@ -33,6 +33,8 @@ export interface ChartTrace {
   name?: string;
   chart_type?: "line" | "bar" | "area" | "pie" | "scatter";
   aggregation?: "sum" | "mean" | "count" | "min" | "max";
+  color?: string;
+  filters?: Record<string, string[]>;  // Trace-specific filters
 }
 
 export interface ChartRequest {

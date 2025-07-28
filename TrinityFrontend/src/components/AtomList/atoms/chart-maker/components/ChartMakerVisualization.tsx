@@ -8,9 +8,13 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Badge } from '@/components/ui/badge';
-import { Plus, Minus, BarChart3, Filter, X } from 'lucide-react';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { Plus, Minus, BarChart3, Filter, X, Layers, LineChart } from 'lucide-react';
 import { ChartConfig } from '../ChartMakerAtom';
 import { ChartMakerSettings, ChartMakerConfig } from '@/components/LaboratoryMode/store/laboratoryStore';
+import TraceManager from './TraceManager';
+import { migrateLegacyChart, toggleChartMode, validateChart } from '../utils/traceUtils';
 
 interface ChartMakerVisualizationProps {
   settings: ChartMakerSettings;
@@ -55,12 +59,29 @@ const ChartMakerVisualization: React.FC<ChartMakerVisualizationProps> = ({
   const updateChart = (index: number, updates: Partial<ChartMakerConfig>) => {
     const newCharts = [...settings.charts];
     const prevChart = newCharts[index];
-    newCharts[index] = { ...prevChart, ...updates };
+    // Migrate legacy chart format before applying updates
+    const migratedChart = migrateLegacyChart(prevChart);
+    newCharts[index] = { ...migratedChart, ...updates };
     onSettingsChange({ charts: newCharts });
     // If chartRendered is true, trigger immediate backend re-render
     if (prevChart.chartRendered && onChartSettingsImmediateChange) {
-      onChartSettingsImmediateChange(index, { ...prevChart, ...updates });
+      onChartSettingsImmediateChange(index, { ...migratedChart, ...updates });
     }
+  };
+
+  const toggleMode = (chartIndex: number) => {
+    const chart = settings.charts[chartIndex];
+    const toggledChart = toggleChartMode(chart);
+    updateChart(chartIndex, toggledChart);
+  };
+
+  const getAvailableColumns = () => {
+    if (!settings.uploadedData) return { numeric: [], categorical: [] };
+    
+    return {
+      numeric: settings.uploadedData.numericColumns || [],
+      categorical: settings.uploadedData.categoricalColumns || [],
+    };
   };
 
   const getUniqueValues = (column: string) => {
@@ -206,141 +227,208 @@ const ChartMakerVisualization: React.FC<ChartMakerVisualizationProps> = ({
       <div className="flex-1 overflow-hidden">
         <ScrollArea className="h-full">
           <div className="space-y-4 pr-4">
-            {settings.charts.slice(0, settings.numberOfCharts).map((chart, index) => (
-              <Card key={chart.id}>
-                <CardHeader>
-                  <CardTitle className="text-sm">Chart {index + 1}</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  <div>
-                    <Label className="text-xs">Chart Title</Label>
-                    <Input
-                      value={chart.title}
-                      onChange={(e) => updateChart(index, { title: e.target.value })}
-                      className="mt-1"
-                      placeholder="Enter chart title"
-                    />
-                  </div>
-
-                  <div>
-                    <Label className="text-xs">Chart Type</Label>
-                    <Select 
-                      value={chart.type} 
-                      onValueChange={(value) => updateChart(index, { type: value as any })}
-                    >
-                      <SelectTrigger className="mt-1">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="line">Line Chart</SelectItem>
-                        <SelectItem value="bar">Bar Chart</SelectItem>
-                        <SelectItem value="area">Area Chart</SelectItem>
-                        <SelectItem value="scatter">Scatter Plot</SelectItem>
-                        <SelectItem value="pie">Pie Chart</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  <div>
-                    <Label className="text-xs">X-Axis</Label>
-                    <Select 
-                      value={chart.xAxis} 
-                      onValueChange={(value) => updateChart(index, { xAxis: value })}
-                    >
-                      <SelectTrigger className="mt-1">
-                        <SelectValue placeholder="Select X-axis column" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {settings.uploadedData.columns.map((column) => (
-                          <SelectItem key={column} value={column}>{column}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  <div>
-                    <Label className="text-xs">Y-Axis</Label>
-                    <Select 
-                      value={chart.yAxis} 
-                      onValueChange={(value) => updateChart(index, { yAxis: value })}
-                    >
-                      <SelectTrigger className="mt-1">
-                        <SelectValue placeholder="Select Y-axis column" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {settings.uploadedData.columns.map((column) => (
-                          <SelectItem key={column} value={column}>{column}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  <div>
-                    <Label className="text-xs">Filters</Label>
-                    <div className="mt-1 space-y-2">
-                      {Object.entries(chart.filters).map(([column, values]) => (
-                        <div key={column} className="flex items-center gap-2">
-                          <Badge variant="secondary" className="flex items-center gap-1">
-                            {column}: {values.length} selected
-                            <X 
-                              className="w-3 h-3 cursor-pointer" 
-                              onClick={() => removeFilter(index, column)}
-                            />
-                          </Badge>
-                        </div>
-                      ))}
-                      
-                      <Popover>
-                        <PopoverTrigger asChild>
-                          <Button 
-                            variant="outline" 
-                            size="sm" 
-                            className="w-full"
-                            disabled={
-                              !chart.xAxis || !chart.yAxis || chart.xAxis === 'None' || chart.yAxis === 'None' || getAvailableFilterColumns().length === 0
-                            }
-                            style={{
-                              opacity: (!chart.xAxis || !chart.yAxis || chart.xAxis === 'None' || chart.yAxis === 'None' || getAvailableFilterColumns().length === 0) ? 0.5 : 1
-                            }}
-                          >
-                            <Filter className="w-3 h-3 mr-1" />
-                            Add Filter
-                          </Button>
-                        </PopoverTrigger>
-                         <PopoverContent className="w-64" align="start">
-                           <div className="space-y-3">
-                             <Label className="text-xs font-medium">Select Categorical Column to Filter</Label>
-                             {getAvailableFilterColumns().length === 0 ? (
-                               <p className="text-xs text-muted-foreground">No categorical columns available for filtering</p>
-                             ) : (
-                               <div style={{ maxHeight: '224px', overflowY: 'auto' }}>
-                                 {getAvailableFilterColumns().map((column) => (
-                                   <div key={column}>
-                                     <Button
-                                       variant="ghost"
-                                       size="sm"
-                                       className="w-full justify-start"
-                                       onClick={() => {
-                                         if (!chart.filters[column]) {
-                                           updateFilter(index, column, []);
-                                         }
-                                       }}
-                                       disabled={!!chart.filters[column]}
-                                     >
-                                       {column}
-                                     </Button>
-                                   </div>
-                                 ))}
-                               </div>
-                             )}
-                           </div>
-                         </PopoverContent>
-                      </Popover>
+            {settings.charts.slice(0, settings.numberOfCharts).map((chart, index) => {
+              // Migrate legacy chart format
+              const migratedChart = migrateLegacyChart(chart);
+              
+              return (
+                <Card key={chart.id}>
+                  <CardHeader>
+                    <div className="flex items-center justify-between">
+                      <CardTitle className="text-sm">Chart {index + 1}</CardTitle>
+                      <div className="flex items-center gap-2">
+                        <TooltipProvider>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button
+                                size="sm"
+                                variant={migratedChart.isAdvancedMode ? "default" : "outline"}
+                                onClick={() => toggleMode(index)}
+                                className="h-7 text-xs"
+                              >
+                                {migratedChart.isAdvancedMode ? (
+                                  <>
+                                    <Layers className="w-3 h-3 mr-1" />
+                                    Multi-Series
+                                  </>
+                                ) : (
+                                  <>
+                                    <LineChart className="w-3 h-3 mr-1" />
+                                    Simple
+                                  </>
+                                )}
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              <p>
+                                {migratedChart.isAdvancedMode 
+                                  ? "Switch to Simple mode (single Y-axis)" 
+                                  : "Switch to Multi-Series mode (multiple Y-axes)"
+                                }
+                              </p>
+                            </TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
+                      </div>
                     </div>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
+                    {/* Mode description */}
+                    <div className="text-xs text-muted-foreground">
+                      {migratedChart.isAdvancedMode 
+                        ? "Multi-Series: Create multiple data series with individual filters"
+                        : "Simple: Single Y-axis with basic filtering"
+                      }
+                    </div>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    {/* Basic Chart Settings */}
+                    <div className="space-y-3">
+                      <div>
+                        <Label className="text-xs">Chart Title</Label>
+                        <Input
+                          value={chart.title}
+                          onChange={(e) => updateChart(index, { title: e.target.value })}
+                          className="mt-1"
+                          placeholder="Enter chart title"
+                        />
+                      </div>
+
+                      <div>
+                        <Label className="text-xs">Chart Type</Label>
+                        <Select 
+                          value={chart.type} 
+                          onValueChange={(value) => updateChart(index, { type: value as any })}
+                        >
+                          <SelectTrigger className="mt-1">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="line">Line Chart</SelectItem>
+                            <SelectItem value="bar">Bar Chart</SelectItem>
+                            <SelectItem value="area">Area Chart</SelectItem>
+                            <SelectItem value="scatter">Scatter Plot</SelectItem>
+                            <SelectItem value="pie">Pie Chart</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      <div>
+                        <Label className="text-xs">X-Axis</Label>
+                        <Select 
+                          value={chart.xAxis} 
+                          onValueChange={(value) => updateChart(index, { xAxis: value })}
+                        >
+                          <SelectTrigger className="mt-1">
+                            <SelectValue placeholder="Select X-axis column" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {settings.uploadedData.columns.map((column) => (
+                              <SelectItem key={column} value={column}>{column}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+
+                    {/* Mode-specific Configuration */}
+                    {migratedChart.isAdvancedMode ? (
+                      // Advanced Mode - Multiple Traces
+                      <div className="border-t pt-4">
+                        <TraceManager
+                          chart={migratedChart}
+                          onUpdateChart={(updates) => updateChart(index, updates)}
+                          availableColumns={getAvailableColumns()}
+                          getUniqueValues={getUniqueValues}
+                        />
+                      </div>
+                    ) : (
+                      // Simple Mode - Single Y-axis and Filters
+                      <>
+                        <div>
+                          <Label className="text-xs">Y-Axis</Label>
+                          <Select 
+                            value={chart.yAxis} 
+                            onValueChange={(value) => updateChart(index, { yAxis: value })}
+                          >
+                            <SelectTrigger className="mt-1">
+                              <SelectValue placeholder="Select Y-axis column" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {settings.uploadedData.columns.map((column) => (
+                                <SelectItem key={column} value={column}>{column}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+
+                        <div>
+                          <Label className="text-xs">Filters</Label>
+                          <div className="mt-1 space-y-2">
+                            {Object.entries(chart.filters).map(([column, values]) => (
+                              <div key={column} className="flex items-center gap-2">
+                                <Badge variant="secondary" className="flex items-center gap-1">
+                                  {column}: {values.length} selected
+                                  <X 
+                                    className="w-3 h-3 cursor-pointer" 
+                                    onClick={() => removeFilter(index, column)}
+                                  />
+                                </Badge>
+                              </div>
+                            ))}
+                            
+                            <Popover>
+                              <PopoverTrigger asChild>
+                                <Button 
+                                  variant="outline" 
+                                  size="sm" 
+                                  className="w-full"
+                                  disabled={
+                                    !chart.xAxis || !chart.yAxis || chart.xAxis === 'None' || chart.yAxis === 'None' || getAvailableFilterColumns().length === 0
+                                  }
+                                  style={{
+                                    opacity: (!chart.xAxis || !chart.yAxis || chart.xAxis === 'None' || chart.yAxis === 'None' || getAvailableFilterColumns().length === 0) ? 0.5 : 1
+                                  }}
+                                >
+                                  <Filter className="w-3 h-3 mr-1" />
+                                  Add Filter
+                                </Button>
+                              </PopoverTrigger>
+                               <PopoverContent className="w-64" align="start">
+                                 <div className="space-y-3">
+                                   <Label className="text-xs font-medium">Select Categorical Column to Filter</Label>
+                                   {getAvailableFilterColumns().length === 0 ? (
+                                     <p className="text-xs text-muted-foreground">No categorical columns available for filtering</p>
+                                   ) : (
+                                     <div style={{ maxHeight: '224px', overflowY: 'auto' }}>
+                                       {getAvailableFilterColumns().map((column) => (
+                                         <div key={column}>
+                                           <Button
+                                             variant="ghost"
+                                             size="sm"
+                                             className="w-full justify-start"
+                                             onClick={() => {
+                                               if (!chart.filters[column]) {
+                                                 updateFilter(index, column, []);
+                                               }
+                                             }}
+                                             disabled={!!chart.filters[column]}
+                                           >
+                                             {column}
+                                           </Button>
+                                         </div>
+                                       ))}
+                                     </div>
+                                   )}
+                                 </div>
+                               </PopoverContent>
+                            </Popover>
+                          </div>
+                        </div>
+                      </>
+                    )}
+                  </CardContent>
+                </Card>
+              );
+            })}
           </div>
         </ScrollArea>
       </div>
@@ -349,7 +437,7 @@ const ChartMakerVisualization: React.FC<ChartMakerVisualizationProps> = ({
         <Button 
           onClick={onRenderCharts} 
           className="w-full"
-          disabled={!settings.uploadedData || settings.charts.some(chart => !chart.xAxis || !chart.yAxis)}
+          disabled={!settings.uploadedData || settings.charts.some(chart => !validateChart(migrateLegacyChart(chart)))}
         >
           <BarChart3 className="w-4 h-4 mr-2" />
           Render Charts

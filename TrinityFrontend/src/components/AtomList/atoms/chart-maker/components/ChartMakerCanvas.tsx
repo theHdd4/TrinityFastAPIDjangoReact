@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from '@/components/ui/chart';
 import { LineChart, Line, BarChart, Bar, AreaChart, Area, PieChart, Pie, Cell, ScatterChart, Scatter, XAxis, YAxis, CartesianGrid, ResponsiveContainer } from 'recharts';
-import { BarChart3, TrendingUp, BarChart2, Triangle, Zap, Maximize2, ChevronDown } from 'lucide-react';
+import { BarChart3, TrendingUp, BarChart2, Triangle, Zap, Maximize2, ChevronDown, ChevronLeft, ChevronRight, Filter, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/components/ui/context-menu';
@@ -17,6 +17,7 @@ import { ChartMakerConfig } from '@/components/LaboratoryMode/store/laboratorySt
 import './ChartMakerCanvas.css';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { useResponsiveChartLayout } from '@/hooks/useResponsiveChartLayout';
+import { migrateLegacyChart, DEFAULT_TRACE_COLORS } from '../utils/traceUtils';
 
 // Extend ChartData type to include uniqueValuesByColumn for type safety
 interface ChartDataWithUniqueValues extends ChartData {
@@ -28,14 +29,17 @@ interface ChartMakerCanvasProps {
   data: ChartData | null;
   onChartTypeChange?: (chartId: string, newType: ChartConfig['type']) => void;
   onChartFilterChange?: (chartId: string, column: string, values: string[]) => void;
+  onTraceFilterChange?: (chartId: string, traceIndex: number, column: string, values: string[]) => void;
 }
 
-const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onChartTypeChange, onChartFilterChange }) => {
+const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onChartTypeChange, onChartFilterChange, onTraceFilterChange }) => {
   const typedData = data as ChartDataWithUniqueValues | null;
   const [fullscreenChart, setFullscreenChart] = useState<ChartMakerConfig | null>(null);
   const [fullscreenIndex, setFullscreenIndex] = useState<number | null>(null);
   const [lastSelectedIdx, setLastSelectedIdx] = useState<number | null>(null);
   const [previewTypes, setPreviewTypes] = useState<Record<string, ChartConfig['type'] | null>>({});
+  const [currentTraceIndex, setCurrentTraceIndex] = useState<Record<string, number>>({});
+  const [currentTracePages, setCurrentTracePages] = useState<Record<string, number>>({});
   const debounceTimers = useRef<Record<string, NodeJS.Timeout | number | null>>({});
   
   // Container ref for responsive layout
@@ -165,7 +169,7 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
     // Increase panel height for larger charts
     const chartHeight = isCompact ? 'h-40' : layoutConfig.layout === 'vertical' ? 'h-72' : 'h-96';
 
-    if (!chartData.length || !xAxisConfig.dataKey || !yAxisConfig.dataKey) {
+    if (!chartData.length || !xAxisConfig.dataKey || (!yAxisConfig.dataKey && traces.length === 0)) {
       return (
         <div className={`flex items-center justify-center ${chartHeight} text-muted-foreground`}>
           <div className="text-center">
@@ -186,7 +190,7 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
             <LineChart data={chartData}>
               <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
               <XAxis {...xAxisConfig} />
-              <YAxis {...yAxisConfig} />
+              <YAxis {...(yAxisConfig.dataKey ? yAxisConfig : { type: yAxisConfig.type || 'number' })} />
               <ChartTooltip content={<ChartTooltipContent />} contentStyle={{ backgroundColor: 'white', border: 'none', borderRadius: '8px', boxShadow: '0 10px 30px -10px rgba(0, 0, 0, 0.2)' }} />
               {traces.length > 0 ? traces.map((trace, i) => (
                 <Line key={trace.dataKey || i} type={trace.type || 'monotone'} dataKey={trace.dataKey} stroke={trace.stroke || colors.primary} strokeWidth={trace.strokeWidth || 3} dot={{ fill: trace.stroke || colors.primary, strokeWidth: 2, r: 4 }} activeDot={{ r: 6, fill: trace.stroke || colors.primary, stroke: 'white', strokeWidth: 2 }} />
@@ -202,7 +206,7 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
             <BarChart data={chartData}>
               <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
               <XAxis {...xAxisConfig} />
-              <YAxis {...yAxisConfig} />
+              <YAxis {...(yAxisConfig.dataKey ? yAxisConfig : { type: yAxisConfig.type || 'number' })} />
               <ChartTooltip content={<ChartTooltipContent />} contentStyle={{ backgroundColor: 'white', border: 'none', borderRadius: '8px', boxShadow: '0 10px 30px -10px rgba(0, 0, 0, 0.2)' }} />
               {traces.length > 0 ? traces.map((trace, i) => (
                 <Bar key={trace.dataKey || i} dataKey={trace.dataKey} fill={trace.fill || colors.primary} radius={[4, 4, 0, 0]} />
@@ -218,7 +222,7 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
             <AreaChart data={chartData}>
               <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
               <XAxis {...xAxisConfig} />
-              <YAxis {...yAxisConfig} />
+              <YAxis {...(yAxisConfig.dataKey ? yAxisConfig : { type: yAxisConfig.type || 'number' })} />
               <ChartTooltip content={<ChartTooltipContent />} contentStyle={{ backgroundColor: 'white', border: 'none', borderRadius: '8px', boxShadow: '0 10px 30px -10px rgba(0, 0, 0, 0.2)' }} />
               {traces.length > 0 ? traces.map((trace, i) => (
                 <Area key={trace.dataKey || i} type={trace.type || 'monotone'} dataKey={trace.dataKey} stroke={trace.stroke || colors.primary} fill={trace.fill || colors.primary} fillOpacity={trace.fillOpacity || 0.2} strokeWidth={trace.strokeWidth || 2} />
@@ -234,7 +238,7 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
             <ScatterChart data={chartData}>
               <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
               <XAxis {...xAxisConfig} />
-              <YAxis {...yAxisConfig} />
+              <YAxis {...(yAxisConfig.dataKey ? yAxisConfig : { type: yAxisConfig.type || 'number' })} />
               <ChartTooltip content={<ChartTooltipContent />} contentStyle={{ backgroundColor: 'white', border: 'none', borderRadius: '8px', boxShadow: '0 10px 30px -10px rgba(0, 0, 0, 0.2)' }} />
               {traces.length > 0 ? traces.map((trace, i) => (
                 <Scatter key={trace.dataKey || i} dataKey={trace.dataKey} fill={trace.fill || colors.primary} />
@@ -348,144 +352,387 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
                            }
                          }}
                          title="Alt+Click to expand"
-                       />
+                       >
+                         <span style={{ position: 'absolute', right: 12, top: 8, color: 'white', fontSize: 13, fontWeight: 500, textShadow: '0 1px 4px rgba(0,0,0,0.4)' }}>
+                           Alt+Click to expand
+                         </span>
+                       </div>
                      </div>
                      
-                      {/* Filter Controls - Compact version for small screens */}
-                      {Object.keys(chart.filters).length > 0 && (
-                        <div className="bg-gray-50 p-3 border-b">
-                          <div className="space-y-2">
-                            {Object.entries(chart.filters).map(([column, selectedValues]) => {
-                              const uniqueValues = getUniqueValuesForColumn(column);
-                              return (
-                                <div key={column} className="flex items-center gap-2">
-                                  <Label className={`font-medium text-gray-700 min-w-fit ${isCompact ? 'text-xs' : 'text-xs'}`}>
-                                    {column}:
-                                  </Label>
-                                  <Popover>
-                                    <PopoverTrigger asChild>
-                                      <Button
-                                        variant="outline"
-                                        size="sm"
-                                        className={`justify-between flex-1 font-normal ${isCompact ? 'h-6 text-xs' : 'h-7 text-xs'}`}
-                                      >
-                                        <span className="truncate">
-                                          {selectedValues.length === 0
-                                            ? "No values selected"
-                                            : selectedValues.length === uniqueValues.length
-                                            ? "All values"
-                                            : selectedValues.length === 1
-                                            ? selectedValues[0]
-                                            : `${selectedValues.length} selected`
-                                          }
-                                        </span>
-                                        <ChevronDown className="h-3 w-3 opacity-50" />
-                                      </Button>
-                                    </PopoverTrigger>
-                                    <PopoverContent className="w-56 p-0" align="start">
-                                      <div className="p-3 border-b">
-                                        <div className="flex items-center justify-between">
-                                          <span className="text-sm font-medium">Filter by {column}</span>
-                                          {selectedValues.length > 0 && (
+                      {/* Filter Controls - Support both simple and multi-series modes */}
+                      {(() => {
+                        const migratedChart = migrateLegacyChart(chart);
+                        
+                        if (migratedChart.isAdvancedMode && migratedChart.traces && migratedChart.traces.length > 0) {
+                          // Multi-series mode: Show filters by column with series pagination
+                          const allFilterColumns = new Set<string>();
+                          migratedChart.traces.forEach(trace => {
+                            Object.keys(trace.filters || {}).forEach(column => allFilterColumns.add(column));
+                          });
+                          
+                          if (allFilterColumns.size === 0) return null;
+                          
+                          return (
+                            <div className="bg-gray-50 p-3 border-b">
+                              <div className="space-y-2">
+                                {Array.from(allFilterColumns).map(column => {
+                                  // Find traces that use this column for filtering
+                                  const tracesWithColumn = migratedChart.traces!.map((trace, idx) => ({ trace, idx }))
+                                    .filter(({ trace }) => trace.filters && trace.filters[column]);
+                                  
+                                  if (tracesWithColumn.length === 0) return null;
+                                  
+                                  // Get current trace index for this column
+                                  const currentIdx = currentTraceIndex[`${chart.id}-${column}`] || 0;
+                                  const currentTraceInfo = tracesWithColumn[currentIdx] || tracesWithColumn[0];
+                                  const selectedValues = currentTraceInfo.trace.filters[column] || [];
+                                  const uniqueValues = getUniqueValuesForColumn(column);
+                                  
+                                  return (
+                                    <div key={column} className="space-y-2">
+                                      {/* Filter dropdown */}
+                                      <div className="flex items-center gap-2">
+                                        <Label className={`font-medium text-gray-700 min-w-fit ${isCompact ? 'text-xs' : 'text-xs'}`}>
+                                          {column}:
+                                        </Label>
+                                        <Popover>
+                                          <PopoverTrigger asChild>
                                             <Button
-                                              variant="ghost"
+                                              variant="outline"
                                               size="sm"
-                                              className="h-6 px-2 text-xs"
+                                              className={`justify-between flex-1 font-normal ${isCompact ? 'h-6 text-xs' : 'h-7 text-xs'}`}
+                                              title={(() => {
+                                                // Create detailed tooltip showing all series selections
+                                                const allSeriesSelections = tracesWithColumn.map(({ trace, idx }) => {
+                                                  const seriesName = trace.name || `Series ${idx + 1}`;
+                                                  const seriesValues = trace.filters?.[column] || [];
+                                                  return `${seriesName}: ${seriesValues.length > 0 ? seriesValues.join(', ') : 'No values'}`;
+                                                }).join('\n');
+                                                return allSeriesSelections;
+                                              })()}
+                                            >
+                                              <span className="truncate">
+                                                {(() => {
+                                                  // Group selections by series for display
+                                                  const seriesGroups = tracesWithColumn.map(({ trace, idx }) => {
+                                                    const seriesName = trace.name || `S${idx + 1}`;
+                                                    const seriesValues = trace.filters?.[column] || [];
+                                                    if (seriesValues.length === 0) return `${seriesName}: None`;
+                                                    if (seriesValues.length === 1) return `${seriesName}: ${seriesValues[0]}`;
+                                                    return `${seriesName}: ${seriesValues.length} selected`;
+                                                  });
+                                                  
+                                                  if (seriesGroups.length === 0) return "No filters";
+                                                  if (seriesGroups.length === 1) return seriesGroups[0];
+                                                  return seriesGroups.join(' | ');
+                                                })()}
+                                              </span>
+                                              <ChevronDown className="h-3 w-3 opacity-50" />
+                                            </Button>
+                                          </PopoverTrigger>
+                                          <PopoverContent className="w-80 p-0" align="start">
+                                            <div className="p-3 border-b">
+                                              <div className="flex items-center justify-between">
+                                                <span className="text-sm font-medium">Filter by {column}</span>
+                                                <Button
+                                                  variant="ghost"
+                                                  size="sm"
+                                                  className="h-6 px-2 text-xs"
+                                                  onClick={() => {
+                                                    // Clear all series filters for this column
+                                                    tracesWithColumn.forEach(({ idx }) => {
+                                                      onTraceFilterChange?.(chart.id, idx, column, []);
+                                                    });
+                                                  }}
+                                                >
+                                                  Clear All
+                                                </Button>
+                                              </div>
+                                            </div>
+                                            
+                                            {/* Series pagination inside dropdown */}
+                                            {tracesWithColumn.length > 1 && (
+                                              <div className="p-3 border-b bg-gray-50">
+                                                <div className="flex items-center justify-between mb-2">
+                                                  <span className="text-xs text-gray-600 font-medium">Series:</span>
+                                                </div>
+                                                <div className="flex flex-wrap gap-1">
+                                                  {tracesWithColumn.map(({ trace, idx }, seriesIdx) => {
+                                                    const isCurrentSeries = currentIdx === seriesIdx;
+                                                    const seriesName = trace.name || `Series ${idx + 1}`;
+                                                    const seriesFilters = trace.filters?.[column] || [];
+                                                    const seriesColor = trace.color || DEFAULT_TRACE_COLORS[idx % DEFAULT_TRACE_COLORS.length];
+                                                    
+                                                    return (
+                                                      <Button
+                                                        key={idx}
+                                                        variant={isCurrentSeries ? "default" : "outline"}
+                                                        size="sm"
+                                                        className={`h-6 px-2 text-xs flex items-center gap-1 ${isCurrentSeries ? 'bg-blue-600 text-white' : ''}`}
+                                                        onClick={() => setCurrentTraceIndex(prev => ({
+                                                          ...prev,
+                                                          [`${chart.id}-${column}`]: seriesIdx
+                                                        }))}
+                                                        title={`${seriesName} (${seriesColor}) - ${seriesFilters.length > 0 ? `${seriesFilters.length} values selected` : 'No values selected'}`}
+                                                      >
+                                                        {/* Color indicator */}
+                                                        <div 
+                                                          className="w-2 h-2 rounded-full border border-gray-300 flex-shrink-0"
+                                                          style={{ backgroundColor: seriesColor }}
+                                                        />
+                                                        <span className="truncate">{seriesName}</span>
+                                                        {seriesFilters.length > 0 && (
+                                                          <Badge variant="secondary" className="ml-1 h-3 px-1 text-[10px]">
+                                                            {seriesFilters.length}
+                                                          </Badge>
+                                                        )}
+                                                      </Button>
+                                                    );
+                                                  })}
+                                                </div>
+                                              </div>
+                                            )}
+                                            
+                                            <div className="flex gap-2 p-2 border-b">
+                                              <Button
+                                                variant="outline"
+                                                size="sm"
+                                                className="flex-1 h-6 text-xs"
+                                                onClick={() => onTraceFilterChange?.(chart.id, currentTraceInfo.idx, column, uniqueValues)}
+                                              >
+                                                All
+                                              </Button>
+                                              <Button
+                                                variant="outline"
+                                                size="sm"
+                                                className="flex-1 h-6 text-xs"
+                                                onClick={() => onTraceFilterChange?.(chart.id, currentTraceInfo.idx, column, [])}
+                                              >
+                                                None
+                                              </Button>
+                                            </div>
+                                            <ScrollArea className="filter-scroll-area max-h-48">
+                                              <div className="p-2">
+                                                <div className="text-xs text-gray-600 mb-2 font-medium">
+                                                  Values for {currentTraceInfo.trace.name || `Series ${currentTraceInfo.idx + 1}`}:
+                                                </div>
+                                                <RadioGroup value="" onValueChange={() => {}}>
+                                                  <div className="space-y-1">
+                                                    {uniqueValues.map((value, valueIdx) => (
+                                                      <div key={value} className="flex items-center space-x-2 cursor-pointer"
+                                                        onClick={e => {
+                                                          if (!onTraceFilterChange) return;
+                                                          const selectedValues = currentTraceInfo.trace.filters?.[column] || [];
+                                                          if (e.shiftKey && lastSelectedIdx !== null) {
+                                                            // Range select
+                                                            const [start, end] = [lastSelectedIdx, valueIdx].sort((a, b) => a - b);
+                                                            const range = uniqueValues.slice(start, end + 1);
+                                                            const newSelected = Array.from(new Set([...selectedValues, ...range]));
+                                                            onTraceFilterChange(chart.id, currentTraceInfo.idx, column, newSelected);
+                                                            setLastSelectedIdx(valueIdx);
+                                                          } else if (e.ctrlKey || e.metaKey) {
+                                                            // Toggle selection
+                                                            const isSelected = selectedValues.includes(value);
+                                                            const newSelected = isSelected
+                                                              ? selectedValues.filter(v => v !== value)
+                                                              : [...selectedValues, value];
+                                                            onTraceFilterChange(chart.id, currentTraceInfo.idx, column, newSelected);
+                                                            setLastSelectedIdx(valueIdx);
+                                                          } else {
+                                                            // Single select (radio behavior)
+                                                            onTraceFilterChange(chart.id, currentTraceInfo.idx, column, [value]);
+                                                            setLastSelectedIdx(valueIdx);
+                                                          }
+                                                        }}
+                                                        tabIndex={0}
+                                                        onKeyDown={e => {
+                                                          if (e.key === ' ' || e.key === 'Enter') {
+                                                            e.preventDefault();
+                                                            if (!onTraceFilterChange) return;
+                                                            const selectedValues = currentTraceInfo.trace.filters?.[column] || [];
+                                                            if (e.shiftKey && lastSelectedIdx !== null) {
+                                                              const [start, end] = [lastSelectedIdx, valueIdx].sort((a, b) => a - b);
+                                                              const range = uniqueValues.slice(start, end + 1);
+                                                              const newSelected = Array.from(new Set([...selectedValues, ...range]));
+                                                              onTraceFilterChange(chart.id, currentTraceInfo.idx, column, newSelected);
+                                                              setLastSelectedIdx(valueIdx);
+                                                            } else if (e.ctrlKey || e.metaKey) {
+                                                              const isSelected = selectedValues.includes(value);
+                                                              const newSelected = isSelected
+                                                                ? selectedValues.filter(v => v !== value)
+                                                                : [...selectedValues, value];
+                                                              onTraceFilterChange(chart.id, currentTraceInfo.idx, column, newSelected);
+                                                              setLastSelectedIdx(valueIdx);
+                                                            } else {
+                                                              onTraceFilterChange(chart.id, currentTraceInfo.idx, column, [value]);
+                                                              setLastSelectedIdx(valueIdx);
+                                                            }
+                                                          }
+                                                        }}
+                                                      >
+                                                        <RadioGroupItem 
+                                                          value={value} 
+                                                          checked={(currentTraceInfo.trace.filters?.[column] || []).includes(value)} 
+                                                          tabIndex={-1} 
+                                                        />
+                                                        <label className="text-xs cursor-pointer flex-1 truncate">
+                                                          {value || '(empty)'}
+                                                        </label>
+                                                      </div>
+                                                    ))}
+                                                  </div>
+                                                </RadioGroup>
+                                              </div>
+                                            </ScrollArea>
+                                          </PopoverContent>
+                                        </Popover>
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          );
+                        } else {
+                          // Simple mode: Original filter controls
+                          if (Object.keys(chart.filters).length === 0) return null;
+                          
+                          return (
+                            <div className="bg-gray-50 p-3 border-b">
+                              <div className="space-y-2">
+                                {Object.entries(chart.filters).map(([column, selectedValues]) => {
+                                  const uniqueValues = getUniqueValuesForColumn(column);
+                                  return (
+                                    <div key={column} className="flex items-center gap-2">
+                                      <Label className={`font-medium text-gray-700 min-w-fit ${isCompact ? 'text-xs' : 'text-xs'}`}>
+                                        {column}:
+                                      </Label>
+                                      <Popover>
+                                        <PopoverTrigger asChild>
+                                          <Button
+                                            variant="outline"
+                                            size="sm"
+                                            className={`justify-between flex-1 font-normal ${isCompact ? 'h-6 text-xs' : 'h-7 text-xs'}`}
+                                          >
+                                            <span className="truncate">
+                                              {selectedValues.length === 0
+                                                ? "No values selected"
+                                                : selectedValues.length === uniqueValues.length
+                                                ? "All values"
+                                                : selectedValues.length === 1
+                                                ? selectedValues[0]
+                                                : `${selectedValues.length} selected`
+                                              }
+                                            </span>
+                                            <ChevronDown className="h-3 w-3 opacity-50" />
+                                          </Button>
+                                        </PopoverTrigger>
+                                        <PopoverContent className="w-56 p-0" align="start">
+                                          <div className="p-3 border-b">
+                                            <div className="flex items-center justify-between">
+                                              <span className="text-sm font-medium">Filter by {column}</span>
+                                              {selectedValues.length > 0 && (
+                                                <Button
+                                                  variant="ghost"
+                                                  size="sm"
+                                                  className="h-6 px-2 text-xs"
+                                                  onClick={() => onChartFilterChange?.(chart.id, column, [])}
+                                                >
+                                                  Clear
+                                                </Button>
+                                              )}
+                                            </div>
+                                          </div>
+                                          <div className="flex gap-2 p-2 border-b">
+                                            <Button
+                                              variant="outline"
+                                              size="sm"
+                                              className="flex-1 h-6 text-xs"
+                                              onClick={() => onChartFilterChange?.(chart.id, column, uniqueValues)}
+                                            >
+                                              All
+                                            </Button>
+                                            <Button
+                                              variant="outline"
+                                              size="sm"
+                                              className="flex-1 h-6 text-xs"
                                               onClick={() => onChartFilterChange?.(chart.id, column, [])}
                                             >
-                                              Clear
+                                              None
                                             </Button>
-                                          )}
-                                        </div>
-                                      </div>
-                                      <div className="flex gap-2 p-2 border-b">
-                                        <Button
-                                          variant="outline"
-                                          size="sm"
-                                          className="flex-1 h-6 text-xs"
-                                          onClick={() => onChartFilterChange?.(chart.id, column, uniqueValues)}
-                                        >
-                                          All
-                                        </Button>
-                                        <Button
-                                          variant="outline"
-                                          size="sm"
-                                          className="flex-1 h-6 text-xs"
-                                          onClick={() => onChartFilterChange?.(chart.id, column, [])}
-                                        >
-                                          None
-                                        </Button>
-                                      </div>
-                                      <ScrollArea className="filter-scroll-area">
-                                        <RadioGroup value="" onValueChange={() => {}}>
-                                          <div className="p-2 space-y-1">
-                                            {uniqueValues.map((value, valueIdx) => (
-                                              <div key={value} className="flex items-center space-x-2 cursor-pointer"
-                                                onClick={e => {
-                                                  if (!onChartFilterChange) return;
-                                                  if (e.shiftKey && lastSelectedIdx !== null) {
-                                                    // Range select
-                                                    const [start, end] = [lastSelectedIdx, valueIdx].sort((a, b) => a - b);
-                                                    const range = uniqueValues.slice(start, end + 1);
-                                                    const newSelected = Array.from(new Set([...selectedValues, ...range]));
-                                                    onChartFilterChange(chart.id, column, newSelected);
-                                                    setLastSelectedIdx(valueIdx);
-                                                  } else if (e.ctrlKey || e.metaKey) {
-                                                    // Toggle selection
-                                                    const isSelected = selectedValues.includes(value);
-                                                    const newSelected = isSelected
-                                                      ? selectedValues.filter(v => v !== value)
-                                                      : [...selectedValues, value];
-                                                    onChartFilterChange(chart.id, column, newSelected);
-                                                    setLastSelectedIdx(valueIdx);
-                                                  } else {
-                                                    // Single select (radio behavior)
-                                                    onChartFilterChange(chart.id, column, [value]);
-                                                    setLastSelectedIdx(valueIdx);
-                                                  }
-                                                }}
-                                                tabIndex={0}
-                                                onKeyDown={e => {
-                                                  if (e.key === ' ' || e.key === 'Enter') {
-                                                    e.preventDefault();
-                                                    if (!onChartFilterChange) return;
-                                                    if (e.shiftKey && lastSelectedIdx !== null) {
-                                                      const [start, end] = [lastSelectedIdx, valueIdx].sort((a, b) => a - b);
-                                                      const range = uniqueValues.slice(start, end + 1);
-                                                      const newSelected = Array.from(new Set([...selectedValues, ...range]));
-                                                      onChartFilterChange(chart.id, column, newSelected);
-                                                      setLastSelectedIdx(valueIdx);
-                                                    } else if (e.ctrlKey || e.metaKey) {
-                                                      const isSelected = selectedValues.includes(value);
-                                                      const newSelected = isSelected
-                                                        ? selectedValues.filter(v => v !== value)
-                                                        : [...selectedValues, value];
-                                                      onChartFilterChange(chart.id, column, newSelected);
-                                                      setLastSelectedIdx(valueIdx);
-                                                    } else {
-                                                      onChartFilterChange(chart.id, column, [value]);
-                                                      setLastSelectedIdx(valueIdx);
-                                                    }
-                                                  }
-                                                }}
-                                              >
-                                                <RadioGroupItem value={value} checked={selectedValues.includes(value)} tabIndex={-1} />
-                                                <label className="text-xs cursor-pointer flex-1 truncate">
-                                                  {value || '(empty)'}
-                                                </label>
-                                              </div>
-                                            ))}
                                           </div>
-                                        </RadioGroup>
-                                      </ScrollArea>
-                                    </PopoverContent>
-                                  </Popover>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      )}
+                                          <ScrollArea className="filter-scroll-area">
+                                            <RadioGroup value="" onValueChange={() => {}}>
+                                              <div className="p-2 space-y-1">
+                                                {uniqueValues.map((value, valueIdx) => (
+                                                  <div key={value} className="flex items-center space-x-2 cursor-pointer"
+                                                    onClick={e => {
+                                                      if (!onChartFilterChange) return;
+                                                      if (e.shiftKey && lastSelectedIdx !== null) {
+                                                        // Range select
+                                                        const [start, end] = [lastSelectedIdx, valueIdx].sort((a, b) => a - b);
+                                                        const range = uniqueValues.slice(start, end + 1);
+                                                        const newSelected = Array.from(new Set([...selectedValues, ...range]));
+                                                        onChartFilterChange(chart.id, column, newSelected);
+                                                        setLastSelectedIdx(valueIdx);
+                                                      } else if (e.ctrlKey || e.metaKey) {
+                                                        // Toggle selection
+                                                        const isSelected = selectedValues.includes(value);
+                                                        const newSelected = isSelected
+                                                          ? selectedValues.filter(v => v !== value)
+                                                          : [...selectedValues, value];
+                                                        onChartFilterChange(chart.id, column, newSelected);
+                                                        setLastSelectedIdx(valueIdx);
+                                                      } else {
+                                                        // Single select (radio behavior)
+                                                        onChartFilterChange(chart.id, column, [value]);
+                                                        setLastSelectedIdx(valueIdx);
+                                                      }
+                                                    }}
+                                                    tabIndex={0}
+                                                    onKeyDown={e => {
+                                                      if (e.key === ' ' || e.key === 'Enter') {
+                                                        e.preventDefault();
+                                                        if (!onChartFilterChange) return;
+                                                        if (e.shiftKey && lastSelectedIdx !== null) {
+                                                          const [start, end] = [lastSelectedIdx, valueIdx].sort((a, b) => a - b);
+                                                          const range = uniqueValues.slice(start, end + 1);
+                                                          const newSelected = Array.from(new Set([...selectedValues, ...range]));
+                                                          onChartFilterChange(chart.id, column, newSelected);
+                                                          setLastSelectedIdx(valueIdx);
+                                                        } else if (e.ctrlKey || e.metaKey) {
+                                                          const isSelected = selectedValues.includes(value);
+                                                          const newSelected = isSelected
+                                                            ? selectedValues.filter(v => v !== value)
+                                                            : [...selectedValues, value];
+                                                          onChartFilterChange(chart.id, column, newSelected);
+                                                          setLastSelectedIdx(valueIdx);
+                                                        } else {
+                                                          onChartFilterChange(chart.id, column, [value]);
+                                                          setLastSelectedIdx(valueIdx);
+                                                        }
+                                                      }
+                                                    }}
+                                                  >
+                                                    <RadioGroupItem value={value} checked={selectedValues.includes(value)} tabIndex={-1} />
+                                                    <label className="text-xs cursor-pointer flex-1 truncate">
+                                                      {value || '(empty)'}
+                                                    </label>
+                                                  </div>
+                                                ))}
+                                              </div>
+                                            </RadioGroup>
+                                          </ScrollArea>
+                                        </PopoverContent>
+                                      </Popover>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          );
+                        }
+                      })()}
                      
                      <CardContent className={`flex-1 overflow-hidden ${isCompact ? 'p-2' : 'p-4'} flex flex-col`}>
                        <div className="flex-1 overflow-hidden min-h-0">

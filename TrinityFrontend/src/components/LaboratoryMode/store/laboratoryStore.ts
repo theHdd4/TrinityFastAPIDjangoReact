@@ -165,13 +165,27 @@ export interface ChartMakerData {
   uniqueValuesByColumn: Record<string, string[]>;
 }
 
+// Enhanced trace configuration for multiple data series
+export interface ChartTraceConfig {
+  yAxis: string;
+  name?: string;
+  filters: Record<string, string[]>;
+  color?: string;
+  aggregation?: 'sum' | 'mean' | 'count' | 'min' | 'max';
+}
+
 export interface ChartMakerConfig {
   id: string;
   title: string;
   type: 'line' | 'bar' | 'area' | 'pie' | 'scatter';
   xAxis: string;
-  yAxis: string;
-  filters: Record<string, string[]>;
+  yAxis: string; // Keep for backward compatibility
+  filters: Record<string, string[]>; // Keep for backward compatibility
+  
+  // New multi-trace support
+  traces?: ChartTraceConfig[];
+  isAdvancedMode?: boolean; // Toggle between simple and advanced mode
+  
   filteredData?: Record<string, any>[]; // Store filtered data for this specific chart
   chartConfig?: any; // Store the recharts config returned from backend
   lastUpdateTime?: number; // Timestamp of last update (optional)

@@ -7,6 +7,12 @@ import { useLaboratoryStore, DEFAULT_CHART_MAKER_SETTINGS, ChartMakerSettings as
 import { chartMakerApi } from '@/services/chartMakerApi';
 import { ChartData } from '../../ChartMakerAtom';
 import { useToast } from '@/hooks/use-toast';
+import { 
+  migrateLegacyChart, 
+  buildTracesForAPI, 
+  mergeTraceFilters, 
+  validateChart 
+} from '../../utils/traceUtils';
 
 interface Props {
   atomId: string;
@@ -165,24 +171,28 @@ const ChartMakerProperties: React.FC<Props> = ({ atomId }) => {
       // Process each chart independently
       const updatedCharts = await Promise.all(
         settings.charts.map(async (chart) => {
-          if (!chart.xAxis || !chart.yAxis) {
-            return { ...chart, chartRendered: false };
+          // Migrate legacy chart format
+          const migratedChart = migrateLegacyChart(chart);
+          
+          if (!validateChart(migratedChart)) {
+            return { ...migratedChart, chartRendered: false };
           }
+
+          // Build traces for API
+          const traces = buildTracesForAPI(migratedChart);
+          
+          // For advanced mode, filters are included in individual traces
+          // For legacy mode, use merged filters for backward compatibility
+          const legacyFilters = migratedChart.isAdvancedMode ? {} : mergeTraceFilters(migratedChart);
 
           // Prepare chart request
           const chartRequest = {
             file_id: settings.fileId!,
-            chart_type: chart.type,
-            traces: [{
-              x_column: chart.xAxis,
-              y_column: chart.yAxis,
-              name: chart.title,
-              chart_type: chart.type,
-              aggregation: "sum" as const
-            }],
-            title: chart.title,
-            filters: Object.keys(chart.filters).length > 0 ? chart.filters : undefined,
-            filtered_data: chart.filteredData // Use cached filtered data if available
+            chart_type: migratedChart.type,
+            traces: traces,
+            title: migratedChart.title,
+            filters: Object.keys(legacyFilters).length > 0 ? legacyFilters : undefined,
+            filtered_data: migratedChart.filteredData // Use cached filtered data if available
           };
 
           // Log the data being sent to /charts endpoint
@@ -192,7 +202,7 @@ const ChartMakerProperties: React.FC<Props> = ({ atomId }) => {
             // Call the charts endpoint to get recharts config
             const chartResponse = await chartMakerApi.generateChart(chartRequest);
             return {
-              ...chart,
+              ...migratedChart,
               chartConfig: chartResponse.chart_config,
               filteredData: chartResponse.chart_config.data, // Update filtered data from response
               lastUpdateTime: Date.now(), // <-- ensure this is set per chart
@@ -232,25 +242,30 @@ const ChartMakerProperties: React.FC<Props> = ({ atomId }) => {
     if (!chart || !latestSettings.fileId) return;
     // Only trigger if chartRendered is true
     if (!chart.chartRendered) return;
-    // Prepare updated chart
-    const updatedChart = { ...chart, ...updates, chartRendered: false, chartLoading: true };
+    
+    // Migrate and prepare updated chart
+    const migratedChart = migrateLegacyChart(chart);
+    const updatedChart = { ...migratedChart, ...updates, chartRendered: false, chartLoading: true };
+    
     // Optimistically update settings
     const newCharts = [...latestSettings.charts];
     newCharts[chartIndex] = updatedChart;
     updateSettings(atomId, { ...latestSettings, charts: newCharts });
+    
     try {
+      // Build traces for API
+      const traces = buildTracesForAPI(updatedChart);
+      
+      // For advanced mode, filters are included in individual traces
+      // For legacy mode, use merged filters for backward compatibility
+      const legacyFilters = updatedChart.isAdvancedMode ? {} : mergeTraceFilters(updatedChart);
+      
       const chartRequest = {
         file_id: latestSettings.fileId,
         chart_type: updatedChart.type,
-        traces: [{
-          x_column: updatedChart.xAxis,
-          y_column: updatedChart.yAxis,
-          name: updatedChart.title,
-          chart_type: updatedChart.type,
-          aggregation: 'sum' as const,
-        }],
+        traces: traces,
         title: updatedChart.title,
-        filters: Object.keys(updatedChart.filters).length > 0 ? updatedChart.filters : undefined,
+        filters: Object.keys(legacyFilters).length > 0 ? legacyFilters : undefined,
         filtered_data: updatedChart.filteredData,
       };
       const chartResponse = await chartMakerApi.generateChart(chartRequest);

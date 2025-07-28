@@ -185,6 +185,8 @@ class ChartTrace(BaseModel):
     chart_type: Literal["line", "bar", "area", "pie", "scatter"] = "line"
     style: Optional[RechartsStyleConfig] = None
     aggregation: Optional[Literal["sum", "mean", "count", "min", "max"]] = "sum"
+    filters: Optional[dict] = None  # Trace-specific filters
+    color: Optional[str] = None  # Trace-specific color
 
 class ChartRequest(BaseModel):
     file_id: str
