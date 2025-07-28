@@ -464,8 +464,10 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
     );
   };
 
-  const allValid = Object.values(validationResults).length > 0 &&
-    Object.values(validationResults).every(v => v.includes('Success'));
+  const allValid = settings.bypassMasterUpload || (
+    Object.values(validationResults).length > 0 &&
+    Object.values(validationResults).every(v => v.includes('Success'))
+  );
 
   return (
     <div className="w-full h-full bg-gradient-to-br from-slate-50 to-blue-50 rounded-xl border border-gray-200 shadow-xl overflow-hidden flex">
@@ -501,6 +503,7 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
                 onValidateFiles={handleValidateFiles}
                 onSaveDataFrames={handleSaveDataFrames}
                 saveEnabled={allValid}
+                disableValidation={settings.bypassMasterUpload}
                 isDragOver={isDragOver}
                 requiredOptions={settings.requiredFiles || []}
                 onDeleteFile={handleDeleteFile}
