@@ -17,4 +17,5 @@ urlpatterns = [
     path("api/tenants/", include("apps.tenants.urls")),
     path("api/roles/", include("apps.roles.urls")),
     path("api/audit/", include("apps.audit.urls")),
+    path("api/session/", include("apps.session_state.urls")),
 ]

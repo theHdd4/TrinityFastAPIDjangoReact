@@ -118,6 +118,7 @@ TENANT_APPS = [
     "apps.orchestration",
     "apps.roles",
     "apps.audit",
+    "apps.session_state",
 ]
 
 INSTALLED_APPS = SHARED_APPS + [
