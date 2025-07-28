@@ -255,6 +255,10 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
             <LineChart 
               data={chartData} 
               margin={{ top: 20, right: 30, left: 20, bottom: 20 }}
+              onClick={() => {
+                // Clear trace emphasis when clicking on chart background
+                setEmphasizedTrace(prev => ({ ...prev, [chart.id]: null }));
+              }}
             >
               <defs>
                 <linearGradient id={`lineGradient-${chart.id}`} x1="0" y1="0" x2="0" y2="1">
@@ -399,6 +403,10 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
             <BarChart 
               data={processedBarData} 
               margin={{ top: 20, right: 30, left: 20, bottom: 20 }}
+              onClick={() => {
+                // Clear trace emphasis when clicking on chart background (but keep dimmed x-values)
+                setEmphasizedTrace(prev => ({ ...prev, [chart.id]: null }));
+              }}
             >
               <defs>
                 <linearGradient id={`barGradient-${chart.id}`} x1="0" y1="0" x2="0" y2="1">
@@ -555,6 +563,10 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
             <AreaChart 
               data={chartData} 
               margin={{ top: 20, right: 30, left: 20, bottom: 20 }}
+              onClick={() => {
+                // Clear trace emphasis when clicking on chart background
+                setEmphasizedTrace(prev => ({ ...prev, [chart.id]: null }));
+              }}
             >
               <defs>
                 <linearGradient id={`areaGradient-${chart.id}`} x1="0" y1="0" x2="0" y2="1">
@@ -682,6 +694,10 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
             <ScatterChart 
               data={chartData} 
               margin={{ top: 20, right: 30, left: 20, bottom: 20 }}
+              onClick={() => {
+                // Clear trace emphasis when clicking on chart background
+                setEmphasizedTrace(prev => ({ ...prev, [chart.id]: null }));
+              }}
             >
               <defs>
                 <radialGradient id={`scatterGradient-${chart.id}`} cx="50%" cy="50%" r="50%">
@@ -814,7 +830,12 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
 
         return (
           <ChartContainer key={key} config={config} className={`${chartHeight} w-full`}>
-            <PieChart>
+            <PieChart
+              onClick={() => {
+                // Clear trace emphasis when clicking on chart background
+                setEmphasizedTrace(prev => ({ ...prev, [chart.id]: null }));
+              }}
+            >
               <defs>
                 {modernPieColors.map((color, i) => (
                   <linearGradient key={i} id={`pieGradient-${chart.id}-${i}`} x1="0" y1="0" x2="1" y2="1">
@@ -944,22 +965,29 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
                            <BarChart3 className={`mr-2 ${isCompact ? 'w-4 h-4' : 'w-5 h-5'} drop-shadow-sm`} />
                            {chart.title}
                          </div>
-                         {/* Interaction hint for multi-trace charts */}
-                         {(chart.chartConfig?.traces && chart.chartConfig.traces.length > 1) && (
-                           <div className="flex items-center text-xs opacity-80 bg-white/20 rounded-full px-2 py-1">
-                             {chart.chartConfig.chart_type === 'bar' ? (
-                               <>
-                                 <span className="hidden sm:inline">Click: trace, Ctrl+Click: dim x-axis</span>
-                                 <span className="sm:hidden">Click to emphasize</span>
-                               </>
-                             ) : (
-                               <>
-                                 <span className="hidden sm:inline">Click traces to emphasize</span>
-                                 <span className="sm:hidden">Click to emphasize</span>
-                               </>
-                             )}
+                         {/* Hints container - aligned in same row */}
+                         <div className="flex items-center gap-2">
+                           {/* Interaction hint for multi-trace charts */}
+                           {(chart.chartConfig?.traces && chart.chartConfig.traces.length > 1) && (
+                             <div className="flex items-center text-xs opacity-80 bg-white/20 rounded-full px-2 py-1">
+                               {chart.chartConfig.chart_type === 'bar' ? (
+                                 <>
+                                   <span className="hidden sm:inline">Click: trace, Ctrl+Click: dim x-axis</span>
+                                   <span className="sm:hidden">Click to emphasize</span>
+                                 </>
+                               ) : (
+                                 <>
+                                   <span className="hidden sm:inline">Click traces to emphasize</span>
+                                   <span className="sm:hidden">Click to emphasize</span>
+                                 </>
+                               )}
+                             </div>
+                           )}
+                           {/* Alt+Click expand hint */}
+                           <div className="flex items-center text-xs text-white/90 bg-white/20 rounded-full px-2 py-1 backdrop-blur-sm">
+                             <span>Alt+Click to expand</span>
                            </div>
-                         )}
+                         </div>
                        </CardTitle>
                        {/* Transparent overlay for Alt+Click fullscreen */}
                        <div
@@ -972,11 +1000,7 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
                            }
                          }}
                          title="Alt+Click to expand"
-                       >
-                         <div className="absolute top-2 right-2 flex items-center text-xs text-white/90 bg-white/20 rounded-full px-2 py-1 backdrop-blur-sm">
-                           <span>Alt+Click to expand</span>
-                         </div>
-                       </div>
+                       />
                      </div>
                      
                       {/* Filter Controls - Support both simple and multi-series modes */}
