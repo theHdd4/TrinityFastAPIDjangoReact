@@ -203,6 +203,7 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
     } catch (e: any) {
       console.error("⚠️ failed to display SKUs", e);
       setError(e.message || "Error displaying SKUs");
+      logSessionState(user?.id);
     }
   };
 
@@ -249,6 +250,7 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
       logSessionState(user?.id);
     } catch (e: any) {
       setError(e.message || "Error fetching statistics");
+      logSessionState(user?.id);
     }
   };
 

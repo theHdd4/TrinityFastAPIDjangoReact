@@ -17,6 +17,7 @@ export async function logSessionState(userId: number | string | null | undefined
     if (res.ok) {
       const data = await res.json();
       console.log('\uD83D\uDD11 redis namespace', namespace);
+      console.log('\uD83C\uDF10 session id', sessionId);
       console.log('\uD83D\uDCCA session state', data.state);
     } else {
       console.warn('\u26A0\uFE0F failed to fetch session state', res.status);

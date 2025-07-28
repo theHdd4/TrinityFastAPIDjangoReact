@@ -194,6 +194,7 @@ const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
       } catch (err) {
         console.warn('assignment save error parse fail', err);
       }
+      logSessionState(user?.id);
     }
   };
 

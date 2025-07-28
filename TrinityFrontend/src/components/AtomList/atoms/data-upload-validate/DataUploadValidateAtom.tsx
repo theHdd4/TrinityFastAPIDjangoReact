@@ -264,6 +264,8 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
       setValidationResults(results);
       setValidationDetails(details);
       logSessionState(user?.id);
+    } else {
+      logSessionState(user?.id);
     }
   };
 
@@ -375,6 +377,7 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
       logSessionState(user?.id);
     } else {
       toast({ title: 'Unable to Save Dataframes', variant: 'destructive' });
+      logSessionState(user?.id);
     }
   };
 
