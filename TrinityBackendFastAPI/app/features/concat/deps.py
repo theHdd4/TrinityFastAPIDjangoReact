@@ -70,8 +70,9 @@ MONGO_DB = os.getenv("MONGO_DB", "trinity")
 mongo_client = AsyncIOMotorClient(MONGO_URI)
 db = mongo_client[MONGO_DB]
 
-def get_concat_results_collection():
-    return db[os.getenv("CONCAT_RESULTS_COLLECTION", "concat_results")]
+def get_concat_configuration_collection():
+    """Return the Mongo collection used to store concat configuration."""
+    return db[os.getenv("CONCAT_CONFIG_COLLECTION", "concat_configuration")]
 
 def load_dataframe(object_name: str) -> pd.DataFrame:
     """
@@ -139,7 +140,7 @@ __all__ = [
     'minio_client',
     'load_dataframe',
     'save_concat_result_to_minio',
-    'get_concat_results_collection',
+    'get_concat_configuration_collection',
     'save_concat_metadata_to_mongo',
     'OBJECT_PREFIX',
     'MINIO_BUCKET',
