@@ -295,7 +295,7 @@ async def dimension_mapping(req: DimensionMappingRequest):
     mongo_cfg = get_classifier_config_from_mongo(client, app, project)
     if mongo_cfg and mongo_cfg.get("dimensions"):
         print("📦 loaded mapping from MongoDB")
-        redis_client.setex(key, 3600, json.dumps(mongo_cfg))
+        redis_client.setex(key, 3600, json.dumps(mongo_cfg, default=str))
         return {"mapping": mongo_cfg["dimensions"], "config": mongo_cfg}
 
     raise HTTPException(status_code=404, detail="Mapping not found")

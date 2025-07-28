@@ -540,7 +540,7 @@ async def assign_identifiers_to_dimensions(
         client_id=client_id,
     )
     map_key = f"project:{project_id}:dimensions"
-    redis_client.setex(map_key, 3600, json.dumps(assignments))
+    redis_client.setex(map_key, 3600, json.dumps(assignments, default=str))
     in_memory_status = "skipped"
     message = "Identifiers assigned to project dimensions"
     validator_type = "project"
@@ -613,10 +613,10 @@ async def save_config(req: SaveConfigRequest):
         "dimensions": req.dimensions,
         "env": env,
     }
-    redis_client.setex(key, 3600, json.dumps(data))
+    redis_client.setex(key, 3600, json.dumps(data, default=str))
     if req.project_id:
         map_key = f"project:{req.project_id}:dimensions"
-        redis_client.setex(map_key, 3600, json.dumps(req.dimensions))
+        redis_client.setex(map_key, 3600, json.dumps(req.dimensions, default=str))
     mongo_result = save_classifier_config_to_mongo(data)
     print(f"📦 mongo save result {mongo_result}")
     return {"status": "success", "key": key, "data": data, "mongo": mongo_result}
@@ -632,7 +632,7 @@ async def get_config(client_name: str, app_name: str, project_name: str):
 
     mongo_data = get_classifier_config_from_mongo(client_name, app_name, project_name)
     if mongo_data:
-        redis_client.setex(key, 3600, json.dumps(mongo_data))
+        redis_client.setex(key, 3600, json.dumps(mongo_data, default=str))
         return {"status": "success", "source": "mongo", "data": mongo_data}
 
     raise HTTPException(status_code=404, detail="Configuration not found")
@@ -654,7 +654,7 @@ async def cache_project(req: CacheProjectRequest):
         project_name=req.project_name,
     )
     env_key = f"env:{req.client_name}:{req.app_name}:{req.project_name}"
-    redis_client.setex(env_key, 3600, json.dumps(env))
+    redis_client.setex(env_key, 3600, json.dumps(env, default=str))
 
     cfg = get_classifier_config_from_mongo(
         req.client_name, req.app_name, req.project_name
@@ -664,12 +664,12 @@ async def cache_project(req: CacheProjectRequest):
             f"{req.client_name}/{req.app_name}/{req.project_name}/"
             "column_classifier_config"
         )
-        redis_client.setex(cfg_key, 3600, json.dumps(cfg))
+        redis_client.setex(cfg_key, 3600, json.dumps(cfg, default=str))
 
     mapping = get_project_dimension_mapping(req.project_id)
     if mapping and mapping.get("assignments"):
         map_key = f"project:{req.project_id}:dimensions"
-        redis_client.setex(map_key, 3600, json.dumps(mapping["assignments"]))
+        redis_client.setex(map_key, 3600, json.dumps(mapping["assignments"], default=str))
 
     return {
         "status": "cached",

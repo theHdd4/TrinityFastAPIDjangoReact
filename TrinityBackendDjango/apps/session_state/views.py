@@ -105,7 +105,7 @@ class SessionInitView(APIView):
                 "project_name": project_name,
             }
         )
-        redis_client.setex(session_id, TTL, json.dumps(session))
+        redis_client.setex(session_id, TTL, json.dumps(session, default=str))
         redis_client.setex(ns, TTL, session_id)
         return Response({"session_id": session_id, "state": session})
 
@@ -168,7 +168,7 @@ class SessionStateView(APIView):
                     "dimensions": dimensions,
                 }
             if session:
-                redis_client.setex(session_id, TTL, json.dumps(session))
+                redis_client.setex(session_id, TTL, json.dumps(session, default=str))
         return Response({"session_id": session_id, "state": session})
 
 
@@ -191,7 +191,7 @@ class SessionUpdateView(APIView):
             except Exception:
                 pass
         session[key] = value
-        redis_client.setex(session_id, TTL, json.dumps(session))
+        redis_client.setex(session_id, TTL, json.dumps(session, default=str))
         try:
             mc = _mongo_client()
             db = mc.get_default_database()

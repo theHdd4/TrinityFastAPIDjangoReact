@@ -156,7 +156,7 @@ async def get_env_vars(
                 env.get("APP_NAME", ""),
                 env.get("PROJECT_NAME", ""),
             )
-            redis_client.setex(redis_key, ENV_TTL, json.dumps(env))
+            redis_client.setex(redis_key, ENV_TTL, json.dumps(env, default=str))
 
     print(f"🔧 db_env_vars{key} -> {env}")
     return env

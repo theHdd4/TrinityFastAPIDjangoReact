@@ -23,7 +23,7 @@ def cache_master_config(client_id: str, app_id: str, project_id: str, file_key: 
         "config": config,
         "type": "Validation",
     }
-    redis_client.setex(key, TTL, json.dumps(data))
+    redis_client.setex(key, TTL, json.dumps(data, default=str))
 
 
 def get_master_config(client_id: str, app_id: str, project_id: str, file_key: str) -> Dict | None:
