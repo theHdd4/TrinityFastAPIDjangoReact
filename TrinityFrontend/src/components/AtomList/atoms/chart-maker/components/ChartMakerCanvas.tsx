@@ -702,11 +702,6 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
             <p className="text-gray-600 mb-6 text-lg font-medium leading-relaxed">
               Create beautiful interactive charts and visualizations
             </p>
-            <div className="bg-white/80 backdrop-blur-sm rounded-lg p-4 shadow-lg border border-white/20">
-              <p className="text-sm text-gray-500 font-medium">
-                📊 Upload data and configure charts in the settings panel to get started
-              </p>
-            </div>
           </div>
         </div>
       </div>
@@ -790,7 +785,8 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
                               {/* Subtle texture overlay */}
                               <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent"></div>
                               
-                              <div className="relative z-10 space-y-3">
+                              {/* Responsive grid layout for filter columns */}
+                              <div className="relative z-10 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
                                 {Array.from(allFilterColumns).map(column => {
                                   // Find traces that use this column for filtering
                                   const tracesWithColumn = migratedChart.traces!.map((trace, idx) => ({ trace, idx }))
@@ -805,18 +801,18 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
                                   const uniqueValues = getUniqueValuesForColumn(column);
                                   
                                   return (
-                                    <div key={column} className="space-y-3">
-                                      {/* Filter dropdown */}
-                                      <div className="flex items-center gap-3">
-                                        <Label className={`font-semibold text-gray-800 min-w-fit ${isCompact ? 'text-xs' : 'text-sm'} bg-gradient-to-r from-gray-700 to-gray-600 bg-clip-text text-transparent`}>
-                                          {column}:
+                                    <div key={column} className="flex flex-col space-y-2">
+                                      {/* Filter dropdown with compact layout */}
+                                      <div className="flex flex-col gap-2">
+                                        <Label className={`font-semibold text-gray-800 ${isCompact ? 'text-xs' : 'text-sm'} bg-gradient-to-r from-gray-700 to-gray-600 bg-clip-text text-transparent truncate`}>
+                                          {column}
                                         </Label>
                                         <Popover>
                                           <PopoverTrigger asChild>
                                             <Button
                                               variant="outline"
                                               size="sm"
-                                              className={`justify-between flex-1 font-medium ${isCompact ? 'h-7 text-xs' : 'h-8 text-sm'} 
+                                              className={`justify-between w-full font-medium ${isCompact ? 'h-8 text-xs' : 'h-9 text-sm'} 
                                                 bg-gradient-to-r from-white to-gray-50/50 hover:from-gray-50 hover:to-white 
                                                 border-gray-300/60 hover:border-gray-400/60 shadow-sm hover:shadow-md 
                                                 transition-all duration-200 backdrop-blur-sm group`}
@@ -830,7 +826,7 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
                                                 return allSeriesSelections;
                                               })()}
                                             >
-                                              <span className="truncate font-medium text-gray-700 group-hover:text-gray-900 transition-colors">
+                                              <span className="truncate font-medium text-gray-700 group-hover:text-gray-900 transition-colors text-left">
                                                 {(() => {
                                                   // Group selections by series for display
                                                   const seriesGroups = tracesWithColumn.map(({ trace, idx }) => {
@@ -843,10 +839,14 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
                                                   
                                                   if (seriesGroups.length === 0) return "No filters";
                                                   if (seriesGroups.length === 1) return seriesGroups[0];
-                                                  return seriesGroups.join(' | ');
+                                                  
+                                                  // For multiple series, show a compact summary
+                                                  const totalSelected = tracesWithColumn.reduce((sum, { trace }) => 
+                                                    sum + (trace.filters?.[column]?.length || 0), 0);
+                                                  return `${tracesWithColumn.length} series (${totalSelected} filters)`;
                                                 })()}
                                               </span>
-                                              <ChevronDown className="h-3 w-3 text-gray-500 group-hover:text-gray-700 transition-colors" />
+                                              <ChevronDown className="h-3 w-3 text-gray-500 group-hover:text-gray-700 transition-colors flex-shrink-0 ml-2" />
                                             </Button>
                                           </PopoverTrigger>
                                           <PopoverContent className="w-80 p-0 bg-white/95 backdrop-blur-lg border-gray-200/60 shadow-2xl rounded-lg overflow-hidden" align="start">
@@ -1027,25 +1027,26 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
                               {/* Subtle texture overlay */}
                               <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent"></div>
                               
-                              <div className="relative z-10 space-y-3">
+                              {/* Responsive grid layout for simple filter columns */}
+                              <div className="relative z-10 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
                                 {Object.entries(chart.filters).map(([column, selectedValues]) => {
                                   const uniqueValues = getUniqueValuesForColumn(column);
                                   return (
-                                    <div key={column} className="flex items-center gap-3">
-                                      <Label className={`font-semibold text-gray-800 min-w-fit ${isCompact ? 'text-xs' : 'text-sm'} bg-gradient-to-r from-gray-700 to-gray-600 bg-clip-text text-transparent`}>
-                                        {column}:
+                                    <div key={column} className="flex flex-col space-y-2">
+                                      <Label className={`font-semibold text-gray-800 ${isCompact ? 'text-xs' : 'text-sm'} bg-gradient-to-r from-gray-700 to-gray-600 bg-clip-text text-transparent truncate`}>
+                                        {column}
                                       </Label>
                                       <Popover>
                                         <PopoverTrigger asChild>
                                           <Button
                                             variant="outline"
                                             size="sm"
-                                            className={`justify-between flex-1 font-medium ${isCompact ? 'h-7 text-xs' : 'h-8 text-sm'} 
+                                            className={`justify-between w-full font-medium ${isCompact ? 'h-8 text-xs' : 'h-9 text-sm'} 
                                               bg-gradient-to-r from-white to-gray-50/50 hover:from-gray-50 hover:to-white 
                                               border-gray-300/60 hover:border-gray-400/60 shadow-sm hover:shadow-md 
                                               transition-all duration-200 backdrop-blur-sm group`}
                                           >
-                                            <span className="truncate font-medium text-gray-700 group-hover:text-gray-900 transition-colors">
+                                            <span className="truncate font-medium text-gray-700 group-hover:text-gray-900 transition-colors text-left">
                                               {selectedValues.length === 0
                                                 ? "No values selected"
                                                 : selectedValues.length === uniqueValues.length
@@ -1055,7 +1056,7 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
                                                 : `${selectedValues.length} selected`
                                               }
                                             </span>
-                                            <ChevronDown className="h-3 w-3 text-gray-500 group-hover:text-gray-700 transition-colors" />
+                                            <ChevronDown className="h-3 w-3 text-gray-500 group-hover:text-gray-700 transition-colors flex-shrink-0 ml-2" />
                                           </Button>
                                         </PopoverTrigger>
                                         <PopoverContent className="w-56 p-0 bg-white/95 backdrop-blur-lg border-gray-200/60 shadow-2xl rounded-lg overflow-hidden" align="start">
