@@ -12,7 +12,7 @@ import { useLaboratoryStore, DEFAULT_DATAUPLOAD_SETTINGS, DataUploadSettings } f
 import { VALIDATE_API } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/AuthContext';
-import { logSessionState, updateSessionState } from '@/lib/session';
+import { logSessionState, updateSessionState, addNavigationItem } from '@/lib/session';
 import UploadSection from './components/upload/UploadSection';
 import RequiredFilesSection from './components/required-files/RequiredFilesSection';
 
@@ -375,6 +375,11 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
       } else {
         toast({ title: 'Dataframes Saved Successfully' });
       }
+      addNavigationItem(user?.id, {
+        atom: 'data-upload-validate',
+        files: uploadedFiles.map(f => f.name),
+        settings
+      });
       logSessionState(user?.id);
     } else {
       toast({ title: 'Unable to Save Dataframes', variant: 'destructive' });

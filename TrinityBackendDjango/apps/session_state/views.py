@@ -93,7 +93,10 @@ class SessionInitView(APIView):
                     "identifiers": identifiers,
                     "measures": measures,
                     "dimensions": dimensions,
+                    "navigation": [],
                 }
+        if "navigation" not in session:
+            session["navigation"] = []
         session.update(
             {
                 "client_id": client_id,
@@ -166,7 +169,10 @@ class SessionStateView(APIView):
                     "identifiers": identifiers,
                     "measures": measures,
                     "dimensions": dimensions,
+                    "navigation": [],
                 }
+            if "navigation" not in session:
+                session["navigation"] = []
             if session:
                 redis_client.setex(session_id, TTL, json.dumps(session, default=str))
         return Response({"session_id": session_id, "state": session})
@@ -190,7 +196,15 @@ class SessionUpdateView(APIView):
                 session = json.loads(raw)
             except Exception:
                 pass
-        session[key] = value
+        if key == "navigation":
+            nav = session.get("navigation", [])
+            if isinstance(value, list):
+                nav.extend(value)
+            else:
+                nav.append(value)
+            session["navigation"] = nav
+        else:
+            session[key] = value
         redis_client.setex(session_id, TTL, json.dumps(session, default=str))
         try:
             mc = _mongo_client()

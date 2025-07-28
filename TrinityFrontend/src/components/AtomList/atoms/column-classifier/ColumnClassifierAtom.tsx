@@ -14,7 +14,7 @@ import {
 import { CLASSIFIER_API } from '@/lib/api';
 import { fetchDimensionMapping } from '@/lib/dimensions';
 import { useAuth } from '@/contexts/AuthContext';
-import { logSessionState, updateSessionState } from '@/lib/session';
+import { logSessionState, updateSessionState, addNavigationItem } from '@/lib/session';
 
 export type ColumnData = ColumnClassifierColumn;
 export type FileClassification = ColumnClassifierFile;
@@ -186,6 +186,12 @@ const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
         console.warn('assignment save result parse error', err);
       }
       updateSessionState(user?.id, {
+        identifiers,
+        measures,
+        dimensions: currentFile.customDimensions,
+      });
+      addNavigationItem(user?.id, {
+        atom: 'column-classifier',
         identifiers,
         measures,
         dimensions: currentFile.customDimensions,

@@ -36,6 +36,13 @@ export async function updateSessionState(
   }
 }
 
+export async function addNavigationItem(
+  userId: number | string | null | undefined,
+  item: Record<string, any>
+) {
+  await updateSessionState(userId, { navigation: item });
+}
+
 export async function logSessionState(userId: number | string | null | undefined) {
   const session = buildSession(userId);
   if (!session) {

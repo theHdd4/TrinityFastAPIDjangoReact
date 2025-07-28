@@ -16,7 +16,7 @@ import { BarChart3, TrendingUp, Maximize2 } from "lucide-react";
 import { Dialog, DialogContent, DialogTrigger } from "@/components/ui/dialog";
 import D3LineChart from "./D3LineChart";
 import { useAuth } from "@/contexts/AuthContext";
-import { logSessionState } from "@/lib/session";
+import { logSessionState, addNavigationItem } from "@/lib/session";
 
 interface ColumnInfo {
   column: string;
@@ -199,6 +199,12 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
       }
       }
       onUpdateSettings(newSettings);
+      addNavigationItem(user?.id, {
+        atom: 'feature-overview',
+        action: 'displaySkus',
+        dataSource: settings.dataSource,
+        dimensionMap,
+      });
       logSessionState(user?.id);
     } catch (e: any) {
       console.error("⚠️ failed to display SKUs", e);
@@ -246,6 +252,12 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
         statDataMap: result,
         activeMetric: settings.yAxes[0],
         activeRow: row.id,
+      });
+      addNavigationItem(user?.id, {
+        atom: 'feature-overview',
+        action: 'viewStats',
+        metric: settings.yAxes[0],
+        combination: combo,
       });
       logSessionState(user?.id);
     } catch (e: any) {
