@@ -62,6 +62,8 @@ async def explore_root():
         ]
     }
 
+
+
 @router.get("/get-dimensions-and-identifiers/{validator_atom_id}")
 async def get_dimensions_and_identifiers(validator_atom_id: str):
     """
@@ -308,6 +310,58 @@ async def specify_operations(
         },
         "next_step": f"Get chart data using GET /explore/chart-data-multidim/{explore_atom_id}"
     }
+
+@router.get("/minio-files")
+async def list_minio_files(
+    collection_path: str = Query(default="qmmqq/sales/", description="Path in the bucket"),
+    bucket_name: str = Query(default="validated-d1", description="MinIO bucket name")
+):
+    """
+    List files in a MinIO collection
+    """
+    try:
+        from minio import Minio
+        
+        # Initialize MinIO client
+        minio_client = Minio(
+            "10.2.1.65:9003",
+            access_key="minio",
+            secret_key="minio123",
+            secure=False
+        )
+        
+        # List objects
+        objects = minio_client.list_objects(
+            bucket_name,
+            prefix=collection_path,
+            recursive=True
+        )
+        
+        # Collect file information
+        files = []
+        for obj in objects:
+            if not obj.object_name.endswith('/'):  # Skip directories
+                files.append({
+                    "file_name": obj.object_name.split('/')[-1],
+                    "full_path": obj.object_name,
+                    "size": obj.size,
+                    "last_modified": obj.last_modified.isoformat()
+                })
+        
+        return {
+            "status": "success",
+            "bucket": bucket_name,
+            "collection_path": collection_path,
+            "file_count": len(files),
+            "files": files
+        }
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to list MinIO files: {str(e)}"
+        )
+
 
 
 
@@ -694,311 +748,6 @@ async def chart_data_multidim(explore_atom_id: str):
 
 
 
-# @router.get("/chart-data-multidim/{explore_atom_id}")
-# async def chart_data_multidim(explore_atom_id: str):
-#     """
-#     Multi-dimensional grouping with dynamic x-axis selection and weighted average support
-#     """
-#     # Get explore atom configuration
-#     explore_atom_data = None
-    
-#     if explore_atom_id in explore_atoms:
-#         explore_atom_data = explore_atoms[explore_atom_id]
-#     # ✅ REPLACE with this:
-#     else:
-#         mongo_atom = get_explore_atom_from_mongo(explore_atom_id)
-#         if mongo_atom:
-#             explore_atoms[explore_atom_id] = mongo_atom
-#             explore_atom_data = mongo_atom
-
-    
-#     if not explore_atom_data:
-#         raise HTTPException(status_code=404, detail=f"Explore atom not found")
-    
-#     # Extract operations with x_axis and weight_column support
-#     operations = explore_atom_data.get("operations", {})
-#     chart_type = operations.get("chart_type", "table")
-#     group_by = operations.get("group_by", [])
-#     filters = operations.get("filters", {})
-#     measures_config = operations.get("measures_config", {})
-#     x_axis = operations.get("x_axis", group_by[0] if group_by else None)
-#     weight_column = operations.get("weight_column", None)  # ✅ NEW
-    
-#     # Fetch data from MinIO
-#     try:
-#         from minio import Minio
-#         import pandas as pd
-        
-#         minio_client = Minio(
-#             "10.2.1.65:9003",
-#             access_key="minio",
-#             secret_key="minio123",
-#             secure=False
-#         )
-        
-#         bucket_name = "validated-d1"
-#         object_name = "viacom_media/media/20250530_171354_Data For Model.csv"
-        
-#         obj = minio_client.get_object(bucket_name, object_name)
-#         df = pd.read_csv(obj)
-#         obj.close()
-#         obj.release_conn()
-        
-#         print(f"✅ Data loaded: {df.shape[0]} rows, {df.shape[1]} columns")
-        
-#     except Exception as e:
-#         raise HTTPException(status_code=500, detail=f"Failed to fetch data: {str(e)}")
-    
-#     # Case-insensitive column matching
-#     def find_column(search_name, available_columns):
-#         search_lower = search_name.lower()
-#         for col in available_columns:
-#             if col.lower() == search_lower:
-#                 return col
-#         return None
-    
-#     # Apply filters with smart matching
-#     processed_df = df.copy()
-#     filter_debug = {}
-    
-#     for filter_key, filter_value in filters.items():
-#         actual_column = find_column(filter_key, df.columns)
-#         if actual_column:
-#             # Smart value matching (case insensitive)
-#             unique_values = processed_df[actual_column].unique()
-#             matched_value = None
-            
-#             for val in unique_values:
-#                 if str(val).lower() == filter_value.lower():
-#                     matched_value = val
-#                     break
-            
-#             if matched_value:
-#                 original_count = len(processed_df)
-#                 processed_df = processed_df[processed_df[actual_column] == matched_value]
-#                 filter_debug[filter_key] = {
-#                     "matched_value": matched_value,
-#                     "rows_before": original_count,
-#                     "rows_after": len(processed_df)
-#                 }
-#                 print(f"✅ Filter applied: {actual_column}={matched_value}, rows: {original_count} → {len(processed_df)}")
-#             else:
-#                 filter_debug[filter_key] = {
-#                     "status": "no_match_found",
-#                     "available_values": unique_values[:5].tolist()
-#                 }
-#                 print(f"❌ No match for {filter_value} in {actual_column}")
-#         else:
-#             filter_debug[filter_key] = {"status": "column_not_found"}
-    
-#     # Check if any data remains after filtering
-#     if len(processed_df) == 0:
-#         return {
-#             "status": "success",
-#             "chart_type": chart_type,
-#             "data": [],
-#             "metadata": {
-#                 "message": "No data remaining after filters",
-#                 "original_rows": len(df),
-#                 "filtered_rows": 0,
-#                 "filters_applied": filter_debug
-#             }
-#         }
-    
-#     # Validate x_axis exists in group_by
-#     if x_axis and x_axis not in group_by:
-#         raise HTTPException(
-#             status_code=400, 
-#             detail=f"x_axis '{x_axis}' must be in group_by list {group_by}"
-#         )
-
-#     # Multi-dimensional grouping
-#     actual_group_cols = []
-#     for group_col in group_by:
-#         actual_col = find_column(group_col, df.columns)
-#         if actual_col:
-#             actual_group_cols.append(actual_col)
-#             print(f"✅ Group by: {group_col} → {actual_col}")
-#         else:
-#             print(f"❌ Group by column '{group_col}' not found")
-    
-#     if not actual_group_cols:
-#         raise HTTPException(status_code=400, detail="No valid group by columns found")
-
-#     # Get measure column
-#     primary_measure = list(measures_config.keys())[0] if measures_config else "Volume"
-#     actual_measure = find_column(primary_measure, df.columns)
-    
-#     if not actual_measure:
-#         raise HTTPException(status_code=400, detail=f"Measure column '{primary_measure}' not found")
-
-#     # ✅ Enhanced Group and aggregate with weighted average support
-#     agg_type = measures_config.get(primary_measure, "sum")
-    
-#     # Data type validation and cleaning
-#     try:
-#         # Ensure measure column is numeric
-#         processed_df[actual_measure] = pd.to_numeric(processed_df[actual_measure], errors='coerce')
-        
-#         # If using weighted average, ensure weight column is numeric
-#         actual_weight = None
-#         if agg_type == "weighted_avg":
-#             if not weight_column:
-#                 raise HTTPException(status_code=400, detail="weight_column required for weighted_avg")
-            
-#             actual_weight = find_column(weight_column, df.columns)
-#             if not actual_weight:
-#                 raise HTTPException(status_code=400, detail=f"Weight column '{weight_column}' not found")
-            
-#             processed_df[actual_weight] = pd.to_numeric(processed_df[actual_weight], errors='coerce')
-            
-#             # Remove rows with NaN in measure or weight
-#             processed_df = processed_df.dropna(subset=[actual_measure, actual_weight])
-#         else:
-#             # For other aggregations, just remove NaN in measure
-#             processed_df = processed_df.dropna(subset=[actual_measure])
-        
-#         print(f"✅ Data cleaning: {len(processed_df)} rows after removing NaN")
-        
-#     except Exception as e:
-#         print(f"⚠️ Data cleaning warning: {e}")
-
-#     # Perform aggregation
-#     try:
-#         if agg_type == "sum":
-#             grouped_result = processed_df.groupby(actual_group_cols)[actual_measure].sum().reset_index()
-        
-#         elif agg_type == "avg":
-#             grouped_result = processed_df.groupby(actual_group_cols)[actual_measure].mean().reset_index()
-        
-#         elif agg_type == "count":
-#             grouped_result = processed_df.groupby(actual_group_cols)[actual_measure].count().reset_index()
-        
-#         elif agg_type == "min":
-#             grouped_result = processed_df.groupby(actual_group_cols)[actual_measure].min().reset_index()
-        
-#         elif agg_type == "max":
-#             grouped_result = processed_df.groupby(actual_group_cols)[actual_measure].max().reset_index()
-        
-#         elif agg_type == "weighted_avg":
-#             # ✅ NEW: Weighted average implementation
-#             def weighted_avg_func(group):
-#                 numerator = (group[actual_measure] * group[actual_weight]).sum()
-#                 denominator = group[actual_weight].sum()
-#                 return numerator / denominator if denominator != 0 else 0
-            
-#             # Apply weighted average calculation
-#             grouped_result = processed_df.groupby(actual_group_cols).apply(weighted_avg_func).reset_index()
-#             grouped_result.columns = actual_group_cols + [actual_measure]
-            
-#             print(f"✅ Weighted average calculated using {actual_weight} as weight")
-        
-#         else:
-#             # Default to sum
-#             grouped_result = processed_df.groupby(actual_group_cols)[actual_measure].sum().reset_index()
-        
-#         print(f"✅ Aggregation ({agg_type}): {len(grouped_result)} combinations")
-        
-#         # Handle empty results
-#         if len(grouped_result) == 0:
-#             print("⚠️ GroupBy returned empty result")
-#             grouped_result = pd.DataFrame(columns=actual_group_cols + [actual_measure])
-        
-#     except Exception as e:
-#         print(f"❌ GroupBy error: {str(e)}")
-#         print(f"Data types: {processed_df.dtypes}")
-#         print(f"Group columns: {actual_group_cols}")
-#         print(f"Measure column: {actual_measure}")
-#         print(f"Data shape: {processed_df.shape}")
-#         raise HTTPException(status_code=500, detail=f"Grouping failed: {str(e)}")
-
-#     # Format data based on chart type
-#     if chart_type == "line_chart" and x_axis:
-#         # ✅ Line chart specific processing
-#         actual_x_axis = find_column(x_axis, df.columns)
-        
-#         if not actual_x_axis:
-#             raise HTTPException(status_code=400, detail=f"X-axis column '{x_axis}' not found")
-        
-#         # Get non-x-axis columns for line differentiation
-#         line_id_cols = [col for col in actual_group_cols if col != actual_x_axis]
-        
-#         # Create line identifiers
-#         if line_id_cols:
-#             grouped_result['line_id'] = grouped_result[line_id_cols].astype(str).agg(' | '.join, axis=1)
-#         else:
-#             grouped_result['line_id'] = 'Total'
-        
-#         # Convert to line chart format
-#         chart_data = []
-        
-#         for line_name in grouped_result['line_id'].unique():
-#             line_data = grouped_result[grouped_result['line_id'] == line_name].sort_values(actual_x_axis)
-            
-#             chart_data.append({
-#                 "x": line_data[actual_x_axis].tolist(),
-#                 "y": line_data[actual_measure].tolist(),
-#                 "name": line_name,
-#                 "type": "scatter",
-#                 "mode": "lines+markers"
-#             })
-        
-#         print(f"✅ Line chart: {len(chart_data)} lines generated")
-
-#     else:
-#         # ✅ Table format
-#         chart_data = []
-        
-#         for _, row in grouped_result.iterrows():
-#             data_point = {}
-            
-#             # Add all grouping dimensions
-#             for col in actual_group_cols:
-#                 data_point[col.lower()] = str(row[col])
-            
-#             # Add measure value
-#             data_point[primary_measure.lower()] = float(row[actual_measure]) if pd.notna(row[actual_measure]) else 0
-            
-#             chart_data.append(data_point)
-        
-#         # Sort by measure value (descending) and limit results
-#         chart_data = sorted(chart_data, key=lambda x: x[primary_measure.lower()], reverse=True)[:20]
-        
-#         print(f"✅ Table data: {len(chart_data)} rows (top 20)")
-
-#     # ✅ Convert numpy types to Python types before returning
-#     def convert_numpy_types(obj):
-#         """Convert numpy types to native Python types for JSON serialization"""
-#         if isinstance(obj, dict):
-#             return {key: convert_numpy_types(value) for key, value in obj.items()}
-#         elif isinstance(obj, list):
-#             return [convert_numpy_types(item) for item in obj]
-#         elif hasattr(obj, 'item'):  # numpy scalar
-#             return obj.item()
-#         elif hasattr(obj, 'tolist'):  # numpy array
-#             return obj.tolist()
-#         else:
-#             return obj
-
-#     # Enhanced return statement with type conversion
-#     return {
-#         "status": "success",
-#         "explore_atom_id": explore_atom_id,
-#         "chart_type": chart_type,
-#         "data": convert_numpy_types(chart_data),  # ✅ Convert chart data
-#         "metadata": {
-#             "x_axis": x_axis,
-#             "weight_column": weight_column,
-#             "grouped_by": [str(col) for col in actual_group_cols],  # ✅ Convert to strings
-#             "measure": str(actual_measure),  # ✅ Convert to string
-#             "aggregation": agg_type,
-#             "original_rows": int(len(df)),  # ✅ Ensure int type
-#             "filtered_rows": int(len(processed_df)),  # ✅ Ensure int type
-#             "grouped_combinations": int(len(grouped_result)),  # ✅ Ensure int type
-#             "filter_debug": convert_numpy_types(filter_debug),  # ✅ Convert filter debug
-#             "chart_data_points": int(len(chart_data))  # ✅ Ensure int type
-#         }
-#     }
 
 @router.get("/redis-health")
 async def redis_health_check():

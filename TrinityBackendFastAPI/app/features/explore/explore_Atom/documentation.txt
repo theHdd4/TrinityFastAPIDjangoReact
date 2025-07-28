@@ -198,8 +198,6 @@ explore_atom_id (path) - Required: The explore atom ID
 
 Features:
 
-Smart Redis caching for 30-minute data persistence
-
 Case-insensitive column matching
 
 Multi-dimensional grouping support
@@ -361,4 +359,46 @@ Standard Error Response:
 json
 {
   "detail": "Error message describing the issue"
+}
+
+
+10. List MinIO Files
+GET /explore/minio-files
+
+Lists all files available in a specific MinIO collection.
+
+Query Parameters:
+
+collection_path (query) - Optional: Path in the bucket (default: "qmmqq/sales/")
+
+bucket_name (query) - Optional: MinIO bucket name (default: "validated-d1")
+
+Response:
+
+json
+{
+  "status": "success",
+  "bucket": "validated-d1",
+  "collection_path": "qmmqq/sales/",
+  "file_count": 3,
+  "files": [
+    {
+      "file_name": "20250605_115309_updated_dataset_with_base_price (14).csv",
+      "full_path": "qmmqq/sales/20250605_115309_updated_dataset_with_base_price (14).csv",
+      "size": 2048576,
+      "last_modified": "2025-06-05T11:53:09.000Z"
+    },
+    {
+      "file_name": "sales_data_q2.csv",
+      "full_path": "qmmqq/sales/sales_data_q2.csv", 
+      "size": 1536000,
+      "last_modified": "2025-06-10T14:22:45.000Z"
+    }
+  ]
+}
+Error Response (500):
+
+json
+{
+  "detail": "Failed to list MinIO files: Connection refused"
 }
