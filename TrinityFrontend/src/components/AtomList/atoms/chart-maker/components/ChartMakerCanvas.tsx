@@ -786,8 +786,11 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
                           if (allFilterColumns.size === 0) return null;
                           
                           return (
-                            <div className="bg-gray-50 p-3 border-b">
-                              <div className="space-y-2">
+                            <div className="bg-gradient-to-r from-white/80 via-gray-50/90 to-white/80 backdrop-blur-sm p-4 border-b border-gray-200/60 shadow-inner relative overflow-hidden">
+                              {/* Subtle texture overlay */}
+                              <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent"></div>
+                              
+                              <div className="relative z-10 space-y-3">
                                 {Array.from(allFilterColumns).map(column => {
                                   // Find traces that use this column for filtering
                                   const tracesWithColumn = migratedChart.traces!.map((trace, idx) => ({ trace, idx }))
@@ -802,10 +805,10 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
                                   const uniqueValues = getUniqueValuesForColumn(column);
                                   
                                   return (
-                                    <div key={column} className="space-y-2">
+                                    <div key={column} className="space-y-3">
                                       {/* Filter dropdown */}
-                                      <div className="flex items-center gap-2">
-                                        <Label className={`font-medium text-gray-700 min-w-fit ${isCompact ? 'text-xs' : 'text-xs'}`}>
+                                      <div className="flex items-center gap-3">
+                                        <Label className={`font-semibold text-gray-800 min-w-fit ${isCompact ? 'text-xs' : 'text-sm'} bg-gradient-to-r from-gray-700 to-gray-600 bg-clip-text text-transparent`}>
                                           {column}:
                                         </Label>
                                         <Popover>
@@ -813,7 +816,10 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
                                             <Button
                                               variant="outline"
                                               size="sm"
-                                              className={`justify-between flex-1 font-normal ${isCompact ? 'h-6 text-xs' : 'h-7 text-xs'}`}
+                                              className={`justify-between flex-1 font-medium ${isCompact ? 'h-7 text-xs' : 'h-8 text-sm'} 
+                                                bg-gradient-to-r from-white to-gray-50/50 hover:from-gray-50 hover:to-white 
+                                                border-gray-300/60 hover:border-gray-400/60 shadow-sm hover:shadow-md 
+                                                transition-all duration-200 backdrop-blur-sm group`}
                                               title={(() => {
                                                 // Create detailed tooltip showing all series selections
                                                 const allSeriesSelections = tracesWithColumn.map(({ trace, idx }) => {
@@ -824,7 +830,7 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
                                                 return allSeriesSelections;
                                               })()}
                                             >
-                                              <span className="truncate">
+                                              <span className="truncate font-medium text-gray-700 group-hover:text-gray-900 transition-colors">
                                                 {(() => {
                                                   // Group selections by series for display
                                                   const seriesGroups = tracesWithColumn.map(({ trace, idx }) => {
@@ -840,17 +846,19 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
                                                   return seriesGroups.join(' | ');
                                                 })()}
                                               </span>
-                                              <ChevronDown className="h-3 w-3 opacity-50" />
+                                              <ChevronDown className="h-3 w-3 text-gray-500 group-hover:text-gray-700 transition-colors" />
                                             </Button>
                                           </PopoverTrigger>
-                                          <PopoverContent className="w-80 p-0" align="start">
-                                            <div className="p-3 border-b">
+                                          <PopoverContent className="w-80 p-0 bg-white/95 backdrop-blur-lg border-gray-200/60 shadow-2xl rounded-lg overflow-hidden" align="start">
+                                            <div className="p-4 border-b border-gray-200/60 bg-gradient-to-r from-gray-50/80 to-white/80">
                                               <div className="flex items-center justify-between">
-                                                <span className="text-sm font-medium">Filter by {column}</span>
+                                                <span className="text-sm font-semibold text-gray-800 bg-gradient-to-r from-gray-700 to-gray-600 bg-clip-text text-transparent">
+                                                  Filter by {column}
+                                                </span>
                                                 <Button
                                                   variant="ghost"
                                                   size="sm"
-                                                  className="h-6 px-2 text-xs"
+                                                  className="h-7 px-3 text-xs font-medium text-gray-600 hover:text-gray-800 hover:bg-gray-100/60 transition-all duration-200"
                                                   onClick={() => {
                                                     // Clear all series filters for this column
                                                     tracesWithColumn.forEach(({ idx }) => {
@@ -865,11 +873,11 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
                                             
                                             {/* Series pagination inside dropdown */}
                                             {tracesWithColumn.length > 1 && (
-                                              <div className="p-3 border-b bg-gray-50">
-                                                <div className="flex items-center justify-between mb-2">
-                                                  <span className="text-xs text-gray-600 font-medium">Series:</span>
+                                              <div className="p-4 border-b border-gray-200/60 bg-gradient-to-r from-white/50 to-gray-50/50">
+                                                <div className="flex items-center justify-between mb-3">
+                                                  <span className="text-xs text-gray-700 font-semibold">Series:</span>
                                                 </div>
-                                                <div className="flex flex-wrap gap-1">
+                                                <div className="flex flex-wrap gap-2">
                                                   {tracesWithColumn.map(({ trace, idx }, seriesIdx) => {
                                                     const isCurrentSeries = currentIdx === seriesIdx;
                                                     const seriesName = trace.name || `Series ${idx + 1}`;
@@ -881,7 +889,11 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
                                                         key={idx}
                                                         variant={isCurrentSeries ? "default" : "outline"}
                                                         size="sm"
-                                                        className={`h-6 px-2 text-xs flex items-center gap-1 ${isCurrentSeries ? 'bg-blue-600 text-white' : ''}`}
+                                                        className={`h-7 px-3 text-xs flex items-center gap-2 font-medium transition-all duration-200 ${
+                                                          isCurrentSeries 
+                                                            ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-md hover:shadow-lg' 
+                                                            : 'bg-white/80 hover:bg-gray-50 border-gray-300/60 hover:border-gray-400/60'
+                                                        }`}
                                                         onClick={() => setCurrentTraceIndex(prev => ({
                                                           ...prev,
                                                           [`${chart.id}-${column}`]: seriesIdx
@@ -890,12 +902,12 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
                                                       >
                                                         {/* Color indicator */}
                                                         <div 
-                                                          className="w-2 h-2 rounded-full border border-gray-300 flex-shrink-0"
+                                                          className="w-2.5 h-2.5 rounded-full border border-white/60 flex-shrink-0 shadow-sm"
                                                           style={{ backgroundColor: seriesColor }}
                                                         />
-                                                        <span className="truncate">{seriesName}</span>
+                                                        <span className="truncate font-medium">{seriesName}</span>
                                                         {seriesFilters.length > 0 && (
-                                                          <Badge variant="secondary" className="ml-1 h-3 px-1 text-[10px]">
+                                                          <Badge variant="secondary" className="ml-1 h-4 px-1.5 text-[10px] font-semibold bg-white/80 text-gray-700">
                                                             {seriesFilters.length}
                                                           </Badge>
                                                         )}
@@ -906,11 +918,11 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
                                               </div>
                                             )}
                                             
-                                            <div className="flex gap-2 p-2 border-b">
+                                            <div className="flex gap-2 p-3 border-b border-gray-200/60 bg-gradient-to-r from-gray-50/40 to-white/40">
                                               <Button
                                                 variant="outline"
                                                 size="sm"
-                                                className="flex-1 h-6 text-xs"
+                                                className="flex-1 h-7 text-xs font-medium bg-white/80 hover:bg-gray-50 border-gray-300/60 hover:border-gray-400/60 transition-all duration-200"
                                                 onClick={() => onTraceFilterChange?.(chart.id, currentTraceInfo.idx, column, uniqueValues)}
                                               >
                                                 All
@@ -918,21 +930,21 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
                                               <Button
                                                 variant="outline"
                                                 size="sm"
-                                                className="flex-1 h-6 text-xs"
+                                                className="flex-1 h-7 text-xs font-medium bg-white/80 hover:bg-gray-50 border-gray-300/60 hover:border-gray-400/60 transition-all duration-200"
                                                 onClick={() => onTraceFilterChange?.(chart.id, currentTraceInfo.idx, column, [])}
                                               >
                                                 None
                                               </Button>
                                             </div>
-                                            <ScrollArea className="filter-scroll-area max-h-48">
-                                              <div className="p-2">
-                                                <div className="text-xs text-gray-600 mb-2 font-medium">
+                                            <ScrollArea className="filter-scroll-area max-h-48 bg-white/50">
+                                              <div className="p-3">
+                                                <div className="text-xs text-gray-700 mb-3 font-semibold bg-gradient-to-r from-gray-600 to-gray-500 bg-clip-text text-transparent">
                                                   Values for {currentTraceInfo.trace.name || `Series ${currentTraceInfo.idx + 1}`}:
                                                 </div>
                                                 <RadioGroup value="" onValueChange={() => {}}>
-                                                  <div className="space-y-1">
+                                                  <div className="space-y-1.5">
                                                     {uniqueValues.map((value, valueIdx) => (
-                                                      <div key={value} className="flex items-center space-x-2 cursor-pointer"
+                                                      <div key={value} className="flex items-center space-x-2 cursor-pointer p-2 rounded-md hover:bg-gray-50/80 transition-colors group"
                                                         onClick={e => {
                                                           if (!onTraceFilterChange) return;
                                                           const selectedValues = currentTraceInfo.trace.filters?.[column] || [];
@@ -988,7 +1000,7 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
                                                           checked={(currentTraceInfo.trace.filters?.[column] || []).includes(value)} 
                                                           tabIndex={-1} 
                                                         />
-                                                        <label className="text-xs cursor-pointer flex-1 truncate">
+                                                        <label className="text-xs cursor-pointer flex-1 truncate font-medium text-gray-700 group-hover:text-gray-900 transition-colors">
                                                           {value || '(empty)'}
                                                         </label>
                                                       </div>
@@ -1011,13 +1023,16 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
                           if (Object.keys(chart.filters).length === 0) return null;
                           
                           return (
-                            <div className="bg-gray-50 p-3 border-b">
-                              <div className="space-y-2">
+                            <div className="bg-gradient-to-r from-white/80 via-gray-50/90 to-white/80 backdrop-blur-sm p-4 border-b border-gray-200/60 shadow-inner relative overflow-hidden">
+                              {/* Subtle texture overlay */}
+                              <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent"></div>
+                              
+                              <div className="relative z-10 space-y-3">
                                 {Object.entries(chart.filters).map(([column, selectedValues]) => {
                                   const uniqueValues = getUniqueValuesForColumn(column);
                                   return (
-                                    <div key={column} className="flex items-center gap-2">
-                                      <Label className={`font-medium text-gray-700 min-w-fit ${isCompact ? 'text-xs' : 'text-xs'}`}>
+                                    <div key={column} className="flex items-center gap-3">
+                                      <Label className={`font-semibold text-gray-800 min-w-fit ${isCompact ? 'text-xs' : 'text-sm'} bg-gradient-to-r from-gray-700 to-gray-600 bg-clip-text text-transparent`}>
                                         {column}:
                                       </Label>
                                       <Popover>
@@ -1025,9 +1040,12 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
                                           <Button
                                             variant="outline"
                                             size="sm"
-                                            className={`justify-between flex-1 font-normal ${isCompact ? 'h-6 text-xs' : 'h-7 text-xs'}`}
+                                            className={`justify-between flex-1 font-medium ${isCompact ? 'h-7 text-xs' : 'h-8 text-sm'} 
+                                              bg-gradient-to-r from-white to-gray-50/50 hover:from-gray-50 hover:to-white 
+                                              border-gray-300/60 hover:border-gray-400/60 shadow-sm hover:shadow-md 
+                                              transition-all duration-200 backdrop-blur-sm group`}
                                           >
-                                            <span className="truncate">
+                                            <span className="truncate font-medium text-gray-700 group-hover:text-gray-900 transition-colors">
                                               {selectedValues.length === 0
                                                 ? "No values selected"
                                                 : selectedValues.length === uniqueValues.length
@@ -1037,18 +1055,20 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
                                                 : `${selectedValues.length} selected`
                                               }
                                             </span>
-                                            <ChevronDown className="h-3 w-3 opacity-50" />
+                                            <ChevronDown className="h-3 w-3 text-gray-500 group-hover:text-gray-700 transition-colors" />
                                           </Button>
                                         </PopoverTrigger>
-                                        <PopoverContent className="w-56 p-0" align="start">
-                                          <div className="p-3 border-b">
+                                        <PopoverContent className="w-56 p-0 bg-white/95 backdrop-blur-lg border-gray-200/60 shadow-2xl rounded-lg overflow-hidden" align="start">
+                                          <div className="p-4 border-b border-gray-200/60 bg-gradient-to-r from-gray-50/80 to-white/80">
                                             <div className="flex items-center justify-between">
-                                              <span className="text-sm font-medium">Filter by {column}</span>
+                                              <span className="text-sm font-semibold text-gray-800 bg-gradient-to-r from-gray-700 to-gray-600 bg-clip-text text-transparent">
+                                                Filter by {column}
+                                              </span>
                                               {selectedValues.length > 0 && (
                                                 <Button
                                                   variant="ghost"
                                                   size="sm"
-                                                  className="h-6 px-2 text-xs"
+                                                  className="h-7 px-3 text-xs font-medium text-gray-600 hover:text-gray-800 hover:bg-gray-100/60 transition-all duration-200"
                                                   onClick={() => onChartFilterChange?.(chart.id, column, [])}
                                                 >
                                                   Clear
@@ -1056,11 +1076,11 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
                                               )}
                                             </div>
                                           </div>
-                                          <div className="flex gap-2 p-2 border-b">
+                                          <div className="flex gap-2 p-3 border-b border-gray-200/60 bg-gradient-to-r from-gray-50/40 to-white/40">
                                             <Button
                                               variant="outline"
                                               size="sm"
-                                              className="flex-1 h-6 text-xs"
+                                              className="flex-1 h-7 text-xs font-medium bg-white/80 hover:bg-gray-50 border-gray-300/60 hover:border-gray-400/60 transition-all duration-200"
                                               onClick={() => onChartFilterChange?.(chart.id, column, uniqueValues)}
                                             >
                                               All
@@ -1068,17 +1088,17 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
                                             <Button
                                               variant="outline"
                                               size="sm"
-                                              className="flex-1 h-6 text-xs"
+                                              className="flex-1 h-7 text-xs font-medium bg-white/80 hover:bg-gray-50 border-gray-300/60 hover:border-gray-400/60 transition-all duration-200"
                                               onClick={() => onChartFilterChange?.(chart.id, column, [])}
                                             >
                                               None
                                             </Button>
                                           </div>
-                                          <ScrollArea className="filter-scroll-area">
+                                          <ScrollArea className="filter-scroll-area bg-white/50">
                                             <RadioGroup value="" onValueChange={() => {}}>
-                                              <div className="p-2 space-y-1">
+                                              <div className="p-3 space-y-2">
                                                 {uniqueValues.map((value, valueIdx) => (
-                                                  <div key={value} className="flex items-center space-x-2 cursor-pointer"
+                                                  <div key={value} className="flex items-center space-x-2 cursor-pointer p-2 rounded-md hover:bg-gray-50/80 transition-colors group"
                                                     onClick={e => {
                                                       if (!onChartFilterChange) return;
                                                       if (e.shiftKey && lastSelectedIdx !== null) {
@@ -1128,7 +1148,7 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
                                                     }}
                                                   >
                                                     <RadioGroupItem value={value} checked={selectedValues.includes(value)} tabIndex={-1} />
-                                                    <label className="text-xs cursor-pointer flex-1 truncate">
+                                                    <label className="text-xs cursor-pointer flex-1 truncate font-medium text-gray-700 group-hover:text-gray-900 transition-colors">
                                                       {value || '(empty)'}
                                                     </label>
                                                   </div>
