@@ -26,6 +26,7 @@ pyarrow>=15.0.0
 # Environment
 python-dotenv
 gunicorn
+whitenoise
 requests>=2.28.0
 minio
 pandas

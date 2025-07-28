@@ -36,3 +36,13 @@ Trinity Django Admin Guide
    extra domains be sure to update `ADDITIONAL_DOMAINS` and `CSRF_TRUSTED_ORIGINS`
    in `TrinityBackendDjango/.env` so the login session is accepted from those hosts.
 
+5. **Static Files**
+   If the admin pages show missing CSS or JavaScript files, run:
+
+   ```bash
+   docker compose exec web python manage.py collectstatic --noinput
+   ```
+
+   This gathers all static assets into `staticfiles/` so they can be served by
+   the built-in WhiteNoise middleware.
+
