@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from '@/components/ui/chart';
 import { LineChart, Line, BarChart, Bar, AreaChart, Area, PieChart, Pie, Cell, ScatterChart, Scatter, XAxis, YAxis, CartesianGrid, ResponsiveContainer, Legend } from 'recharts';
-import { BarChart3, TrendingUp, BarChart2, Triangle, Zap, Maximize2, ChevronDown, ChevronLeft, ChevronRight, Filter, X, LineChart as LineChartIcon, RotateCcw } from 'lucide-react';
+import { BarChart3, TrendingUp, BarChart2, Triangle, Zap, Maximize2, ChevronDown, ChevronLeft, ChevronRight, Filter, X, LineChart as LineChartIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/components/ui/context-menu';
@@ -30,9 +30,10 @@ interface ChartMakerCanvasProps {
   onChartTypeChange?: (chartId: string, newType: ChartConfig['type']) => void;
   onChartFilterChange?: (chartId: string, column: string, values: string[]) => void;
   onTraceFilterChange?: (chartId: string, traceIndex: number, column: string, values: string[]) => void;
+  isFullWidthMode?: boolean; // When atom list and global properties tabs are hidden
 }
 
-const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onChartTypeChange, onChartFilterChange, onTraceFilterChange }) => {
+const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onChartTypeChange, onChartFilterChange, onTraceFilterChange, isFullWidthMode = false }) => {
   const typedData = data as ChartDataWithUniqueValues | null;
   const [fullscreenChart, setFullscreenChart] = useState<ChartMakerConfig | null>(null);
   const [fullscreenIndex, setFullscreenIndex] = useState<number | null>(null);
@@ -43,12 +44,6 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
   const [emphasizedTrace, setEmphasizedTrace] = useState<Record<string, string | null>>({});
   const [dimmedXValues, setDimmedXValues] = useState<Record<string, Set<string>>>({});
   const debounceTimers = useRef<Record<string, NodeJS.Timeout | number | null>>({});
-  
-  // Zoom and pan state management
-  const [zoomDomains, setZoomDomains] = useState<Record<string, { left?: number; right?: number; top?: number; bottom?: number }>>({});
-  const [isDragging, setIsDragging] = useState<Record<string, boolean>>({});
-  const [dragStart, setDragStart] = useState<Record<string, { x: number; y: number }>>({});
-  const chartRefs = useRef<Record<string, any>>({});
   
   // Container ref for responsive layout
   const containerRef = useRef<HTMLDivElement>(null);
@@ -62,9 +57,6 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
       Object.values(debounceTimers.current).forEach(timer => {
         if (timer) clearTimeout(timer as number);
       });
-      // Ensure text selection is re-enabled on cleanup
-      document.body.style.userSelect = '';
-      document.body.style.webkitUserSelect = '';
     };
   }, []);
 
@@ -73,114 +65,6 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
     if (debounceTimers.current[chartId]) clearTimeout(debounceTimers.current[chartId] as number);
     debounceTimers.current[chartId] = setTimeout(fn, delay);
   };
-
-  // Zoom and pan utilities
-  const handleWheel = useCallback((e: React.WheelEvent, chartId: string, chartData: any[]) => {
-    e.preventDefault();
-    e.stopPropagation();
-    
-    if (!chartData || chartData.length === 0) return;
-    
-    const zoomFactor = e.deltaY > 0 ? 1.1 : 0.9;
-    const currentDomain = zoomDomains[chartId] || {};
-    
-    // Get chart dimensions for calculations
-    const rect = e.currentTarget.getBoundingClientRect();
-    const mouseX = (e.clientX - rect.left) / rect.width;
-    
-    // Calculate new domain based on zoom
-    const dataLength = chartData.length;
-    const currentLeft = currentDomain.left || 0;
-    const currentRight = currentDomain.right || dataLength - 1;
-    const currentRange = currentRight - currentLeft;
-    
-    const newRange = Math.max(1, Math.min(dataLength - 1, currentRange * zoomFactor));
-    const zoomCenter = currentLeft + currentRange * mouseX;
-    
-    const newLeft = Math.max(0, zoomCenter - newRange * mouseX);
-    const newRight = Math.min(dataLength - 1, newLeft + newRange);
-    
-    setZoomDomains(prev => ({
-      ...prev,
-      [chartId]: {
-        ...currentDomain,
-        left: newLeft,
-        right: newRight
-      }
-    }));
-  }, [zoomDomains]);
-
-  const handleMouseDown = useCallback((e: React.MouseEvent, chartId: string) => {
-    e.preventDefault();
-    setIsDragging(prev => ({ ...prev, [chartId]: true }));
-    setDragStart(prev => ({ ...prev, [chartId]: { x: e.clientX, y: e.clientY } }));
-    
-    // Disable text selection on the entire page while dragging
-    document.body.style.userSelect = 'none';
-    document.body.style.webkitUserSelect = 'none';
-  }, []);
-
-  const handleMouseMove = useCallback((e: React.MouseEvent, chartId: string, chartData: any[]) => {
-    if (!isDragging[chartId] || !dragStart[chartId] || !chartData || chartData.length === 0) return;
-    
-    e.preventDefault();
-    const deltaX = e.clientX - dragStart[chartId].x;
-    const rect = e.currentTarget.getBoundingClientRect();
-    const dataLength = chartData.length;
-    
-    // Calculate pan amount based on mouse movement
-    const panAmount = -(deltaX / rect.width) * dataLength * 0.1;
-    
-    const currentDomain = zoomDomains[chartId] || {};
-    const currentLeft = currentDomain.left || 0;
-    const currentRight = currentDomain.right || dataLength - 1;
-    const currentRange = currentRight - currentLeft;
-    
-    let newLeft = currentLeft + panAmount;
-    let newRight = currentRight + panAmount;
-    
-    // Keep within bounds
-    if (newLeft < 0) {
-      newLeft = 0;
-      newRight = currentRange;
-    }
-    if (newRight >= dataLength) {
-      newRight = dataLength - 1;
-      newLeft = newRight - currentRange;
-    }
-    
-    setZoomDomains(prev => ({
-      ...prev,
-      [chartId]: {
-        ...currentDomain,
-        left: newLeft,
-        right: newRight
-      }
-    }));
-    
-    setDragStart(prev => ({ ...prev, [chartId]: { x: e.clientX, y: e.clientY } }));
-  }, [isDragging, dragStart, zoomDomains]);
-
-  const handleMouseUp = useCallback((chartId: string) => {
-    setIsDragging(prev => ({ ...prev, [chartId]: false }));
-    setDragStart(prev => ({ ...prev, [chartId]: { x: 0, y: 0 } }));
-    
-    // Re-enable text selection
-    document.body.style.userSelect = '';
-    document.body.style.webkitUserSelect = '';
-  }, []);
-
-  const resetZoom = useCallback((chartId: string) => {
-    setZoomDomains(prev => {
-      const newDomains = { ...prev };
-      delete newDomains[chartId];
-      return newDomains;
-    });
-  }, []);
-
-  const isZoomed = useCallback((chartId: string) => {
-    return zoomDomains[chartId] !== undefined;
-  }, [zoomDomains]);
 
   const getUniqueValuesForColumn = (column: string) => {
     // Use backend-provided unique values if available
@@ -348,7 +232,13 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
     const key = chartKey || chart.lastUpdateTime || chart.id;
 
     // Dynamic height based on layout or use provided height class
-    const chartHeight = heightClass || (isCompact ? 'h-40' : layoutConfig.layout === 'vertical' ? 'h-72' : 'h-96');
+    // Give more height when sidebars are hidden (full width mode)
+    const chartHeight = heightClass || (() => {
+      if (isFullWidthMode) {
+        return isCompact ? 'h-56' : layoutConfig.layout === 'vertical' ? 'h-96' : 'h-[32rem]';
+      }
+      return isCompact ? 'h-40' : layoutConfig.layout === 'vertical' ? 'h-72' : 'h-96';
+    })();
 
     if (!chartData.length || !xAxisConfig.dataKey || (!yAxisConfig.dataKey && traces.length === 0)) {
       return (
@@ -366,42 +256,16 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
 
     switch (chartType) {
       case 'line':
-        // Get zoom domain for this chart
-        const lineDomain = zoomDomains[chart.id];
-        const lineDisplayData = lineDomain 
-          ? chartData.slice(
-              Math.floor(lineDomain.left || 0), 
-              Math.floor((lineDomain.right || chartData.length - 1) + 1)
-            )
-          : chartData;
-        
         return (
-          <div className={`${chartHeight} w-full relative`}>
-            <ChartContainer 
-              key={key} 
-              config={config} 
-              className="h-full w-full select-none"
-              onWheel={(e) => handleWheel(e, chart.id, chartData)}
-              onMouseDown={(e) => handleMouseDown(e, chart.id)}
-              onMouseMove={(e) => handleMouseMove(e, chart.id, chartData)}
-              onMouseUp={() => handleMouseUp(chart.id)}
-              onMouseLeave={() => handleMouseUp(chart.id)}
-              style={{ 
-                cursor: isDragging[chart.id] ? 'grabbing' : 'grab',
-                userSelect: 'none',
-                WebkitUserSelect: 'none',
-                MozUserSelect: 'none',
-                msUserSelect: 'none'
+          <ChartContainer key={key} config={config} className={`${chartHeight} w-full`}>
+            <LineChart 
+              data={chartData} 
+              margin={{ top: 20, right: 30, left: 20, bottom: 20 }}
+              onClick={() => {
+                // Clear trace emphasis when clicking on chart background
+                setEmphasizedTrace(prev => ({ ...prev, [chart.id]: null }));
               }}
             >
-              <LineChart 
-                data={lineDisplayData} 
-                margin={{ top: 20, right: 30, left: 20, bottom: 20 }}
-                onClick={() => {
-                  // Clear trace emphasis when clicking on chart background
-                  setEmphasizedTrace(prev => ({ ...prev, [chart.id]: null }));
-                }}
-              >
                 <defs>
                   <linearGradient id={`lineGradient-${chart.id}`} x1="0" y1="0" x2="0" y2="1">
                     <stop offset="0%" stopColor={colors.primary} stopOpacity={0.8}/>
@@ -533,18 +397,6 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
                 )}
               </LineChart>
             </ChartContainer>
-            {/* Reset button */}
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => resetZoom(chart.id)}
-              disabled={!isZoomed(chart.id)}
-              className="absolute bottom-2 left-1/2 transform -translate-x-1/2 h-7 px-2 text-xs bg-white/90 hover:bg-white"
-            >
-              <RotateCcw className="w-3 h-3 mr-1" />
-              Reset
-            </Button>
-          </div>
         );
       case 'bar':
         // Process data to apply x-axis dimming (multiple x-values can be dimmed)
@@ -562,43 +414,17 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
               return newItem;
             })
           : chartData;
-        
-        // Get zoom domain for bar chart
-        const barDomain = zoomDomains[chart.id];
-        const barDisplayData = barDomain 
-          ? processedBarData.slice(
-              Math.floor(barDomain.left || 0), 
-              Math.floor((barDomain.right || processedBarData.length - 1) + 1)
-            )
-          : processedBarData;
           
         return (
-          <div className={`${chartHeight} w-full relative`}>
-            <ChartContainer 
-              key={key} 
-              config={config} 
-              className="h-full w-full select-none"
-              onWheel={(e) => handleWheel(e, chart.id, processedBarData)}
-              onMouseDown={(e) => handleMouseDown(e, chart.id)}
-              onMouseMove={(e) => handleMouseMove(e, chart.id, processedBarData)}
-              onMouseUp={() => handleMouseUp(chart.id)}
-              onMouseLeave={() => handleMouseUp(chart.id)}
-              style={{ 
-                cursor: isDragging[chart.id] ? 'grabbing' : 'grab',
-                userSelect: 'none',
-                WebkitUserSelect: 'none',
-                MozUserSelect: 'none',
-                msUserSelect: 'none'
+          <ChartContainer key={key} config={config} className={`${chartHeight} w-full`}>
+            <BarChart 
+              data={processedBarData} 
+              margin={{ top: 20, right: 30, left: 20, bottom: 20 }}
+              onClick={() => {
+                // Clear trace emphasis when clicking on chart background (but keep dimmed x-values)
+                setEmphasizedTrace(prev => ({ ...prev, [chart.id]: null }));
               }}
             >
-              <BarChart 
-                data={barDisplayData} 
-                margin={{ top: 20, right: 30, left: 20, bottom: 20 }}
-                onClick={() => {
-                  // Clear trace emphasis when clicking on chart background (but keep dimmed x-values)
-                  setEmphasizedTrace(prev => ({ ...prev, [chart.id]: null }));
-                }}
-              >
               <defs>
                 <linearGradient id={`barGradient-${chart.id}`} x1="0" y1="0" x2="0" y2="1">
                   <stop offset="0%" stopColor={colors.primary} stopOpacity={1}/>
@@ -758,56 +584,18 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
               )}
             </BarChart>
           </ChartContainer>
-          {/* Reset button */}
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => resetZoom(chart.id)}
-            disabled={!isZoomed(chart.id)}
-            className="absolute bottom-2 left-1/2 transform -translate-x-1/2 h-7 px-2 text-xs bg-white/90 hover:bg-white"
-          >
-            <RotateCcw className="w-3 h-3 mr-1" />
-            Reset
-          </Button>
-        </div>
-      );
+        );
       case 'area':
-        // Get zoom domain for area chart
-        const areaDomain = zoomDomains[chart.id];
-        const areaDisplayData = areaDomain 
-          ? chartData.slice(
-              Math.floor(areaDomain.left || 0), 
-              Math.floor((areaDomain.right || chartData.length - 1) + 1)
-            )
-          : chartData;
-        
         return (
-          <div className={`${chartHeight} w-full relative`}>
-            <ChartContainer 
-              key={key} 
-              config={config} 
-              className="h-full w-full select-none"
-              onWheel={(e) => handleWheel(e, chart.id, chartData)}
-              onMouseDown={(e) => handleMouseDown(e, chart.id)}
-              onMouseMove={(e) => handleMouseMove(e, chart.id, chartData)}
-              onMouseUp={() => handleMouseUp(chart.id)}
-              onMouseLeave={() => handleMouseUp(chart.id)}
-              style={{ 
-                cursor: isDragging[chart.id] ? 'grabbing' : 'grab',
-                userSelect: 'none',
-                WebkitUserSelect: 'none',
-                MozUserSelect: 'none',
-                msUserSelect: 'none'
+          <ChartContainer key={key} config={config} className={`${chartHeight} w-full`}>
+            <AreaChart 
+              data={chartData} 
+              margin={{ top: 20, right: 30, left: 20, bottom: 20 }}
+              onClick={() => {
+                // Clear trace emphasis when clicking on chart background
+                setEmphasizedTrace(prev => ({ ...prev, [chart.id]: null }));
               }}
             >
-              <AreaChart 
-                data={areaDisplayData} 
-                margin={{ top: 20, right: 30, left: 20, bottom: 20 }}
-                onClick={() => {
-                  // Clear trace emphasis when clicking on chart background
-                  setEmphasizedTrace(prev => ({ ...prev, [chart.id]: null }));
-                }}
-              >
               <defs>
                 <linearGradient id={`areaGradient-${chart.id}`} x1="0" y1="0" x2="0" y2="1">
                   <stop offset="0%" stopColor={colors.primary} stopOpacity={0.6}/>
@@ -938,56 +726,18 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
               )}
             </AreaChart>
           </ChartContainer>
-          {/* Reset button */}
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => resetZoom(chart.id)}
-            disabled={!isZoomed(chart.id)}
-            className="absolute bottom-2 left-1/2 transform -translate-x-1/2 h-7 px-2 text-xs bg-white/90 hover:bg-white"
-          >
-            <RotateCcw className="w-3 h-3 mr-1" />
-            Reset
-          </Button>
-        </div>
-      );
+        );
       case 'scatter':
-        // Get zoom domain for scatter chart
-        const scatterDomain = zoomDomains[chart.id];
-        const scatterDisplayData = scatterDomain 
-          ? chartData.slice(
-              Math.floor(scatterDomain.left || 0), 
-              Math.floor((scatterDomain.right || chartData.length - 1) + 1)
-            )
-          : chartData;
-        
         return (
-          <div className={`${chartHeight} w-full relative`}>
-            <ChartContainer 
-              key={key} 
-              config={config} 
-              className="h-full w-full select-none"
-              onWheel={(e) => handleWheel(e, chart.id, chartData)}
-              onMouseDown={(e) => handleMouseDown(e, chart.id)}
-              onMouseMove={(e) => handleMouseMove(e, chart.id, chartData)}
-              onMouseUp={() => handleMouseUp(chart.id)}
-              onMouseLeave={() => handleMouseUp(chart.id)}
-              style={{ 
-                cursor: isDragging[chart.id] ? 'grabbing' : 'grab',
-                userSelect: 'none',
-                WebkitUserSelect: 'none',
-                MozUserSelect: 'none',
-                msUserSelect: 'none'
+          <ChartContainer key={key} config={config} className={`${chartHeight} w-full`}>
+            <ScatterChart 
+              data={chartData} 
+              margin={{ top: 20, right: 30, left: 20, bottom: 20 }}
+              onClick={() => {
+                // Clear trace emphasis when clicking on chart background
+                setEmphasizedTrace(prev => ({ ...prev, [chart.id]: null }));
               }}
             >
-              <ScatterChart 
-                data={scatterDisplayData} 
-                margin={{ top: 20, right: 30, left: 20, bottom: 20 }}
-                onClick={() => {
-                  // Clear trace emphasis when clicking on chart background
-                  setEmphasizedTrace(prev => ({ ...prev, [chart.id]: null }));
-                }}
-              >
               <defs>
                 <radialGradient id={`scatterGradient-${chart.id}`} cx="50%" cy="50%" r="50%">
                   <stop offset="0%" stopColor={colors.primary} stopOpacity={1}/>
@@ -1099,19 +849,7 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
               )}
             </ScatterChart>
           </ChartContainer>
-          {/* Reset button */}
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => resetZoom(chart.id)}
-            disabled={!isZoomed(chart.id)}
-            className="absolute bottom-2 left-1/2 transform -translate-x-1/2 h-7 px-2 text-xs bg-white/90 hover:bg-white"
-          >
-            <RotateCcw className="w-3 h-3 mr-1" />
-            Reset
-          </Button>
-        </div>
-      );
+        );
       case 'pie':
         // Pie chart expects data as [{ name, value }]
         const pieData = (chartData as any[]).reduce((acc: { name: string; value: number }[], row) => {
