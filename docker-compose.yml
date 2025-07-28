@@ -105,6 +105,7 @@ services:
     command: celery -A config.celery worker --loglevel=info
     volumes:
       - ./TrinityBackendDjango:/code
+      - ./TrinityBackendFastAPI:/code/TrinityBackendFastAPI
     env_file:
       - ./TrinityBackendDjango/.env
     depends_on:
