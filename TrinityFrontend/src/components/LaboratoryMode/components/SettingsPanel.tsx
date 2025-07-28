@@ -22,6 +22,7 @@ import MergeProperties from '@/components/AtomList/atoms/merge/components/proper
 import ColumnClassifierProperties from '@/components/AtomList/atoms/column-classifier/components/properties/ColumnClassifierProperties';
 import CreateColumnProperties from '@/components/AtomList/atoms/createcolumn/components/properties/CreateColumnProperties';
 import GroupByProperties from '@/components/AtomList/atoms/groupby-wtg-avg/components/properties/GroupByProperties';
+import ScopeSelectorProperties from '@/components/AtomList/atoms/scope-selector/components/properties/ScopeSelectorProperties';
 
 interface SettingsPanelProps {
   isCollapsed: boolean;
@@ -106,6 +107,8 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
             <CreateColumnProperties atomId={selectedAtomId} />
           ) : selectedAtomId && atom?.atomId === 'groupby-wtg-avg' ? (
             <GroupByProperties atomId={selectedAtomId} />
+          ) : selectedAtomId && atom?.atomId === 'scope-selector' ? (
+            <ScopeSelectorProperties atomId={selectedAtomId} />
           ) : (
           <>
           <Tabs value={tab} onValueChange={setTab} className="w-full">

@@ -9,6 +9,7 @@ from app.features.column_classifier.endpoint import router as column_classifier_
 from app.features.createcolumn.endpoint import router as create_router
 from app.features.groupby_weighted_avg.endpoint import router as groupby_router
 from app.features.project_state.endpoint import router as project_state_router
+from app.features.scope_selector.endpoint import router as scope_selector_router
 
 api_router = APIRouter()
 text_router  = APIRouter()
@@ -22,3 +23,4 @@ api_router.include_router(column_classifier_router)
 api_router.include_router(create_router)
 api_router.include_router(groupby_router)
 api_router.include_router(project_state_router)
+api_router.include_router(scope_selector_router)
