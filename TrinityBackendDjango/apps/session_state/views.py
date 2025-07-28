@@ -198,10 +198,21 @@ class SessionUpdateView(APIView):
                 pass
         if key == "navigation":
             nav = session.get("navigation", [])
+
+            def upsert(item: Dict[str, Any]):
+                if isinstance(item, dict) and "atom" in item:
+                    atom = item["atom"]
+                    filtered = [n for n in nav if not (isinstance(n, dict) and n.get("atom") == atom)]
+                    filtered.append(item)
+                    return filtered
+                nav.append(item)
+                return nav
+
             if isinstance(value, list):
-                nav.extend(value)
+                for itm in value:
+                    nav = upsert(itm)
             else:
-                nav.append(value)
+                nav = upsert(value)
             session["navigation"] = nav
         else:
             session[key] = value
