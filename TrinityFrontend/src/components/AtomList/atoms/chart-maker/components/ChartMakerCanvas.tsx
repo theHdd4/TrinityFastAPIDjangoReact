@@ -40,6 +40,8 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
   const [previewTypes, setPreviewTypes] = useState<Record<string, ChartConfig['type'] | null>>({});
   const [currentTraceIndex, setCurrentTraceIndex] = useState<Record<string, number>>({});
   const [currentTracePages, setCurrentTracePages] = useState<Record<string, number>>({});
+  const [emphasizedTrace, setEmphasizedTrace] = useState<Record<string, string | null>>({});
+  const [emphasizedXValue, setEmphasizedXValue] = useState<Record<string, string | null>>({});
   const debounceTimers = useRef<Record<string, NodeJS.Timeout | number | null>>({});
   
   // Container ref for responsive layout
@@ -250,7 +252,14 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
       case 'line':
         return (
           <ChartContainer key={key} config={config} className={`${chartHeight} w-full`}>
-            <LineChart data={chartData} margin={{ top: 20, right: 30, left: 20, bottom: 20 }}>
+            <LineChart 
+              data={chartData} 
+              margin={{ top: 20, right: 30, left: 20, bottom: 20 }}
+              onClick={() => {
+                // Reset emphasis when clicking on empty space
+                setEmphasizedTrace(prev => ({ ...prev, [chart.id]: null }));
+              }}
+            >
               <defs>
                 <linearGradient id={`lineGradient-${chart.id}`} x1="0" y1="0" x2="0" y2="1">
                   <stop offset="0%" stopColor={colors.primary} stopOpacity={0.8}/>
@@ -298,31 +307,45 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
                 }} 
                 cursor={{ stroke: colors.primary, strokeWidth: 1, strokeOpacity: 0.4 }}
               />
-              {traces.length > 0 ? traces.map((trace, i) => (
-                <Line 
-                  key={trace.dataKey || i} 
-                  type="monotone" 
-                  dataKey={trace.dataKey} 
-                  stroke={trace.stroke || colors.primary}
-                  strokeWidth={3}
-                  fill={`url(#lineGradient-${chart.id})`}
-                  dot={{ 
-                    fill: trace.stroke || colors.primary, 
-                    strokeWidth: 0, 
-                    r: 0,
-                    filter: `url(#lineShadow-${chart.id})`
-                  }}
-                  activeDot={{ 
-                    r: 6, 
-                    fill: trace.stroke || colors.primary, 
-                    stroke: 'white', 
-                    strokeWidth: 3,
-                    filter: `url(#lineShadow-${chart.id})`,
-                    style: { cursor: 'pointer' }
-                  }}
-                  filter={`url(#lineShadow-${chart.id})`}
-                />
-              )) : (
+              {traces.length > 0 ? traces.map((trace, i) => {
+                const isEmphasized = emphasizedTrace[chart.id] === trace.dataKey;
+                const isOtherEmphasized = emphasizedTrace[chart.id] && emphasizedTrace[chart.id] !== trace.dataKey;
+                const traceColor = trace.stroke || trace.fill || DEFAULT_TRACE_COLORS[i % DEFAULT_TRACE_COLORS.length];
+                
+                return (
+                  <Line 
+                    key={trace.dataKey || i} 
+                    type="monotone" 
+                    dataKey={trace.dataKey} 
+                    stroke={traceColor}
+                    strokeOpacity={isOtherEmphasized ? 0.4 : 1}
+                    strokeWidth={isEmphasized ? 4 : 2}
+                    fill={`url(#lineGradient-${chart.id})`}
+                    dot={{ 
+                      fill: traceColor, 
+                      strokeWidth: 0, 
+                      r: 0,
+                      filter: `url(#lineShadow-${chart.id})`
+                    }}
+                    activeDot={{ 
+                      r: 6, 
+                      fill: traceColor, 
+                      stroke: 'white', 
+                      strokeWidth: 3,
+                      filter: `url(#lineShadow-${chart.id})`,
+                      style: { cursor: 'pointer' }
+                    }}
+                    filter={isEmphasized ? `url(#lineShadow-${chart.id})` : undefined}
+                    onClick={() => {
+                      setEmphasizedTrace(prev => ({
+                        ...prev,
+                        [chart.id]: prev[chart.id] === trace.dataKey ? null : trace.dataKey
+                      }));
+                    }}
+                    style={{ cursor: 'pointer' }}
+                  />
+                );
+              }) : (
                 <Line 
                   type="monotone" 
                   dataKey={yAxisConfig.dataKey} 
@@ -349,9 +372,33 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
           </ChartContainer>
         );
       case 'bar':
+        // Process data to apply x-axis emphasis
+        const processedBarData = emphasizedXValue[chart.id] 
+          ? chartData.map(item => {
+              const isXEmphasized = item[xAxisConfig.dataKey] === emphasizedXValue[chart.id];
+              const newItem = { ...item };
+              
+              // Dim non-emphasized x-values for all traces
+              if (!isXEmphasized && traces.length > 0) {
+                traces.forEach(trace => {
+                  newItem[`${trace.dataKey}_dimmed`] = true;
+                });
+              }
+              return newItem;
+            })
+          : chartData;
+          
         return (
           <ChartContainer key={key} config={config} className={`${chartHeight} w-full`}>
-            <BarChart data={chartData} margin={{ top: 20, right: 30, left: 20, bottom: 20 }}>
+            <BarChart 
+              data={processedBarData} 
+              margin={{ top: 20, right: 30, left: 20, bottom: 20 }}
+              onClick={() => {
+                // Reset emphasis when clicking on empty space
+                setEmphasizedTrace(prev => ({ ...prev, [chart.id]: null }));
+                setEmphasizedXValue(prev => ({ ...prev, [chart.id]: null }));
+              }}
+            >
               <defs>
                 <linearGradient id={`barGradient-${chart.id}`} x1="0" y1="0" x2="0" y2="1">
                   <stop offset="0%" stopColor={colors.primary} stopOpacity={1}/>
@@ -369,12 +416,22 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
               />
               <XAxis 
                 {...xAxisConfig} 
-                stroke="#64748b"
+                stroke={emphasizedXValue[chart.id] ? "#374151" : "#64748b"}
                 fontSize={11}
                 fontWeight={500}
                 tickLine={false}
                 axisLine={false}
                 tickMargin={8}
+                onClick={(data) => {
+                  if (data && data.value) {
+                    setEmphasizedXValue(prev => ({
+                      ...prev,
+                      [chart.id]: prev[chart.id] === data.value ? null : data.value
+                    }));
+                    setEmphasizedTrace(prev => ({ ...prev, [chart.id]: null }));
+                  }
+                }}
+                style={{ cursor: 'pointer' }}
               />
               <YAxis 
                 {...(yAxisConfig.dataKey ? yAxisConfig : { type: yAxisConfig.type || 'number' })} 
@@ -399,16 +456,53 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
                 }} 
                 cursor={{ fill: 'rgba(0, 0, 0, 0.04)' }}
               />
-              {traces.length > 0 ? traces.map((trace, i) => (
-                <Bar 
-                  key={trace.dataKey || i} 
-                  dataKey={trace.dataKey} 
-                  fill={`url(#barGradient-${chart.id})`}
-                  radius={[6, 6, 0, 0]}
-                  filter={`url(#barShadow-${chart.id})`}
-                  style={{ cursor: 'pointer' }}
-                />
-              )) : (
+              {traces.length > 0 ? traces.map((trace, i) => {
+                const isEmphasized = emphasizedTrace[chart.id] === trace.dataKey;
+                const isOtherEmphasized = emphasizedTrace[chart.id] && emphasizedTrace[chart.id] !== trace.dataKey;
+                const traceColor = trace.stroke || trace.fill || DEFAULT_TRACE_COLORS[i % DEFAULT_TRACE_COLORS.length];
+                
+                return (
+                  <Bar 
+                    key={trace.dataKey || i} 
+                    dataKey={trace.dataKey} 
+                    fill={traceColor}
+                    fillOpacity={isOtherEmphasized ? 0.3 : 0.8}
+                    stroke={traceColor}
+                    strokeWidth={isEmphasized ? 2 : 0}
+                    radius={[6, 6, 0, 0]}
+                    filter={isEmphasized ? `url(#barShadow-${chart.id})` : undefined}
+                    style={{ cursor: 'pointer' }}
+                    onClick={(data, index) => {
+                      if (data && data.payload) {
+                        const xValue = data.payload[xAxisConfig.dataKey];
+                        setEmphasizedXValue(prev => ({
+                          ...prev,
+                          [chart.id]: prev[chart.id] === xValue ? null : xValue
+                        }));
+                        setEmphasizedTrace(prev => ({ ...prev, [chart.id]: null }));
+                      } else {
+                        setEmphasizedTrace(prev => ({
+                          ...prev,
+                          [chart.id]: prev[chart.id] === trace.dataKey ? null : trace.dataKey
+                        }));
+                        setEmphasizedXValue(prev => ({ ...prev, [chart.id]: null }));
+                      }
+                    }}
+                  >
+                    {/* Custom Cell components for x-axis emphasis */}
+                    {emphasizedXValue[chart.id] && processedBarData.map((entry, index) => {
+                      const isXDimmed = entry[`${trace.dataKey}_dimmed`];
+                      return (
+                        <Cell 
+                          key={`cell-${index}`} 
+                          fill={isXDimmed ? `${traceColor}60` : traceColor}
+                          fillOpacity={isXDimmed ? 0.4 : (isOtherEmphasized ? 0.3 : 0.8)}
+                        />
+                      );
+                    })}
+                  </Bar>
+                );
+              }) : (
                 <Bar 
                   dataKey={yAxisConfig.dataKey} 
                   fill={`url(#barGradient-${chart.id})`}
@@ -423,7 +517,14 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
       case 'area':
         return (
           <ChartContainer key={key} config={config} className={`${chartHeight} w-full`}>
-            <AreaChart data={chartData} margin={{ top: 20, right: 30, left: 20, bottom: 20 }}>
+            <AreaChart 
+              data={chartData} 
+              margin={{ top: 20, right: 30, left: 20, bottom: 20 }}
+              onClick={() => {
+                // Reset emphasis when clicking on empty space
+                setEmphasizedTrace(prev => ({ ...prev, [chart.id]: null }));
+              }}
+            >
               <defs>
                 <linearGradient id={`areaGradient-${chart.id}`} x1="0" y1="0" x2="0" y2="1">
                   <stop offset="0%" stopColor={colors.primary} stopOpacity={0.6}/>
@@ -472,29 +573,44 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
                 }} 
                 cursor={{ stroke: colors.primary, strokeWidth: 1, strokeOpacity: 0.4 }}
               />
-              {traces.length > 0 ? traces.map((trace, i) => (
-                <Area 
-                  key={trace.dataKey || i} 
-                  type="monotone" 
-                  dataKey={trace.dataKey} 
-                  stroke={trace.stroke || colors.primary} 
-                  fill={`url(#areaGradient-${chart.id})`}
-                  strokeWidth={3}
-                  filter={`url(#areaShadow-${chart.id})`}
-                  dot={{ 
-                    fill: trace.stroke || colors.primary, 
-                    strokeWidth: 0, 
-                    r: 0
-                  }}
-                  activeDot={{ 
-                    r: 6, 
-                    fill: trace.stroke || colors.primary, 
-                    stroke: 'white', 
-                    strokeWidth: 3,
-                    style: { cursor: 'pointer' }
-                  }}
-                />
-              )) : (
+              {traces.length > 0 ? traces.map((trace, i) => {
+                const isEmphasized = emphasizedTrace[chart.id] === trace.dataKey;
+                const isOtherEmphasized = emphasizedTrace[chart.id] && emphasizedTrace[chart.id] !== trace.dataKey;
+                const traceColor = trace.stroke || trace.fill || DEFAULT_TRACE_COLORS[i % DEFAULT_TRACE_COLORS.length];
+                
+                return (
+                  <Area 
+                    key={trace.dataKey || i} 
+                    type="monotone" 
+                    dataKey={trace.dataKey} 
+                    stroke={traceColor} 
+                    fill={traceColor}
+                    fillOpacity={isOtherEmphasized ? 0.1 : 0.3}
+                    strokeOpacity={isOtherEmphasized ? 0.4 : 1}
+                    strokeWidth={isEmphasized ? 4 : 2}
+                    filter={isEmphasized ? `url(#areaShadow-${chart.id})` : undefined}
+                    dot={{ 
+                      fill: traceColor, 
+                      strokeWidth: 0, 
+                      r: 0
+                    }}
+                    activeDot={{ 
+                      r: 6, 
+                      fill: traceColor, 
+                      stroke: 'white', 
+                      strokeWidth: 3,
+                      style: { cursor: 'pointer' }
+                    }}
+                    onClick={() => {
+                      setEmphasizedTrace(prev => ({
+                        ...prev,
+                        [chart.id]: prev[chart.id] === trace.dataKey ? null : trace.dataKey
+                      }));
+                    }}
+                    style={{ cursor: 'pointer' }}
+                  />
+                );
+              }) : (
                 <Area 
                   type="monotone" 
                   dataKey={yAxisConfig.dataKey} 
@@ -522,7 +638,14 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
       case 'scatter':
         return (
           <ChartContainer key={key} config={config} className={`${chartHeight} w-full`}>
-            <ScatterChart data={chartData} margin={{ top: 20, right: 30, left: 20, bottom: 20 }}>
+            <ScatterChart 
+              data={chartData} 
+              margin={{ top: 20, right: 30, left: 20, bottom: 20 }}
+              onClick={() => {
+                // Reset emphasis when clicking on empty space
+                setEmphasizedTrace(prev => ({ ...prev, [chart.id]: null }));
+              }}
+            >
               <defs>
                 <radialGradient id={`scatterGradient-${chart.id}`} cx="50%" cy="50%" r="50%">
                   <stop offset="0%" stopColor={colors.primary} stopOpacity={1}/>
@@ -569,16 +692,29 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
                 }} 
                 cursor={{ strokeDasharray: '3 3' }}
               />
-              {traces.length > 0 ? traces.map((trace, i) => (
-                <Scatter 
-                  key={trace.dataKey || i} 
-                  dataKey={trace.dataKey} 
-                  fill={`url(#scatterGradient-${chart.id})`}
-                  fillOpacity={0.8}
-                  filter={`url(#scatterShadow-${chart.id})`}
-                  style={{ cursor: 'pointer' }}
-                />
-              )) : (
+              {traces.length > 0 ? traces.map((trace, i) => {
+                const isEmphasized = emphasizedTrace[chart.id] === trace.dataKey;
+                const isOtherEmphasized = emphasizedTrace[chart.id] && emphasizedTrace[chart.id] !== trace.dataKey;
+                const traceColor = trace.stroke || trace.fill || DEFAULT_TRACE_COLORS[i % DEFAULT_TRACE_COLORS.length];
+                
+                return (
+                  <Scatter 
+                    key={trace.dataKey || i} 
+                    dataKey={trace.dataKey} 
+                    fill={traceColor}
+                    fillOpacity={isOtherEmphasized ? 0.3 : 0.8}
+                    r={isEmphasized ? 6 : 4}
+                    filter={isEmphasized ? `url(#scatterShadow-${chart.id})` : undefined}
+                    onClick={() => {
+                      setEmphasizedTrace(prev => ({
+                        ...prev,
+                        [chart.id]: prev[chart.id] === trace.dataKey ? null : trace.dataKey
+                      }));
+                    }}
+                    style={{ cursor: 'pointer' }}
+                  />
+                );
+              }) : (
                 <Scatter 
                   dataKey={yAxisConfig.dataKey} 
                   fill={`url(#scatterGradient-${chart.id})`}
@@ -745,9 +881,18 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
                  <ContextMenuTrigger>
                    <Card className="border-0 shadow-xl bg-white/95 backdrop-blur-sm overflow-hidden transform hover:scale-[1.02] transition-all duration-300 relative flex flex-col h-full group hover:shadow-2xl">
                      <div className={`bg-gradient-to-r ${colors.gradient} p-4 relative flex-shrink-0 group-hover:shadow-lg transition-shadow duration-300`}>
-                       <CardTitle className={`font-bold text-white flex items-center ${isCompact ? 'text-base' : 'text-lg'} drop-shadow-sm`}>
-                         <BarChart3 className={`mr-2 ${isCompact ? 'w-4 h-4' : 'w-5 h-5'} drop-shadow-sm`} />
-                         {chart.title}
+                       <CardTitle className={`font-bold text-white flex items-center justify-between ${isCompact ? 'text-base' : 'text-lg'} drop-shadow-sm`}>
+                         <div className="flex items-center">
+                           <BarChart3 className={`mr-2 ${isCompact ? 'w-4 h-4' : 'w-5 h-5'} drop-shadow-sm`} />
+                           {chart.title}
+                         </div>
+                         {/* Interaction hint for multi-trace charts */}
+                         {(chart.chartConfig?.traces && chart.chartConfig.traces.length > 1) && (
+                           <div className="flex items-center text-xs opacity-80 bg-white/20 rounded-full px-2 py-1">
+                             <span className="hidden sm:inline">Click traces to emphasize</span>
+                             <span className="sm:hidden">Click to emphasize</span>
+                           </div>
+                         )}
                        </CardTitle>
                        {/* Transparent overlay for Alt+Click fullscreen */}
                        <div
