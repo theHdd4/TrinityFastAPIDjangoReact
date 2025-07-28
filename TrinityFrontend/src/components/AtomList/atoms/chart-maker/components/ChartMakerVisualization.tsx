@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useRef, useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -29,6 +29,54 @@ const ChartMakerVisualization: React.FC<ChartMakerVisualizationProps> = ({
   onRenderCharts,
   onChartSettingsImmediateChange
 }) => {
+  // Debounce timers for chart re-rendering (1.5 seconds)
+  const debounceTimers = useRef<Record<string, NodeJS.Timeout>>({});
+  
+  // Local state for title inputs to prevent overwriting during typing
+  const [localTitles, setLocalTitles] = useState<Record<number, string>>({});
+
+  // Initialize local titles when settings change
+  useEffect(() => {
+    const newLocalTitles: Record<number, string> = {};
+    settings.charts.forEach((chart, index) => {
+      // Only update if we don't already have a local value for this chart
+      if (localTitles[index] === undefined) {
+        newLocalTitles[index] = chart.title;
+      }
+    });
+    if (Object.keys(newLocalTitles).length > 0) {
+      setLocalTitles(prev => ({ ...prev, ...newLocalTitles }));
+    }
+  }, [settings.charts.length]); // Only depend on chart count, not individual chart changes
+
+  // Cleanup debounce timers on unmount
+  useEffect(() => {
+    return () => {
+      Object.values(debounceTimers.current).forEach(timer => {
+        if (timer) clearTimeout(timer);
+      });
+    };
+  }, []);
+
+  // Debounce utility for chart updates (1.5 seconds)
+  const debounceChartUpdate = (chartIndex: number, fn: () => void, delay: number = 1500) => {
+    const key = `chart-${chartIndex}`;
+    if (debounceTimers.current[key]) {
+      clearTimeout(debounceTimers.current[key]);
+    }
+    debounceTimers.current[key] = setTimeout(fn, delay);
+  };
+
+  // Handle title changes with local state
+  const handleTitleChange = (index: number, newTitle: string) => {
+    // Update local state immediately for UI responsiveness
+    setLocalTitles(prev => ({ ...prev, [index]: newTitle }));
+    
+    // Debounce the actual chart update
+    debounceChartUpdate(index, () => {
+      updateChart(index, { title: newTitle });
+    });
+  };
   const handleNumberOfChartsChange = (change: number) => {
     const newNumber = Math.max(1, Math.min(2, settings.numberOfCharts + change));
     const newCharts = [...settings.charts];
@@ -285,8 +333,8 @@ const ChartMakerVisualization: React.FC<ChartMakerVisualizationProps> = ({
                       <div>
                         <Label className="text-xs">Chart Title</Label>
                         <Input
-                          value={chart.title}
-                          onChange={(e) => updateChart(index, { title: e.target.value })}
+                          value={localTitles[index] ?? chart.title}
+                          onChange={(e) => handleTitleChange(index, e.target.value)}
                           className="mt-1"
                           placeholder="Enter chart title"
                         />
