@@ -1,0 +1,38 @@
+Trinity Django Admin Guide
+=========================
+
+1. **Start the backend services**
+   From the repository root run:
+   
+   ```bash
+   ./scripts/start_backend.sh
+   ```
+
+   This builds the containers and exposes the Django service at `http://<HOST_IP>:8000/`.
+   Set `HOST_IP` in `TrinityBackendDjango/.env` to the address of your host machine.
+
+2. **Create the initial tenant and users**
+   Once the containers are running execute:
+
+   ```bash
+   docker compose exec web python create_tenant.py
+   ```
+
+   The script creates the default tenant (`acme_corp`) and seeds login accounts.
+   You will get a superuser called `harsha` with password `harsha` along with
+   role‑based users:
+
+   - `architect_user` / `architect`
+   - `editor_user` / `editor`
+   - `viewer_user` / `viewer`
+
+3. **Log in to Django Admin**
+   Visit `http://<HOST_IP>:8000/admin/` in your browser and sign in with one
+   of the credentials above. Use `harsha` for full superuser access. The role‑based
+   accounts demonstrate the Architect, Editor and Viewer permissions.
+
+4. **Managing tenants**
+   The admin interface exposes models for Users, Roles and Tenants. When adding
+   extra domains be sure to update `ADDITIONAL_DOMAINS` and `CSRF_TRUSTED_ORIGINS`
+   in `TrinityBackendDjango/.env` so the login session is accepted from those hosts.
+
