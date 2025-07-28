@@ -10,6 +10,9 @@ from apps.accounts.views import CsrfExemptSessionAuthentication
 from redis_store.redis_client import redis_client
 from pymongo import MongoClient
 from django.conf import settings
+from asgiref.sync import async_to_sync
+from apps.accounts.utils import get_env_vars
+from app.features.column_classifier.database import get_classifier_config_from_mongo
 
 TTL = 3600 * 2  # 2 hours
 
@@ -59,6 +62,38 @@ class SessionInitView(APIView):
                     session = record["state"]
             except Exception:
                 pass
+            if not session:
+                envvars = {}
+                identifiers = []
+                measures = []
+                dimensions = {}
+                try:
+                    envvars = async_to_sync(get_env_vars)(
+                        client_id,
+                        app_id,
+                        project_id,
+                        client_name=client_name,
+                        app_name=app_name,
+                        project_name=project_name,
+                    )
+                except Exception:
+                    pass
+                try:
+                    cfg = get_classifier_config_from_mongo(
+                        client_name, app_name, project_name
+                    )
+                    if cfg:
+                        identifiers = cfg.get("identifiers", [])
+                        measures = cfg.get("measures", [])
+                        dimensions = cfg.get("dimensions", {})
+                except Exception:
+                    pass
+                session = {
+                    "envvars": envvars,
+                    "identifiers": identifiers,
+                    "measures": measures,
+                    "dimensions": dimensions,
+                }
         session.update(
             {
                 "client_id": client_id,
@@ -100,6 +135,38 @@ class SessionStateView(APIView):
                     session = record["state"]
             except Exception:
                 pass
+            if not session:
+                parts = session_id.split(":")
+                envvars = {}
+                identifiers = []
+                measures = []
+                dimensions = {}
+                if len(parts) == 5:
+                    c_id, u_id, a_id, p_id = parts[1], parts[2], parts[3], parts[4]
+                else:
+                    c_id = a_id = p_id = ""
+                try:
+                    envvars = async_to_sync(get_env_vars)(
+                        c_id,
+                        a_id,
+                        p_id,
+                    )
+                except Exception:
+                    pass
+                try:
+                    cfg = get_classifier_config_from_mongo(parts[1], parts[3], parts[4]) if len(parts) == 5 else None
+                    if cfg:
+                        identifiers = cfg.get("identifiers", [])
+                        measures = cfg.get("measures", [])
+                        dimensions = cfg.get("dimensions", {})
+                except Exception:
+                    pass
+                session = {
+                    "envvars": envvars,
+                    "identifiers": identifiers,
+                    "measures": measures,
+                    "dimensions": dimensions,
+                }
             if session:
                 redis_client.setex(session_id, TTL, json.dumps(session))
         return Response({"session_id": session_id, "state": session})

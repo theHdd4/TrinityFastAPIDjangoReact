@@ -12,7 +12,7 @@ import { useLaboratoryStore, DEFAULT_DATAUPLOAD_SETTINGS, DataUploadSettings } f
 import { VALIDATE_API } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/AuthContext';
-import { logSessionState } from '@/lib/session';
+import { logSessionState, updateSessionState } from '@/lib/session';
 import UploadSection from './components/upload/UploadSection';
 import RequiredFilesSection from './components/required-files/RequiredFilesSection';
 
@@ -346,6 +346,7 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
       const data = await res.json();
       if (data.environment) {
         console.log('Fetched env vars', data.environment);
+        updateSessionState(user?.id, { envvars: data.environment });
       }
       if (data.prefix) {
         console.log('Saving to MinIO prefix', data.prefix);
