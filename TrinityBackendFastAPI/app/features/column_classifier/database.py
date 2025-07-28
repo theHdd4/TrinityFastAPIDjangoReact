@@ -22,19 +22,22 @@ COLLECTIONS = {
 try:
     mongo_client = MongoClient(MONGODB_URL, serverSelectionTimeoutMS=5000)
     db = mongo_client[DATABASE_NAME]
+    config_db = mongo_client[settings.classifier_configs_database]
     
     # Test connection
     mongo_client.admin.command('ping')
     print(f"✅ Connected to MongoDB: {DATABASE_NAME}")
+    print(f"✅ Config DB: {settings.classifier_configs_database}")
     
 except Exception as e:
     print(f"❌ MongoDB connection failed: {e}")
     mongo_client = None
     db = None
+    config_db = None
 
 def check_mongodb_connection():
     """Check if MongoDB is available"""
-    return mongo_client is not None and db is not None
+    return mongo_client is not None and db is not None and config_db is not None
 
 def get_validator_atom_from_mongo(validator_atom_id: str):
     """Get validator atom data from MongoDB - USED BY classify_columns endpoint"""
@@ -377,7 +380,7 @@ def save_classifier_config_to_mongo(config: dict):
             **config,
             "updated_at": datetime.utcnow(),
         }
-        result = db[COLLECTIONS["CLASSIFIER_CONFIGS"]].replace_one(
+        result = config_db[COLLECTIONS["CLASSIFIER_CONFIGS"]].replace_one(
             {"_id": document_id}, document, upsert=True
         )
         return {
@@ -398,7 +401,7 @@ def get_classifier_config_from_mongo(client: str, app: str, project: str):
 
     try:
         document_id = f"{client}/{app}/{project}"
-        return db[COLLECTIONS["CLASSIFIER_CONFIGS"]].find_one({"_id": document_id})
+        return config_db[COLLECTIONS["CLASSIFIER_CONFIGS"]].find_one({"_id": document_id})
     except Exception as exc:
         logging.error(f"MongoDB read error for classifier config: {exc}")
         return None
