@@ -41,7 +41,7 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
   const [currentTraceIndex, setCurrentTraceIndex] = useState<Record<string, number>>({});
   const [currentTracePages, setCurrentTracePages] = useState<Record<string, number>>({});
   const [emphasizedTrace, setEmphasizedTrace] = useState<Record<string, string | null>>({});
-  const [emphasizedXValue, setEmphasizedXValue] = useState<Record<string, string | null>>({});
+  const [dimmedXValues, setDimmedXValues] = useState<Record<string, Set<string>>>({});
   const debounceTimers = useRef<Record<string, NodeJS.Timeout | number | null>>({});
   
   // Container ref for responsive layout
@@ -378,14 +378,14 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
           </ChartContainer>
         );
       case 'bar':
-        // Process data to apply x-axis emphasis
-        const processedBarData = emphasizedXValue[chart.id] 
+        // Process data to apply x-axis dimming (multiple x-values can be dimmed)
+        const processedBarData = dimmedXValues[chart.id] && dimmedXValues[chart.id].size > 0
           ? chartData.map(item => {
-              const isXEmphasized = item[xAxisConfig.dataKey] === emphasizedXValue[chart.id];
+              const isDimmed = dimmedXValues[chart.id].has(String(item[xAxisConfig.dataKey]));
               const newItem = { ...item };
               
-              // Dim non-emphasized x-values for all traces
-              if (!isXEmphasized && traces.length > 0) {
+              // Dim selected x-values for all traces
+              if (isDimmed && traces.length > 0) {
                 traces.forEach(trace => {
                   newItem[`${trace.dataKey}_dimmed`] = true;
                 });
@@ -417,7 +417,7 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
               />
               <XAxis 
                 {...xAxisConfig} 
-                stroke={emphasizedXValue[chart.id] ? "#374151" : "#64748b"}
+                stroke={dimmedXValues[chart.id] && dimmedXValues[chart.id].size > 0 ? "#374151" : "#64748b"}
                 fontSize={11}
                 fontWeight={500}
                 tickLine={false}
@@ -425,10 +425,19 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
                 tickMargin={8}
                 onClick={(data) => {
                   if (data && data.value) {
-                    setEmphasizedXValue(prev => ({
-                      ...prev,
-                      [chart.id]: prev[chart.id] === data.value ? null : data.value
-                    }));
+                    const xValue = String(data.value);
+                    setDimmedXValues(prev => {
+                      const currentSet = prev[chart.id] || new Set();
+                      const newSet = new Set(currentSet);
+                      
+                      if (newSet.has(xValue)) {
+                        newSet.delete(xValue); // Remove if already dimmed
+                      } else {
+                        newSet.add(xValue); // Add to dimmed set
+                      }
+                      
+                      return { ...prev, [chart.id]: newSet };
+                    });
                     setEmphasizedTrace(prev => ({ ...prev, [chart.id]: null }));
                   }
                 }}
@@ -465,7 +474,7 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
                 // Custom bar shape that handles clicks
                 const CustomBar = (props: any) => {
                   const { x, y, width, height, payload } = props;
-                  const isXDimmed = emphasizedXValue[chart.id] && payload && payload[`${trace.dataKey}_dimmed`];
+                  const isXDimmed = payload && payload[`${trace.dataKey}_dimmed`];
                   const finalColor = isXDimmed ? `${traceColor}60` : traceColor;
                   const finalOpacity = isXDimmed ? 0.4 : (isOtherEmphasized ? 0.3 : 0.8);
                   
@@ -486,12 +495,20 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
                       onClick={(e) => {
                         e.stopPropagation();
                         if (e.ctrlKey || e.metaKey) {
-                          // Ctrl/Cmd + click for x-axis emphasis
-                          const xValue = payload[xAxisConfig.dataKey];
-                          setEmphasizedXValue(prev => ({
-                            ...prev,
-                            [chart.id]: prev[chart.id] === xValue ? null : xValue
-                          }));
+                          // Ctrl/Cmd + click for x-axis dimming (additive)
+                          const xValue = String(payload[xAxisConfig.dataKey]);
+                          setDimmedXValues(prev => {
+                            const currentSet = prev[chart.id] || new Set();
+                            const newSet = new Set(currentSet);
+                            
+                            if (newSet.has(xValue)) {
+                              newSet.delete(xValue); // Remove if already dimmed
+                            } else {
+                              newSet.add(xValue); // Add to dimmed set
+                            }
+                            
+                            return { ...prev, [chart.id]: newSet };
+                          });
                           setEmphasizedTrace(prev => ({ ...prev, [chart.id]: null }));
                         } else {
                           // Regular click for trace emphasis
@@ -499,7 +516,7 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
                             ...prev,
                             [chart.id]: prev[chart.id] === trace.dataKey ? null : trace.dataKey
                           }));
-                          setEmphasizedXValue(prev => ({ ...prev, [chart.id]: null }));
+                          setDimmedXValues(prev => ({ ...prev, [chart.id]: new Set() }));
                         }
                       }}
                     />
@@ -932,7 +949,7 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
                            <div className="flex items-center text-xs opacity-80 bg-white/20 rounded-full px-2 py-1">
                              {chart.chartConfig.chart_type === 'bar' ? (
                                <>
-                                 <span className="hidden sm:inline">Click: trace, Ctrl+Click: x-axis</span>
+                                 <span className="hidden sm:inline">Click: trace, Ctrl+Click: dim x-axis</span>
                                  <span className="sm:hidden">Click to emphasize</span>
                                </>
                              ) : (
@@ -956,9 +973,9 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
                          }}
                          title="Alt+Click to expand"
                        >
-                         <span style={{ position: 'absolute', right: 12, top: 8, color: 'white', fontSize: 13, fontWeight: 500, textShadow: '0 1px 4px rgba(0,0,0,0.4)' }}>
-                           Alt+Click to expand
-                         </span>
+                         <div className="absolute top-2 right-2 flex items-center text-xs text-white/90 bg-white/20 rounded-full px-2 py-1 backdrop-blur-sm">
+                           <span>Alt+Click to expand</span>
+                         </div>
                        </div>
                      </div>
                      
