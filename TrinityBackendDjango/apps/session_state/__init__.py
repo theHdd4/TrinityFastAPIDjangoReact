@@ -9,5 +9,8 @@ import sys
 from pathlib import Path
 
 backend_root = Path(__file__).resolve().parents[3] / "TrinityBackendFastAPI"
-sys.path.append(str(backend_root))
-sys.path.append(str(backend_root / "app"))
+backend_app = backend_root / "app"
+for p in (backend_root, backend_app):
+    s = str(p)
+    if s not in sys.path:
+        sys.path.insert(0, s)
