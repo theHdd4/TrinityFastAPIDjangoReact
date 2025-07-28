@@ -11,6 +11,8 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { useLaboratoryStore, DEFAULT_DATAUPLOAD_SETTINGS, DataUploadSettings } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { VALIDATE_API } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
+import { useAuth } from '@/contexts/AuthContext';
+import { logSessionState } from '@/lib/session';
 import UploadSection from './components/upload/UploadSection';
 import RequiredFilesSection from './components/required-files/RequiredFilesSection';
 
@@ -24,6 +26,7 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
   const settings: DataUploadSettings = atom?.settings || { ...DEFAULT_DATAUPLOAD_SETTINGS };
 
   const { toast } = useToast();
+  const { user } = useAuth();
 
   const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
   const [isDragOver, setIsDragOver] = useState(false);
@@ -260,6 +263,7 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
 
       setValidationResults(results);
       setValidationDetails(details);
+      logSessionState(user?.id);
     }
   };
 
@@ -368,6 +372,7 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
       } else {
         toast({ title: 'Dataframes Saved Successfully' });
       }
+      logSessionState(user?.id);
     } else {
       toast({ title: 'Unable to Save Dataframes', variant: 'destructive' });
     }
