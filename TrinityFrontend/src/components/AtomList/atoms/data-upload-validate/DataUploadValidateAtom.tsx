@@ -48,9 +48,25 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
     setUploadedFiles((prev) => [...prev, ...files]);
     updateSettings(atomId, {
       uploadedFiles: [...(settings.uploadedFiles || []), ...files.map((f) => f.name)],
-      fileMappings: { ...fileAssignments, ...Object.fromEntries(files.map(f => [f.name, settings.requiredFiles?.[0] || ''])) }
+      fileMappings: {
+        ...fileAssignments,
+        ...Object.fromEntries(
+          files.map(f => [
+            f.name,
+            settings.bypassMasterUpload ? f.name : settings.requiredFiles?.[0] || ''
+          ])
+        )
+      }
     });
-    setFileAssignments(prev => ({ ...prev, ...Object.fromEntries(files.map(f => [f.name, settings.requiredFiles?.[0] || ''])) }));
+    setFileAssignments(prev => ({
+      ...prev,
+      ...Object.fromEntries(
+        files.map(f => [
+          f.name,
+          settings.bypassMasterUpload ? f.name : settings.requiredFiles?.[0] || ''
+        ])
+      )
+    }));
   };
 
   const handleDrop = (e: React.DragEvent) => {
@@ -489,7 +505,7 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
                 requiredOptions={settings.requiredFiles || []}
                 onDeleteFile={handleDeleteFile}
                 saveStatus={saveStatus}
-                disabled={(settings.requiredFiles || []).length === 0}
+                disabled={!settings.bypassMasterUpload && (settings.requiredFiles || []).length === 0}
               />
             </div>
 
@@ -505,6 +521,7 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
                 openFile={openFile}
                 setOpenFile={setOpenFile}
                 getStatusIcon={getStatusIcon}
+                bypassMasterUpload={settings.bypassMasterUpload}
               />
             </div>
           </div>
