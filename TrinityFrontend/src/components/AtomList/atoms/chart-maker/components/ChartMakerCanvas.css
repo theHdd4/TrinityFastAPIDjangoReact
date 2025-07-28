@@ -13,22 +13,86 @@
 }
 
 .chart-card {
-  transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), 
+              box-shadow 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+              filter 0.3s ease;
 }
 
 .chart-card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+  transform: translateY(-4px) scale(1.01);
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.15), 
+              0 10px 20px -5px rgba(0, 0, 0, 0.1);
+  filter: brightness(1.02);
+}
+
+/* Modern chart animations */
+.recharts-surface {
+  transition: all 0.3s ease;
+}
+
+.recharts-line,
+.recharts-bar,
+.recharts-area,
+.recharts-scatter-dot,
+.recharts-pie-sector {
+  transition: all 0.2s ease;
+}
+
+.recharts-active-dot {
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.1);
+    opacity: 0.8;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+/* Enhanced hover effects for chart elements */
+.recharts-bar:hover {
+  filter: brightness(1.1);
+}
+
+.recharts-pie-sector:hover {
+  filter: brightness(1.1) saturate(1.1);
 }
 
 /* Smooth layout transitions */
 @media (prefers-reduced-motion: no-preference) {
   .chart-grid-container {
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: all 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94);
   }
   
   .chart-card {
-    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: all 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  }
+  
+  /* Modern loading animation */
+  .chart-loading {
+    background: linear-gradient(90deg, 
+      rgba(255, 255, 255, 0.3) 0%, 
+      rgba(255, 255, 255, 0.5) 50%, 
+      rgba(255, 255, 255, 0.3) 100%);
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite;
+  }
+  
+  @keyframes shimmer {
+    0% {
+      background-position: -200% 0;
+    }
+    100% {
+      background-position: 200% 0;
+    }
   }
 }
 

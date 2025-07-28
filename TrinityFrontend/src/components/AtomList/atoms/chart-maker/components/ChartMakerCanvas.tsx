@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from '@/components/ui/chart';
 import { LineChart, Line, BarChart, Bar, AreaChart, Area, PieChart, Pie, Cell, ScatterChart, Scatter, XAxis, YAxis, CartesianGrid, ResponsiveContainer } from 'recharts';
-import { BarChart3, TrendingUp, BarChart2, Triangle, Zap, Maximize2, ChevronDown, ChevronLeft, ChevronRight, Filter, X } from 'lucide-react';
+import { BarChart3, TrendingUp, BarChart2, Triangle, Zap, Maximize2, ChevronDown, ChevronLeft, ChevronRight, Filter, X, LineChart as LineChartIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/components/ui/context-menu';
@@ -105,29 +105,52 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
   const getChartColors = (index: number) => {
     const colorSchemes = [
       {
-        primary: "#3b82f6", // blue
-        secondary: "#93c5fd",
-        gradient: "from-blue-500 to-blue-600"
+        primary: "#6366f1", // modern indigo
+        secondary: "#a5b4fc",
+        tertiary: "#e0e7ff",
+        gradient: "from-indigo-500 via-indigo-600 to-purple-600",
+        darkAccent: "#4338ca",
+        lightAccent: "#f0f9ff"
       },
       {
-        primary: "#10b981", // green  
-        secondary: "#6ee7b7",
-        gradient: "from-green-500 to-green-600"
+        primary: "#06b6d4", // modern cyan
+        secondary: "#67e8f9",
+        tertiary: "#cffafe",
+        gradient: "from-cyan-500 via-cyan-600 to-blue-600",
+        darkAccent: "#0891b2",
+        lightAccent: "#f0fdfa"
       },
       {
-        primary: "#8b5cf6", // purple
+        primary: "#8b5cf6", // modern violet
         secondary: "#c4b5fd",
-        gradient: "from-purple-500 to-purple-600"
+        tertiary: "#ede9fe",
+        gradient: "from-violet-500 via-purple-600 to-fuchsia-600",
+        darkAccent: "#7c3aed",
+        lightAccent: "#faf5ff"
       },
       {
-        primary: "#f59e0b", // amber
+        primary: "#f59e0b", // modern amber
         secondary: "#fcd34d",
-        gradient: "from-amber-500 to-amber-600"
+        tertiary: "#fef3c7",
+        gradient: "from-amber-500 via-orange-500 to-red-500",
+        darkAccent: "#d97706",
+        lightAccent: "#fffbeb"
       },
       {
-        primary: "#ef4444", // red
-        secondary: "#fca5a5",
-        gradient: "from-red-500 to-red-600"
+        primary: "#ef4444", // modern red
+        secondary: "#f87171",
+        tertiary: "#fecaca",
+        gradient: "from-red-500 via-red-600 to-pink-600",
+        darkAccent: "#dc2626",
+        lightAccent: "#fef2f2"
+      },
+      {
+        primary: "#10b981", // modern emerald
+        secondary: "#6ee7b7",
+        tertiary: "#d1fae5",
+        gradient: "from-emerald-500 via-green-500 to-teal-600",
+        darkAccent: "#059669",
+        lightAccent: "#f0fdf4"
       }
     ];
     return colorSchemes[index % colorSchemes.length];
@@ -144,12 +167,52 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
     // Show loading spinner if chart is loading
     if ((chart as any).chartLoading) {
       const loadingHeight = isCompact ? 'h-40' : 'h-64';
+      const colors = getChartColors(index);
       return (
-        <div className={`flex items-center justify-center ${loadingHeight}`}>
-          <svg className="animate-spin h-8 w-8 text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
-          </svg>
+        <div className={`flex flex-col items-center justify-center ${loadingHeight} bg-gradient-to-br from-white/50 to-gray-50/50 backdrop-blur-sm relative overflow-hidden`}>
+          {/* Background shimmer effect */}
+          <div className="absolute inset-0 chart-loading"></div>
+          
+          {/* Modern loading animation */}
+          <div className="relative z-10 flex flex-col items-center space-y-4">
+            <div className="relative">
+              <div className="w-12 h-12 rounded-full border-4 border-gray-200 animate-spin"></div>
+              <div 
+                className="absolute inset-0 w-12 h-12 rounded-full border-4 border-transparent animate-spin"
+                style={{
+                  borderTopColor: colors.primary,
+                  borderRightColor: colors.primary,
+                  animationDuration: '1s',
+                  animationDirection: 'reverse'
+                }}
+              ></div>
+            </div>
+            
+            <div className="text-center">
+              <div className="text-sm font-medium text-gray-700 mb-1">
+                Rendering Chart
+              </div>
+              <div className="text-xs text-gray-500">
+                Creating beautiful visualization...
+              </div>
+            </div>
+            
+            {/* Floating chart icons */}
+            <div className="absolute inset-0 pointer-events-none">
+              <BarChart3 
+                className="absolute top-4 left-4 w-4 h-4 text-gray-300 animate-pulse" 
+                style={{ animationDelay: '0s' }}
+              />
+              <TrendingUp 
+                className="absolute top-8 right-6 w-3 h-3 text-gray-300 animate-pulse" 
+                style={{ animationDelay: '0.5s' }}
+              />
+              <BarChart2 
+                className="absolute bottom-6 left-8 w-3 h-3 text-gray-300 animate-pulse" 
+                style={{ animationDelay: '1s' }}
+              />
+            </div>
+          </div>
         </div>
       );
     }
@@ -187,15 +250,100 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
       case 'line':
         return (
           <ChartContainer key={key} config={config} className={`${chartHeight} w-full`}>
-            <LineChart data={chartData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-              <XAxis {...xAxisConfig} />
-              <YAxis {...(yAxisConfig.dataKey ? yAxisConfig : { type: yAxisConfig.type || 'number' })} />
-              <ChartTooltip content={<ChartTooltipContent />} contentStyle={{ backgroundColor: 'white', border: 'none', borderRadius: '8px', boxShadow: '0 10px 30px -10px rgba(0, 0, 0, 0.2)' }} />
+            <LineChart data={chartData} margin={{ top: 20, right: 30, left: 20, bottom: 20 }}>
+              <defs>
+                <linearGradient id={`lineGradient-${chart.id}`} x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor={colors.primary} stopOpacity={0.8}/>
+                  <stop offset="100%" stopColor={colors.primary} stopOpacity={0.1}/>
+                </linearGradient>
+                <filter id={`lineShadow-${chart.id}`} x="-50%" y="-50%" width="200%" height="200%">
+                  <feDropShadow dx="0" dy="2" stdDeviation="3" floodOpacity="0.3" floodColor={colors.primary}/>
+                </filter>
+              </defs>
+              <CartesianGrid 
+                strokeDasharray="3 3" 
+                stroke="#e2e8f0" 
+                strokeOpacity={0.6}
+                vertical={false}
+              />
+              <XAxis 
+                {...xAxisConfig} 
+                stroke="#64748b"
+                fontSize={11}
+                fontWeight={500}
+                tickLine={false}
+                axisLine={false}
+                tickMargin={8}
+              />
+              <YAxis 
+                {...(yAxisConfig.dataKey ? yAxisConfig : { type: yAxisConfig.type || 'number' })} 
+                stroke="#64748b"
+                fontSize={11}
+                fontWeight={500}
+                tickLine={false}
+                axisLine={false}
+                tickMargin={8}
+                width={60}
+              />
+              <ChartTooltip 
+                content={<ChartTooltipContent />} 
+                contentStyle={{ 
+                  backgroundColor: 'rgba(255, 255, 255, 0.98)', 
+                  border: 'none', 
+                  borderRadius: '12px', 
+                  boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.15), 0 10px 10px -5px rgba(0, 0, 0, 0.1)',
+                  backdropFilter: 'blur(10px)',
+                  fontSize: '12px',
+                  fontWeight: 500
+                }} 
+                cursor={{ stroke: colors.primary, strokeWidth: 1, strokeOpacity: 0.4 }}
+              />
               {traces.length > 0 ? traces.map((trace, i) => (
-                <Line key={trace.dataKey || i} type={trace.type || 'monotone'} dataKey={trace.dataKey} stroke={trace.stroke || colors.primary} strokeWidth={trace.strokeWidth || 3} dot={{ fill: trace.stroke || colors.primary, strokeWidth: 2, r: 4 }} activeDot={{ r: 6, fill: trace.stroke || colors.primary, stroke: 'white', strokeWidth: 2 }} />
+                <Line 
+                  key={trace.dataKey || i} 
+                  type="monotone" 
+                  dataKey={trace.dataKey} 
+                  stroke={trace.stroke || colors.primary}
+                  strokeWidth={3}
+                  fill={`url(#lineGradient-${chart.id})`}
+                  dot={{ 
+                    fill: trace.stroke || colors.primary, 
+                    strokeWidth: 0, 
+                    r: 0,
+                    filter: `url(#lineShadow-${chart.id})`
+                  }}
+                  activeDot={{ 
+                    r: 6, 
+                    fill: trace.stroke || colors.primary, 
+                    stroke: 'white', 
+                    strokeWidth: 3,
+                    filter: `url(#lineShadow-${chart.id})`,
+                    style: { cursor: 'pointer' }
+                  }}
+                  filter={`url(#lineShadow-${chart.id})`}
+                />
               )) : (
-                <Line type="monotone" dataKey={yAxisConfig.dataKey} stroke={colors.primary} strokeWidth={3} dot={{ fill: colors.primary, strokeWidth: 2, r: 4 }} activeDot={{ r: 6, fill: colors.primary, stroke: 'white', strokeWidth: 2 }} />
+                <Line 
+                  type="monotone" 
+                  dataKey={yAxisConfig.dataKey} 
+                  stroke={colors.primary}
+                  strokeWidth={3}
+                  fill={`url(#lineGradient-${chart.id})`}
+                  dot={{ 
+                    fill: colors.primary, 
+                    strokeWidth: 0, 
+                    r: 0
+                  }}
+                  activeDot={{ 
+                    r: 6, 
+                    fill: colors.primary, 
+                    stroke: 'white', 
+                    strokeWidth: 3,
+                    filter: `url(#lineShadow-${chart.id})`,
+                    style: { cursor: 'pointer' }
+                  }}
+                  filter={`url(#lineShadow-${chart.id})`}
+                />
               )}
             </LineChart>
           </ChartContainer>
@@ -203,15 +351,71 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
       case 'bar':
         return (
           <ChartContainer key={key} config={config} className={`${chartHeight} w-full`}>
-            <BarChart data={chartData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-              <XAxis {...xAxisConfig} />
-              <YAxis {...(yAxisConfig.dataKey ? yAxisConfig : { type: yAxisConfig.type || 'number' })} />
-              <ChartTooltip content={<ChartTooltipContent />} contentStyle={{ backgroundColor: 'white', border: 'none', borderRadius: '8px', boxShadow: '0 10px 30px -10px rgba(0, 0, 0, 0.2)' }} />
+            <BarChart data={chartData} margin={{ top: 20, right: 30, left: 20, bottom: 20 }}>
+              <defs>
+                <linearGradient id={`barGradient-${chart.id}`} x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor={colors.primary} stopOpacity={1}/>
+                  <stop offset="100%" stopColor={colors.darkAccent} stopOpacity={0.8}/>
+                </linearGradient>
+                <filter id={`barShadow-${chart.id}`} x="-50%" y="-50%" width="200%" height="200%">
+                  <feDropShadow dx="0" dy="4" stdDeviation="4" floodOpacity="0.2" floodColor={colors.primary}/>
+                </filter>
+              </defs>
+              <CartesianGrid 
+                strokeDasharray="3 3" 
+                stroke="#e2e8f0" 
+                strokeOpacity={0.6}
+                vertical={false}
+              />
+              <XAxis 
+                {...xAxisConfig} 
+                stroke="#64748b"
+                fontSize={11}
+                fontWeight={500}
+                tickLine={false}
+                axisLine={false}
+                tickMargin={8}
+              />
+              <YAxis 
+                {...(yAxisConfig.dataKey ? yAxisConfig : { type: yAxisConfig.type || 'number' })} 
+                stroke="#64748b"
+                fontSize={11}
+                fontWeight={500}
+                tickLine={false}
+                axisLine={false}
+                tickMargin={8}
+                width={60}
+              />
+              <ChartTooltip 
+                content={<ChartTooltipContent />} 
+                contentStyle={{ 
+                  backgroundColor: 'rgba(255, 255, 255, 0.98)', 
+                  border: 'none', 
+                  borderRadius: '12px', 
+                  boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.15), 0 10px 10px -5px rgba(0, 0, 0, 0.1)',
+                  backdropFilter: 'blur(10px)',
+                  fontSize: '12px',
+                  fontWeight: 500
+                }} 
+                cursor={{ fill: 'rgba(0, 0, 0, 0.04)' }}
+              />
               {traces.length > 0 ? traces.map((trace, i) => (
-                <Bar key={trace.dataKey || i} dataKey={trace.dataKey} fill={trace.fill || colors.primary} radius={[4, 4, 0, 0]} />
+                <Bar 
+                  key={trace.dataKey || i} 
+                  dataKey={trace.dataKey} 
+                  fill={`url(#barGradient-${chart.id})`}
+                  radius={[6, 6, 0, 0]}
+                  filter={`url(#barShadow-${chart.id})`}
+                  style={{ cursor: 'pointer' }}
+                />
               )) : (
-                <Bar dataKey={yAxisConfig.dataKey} fill={colors.primary} radius={[4, 4, 0, 0]} />
+                <Bar 
+                  dataKey={yAxisConfig.dataKey} 
+                  fill={`url(#barGradient-${chart.id})`}
+                  radius={[6, 6, 0, 0]}
+                  filter={`url(#barShadow-${chart.id})`}
+                  style={{ cursor: 'pointer' }}
+                />
               )}
             </BarChart>
           </ChartContainer>
@@ -219,15 +423,98 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
       case 'area':
         return (
           <ChartContainer key={key} config={config} className={`${chartHeight} w-full`}>
-            <AreaChart data={chartData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-              <XAxis {...xAxisConfig} />
-              <YAxis {...(yAxisConfig.dataKey ? yAxisConfig : { type: yAxisConfig.type || 'number' })} />
-              <ChartTooltip content={<ChartTooltipContent />} contentStyle={{ backgroundColor: 'white', border: 'none', borderRadius: '8px', boxShadow: '0 10px 30px -10px rgba(0, 0, 0, 0.2)' }} />
+            <AreaChart data={chartData} margin={{ top: 20, right: 30, left: 20, bottom: 20 }}>
+              <defs>
+                <linearGradient id={`areaGradient-${chart.id}`} x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor={colors.primary} stopOpacity={0.6}/>
+                  <stop offset="50%" stopColor={colors.primary} stopOpacity={0.3}/>
+                  <stop offset="100%" stopColor={colors.primary} stopOpacity={0.05}/>
+                </linearGradient>
+                <filter id={`areaShadow-${chart.id}`} x="-50%" y="-50%" width="200%" height="200%">
+                  <feDropShadow dx="0" dy="2" stdDeviation="3" floodOpacity="0.3" floodColor={colors.primary}/>
+                </filter>
+              </defs>
+              <CartesianGrid 
+                strokeDasharray="3 3" 
+                stroke="#e2e8f0" 
+                strokeOpacity={0.6}
+                vertical={false}
+              />
+              <XAxis 
+                {...xAxisConfig} 
+                stroke="#64748b"
+                fontSize={11}
+                fontWeight={500}
+                tickLine={false}
+                axisLine={false}
+                tickMargin={8}
+              />
+              <YAxis 
+                {...(yAxisConfig.dataKey ? yAxisConfig : { type: yAxisConfig.type || 'number' })} 
+                stroke="#64748b"
+                fontSize={11}
+                fontWeight={500}
+                tickLine={false}
+                axisLine={false}
+                tickMargin={8}
+                width={60}
+              />
+              <ChartTooltip 
+                content={<ChartTooltipContent />} 
+                contentStyle={{ 
+                  backgroundColor: 'rgba(255, 255, 255, 0.98)', 
+                  border: 'none', 
+                  borderRadius: '12px', 
+                  boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.15), 0 10px 10px -5px rgba(0, 0, 0, 0.1)',
+                  backdropFilter: 'blur(10px)',
+                  fontSize: '12px',
+                  fontWeight: 500
+                }} 
+                cursor={{ stroke: colors.primary, strokeWidth: 1, strokeOpacity: 0.4 }}
+              />
               {traces.length > 0 ? traces.map((trace, i) => (
-                <Area key={trace.dataKey || i} type={trace.type || 'monotone'} dataKey={trace.dataKey} stroke={trace.stroke || colors.primary} fill={trace.fill || colors.primary} fillOpacity={trace.fillOpacity || 0.2} strokeWidth={trace.strokeWidth || 2} />
+                <Area 
+                  key={trace.dataKey || i} 
+                  type="monotone" 
+                  dataKey={trace.dataKey} 
+                  stroke={trace.stroke || colors.primary} 
+                  fill={`url(#areaGradient-${chart.id})`}
+                  strokeWidth={3}
+                  filter={`url(#areaShadow-${chart.id})`}
+                  dot={{ 
+                    fill: trace.stroke || colors.primary, 
+                    strokeWidth: 0, 
+                    r: 0
+                  }}
+                  activeDot={{ 
+                    r: 6, 
+                    fill: trace.stroke || colors.primary, 
+                    stroke: 'white', 
+                    strokeWidth: 3,
+                    style: { cursor: 'pointer' }
+                  }}
+                />
               )) : (
-                <Area type="monotone" dataKey={yAxisConfig.dataKey} stroke={colors.primary} fill={colors.primary} fillOpacity={0.2} strokeWidth={2} />
+                <Area 
+                  type="monotone" 
+                  dataKey={yAxisConfig.dataKey} 
+                  stroke={colors.primary} 
+                  fill={`url(#areaGradient-${chart.id})`}
+                  strokeWidth={3}
+                  filter={`url(#areaShadow-${chart.id})`}
+                  dot={{ 
+                    fill: colors.primary, 
+                    strokeWidth: 0, 
+                    r: 0
+                  }}
+                  activeDot={{ 
+                    r: 6, 
+                    fill: colors.primary, 
+                    stroke: 'white', 
+                    strokeWidth: 3,
+                    style: { cursor: 'pointer' }
+                  }}
+                />
               )}
             </AreaChart>
           </ChartContainer>
@@ -235,15 +522,70 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
       case 'scatter':
         return (
           <ChartContainer key={key} config={config} className={`${chartHeight} w-full`}>
-            <ScatterChart data={chartData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-              <XAxis {...xAxisConfig} />
-              <YAxis {...(yAxisConfig.dataKey ? yAxisConfig : { type: yAxisConfig.type || 'number' })} />
-              <ChartTooltip content={<ChartTooltipContent />} contentStyle={{ backgroundColor: 'white', border: 'none', borderRadius: '8px', boxShadow: '0 10px 30px -10px rgba(0, 0, 0, 0.2)' }} />
+            <ScatterChart data={chartData} margin={{ top: 20, right: 30, left: 20, bottom: 20 }}>
+              <defs>
+                <radialGradient id={`scatterGradient-${chart.id}`} cx="50%" cy="50%" r="50%">
+                  <stop offset="0%" stopColor={colors.primary} stopOpacity={1}/>
+                  <stop offset="100%" stopColor={colors.darkAccent} stopOpacity={0.7}/>
+                </radialGradient>
+                <filter id={`scatterShadow-${chart.id}`} x="-50%" y="-50%" width="200%" height="200%">
+                  <feDropShadow dx="0" dy="2" stdDeviation="3" floodOpacity="0.4" floodColor={colors.primary}/>
+                </filter>
+              </defs>
+              <CartesianGrid 
+                strokeDasharray="3 3" 
+                stroke="#e2e8f0" 
+                strokeOpacity={0.6}
+              />
+              <XAxis 
+                {...xAxisConfig} 
+                stroke="#64748b"
+                fontSize={11}
+                fontWeight={500}
+                tickLine={false}
+                axisLine={false}
+                tickMargin={8}
+              />
+              <YAxis 
+                {...(yAxisConfig.dataKey ? yAxisConfig : { type: yAxisConfig.type || 'number' })} 
+                stroke="#64748b"
+                fontSize={11}
+                fontWeight={500}
+                tickLine={false}
+                axisLine={false}
+                tickMargin={8}
+                width={60}
+              />
+              <ChartTooltip 
+                content={<ChartTooltipContent />} 
+                contentStyle={{ 
+                  backgroundColor: 'rgba(255, 255, 255, 0.98)', 
+                  border: 'none', 
+                  borderRadius: '12px', 
+                  boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.15), 0 10px 10px -5px rgba(0, 0, 0, 0.1)',
+                  backdropFilter: 'blur(10px)',
+                  fontSize: '12px',
+                  fontWeight: 500
+                }} 
+                cursor={{ strokeDasharray: '3 3' }}
+              />
               {traces.length > 0 ? traces.map((trace, i) => (
-                <Scatter key={trace.dataKey || i} dataKey={trace.dataKey} fill={trace.fill || colors.primary} />
+                <Scatter 
+                  key={trace.dataKey || i} 
+                  dataKey={trace.dataKey} 
+                  fill={`url(#scatterGradient-${chart.id})`}
+                  fillOpacity={0.8}
+                  filter={`url(#scatterShadow-${chart.id})`}
+                  style={{ cursor: 'pointer' }}
+                />
               )) : (
-                <Scatter dataKey={yAxisConfig.dataKey} fill={colors.primary} />
+                <Scatter 
+                  dataKey={yAxisConfig.dataKey} 
+                  fill={`url(#scatterGradient-${chart.id})`}
+                  fillOpacity={0.8}
+                  filter={`url(#scatterShadow-${chart.id})`}
+                  style={{ cursor: 'pointer' }}
+                />
               )}
             </ScatterChart>
           </ChartContainer>
@@ -261,28 +603,71 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
           }
           return acc;
         }, []);
+
+        // Modern pie color palette with better harmony
+        const modernPieColors = [
+          colors.primary,
+          colors.secondary,
+          colors.tertiary,
+          "#8b5cf6", // violet
+          "#f59e0b", // amber
+          "#ef4444", // red
+          "#06b6d4", // cyan
+          "#84cc16", // lime
+          "#f97316", // orange
+          "#ec4899", // pink
+        ];
+
         return (
           <ChartContainer key={key} config={config} className={`${chartHeight} w-full`}>
             <PieChart>
+              <defs>
+                {modernPieColors.map((color, i) => (
+                  <linearGradient key={i} id={`pieGradient-${chart.id}-${i}`} x1="0" y1="0" x2="1" y2="1">
+                    <stop offset="0%" stopColor={color} stopOpacity={1}/>
+                    <stop offset="100%" stopColor={color} stopOpacity={0.8}/>
+                  </linearGradient>
+                ))}
+                <filter id={`pieShadow-${chart.id}`} x="-50%" y="-50%" width="200%" height="200%">
+                  <feDropShadow dx="0" dy="4" stdDeviation="6" floodOpacity="0.15" floodColor="#000000"/>
+                </filter>
+              </defs>
               <Pie
                 data={pieData}
                 cx="50%"
                 cy="50%"
-                outerRadius={isCompact ? 60 : 90}
-                innerRadius={isCompact ? 20 : 30}
-                fill={colors.primary}
+                outerRadius={isCompact ? 65 : 95}
+                innerRadius={isCompact ? 25 : 35}
                 dataKey="value"
-                label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                stroke="white"
+                strokeWidth={3}
+                filter={`url(#pieShadow-${chart.id})`}
+                label={({ name, percent }) => 
+                  percent > 0.05 ? `${name} ${(percent * 100).toFixed(0)}%` : ''
+                }
                 labelLine={false}
+                style={{ fontSize: '11px', fontWeight: 500 }}
               >
-                {pieData.map((entry, i) => {
-                  const pieColors = [colors.primary, colors.secondary, "#8b5cf6", "#f59e0b", "#ef4444"];
-                  return (
-                    <Cell key={`cell-${i}`} fill={pieColors[i % pieColors.length]} stroke="white" strokeWidth={2} />
-                  );
-                })}
+                {pieData.map((entry, i) => (
+                  <Cell 
+                    key={`cell-${i}`} 
+                    fill={`url(#pieGradient-${chart.id}-${i % modernPieColors.length})`}
+                    style={{ cursor: 'pointer' }}
+                  />
+                ))}
               </Pie>
-              <ChartTooltip content={<ChartTooltipContent />} contentStyle={{ backgroundColor: 'white', border: 'none', borderRadius: '8px', boxShadow: '0 10px 30px -10px rgba(0, 0, 0, 0.2)' }} />
+              <ChartTooltip 
+                content={<ChartTooltipContent />} 
+                contentStyle={{ 
+                  backgroundColor: 'rgba(255, 255, 255, 0.98)', 
+                  border: 'none', 
+                  borderRadius: '12px', 
+                  boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.15), 0 10px 10px -5px rgba(0, 0, 0, 0.1)',
+                  backdropFilter: 'blur(10px)',
+                  fontSize: '12px',
+                  fontWeight: 500
+                }} 
+              />
             </PieChart>
           </ChartContainer>
         );
@@ -293,19 +678,35 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
 
   if (charts.length === 0) {
     return (
-      <div className="w-full h-full p-6 bg-gradient-to-br from-slate-50 to-blue-50 overflow-y-auto">
-        <div className="flex items-center justify-center h-full">
-          <div className="text-center">
-            <div className="w-20 h-20 mx-auto mb-6 rounded-full bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center shadow-xl">
-              <BarChart3 className="w-10 h-10 text-white" />
+      <div className="w-full h-full p-6 bg-gradient-to-br from-slate-50 via-blue-50/30 to-indigo-50/50 overflow-y-auto relative">
+        {/* Subtle background pattern */}
+        <div className="absolute inset-0 opacity-20">
+          <svg width="80" height="80" viewBox="0 0 80 80" className="absolute inset-0 w-full h-full">
+            <defs>
+              <pattern id="emptyGrid" width="80" height="80" patternUnits="userSpaceOnUse">
+                <path d="M 80 0 L 0 0 0 80" fill="none" stroke="rgb(148 163 184 / 0.15)" strokeWidth="1"/>
+              </pattern>
+            </defs>
+            <rect width="100%" height="100%" fill="url(#emptyGrid)" />
+          </svg>
+        </div>
+        
+        <div className="relative z-10 flex items-center justify-center h-full">
+          <div className="text-center max-w-md">
+            <div className="w-24 h-24 mx-auto mb-8 rounded-2xl bg-gradient-to-br from-indigo-500 via-blue-500 to-purple-600 flex items-center justify-center shadow-2xl transform rotate-3 hover:rotate-0 transition-transform duration-300">
+              <BarChart3 className="w-12 h-12 text-white drop-shadow-lg" />
             </div>
-            <h3 className="text-2xl font-bold text-gray-900 mb-2">Chart Maker</h3>
-            <p className="text-gray-600 mb-4">
+            <h3 className="text-3xl font-bold text-gray-900 mb-3 bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent">
+              Chart Maker
+            </h3>
+            <p className="text-gray-600 mb-6 text-lg font-medium leading-relaxed">
               Create beautiful interactive charts and visualizations
             </p>
-            <p className="text-sm text-gray-500">
-              Upload data and configure charts in the settings panel to get started
-            </p>
+            <div className="bg-white/80 backdrop-blur-sm rounded-lg p-4 shadow-lg border border-white/20">
+              <p className="text-sm text-gray-500 font-medium">
+                📊 Upload data and configure charts in the settings panel to get started
+              </p>
+            </div>
           </div>
         </div>
       </div>
@@ -313,16 +714,28 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
   }
 
   return (
-    <div ref={containerRef} className="w-full h-full flex flex-col bg-gradient-to-br from-slate-50 to-blue-50">
-      <div className="flex-shrink-0 p-6 pb-0">
-        <div className="flex items-center mb-4">
-          <div className="w-1 h-8 bg-gradient-to-b from-blue-500 to-blue-600 rounded-full mr-4"></div>
-          <h2 className="text-2xl font-bold text-gray-900">Chart Maker</h2>
-        </div>
-        <p className="text-gray-600">Interactive data visualization dashboard</p>
+    <div ref={containerRef} className="w-full h-full flex flex-col bg-gradient-to-br from-slate-50 via-blue-50/30 to-indigo-50/50 relative overflow-hidden">
+      {/* Subtle background pattern */}
+      <div className="absolute inset-0 opacity-30">
+        <svg width="60" height="60" viewBox="0 0 60 60" className="absolute inset-0 w-full h-full">
+          <defs>
+            <pattern id="grid" width="60" height="60" patternUnits="userSpaceOnUse">
+              <path d="M 60 0 L 0 0 0 60" fill="none" stroke="rgb(148 163 184 / 0.1)" strokeWidth="1"/>
+            </pattern>
+          </defs>
+          <rect width="100%" height="100%" fill="url(#grid)" />
+        </svg>
       </div>
       
-      <div className="flex-1 p-6 pt-4 overflow-hidden">
+      <div className="relative z-10 flex-shrink-0 p-6 pb-0">
+        <div className="flex items-center mb-4">
+          <div className="w-1 h-8 bg-gradient-to-b from-indigo-500 via-blue-500 to-purple-600 rounded-full mr-4 shadow-lg"></div>
+          <h2 className="text-2xl font-bold text-gray-900 drop-shadow-sm">Chart Maker</h2>
+        </div>
+        <p className="text-gray-600 font-medium">Interactive data visualization dashboard</p>
+      </div>
+      
+      <div className="relative z-10 flex-1 p-6 pt-4 overflow-hidden">
         <div 
           className={`grid gap-6 ${layoutConfig.containerClass} transition-all duration-300 ease-in-out h-full`}
           style={{
@@ -335,10 +748,10 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
             return (
               <ContextMenu key={chart.id}>
                  <ContextMenuTrigger>
-                   <Card className="border-0 shadow-xl bg-white/90 backdrop-blur-sm overflow-hidden transform hover:scale-105 transition-all duration-300 relative flex flex-col h-full">
-                     <div className={`bg-gradient-to-r ${colors.gradient} p-4 relative flex-shrink-0`}>
-                       <CardTitle className={`font-bold text-white flex items-center ${isCompact ? 'text-base' : 'text-lg'}`}>
-                         <BarChart3 className={`mr-2 ${isCompact ? 'w-4 h-4' : 'w-5 h-5'}`} />
+                   <Card className="border-0 shadow-xl bg-white/95 backdrop-blur-sm overflow-hidden transform hover:scale-[1.02] transition-all duration-300 relative flex flex-col h-full group hover:shadow-2xl">
+                     <div className={`bg-gradient-to-r ${colors.gradient} p-4 relative flex-shrink-0 group-hover:shadow-lg transition-shadow duration-300`}>
+                       <CardTitle className={`font-bold text-white flex items-center ${isCompact ? 'text-base' : 'text-lg'} drop-shadow-sm`}>
+                         <BarChart3 className={`mr-2 ${isCompact ? 'w-4 h-4' : 'w-5 h-5'} drop-shadow-sm`} />
                          {chart.title}
                        </CardTitle>
                        {/* Transparent overlay for Alt+Click fullscreen */}
@@ -788,7 +1201,7 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
                         <div className="flex items-center justify-center h-full text-muted-foreground">
                           <div className="text-center">
                             <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-gradient-to-br from-slate-100 to-slate-200 flex items-center justify-center">
-                              <LineChart className="w-8 h-8 text-slate-400" />
+                              <LineChartIcon className="w-8 h-8 text-slate-400" />
                             </div>
                             <p className="font-medium">Configure chart settings</p>
                             <p className="text-sm">Select X-axis and Y-axis to display data</p>
@@ -801,37 +1214,73 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
                       case 'line':
                         return (
                           <ResponsiveContainer width="100%" height="100%">
-                            <LineChart data={chartData}>
-                              <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                            <LineChart data={chartData} margin={{ top: 30, right: 30, left: 30, bottom: 30 }}>
+                              <defs>
+                                <linearGradient id={`fullscreenLineGradient-${fullscreenChart.id}`} x1="0" y1="0" x2="0" y2="1">
+                                  <stop offset="0%" stopColor={colors.primary} stopOpacity={0.8}/>
+                                  <stop offset="100%" stopColor={colors.primary} stopOpacity={0.1}/>
+                                </linearGradient>
+                                <filter id={`fullscreenLineShadow-${fullscreenChart.id}`} x="-50%" y="-50%" width="200%" height="200%">
+                                  <feDropShadow dx="0" dy="3" stdDeviation="4" floodOpacity="0.3" floodColor={colors.primary}/>
+                                </filter>
+                              </defs>
+                              <CartesianGrid 
+                                strokeDasharray="3 3" 
+                                stroke="#e2e8f0" 
+                                strokeOpacity={0.6}
+                                vertical={false}
+                              />
                               <XAxis 
                                 dataKey={fullscreenChart.xAxis} 
                                 stroke="#64748b"
-                                fontSize={12}
+                                fontSize={13}
+                                fontWeight={500}
                                 tickLine={false}
                                 axisLine={false}
+                                tickMargin={12}
                               />
                               <YAxis 
                                 stroke="#64748b"
-                                fontSize={12}
+                                fontSize={13}
+                                fontWeight={500}
                                 tickLine={false}
                                 axisLine={false}
+                                tickMargin={12}
+                                width={70}
                               />
                               <ChartTooltip 
                                 content={<ChartTooltipContent />}
                                 contentStyle={{
-                                  backgroundColor: 'white',
+                                  backgroundColor: 'rgba(255, 255, 255, 0.98)',
                                   border: 'none',
-                                  borderRadius: '8px',
-                                  boxShadow: '0 10px 30px -10px rgba(0, 0, 0, 0.2)'
+                                  borderRadius: '12px',
+                                  boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.15), 0 10px 10px -5px rgba(0, 0, 0, 0.1)',
+                                  backdropFilter: 'blur(10px)',
+                                  fontSize: '13px',
+                                  fontWeight: 500
                                 }}
+                                cursor={{ stroke: colors.primary, strokeWidth: 1, strokeOpacity: 0.4 }}
                               />
                               <Line 
                                 type="monotone" 
                                 dataKey={fullscreenChart.yAxis} 
                                 stroke={colors.primary}
-                                strokeWidth={3}
-                                dot={{ fill: colors.primary, strokeWidth: 2, r: 4 }}
-                                activeDot={{ r: 6, fill: colors.primary, stroke: 'white', strokeWidth: 2 }}
+                                strokeWidth={4}
+                                fill={`url(#fullscreenLineGradient-${fullscreenChart.id})`}
+                                dot={{ 
+                                  fill: colors.primary, 
+                                  strokeWidth: 0, 
+                                  r: 0
+                                }}
+                                activeDot={{ 
+                                  r: 8, 
+                                  fill: colors.primary, 
+                                  stroke: 'white', 
+                                  strokeWidth: 4,
+                                  filter: `url(#fullscreenLineShadow-${fullscreenChart.id})`,
+                                  style: { cursor: 'pointer' }
+                                }}
+                                filter={`url(#fullscreenLineShadow-${fullscreenChart.id})`}
                               />
                             </LineChart>
                           </ResponsiveContainer>
@@ -840,34 +1289,59 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
                       case 'bar':
                         return (
                           <ResponsiveContainer width="100%" height="100%">
-                            <BarChart data={chartData}>
-                              <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                            <BarChart data={chartData} margin={{ top: 30, right: 30, left: 30, bottom: 30 }}>
+                              <defs>
+                                <linearGradient id={`fullscreenBarGradient-${fullscreenChart.id}`} x1="0" y1="0" x2="0" y2="1">
+                                  <stop offset="0%" stopColor={colors.primary} stopOpacity={1}/>
+                                  <stop offset="100%" stopColor={colors.darkAccent} stopOpacity={0.8}/>
+                                </linearGradient>
+                                <filter id={`fullscreenBarShadow-${fullscreenChart.id}`} x="-50%" y="-50%" width="200%" height="200%">
+                                  <feDropShadow dx="0" dy="4" stdDeviation="6" floodOpacity="0.2" floodColor={colors.primary}/>
+                                </filter>
+                              </defs>
+                              <CartesianGrid 
+                                strokeDasharray="3 3" 
+                                stroke="#e2e8f0" 
+                                strokeOpacity={0.6}
+                                vertical={false}
+                              />
                               <XAxis 
                                 dataKey={fullscreenChart.xAxis} 
                                 stroke="#64748b"
-                                fontSize={12}
+                                fontSize={13}
+                                fontWeight={500}
                                 tickLine={false}
                                 axisLine={false}
+                                tickMargin={12}
                               />
                               <YAxis 
                                 stroke="#64748b"
-                                fontSize={12}
+                                fontSize={13}
+                                fontWeight={500}
                                 tickLine={false}
                                 axisLine={false}
+                                tickMargin={12}
+                                width={70}
                               />
                               <ChartTooltip 
                                 content={<ChartTooltipContent />}
                                 contentStyle={{
-                                  backgroundColor: 'white',
+                                  backgroundColor: 'rgba(255, 255, 255, 0.98)',
                                   border: 'none',
-                                  borderRadius: '8px',
-                                  boxShadow: '0 10px 30px -10px rgba(0, 0, 0, 0.2)'
+                                  borderRadius: '12px',
+                                  boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.15), 0 10px 10px -5px rgba(0, 0, 0, 0.1)',
+                                  backdropFilter: 'blur(10px)',
+                                  fontSize: '13px',
+                                  fontWeight: 500
                                 }}
+                                cursor={{ fill: 'rgba(0, 0, 0, 0.04)' }}
                               />
                               <Bar 
                                 dataKey={fullscreenChart.yAxis} 
-                                fill={colors.primary}
-                                radius={[4, 4, 0, 0]}
+                                fill={`url(#fullscreenBarGradient-${fullscreenChart.id})`}
+                                radius={[8, 8, 0, 0]}
+                                filter={`url(#fullscreenBarShadow-${fullscreenChart.id})`}
+                                style={{ cursor: 'pointer' }}
                               />
                             </BarChart>
                           </ResponsiveContainer>
@@ -876,71 +1350,132 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
                       case 'area':
                         return (
                           <ResponsiveContainer width="100%" height="100%">
-                            <AreaChart data={chartData}>
-                              <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                            <AreaChart data={chartData} margin={{ top: 30, right: 30, left: 30, bottom: 30 }}>
+                              <defs>
+                                <linearGradient id={`fullscreenAreaGradient-${fullscreenChart.id}`} x1="0" y1="0" x2="0" y2="1">
+                                  <stop offset="0%" stopColor={colors.primary} stopOpacity={0.6}/>
+                                  <stop offset="50%" stopColor={colors.primary} stopOpacity={0.3}/>
+                                  <stop offset="100%" stopColor={colors.primary} stopOpacity={0.05}/>
+                                </linearGradient>
+                                <filter id={`fullscreenAreaShadow-${fullscreenChart.id}`} x="-50%" y="-50%" width="200%" height="200%">
+                                  <feDropShadow dx="0" dy="3" stdDeviation="4" floodOpacity="0.3" floodColor={colors.primary}/>
+                                </filter>
+                              </defs>
+                              <CartesianGrid 
+                                strokeDasharray="3 3" 
+                                stroke="#e2e8f0" 
+                                strokeOpacity={0.6}
+                                vertical={false}
+                              />
                               <XAxis 
                                 dataKey={fullscreenChart.xAxis} 
                                 stroke="#64748b"
-                                fontSize={12}
+                                fontSize={13}
+                                fontWeight={500}
                                 tickLine={false}
                                 axisLine={false}
+                                tickMargin={12}
                               />
                               <YAxis 
                                 stroke="#64748b"
-                                fontSize={12}
+                                fontSize={13}
+                                fontWeight={500}
                                 tickLine={false}
                                 axisLine={false}
+                                tickMargin={12}
+                                width={70}
                               />
                               <ChartTooltip 
                                 content={<ChartTooltipContent />}
                                 contentStyle={{
-                                  backgroundColor: 'white',
+                                  backgroundColor: 'rgba(255, 255, 255, 0.98)',
                                   border: 'none',
-                                  borderRadius: '8px',
-                                  boxShadow: '0 10px 30px -10px rgba(0, 0, 0, 0.2)'
+                                  borderRadius: '12px',
+                                  boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.15), 0 10px 10px -5px rgba(0, 0, 0, 0.1)',
+                                  backdropFilter: 'blur(10px)',
+                                  fontSize: '13px',
+                                  fontWeight: 500
                                 }}
+                                cursor={{ stroke: colors.primary, strokeWidth: 1, strokeOpacity: 0.4 }}
                               />
                               <Area 
                                 type="monotone" 
                                 dataKey={fullscreenChart.yAxis} 
-                                stroke={colors.primary}
-                                fill={colors.primary}
-                                fillOpacity={0.2}
-                                strokeWidth={2}
+                                stroke={colors.primary} 
+                                fill={`url(#fullscreenAreaGradient-${fullscreenChart.id})`}
+                                strokeWidth={4}
+                                filter={`url(#fullscreenAreaShadow-${fullscreenChart.id})`}
+                                dot={{ 
+                                  fill: colors.primary, 
+                                  strokeWidth: 0, 
+                                  r: 0
+                                }}
+                                activeDot={{ 
+                                  r: 8, 
+                                  fill: colors.primary, 
+                                  stroke: 'white', 
+                                  strokeWidth: 4,
+                                  style: { cursor: 'pointer' }
+                                }}
                               />
                             </AreaChart>
                           </ResponsiveContainer>
-                        );
-                      
-                      case 'scatter':
+                        );                      case 'scatter':
                         return (
                           <ResponsiveContainer width="100%" height="100%">
-                            <ScatterChart data={chartData}>
-                              <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                            <ScatterChart data={chartData} margin={{ top: 30, right: 30, left: 30, bottom: 30 }}>
+                              <defs>
+                                <radialGradient id={`fullscreenScatterGradient-${fullscreenChart.id}`} cx="50%" cy="50%" r="50%">
+                                  <stop offset="0%" stopColor={colors.primary} stopOpacity={1}/>
+                                  <stop offset="100%" stopColor={colors.darkAccent} stopOpacity={0.7}/>
+                                </radialGradient>
+                                <filter id={`fullscreenScatterShadow-${fullscreenChart.id}`} x="-50%" y="-50%" width="200%" height="200%">
+                                  <feDropShadow dx="0" dy="3" stdDeviation="4" floodOpacity="0.4" floodColor={colors.primary}/>
+                                </filter>
+                              </defs>
+                              <CartesianGrid 
+                                strokeDasharray="3 3" 
+                                stroke="#e2e8f0" 
+                                strokeOpacity={0.6}
+                              />
                               <XAxis 
                                 dataKey={fullscreenChart.xAxis} 
                                 stroke="#64748b"
-                                fontSize={12}
+                                fontSize={13}
+                                fontWeight={500}
                                 tickLine={false}
                                 axisLine={false}
+                                tickMargin={12}
                               />
                               <YAxis 
                                 dataKey={fullscreenChart.yAxis} 
                                 stroke="#64748b"
-                                fontSize={12}
+                                fontSize={13}
+                                fontWeight={500}
                                 tickLine={false}
                                 axisLine={false}
+                                tickMargin={12}
+                                width={70}
                               />
                               <ChartTooltip 
                                 content={<ChartTooltipContent />}
                                 contentStyle={{
-                                  backgroundColor: 'white',
+                                  backgroundColor: 'rgba(255, 255, 255, 0.98)',
                                   border: 'none',
-                                  borderRadius: '8px',
-                                  boxShadow: '0 10px 30px -10px rgba(0, 0, 0, 0.2)'
+                                  borderRadius: '12px',
+                                  boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.15), 0 10px 10px -5px rgba(0, 0, 0, 0.1)',
+                                  backdropFilter: 'blur(10px)',
+                                  fontSize: '13px',
+                                  fontWeight: 500
                                 }}
+                                cursor={{ strokeDasharray: '3 3' }}
                               />
-                              <Scatter fill={colors.primary} />
+                              <Scatter 
+                                fill={`url(#fullscreenScatterGradient-${fullscreenChart.id})`}
+                                fillOpacity={0.8}
+                                filter={`url(#fullscreenScatterShadow-${fullscreenChart.id})`}
+                                style={{ cursor: 'pointer' }}
+                              />
                             </ScatterChart>
                           </ResponsiveContainer>
                         );
@@ -960,39 +1495,68 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
                           return acc;
                         }, []);
 
+                        // Modern pie color palette for fullscreen
+                        const fullscreenPieColors = [
+                          colors.primary,
+                          colors.secondary,
+                          colors.tertiary,
+                          "#8b5cf6", // violet
+                          "#f59e0b", // amber
+                          "#ef4444", // red
+                          "#06b6d4", // cyan
+                          "#84cc16", // lime
+                          "#f97316", // orange
+                          "#ec4899", // pink
+                        ];
+
                         return (
                           <ResponsiveContainer width="100%" height="100%">
                             <PieChart>
+                              <defs>
+                                {fullscreenPieColors.map((color, i) => (
+                                  <linearGradient key={i} id={`fullscreenPieGradient-${fullscreenChart.id}-${i}`} x1="0" y1="0" x2="1" y2="1">
+                                    <stop offset="0%" stopColor={color} stopOpacity={1}/>
+                                    <stop offset="100%" stopColor={color} stopOpacity={0.8}/>
+                                  </linearGradient>
+                                ))}
+                                <filter id={`fullscreenPieShadow-${fullscreenChart.id}`} x="-50%" y="-50%" width="200%" height="200%">
+                                  <feDropShadow dx="0" dy="6" stdDeviation="8" floodOpacity="0.15" floodColor="#000000"/>
+                                </filter>
+                              </defs>
                               <Pie
                                 data={pieData}
                                 cx="50%"
                                 cy="50%"
-                                outerRadius={200}
-                                innerRadius={80}
-                                fill={colors.primary}
+                                outerRadius={250}
+                                innerRadius={100}
                                 dataKey="value"
-                                label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                                stroke="white"
+                                strokeWidth={4}
+                                filter={`url(#fullscreenPieShadow-${fullscreenChart.id})`}
+                                label={({ name, percent }) => 
+                                  percent > 0.03 ? `${name} ${(percent * 100).toFixed(0)}%` : ''
+                                }
                                 labelLine={false}
+                                style={{ fontSize: '14px', fontWeight: 600 }}
                               >
-                                {pieData.map((entry, index) => {
-                                  const pieColors = [colors.primary, colors.secondary, "#8b5cf6", "#f59e0b", "#ef4444"];
-                                  return (
-                                    <Cell 
-                                      key={`cell-${index}`} 
-                                      fill={pieColors[index % pieColors.length]} 
-                                      stroke="white"
-                                      strokeWidth={2}
-                                    />
-                                  );
-                                })}
+                                {pieData.map((entry, index) => (
+                                  <Cell 
+                                    key={`cell-${index}`} 
+                                    fill={`url(#fullscreenPieGradient-${fullscreenChart.id}-${index % fullscreenPieColors.length})`}
+                                    style={{ cursor: 'pointer' }}
+                                  />
+                                ))}
                               </Pie>
                               <ChartTooltip 
                                 content={<ChartTooltipContent />}
                                 contentStyle={{
-                                  backgroundColor: 'white',
+                                  backgroundColor: 'rgba(255, 255, 255, 0.98)',
                                   border: 'none',
-                                  borderRadius: '8px',
-                                  boxShadow: '0 10px 30px -10px rgba(0, 0, 0, 0.2)'
+                                  borderRadius: '12px',
+                                  boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.15), 0 10px 10px -5px rgba(0, 0, 0, 0.1)',
+                                  backdropFilter: 'blur(10px)',
+                                  fontSize: '14px',
+                                  fontWeight: 500
                                 }}
                               />
                             </PieChart>
