@@ -66,11 +66,12 @@ ensure_minio_bucket()
 
 # MongoDB config
 MONGO_URI = os.getenv("MONGO_URI", "mongodb://mongo:27017/trinity")
+MONGO_DB = os.getenv("MONGO_DB", "trinity")
 mongo_client = AsyncIOMotorClient(MONGO_URI)
-concat_db = mongo_client[os.getenv("CONCAT_DB_NAME", "concat_db")]
+db = mongo_client[MONGO_DB]
 
 def get_concat_results_collection():
-    return concat_db[os.getenv("CONCAT_RESULTS_COLLECTION", "concat_results")]
+    return db[os.getenv("CONCAT_RESULTS_COLLECTION", "concat_results")]
 
 def load_dataframe(object_name: str) -> pd.DataFrame:
     """
