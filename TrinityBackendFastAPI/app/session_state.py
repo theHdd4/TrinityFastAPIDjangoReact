@@ -24,7 +24,7 @@ def _save_snapshot(client_id: str, app_id: str, project_id: str, state: Dict) ->
     prefix = _snapshot_prefix(client_id, app_id, project_id)
     ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
     object_name = f"{prefix}{ts}.json"
-    data = json.dumps(state).encode()
+    data = json.dumps(state, default=str).encode()
     client.put_object(MINIO_BUCKET, object_name, io.BytesIO(data), len(data), content_type="application/json")
 
 
@@ -45,7 +45,7 @@ def _load_latest_snapshot(client_id: str, app_id: str, project_id: str) -> Optio
 
 async def save_state(client_id: str, app_id: str, project_id: str, state: Dict) -> None:
     key = _redis_key(client_id, app_id, project_id)
-    redis_client.setex(key, TTL, json.dumps(state))
+    redis_client.setex(key, TTL, json.dumps(state, default=str))
     await upsert_project_state(client_id, app_id, project_id, state)
     _save_snapshot(client_id, app_id, project_id, state)
 
@@ -60,6 +60,6 @@ async def load_state(client_id: str, app_id: str, project_id: str) -> Optional[D
             pass
     db_state = await fetch_project_state(project_id)
     if db_state is not None:
-        redis_client.setex(key, TTL, json.dumps(db_state))
+        redis_client.setex(key, TTL, json.dumps(db_state, default=str))
         return db_state
     return _load_latest_snapshot(client_id, app_id, project_id)

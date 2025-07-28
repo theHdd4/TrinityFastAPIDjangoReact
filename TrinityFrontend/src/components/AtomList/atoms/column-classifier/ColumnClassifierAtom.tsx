@@ -13,6 +13,8 @@ import {
 } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { CLASSIFIER_API } from '@/lib/api';
 import { fetchDimensionMapping } from '@/lib/dimensions';
+import { useAuth } from '@/contexts/AuthContext';
+import { logSessionState, updateSessionState, addNavigationItem } from '@/lib/session';
 
 export type ColumnData = ColumnClassifierColumn;
 export type FileClassification = ColumnClassifierFile;
@@ -29,6 +31,7 @@ const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
   };
   const classifierData = settings.data;
   const { toast } = useToast();
+  const { user } = useAuth();
 
   React.useEffect(() => {
     const loadMapping = async () => {
@@ -182,6 +185,18 @@ const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
       } catch (err) {
         console.warn('assignment save result parse error', err);
       }
+      updateSessionState(user?.id, {
+        identifiers,
+        measures,
+        dimensions: currentFile.customDimensions,
+      });
+      addNavigationItem(user?.id, {
+        atom: 'column-classifier',
+        identifiers,
+        measures,
+        dimensions: currentFile.customDimensions,
+      });
+      logSessionState(user?.id);
     } else {
       toast({ title: 'Unable to Save Configuration', variant: 'destructive' });
       try {
@@ -190,6 +205,7 @@ const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
       } catch (err) {
         console.warn('assignment save error parse fail', err);
       }
+      logSessionState(user?.id);
     }
   };
 

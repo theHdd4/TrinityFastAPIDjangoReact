@@ -40,6 +40,8 @@ export const DEFAULT_TEXTBOX_SETTINGS: TextBoxSettings = {
 export interface DataUploadSettings {
   masterFile: string;
   fileValidation: boolean;
+  /** When true, allow uploads without selecting a master file */
+  bypassMasterUpload?: boolean;
   columnConfig: Record<string, Record<string, string>>;
   frequency: string;
   dimensions: Record<string, unknown>;
@@ -56,6 +58,7 @@ export interface DataUploadSettings {
 export const DEFAULT_DATAUPLOAD_SETTINGS: DataUploadSettings = {
   masterFile: "",
   fileValidation: true,
+  bypassMasterUpload: false,
   columnConfig: {},
   frequency: "monthly",
   dimensions: {},

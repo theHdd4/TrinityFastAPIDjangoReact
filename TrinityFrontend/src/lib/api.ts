@@ -88,6 +88,10 @@ export const MERGE_API =
   normalizeUrl(import.meta.env.VITE_MERGE_API) ||
   `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/merge`;
 
+export const SESSION_API =
+  normalizeUrl(import.meta.env.VITE_SESSION_API) ||
+  `${backendOrigin}${djangoPrefix}/session`;
+
 export const FEATURE_OVERVIEW_API =
   normalizeUrl(import.meta.env.VITE_FEATURE_OVERVIEW_API) ||
   `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/feature-overview`;
