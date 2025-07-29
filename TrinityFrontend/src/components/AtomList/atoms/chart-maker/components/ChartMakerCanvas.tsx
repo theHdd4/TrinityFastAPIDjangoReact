@@ -5,7 +5,6 @@ import { LineChart, Line, BarChart, Bar, AreaChart, Area, PieChart, Pie, Cell, S
 import { BarChart3, TrendingUp, BarChart2, Triangle, Zap, Maximize2, ChevronDown, ChevronLeft, ChevronRight, Filter, X, LineChart as LineChartIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/components/ui/context-menu';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Badge } from '@/components/ui/badge';
@@ -18,6 +17,7 @@ import './ChartMakerCanvas.css';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { useResponsiveChartLayout } from '@/hooks/useResponsiveChartLayout';
 import { migrateLegacyChart, DEFAULT_TRACE_COLORS } from '../utils/traceUtils';
+import ChatBubble from './ChatBubble';
 
 // Extend ChartData type to include uniqueValuesByColumn for type safety
 interface ChartDataWithUniqueValues extends ChartData {
@@ -43,6 +43,23 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
   const [currentTracePages, setCurrentTracePages] = useState<Record<string, number>>({});
   const [emphasizedTrace, setEmphasizedTrace] = useState<Record<string, string | null>>({});
   const [dimmedXValues, setDimmedXValues] = useState<Record<string, Set<string>>>({});
+
+  // Chat bubble state management
+  const [chatBubble, setChatBubble] = useState<{
+    visible: boolean;
+    chartId: string | null;
+    anchor: { x: number; y: number };
+  }>({
+    visible: false,
+    chartId: null,
+    anchor: { x: 0, y: 0 }
+  });
+  const [chatBubbleShouldRender, setChatBubbleShouldRender] = useState(false);
+  const [overlayActive, setOverlayActive] = useState(false);
+
+  // Mouse hold detection refs
+  const longPressTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const holdTargetRef = useRef<{ chartId: string; element: HTMLElement } | null>(null);
   const debounceTimers = useRef<Record<string, NodeJS.Timeout | number | null>>({});
   
   // Container ref for responsive layout
@@ -165,6 +182,87 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
       color: "hsl(var(--chart-1))",
     },
   };
+
+  // Chat bubble handlers
+  const handleMouseDown = (e: React.MouseEvent, chartId: string) => {
+    if (e.button !== 0) return; // Only left click
+    
+    e.stopPropagation();
+    
+    // Store the target element reference
+    const target = e.currentTarget as HTMLElement;
+    
+    // Start the long press timer
+    longPressTimerRef.current = setTimeout(() => {
+      // Check if target still exists before calling getBoundingClientRect
+      if (!target || !target.getBoundingClientRect) {
+        return;
+      }
+      
+      try {
+        // Calculate bubble position
+        const rect = target.getBoundingClientRect();
+        const position = {
+          x: rect.left + rect.width / 2,
+          y: rect.bottom + 10
+        };
+        
+        setChatBubble({
+          visible: true,
+          chartId,
+          anchor: position
+        });
+        setChatBubbleShouldRender(true);
+        setOverlayActive(false); // Will be activated after animation
+      } catch (error) {
+        console.warn('Error calculating bubble position:', error);
+      }
+    }, 700);
+    
+    // Setup cleanup listeners on window
+    const cleanup = () => {
+      if (longPressTimerRef.current) {
+        clearTimeout(longPressTimerRef.current);
+        longPressTimerRef.current = null;
+      }
+      window.removeEventListener('mouseup', cleanup);
+      window.removeEventListener('mouseleave', cleanup);
+    };
+    
+    window.addEventListener('mouseup', cleanup);
+    window.addEventListener('mouseleave', cleanup);
+  };
+
+  const handleChartTypeSelect = (type: string) => {
+    if (chatBubble.chartId) {
+      onChartTypeChange?.(chatBubble.chartId, type as ChartConfig['type']);
+      setChatBubble({ ...chatBubble, visible: false });
+    }
+  };
+
+  const handleCloseChatBubble = () => {
+    setChatBubble({ ...chatBubble, visible: false });
+  };
+
+  const handleBubbleExited = () => {
+    setChatBubbleShouldRender(false);
+  };
+
+  // Activate overlay after bubble entry animation completes, deactivate immediately on exit
+  useEffect(() => {
+    if (chatBubble.visible && chatBubbleShouldRender) {
+      // Delay overlay activation to allow bubble entry animation to complete (300ms + buffer)
+      const timer = setTimeout(() => {
+        setOverlayActive(true);
+      }, 350); // Slightly longer than entry animation duration (300ms)
+      return () => clearTimeout(timer);
+    } else {
+      // Immediately deactivate overlay when bubble starts hiding
+      if (overlayActive) {
+        setOverlayActive(false);
+      }
+    }
+  }, [chatBubble.visible, chatBubbleShouldRender, overlayActive]);
 
   const renderChart = (chart: ChartMakerConfig, index: number, chartKey?: string, heightClass?: string, isFullscreen = false) => {
     // Show loading spinner if chart is loading
@@ -1006,9 +1104,14 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
             const colors = getChartColors(index);
             
             return (
-              <ContextMenu key={chart.id}>
-                 <ContextMenuTrigger>
-                   <Card className="border-0 shadow-xl bg-white/95 backdrop-blur-sm overflow-hidden transform hover:scale-[1.02] transition-all duration-300 relative flex flex-col h-full group hover:shadow-2xl">
+                   <Card 
+                     key={chart.id} 
+                     className="border-0 shadow-xl bg-white/95 backdrop-blur-sm overflow-hidden transform hover:scale-[1.02] transition-all duration-300 relative flex flex-col h-full group hover:shadow-2xl"
+                     onContextMenu={e => {
+                       e.preventDefault(); // Disable right-click context menu
+                       e.stopPropagation();
+                     }}
+                   >
                      <div className={`bg-gradient-to-r ${colors.gradient} p-4 relative flex-shrink-0 group-hover:shadow-lg transition-shadow duration-300`}>
                        <CardTitle className={`font-bold text-white flex items-center justify-between ${isCompact ? 'text-base' : 'text-lg'} drop-shadow-sm`}>
                          <div className="flex items-center">
@@ -1039,7 +1142,7 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
                            </div>
                          </div>
                        </CardTitle>
-                       {/* Transparent overlay for Alt+Click fullscreen */}
+                       {/* Transparent overlay for Alt+Click fullscreen and mouse hold for chart type switching */}
                        <div
                          className="absolute inset-0 cursor-pointer"
                          style={{ background: 'transparent', zIndex: 10 }}
@@ -1049,7 +1152,12 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
                              setFullscreenIndex(index);
                            }
                          }}
-                         title="Alt+Click to expand"
+                         onMouseDown={e => handleMouseDown(e, chart.id)}
+                         onContextMenu={e => {
+                           e.preventDefault(); // Disable right-click context menu
+                           e.stopPropagation();
+                         }}
+                         title="Alt+Click to expand, Hold to change chart type"
                        />
                      </div>
                      
@@ -1460,27 +1568,6 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
                        </div>
                      </CardContent>
                    </Card>
-                </ContextMenuTrigger>
-                <ContextMenuContent className="w-48">
-                  {(Object.keys(chartTypeIcons) as Array<'line' | 'bar' | 'area' | 'pie' | 'scatter'>).map((type) => {
-                    const Icon = chartTypeIcons[type];
-                    const isActive = (previewTypes[chart.id] || chart.type) === type;
-                    return (
-                      <ContextMenuItem
-                        key={type}
-                        className={`flex items-center gap-2 ${isActive ? 'bg-accent' : ''}`}
-                        onClick={() => {
-                          if (previewTypes[chart.id]) setPreviewTypes(prev => ({ ...prev, [chart.id]: null }));
-                          onChartTypeChange?.(chart.id, type);
-                        }}
-                      >
-                        <Icon className="h-4 w-4" />
-                        {chartTypeLabels[type]}
-                      </ContextMenuItem>
-                    );
-                  })}
-                </ContextMenuContent>
-              </ContextMenu>
             );
           })}
         </div>
@@ -1504,6 +1591,58 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Chat Bubble Portal */}
+      {chatBubbleShouldRender && (
+        <>
+          {/* Overlay for outside click detection */}
+          {overlayActive && (
+            <div
+              style={{
+                position: 'fixed',
+                top: 0,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                zIndex: 3000,
+                background: 'transparent',
+                pointerEvents: 'auto',
+                cursor: 'default'
+              }}
+              onMouseDown={(e) => {
+                // Prevent the click from propagating to other components
+                e.preventDefault();
+                e.stopPropagation();
+                handleCloseChatBubble();
+              }}
+            />
+          )}
+          
+          {/* Bubble container */}
+          <div 
+            style={{
+              position: 'fixed',
+              left: chatBubble.anchor.x,
+              top: chatBubble.anchor.y,
+              transform: 'translate(-50%, 0)',
+              zIndex: 4000,
+            }}
+            onMouseDown={(e) => {
+              // Prevent clicks on bubble from propagating to overlay or other components
+              e.preventDefault();
+              e.stopPropagation();
+            }}
+          >
+            <ChatBubble
+              visible={chatBubble.visible}
+              chartType={chatBubble.chartId ? charts.find(c => c.id === chatBubble.chartId)?.type || 'line' : 'line'}
+              onChartTypeSelect={handleChartTypeSelect}
+              onClose={handleCloseChatBubble}
+              onExited={handleBubbleExited}
+            />
+          </div>
+        </>
+      )}
     </div>
   );
 };
