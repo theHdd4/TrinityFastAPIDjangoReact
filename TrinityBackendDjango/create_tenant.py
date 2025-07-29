@@ -11,8 +11,8 @@ django.setup()
 from apps.tenants.models import Tenant, Domain
 
 def main():
-    tenant_name = "acme_corp"
-    tenant_schema = "acme_corp_schema"
+    tenant_name = "quant_matrix_ai"
+    tenant_schema = "quant_matrix_ai_schema"
     # Map localhost requests to the default tenant unless overridden
     primary_domain = os.getenv("PRIMARY_DOMAIN", "localhost")
 
