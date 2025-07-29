@@ -1,6 +1,8 @@
 from django.core.management.base import BaseCommand
+from django.core.management import call_command
 from django.conf import settings
 from django.db import connection
+from django.db.utils import OperationalError, ProgrammingError
 from apps.atoms.models import Atom, AtomCategory, AtomVersion
 from pathlib import Path
 import datetime
@@ -15,6 +17,20 @@ class Command(BaseCommand):
             connection.set_schema_to_public()
         except Exception:
             pass
+
+        # Automatically create the atoms tables in the public schema if they
+        # do not exist yet. This helps first-time setups where migrations have
+        # not been applied.
+        try:
+            Atom.objects.exists()
+        except (ProgrammingError, OperationalError):
+            self.stdout.write("Atom tables missing. Running shared migrations…")
+            call_command(
+                "migrate_schemas",
+                "--shared",
+                interactive=False,
+                verbosity=0,
+            )
 
         # BASE_DIR points to the Django project directory. The FastAPI backend
         # lives one level up inside ``TrinityBackendFastAPI``.  Build the path

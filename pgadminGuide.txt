@@ -1,0 +1,36 @@
+# Checking Atom Table in PgAdmin
+
+Follow these steps to verify that the `atoms` tables exist and contain the
+features imported from FastAPI.
+
+1. Start the Docker stack if it is not already running:
+
+   ```bash
+   docker compose up -d
+   ```
+
+2. Browse to [http://localhost:5050](http://localhost:5050) and log in using the
+   default PgAdmin credentials:
+
+   - **Email:** `admin@example.com`
+   - **Password:** `admin`
+
+3. Add a new server connection:
+
+   - **General → Name:** `Trinity Postgres`
+   - **Connection → Host name/address:** `postgres`
+   - **Port:** `5432`
+   - **Username:** `trinity_user`
+   - **Password:** `trinity_pass`
+
+4. After connecting expand:
+
+   `Servers → Trinity Postgres → Databases → trinity_db → Schemas → public → Tables`
+
+   You should see the tables `atoms_atom`, `atoms_atomcategory` and
+   `atoms_atomversion`.
+
+5. Right–click `atoms_atom` and choose **View/Edit Data → All Rows** to inspect
+   the imported atoms. Each row corresponds to a feature folder inside
+   `TrinityBackendFastAPI/app/features`.
+
