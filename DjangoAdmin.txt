@@ -11,6 +11,13 @@ Trinity Django Admin Guide
    This builds the containers and exposes the Django service at `http://<HOST_IP>:8000/`.
    Set `HOST_IP` in `TrinityBackendDjango/.env` to the address of your host machine.
 
+   If you are running locally outside of Docker, install the Python
+   dependencies first:
+
+   ```bash
+   pip install -r TrinityBackendDjango/requirements.txt
+   ```
+
 2. **Create the initial tenant and users**
    Once the containers are running execute:
 
