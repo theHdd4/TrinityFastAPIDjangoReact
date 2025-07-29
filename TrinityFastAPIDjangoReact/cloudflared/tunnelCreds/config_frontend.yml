@@ -1,0 +1,7 @@
+tunnel: TUNNEL_ID_FRONTEND
+credentials-file: /etc/cloudflared/TUNNEL_ID_FRONTEND.json
+
+ingress:
+  - hostname: trinity.quantmatrixai.com
+    service: http://frontend:80
+  - service: http_status:404
