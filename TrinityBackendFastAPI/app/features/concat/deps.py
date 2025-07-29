@@ -22,10 +22,34 @@ CLIENT_NAME = os.getenv("CLIENT_NAME", "default_client")
 APP_NAME = os.getenv("APP_NAME", "default_app")
 PROJECT_NAME = os.getenv("PROJECT_NAME", "default_project")
 
-# Redis config (NEW)
+# Redis configuration
 REDIS_HOST = os.getenv("REDIS_HOST", "redis")
 REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))
-redis_client = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, decode_responses=False)
+REDIS_DB = int(os.getenv("REDIS_DB", 0))
+REDIS_PASSWORD = os.getenv("REDIS_PASSWORD")
+
+# Initialize Redis client with connection pooling and timeouts
+redis_client = None
+try:
+    redis_client = redis.Redis(
+        host=REDIS_HOST,
+        port=REDIS_PORT,
+        db=REDIS_DB,
+        password=REDIS_PASSWORD or None,
+        decode_responses=False,  # Keep as bytes for binary data
+        socket_timeout=5.0,      # 5 second timeout
+        socket_connect_timeout=5.0,
+        retry_on_timeout=True,
+        max_connections=100,
+        health_check_interval=30  # Check connection every 30 seconds
+    )
+    # Test the connection
+    redis_client.ping()
+    print(f"✅ Connected to Redis at {REDIS_HOST}:{REDIS_PORT} (DB: {REDIS_DB})")
+except Exception as e:
+    print(f"⚠️ Failed to connect to Redis at {REDIS_HOST}:{REDIS_PORT}: {e}")
+    print("⚠️ Some features may be limited without Redis.")
+    redis_client = None
 
 
 def load_names_from_db() -> None:
@@ -45,6 +69,7 @@ load_names_from_db()
 
 OBJECT_PREFIX = f"{CLIENT_NAME}/{APP_NAME}/{PROJECT_NAME}/"
 
+# Initialize MinIO client
 minio_client = Minio(
     MINIO_ENDPOINT,
     access_key=MINIO_ACCESS_KEY,
@@ -54,9 +79,14 @@ minio_client = Minio(
 
 def ensure_minio_bucket():
     try:
+        # Check if bucket exists, create if it doesn't
         if not minio_client.bucket_exists(MINIO_BUCKET):
-            minio_client.make_bucket(MINIO_BUCKET)
-            print(f"📁 Created MinIO bucket '{MINIO_BUCKET}' for concat")
+            try:
+                minio_client.make_bucket(MINIO_BUCKET)
+                print(f"✅ Created MinIO bucket: {MINIO_BUCKET}")
+            except Exception as e:
+                print(f"⚠️ Failed to create MinIO bucket {MINIO_BUCKET}: {e}")
+                raise
         else:
             print(f"✅ MinIO bucket '{MINIO_BUCKET}' is accessible for concat")
     except Exception as e:
@@ -64,20 +94,43 @@ def ensure_minio_bucket():
 
 ensure_minio_bucket()
 
-# MongoDB (optional). Only enabled when CONCAT_USE_MONGO env is 'true'.
+# MongoDB configuration
 _USE_MONGO = os.getenv("CONCAT_USE_MONGO", "false").lower() == "true"
 mongo_client = None
 concat_db = None
+
 if _USE_MONGO:
     MONGO_URI = os.getenv("MONGO_URI")
+    MONGO_DB = os.getenv("MONGO_DB", "trinity")
+    
     if not MONGO_URI:
-        print("⚠️ CONCAT_USE_MONGO=true but MONGO_URI is not set; Mongo features disabled.")
+        print("⚠️ CONCAT_USE_MONGO is true but MONGO_URI is not set. MongoDB features will be disabled.")
     else:
         try:
-            mongo_client = AsyncIOMotorClient(MONGO_URI)
-            concat_db = mongo_client[os.getenv("MONGO_DB", "trinity")]
+            print(f"🔌 Attempting to connect to MongoDB at {MONGO_URI}...")
+            mongo_client = AsyncIOMotorClient(
+                MONGO_URI,
+                serverSelectionTimeoutMS=5000,  # 5 second timeout
+                connectTimeoutMS=30000,         # 30 second connection timeout
+                socketTimeoutMS=None,           # No timeout for operations
+                connect=False,                  # Lazy connect
+                maxPoolSize=100,                # Maximum number of connections
+                minPoolSize=1,                  # Minimum number of connections
+                maxIdleTimeMS=60000,            # Close idle connections after 1 minute
+                retryWrites=True,               # Automatically retry write operations
+                retryReads=True                 # Automatically retry read operations
+            )
+            
+            # Force connection on initialization to verify it works
+            loop = asyncio.get_event_loop()
+            loop.run_until_complete(mongo_client.admin.command('ping'))
+            
+            concat_db = mongo_client[MONGO_DB]
+            print(f"✅ Connected to MongoDB: {MONGO_URI} (DB: {MONGO_DB})")
+            
         except Exception as exc:
-            print(f"⚠️ Mongo connection failed: {exc}; continuing without Mongo.")
+            print(f"⚠️ Failed to connect to MongoDB: {exc}")
+            print("⚠️ Continuing without MongoDB. Some features may be limited.")
             mongo_client = None
             concat_db = None
 

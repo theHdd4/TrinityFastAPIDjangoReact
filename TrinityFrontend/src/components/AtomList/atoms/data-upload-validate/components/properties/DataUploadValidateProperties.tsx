@@ -12,6 +12,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Switch } from "@/components/ui/switch";
 import {
   Tooltip,
   TooltipTrigger,
@@ -54,6 +55,7 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
   const [renameMap, setRenameMap] = useState<Record<string, string>>({});
   const [skipFetch, setSkipFetch] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [bypassMasterUpload, setBypassMasterUpload] = useState<boolean>(settings.bypassMasterUpload || false);
   const [validatorId, setValidatorId] = useState<string>(
     settings.validatorId || "",
   );
@@ -126,6 +128,10 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
   const [categoricalColumns, setCategoricalColumns] = useState<string[]>([]);
   const [continuousColumns, setContinuousColumns] = useState<string[]>([]);
   const [schemaSamples, setSchemaSamples] = useState<Record<string, any>>({});
+
+  useEffect(() => {
+    setBypassMasterUpload(settings.bypassMasterUpload || false);
+  }, [settings.bypassMasterUpload]);
 
   // Load existing configuration if validator id already present
   useEffect(() => {
@@ -320,6 +326,11 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
     const newMap = { ...(settings.fileKeyMap || {}) } as Record<string, string>;
     delete newMap[name];
     updateSettings(atomId, { fileKeyMap: newMap });
+  };
+
+  const handleBypassToggle = (val: boolean) => {
+    setBypassMasterUpload(val);
+    updateSettings(atomId, { bypassMasterUpload: val });
   };
 
   const handleDataTypeChange = (column: string, value: string) => {
@@ -790,6 +801,14 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
       </div>
 
       <div className="flex-1 overflow-y-auto overflow-x-hidden scrollbar-thin scrollbar-thumb-gray-300">
+        <div className="p-4 border-b border-gray-200 bg-gray-50 flex items-center justify-between">
+          <span className="text-sm font-medium text-gray-700">Bypass Master File Upload (Allow any file to be uploaded)</span>
+          <Switch
+            checked={bypassMasterUpload}
+            onCheckedChange={handleBypassToggle}
+            className="data-[state=checked]:bg-[#458EE2]"
+          />
+        </div>
         {/* Master File Upload Section */}
         <div className="p-4 border-b border-gray-200 bg-gray-50">
           <div className="space-y-4">

@@ -15,6 +15,8 @@ import { fetchDimensionMapping } from "@/lib/dimensions";
 import { BarChart3, TrendingUp, Maximize2 } from "lucide-react";
 import { Dialog, DialogContent, DialogTrigger } from "@/components/ui/dialog";
 import D3LineChart from "./D3LineChart";
+import { useAuth } from "@/contexts/AuthContext";
+import { logSessionState, addNavigationItem } from "@/lib/session";
 
 interface ColumnInfo {
   column: string;
@@ -32,6 +34,7 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
   settings,
   onUpdateSettings,
 }) => {
+  const { user } = useAuth();
   const [dimensionMap, setDimensionMap] = useState<Record<string, string[]>>(
     settings.dimensionMap || {},
   );
@@ -191,14 +194,22 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
         const defaults = ["salesvalue", "volume"].filter((d) =>
           lower.includes(d),
         );
-        if (defaults.length > 0) {
-          newSettings.yAxes = defaults;
-        }
+      if (defaults.length > 0) {
+        newSettings.yAxes = defaults;
+      }
       }
       onUpdateSettings(newSettings);
+      addNavigationItem(user?.id, {
+        atom: 'feature-overview',
+        action: 'displaySkus',
+        dataSource: settings.dataSource,
+        dimensionMap,
+      });
+      logSessionState(user?.id);
     } catch (e: any) {
       console.error("⚠️ failed to display SKUs", e);
       setError(e.message || "Error displaying SKUs");
+      logSessionState(user?.id);
     }
   };
 
@@ -242,8 +253,16 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
         activeMetric: settings.yAxes[0],
         activeRow: row.id,
       });
+      addNavigationItem(user?.id, {
+        atom: 'feature-overview',
+        action: 'viewStats',
+        metric: settings.yAxes[0],
+        combination: combo,
+      });
+      logSessionState(user?.id);
     } catch (e: any) {
       setError(e.message || "Error fetching statistics");
+      logSessionState(user?.id);
     }
   };
 

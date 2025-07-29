@@ -519,7 +519,7 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
     );
   }
 
-  console.log('RENDER: lastUsedIdentifiers', selectedIdentifiers);
+
 
   return (
     <div className="space-y-6 h-full">
@@ -555,13 +555,7 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
           </div>
         </div>
       )}
-      {/* Identifier display/selection UI with minimize/collapse */}
-      {hasIdentifierOp && (
-        <Card>
-          <div className="flex items-center justify-between px-4 pt-4 pb-2">
-            <div className="flex items-center space-x-2">
-              <span className="font-semibold text-base">Identifiers</span>
-            </div>
+{/*
             <button
               className="p-1 rounded hover:bg-green-100 transition-colors"
               onClick={() => setIdentifiersCollapsed(v => !v)}
@@ -577,7 +571,7 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
                   <div className="font-medium text-blue-700 mb-2">Identifiers (from classification)</div>
                   <div className="flex flex-wrap gap-2">
                     {mongoIdentifiers.map(id => (
-                      <span key={id} className="inline-block bg-blue-100 text-blue-800 px-3 py-1 rounded font-semibold text-xs">{id}</span>
+                      
                     ))}
                   </div>
                 </div>
@@ -603,6 +597,7 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
           )}
         </Card>
       )}
+*/}
       {/* Operations Configuration with Create Button on top right */}
       <Card>
         <div className="flex items-center justify-between px-4 pt-4 pb-2">
@@ -958,19 +953,7 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
                     {saveSuccess && <span className="text-green-600 text-sm ml-2">Saved!</span>}
                   </div>
                 </div>
-                
-                {/* lastUsedIdentifiers state is no longer needed, but keeping the logic for now */}
-                {/* {lastUsedIdentifiers.length > 0 && (
-                  <Card className="p-3 mb-2 bg-blue-50 border-blue-200">
-                    <div className="font-medium text-blue-700 mb-1">Identifiers used for operation:</div>
-                    <div className="flex flex-wrap gap-2">
-                      {lastUsedIdentifiers.map(id => (
-                        <span key={id} className="inline-block bg-blue-100 text-blue-800 px-3 py-1 rounded font-semibold text-xs">{id}</span>
-                      ))}
-                    </div>
-                  </Card>
-                )} */}
-                
+
                 {((!previewFile && preview.length > 0) || (previewFile && preview.length > 0 && previewHeaders.length === 0)) && (
                   <div className="rounded-md border border-green-100">
                     <Table className="min-w-full" maxHeight="max-h-96">

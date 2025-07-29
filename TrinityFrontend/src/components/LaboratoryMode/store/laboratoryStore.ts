@@ -40,6 +40,8 @@ export const DEFAULT_TEXTBOX_SETTINGS: TextBoxSettings = {
 export interface DataUploadSettings {
   masterFile: string;
   fileValidation: boolean;
+  /** When true, allow uploads without selecting a master file */
+  bypassMasterUpload?: boolean;
   columnConfig: Record<string, Record<string, string>>;
   frequency: string;
   dimensions: Record<string, unknown>;
@@ -56,6 +58,7 @@ export interface DataUploadSettings {
 export const DEFAULT_DATAUPLOAD_SETTINGS: DataUploadSettings = {
   masterFile: "",
   fileValidation: true,
+  bypassMasterUpload: false,
   columnConfig: {},
   frequency: "monthly",
   dimensions: {},
@@ -86,6 +89,7 @@ export interface FeatureOverviewSettings {
   activeMetric?: string;
   activeRow?: number | null;
   dimensionMap?: Record<string, string[]>;
+  filterUnique?: boolean;
 }
 
 export const DEFAULT_FEATURE_OVERVIEW_SETTINGS: FeatureOverviewSettings = {
@@ -106,6 +110,7 @@ export const DEFAULT_FEATURE_OVERVIEW_SETTINGS: FeatureOverviewSettings = {
   activeMetric: "",
   activeRow: null,
   dimensionMap: {},
+  filterUnique: false,
 };
 
 export interface ConcatSettings {

@@ -22,6 +22,9 @@ const GroupByProperties: React.FC<GroupByPropertiesProps> = ({ atomId }) => {
   // Tab for Input/Settings/Exhibition similar to CreateColumn
   const [tab, setTab] = useState('input');
 
+  // ------------------------------
+  // Initial lists
+  // ------------------------------
   const identifiers = settings.identifiers || [];
   const measures = settings.measures || [];
   const selectedIdentifiers = settings.selectedIdentifiers || [];
@@ -45,6 +48,21 @@ const GroupByProperties: React.FC<GroupByPropertiesProps> = ({ atomId }) => {
 
   const fallbackIdentifiers = identifiers.length === 0 ? categoricalColumns : identifiers;
   const fallbackMeasures = measures.length === 0 ? numericalColumns : measures;
+
+  // ------------------------------
+  // Local draggable lists
+  // ------------------------------
+  const [identifierList, setIdentifierList] = useState<string[]>(fallbackIdentifiers);
+  const [measureList, setMeasureList] = useState<string[]>(fallbackMeasures);
+
+  // Keep local lists in sync when fallback arrays change (e.g. after data fetch)
+  useEffect(() => {
+    setIdentifierList(fallbackIdentifiers);
+  }, [fallbackIdentifiers]);
+
+  useEffect(() => {
+    setMeasureList(fallbackMeasures);
+  }, [fallbackMeasures]);
 
   // Use local state for selectedMeasures to ensure checkboxes are ticked on first render
   // Initialise localSelectedMeasures so all measures are ticked by default
@@ -72,6 +90,55 @@ const GroupByProperties: React.FC<GroupByPropertiesProps> = ({ atomId }) => {
     }
   }, [settings.selectedMeasureNames]);
 
+  // ------------------------------
+  // Drag helpers
+  // ------------------------------
+  type DragMeta = { item: string; source: 'identifiers' | 'measures' };
+
+  const handleDragStart = (e: React.DragEvent<HTMLDivElement>, meta: DragMeta) => {
+    e.dataTransfer.setData('text/plain', JSON.stringify(meta));
+  };
+
+  const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault(); // Allow drop
+  };
+
+  const handleDrop = (e: React.DragEvent<HTMLDivElement>, destination: 'identifiers' | 'measures') => {
+    e.preventDefault();
+    const raw = e.dataTransfer.getData('text/plain');
+    if (!raw) return;
+    const { item, source } = JSON.parse(raw) as DragMeta;
+    if (source === destination) return;
+
+    if (source === 'identifiers' && destination === 'measures') {
+      const newIdentifiers = identifierList.filter(i => i !== item);
+      const newMeasures = [...measureList, item];
+      setIdentifierList(newIdentifiers);
+      setMeasureList(newMeasures);
+      // If the item was selected in identifiers, move its selection to measures
+      if (selectedIdentifiers.includes(item)) {
+        updateSettings(atomId, {
+          selectedIdentifiers: selectedIdentifiers.filter(id => id !== item),
+        });
+        setLocalSelectedMeasures(prev => [...prev, item]);
+      }
+      updateSettings(atomId, { identifiers: newIdentifiers, measures: newMeasures });
+    } else if (source === 'measures' && destination === 'identifiers') {
+      const newMeasures = measureList.filter(m => m !== item);
+      const newIdentifiers = [...identifierList, item];
+      setIdentifierList(newIdentifiers);
+      setMeasureList(newMeasures);
+      // If the item was selected in measures, move its selection to identifiers
+      if (localSelectedMeasures.includes(item)) {
+        setLocalSelectedMeasures(localSelectedMeasures.filter(m => m !== item));
+      }
+      updateSettings(atomId, { identifiers: newIdentifiers, measures: newMeasures });
+    }
+  };
+
+  // ------------------------------
+  // Toggle helpers
+  // ------------------------------
   const toggleIdentifier = useCallback((identifier: string) => {
     const newSelected = selectedIdentifiers.includes(identifier)
       ? selectedIdentifiers.filter(id => id !== identifier)
@@ -87,7 +154,7 @@ const GroupByProperties: React.FC<GroupByPropertiesProps> = ({ atomId }) => {
     setLocalSelectedMeasures(newSelected);
     // Persist selected measure names in settings so canvas dropdown updates but without altering measure rows
     updateSettings(atomId, { selectedMeasureNames: newSelected });
-  }, [localSelectedMeasures, atomId, updateSettings]);
+  }, [localSelectedMeasures, atomId, updateSettings, selectedIdentifiers]);
 
   const selectedAggregationMethods = Array.isArray(settings.selectedAggregationMethods) && settings.selectedAggregationMethods.length > 0
     ? settings.selectedAggregationMethods
@@ -149,13 +216,15 @@ const GroupByProperties: React.FC<GroupByPropertiesProps> = ({ atomId }) => {
 
         {/* Settings Tab */}
         <TabsContent value="settings" className="space-y-4 h-full overflow-auto">
-          <Card className="border-l-4 border-l-blue-500">
+          <Card className="border-l-4 border-l-blue-500"
+                onDragOver={handleDragOver}
+                onDrop={(e) => handleDrop(e, 'identifiers')}>
             <CardHeader>
               <CardTitle className="text-lg">Identifiers Selection</CardTitle>
             </CardHeader>
             <CardContent>
               <div className="grid grid-cols-2 gap-2 max-h-48 overflow-y-auto pr-2">
-                {fallbackIdentifiers.map((identifier: string) => {
+                {identifierList.map((identifier: string) => {
                   const isSelected = selectedIdentifiers.includes(identifier);
                   return (
                     <div
@@ -163,6 +232,8 @@ const GroupByProperties: React.FC<GroupByPropertiesProps> = ({ atomId }) => {
                        title={identifier}
                        className={`flex items-center gap-2 p-2 rounded-lg transition-colors cursor-pointer select-none ${isSelected ? 'bg-blue-100 text-blue-900' : 'hover:bg-indigo-50 bg-white text-gray-900'}`}
                        onClick={() => toggleIdentifier(identifier)}
+                       draggable
+                       onDragStart={(e) => handleDragStart(e, { item: identifier, source: 'identifiers' })}
                      >
                       <Checkbox
                         id={identifier}
@@ -179,13 +250,15 @@ const GroupByProperties: React.FC<GroupByPropertiesProps> = ({ atomId }) => {
               </div>
             </CardContent>
           </Card>
-          <Card className="border-l-4 border-l-green-500">
+          <Card className="border-l-4 border-l-green-500"
+                onDragOver={handleDragOver}
+                onDrop={(e) => handleDrop(e, 'measures')}>
             <CardHeader>
               <CardTitle className="text-lg">Measures Selection</CardTitle>
             </CardHeader>
             <CardContent>
               <div className="grid grid-cols-2 gap-2 max-h-48 overflow-y-auto pr-2">
-                {fallbackMeasures.map((measure: string) => {
+                {measureList.map((measure: string) => {
                   const isSelected = localSelectedMeasures.includes(measure);
                   return (
                     <div
@@ -193,6 +266,8 @@ const GroupByProperties: React.FC<GroupByPropertiesProps> = ({ atomId }) => {
                        title={measure}
                        className={`flex items-center gap-2 p-2 rounded-lg transition-colors cursor-pointer select-none ${isSelected ? 'bg-green-100 text-green-900' : 'hover:bg-green-50 bg-white text-gray-900'}`}
                        onClick={() => toggleMeasure(measure)}
+                       draggable
+                       onDragStart={(e) => handleDragStart(e, { item: measure, source: 'measures' })}
                      >
                       <Checkbox id={measure} checked={isSelected} onCheckedChange={() => toggleMeasure(measure)} />
                       <Label htmlFor={measure} className={`text-sm font-medium cursor-pointer truncate ${isSelected ? 'text-green-900' : 'text-gray-900'}`}>

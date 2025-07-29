@@ -32,6 +32,8 @@ interface UploadSectionProps {
   onDeleteFile: (name: string) => void;
   saveStatus: Record<string, string>;
   disabled?: boolean;
+  /** When true, disable the validate button */
+  disableValidation?: boolean;
 }
 
 const UploadSection: React.FC<UploadSectionProps> = ({
@@ -54,7 +56,8 @@ const UploadSection: React.FC<UploadSectionProps> = ({
   requiredOptions,
   onDeleteFile,
   saveStatus,
-  disabled = false
+  disabled = false,
+  disableValidation = false
 }) => (
   <Card className="h-full flex flex-col shadow-sm border-0 bg-white">
     <div className="p-4 border-b border-gray-100">
@@ -140,7 +143,7 @@ const UploadSection: React.FC<UploadSectionProps> = ({
         </label>
       </div>
       {uploadedFiles.length > 0 && (
-        <Button className="w-full mt-4" onClick={onValidateFiles}>
+        <Button className="w-full mt-4" onClick={onValidateFiles} disabled={disableValidation}>
           Validate Files
         </Button>
       )}

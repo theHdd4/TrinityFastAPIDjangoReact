@@ -662,18 +662,36 @@ async def get_column_classification(
     file_key: str = Query(...)
 ):
     """
-    Fetch column classification (identifiers, measures, unclassified) from MongoDB for a given validator_atom_id and file_key.
+    Fetch column classification (identifiers, measures, unclassified) from Redis-first fallback then MongoDB for a given validator_atom_id and file_key.
     """
     collection = await get_column_classifications_collection()
-    document = await collection.find_one({
-        "validator_atom_id": validator_atom_id,
-        "file_key": file_key
-    })
-    if not document or "final_classification" not in document:
-        raise HTTPException(status_code=404, detail="Final classification not found in MongoDB")
-    final = document["final_classification"]
+
+    # 1️⃣  Try Redis via the shared helper; if not available it will fall back to MongoDB
+    identifiers, measures = await fetch_measures_list(
+        validator_atom_id=validator_atom_id,
+        file_key=file_key,
+        collection=collection,
+    )
+
+    # 2️⃣  Filter out common time-related identifiers
+    time_keywords = {"date", "time", "month", "months", "week", "weeks", "year"}
+    identifiers = [col for col in identifiers if col.lower() not in time_keywords]
+
+    # 3️⃣  Attempt to retrieve *unclassified* list from MongoDB; if missing, default to []
+    unclassified: list = []
+    try:
+        document = await collection.find_one({
+            "validator_atom_id": validator_atom_id,
+            "file_key": file_key,
+        })
+        if document and "final_classification" in document:
+            unclassified = document["final_classification"].get("unclassified", [])
+    except Exception:
+        # Fallback silently – unclassified will remain [] if MongoDB is unreachable
+        pass
+
     return {
-        "identifiers": final.get("identifiers", []),
-        "measures": final.get("measures", []),
-        "unclassified": final.get("unclassified", [])
+        "identifiers": identifiers,
+        "measures": measures,
+        "unclassified": unclassified,
     }

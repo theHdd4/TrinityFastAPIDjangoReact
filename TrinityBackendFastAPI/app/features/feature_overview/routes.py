@@ -12,6 +12,7 @@ import pyarrow.ipc as ipc
 from datetime import date, datetime
 from typing import List
 from fastapi import Depends
+from pydantic import BaseModel
 from motor.motor_asyncio import AsyncIOMotorCollection
 from .deps import (
     get_unique_dataframe_results_collection,
@@ -33,6 +34,19 @@ from .feature_overview.base import (
     unique_count,
 )
 from app.DataStorageRetrieval.db import fetch_client_app_project
+from app.core.utils import get_env_vars
+
+
+def _parse_numeric_id(value: str | int | None) -> int:
+    """Return the numeric component of an ID string like "name_123"."""
+    if value is None:
+        return 0
+    try:
+        return int(str(value).split("_")[-1])
+    except Exception:
+        return 0
+
+
 from app.DataStorageRetrieval.arrow_client import (
     download_dataframe,
     download_table_bytes,
@@ -43,7 +57,10 @@ from app.DataStorageRetrieval.flight_registry import (
     set_ticket,
 )
 from app.DataStorageRetrieval.db import get_dataset_info
-from app.features.column_classifier.database import get_project_dimension_mapping
+from app.features.column_classifier.database import (
+    get_project_dimension_mapping,
+    get_classifier_config_from_mongo,
+)
 import asyncio
 
 
@@ -95,9 +112,7 @@ def ensure_minio_bucket():
             minio_client.make_bucket(MINIO_BUCKET)
             print(f"📁 Created MinIO bucket '{MINIO_BUCKET}' for feature overview")
         else:
-            print(
-                f"✅ MinIO bucket '{MINIO_BUCKET}' is accessible for feature overview"
-            )
+            print(f"✅ MinIO bucket '{MINIO_BUCKET}' is accessible for feature overview")
     except Exception as e:
         print(f"⚠️ MinIO connection error: {e}")
 
@@ -130,7 +145,9 @@ async def column_summary(object_name: str):
             try:
                 df = download_dataframe(flight_path)
             except Exception as e:
-                print(f"⚠️ column_summary flight download failed for {object_name}: {e}")
+                print(
+                    f"⚠️ column_summary flight download failed for {object_name}: {e}"
+                )
         if df is None:
             if not object_name.endswith(".arrow"):
                 raise ValueError("Unsupported file format")
@@ -179,7 +196,8 @@ async def column_summary(object_name: str):
 
 @router.get("/cached_dataframe")
 async def cached_dataframe(object_name: str):
-    """Return the saved dataframe as CSV text from Redis or MinIO."""
+    """Return the saved dataframe as CSV text.
+    Prefers Arrow Flight for the latest data, then falls back to Redis/MinIO."""
     object_name = unquote(object_name)
     print(f"➡️ cached_dataframe request: {object_name}")
     if not object_name.startswith(OBJECT_PREFIX):
@@ -187,6 +205,13 @@ async def cached_dataframe(object_name: str):
             f"⚠️ cached_dataframe prefix mismatch: {object_name} (expected {OBJECT_PREFIX})"
         )
     try:
+        try:
+            df = download_dataframe(object_name)
+            csv_text = df.to_csv(index=False)
+            return Response(csv_text, media_type="text/csv")
+        except Exception as exc:
+            print(f"⚠️ flight dataframe error for {object_name}: {exc}")
+
         content = redis_client.get(object_name)
         if content is None:
             response = minio_client.get_object(MINIO_BUCKET, object_name)
@@ -238,52 +263,42 @@ async def flight_table(object_name: str):
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@router.get("/dimension_mapping")
-async def dimension_mapping(project_id: int = PROJECT_ID):
-    """Return dimension to identifier mapping stored on the Flight server.
-    If not present, attempt to load from MongoDB and upload to Flight."""
-    path = f"{project_id}/dimension_mapping"
-    df = None
-    try:
-        df = download_dataframe(path)
-    except Exception as exc:
-        print(f"⚠️ dimension_mapping download failed for {path}: {exc}")
-    if df is None:
-        mongo_doc = get_project_dimension_mapping(project_id)
-        if mongo_doc and mongo_doc.get("assignments"):
-            try:
-                rows = [
-                    (d, ident)
-                    for d, ids in mongo_doc["assignments"].items()
-                    for ident in ids
-                ]
-                if rows:
-                    df = pd.DataFrame(rows, columns=["dimension", "identifier"])
-                    upload_dataframe(df, path)
-                    set_ticket(
-                        f"project_{project_id}_dimensions",
-                        f"project_{project_id}_dimensions.arrow",
-                        path,
-                        "project_dimensions.csv",
-                    )
-                    print(
-                        f"🆗 uploaded mapping from mongo to flight for project {project_id}"
-                    )
-            except Exception as exc:
-                print(f"⚠️ failed to upload mongo mapping for {project_id}: {exc}")
-    if df is None:
-        raise HTTPException(status_code=404, detail="Mapping not found")
+class DimensionMappingRequest(BaseModel):
+    client_name: str
+    app_name: str
+    project_name: str
 
-    mapping: dict[str, list[str]] = {}
-    try:
-        for _, row in df.iterrows():
-            dim = str(row.get("dimension", "")).strip()
-            ident = str(row.get("identifier", "")).strip()
-            if dim:
-                mapping.setdefault(dim, []).append(ident)
-    except Exception as exc:
-        print(f"⚠️ dimension_mapping parse error: {exc}")
-    return {"mapping": mapping}
+
+@router.post("/dimension_mapping")
+async def dimension_mapping(req: DimensionMappingRequest):
+    """Return dimension to identifier mapping from Redis or MongoDB."""
+    payload = req.dict()
+    print(f"🛰️ dimension_mapping payload: {payload}")
+    client = req.client_name
+    app = req.app_name
+    project = req.project_name
+    key = f"{client}/{app}/{project}/column_classifier_config"
+    print(f"🔑 config key {key}")
+    cached = redis_client.get(key)
+    if cached:
+        print("✅ found cached config")
+        try:
+            cfg = json.loads(cached)
+            dims = cfg.get("dimensions")
+            if isinstance(dims, dict):
+                return {"mapping": dims, "config": cfg}
+        except Exception as exc:
+            print(f"⚠️ dimension_mapping redis parse error: {exc}")
+    else:
+        print("🔍 config not in redis")
+
+    mongo_cfg = get_classifier_config_from_mongo(client, app, project)
+    if mongo_cfg and mongo_cfg.get("dimensions"):
+        print("📦 loaded mapping from MongoDB")
+        redis_client.setex(key, 3600, json.dumps(mongo_cfg, default=str))
+        return {"mapping": mongo_cfg["dimensions"], "config": mongo_cfg}
+
+    raise HTTPException(status_code=404, detail="Mapping not found")
 
 
 @router.get("/sku_stats")
@@ -389,7 +404,6 @@ async def feature_overview_uniquecountendpoint(
     ),
 ):
     try:
-
         dimensions = await fetch_dimensions_dict(
             validator_atom_id, file_key, validator_collection
         )
@@ -451,7 +465,6 @@ async def feature_overview_summaryendpoint(
     ),
 ):
     try:
-
         dimensions = await fetch_dimensions_dict(
             validator_atom_id, file_key, validator_collection
         )

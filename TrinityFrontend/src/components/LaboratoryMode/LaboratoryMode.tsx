@@ -12,6 +12,8 @@ import FloatingNavigationList from './components/FloatingNavigationList';
 import { useExhibitionStore } from '@/components/ExhibitionMode/store/exhibitionStore';
 import { REGISTRY_API, LAB_ACTIONS_API } from '@/lib/api';
 import { useLaboratoryStore } from './store/laboratoryStore';
+import { useAuth } from '@/contexts/AuthContext';
+import { addNavigationItem, logSessionState } from '@/lib/session';
 
 const LaboratoryMode = () => {
   const [selectedAtomId, setSelectedAtomId] = useState<string>();
@@ -23,6 +25,7 @@ const LaboratoryMode = () => {
   const { toast } = useToast();
   const { cards, setCards } = useExhibitionStore();
   const setLabCards = useLaboratoryStore(state => state.setCards);
+  const { user } = useAuth();
 
   const handleUndo = async () => {
     const current = localStorage.getItem('current-project');
@@ -120,6 +123,17 @@ const LaboratoryMode = () => {
         description: `Laboratory configuration saved successfully. ${exhibitedCards.length} card(s) marked for exhibition.`,
       });
       setError(null);
+      const allAtoms = cards.flatMap(card =>
+        card.atoms.map(atom => ({
+          id: atom.id,
+          title: atom.title,
+          category: atom.category,
+          color: atom.color,
+          cardId: card.id,
+        }))
+      );
+      addNavigationItem(user?.id, { atom: 'laboratory-save', atoms: allAtoms });
+      logSessionState(user?.id);
     } catch (error) {
       console.error('Save error:', error);
       setError('Failed to save configuration. Please try again.');

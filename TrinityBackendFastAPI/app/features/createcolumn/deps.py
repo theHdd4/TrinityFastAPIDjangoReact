@@ -77,6 +77,12 @@ async def fetch_measures_list(
     file_key: str,
     collection: AsyncIOMotorCollection
 ) -> list:
+    # Try Redis first
+    cfg = redis_classifier_config()
+    if cfg and isinstance(cfg.get("identifiers"), list) and isinstance(cfg.get("measures"), list):
+        return cfg["identifiers"], cfg["measures"]
+
+    # Fallback to MongoDB
     document = await collection.find_one({
         "validator_atom_id": validator_atom_id,
         "file_key": file_key
@@ -96,7 +102,8 @@ async def get_create_settings_collection():
 
 # Redis configuration from environment variables
 REDIS_HOST = os.getenv("REDIS_HOST", "redis")
-redis_client = redis.Redis(host=REDIS_HOST, port=6379, decode_responses=False)
+# decode_responses=True to get str directly
+redis_client = redis.Redis(host=REDIS_HOST, port=6379, decode_responses=True)
 
 
 import os
@@ -104,3 +111,24 @@ CLIENT_NAME = os.getenv("CLIENT_NAME", "default_client")
 APP_NAME = os.getenv("APP_NAME", "default_app")
 PROJECT_NAME = os.getenv("PROJECT_NAME", "default_project")
 OBJECT_PREFIX = f"{CLIENT_NAME}/{APP_NAME}/{PROJECT_NAME}/"
+
+# -------------------------------------------------
+# Helper: fetch identifiers/measures from Redis first
+# -------------------------------------------------
+
+def redis_classifier_config() -> dict | None:
+    """Retrieve and decode the column-classifier-config JSON from Redis.
+
+    Returns parsed dict or None if key missing/invalid.
+    """
+    key = f"{OBJECT_PREFIX}column_classifier_config"
+    try:
+        data_str = redis_client.get(key)
+        if not data_str:
+            return None
+        import json
+        cfg = json.loads(data_str)
+        return cfg if isinstance(cfg, dict) else None
+    except Exception as err:
+        print(f"⚠️ redis_classifier_config error: {err}")
+        return None

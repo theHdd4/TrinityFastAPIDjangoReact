@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Card } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { VALIDATE_API, FEATURE_OVERVIEW_API, GROUPBY_API } from '@/lib/api';
+import { fetchDimensionMapping } from '@/lib/dimensions';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 
 interface Props {
@@ -23,6 +24,10 @@ const GroupByInputFiles: React.FC<Props> = ({ atomId }) => {
   const [frames, setFrames] = useState<Frame[]>([]);
   const [columns, setColumns] = useState<ColumnInfo[]>(Array.isArray(settings.allColumns) ? settings.allColumns.filter(Boolean) : []);
   const [identifiers, setIdentifiers] = useState<string[]>(settings.identifiers || []);
+  const [identifiersLoaded, setIdentifiersLoaded] = useState(false);
+  const [mappingResolved, setMappingResolved] = useState(false);
+  const [catColumns, setCatColumns] = useState<string[]>([]);
+  const [showCatSelector, setShowCatSelector] = useState(false);
   const [measures, setMeasures] = useState<string[]>(settings.measures || []);
 
   useEffect(() => {
@@ -59,8 +64,8 @@ const GroupByInputFiles: React.FC<Props> = ({ atomId }) => {
       setColumns(summary);
     }
     // Fetch identifiers/measures from backend
-    setIdentifiers([]);
-    setMeasures([]);
+    let fetchedIdentifiers: string[] = [];
+    let fetchedMeasures: string[] = [];
     try {
       const atom = useLaboratoryStore.getState().getAtom(atomId);
       const validator_atom_id = atom?.settings?.validator_atom_id || '';
@@ -74,16 +79,24 @@ const GroupByInputFiles: React.FC<Props> = ({ atomId }) => {
         const resp = await fetch(`${GROUPBY_API}/init`, { method: 'POST', body: formData });
         if (resp.ok) {
           const data = await resp.json();
-          setIdentifiers(data.identifiers || []);
-          setMeasures(data.measures || []);
+          fetchedIdentifiers = Array.isArray(data.identifiers) ? data.identifiers.filter(Boolean) : [];
+          fetchedMeasures = Array.isArray(data.measures) ? data.measures.filter(Boolean) : [];
+          setIdentifiers(fetchedIdentifiers);
+          setMeasures(fetchedMeasures);
         }
       }
     } catch (err) {
-      // fallback: do nothing
+      // ignore, fallback later
     }
+
+    // If backend provided nothing, keep previous state (empty arrays allowed)
+    const finalIdentifiers = fetchedIdentifiers.length ? fetchedIdentifiers : identifiers;
+    const finalMeasures = fetchedMeasures.length ? fetchedMeasures : measures;
+
     // Set selectedMeasures to a single measure config object by default
     let defaultSelectedMeasures = [];
-    const allMeasures = measures.length > 0 ? measures : summary.filter(c => c.data_type && (c.data_type.toLowerCase().includes('int') || c.data_type.toLowerCase().includes('float') || c.data_type.toLowerCase().includes('number'))).map(c => c.column);
+    const allMeasures = finalMeasures.length > 0 ? finalMeasures : summary.filter(c => c.data_type && (c.data_type.toLowerCase().includes('int') || c.data_type.toLowerCase().includes('float') || c.data_type.toLowerCase().includes('number'))).map(c => c.column);
+
     if (allMeasures.length > 0) {
       // Use the first available measure and default aggregator
       defaultSelectedMeasures = [{ field: allMeasures[0], aggregator: 'Sum' }];
@@ -91,8 +104,8 @@ const GroupByInputFiles: React.FC<Props> = ({ atomId }) => {
     updateSettings(atomId, {
       dataSource: val,
       allColumns: summary,
-      identifiers,
-      measures,
+      identifiers: finalIdentifiers,
+      measures: finalMeasures,
       selectedMeasures: defaultSelectedMeasures,
     });
   };
@@ -114,7 +127,7 @@ const GroupByInputFiles: React.FC<Props> = ({ atomId }) => {
           </SelectContent>
         </Select>
       </Card>
-      {identifiers.length > 0 && (
+      {false && identifiers.length > 0 && (
         <Card className="p-4 space-y-3 bg-gradient-to-br from-blue-50 to-blue-100">
           <div className="font-medium text-blue-700 mb-2">Identifiers (from classification)</div>
           <div className="flex flex-wrap gap-2">

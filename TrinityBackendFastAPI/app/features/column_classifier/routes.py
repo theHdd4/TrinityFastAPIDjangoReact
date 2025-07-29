@@ -19,15 +19,15 @@ from app.features.feature_overview.deps import redis_client
 # Change these lines at the top of routes.py:
 from app.features.column_classifier.database import (
     get_validator_atom_from_mongo,
-    save_classification_to_mongo,
-    get_classification_from_mongo,
     get_validator_from_memory_or_disk,
     save_business_dimensions_to_mongo,
-    update_business_dimensions_assignments_in_mongo,
-    get_business_dimensions_from_mongo,
     save_project_dimension_mapping,
+    save_classifier_config_to_mongo,
+    get_classifier_config_from_mongo,
+    get_project_dimension_mapping,
 )
 from app.features.column_classifier.config import settings
+from app.core.utils import get_env_vars
 
 
 from app.features.column_classifier.schemas import (
@@ -539,6 +539,8 @@ async def assign_identifiers_to_dimensions(
         user_id=user_id,
         client_id=client_id,
     )
+    map_key = f"project:{project_id}:dimensions"
+    redis_client.setex(map_key, 3600, json.dumps(assignments, default=str))
     in_memory_status = "skipped"
     message = "Identifiers assigned to project dimensions"
     validator_type = "project"
@@ -579,3 +581,99 @@ async def assign_identifiers_to_dimensions(
         in_memory_updated=in_memory_status,
         next_steps=NextStepsAssignment(view_complete_setup="", export_configuration=""),
     )
+
+
+class SaveConfigRequest(BaseModel):
+    project_id: int | None = None
+    client_name: str = ""
+    app_name: str = ""
+    project_name: str = ""
+    identifiers: List[str]
+    measures: List[str]
+    dimensions: Dict[str, List[str]]
+
+
+@router.post("/save_config")
+async def save_config(req: SaveConfigRequest):
+    """Save column classifier configuration to Redis and MongoDB."""
+    key = f"{req.client_name}/{req.app_name}/{req.project_name}/column_classifier_config"
+    env = await get_env_vars(
+        client_name=req.client_name,
+        app_name=req.app_name,
+        project_name=req.project_name,
+    )
+    print(f"🔧 save_config env {env}")
+    data = {
+        "project_id": req.project_id,
+        "client_name": req.client_name,
+        "app_name": req.app_name,
+        "project_name": req.project_name,
+        "identifiers": req.identifiers,
+        "measures": req.measures,
+        "dimensions": req.dimensions,
+        "env": env,
+    }
+    redis_client.setex(key, 3600, json.dumps(data, default=str))
+    if req.project_id:
+        map_key = f"project:{req.project_id}:dimensions"
+        redis_client.setex(map_key, 3600, json.dumps(req.dimensions, default=str))
+    mongo_result = save_classifier_config_to_mongo(data)
+    print(f"📦 mongo save result {mongo_result}")
+    return {"status": "success", "key": key, "data": data, "mongo": mongo_result}
+
+
+@router.get("/get_config")
+async def get_config(client_name: str, app_name: str, project_name: str):
+    """Retrieve saved column classifier configuration."""
+    key = f"{client_name}/{app_name}/{project_name}/column_classifier_config"
+    cached = redis_client.get(key)
+    if cached:
+        return {"status": "success", "source": "redis", "data": json.loads(cached)}
+
+    mongo_data = get_classifier_config_from_mongo(client_name, app_name, project_name)
+    if mongo_data:
+        redis_client.setex(key, 3600, json.dumps(mongo_data, default=str))
+        return {"status": "success", "source": "mongo", "data": mongo_data}
+
+    raise HTTPException(status_code=404, detail="Configuration not found")
+
+
+class CacheProjectRequest(BaseModel):
+    client_name: str
+    app_name: str = ""
+    project_name: str
+    project_id: int
+
+
+@router.post("/cache_project")
+async def cache_project(req: CacheProjectRequest):
+    """Load project environment and classifier data into Redis."""
+    env = await get_env_vars(
+        client_name=req.client_name,
+        app_name=req.app_name,
+        project_name=req.project_name,
+    )
+    env_key = f"env:{req.client_name}:{req.app_name}:{req.project_name}"
+    redis_client.setex(env_key, 3600, json.dumps(env, default=str))
+
+    cfg = get_classifier_config_from_mongo(
+        req.client_name, req.app_name, req.project_name
+    )
+    if cfg:
+        cfg_key = (
+            f"{req.client_name}/{req.app_name}/{req.project_name}/"
+            "column_classifier_config"
+        )
+        redis_client.setex(cfg_key, 3600, json.dumps(cfg, default=str))
+
+    mapping = get_project_dimension_mapping(req.project_id)
+    if mapping and mapping.get("assignments"):
+        map_key = f"project:{req.project_id}:dimensions"
+        redis_client.setex(map_key, 3600, json.dumps(mapping["assignments"], default=str))
+
+    return {
+        "status": "cached",
+        "env_cached": bool(env),
+        "config_cached": bool(cfg),
+        "mapping_cached": bool(mapping),
+    }

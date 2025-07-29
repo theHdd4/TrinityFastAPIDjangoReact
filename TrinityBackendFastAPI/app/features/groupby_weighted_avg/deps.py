@@ -22,6 +22,33 @@ APP_NAME = os.getenv("APP_NAME", "default_app")
 PROJECT_NAME = os.getenv("PROJECT_NAME", "default_project")
 OBJECT_PREFIX = f"{CLIENT_NAME}/{APP_NAME}/{PROJECT_NAME}/"
 
+# ------------------------
+# Redis configuration
+# ------------------------
+REDIS_HOST = os.getenv("REDIS_HOST", "redis")
+# decode_responses=True to get str directly
+redis_client = redis.Redis(host=REDIS_HOST, port=6379, decode_responses=True)
+
+# Helper: fetch column-classifier-config JSON from Redis
+
+def redis_classifier_config() -> dict | None:
+    """Retrieve and decode the column-classifier-config JSON from Redis.
+
+    Returns a parsed dict or None if key missing/invalid.
+    """
+    key = f"{OBJECT_PREFIX}column_classifier_config"
+    try:
+        data_str = redis_client.get(key)
+        print(f"🔍 redis_classifier_config GET {key} => {'hit' if data_str else 'miss'}")
+        if not data_str:
+            return None
+        import json
+        cfg = json.loads(data_str)
+        return cfg if isinstance(cfg, dict) else None
+    except Exception as err:
+        print(f"⚠️ redis_classifier_config error: {err}")
+        return None
+
 minio_client = Minio(
     MINIO_ENDPOINT,
     access_key=MINIO_ACCESS_KEY,
@@ -75,12 +102,18 @@ async def get_column_classifications_collection() -> AsyncIOMotorCollection:
 async def fetch_measures_list(
     validator_atom_id: str,
     file_key: str,
-    collection: AsyncIOMotorCollection
+    collection: AsyncIOMotorCollection,
 ) -> list:
-    document = await collection.find_one({
-        "validator_atom_id": validator_atom_id,
-        "file_key": file_key
-    })
+    """Return measures list, preferring Redis classifier config, then MongoDB."""
+    cfg = redis_classifier_config()
+    if cfg and isinstance(cfg.get("measures"), list):
+        print("🔵 fetch_measures_list: returning measures from Redis", cfg.get("measures"))
+        return cfg["measures"]
+
+    # Fallback to MongoDB
+    document = await collection.find_one(
+        {"validator_atom_id": validator_atom_id, "file_key": file_key}
+    )
     if not document or "final_classification" not in document:
         raise HTTPException(status_code=404, detail="Final classification not found in MongoDB")
     measures = document["final_classification"].get("measures", [])
@@ -89,16 +122,27 @@ async def fetch_measures_list(
 async def fetch_identifiers_and_measures(
     validator_atom_id: str,
     file_key: str,
-    collection: AsyncIOMotorCollection
+    collection: AsyncIOMotorCollection,
 ) -> Tuple[list, list]:
-    document = await collection.find_one({
-        "validator_atom_id": validator_atom_id,
-        "file_key": file_key
-    })
-    if not document or "final_classification" not in document:
-        raise HTTPException(status_code=404, detail="Final classification not found in MongoDB")
-    identifiers = document["final_classification"].get("identifiers", [])
-    measures = document["final_classification"].get("measures", [])
+    """Return identifiers and measures with Redis-first logic and basic filtering."""
+    cfg = redis_classifier_config()
+    if cfg and isinstance(cfg.get("identifiers"), list) and isinstance(cfg.get("measures"), list):
+        print("🔵 fetch_identifiers_and_measures: using Redis data", cfg)
+        identifiers = cfg["identifiers"]
+        measures = cfg["measures"]
+    else:
+        document = await collection.find_one(
+            {"validator_atom_id": validator_atom_id, "file_key": file_key}
+        )
+        if not document or "final_classification" not in document:
+            raise HTTPException(status_code=404, detail="Final classification not found in MongoDB")
+        identifiers = document["final_classification"].get("identifiers", [])
+        measures = document["final_classification"].get("measures", [])
+
+    # Filter out common time-related identifiers
+    time_keywords = {"date", "time", "month", "months", "week", "weeks", "year"}
+    identifiers = [i for i in identifiers if i and i.lower() not in time_keywords]
+
     return identifiers, measures
 
 async def fetch_dimensions_dict(

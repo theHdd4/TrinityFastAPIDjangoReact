@@ -11,6 +11,8 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { useLaboratoryStore, DEFAULT_DATAUPLOAD_SETTINGS, DataUploadSettings } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { VALIDATE_API } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
+import { useAuth } from '@/contexts/AuthContext';
+import { logSessionState, updateSessionState, addNavigationItem } from '@/lib/session';
 import UploadSection from './components/upload/UploadSection';
 import RequiredFilesSection from './components/required-files/RequiredFilesSection';
 
@@ -24,6 +26,7 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
   const settings: DataUploadSettings = atom?.settings || { ...DEFAULT_DATAUPLOAD_SETTINGS };
 
   const { toast } = useToast();
+  const { user } = useAuth();
 
   const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
   const [isDragOver, setIsDragOver] = useState(false);
@@ -45,9 +48,25 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
     setUploadedFiles((prev) => [...prev, ...files]);
     updateSettings(atomId, {
       uploadedFiles: [...(settings.uploadedFiles || []), ...files.map((f) => f.name)],
-      fileMappings: { ...fileAssignments, ...Object.fromEntries(files.map(f => [f.name, settings.requiredFiles?.[0] || ''])) }
+      fileMappings: {
+        ...fileAssignments,
+        ...Object.fromEntries(
+          files.map(f => [
+            f.name,
+            settings.bypassMasterUpload ? f.name : settings.requiredFiles?.[0] || ''
+          ])
+        )
+      }
     });
-    setFileAssignments(prev => ({ ...prev, ...Object.fromEntries(files.map(f => [f.name, settings.requiredFiles?.[0] || ''])) }));
+    setFileAssignments(prev => ({
+      ...prev,
+      ...Object.fromEntries(
+        files.map(f => [
+          f.name,
+          settings.bypassMasterUpload ? f.name : settings.requiredFiles?.[0] || ''
+        ])
+      )
+    }));
   };
 
   const handleDrop = (e: React.DragEvent) => {
@@ -260,6 +279,9 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
 
       setValidationResults(results);
       setValidationDetails(details);
+      logSessionState(user?.id);
+    } else {
+      logSessionState(user?.id);
     }
   };
 
@@ -340,6 +362,7 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
       const data = await res.json();
       if (data.environment) {
         console.log('Fetched env vars', data.environment);
+        updateSessionState(user?.id, { envvars: data.environment });
       }
       if (data.prefix) {
         console.log('Saving to MinIO prefix', data.prefix);
@@ -368,8 +391,15 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
       } else {
         toast({ title: 'Dataframes Saved Successfully' });
       }
+      addNavigationItem(user?.id, {
+        atom: 'data-upload-validate',
+        files: uploadedFiles.map(f => f.name),
+        settings
+      });
+      logSessionState(user?.id);
     } else {
       toast({ title: 'Unable to Save Dataframes', variant: 'destructive' });
+      logSessionState(user?.id);
     }
   };
 
@@ -434,8 +464,10 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
     );
   };
 
-  const allValid = Object.values(validationResults).length > 0 &&
-    Object.values(validationResults).every(v => v.includes('Success'));
+  const allValid = settings.bypassMasterUpload || (
+    Object.values(validationResults).length > 0 &&
+    Object.values(validationResults).every(v => v.includes('Success'))
+  );
 
   return (
     <div className="w-full h-full bg-gradient-to-br from-slate-50 to-blue-50 rounded-xl border border-gray-200 shadow-xl overflow-hidden flex">
@@ -471,11 +503,12 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
                 onValidateFiles={handleValidateFiles}
                 onSaveDataFrames={handleSaveDataFrames}
                 saveEnabled={allValid}
+                disableValidation={settings.bypassMasterUpload}
                 isDragOver={isDragOver}
                 requiredOptions={settings.requiredFiles || []}
                 onDeleteFile={handleDeleteFile}
                 saveStatus={saveStatus}
-                disabled={(settings.requiredFiles || []).length === 0}
+                disabled={!settings.bypassMasterUpload && (settings.requiredFiles || []).length === 0}
               />
             </div>
 
@@ -491,6 +524,7 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
                 openFile={openFile}
                 setOpenFile={setOpenFile}
                 getStatusIcon={getStatusIcon}
+                bypassMasterUpload={settings.bypassMasterUpload}
               />
             </div>
           </div>
