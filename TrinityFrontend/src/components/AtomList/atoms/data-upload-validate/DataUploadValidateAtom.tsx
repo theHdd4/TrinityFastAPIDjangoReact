@@ -286,7 +286,7 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
   };
 
   const handleSaveDataFrames = async () => {
-    if (!settings.validatorId) return;
+    if (!settings.validatorId && !settings.bypassMasterUpload) return;
     console.log('🔧 Running save dataframes util');
     try {
       let query = '';
@@ -331,7 +331,8 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
       /* ignore */
     }
     const form = new FormData();
-    form.append('validator_atom_id', settings.validatorId);
+    const vidSave = settings.validatorId || 'bypass_upload';
+    form.append('validator_atom_id', vidSave);
     const envStr = localStorage.getItem('env');
     if (envStr) {
       try {
