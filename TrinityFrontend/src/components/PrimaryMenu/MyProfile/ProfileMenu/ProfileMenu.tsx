@@ -18,7 +18,7 @@ import ProfileInformationItem from './components/ProfileInformationItem';
 
 const ProfileMenu: React.FC = () => {
   const { logout, user, profile } = useAuth();
-  const canManage = user?.role === 'admin';
+  const canManage = user?.role === 'admin' || user?.is_staff;
   const navigate = useNavigate();
 
   const handleLogout = () => {
