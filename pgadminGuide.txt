@@ -23,14 +23,17 @@ features imported from FastAPI.
    - **Username:** `trinity_user`
    - **Password:** `trinity_pass`
 
-4. After connecting expand:
+4. After connecting expand the **public** schema:
 
    `Servers → Trinity Postgres → Databases → trinity_db → Schemas → public → Tables`
 
    You should see the tables `atoms_atom`, `atoms_atomcategory` and
    `atoms_atomversion`.
 
-5. Right–click `atoms_atom` and choose **View/Edit Data → All Rows** to inspect
-   the imported atoms. Each row corresponds to a feature folder inside
+5. Also expand your tenant schema, e.g. `acme_corp_schema`, under
+   `Schemas` and confirm the same three tables exist there as well.
+
+6. Right–click `atoms_atom` in either schema and choose **View/Edit Data → All Rows**
+   to inspect the imported atoms. Each row corresponds to a feature folder inside
    `TrinityBackendFastAPI/app/features`.
 

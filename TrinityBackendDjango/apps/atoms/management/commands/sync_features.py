@@ -3,6 +3,7 @@ from django.core.management import call_command
 from django.conf import settings
 from django.db import connection
 from django.db.utils import OperationalError, ProgrammingError
+from django_tenants.utils import get_tenant_model, schema_context
 from apps.atoms.models import Atom, AtomCategory, AtomVersion
 from pathlib import Path
 import datetime
@@ -18,13 +19,16 @@ class Command(BaseCommand):
         except Exception:
             pass
 
-        # Automatically create the atoms tables in the public schema if they
-        # do not exist yet. This helps first-time setups where migrations have
-        # not been applied.
+        # Ensure the atoms tables exist in the public schema. If not, run the
+        # shared migrations which create tables for all shared apps including
+        # ``apps.atoms``.
         try:
-            Atom.objects.exists()
+            with schema_context("public"):
+                Atom.objects.exists()
         except (ProgrammingError, OperationalError):
-            self.stdout.write("Atom tables missing. Running shared migrations…")
+            self.stdout.write(
+                "Atom tables missing in public schema. Running shared migrations…"
+            )
             call_command(
                 "migrate_schemas",
                 "--shared",
@@ -32,16 +36,36 @@ class Command(BaseCommand):
                 verbosity=0,
             )
 
-        # BASE_DIR points to the Django project directory. The FastAPI backend
-        # lives one level up inside ``TrinityBackendFastAPI``.  Build the path
-        # in a way that works for both local development and the Docker
-        # container layout.
+        # Verify each tenant schema also has the atoms tables, running
+        # migrations for any that are missing them.
+        TenantModel = get_tenant_model()
+        for tenant in TenantModel.objects.all():
+            try:
+                with schema_context(tenant.schema_name):
+                    Atom.objects.exists()
+            except (ProgrammingError, OperationalError):
+                self.stdout.write(
+                    f"Atom tables missing in {tenant.schema_name}. Running migrations…"
+                )
+                call_command(
+                    "migrate_schemas",
+                    "--schema",
+                    tenant.schema_name,
+                    interactive=False,
+                    verbosity=0,
+                )
+
+        # BASE_DIR may be ``/code`` inside Docker or the project directory when
+        # running locally. The FastAPI features folder sits alongside the Django
+        # backend.  Try both locations so the command works in either context.
+        base = Path(settings.BASE_DIR)
         features_path = (
-            Path(settings.BASE_DIR).parent
-            / "TrinityBackendFastAPI"
-            / "app"
-            / "features"
+            base / "TrinityBackendFastAPI" / "app" / "features"
         )
+        if not features_path.exists():
+            features_path = (
+                base.parent / "TrinityBackendFastAPI" / "app" / "features"
+            )
         if not features_path.exists():
             self.stderr.write(f"Features directory not found: {features_path}")
             return
