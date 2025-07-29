@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from '@/components/ui/chart';
 import { LineChart, Line, BarChart, Bar, AreaChart, Area, PieChart, Pie, Cell, ScatterChart, Scatter, XAxis, YAxis, CartesianGrid, ResponsiveContainer, Legend } from 'recharts';
-import { BarChart3, TrendingUp, BarChart2, Triangle, Zap, Maximize2, ChevronDown, ChevronLeft, ChevronRight, Filter, X, LineChart as LineChartIcon } from 'lucide-react';
+import { BarChart3, TrendingUp, BarChart2, Triangle, Zap, Maximize2, ChevronDown, ChevronLeft, ChevronRight, Filter, X, LineChart as LineChartIcon, PieChart as PieChartIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -101,7 +101,7 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
     line: TrendingUp,
     bar: BarChart2,
     area: Triangle,
-    pie: BarChart3,
+    pie: PieChartIcon,
     scatter: Zap
   };
 
@@ -355,7 +355,7 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
     switch (chartType) {
       case 'line':
         return (
-          <ChartContainer key={key} config={config} className={`${chartHeight} w-full`}>
+          <ChartContainer key={key} config={config} className={`chart-container ${chartHeight} w-full`}>
             <LineChart 
               data={chartData} 
               margin={{ top: 20, right: 30, left: 20, bottom: 20 }}
@@ -514,7 +514,7 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
           : chartData;
           
         return (
-          <ChartContainer key={key} config={config} className={`${chartHeight} w-full`}>
+          <ChartContainer key={key} config={config} className={`chart-container ${chartHeight} w-full`}>
             <BarChart 
               data={processedBarData} 
               margin={{ top: 20, right: 30, left: 20, bottom: 20 }}
@@ -685,7 +685,7 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
         );
       case 'area':
         return (
-          <ChartContainer key={key} config={config} className={`${chartHeight} w-full`}>
+          <ChartContainer key={key} config={config} className={`chart-container ${chartHeight} w-full`}>
             <AreaChart 
               data={chartData} 
               margin={{ top: 20, right: 30, left: 20, bottom: 20 }}
@@ -827,7 +827,7 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
         );
       case 'scatter':
         return (
-          <ChartContainer key={key} config={config} className={`${chartHeight} w-full`}>
+          <ChartContainer key={key} config={config} className={`chart-container ${chartHeight} w-full`}>
             <ScatterChart 
               data={chartData} 
               margin={{ top: 20, right: 30, left: 20, bottom: 20 }}
@@ -977,7 +977,7 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
         ];
 
         return (
-          <ChartContainer key={key} config={config} className={`${chartHeight} w-full`}>
+          <ChartContainer key={key} config={config} className={`chart-container ${chartHeight} w-full`}>
             <PieChart
               onClick={() => {
                 // Clear trace emphasis when clicking on chart background
@@ -1106,7 +1106,7 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
             return (
                    <Card 
                      key={chart.id} 
-                     className="border-0 shadow-xl bg-white/95 backdrop-blur-sm overflow-hidden transform hover:scale-[1.02] transition-all duration-300 relative flex flex-col h-full group hover:shadow-2xl"
+                     className="chart-card border-0 shadow-xl bg-white/95 backdrop-blur-sm overflow-hidden transform hover:scale-[1.02] transition-all duration-300 relative flex flex-col h-full group hover:shadow-2xl"
                      onContextMenu={e => {
                        e.preventDefault(); // Disable right-click context menu
                        e.stopPropagation();
@@ -1575,7 +1575,7 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
 
       {/* Fullscreen Modal */}
       <Dialog open={!!fullscreenChart} onOpenChange={() => setFullscreenChart(null)}>
-        <DialogContent className="max-w-6xl h-[80vh] p-6">
+        <DialogContent className="chart-container max-w-6xl h-[80vh] p-6">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <BarChart3 className="w-5 h-5" />

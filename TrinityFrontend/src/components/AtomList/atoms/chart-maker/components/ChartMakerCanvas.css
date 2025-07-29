@@ -258,3 +258,22 @@
     transition: none;
   }
 }
+
+/* Prevent text selection in charts */
+.chart-container,
+.chart-canvas,
+.recharts-wrapper,
+.recharts-surface {
+  user-select: none;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+}
+
+/* Prevent text selection on chart cards */
+.chart-card {
+  user-select: none;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+}

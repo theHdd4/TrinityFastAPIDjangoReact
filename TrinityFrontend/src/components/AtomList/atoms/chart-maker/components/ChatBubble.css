@@ -18,6 +18,10 @@
   transform: translateX(-50%);
   width: fit-content;
   min-width: 0;
+  user-select: none;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
 }
 
 .chat-bubble.animating-out {

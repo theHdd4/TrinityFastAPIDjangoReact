@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { BarChart3, TrendingUp, BarChart2, Triangle, Zap } from 'lucide-react';
+import { BarChart3, TrendingUp, PieChart, Triangle, Zap } from 'lucide-react';
 import './ChatBubble.css';
 
 interface ChatBubbleProps {
@@ -25,7 +25,7 @@ const ChatBubble: React.FC<ChatBubbleProps> = ({
     { icon: <TrendingUp />, label: 'line', displayName: 'Line' },
     { icon: <Triangle />, label: 'area', displayName: 'Area' },
     { icon: <Zap />, label: 'scatter', displayName: 'Scatter' },
-    { icon: <BarChart2 />, label: 'pie', displayName: 'Pie' },
+    { icon: <PieChart />, label: 'pie', displayName: 'Pie' },
   ];
 
   useEffect(() => {
