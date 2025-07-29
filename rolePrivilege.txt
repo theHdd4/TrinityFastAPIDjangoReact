@@ -1,0 +1,27 @@
+# User Roles and Privileges
+
+This project uses role-based access control via the `UserRole` model. Each user can have one or more roles tied to a specific client/tenant. Below is a summary of the built-in roles and what they allow:
+
+## Super Admin
+- Full access across all tenants
+- Can manage users, clients, projects and system configuration
+- Can view and edit any data
+
+## Admin
+- Same capabilities as Super Admin but scoped to a single tenant
+- Manage users and domains for their tenant
+- Requires `is_staff` for Django admin access
+
+## Staff
+- Django staff status gives access to administrative interfaces
+- Staff users can manage configuration and registry items
+
+## Editor
+- Can modify content and run apps within their assigned tenant
+- Cannot manage users or tenants
+
+## Viewer
+- Read-only access to view datasets and results
+- Cannot modify data or settings
+
+These defaults can be customized by editing the `RoleDefinition` and `UserRole` models.
