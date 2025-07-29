@@ -108,6 +108,13 @@ def main():
     call_command("migrate_schemas", "--schema", tenant_schema, interactive=False, verbosity=1)
     print("   ✅ Tenant-schema migrations complete.\n")
 
+    # Load atom catalogue from FastAPI features
+    try:
+        call_command("sync_features")
+        print("   ✅ Atom catalogue synced from features folder")
+    except Exception as exc:
+        print(f"   ⚠️  Failed to sync atoms: {exc}")
+
     # Seed default App templates if none exist
     from apps.registry.models import App
     from django_tenants.utils import schema_context

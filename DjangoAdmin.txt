@@ -51,6 +51,13 @@ Trinity Administrator Guide
    docker compose exec web python manage.py collectstatic --noinput
    ```
 
+   Finally import the available FastAPI atoms so they appear under
+   **Atoms → Atom** in the admin interface:
+
+   ```bash
+   docker compose exec web python manage.py sync_features
+   ```
+
 4. **Managing tenants**
    The admin interface exposes models for Users, Roles and Tenants. When adding
    extra domains be sure to update `ADDITIONAL_DOMAINS` and `CSRF_TRUSTED_ORIGINS`
