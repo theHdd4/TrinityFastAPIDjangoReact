@@ -16,12 +16,16 @@ class Command(BaseCommand):
         except Exception:
             pass
 
-        # When running under Docker the Django project is copied into /code
-        # and the FastAPI backend sits inside the same folder. BASE_DIR points
-        # at /code so using `.parent` would incorrectly resolve to '/'. Use
-        # BASE_DIR directly to reliably locate the features directory in both
-        # local and container environments.
-        features_path = Path(settings.BASE_DIR) / "TrinityBackendFastAPI" / "app" / "features"
+        # BASE_DIR points to the Django project directory. The FastAPI backend
+        # lives one level up inside ``TrinityBackendFastAPI``.  Build the path
+        # in a way that works for both local development and the Docker
+        # container layout.
+        features_path = (
+            Path(settings.BASE_DIR).parent
+            / "TrinityBackendFastAPI"
+            / "app"
+            / "features"
+        )
         if not features_path.exists():
             self.stderr.write(f"Features directory not found: {features_path}")
             return
