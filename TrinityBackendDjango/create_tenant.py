@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import os
+import uuid
 import django
 from django.core.management import call_command
 from django.db import transaction, connection
@@ -11,8 +12,8 @@ django.setup()
 from apps.tenants.models import Tenant, Domain
 
 def main():
-    tenant_name = "quant_matrix_ai"
-    tenant_schema = "quant_matrix_ai_schema"
+    tenant_name = "Quant_Matrix_AI"
+    tenant_schema = "Quant_Matrix_AI_Schema"
     # Map localhost requests to the default tenant unless overridden
     primary_domain = os.getenv("PRIMARY_DOMAIN", "localhost")
 
@@ -26,21 +27,21 @@ def main():
     call_command("migrate_schemas", "--shared", interactive=False, verbosity=1)
     print("   ✅ Shared migrations complete.\n")
 
-    # Create an initial admin user for testing login if it doesn't exist
+    # Create the default super admin user for testing login if it doesn't exist
     from django.contrib.auth import get_user_model
     User = get_user_model()
-    if not User.objects.filter(username="admin_user").exists():
+    if not User.objects.filter(username="neo").exists():
         User.objects.create_superuser(
-            username="admin_user", password="admin", email=""
+            username="neo", password="neo_the_one", email=""
         )
-        print("→ 1b) Created default admin 'admin_user' with password 'admin'")
+        print("→ 1b) Created default super admin 'neo' with password 'neo_the_one'")
     else:
-        print("→ 1b) Default admin 'admin_user' already exists")
+        print("→ 1b) Default super admin 'neo' already exists")
 
     # Create additional users for each role
     role_users = [
-        ("admin_user", "admin", "admin"),
         ("neo", "neo_the_one", "super_admin"),
+        ("admin_user", "admin", "admin"),
         ("editor_user", "editor", "editor"),
         ("viewer_user", "viewer", "viewer"),
     ]
@@ -72,6 +73,8 @@ def main():
             print(f"   → Created Domain: {domain_obj}")
         else:
             print(f"   → Domain already existed: {domain_obj}")
+
+        tenant_client_id = uuid.uuid5(uuid.NAMESPACE_DNS, tenant_schema)
 
         # Additional localhost aliases for convenience
         for extra in ("localhost", "127.0.0.1"):
@@ -141,12 +144,12 @@ def main():
 
         # Assign roles to the default users within this tenant
         from apps.roles.models import UserRole
-        import uuid
         for username, _, role in role_users:
             user = User.objects.get(username=username)
+            client_uuid = tenant_client_id if username == "admin_user" else uuid.uuid4()
             UserRole.objects.get_or_create(
                 user=user,
-                client_id=uuid.uuid4(),
+                client_id=client_uuid,
                 app_id=uuid.uuid4(),
                 project_id=uuid.uuid4(),
                 role=role,
