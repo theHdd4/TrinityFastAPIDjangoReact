@@ -107,3 +107,7 @@ TrinityAI/Agent_fetch_atom/models/
 arrow_data/
 cloudflared/tunnelCreds/credentials.json
 cloudflared/tunnelCreds/cert.pem
+
+
+
+.yml
