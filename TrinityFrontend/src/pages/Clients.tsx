@@ -28,6 +28,8 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { TENANTS_API, REGISTRY_API } from '@/lib/api';
+import { useAuth } from '@/contexts/AuthContext';
+import NotFound from './NotFound';
 console.log('TENANTS_API', TENANTS_API);
 console.log('REGISTRY_API', REGISTRY_API);
 
@@ -45,6 +47,17 @@ interface App {
 }
 
 const Clients = () => {
+  const { user } = useAuth();
+  const role = user?.role?.toLowerCase();
+  const hasAccess =
+    role === 'admin' ||
+    role === 'super_admin' ||
+    user?.is_staff ||
+    user?.is_superuser;
+
+  if (!hasAccess) {
+    return <NotFound />;
+  }
   const [tenants, setTenants] = useState<Tenant[]>([]);
   const [apps, setApps] = useState<App[]>([]);
   const [searchTerm, setSearchTerm] = useState('');

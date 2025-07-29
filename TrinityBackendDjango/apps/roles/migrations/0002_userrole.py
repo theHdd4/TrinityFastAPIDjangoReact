@@ -35,6 +35,7 @@ class Migration(migrations.Migration):
                             ("admin", "Admin"),
                             ("editor", "Editor"),
                             ("viewer", "Viewer"),
+                            ("super_admin", "Super Admin"),
                         ],
                         max_length=20,
                     ),
