@@ -48,7 +48,6 @@ const Users = () => {
   const role = user?.role?.toLowerCase();
   const hasAccess =
     role === 'admin' ||
-    role === 'architect' ||
     user?.is_staff ||
     user?.is_superuser;
 

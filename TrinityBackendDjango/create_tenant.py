@@ -39,7 +39,7 @@ def main():
 
     # Create additional users for each role
     role_users = [
-        ("architect_user", "architect", "admin"),
+        ("harsha", "harsha", "admin"),
         ("editor_user", "editor", "editor"),
         ("viewer_user", "viewer", "viewer"),
     ]

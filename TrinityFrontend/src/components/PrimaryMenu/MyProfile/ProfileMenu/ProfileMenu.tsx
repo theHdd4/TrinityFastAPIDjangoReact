@@ -21,7 +21,6 @@ const ProfileMenu: React.FC = () => {
   const role = user?.role?.toLowerCase();
   const canManage =
     role === 'admin' ||
-    role === 'architect' ||
     user?.is_staff ||
     user?.is_superuser;
   const navigate = useNavigate();
