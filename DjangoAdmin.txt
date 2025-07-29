@@ -1,5 +1,5 @@
-Trinity Django Admin Guide
-=========================
+Trinity Administrator Guide
+==========================
 
 1. **Start the backend services**
    From the repository root run:
@@ -33,7 +33,7 @@ Trinity Django Admin Guide
    - `editor_user` / `editor`
    - `viewer_user` / `viewer`
 
-3. **Log in to Django Admin**
+3. **Log in to the Trinity Administrator**
    Visit `http://<HOST_IP>:8000/admin/` in your browser and sign in with one
    of the credentials above. Use `harsha` for full superuser access. The role‑based
    accounts demonstrate the Architect, Editor and Viewer permissions.

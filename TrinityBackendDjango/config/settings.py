@@ -105,13 +105,13 @@ SHARED_APPS = [
     "rest_framework",
     "guardian",
     "simple_history",
+    "apps.atoms",                 # share atom catalogue globally
 ]
 
 TENANT_APPS = [
     "apps.registry",
     "apps.subscriptions",
     "apps.workflows",
-    "apps.atoms",
     "apps.atom_configs",
     "apps.config_store",
     "apps.permissions",
