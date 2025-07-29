@@ -1,8 +1,0 @@
-# Configuration for the development Cloudflare tunnel.
-tunnel: 6351c8dd-2df0-4cc5-8799-6e95e1afc103
-credentials-file: /etc/cloudflared/6351c8dd-2df0-4cc5-8799-6e95e1afc103.json
-
-ingress:
-  - hostname: trinity-dev.quantmatrixai.com
-    service: http://traefik:80
-  - service: http_status:404
