@@ -37,6 +37,19 @@ def main():
     else:
         print("→ 1b) Default admin 'harsha' already exists")
 
+    # Create additional users for each role
+    role_users = [
+        ("architect_user", "architect", "admin"),
+        ("editor_user", "editor", "editor"),
+        ("viewer_user", "viewer", "viewer"),
+    ]
+    for username, password, _ in role_users:
+        if not User.objects.filter(username=username).exists():
+            User.objects.create_user(username=username, password=password)
+            print(f"→ 1c) Created user '{username}' with password '{password}'")
+        else:
+            print(f"→ 1c) User '{username}' already exists")
+
     with transaction.atomic():
         # 2a) Create (or get) the Tenant row in public
         tenant_obj, created = Tenant.objects.get_or_create(
@@ -95,6 +108,13 @@ def main():
     call_command("migrate_schemas", "--schema", tenant_schema, interactive=False, verbosity=1)
     print("   ✅ Tenant-schema migrations complete.\n")
 
+    # Load atom catalogue from FastAPI features
+    try:
+        call_command("sync_features")
+        print("   ✅ Atom catalogue synced from features folder")
+    except Exception as exc:
+        print(f"   ⚠️  Failed to sync atoms: {exc}")
+
     # Seed default App templates if none exist
     from apps.registry.models import App
     from django_tenants.utils import schema_context
@@ -117,6 +137,19 @@ def main():
                 print(f"   → Created App template '{name}'")
             else:
                 print(f"   → App template '{name}' already exists")
+
+        # Assign roles to the default users within this tenant
+        from apps.roles.models import UserRole
+        import uuid
+        for username, _, role in role_users:
+            user = User.objects.get(username=username)
+            UserRole.objects.get_or_create(
+                user=user,
+                client_id=uuid.uuid4(),
+                app_id=uuid.uuid4(),
+                project_id=uuid.uuid4(),
+                role=role,
+            )
 
     print("All done! Tenant and all tables created.\n")
 

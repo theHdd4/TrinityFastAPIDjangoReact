@@ -26,6 +26,7 @@ const LaboratoryMode = () => {
   const { cards, setCards } = useExhibitionStore();
   const setLabCards = useLaboratoryStore(state => state.setCards);
   const { user } = useAuth();
+  const isViewer = user?.role === 'viewer';
 
   const handleUndo = async () => {
     const current = localStorage.getItem('current-project');
@@ -199,6 +200,7 @@ const LaboratoryMode = () => {
           </div>
           
           <div className="flex items-center space-x-3">
+            {!isViewer && (
             <Button
               variant="outline"
               size="sm"
@@ -208,6 +210,8 @@ const LaboratoryMode = () => {
               <Undo2 className="w-4 h-4 mr-2" />
               Undo
             </Button>
+            )}
+            {!isViewer && (
             <Button
               variant="outline"
               size="sm"
@@ -217,9 +221,10 @@ const LaboratoryMode = () => {
               <Save className="w-4 h-4 mr-2" />
               Save
             </Button>
-            <Button 
-              variant="outline" 
-              size="sm" 
+            )}
+            <Button
+              variant="outline"
+              size="sm"
               className="border-gray-200 hover:bg-gray-50 text-gray-700 font-medium"
               onClick={() => setShowFloatingNavigationList(!showFloatingNavigationList)}
             >
@@ -230,17 +235,21 @@ const LaboratoryMode = () => {
               <Share2 className="w-4 h-4 mr-2" />
               Share
             </Button>
+            {!isViewer && (
             <Button className="bg-gradient-to-r from-[#41C185] to-[#3ba876] hover:from-[#3ba876] to-[#339966] text-white shadow-lg font-medium">
               <Play className="w-4 h-4 mr-2" />
               Run Pipeline
             </Button>
+            )}
           </div>
         </div>
       </div>
 
       <div className="flex-1 flex overflow-hidden">
         {/* Atoms Sidebar */}
-        <AuxiliaryMenuLeft onAtomDragStart={handleAtomDragStart} />
+        {!isViewer && (
+          <AuxiliaryMenuLeft onAtomDragStart={handleAtomDragStart} />
+        )}
 
         {/* Main Canvas Area */}
         <div className="flex-1 p-6" onClick={() => {setSelectedAtomId(undefined); setSelectedCardId(undefined);}}>

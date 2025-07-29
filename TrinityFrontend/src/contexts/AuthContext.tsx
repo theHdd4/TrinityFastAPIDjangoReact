@@ -8,6 +8,7 @@ interface UserInfo {
   email: string;
   mfa_enabled: boolean;
   preferences: Record<string, unknown> | null;
+  role?: string;
 }
 
 interface ProfileInfo {
