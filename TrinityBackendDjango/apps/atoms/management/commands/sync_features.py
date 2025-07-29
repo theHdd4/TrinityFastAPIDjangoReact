@@ -1,5 +1,6 @@
 from django.core.management.base import BaseCommand
 from django.conf import settings
+from django.db import connection
 from apps.atoms.models import Atom, AtomCategory, AtomVersion
 from pathlib import Path
 import datetime
@@ -8,6 +9,13 @@ class Command(BaseCommand):
     help = "Sync Atom entries from FastAPI features directory"
 
     def handle(self, *args, **options):
+        # Ensure atoms are stored in the public schema even when called from a
+        # tenant-aware context.
+        try:
+            connection.set_schema_to_public()
+        except Exception:
+            pass
+
         # When running under Docker the Django project is copied into /code
         # and the FastAPI backend sits inside the same folder. BASE_DIR points
         # at /code so using `.parent` would incorrectly resolve to '/'. Use
