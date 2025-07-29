@@ -51,6 +51,7 @@ const Clients = () => {
   const role = user?.role?.toLowerCase();
   const hasAccess =
     role === 'admin' ||
+    role === 'super_admin' ||
     user?.is_staff ||
     user?.is_superuser;
 

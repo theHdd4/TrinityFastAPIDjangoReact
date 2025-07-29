@@ -26,16 +26,17 @@ Trinity Administrator Guide
    ```
 
    The script creates the default tenant (`acme_corp`) and seeds login accounts.
-   You will get an admin user called `harsha` with password `harsha` along with
-   role‑based users:
+   You will get an admin user called `admin_user` with password `admin` and a
+   super admin `neo` with password `neo_the_one` along with role‑based users:
 
    - `editor_user` / `editor`
    - `viewer_user` / `viewer`
 
 3. **Log in to the Trinity Administrator**
    Visit `http://<HOST_IP>:8000/admin/` in your browser and sign in with one
-   of the credentials above. Use `harsha` for full admin access. The role‑based
-   accounts demonstrate the Admin, Editor and Viewer permissions.
+   of the credentials above. Use `neo` for full super admin access. The
+   `admin_user` account demonstrates the Admin role while the other accounts
+   show Editor and Viewer permissions.
 
    If you hit a *500 Internal Server Error* on the login page make sure the
    database is running and that migrations have been applied:

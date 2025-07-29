@@ -29,17 +29,18 @@ def main():
     # Create an initial admin user for testing login if it doesn't exist
     from django.contrib.auth import get_user_model
     User = get_user_model()
-    if not User.objects.filter(username="harsha").exists():
+    if not User.objects.filter(username="admin_user").exists():
         User.objects.create_superuser(
-            username="harsha", password="harsha", email=""
+            username="admin_user", password="admin", email=""
         )
-        print("→ 1b) Created default admin 'harsha' with password 'harsha'")
+        print("→ 1b) Created default admin 'admin_user' with password 'admin'")
     else:
-        print("→ 1b) Default admin 'harsha' already exists")
+        print("→ 1b) Default admin 'admin_user' already exists")
 
     # Create additional users for each role
     role_users = [
-        ("harsha", "harsha", "admin"),
+        ("admin_user", "admin", "admin"),
+        ("neo", "neo_the_one", "super_admin"),
         ("editor_user", "editor", "editor"),
         ("viewer_user", "viewer", "viewer"),
     ]

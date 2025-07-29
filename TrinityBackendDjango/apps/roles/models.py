@@ -37,11 +37,13 @@ class UserRole(models.Model):
     ROLE_ADMIN = "admin"
     ROLE_EDITOR = "editor"
     ROLE_VIEWER = "viewer"
+    ROLE_SUPER_ADMIN = "super_admin"
 
     ROLE_CHOICES = [
         (ROLE_ADMIN, "Admin"),
         (ROLE_EDITOR, "Editor"),
         (ROLE_VIEWER, "Viewer"),
+        (ROLE_SUPER_ADMIN, "Super Admin"),
     ]
 
     user = models.ForeignKey(
