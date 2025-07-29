@@ -25,7 +25,7 @@ Trinity Administrator Guide
    docker compose exec web python create_tenant.py
    ```
 
-   The script creates the default tenant (`quant_matrix_ai`) and seeds login accounts.
+   The script creates the default tenant (`Quant_Matrix_AI`) and seeds login accounts.
    You will get an admin user called `admin_user` with password `admin` and a
    super admin `neo` with password `neo_the_one` along with role‑based users:
 
@@ -36,7 +36,7 @@ Trinity Administrator Guide
    Visit `http://<HOST_IP>:8000/admin/` in your browser and sign in with one
    of the credentials above. Use `neo` for full super admin access. The
    `admin_user` account demonstrates the Admin role while the other accounts
-   show Editor and Viewer permissions.
+   show Editor and Viewer permissions. The default domain is `quantmatrix.ai`.
 
    If you hit a *500 Internal Server Error* on the login page make sure the
    database is running and that migrations have been applied:

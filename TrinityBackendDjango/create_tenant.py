@@ -11,11 +11,12 @@ django.setup()
 # Adjust this import path if your app label is different:
 from apps.tenants.models import Tenant, Domain
 
+
 def main():
     tenant_name = "Quant_Matrix_AI"
     tenant_schema = "Quant_Matrix_AI_Schema"
     # Map localhost requests to the default tenant unless overridden
-    primary_domain = os.getenv("PRIMARY_DOMAIN", "localhost")
+    primary_domain = os.getenv("PRIMARY_DOMAIN", "quantmatrix.ai")
 
     print("\n→ 1) Applying SHARED (public) migrations…")
     # Run only shared apps into the public schema
@@ -29,11 +30,10 @@ def main():
 
     # Create the default super admin user for testing login if it doesn't exist
     from django.contrib.auth import get_user_model
+
     User = get_user_model()
     if not User.objects.filter(username="neo").exists():
-        User.objects.create_superuser(
-            username="neo", password="neo_the_one", email=""
-        )
+        User.objects.create_superuser(username="neo", password="neo_the_one", email="")
         print("→ 1b) Created default super admin 'neo' with password 'neo_the_one'")
     else:
         print("→ 1b) Default super admin 'neo' already exists")
@@ -47,9 +47,18 @@ def main():
     ]
     for username, password, _ in role_users:
         if not User.objects.filter(username=username).exists():
-            User.objects.create_user(username=username, password=password)
+            is_staff = username in ("neo", "admin_user")
+            User.objects.create_user(
+                username=username,
+                password=password,
+                is_staff=is_staff,
+            )
             print(f"→ 1c) Created user '{username}' with password '{password}'")
         else:
+            user = User.objects.get(username=username)
+            if username == "admin_user" and not user.is_staff:
+                user.is_staff = True
+                user.save()
             print(f"→ 1c) User '{username}' already exists")
 
     with transaction.atomic():
@@ -109,7 +118,9 @@ def main():
     print(f"→ 3) Running TENANT-SCHEMA migrations for '{tenant_schema}'…")
     # Switch into the tenant schema and apply all tenant apps there
     # `migrate_schemas` expects the schema name via the --schema flag.
-    call_command("migrate_schemas", "--schema", tenant_schema, interactive=False, verbosity=1)
+    call_command(
+        "migrate_schemas", "--schema", tenant_schema, interactive=False, verbosity=1
+    )
     print("   ✅ Tenant-schema migrations complete.\n")
 
     # Load atom catalogue from FastAPI features
@@ -144,6 +155,7 @@ def main():
 
         # Assign roles to the default users within this tenant
         from apps.roles.models import UserRole
+
         for username, _, role in role_users:
             user = User.objects.get(username=username)
             client_uuid = tenant_client_id if username == "admin_user" else uuid.uuid4()
@@ -156,6 +168,7 @@ def main():
             )
 
     print("All done! Tenant and all tables created.\n")
+
 
 if __name__ == "__main__":
     main()
