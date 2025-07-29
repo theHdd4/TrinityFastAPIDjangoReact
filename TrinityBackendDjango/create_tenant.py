@@ -42,22 +42,24 @@ def main():
     # accounts are tied to the Quant Matrix AI tenant to demonstrate
     # client-specific privileges. Passwords for the staff list below are set
     # to the employee ID provided.
+    # Username for staff members uses their Quant Matrix email address
+    email_domain = "quantmatrix.ai"
     role_users = [
         ("neo", "neo_the_one", "super_admin", "", ""),
         ("admin_user", "admin", "admin", "", ""),
         ("editor_user", "editor", "editor", "", ""),
         ("viewer_user", "viewer", "viewer", "", ""),
-        ("gautami_sharma", "QM250111", "editor", "Gautami", "Sharma"),
-        ("abhishek_sahu", "QM240110", "editor", "Abhishek", "Sahu"),
-        ("aakash_verma", "QM240109", "editor", "Aakash", "Verma"),
-        ("sushant_upadhyay", "QM240108", "admin", "Sushant", "Upadhyay"),
-        ("mahek_kala", "QM250107", "editor", "Mahek", "Kala"),
-        ("abhishek_tiwari", "QM240106", "editor", "Abhishek", "Tiwari"),
-        ("sandesh_panale", "QM240105", "viewer", "Sandesh", "Panale"),
-        ("rutuja_wagh", "QM240104", "viewer", "Rutuja", "Wagh"),
-        ("saahil_kejriwal", "QM240103", "viewer", "Saahil", "Kejriwal"),
-        ("harshadip_das", "QM240102", "admin", "Harshadip", "Das"),
-        ("venu_gorti", "QM240110", "admin", "Venu", "Gorti"),
+        (f"gautami.sharma@{email_domain}", "QM250111", "editor", "Gautami", "Sharma"),
+        (f"abhishek.sahu@{email_domain}", "QM240110", "editor", "Abhishek", "Sahu"),
+        (f"aakash.verma@{email_domain}", "QM240109", "editor", "Aakash", "Verma"),
+        (f"sushant.upadhyay@{email_domain}", "QM240108", "admin", "Sushant", "Upadhyay"),
+        (f"mahek.kala@{email_domain}", "QM250107", "editor", "Mahek", "Kala"),
+        (f"abhishek.tiwari@{email_domain}", "QM240106", "editor", "Abhishek", "Tiwari"),
+        (f"sandesh.panale@{email_domain}", "QM240105", "viewer", "Sandesh", "Panale"),
+        (f"rutuja.wagh@{email_domain}", "QM240104", "viewer", "Rutuja", "Wagh"),
+        (f"saahil.kejriwal@{email_domain}", "QM240103", "viewer", "Saahil", "Kejriwal"),
+        (f"harshadip.das@{email_domain}", "QM240102", "admin", "Harshadip", "Das"),
+        (f"venu.gorti@{email_domain}", "QM240110", "admin", "Venu", "Gorti"),
     ]
 
     for username, password, role, first, last in role_users:
@@ -68,6 +70,7 @@ def main():
                 password=password,
                 first_name=first,
                 last_name=last,
+                email=username if "@" in username else "",
                 is_staff=is_staff,
             )
             print(f"→ 1c) Created user '{username}' with password '{password}'")
@@ -82,6 +85,9 @@ def main():
                 update_needed = True
             if last and user.last_name != last:
                 user.last_name = last
+                update_needed = True
+            if "@" in username and user.email != username:
+                user.email = username
                 update_needed = True
             if update_needed:
                 user.save()
