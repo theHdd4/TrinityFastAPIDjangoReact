@@ -48,10 +48,12 @@ interface App {
 
 const Clients = () => {
   const { user } = useAuth();
+  const role = user?.role?.toLowerCase();
   const hasAccess =
-    user?.role === 'admin' ||
-    user?.role === 'architect' ||
-    user?.is_staff;
+    role === 'admin' ||
+    role === 'architect' ||
+    user?.is_staff ||
+    user?.is_superuser;
 
   if (!hasAccess) {
     return <NotFound />;

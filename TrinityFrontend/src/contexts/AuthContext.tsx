@@ -9,6 +9,8 @@ interface UserInfo {
   mfa_enabled: boolean;
   preferences: Record<string, unknown> | null;
   role?: string;
+  is_staff?: boolean;
+  is_superuser?: boolean;
 }
 
 interface ProfileInfo {
