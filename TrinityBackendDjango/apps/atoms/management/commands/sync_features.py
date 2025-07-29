@@ -11,6 +11,12 @@ import datetime
 class Command(BaseCommand):
     help = "Sync Atom entries from FastAPI features directory"
 
+    REQUIRED_TABLES = {
+        "atoms_atom",
+        "atoms_atomcategory",
+        "atoms_atomversion",
+    }
+
     def handle(self, *args, **options):
         # Ensure atoms are stored in the public schema even when called from a
         # tenant-aware context.
@@ -19,55 +25,26 @@ class Command(BaseCommand):
         except Exception:
             pass
 
-        # Ensure the atoms tables exist in the public schema. If not, run the
-        # shared migrations which create tables for all shared apps including
-        # ``apps.atoms``.
-        try:
-            with schema_context("public"):
-                Atom.objects.exists()
-        except (ProgrammingError, OperationalError):
-            self.stdout.write(
-                "Atom tables missing in public schema. Running shared migrations…"
-            )
-            call_command(
-                "migrate_schemas",
-                "--shared",
-                interactive=False,
-                verbosity=0,
-            )
+        self._ensure_tables("public")
 
         # Verify each tenant schema also has the atoms tables, running
         # migrations for any that are missing them.
         TenantModel = get_tenant_model()
         for tenant in TenantModel.objects.all():
-            try:
-                with schema_context(tenant.schema_name):
-                    Atom.objects.exists()
-            except (ProgrammingError, OperationalError):
-                self.stdout.write(
-                    f"Atom tables missing in {tenant.schema_name}. Running migrations…"
-                )
-                call_command(
-                    "migrate_schemas",
-                    "--schema",
-                    tenant.schema_name,
-                    interactive=False,
-                    verbosity=0,
-                )
+            self._ensure_tables(tenant.schema_name)
 
         # BASE_DIR may be ``/code`` inside Docker or the project directory when
         # running locally. The FastAPI features folder sits alongside the Django
         # backend.  Try both locations so the command works in either context.
         base = Path(settings.BASE_DIR)
-        features_path = (
-            base / "TrinityBackendFastAPI" / "app" / "features"
-        )
-        if not features_path.exists():
-            features_path = (
-                base.parent / "TrinityBackendFastAPI" / "app" / "features"
-            )
-        if not features_path.exists():
-            self.stderr.write(f"Features directory not found: {features_path}")
+        candidates = [
+            base / "TrinityBackendFastAPI" / "app" / "features",
+            base.parent / "TrinityBackendFastAPI" / "app" / "features",
+        ]
+        features_path = next((p for p in candidates if p.exists()), None)
+        if not features_path:
+            joined = ", ".join(str(p) for p in candidates)
+            self.stderr.write(f"Features directory not found in: {joined}")
             return
 
         category, _ = AtomCategory.objects.get_or_create(name="General")
@@ -92,3 +69,31 @@ class Command(BaseCommand):
                 )
                 created_count += 1
         self.stdout.write(self.style.SUCCESS(f"Synced {created_count} atoms"))
+
+    def _ensure_tables(self, schema_name: str) -> None:
+        """Make sure the atom tables exist for ``schema_name``."""
+        with schema_context(schema_name):
+            with connection.cursor() as cursor:
+                existing = set(connection.introspection.table_names(cursor))
+        if not self.REQUIRED_TABLES.issubset(existing):
+            if schema_name == "public":
+                self.stdout.write(
+                    "Atom tables missing in public schema. Running shared migrations…"
+                )
+                call_command(
+                    "migrate_schemas",
+                    "--shared",
+                    interactive=False,
+                    verbosity=0,
+                )
+            else:
+                self.stdout.write(
+                    f"Atom tables missing in {schema_name}. Running migrations…"
+                )
+                call_command(
+                    "migrate_schemas",
+                    "--schema",
+                    schema_name,
+                    interactive=False,
+                    verbosity=0,
+                )
