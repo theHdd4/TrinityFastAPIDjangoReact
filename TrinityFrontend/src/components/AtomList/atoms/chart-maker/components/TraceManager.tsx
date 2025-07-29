@@ -173,7 +173,7 @@ const TraceManager: React.FC<TraceManagerProps> = ({
                   <div className="flex flex-wrap gap-1">
                     {Object.entries(trace.filters || {}).map(([column, values]) => (
                       <Badge key={column} variant="secondary" className="flex items-center gap-1 text-xs">
-                        {column}: {(values as string[]).length} selected
+                        {column}
                         <X 
                           className="w-3 h-3 cursor-pointer hover:text-red-500" 
                           onClick={() => {

@@ -410,17 +410,15 @@ const ChartMakerVisualization: React.FC<ChartMakerVisualizationProps> = ({
 
                         <div>
                           <Label className="text-xs">Filters</Label>
-                          <div className="mt-1 space-y-2">
+                          <div className="mt-1 flex flex-wrap gap-2">
                             {Object.entries(chart.filters).map(([column, values]) => (
-                              <div key={column} className="flex items-center gap-2">
-                                <Badge variant="secondary" className="flex items-center gap-1">
-                                  {column}: {values.length} selected
-                                  <X 
-                                    className="w-3 h-3 cursor-pointer" 
-                                    onClick={() => removeFilter(index, column)}
-                                  />
-                                </Badge>
-                              </div>
+                              <Badge key={column} variant="secondary" className="flex items-center gap-1">
+                                {column}
+                                <X 
+                                  className="w-3 h-3 cursor-pointer" 
+                                  onClick={() => removeFilter(index, column)}
+                                />
+                              </Badge>
                             ))}
                             
                             <Popover>
