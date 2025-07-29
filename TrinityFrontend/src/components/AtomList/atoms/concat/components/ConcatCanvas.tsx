@@ -28,6 +28,7 @@ interface ConcatCanvasProps {
   file1?: string;
   file2?: string;
   direction?: string;
+  fullCsv?: string;
 }
 
 interface PaginationInfo {
@@ -44,7 +45,7 @@ interface DataResponse {
   pagination: PaginationInfo;
 }
 
-const ConcatCanvas: React.FC<ConcatCanvasProps> = ({ concatId, resultFilePath, file1, file2, direction }) => {
+const ConcatCanvas: React.FC<ConcatCanvasProps> = ({ concatId, resultFilePath, file1, file2, direction, fullCsv }) => {
   const [data, setData] = useState<Record<string, any>[]>([]);
   const [headers, setHeaders] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
@@ -113,6 +114,12 @@ const ConcatCanvas: React.FC<ConcatCanvasProps> = ({ concatId, resultFilePath, f
   };
 
   useEffect(() => {
+    if (fullCsv) {
+      setRawCSV(fullCsv);
+    }
+  }, [fullCsv]);
+
+  useEffect(() => {
     console.log('[ConcatCanvas] resultFilePath:', resultFilePath);
     if (resultFilePath) {
       fetchData(1);
@@ -132,11 +139,12 @@ const ConcatCanvas: React.FC<ConcatCanvasProps> = ({ concatId, resultFilePath, f
     setSaveSuccess(false);
     try {
       // Use the current rawCSV, and generate a filename
-      const filename = `concat_${file1?.split('/').pop() || 'file1'}_${file2?.split('/').pop() || 'file2'}_${Date.now()}`;
+      const filename = `concat_${file1?.split('/')?.pop() || 'file1'}_${file2?.split('/')?.pop() || 'file2'}_${Date.now()}`;
+      const csvToSave = fullCsv || rawCSV;
       const response = await fetch(`${CONCAT_API}/save`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ csv_data: rawCSV, filename }),
+        body: JSON.stringify({ csv_data: csvToSave, filename }),
       });
       if (!response.ok) {
         throw new Error(`Save failed: ${response.statusText}`);
@@ -181,7 +189,7 @@ const ConcatCanvas: React.FC<ConcatCanvasProps> = ({ concatId, resultFilePath, f
       <div className="p-4">
         <Card>
           <CardContent className="p-4">
-            <p className="text-gray-500">No concatenation results available. Perform a concatenation to see results here.</p>
+            <p className="text-gray-500">Please Configure concatinate options</p>
           </CardContent>
         </Card>
       </div>
@@ -208,8 +216,10 @@ const ConcatCanvas: React.FC<ConcatCanvasProps> = ({ concatId, resultFilePath, f
                   </div>
                   <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
                     <div className="flex items-center space-x-2">
-                      <Database className="w-4 h-4 text-blue-600" />
-                      <span className="text-sm font-medium text-gray-800">{file1 ? file1.split('/').pop() : 'N/A'}</span>
+                      <Database className="w-4 h-4 text-blue-600 flex-shrink-0" />
+                      <span className="text-sm font-medium text-gray-800 truncate" title={file1 ? file1.split('/').pop() : 'N/A'}>
+                        {file1 ? file1.split('/').pop() : 'N/A'}
+                      </span>
                     </div>
                   </div>
                 </div>
@@ -220,8 +230,10 @@ const ConcatCanvas: React.FC<ConcatCanvasProps> = ({ concatId, resultFilePath, f
                   </div>
                   <div className="bg-green-50 border border-green-200 rounded-lg p-3">
                     <div className="flex items-center space-x-2">
-                      <Database className="w-4 h-4 text-green-600" />
-                      <span className="text-sm font-medium text-gray-800">{file2 ? file2.split('/').pop() : 'N/A'}</span>
+                      <Database className="w-4 h-4 text-green-600 flex-shrink-0" />
+                      <span className="text-sm font-medium text-gray-800 truncate" title={file2 ? file2.split('/').pop() : 'N/A'}>
+                        {file2 ? file2.split('/').pop() : 'N/A'}
+                      </span>
                     </div>
                   </div>
                 </div>
@@ -288,13 +300,7 @@ const ConcatCanvas: React.FC<ConcatCanvasProps> = ({ concatId, resultFilePath, f
                       {data.map((row, rowIndex) => (
                         <TableRow
                           key={rowIndex}
-                          className={`
-                            ${rowIndex < 4
-                              ? 'bg-yellow-50 hover:bg-yellow-100'
-                              : 'bg-white hover:bg-gray-50'
-                            }
-                            transition-all duration-200 border-b border-gray-100
-                          `}
+                          className="bg-white hover:bg-gray-50 transition-all duration-200 border-b border-gray-100"
                         >
                           {headers.map((header, colIndex) => (
                             <TableCell key={colIndex} className="py-4 text-center font-medium text-gray-700">

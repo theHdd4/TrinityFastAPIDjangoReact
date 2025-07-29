@@ -112,11 +112,11 @@ const MergeResults: React.FC<MergeResultsProps> = ({ settings }) => {
   if (!settings.mergeResults || !settings.mergeResults.data) {
     return (
       <div className="p-4">
-        <Card>
-          <CardContent className="p-4">
-            <p className="text-gray-500">No merge results available. Perform a merge to see results here.</p>
-          </CardContent>
-        </Card>
+              <Card>
+        <CardContent className="p-4">
+          <p className="text-gray-500">Please Configure merge options</p>
+        </CardContent>
+      </Card>
       </div>
     );
   }
@@ -176,13 +176,7 @@ const MergeResults: React.FC<MergeResultsProps> = ({ settings }) => {
                       {data.map((row, rowIndex) => (
                         <TableRow
                           key={rowIndex}
-                          className={`
-                            ${rowIndex < 4
-                              ? 'bg-yellow-50 hover:bg-yellow-100'
-                              : 'bg-white hover:bg-gray-50'
-                            }
-                            transition-all duration-200 border-b border-gray-100
-                          `}
+                          className="bg-white hover:bg-gray-50 transition-all duration-200 border-b border-gray-100"
                         >
                           {headers.map((header, colIndex) => (
                             <TableCell key={colIndex} className="py-4 text-center font-medium text-gray-700">

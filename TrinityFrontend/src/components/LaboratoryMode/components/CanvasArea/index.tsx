@@ -23,6 +23,9 @@ import FeatureOverviewAtom from '@/components/AtomList/atoms/feature-overview/Fe
 import ConcatAtom from '@/components/AtomList/atoms/concat/ConcatAtom';
 import MergeAtom from '@/components/AtomList/atoms/merge/MergeAtom';
 import ColumnClassifierAtom from '@/components/AtomList/atoms/column-classifier/ColumnClassifierAtom';
+import ScopeSelectorAtom from '@/components/AtomList/atoms/scope-selector/ScopeSelectorAtom';
+import CreateColumnAtom from '@/components/AtomList/atoms/createcolumn/CreateColumnAtom';
+import GroupByAtom from '@/components/AtomList/atoms/groupby-wtg-avg/GroupByAtom';
 import { fetchDimensionMapping } from '@/lib/dimensions';
 
 import {
@@ -1145,6 +1148,12 @@ const handleAddDragLeave = (e: React.DragEvent) => {
                         <MergeAtom atomId={atom.id} />
                       ) : atom.atomId === 'column-classifier' ? (
                         <ColumnClassifierAtom atomId={atom.id} />
+                      ) : atom.atomId === 'create-column' ? (
+                        <CreateColumnAtom atomId={atom.id} />
+                      ) : atom.atomId === 'groupby-wtg-avg' ? (
+                        <GroupByAtom atomId={atom.id} />
+                      ) : atom.atomId === 'scope-selector' ? (
+                        <ScopeSelectorAtom atomId={atom.id} />
                       ) : (
                         <div>
                           <h4 className="font-semibold text-gray-900 mb-1 text-sm">{atom.title}</h4>

@@ -37,6 +37,7 @@ import featureCreateTransform from '@/components/AtomList/atoms/feature-create-t
 import scopeSelector from '@/components/AtomList/atoms/scope-selector';
 import rowOperations from '@/components/AtomList/atoms/row-operations';
 import columnClassifier from '@/components/AtomList/atoms/column-classifier';
+import createColumn from '@/components/AtomList/atoms/createcolumn';
 import correlation from '@/components/AtomList/atoms/correlation';
 import explore from '@/components/AtomList/atoms/explore';
 import descriptiveStats from '@/components/AtomList/atoms/descriptive-stats';
@@ -99,7 +100,8 @@ export const atomCategories: AtomCategory[] = [
       featureCreateTransform,
       scopeSelector,
       rowOperations,
-      columnClassifier
+      columnClassifier,
+      createColumn
     ]
   },
   {

@@ -96,6 +96,16 @@ export const FEATURE_OVERVIEW_API =
   normalizeUrl(import.meta.env.VITE_FEATURE_OVERVIEW_API) ||
   `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/feature-overview`;
 
+export const SCOPE_SELECTOR_API =
+  normalizeUrl(import.meta.env.VITE_SCOPE_SELECTOR_API) ||
+  `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/scope-selector`;
+
+export const CREATECOLUMN_API =
+  import.meta.env.VITE_CREATECOLUMN_API || `${backendOrigin.replace(/:8000$/, ':8001')}/api/create`;
+
+export const GROUPBY_API =
+  import.meta.env.VITE_GROUPBY_API || `${backendOrigin.replace(/:8000$/, ':8001')}/api/groupby`;
+
 const aiBase =
   normalizeUrl(import.meta.env.VITE_TRINITY_AI_API) ||
   backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${aiPort}`);
