@@ -38,7 +38,9 @@ def main():
     else:
         print("→ 1b) Default super admin 'neo' already exists")
 
-    # Create additional users for each role
+    # Create additional users for each role. The admin, editor and viewer
+    # accounts are tied to the Quant Matrix AI tenant to demonstrate
+    # client-specific privileges.
     role_users = [
         ("neo", "neo_the_one", "super_admin"),
         ("admin_user", "admin", "admin"),
@@ -158,7 +160,12 @@ def main():
 
         for username, _, role in role_users:
             user = User.objects.get(username=username)
-            client_uuid = tenant_client_id if username == "admin_user" else uuid.uuid4()
+            # Admin, editor and viewer roles are tied to the Quant Matrix AI tenant
+            # so they share the same client UUID. Only the super admin user is not
+            # bound to a specific client.
+            client_uuid = (
+                tenant_client_id if username != "neo" else uuid.uuid4()
+            )
             UserRole.objects.get_or_create(
                 user=user,
                 client_id=client_uuid,

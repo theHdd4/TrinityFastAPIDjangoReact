@@ -29,14 +29,15 @@ Trinity Administrator Guide
    You will get an admin user called `admin_user` with password `admin` and a
    super admin `neo` with password `neo_the_one` along with role‑based users:
 
-   - `editor_user` / `editor`
-   - `viewer_user` / `viewer`
+   - `editor_user` / `editor` (client editor)
+   - `viewer_user` / `viewer` (client viewer)
 
 3. **Log in to the Trinity Administrator**
    Visit `http://<HOST_IP>:8000/admin/` in your browser and sign in with one
    of the credentials above. Use `neo` for full super admin access. The
    `admin_user` account demonstrates the Admin role while the other accounts
-   show Editor and Viewer permissions. The default domain is `quantmatrix.ai`.
+   show Client Editor and Client Viewer permissions. The default domain is
+   `quantmatrix.ai`.
 
    If you hit a *500 Internal Server Error* on the login page make sure the
    database is running and that migrations have been applied:
