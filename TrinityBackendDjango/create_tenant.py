@@ -40,26 +40,50 @@ def main():
 
     # Create additional users for each role. The admin, editor and viewer
     # accounts are tied to the Quant Matrix AI tenant to demonstrate
-    # client-specific privileges.
+    # client-specific privileges. Passwords for the staff list below are set
+    # to the employee ID provided.
     role_users = [
-        ("neo", "neo_the_one", "super_admin"),
-        ("admin_user", "admin", "admin"),
-        ("editor_user", "editor", "editor"),
-        ("viewer_user", "viewer", "viewer"),
+        ("neo", "neo_the_one", "super_admin", "", ""),
+        ("admin_user", "admin", "admin", "", ""),
+        ("editor_user", "editor", "editor", "", ""),
+        ("viewer_user", "viewer", "viewer", "", ""),
+        ("gautami_sharma", "QM250111", "editor", "Gautami", "Sharma"),
+        ("abhishek_sahu", "QM240110", "editor", "Abhishek", "Sahu"),
+        ("aakash_verma", "QM240109", "editor", "Aakash", "Verma"),
+        ("sushant_upadhyay", "QM240108", "admin", "Sushant", "Upadhyay"),
+        ("mahek_kala", "QM250107", "editor", "Mahek", "Kala"),
+        ("abhishek_tiwari", "QM240106", "editor", "Abhishek", "Tiwari"),
+        ("sandesh_panale", "QM240105", "viewer", "Sandesh", "Panale"),
+        ("rutuja_wagh", "QM240104", "viewer", "Rutuja", "Wagh"),
+        ("saahil_kejriwal", "QM240103", "viewer", "Saahil", "Kejriwal"),
+        ("harshadip_das", "QM240102", "admin", "Harshadip", "Das"),
+        ("venu_gorti", "QM240110", "admin", "Venu", "Gorti"),
     ]
-    for username, password, _ in role_users:
+
+    for username, password, role, first, last in role_users:
         if not User.objects.filter(username=username).exists():
-            is_staff = username in ("neo", "admin_user")
+            is_staff = role in ("admin", "super_admin")
             User.objects.create_user(
                 username=username,
                 password=password,
+                first_name=first,
+                last_name=last,
                 is_staff=is_staff,
             )
             print(f"→ 1c) Created user '{username}' with password '{password}'")
         else:
             user = User.objects.get(username=username)
-            if username == "admin_user" and not user.is_staff:
+            update_needed = False
+            if role in ("admin", "super_admin") and not user.is_staff:
                 user.is_staff = True
+                update_needed = True
+            if first and user.first_name != first:
+                user.first_name = first
+                update_needed = True
+            if last and user.last_name != last:
+                user.last_name = last
+                update_needed = True
+            if update_needed:
                 user.save()
             print(f"→ 1c) User '{username}' already exists")
 
@@ -158,7 +182,7 @@ def main():
         # Assign roles to the default users within this tenant
         from apps.roles.models import UserRole
 
-        for username, _, role in role_users:
+        for username, _, role, *_ in role_users:
             user = User.objects.get(username=username)
             # Admin, editor and viewer roles are tied to the Quant Matrix AI tenant
             # so they share the same client UUID. Only the super admin user is not
