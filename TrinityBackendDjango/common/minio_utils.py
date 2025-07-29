@@ -23,34 +23,55 @@ def get_client() -> Minio:
     return _client
 
 
-def ensure_bucket() -> None:
-    """Create the configured bucket if missing."""
-    if not _client.bucket_exists(MINIO_BUCKET):
-        _client.make_bucket(MINIO_BUCKET)
+def ensure_bucket() -> bool:
+    """Create the configured bucket if missing.
+
+    Returns True if the bucket exists or was created, False if the connection
+    failed (e.g. invalid credentials). Any other MinIO errors are re-raised.
+    """
+    try:
+        if not _client.bucket_exists(MINIO_BUCKET):
+            _client.make_bucket(MINIO_BUCKET)
+        return True
+    except S3Error as exc:
+        # If credentials are invalid or the server is unreachable just log a
+        # warning instead of failing hard. This allows management commands to
+        # run without MinIO configured.
+        print(f"MinIO connection error: {exc}")
+        return False
 
 
 def create_prefix(prefix: str) -> None:
     """Create an empty folder-like object for the given prefix."""
-    ensure_bucket()
+    if not ensure_bucket():
+        return
     if not prefix.endswith("/"):
         prefix += "/"
     try:
         _client.stat_object(MINIO_BUCKET, prefix)
-    except S3Error as exc:  # object missing
+    except S3Error as exc:  # object missing or connection issue
         if getattr(exc, "code", "") == "NoSuchKey":
-            _client.put_object(MINIO_BUCKET, prefix, io.BytesIO(b""), 0)
+            try:
+                _client.put_object(MINIO_BUCKET, prefix, io.BytesIO(b""), 0)
+            except S3Error as exc2:
+                print(f"MinIO connection error: {exc2}")
         else:
-            raise
+            print(f"MinIO connection error: {exc}")
 
 
 def rename_prefix(old_prefix: str, new_prefix: str) -> None:
     """Rename all objects under one prefix to another."""
-    ensure_bucket()
+    if not ensure_bucket():
+        return
     if not old_prefix.endswith("/"):
         old_prefix += "/"
     if not new_prefix.endswith("/"):
         new_prefix += "/"
-    objects = list(_client.list_objects(MINIO_BUCKET, prefix=old_prefix, recursive=True))
+    try:
+        objects = list(_client.list_objects(MINIO_BUCKET, prefix=old_prefix, recursive=True))
+    except S3Error as exc:
+        print(f"MinIO connection error: {exc}")
+        return
     if not objects:
         # just create the new prefix and remove old placeholder
         create_prefix(new_prefix)
