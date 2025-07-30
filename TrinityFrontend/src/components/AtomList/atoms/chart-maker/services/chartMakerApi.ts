@@ -98,6 +98,24 @@ class ChartMakerApiService {
     return this.uploadFile(file);
   }
 
+  async loadSavedDataframe(objectName: string): Promise<UploadCSVResponse> {
+    // Direct API call to load saved dataframe without download/upload cycle
+    const response = await fetch(`${this.baseUrl}/load-saved-dataframe`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ object_name: objectName }),
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.detail || 'Failed to load saved dataframe');
+    }
+
+    return response.json();
+  }
+
   async getAllColumns(fileId: string): Promise<AllColumnsResponse> {
     const response = await fetch(`${this.baseUrl}/get-all-columns/${fileId}`);
     

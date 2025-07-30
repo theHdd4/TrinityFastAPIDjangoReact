@@ -82,10 +82,18 @@ const ChartMakerProperties: React.FC<Props> = ({ atomId }) => {
     }
   };
 
-  const handleDataUpload = async (data: ChartData, fileId: string, dataSource?: string) => {
+  const handleDataUpload = async (data: ChartData | null, fileId: string, dataSource?: string) => {
     try {
-      // Remove: setLoading({ uploading: true });
       setError(undefined);
+
+      // If data is null, this is the start of loading - set loading state immediately
+      if (data === null) {
+        setLoading({ uploading: true });
+        handleSettingsChange({
+          dataSource: dataSource || settings.dataSource,
+        });
+        return;
+      }
 
       // Update data immediately
       const updatedCharts = settings.charts.map(chart => ({
