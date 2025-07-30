@@ -20,7 +20,7 @@ allowed_origins = [o.strip() for o in origins.split(",") if o.strip()]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://10.2.1.206:8080"],  # or ["*"] for all
+    allow_origins=["http://192.168.1.98:8080"],  # or ["*"] for all
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
