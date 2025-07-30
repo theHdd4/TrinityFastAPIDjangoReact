@@ -691,19 +691,62 @@ Return ONLY the JSON response:"""
         return response.json().get('message', {}).get('content', '')
     
     def _extract_json(self, response):
-        """Extract JSON from LLM response"""
-        # Clean response
+        """Extract JSON from LLM response using multiple strategies."""
+        if not response:
+            return None
+
         cleaned = re.sub(r'<think>.*?</think>', '', response, flags=re.DOTALL)
         cleaned = re.sub(r'<reasoning>.*?</reasoning>', '', cleaned, flags=re.DOTALL)
-        
-        # Find JSON
-        json_match = re.search(r'\{.*\}', cleaned, re.DOTALL)
-        if json_match:
-            try:
-                return json.loads(json_match.group())
-            except json.JSONDecodeError:
-                pass
-        
+        cleaned = re.sub(r'```json\s*', '', cleaned)
+        cleaned = re.sub(r'```\s*', '', cleaned)
+
+        json_patterns = [
+            r'\{[^{}]*\{[^{}]*\}[^{}]*\}',
+            r'\{[^{}]+\}',
+            r'\{.*?\}(?=\s*$)',
+            r'\{.*\}',
+        ]
+
+        for pattern in json_patterns:
+            matches = re.findall(pattern, cleaned, re.DOTALL)
+            for match in matches:
+                try:
+                    parsed = json.loads(match)
+                    if isinstance(parsed, dict) and (
+                        'success' in parsed or 'suggestions' in parsed
+                    ):
+                        return parsed
+                except json.JSONDecodeError:
+                    continue
+
+        try:
+            start_idx = cleaned.find('{')
+            if start_idx != -1:
+                brace_count = 0
+                end_idx = start_idx
+                for i in range(start_idx, len(cleaned)):
+                    if cleaned[i] == '{':
+                        brace_count += 1
+                    elif cleaned[i] == '}':
+                        brace_count -= 1
+                        if brace_count == 0:
+                            end_idx = i + 1
+                            break
+                if end_idx > start_idx:
+                    potential_json = cleaned[start_idx:end_idx]
+                    return json.loads(potential_json)
+        except Exception:
+            pass
+
+        try:
+            fixed = re.sub(r',\s*}', '}', cleaned)
+            fixed = re.sub(r',\s*]', ']', fixed)
+            match = re.search(r'\{.*\}', fixed, re.DOTALL)
+            if match:
+                return json.loads(match.group())
+        except Exception:
+            pass
+
         return None
     
     def _create_fallback_response(self, session_id):

@@ -1,6 +1,17 @@
 """Dependency injection for scope_selector feature."""
 import logging
-from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorCollection, AsyncIOMotorDatabase
+try:
+    from motor.motor_asyncio import (
+        AsyncIOMotorClient,
+        AsyncIOMotorCollection,
+        AsyncIOMotorDatabase,
+    )
+except ImportError:  # tests provide a stub without AsyncIOMotorDatabase
+    from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorCollection
+
+    class AsyncIOMotorDatabase:  # type: ignore
+        """Fallback type used only for testing."""
+        pass
 import os
 import redis
 from redis import Redis
@@ -48,12 +59,14 @@ minio_client: Minio = Minio(
     region=settings.minio_region
 )
 
-# Ensure MinIO bucket exists
+# Ensure MinIO bucket exists if API supports it
 try:
-    if not minio_client.bucket_exists(settings.minio_bucket):
+    if hasattr(minio_client, "bucket_exists") and not minio_client.bucket_exists(
+        settings.minio_bucket
+    ):
         minio_client.make_bucket(
             bucket_name=settings.minio_bucket,
-            location=settings.minio_region
+            location=settings.minio_region,
         )
         logger.info(f"Created MinIO bucket: {settings.minio_bucket}")
     logger.info(f"MinIO bucket '{settings.minio_bucket}' is ready")
@@ -87,15 +100,21 @@ def get_minio_client() -> Minio:
             )
             
             # Test connection
-            if not minio_client.bucket_exists(settings.minio_bucket):
+            if hasattr(minio_client, "bucket_exists") and not minio_client.bucket_exists(
+                settings.minio_bucket
+            ):
                 try:
                     minio_client.make_bucket(
                         bucket_name=settings.minio_bucket,
-                        location=settings.minio_region
+                        location=settings.minio_region,
                     )
-                    logger.info(f"Created MinIO bucket: {settings.minio_bucket} in region {settings.minio_region}")
+                    logger.info(
+                        f"Created MinIO bucket: {settings.minio_bucket} in region {settings.minio_region}"
+                    )
                 except Exception as e:
-                    logger.warning(f"Could not create bucket {settings.minio_bucket}: {str(e)}")
+                    logger.warning(
+                        f"Could not create bucket {settings.minio_bucket}: {str(e)}"
+                    )
                     # Continue even if bucket creation fails - it might already exist
                     
             # Verify we can list objects
@@ -110,21 +129,21 @@ def get_minio_client() -> Minio:
     return minio_client
 
 
-async def get_validator_atoms_collection() -> AsyncGenerator[AsyncIOMotorCollection[Any], None]:
+async def get_validator_atoms_collection() -> AsyncGenerator[AsyncIOMotorCollection, None]:
     """Get MongoDB collection for validator atoms."""
     client = get_mongo_client()
     db: AsyncIOMotorDatabase = client[settings.mongo_source_database]
     yield db[settings.mongo_column_classifications_collection]
 
 
-async def get_scopes_collection() -> AsyncGenerator[AsyncIOMotorCollection[Any], None]:
+async def get_scopes_collection() -> AsyncGenerator[AsyncIOMotorCollection, None]:
     """Get MongoDB collection for scopes."""
     client = get_mongo_client()
     db: AsyncIOMotorDatabase = client[settings.mongo_scope_database]
     yield db[settings.mongo_scopes_collection]
 
 
-async def get_processing_jobs_collection() -> AsyncGenerator[AsyncIOMotorCollection[Any], None]:
+async def get_processing_jobs_collection() -> AsyncGenerator[AsyncIOMotorCollection, None]:
     """Get MongoDB collection for processing jobs."""
     client = get_mongo_client()
     db: AsyncIOMotorDatabase = client[settings.mongo_scope_database]

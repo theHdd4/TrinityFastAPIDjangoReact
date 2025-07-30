@@ -1,6 +1,10 @@
 # database.py
 from pymongo import MongoClient
-from pymongo.errors import ServerSelectionTimeoutError
+try:
+    from pymongo.errors import ServerSelectionTimeoutError
+except Exception:  # tests provide a stubbed pymongo without errors module
+    class ServerSelectionTimeoutError(Exception):
+        pass
 from typing import Optional, Dict, Any, List
 import logging
 from .config import Settings

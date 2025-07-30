@@ -110,7 +110,8 @@ const aiBase =
   normalizeUrl(import.meta.env.VITE_TRINITY_AI_API) ||
   backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${aiPort}`);
 
-export const TRINITY_AI_API = usesProxy ? `${aiBase}/chat` : aiBase;
+// All Trinity AI endpoints are served under the `/trinityai` prefix
+export const TRINITY_AI_API = `${aiBase}/trinityai`;
 
 export const LAB_ACTIONS_API = `${REGISTRY_API}/laboratory-actions`;
 
