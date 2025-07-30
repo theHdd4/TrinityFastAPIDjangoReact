@@ -30,7 +30,7 @@ features imported from FastAPI.
    You should see the tables `atoms_atom`, `atoms_atomcategory` and
    `atoms_atomversion`.
 
-5. Also expand your tenant schema, e.g. `quant_matrix_ai_schema`, under
+5. Also expand your tenant schema, e.g. `Quant_Matrix_AI_Schema`, under
    `Schemas` and confirm the same three tables exist there as well.
 
 6. Right–click `atoms_atom` in either schema and choose **View/Edit Data → All Rows**
