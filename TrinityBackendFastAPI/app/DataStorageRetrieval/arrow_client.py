@@ -1,18 +1,67 @@
 import os
 import logging
+import json
+from typing import Dict
+
 import pandas as pd
 import pyarrow as pa
 import pyarrow.flight as flight
 import pyarrow.ipc as ipc
 from minio import Minio
+
+try:
+    import redis  # type: ignore
+except ModuleNotFoundError:  # pragma: no cover - redis optional
+    redis = None
+
 from .flight_registry import get_arrow_for_flight_path
+
+REDIS_HOST = os.getenv("REDIS_HOST", "redis")
+_redis_client = (
+    redis.Redis(host=REDIS_HOST, port=6379, decode_responses=True) if redis else None
+)
+
+
+def load_env_from_redis() -> Dict[str, str]:
+    """Load environment variables from Redis and update ``os.environ``."""
+    if _redis_client is None:
+        return {}
+    env: Dict[str, str] = {}
+    user_id = os.getenv("USER_ID", "")
+    if user_id:
+        key = f"currentenv:{user_id}"
+        current = _redis_client.hgetall(key)
+        if current:
+            logger.debug("redis %s -> %s", key, current)
+            for k, v in current.items():
+                os.environ[k.upper()] = v
+                env[k.upper()] = v
+    client = os.getenv("CLIENT_NAME", env.get("CLIENT_NAME", ""))
+    app = os.getenv("APP_NAME", env.get("APP_NAME", ""))
+    project = os.getenv("PROJECT_NAME", env.get("PROJECT_NAME", ""))
+    if client and project:
+        env_key = f"env:{client}:{app}:{project}"
+        cached = _redis_client.get(env_key)
+        if cached:
+            try:
+                data = json.loads(cached)
+                logger.debug("redis %s -> %s", env_key, data)
+                env.update(data)
+                for k, v in data.items():
+                    os.environ[k] = v
+            except Exception as exc:  # pragma: no cover
+                logger.error("failed to decode %s: %s", env_key, exc)
+    return env
 
 
 def _get_prefix() -> str:
     """Return the MinIO object prefix derived from environment variables."""
-    client = os.getenv("CLIENT_NAME", "default_client")
-    app = os.getenv("APP_NAME", "default_app")
-    project = os.getenv("PROJECT_NAME", "default_project")
+    env = load_env_from_redis()
+    client = os.getenv("CLIENT_NAME", env.get("CLIENT_NAME", "default_client"))
+    app = os.getenv("APP_NAME", env.get("APP_NAME", "default_app"))
+    project = os.getenv(
+        "PROJECT_NAME", env.get("PROJECT_NAME", "default_project")
+    )
     prefix = os.getenv("MINIO_PREFIX", f"{client}/{app}/{project}/")
     if not prefix.endswith("/"):
         prefix += "/"

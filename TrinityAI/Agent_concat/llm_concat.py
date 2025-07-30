@@ -337,6 +337,7 @@ import re
 from pathlib import Path
 from minio import Minio
 from minio.error import S3Error
+from DataStorageRetrieval.arrow_client import load_env_from_redis
 from datetime import datetime
 import uuid
 import os
@@ -396,6 +397,7 @@ class SmartConcatAgent:
             print(f"[WARN] Failed to read arrow registry: {e}")
 
         try:
+            load_env_from_redis()
             endpoint = _describe_endpoint(self.minio_client)
             print(
                 f"[DEBUG] listing objects from {endpoint} bucket={self.bucket} prefix={self.prefix}"
