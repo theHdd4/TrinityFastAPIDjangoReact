@@ -3,7 +3,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Upload, FileText, Check, Loader2, AlertCircle, Database } from 'lucide-react';
 import { ChartData } from '../ChartMakerAtom';
-import { chartMakerApi } from '@/services/chartMakerApi';
+import { chartMakerApi } from '../services/chartMakerApi';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { useSavedDataframes } from '@/hooks/useSavedDataframes';
 import { FEATURE_OVERVIEW_API } from '@/lib/api';

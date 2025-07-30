@@ -4,7 +4,7 @@ import { Settings, BarChart3 } from 'lucide-react';
 import ChartMakerSettings from '../ChartMakerSettings';
 import ChartMakerVisualization from '../ChartMakerVisualization';
 import { useLaboratoryStore, DEFAULT_CHART_MAKER_SETTINGS, ChartMakerSettings as SettingsType } from '@/components/LaboratoryMode/store/laboratoryStore';
-import { chartMakerApi } from '@/services/chartMakerApi';
+import { chartMakerApi } from '../../services/chartMakerApi';
 import { ChartData } from '../../ChartMakerAtom';
 import { useToast } from '@/hooks/use-toast';
 import { 

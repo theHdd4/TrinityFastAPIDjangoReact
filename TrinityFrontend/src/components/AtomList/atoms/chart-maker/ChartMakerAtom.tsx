@@ -1,7 +1,7 @@
 import React, { useRef, useEffect, useMemo } from 'react';
 import ChartMakerCanvas from './components/ChartMakerCanvas';
 import { useLaboratoryStore, DEFAULT_CHART_MAKER_SETTINGS, ChartMakerSettings as SettingsType, ChartMakerConfig } from '@/components/LaboratoryMode/store/laboratoryStore';
-import { chartMakerApi } from '@/services/chartMakerApi';
+import { chartMakerApi } from './services/chartMakerApi';
 import { useToast } from '@/hooks/use-toast';
 import { 
   migrateLegacyChart, 
