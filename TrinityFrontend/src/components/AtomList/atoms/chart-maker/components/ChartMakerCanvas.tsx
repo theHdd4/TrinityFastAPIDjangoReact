@@ -492,6 +492,11 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
                       opacity: 0.8
                     }}
                     iconType="line"
+                    formatter={(value) => {
+                      // Find the trace that matches this dataKey and return its name
+                      const matchingTrace = traces.find(trace => trace.dataKey === value);
+                      return matchingTrace ? matchingTrace.name : value;
+                    }}
                   />
                 )}
               </LineChart>
@@ -679,6 +684,11 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
                     opacity: 0.8
                   }}
                   iconType="rect"
+                  formatter={(value) => {
+                    // Find the trace that matches this dataKey and return its name
+                    const matchingTrace = traces.find(trace => trace.dataKey === value);
+                    return matchingTrace ? matchingTrace.name : value;
+                  }}
                 />
               )}
             </BarChart>
@@ -821,6 +831,11 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
                     opacity: 0.8
                   }}
                   iconType="rect"
+                  formatter={(value) => {
+                    // Find the trace that matches this dataKey and return its name
+                    const matchingTrace = traces.find(trace => trace.dataKey === value);
+                    return matchingTrace ? matchingTrace.name : value;
+                  }}
                 />
               )}
             </AreaChart>
@@ -944,6 +959,11 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
                     opacity: 0.8
                   }}
                   iconType="circle"
+                  formatter={(value) => {
+                    // Find the trace that matches this dataKey and return its name
+                    const matchingTrace = traces.find(trace => trace.dataKey === value);
+                    return matchingTrace ? matchingTrace.name : value;
+                  }}
                 />
               )}
             </ScatterChart>

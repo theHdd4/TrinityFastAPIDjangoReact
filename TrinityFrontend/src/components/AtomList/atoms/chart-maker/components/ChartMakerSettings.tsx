@@ -201,12 +201,6 @@ const ChartMakerSettings: React.FC<ChartMakerSettingsProps> = ({
             <div>
               <strong>Columns:</strong> {data.columns.join(', ')}
             </div>
-            <div>
-              <strong>Sample Data:</strong>
-              <div className="mt-1 p-2 bg-muted rounded text-xs font-mono">
-                {JSON.stringify(data.rows[0] || {}, null, 2)}
-              </div>
-            </div>
           </div>
         </Card>
       )}
