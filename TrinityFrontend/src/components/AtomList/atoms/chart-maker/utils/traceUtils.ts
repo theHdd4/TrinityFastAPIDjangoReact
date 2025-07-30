@@ -1,18 +1,18 @@
 import { ChartMakerConfig, ChartTraceConfig } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { ChartTrace } from '@/services/chartMakerApi';
 
-// Default color palette for traces - modernized
+// Default color palette for traces - matches backend colors
 export const DEFAULT_TRACE_COLORS = [
+  '#8884d8', // blue (matches backend first color)
+  '#82ca9d', // green
+  '#ffc658', // yellow
+  '#ff7300', // orange
+  '#8dd1e1', // light blue
+  '#d084d0', // purple
   '#6366f1', // modern indigo
   '#06b6d4', // modern cyan  
-  '#8b5cf6', // modern violet
-  '#f59e0b', // modern amber
   '#ef4444', // modern red
   '#10b981', // modern emerald
-  '#f97316', // modern orange
-  '#ec4899', // modern pink
-  '#84cc16', // modern lime
-  '#6366f1', // cycle back to indigo
 ];
 
 // Convert legacy single yAxis/filters to traces format

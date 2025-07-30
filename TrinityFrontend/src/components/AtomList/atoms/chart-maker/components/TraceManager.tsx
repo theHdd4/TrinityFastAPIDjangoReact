@@ -200,7 +200,6 @@ const TraceManager: React.FC<TraceManagerProps> = ({
                         availableColumns.categorical.filter(col => 
                           col !== chart.xAxis && 
                           col !== trace.yAxis && 
-                          !trace.filters?.[col] &&
                           getUniqueValues(col).length > 1
                         ).length === 0
                       }
@@ -216,7 +215,6 @@ const TraceManager: React.FC<TraceManagerProps> = ({
                         const availableFilterColumns = availableColumns.categorical.filter(col => 
                           col !== chart.xAxis && 
                           col !== trace.yAxis && 
-                          !trace.filters?.[col] &&
                           getUniqueValues(col).length > 1
                         );
                         
@@ -224,25 +222,35 @@ const TraceManager: React.FC<TraceManagerProps> = ({
                           <p className="text-xs text-muted-foreground">No more columns available for filtering</p>
                         ) : (
                           <div style={{ maxHeight: '200px', overflowY: 'auto' }}>
-                            {availableFilterColumns.map((column) => (
-                              <div key={column}>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  className="w-full justify-start"
-                                  onClick={() => {
-                                    // Add this column as a filter for this trace with empty selection initially (like single mode)
-                                    const newFilters = { 
-                                      ...trace.filters, 
-                                      [column]: [] 
-                                    };
-                                    handleUpdateTrace(index, { filters: newFilters });
-                                  }}
-                                >
-                                  {column}
-                                </Button>
-                              </div>
-                            ))}
+                            {availableFilterColumns.map((column) => {
+                              const isAlreadySelected = !!trace.filters?.[column];
+                              return (
+                                <div key={column}>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className={`w-full justify-start ${
+                                      isAlreadySelected 
+                                        ? 'text-muted-foreground bg-muted/50 cursor-default' 
+                                        : 'hover:bg-accent'
+                                    }`}
+                                    disabled={isAlreadySelected}
+                                    onClick={() => {
+                                      if (!isAlreadySelected) {
+                                        // Add this column as a filter for this trace with empty selection initially (like single mode)
+                                        const newFilters = { 
+                                          ...trace.filters, 
+                                          [column]: [] 
+                                        };
+                                        handleUpdateTrace(index, { filters: newFilters });
+                                      }
+                                    }}
+                                  >
+                                    {column}
+                                  </Button>
+                                </div>
+                              );
+                            })}
                           </div>
                         );
                       })()}

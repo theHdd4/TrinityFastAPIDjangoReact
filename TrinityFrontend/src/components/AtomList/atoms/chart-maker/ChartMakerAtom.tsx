@@ -76,7 +76,6 @@ const ChartMakerAtom: React.FC<Props> = ({ atomId }) => {
         title: 'Rendering chart...',
         description: 'Applying settings and generating chart.',
         variant: 'default',
-        duration: 2000,
       });
     }, 1000);
 
@@ -152,7 +151,6 @@ const ChartMakerAtom: React.FC<Props> = ({ atomId }) => {
         title: 'Rendering chart...',
         description: 'Applying settings and generating chart.',
         variant: 'default',
-        duration: 2000,
       });
     }, 1000);
 
@@ -229,7 +227,6 @@ const ChartMakerAtom: React.FC<Props> = ({ atomId }) => {
         title: 'Rendering chart...',
         description: 'Updating trace filter and regenerating chart.',
         variant: 'default',
-        duration: 2000,
       });
     }, 1000);
 
@@ -431,7 +428,6 @@ const ChartMakerAtom: React.FC<Props> = ({ atomId }) => {
             title: 'Chart rendered',
             description: 'Your chart is ready.',
             variant: 'default',
-            duration: 2000,
           });
         } catch (error) {
           updateSettings(atomId, {
@@ -445,7 +441,6 @@ const ChartMakerAtom: React.FC<Props> = ({ atomId }) => {
             title: 'Rendering failed',
             description: error instanceof Error ? error.message : 'Failed to render chart',
             variant: 'destructive',
-            duration: 2000,
           });
         }
       }
@@ -456,7 +451,7 @@ const ChartMakerAtom: React.FC<Props> = ({ atomId }) => {
   const chartsToShow = settings.uploadedData ? settings.charts : [];
 
   return (
-    <div className="w-full h-full">
+    <div className="w-full h-full min-h-[28rem]">
       <ChartMakerCanvas 
         charts={chartsToShow}
         data={settings.uploadedData}

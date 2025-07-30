@@ -128,7 +128,7 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
         primary: "#6366f1", // modern indigo
         secondary: "#a5b4fc",
         tertiary: "#e0e7ff",
-        gradient: "from-indigo-500 via-indigo-600 to-purple-600",
+        gradient: "from-blue-500 to-blue-600",
         darkAccent: "#4338ca",
         lightAccent: "#f0f9ff"
       },
@@ -144,7 +144,7 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
         primary: "#8b5cf6", // modern violet
         secondary: "#c4b5fd",
         tertiary: "#ede9fe",
-        gradient: "from-violet-500 via-purple-600 to-fuchsia-600",
+        gradient: "from-blue-500 to-blue-600",
         darkAccent: "#7c3aed",
         lightAccent: "#faf5ff"
       },
@@ -267,7 +267,7 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
   const renderChart = (chart: ChartMakerConfig, index: number, chartKey?: string, heightClass?: string, isFullscreen = false) => {
     // Show loading spinner if chart is loading
     if ((chart as any).chartLoading) {
-      const loadingHeight = isCompact ? 'h-40' : 'h-64';
+      const loadingHeight = isCompact ? 'h-56' : 'h-80';
       const colors = getChartColors(index);
       return (
         <div className={`flex flex-col items-center justify-center ${loadingHeight} bg-gradient-to-br from-white/50 to-gray-50/50 backdrop-blur-sm relative overflow-hidden`}>
@@ -333,9 +333,10 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
     // Give more height when sidebars are hidden (full width mode)
     const chartHeight = heightClass || (() => {
       if (isFullWidthMode) {
-        return isCompact ? 'h-56' : layoutConfig.layout === 'vertical' ? 'h-96' : 'h-[32rem]';
+        return isCompact ? 'h-64' : layoutConfig.layout === 'vertical' ? 'h-[28rem]' : 'h-[36rem]';
       }
-      return isCompact ? 'h-40' : layoutConfig.layout === 'vertical' ? 'h-72' : 'h-96';
+      // Increased heights for better visibility when sidebars are open
+      return isCompact ? 'h-56' : layoutConfig.layout === 'vertical' ? 'h-[24rem]' : 'h-[28rem]';
     })();
 
     if (!chartData.length || !xAxisConfig.dataKey || (!yAxisConfig.dataKey && traces.length === 0)) {
@@ -964,10 +965,10 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
 
         // Modern pie color palette with better harmony
         const modernPieColors = [
-          colors.primary,
+          "#8884d8", // blue (matches backend and single-series first color)
           colors.secondary,
           colors.tertiary,
-          "#8b5cf6", // violet
+          "#3b82f6", // blue
           "#f59e0b", // amber
           "#ef4444", // red
           "#06b6d4", // cyan
@@ -1041,7 +1042,7 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
 
   if (charts.length === 0) {
     return (
-      <div className="w-full h-full p-6 bg-gradient-to-br from-slate-50 via-blue-50/30 to-indigo-50/50 overflow-y-auto relative">
+      <div className="w-full h-full p-6 bg-gradient-to-br from-slate-50 via-blue-50/30 to-blue-50/50 overflow-y-auto relative">
         {/* Subtle background pattern */}
         <div className="absolute inset-0 opacity-20">
           <svg width="80" height="80" viewBox="0 0 80 80" className="absolute inset-0 w-full h-full">
@@ -1056,10 +1057,10 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
         
         <div className="relative z-10 flex items-center justify-center h-full">
           <div className="text-center max-w-md">
-            <div className="w-24 h-24 mx-auto mb-8 rounded-2xl bg-gradient-to-br from-indigo-500 via-blue-500 to-purple-600 flex items-center justify-center shadow-2xl transform rotate-3 hover:rotate-0 transition-transform duration-300">
+            <div className="w-24 h-24 mx-auto mb-8 rounded-2xl bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center shadow-2xl transform rotate-3 hover:rotate-0 transition-transform duration-300">
               <BarChart3 className="w-12 h-12 text-white drop-shadow-lg" />
             </div>
-            <h3 className="text-3xl font-bold text-gray-900 mb-3 bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent">
+            <h3 className="text-3xl font-bold text-gray-900 mb-3 bg-gradient-to-r from-blue-500 to-blue-600 bg-clip-text text-transparent">
               Chart Maker
             </h3>
             <p className="text-gray-600 mb-6 text-lg font-medium leading-relaxed">
@@ -1072,7 +1073,7 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
   }
 
   return (
-    <div ref={containerRef} className="w-full h-full flex flex-col bg-gradient-to-br from-slate-50 via-blue-50/30 to-indigo-50/50 relative overflow-hidden">
+    <div ref={containerRef} className="w-full h-full min-h-[28rem] flex flex-col bg-gradient-to-br from-slate-50 via-blue-50/30 to-blue-50/50 relative overflow-hidden">
       {/* Subtle background pattern */}
       <div className="absolute inset-0 opacity-30">
         <svg width="60" height="60" viewBox="0 0 60 60" className="absolute inset-0 w-full h-full">
@@ -1087,7 +1088,7 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
       
       <div className="relative z-10 flex-shrink-0 p-6 pb-0">
         <div className="flex items-center mb-4">
-          <div className="w-1 h-8 bg-gradient-to-b from-indigo-500 via-blue-500 to-purple-600 rounded-full mr-4 shadow-lg"></div>
+          <div className="w-1 h-8 bg-gradient-to-b from-blue-500 to-blue-600 rounded-full mr-4 shadow-lg"></div>
           <h2 className="text-2xl font-bold text-gray-900 drop-shadow-sm">Chart Maker</h2>
         </div>
         <p className="text-gray-600 font-medium">Interactive data visualization dashboard</p>
@@ -1285,7 +1286,7 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
                                                         size="sm"
                                                         className={`h-7 px-3 text-xs flex items-center gap-2 font-medium transition-all duration-200 ${
                                                           isCurrentSeries 
-                                                            ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-md hover:shadow-lg' 
+                                                            ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white shadow-md hover:shadow-lg' 
                                                             : 'bg-white/80 hover:bg-gray-50 border-gray-300/60 hover:border-gray-400/60'
                                                         }`}
                                                         onClick={() => setCurrentTraceIndex(prev => ({
