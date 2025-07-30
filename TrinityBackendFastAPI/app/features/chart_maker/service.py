@@ -10,6 +10,7 @@ from .schemas import (
     RechartsAxisConfig, RechartsLegendConfig, RechartsTooltipConfig, 
     RechartsResponsiveConfig, ChartResponse, ChartTrace
 )
+from app.DataStorageRetrieval.arrow_client import download_dataframe
 
 
 class ChartMakerService:
@@ -47,6 +48,17 @@ class ChartMakerService:
         if file_id not in self.file_storage:
             raise HTTPException(status_code=404, detail=f"File with id {file_id} not found")
         return self.file_storage[file_id]
+    
+    def load_saved_dataframe(self, object_name: str) -> str:
+        """Load a saved dataframe from Arrow Flight and return file_id"""
+        try:
+            # Download dataframe from Arrow Flight using the object name as path
+            df = download_dataframe(object_name)
+            # Store it and return file_id
+            file_id = self.store_file(df)
+            return file_id
+        except Exception as e:
+            raise HTTPException(status_code=404, detail=f"Error loading saved dataframe {object_name}: {str(e)}")
     
     def get_all_columns(self, df: pd.DataFrame) -> List[str]:
         """Get all column names"""

@@ -140,6 +140,9 @@ class CSVUploadResponse(BaseModel):
     sample_data: List[dict]
     row_count: int
 
+class LoadSavedDataframeRequest(BaseModel):
+    object_name: str
+
 # Recharts-specific schemas for chart generation
 class RechartsStyleConfig(BaseModel):
     stroke: Optional[str] = "#8884d8"

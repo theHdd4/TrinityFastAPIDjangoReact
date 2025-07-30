@@ -10,6 +10,7 @@ from .schemas import (
     UniqueValuesResponse, 
     AllColumnsResponse, 
     CSVUploadResponse,
+    LoadSavedDataframeRequest,
     FilterResponse,
     ChartRequest,
     ChartResponse
@@ -70,6 +71,50 @@ async def upload_csv(file: UploadFile = File(...)):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error processing file: {str(e)}")
+
+
+@router.post("/load-saved-dataframe", response_model=CSVUploadResponse)
+async def load_saved_dataframe(request: LoadSavedDataframeRequest):
+    """
+    Load a saved dataframe from Arrow Flight and return comprehensive file info including:
+    - File ID for subsequent operations
+    - All columns
+    - Column types (numeric/categorical)
+    - Unique values for categorical columns
+    - Sample data
+    """
+    try:
+        # Load the dataframe from Arrow Flight
+        file_id = chart_service.load_saved_dataframe(request.object_name)
+        df = chart_service.get_file(file_id)
+        
+        # Get all columns
+        all_columns = chart_service.get_all_columns(df)
+        
+        # Get column types
+        column_types = chart_service.get_column_types(df)
+        
+        # Get unique values for categorical columns (limit to first 100 for performance)
+        categorical_columns = column_types["categorical_columns"][:20]  # Limit to prevent large payloads
+        unique_values = chart_service.get_unique_values(df, categorical_columns)
+        
+        # Get sample data
+        sample_data = chart_service.get_sample_data(df, n=5)
+        
+        return CSVUploadResponse(
+            file_id=file_id,
+            columns=all_columns,
+            numeric_columns=column_types["numeric_columns"],
+            categorical_columns=column_types["categorical_columns"],
+            unique_values=unique_values,
+            sample_data=sample_data,
+            row_count=len(df)
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error loading saved dataframe: {str(e)}")
 
 
 @router.get("/get-all-columns/{file_id}", response_model=AllColumnsResponse)
