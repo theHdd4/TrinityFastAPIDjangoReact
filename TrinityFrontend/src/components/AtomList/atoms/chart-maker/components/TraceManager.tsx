@@ -156,7 +156,12 @@ const TraceManager: React.FC<TraceManagerProps> = ({
                 <Label className="text-xs">Y-Axis Column</Label>
                 <Select
                   value={trace.yAxis}
-                  onValueChange={(value) => handleUpdateTrace(index, { yAxis: value, name: value || trace.name })}
+                  onValueChange={(value) => {
+                    // Update both yAxis and name to the new column value
+                    handleUpdateTrace(index, { yAxis: value, name: value });
+                    // Also update local state to reflect the change immediately
+                    setLocalTraceNames(prev => ({ ...prev, [index]: value || '' }));
+                  }}
                 >
                   <SelectTrigger className="h-8">
                     <SelectValue placeholder="Select column" />
