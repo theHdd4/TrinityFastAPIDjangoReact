@@ -358,7 +358,7 @@ def _describe_endpoint(client: Minio) -> str:
 
 class SmartConcatAgent:
     """Complete LLM-driven concatenation agent with full history context"""
-    
+
     def __init__(self, api_url, model_name, bearer_token, minio_endpoint, access_key, secret_key, bucket, prefix):
         self.api_url = api_url
         self.model_name = model_name
@@ -368,6 +368,12 @@ class SmartConcatAgent:
         self.minio_client = Minio(minio_endpoint, access_key=access_key, secret_key=secret_key, secure=False)
         self.bucket = bucket
         self.prefix = prefix
+        logger.debug(
+            "SmartConcatAgent init minio_endpoint=%s bucket=%s prefix=%s",
+            minio_endpoint,
+            bucket,
+            prefix,
+        )
         
         # Memory system
         self.sessions = {}
@@ -399,6 +405,12 @@ class SmartConcatAgent:
         try:
             load_env_from_redis()
             endpoint = _describe_endpoint(self.minio_client)
+            logger.debug(
+                "listing objects from %s bucket=%s prefix=%s",
+                endpoint,
+                self.bucket,
+                self.prefix,
+            )
             print(
                 f"[DEBUG] listing objects from {endpoint} bucket={self.bucket} prefix={self.prefix}"
             )
@@ -410,6 +422,13 @@ class SmartConcatAgent:
                     os.getenv("PROJECT_NAME"),
                     os.getenv("MINIO_PREFIX"),
                 )
+            )
+            logger.debug(
+                "env CLIENT_NAME=%s APP_NAME=%s PROJECT_NAME=%s MINIO_PREFIX=%s",
+                os.getenv("CLIENT_NAME"),
+                os.getenv("APP_NAME"),
+                os.getenv("PROJECT_NAME"),
+                os.getenv("MINIO_PREFIX"),
             )
             objects = self.minio_client.list_objects(
                 self.bucket, prefix=self.prefix, recursive=True

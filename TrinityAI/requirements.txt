@@ -11,3 +11,4 @@ pyarrow>=15.0.0
 minio
 redis
 pymongo
+python-dotenv
