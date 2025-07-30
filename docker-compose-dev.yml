@@ -130,15 +130,10 @@ services:
     networks:
       - trinity-dev-net
     environment:
-<<<<<<< HEAD
       MONGO_URI: "mongodb://root:rootpass@mongo:27017/trinity_dev?authSource=admin"
       MINIO_ENDPOINT: minio:9000
       MINIO_ACCESS_KEY: minio
       MINIO_SECRET_KEY: minio123
-=======
-      MONGO_URI: "mongodb://mongo:27017/trinity_dev"
-    restart: always
->>>>>>> dev
 
   fastapi:
     build: ./TrinityBackendDjango
