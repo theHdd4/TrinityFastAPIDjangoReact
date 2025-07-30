@@ -75,7 +75,14 @@ class UserEnvironmentVariable(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        unique_together = ("client_id", "app_id", "project_id", "key")
+        # Scope variables to each user to avoid cross-user collisions
+        unique_together = (
+            "user",
+            "client_id",
+            "app_id",
+            "project_id",
+            "key",
+        )
 
     def __str__(self):
         return f"{self.user.username}: {self.key}"

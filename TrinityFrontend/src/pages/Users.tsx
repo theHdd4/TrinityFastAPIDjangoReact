@@ -25,6 +25,8 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { ACCOUNTS_API, TENANTS_API } from '@/lib/api';
+import { useAuth } from '@/contexts/AuthContext';
+import NotFound from './NotFound';
 
 interface User {
   id: number;
@@ -42,6 +44,17 @@ interface User {
 const API_BASE = ACCOUNTS_API;
 
 const Users = () => {
+  const { user } = useAuth();
+  const role = user?.role?.toLowerCase();
+  const hasAccess =
+    role === 'admin' ||
+    role === 'super_admin' ||
+    user?.is_staff ||
+    user?.is_superuser;
+
+  if (!hasAccess) {
+    return <NotFound />;
+  }
   const [users, setUsers] = useState<User[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedRole, setSelectedRole] = useState<string>('All');
