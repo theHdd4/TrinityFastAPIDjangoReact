@@ -9,13 +9,7 @@ import pyarrow as pa
 import pyarrow.flight as flight
 import pyarrow.ipc as ipc
 from minio import Minio
-try:
-    from dotenv import load_dotenv
-except ModuleNotFoundError:  # pragma: no cover - optional dependency
-    def load_dotenv(*_, **__):
-        logging.getLogger("trinity.flight").warning(
-            "python-dotenv not installed; skipping .env loading"
-        )
+from dotenv import load_dotenv
 
 # Load environment variables from the repo's .env file on import so other
 # modules can rely on CLIENT_NAME/APP_NAME/PROJECT_NAME being set. This
@@ -71,14 +65,20 @@ def load_env_from_redis() -> Dict[str, str]:
     return env
 
 
-def _get_prefix() -> str:
-    """Return the MinIO object prefix derived from environment variables."""
+def get_current_names() -> tuple[str, str, str]:
+    """Return (client, app, project) using environment variables and Redis."""
     env = load_env_from_redis()
     client = os.getenv("CLIENT_NAME", env.get("CLIENT_NAME", "default_client"))
     app = os.getenv("APP_NAME", env.get("APP_NAME", "default_app"))
     project = os.getenv(
         "PROJECT_NAME", env.get("PROJECT_NAME", "default_project")
     )
+    return client, app, project
+
+
+def get_minio_prefix() -> str:
+    """Return the MinIO object prefix derived from environment variables."""
+    client, app, project = get_current_names()
     prefix = os.getenv("MINIO_PREFIX", f"{client}/{app}/{project}/")
     if not prefix.endswith("/"):
         prefix += "/"
@@ -91,6 +91,10 @@ def _get_prefix() -> str:
         os.getenv("MINIO_PREFIX"),
     )
     return prefix
+
+
+# Backwards compatibility
+_get_prefix = get_minio_prefix
 
 
 def _find_latest_object(basename: str, client: Minio, bucket: str, prefix: str) -> str | None:
@@ -169,7 +173,7 @@ def download_dataframe(path: str) -> pd.DataFrame:
             logger.debug("MinIO client created for %s", endpoint)
         if not arrow_obj:
             basename = os.path.basename(path)
-            prefix = _get_prefix()
+            prefix = get_minio_prefix()
             arrow_obj = _find_latest_object(basename + ".arrow", m_client, bucket, prefix)
             if arrow_obj is None:
                 arrow_obj = os.path.join(prefix, basename)
@@ -248,7 +252,7 @@ def download_table_bytes(path: str) -> bytes:
             logger.debug("MinIO client created for %s", endpoint)
         if not arrow_obj:
             basename = os.path.basename(path)
-            prefix = _get_prefix()
+            prefix = get_minio_prefix()
             arrow_obj = _find_latest_object(basename + ".arrow", m_client, bucket, prefix)
             if arrow_obj is None:
                 arrow_obj = os.path.join(prefix, basename)

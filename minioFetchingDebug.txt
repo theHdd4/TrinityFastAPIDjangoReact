@@ -1,16 +1,17 @@
-The FastAPI services load environment variables from the repository's .env files
-and Redis on startup. `DataStorageRetrieval.arrow_client` calls `load_dotenv` on
-import so CLIENT_NAME, APP_NAME and PROJECT_NAME are available for any module
-that accesses MinIO (requires the ``python-dotenv`` package from
-``requirements.txt``). During the FastAPI startup event we also call
-`load_env_from_redis()` which populates these variables from the user's saved
-environment in Redis.
+The FastAPI services load environment variables from the repository's ``.env``
+files and Redis on startup. ``DataStorageRetrieval.arrow_client`` reads the
+``.env`` on import using ``python-dotenv`` and provides helpers to refresh the
+variables from Redis via ``load_env_from_redis()``. This ensures ``CLIENT_NAME``,
+``APP_NAME`` and ``PROJECT_NAME`` are always available to build the correct
+MinIO prefix.
 
 To determine the current MinIO prefix you can call:
 
 ```python
-from DataStorageRetrieval.arrow_client import _get_prefix
-prefix = _get_prefix()  # returns "<client>/<app>/<project>/"
+from DataStorageRetrieval.arrow_client import get_current_names, get_minio_prefix
+
+client, app, project = get_current_names()
+prefix = get_minio_prefix()  # "<client>/<app>/<project>/"
 ```
 
 Any service may combine this prefix with the MinIO bucket name (default
