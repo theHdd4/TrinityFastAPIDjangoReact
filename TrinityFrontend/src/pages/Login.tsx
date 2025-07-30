@@ -144,7 +144,7 @@ const Login = () => {
 
             <div className="text-center">
               <p className="text-black text-xs font-mono">
-                Demo Credentials: harsha / harsha
+                Demo Credentials: neo / neo_the_one
               </p>
             </div>
           </CardContent>

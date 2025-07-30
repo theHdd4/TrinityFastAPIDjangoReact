@@ -105,13 +105,13 @@ SHARED_APPS = [
     "rest_framework",
     "guardian",
     "simple_history",
+    "apps.atoms",                 # share atom catalogue globally
 ]
 
 TENANT_APPS = [
     "apps.registry",
     "apps.subscriptions",
     "apps.workflows",
-    "apps.atoms",
     "apps.atom_configs",
     "apps.config_store",
     "apps.permissions",
@@ -149,6 +149,7 @@ MIDDLEWARE = [
     "django_tenants.middleware.TenantMiddleware",      # must be first
     "corsheaders.middleware.CorsMiddleware",           # CORS needs to run early
     "django.middleware.security.SecurityMiddleware",
+    "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -237,6 +238,7 @@ REST_FRAMEWORK = {
 # ------------------------------------------------------------------
 STATIC_URL = "/static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
+STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
 
 MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
@@ -260,3 +262,6 @@ SIMPLE_HISTORY_HISTORY_ID_USE_UUID = True
 # Misc
 # ------------------------------------------------------------------
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+# Disable COOP header for local HTTP access to the admin
+SECURE_CROSS_ORIGIN_OPENER_POLICY = None
