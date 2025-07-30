@@ -34,7 +34,9 @@ _redis_client = (
 
 def load_env_from_redis() -> Dict[str, str]:
     """Load environment variables from Redis and update ``os.environ``."""
+    logger.debug("load_env_from_redis() called")
     if _redis_client is None:
+        logger.debug("redis client not available")
         return {}
     env: Dict[str, str] = {}
     user_id = os.getenv("USER_ID", "")
@@ -62,6 +64,7 @@ def load_env_from_redis() -> Dict[str, str]:
                     os.environ[k] = v
             except Exception as exc:  # pragma: no cover
                 logger.error("failed to decode %s: %s", env_key, exc)
+    logger.debug("env after redis load: %s", env)
     return env
 
 
@@ -78,6 +81,7 @@ def get_current_names() -> tuple[str, str, str]:
 
 def get_minio_prefix() -> str:
     """Return the MinIO object prefix derived from environment variables."""
+    logger.debug("get_minio_prefix() called")
     client, app, project = get_current_names()
     prefix = os.getenv("MINIO_PREFIX", f"{client}/{app}/{project}/")
     if not prefix.endswith("/"):

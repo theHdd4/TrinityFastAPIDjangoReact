@@ -38,12 +38,15 @@ async def log_env():
     # Load environment variables from Redis so CLIENT_NAME/APP_NAME/PROJECT_NAME
     # are available when the service starts.
     load_env_from_redis()
+    from DataStorageRetrieval.arrow_client import get_minio_prefix
+    prefix = get_minio_prefix()
     print(
-        "🚀 env CLIENT_NAME=%s APP_NAME=%s PROJECT_NAME=%s"
+        "🚀 env CLIENT_NAME=%s APP_NAME=%s PROJECT_NAME=%s PREFIX=%s"
         % (
             os.getenv("CLIENT_NAME"),
             os.getenv("APP_NAME"),
             os.getenv("PROJECT_NAME"),
+            prefix,
         )
     )
 
