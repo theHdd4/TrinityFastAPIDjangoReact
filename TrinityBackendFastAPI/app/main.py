@@ -9,6 +9,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.api.router import api_router, text_router
 import os
+from DataStorageRetrieval.arrow_client import load_env_from_redis
 
 app = FastAPI()
 
@@ -34,6 +35,9 @@ app.include_router(text_router, prefix="/api/t")
 
 @app.on_event("startup")
 async def log_env():
+    # Load environment variables from Redis so CLIENT_NAME/APP_NAME/PROJECT_NAME
+    # are available when the service starts.
+    load_env_from_redis()
     print(
         "🚀 env CLIENT_NAME=%s APP_NAME=%s PROJECT_NAME=%s"
         % (

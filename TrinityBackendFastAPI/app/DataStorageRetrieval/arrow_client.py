@@ -1,6 +1,7 @@
 import os
 import logging
 import json
+from pathlib import Path
 from typing import Dict
 
 import pandas as pd
@@ -8,6 +9,15 @@ import pyarrow as pa
 import pyarrow.flight as flight
 import pyarrow.ipc as ipc
 from minio import Minio
+from dotenv import load_dotenv
+
+# Load environment variables from the repo's .env file on import so other
+# modules can rely on CLIENT_NAME/APP_NAME/PROJECT_NAME being set. This
+# mirrors how the backend loads its environment when running inside Docker.
+ENV_FILE = Path(__file__).resolve().parents[2] / ".env.dev"
+if not ENV_FILE.exists():
+    ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
+load_dotenv(ENV_FILE, override=False)
 
 try:
     import redis  # type: ignore
