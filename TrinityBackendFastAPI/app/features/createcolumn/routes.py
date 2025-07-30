@@ -7,7 +7,8 @@ import json
 # from .create.base import calculate_residuals, compute_rpi, apply_stl_outlier
 from .create.base import calculate_residuals, compute_rpi, apply_stl_outlier
 
-from .deps import get_minio_df,fetch_measures_list,get_column_classifications_collection,get_create_settings_collection,minio_client, MINIO_BUCKET, redis_client, OBJECT_PREFIX
+from .deps import get_minio_df,fetch_measures_list,get_column_classifications_collection,get_create_settings_collection,minio_client, MINIO_BUCKET, redis_client
+from app.features.data_upload_validate.app.routes import get_object_prefix
 from .mongodb_saver import save_create_data,save_create_data_settings
 import io
 from sklearn.preprocessing import StandardScaler
@@ -482,10 +483,10 @@ async def save_createcolumn_dataframe(
             filename = f"{file_id}_createcolumn.arrow"
         if not filename.endswith('.arrow'):
             filename += '.arrow'
-        # Prepend OBJECT_PREFIX if not already present
-        if not filename.startswith(OBJECT_PREFIX):
-            filename = OBJECT_PREFIX + filename
-        print(f"[DEBUG] Saving to MinIO: bucket={MINIO_BUCKET}, filename={filename}, OBJECT_PREFIX={OBJECT_PREFIX}")
+        # Get consistent object prefix and construct full path
+        prefix = await get_object_prefix()
+        filename = f"{prefix}create-data/{filename}"
+        print(f"[DEBUG] Saving to MinIO: bucket={MINIO_BUCKET}, filename={filename}")
         # Save to MinIO
         table = pa.Table.from_pandas(df)
         arrow_buffer = pa.BufferOutputStream()
@@ -526,8 +527,7 @@ async def cached_dataframe(
     from urllib.parse import unquote
     object_name = unquote(object_name)
     print(f"➡️ createcolumn cached_dataframe request: {object_name}, page={page}, page_size={page_size}")
-    if not object_name.startswith(OBJECT_PREFIX):
-        print(f"⚠️ cached_dataframe prefix mismatch: {object_name} (expected {OBJECT_PREFIX})")
+    # Prefix validation removed as we now use consistent paths from get_object_prefix
     try:
         content = redis_client.get(object_name)
         if content is None:

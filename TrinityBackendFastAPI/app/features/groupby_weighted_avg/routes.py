@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Form, HTTPException, Query, Response
 from typing import Dict, List
-from .deps import get_minio_df, get_validator_atoms_collection, fetch_dimensions_dict, get_column_classifications_collection, fetch_measures_list, fetch_identifiers_and_measures, minio_client, MINIO_BUCKET, OBJECT_PREFIX
+from .deps import get_minio_df, get_validator_atoms_collection, fetch_dimensions_dict, get_column_classifications_collection, fetch_measures_list, fetch_identifiers_and_measures, minio_client, MINIO_BUCKET
+from app.features.data_upload_validate.app.routes import get_object_prefix
 from .mongodb_saver import save_groupby_result
 import io
 import json
@@ -17,13 +18,8 @@ async def export_csv(object_name: str):
     """Export the grouped result as CSV file."""
     object_name = unquote(object_name)
     try:
-        # Try object name as-is first
-        try:
-            response = minio_client.get_object(MINIO_BUCKET, object_name)
-        except Exception:
-            # fallback with prefix
-            prefixed = OBJECT_PREFIX + object_name if not object_name.startswith(OBJECT_PREFIX) else object_name[len(OBJECT_PREFIX):]
-            response = minio_client.get_object(MINIO_BUCKET, prefixed)
+        # Get the object directly with the provided name
+        response = minio_client.get_object(MINIO_BUCKET, object_name)
         content = response.read()
 
         # Convert Arrow or Excel to CSV if needed
@@ -53,21 +49,9 @@ async def export_excel(object_name: str):
     """Export the grouped result as Excel file."""
     object_name = unquote(object_name)
     try:
-        # Attempt cache (optional) - just skip for now
-        # Fetch from MinIO with or without prefix
-        key_try = [object_name]
-        if not object_name.startswith(OBJECT_PREFIX):
-            key_try.append(OBJECT_PREFIX + object_name)
-        content = None
-        for k in key_try:
-            try:
-                response = minio_client.get_object(MINIO_BUCKET, k)
-                content = response.read()
-                break
-            except Exception:
-                continue
-        if content is None:
-            raise FileNotFoundError("Object not found in MinIO")
+        # Fetch from MinIO with the exact path
+        response = minio_client.get_object(MINIO_BUCKET, object_name)
+        content = response.read()
 
         import io, pandas as pd
         if object_name.endswith(".arrow"):
@@ -223,8 +207,9 @@ async def save_groupby_dataframe(
         df = pd.read_csv(io.StringIO(csv_data))
         if not filename.endswith('.arrow'):
             filename = filename.replace('.csv','') + '.arrow'
-        if not filename.startswith(OBJECT_PREFIX):
-            filename = OBJECT_PREFIX + filename
+        # Get consistent object prefix and construct full path
+        prefix = await get_object_prefix()
+        filename = f"{prefix}groupby-data/{filename}"
         table = pa.Table.from_pandas(df)
         sink = pa.BufferOutputStream()
         with ipc.new_file(sink, table.schema) as writer:
