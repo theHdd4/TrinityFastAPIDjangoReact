@@ -133,9 +133,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Mount the API router so all endpoints are served under the `/trinityai` prefix
-app.include_router(api_router)
-
 @api_router.post("")
 @api_router.post("/")
 @api_router.post("/chat")
@@ -227,6 +224,9 @@ async def list_available_atoms():
             return {"error": "Processor not available"}
     except Exception as e:
         return {"error": str(e)}
+
+# After defining all endpoints include the router so the app registers them
+app.include_router(api_router)
 
 if __name__ == "__main__":
     # Run the FastAPI application. Using the `app` instance directly
