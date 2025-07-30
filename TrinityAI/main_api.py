@@ -3,7 +3,7 @@ import sys
 import asyncio
 from pathlib import Path
 import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, APIRouter
 from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -117,9 +117,12 @@ app = FastAPI(
     version="7.0"
 )
 
+# Router with a global prefix for all Trinity AI endpoints
+api_router = APIRouter(prefix="/trinityai")
+
 # Expose the concat and merge agent APIs alongside the chat endpoints
-app.include_router(concat_app.router)
-app.include_router(merge_app.router)
+api_router.include_router(concat_app.router)
+api_router.include_router(merge_app.router)
 
 # Enable CORS for browser-based clients
 app.add_middleware(
@@ -130,7 +133,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-@app.post("/chat")
+# Mount the API router so all endpoints are served under the `/trinityai` prefix
+app.include_router(api_router)
+
+@api_router.post("/chat")
 async def chat_endpoint(request: QueryRequest):
     """
     Process query using single LLM for complete workflow:
@@ -179,7 +185,7 @@ async def chat_endpoint(request: QueryRequest):
         }
         return jsonable_encoder(error_response)
 
-@app.get("/health")
+@api_router.get("/health")
 async def health():
     return {
         "status": "healthy",
@@ -189,7 +195,7 @@ async def health():
         "processing_type": "unified_single_llm"
     }
 
-@app.get("/debug/{query}")
+@api_router.get("/debug/{query}")
 async def debug_processing(query: str):
     """Debug endpoint to see single LLM processing details"""
     try:
@@ -205,7 +211,7 @@ async def debug_processing(query: str):
     except Exception as e:
         return {"error": str(e)}
 
-@app.get("/atoms")
+@api_router.get("/atoms")
 async def list_available_atoms():
     """List all available atoms"""
     try:

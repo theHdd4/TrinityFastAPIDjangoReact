@@ -35,8 +35,9 @@ Follow the steps below to run all services together.
   changing the value so Vite picks it up:
 
   When `VITE_BACKEND_ORIGIN` points at the public hostname the AI endpoints are
-  automatically prefixed with `/chat`. This ensures requests like `/concat` or
-  `/merge` reach the `trinity-ai` container through Traefik.
+  automatically served under the `/trinityai` prefix. This ensures requests like
+  `/trinityai/concat` or `/trinityai/merge` reach the `trinity-ai` container
+  through Traefik.
 
   ```bash
   docker compose build frontend
@@ -156,11 +157,11 @@ fastapi` or `docker compose logs trinity-ai` to confirm the servers started
 successfully. CORS is enabled so the React frontend served from `localhost:8080`
  can call the APIs. Once the containers finish installing dependencies the text
  service is reachable at `http://localhost:8001/api/t` and Trinity AI at
- `http://localhost:8002/chat`. When accessed through the tunnel, Traefik
- proxies `/chat` to the `trinity-ai` container so the frontend posts to
- `https://trinity.quantmatrixai.com/chat`. The router uses a high priority so
- `/chat` requests never fall back to the frontend service. Use
- `python scripts/check_ai_tunnel.py` to verify the chat endpoint responds
+ `http://localhost:8002/trinityai`. When accessed through the tunnel, Traefik
+ proxies `/trinityai` to the `trinity-ai` container so the frontend posts to
+ `https://trinity.quantmatrixai.com/trinityai`. The router uses a high priority so
+ `/trinityai` requests never fall back to the frontend service. Use
+ `python scripts/check_ai_tunnel.py` to verify the Trinity AI endpoint responds
 through the tunnel.
 
 ### Development stack
@@ -279,7 +280,7 @@ Similarly the Trinity AI service should map port `8002`:
 traefik.http.services.trinity-ai.loadbalancer.server.port=8002
 ```
 
-Run `python scripts/check_ai_tunnel.py` to confirm `/chat` is reachable
+Run `python scripts/check_ai_tunnel.py` to confirm `/trinityai` is reachable
 through the tunnel and routed to the AI container.
 
 Use `docker compose logs traefik` and `docker compose logs fastapi` for

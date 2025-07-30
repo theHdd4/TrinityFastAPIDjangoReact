@@ -196,7 +196,7 @@ services:
     labels:
       - "environment=dev"
       - "traefik.enable=true"
-      - "traefik.http.routers.trinity-ai.rule=Host(`trinity-dev.quantmatrixai.com`) && PathPrefix(`/chat`)"
+      - "traefik.http.routers.trinity-ai.rule=Host(`trinity-dev.quantmatrixai.com`) && PathPrefix(`/trinityai`)"
       - "traefik.http.routers.trinity-ai.entrypoints=web"
       - "traefik.http.routers.trinity-ai.priority=100"
       - "traefik.http.services.trinity-ai.loadbalancer.server.port=8002"
