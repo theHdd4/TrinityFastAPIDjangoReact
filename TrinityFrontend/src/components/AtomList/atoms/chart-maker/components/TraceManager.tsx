@@ -245,7 +245,7 @@ const TraceManager: React.FC<TraceManagerProps> = ({
                   }
                 >
                   <Filter className="w-3 h-3 mr-1" />
-                  Add Filter Column
+                  Add Filter
                 </Button>
               </PopoverTrigger>
               <PopoverContent className="w-64" align="start">
