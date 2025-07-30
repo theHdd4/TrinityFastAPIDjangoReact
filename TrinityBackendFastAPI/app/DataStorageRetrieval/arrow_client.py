@@ -41,6 +41,7 @@ def load_env_from_redis() -> Dict[str, str]:
     project = os.getenv("PROJECT_NAME", env.get("PROJECT_NAME", ""))
     if client and project:
         env_key = f"env:{client}:{app}:{project}"
+        logger.debug("redis namespace %s", env_key)
         cached = _redis_client.get(env_key)
         if cached:
             try:

@@ -55,6 +55,11 @@ def _fetch_names_from_db() -> tuple[str, str, str]:
             project = project_db or project
         except Exception as exc:
             print(f"⚠️ Failed to load names from DB: {exc}")
+
+    os.environ["CLIENT_NAME"] = client
+    os.environ["APP_NAME"] = app
+    os.environ["PROJECT_NAME"] = project
+    load_env_from_redis()
     return client, app, project
 
 
