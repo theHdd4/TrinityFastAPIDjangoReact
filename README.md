@@ -156,10 +156,10 @@ folder runs on `localhost:8002` for chat prompts. Use `docker compose logs
 fastapi` or `docker compose logs trinity-ai` to confirm the servers started
 successfully. CORS is enabled so the React frontend served from `localhost:8080`
  can call the APIs. Once the containers finish installing dependencies the text
- service is reachable at `http://localhost:8001/api/t` and Trinity AI at
- `http://localhost:8002/trinityai`. When accessed through the tunnel, Traefik
- proxies `/trinityai` to the `trinity-ai` container so the frontend posts to
- `https://trinity.quantmatrixai.com/trinityai`. The router uses a high priority so
+  service is reachable at `http://localhost:8001/api/t` and Trinity AI at
+  `http://localhost:8002/trinityai/chat`. When accessed through the tunnel, Traefik
+  proxies `/trinityai` to the `trinity-ai` container so the frontend posts to
+  `https://trinity.quantmatrixai.com/trinityai/chat`. The router uses a high priority so
  `/trinityai` requests never fall back to the frontend service. Use
  `python scripts/check_ai_tunnel.py` to verify the Trinity AI endpoint responds
 through the tunnel.

@@ -136,6 +136,8 @@ app.add_middleware(
 # Mount the API router so all endpoints are served under the `/trinityai` prefix
 app.include_router(api_router)
 
+@api_router.post("")
+@api_router.post("/")
 @api_router.post("/chat")
 async def chat_endpoint(request: QueryRequest):
     """
