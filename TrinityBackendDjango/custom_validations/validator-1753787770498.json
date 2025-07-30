@@ -1,0 +1,374 @@
+{
+  "validator_atom_id": "validator-1753787770498",
+  "created_from_files": [
+    "Master_D0.csv"
+  ],
+  "file_keys": [
+    "Master_D0.csv"
+  ],
+  "schemas": {
+    "Master_D0.csv": {
+      "columns": [
+        {
+          "column": "market",
+          "type": "string"
+        },
+        {
+          "column": "channel",
+          "type": "string"
+        },
+        {
+          "column": "region",
+          "type": "string"
+        },
+        {
+          "column": "category",
+          "type": "string"
+        },
+        {
+          "column": "subcategory",
+          "type": "string"
+        },
+        {
+          "column": "brand",
+          "type": "string"
+        },
+        {
+          "column": "variant",
+          "type": "string"
+        },
+        {
+          "column": "packtype",
+          "type": "string"
+        },
+        {
+          "column": "ppg",
+          "type": "string"
+        },
+        {
+          "column": "packsize",
+          "type": "string"
+        },
+        {
+          "column": "year",
+          "type": "numeric"
+        },
+        {
+          "column": "month",
+          "type": "numeric"
+        },
+        {
+          "column": "week",
+          "type": "numeric"
+        },
+        {
+          "column": "date",
+          "type": "string"
+        },
+        {
+          "column": "brcatid",
+          "type": "string"
+        },
+        {
+          "column": "salesvalue",
+          "type": "numeric"
+        },
+        {
+          "column": "volume",
+          "type": "numeric"
+        },
+        {
+          "column": "volumeunits",
+          "type": "numeric"
+        },
+        {
+          "column": "d1",
+          "type": "numeric"
+        },
+        {
+          "column": "d2",
+          "type": "numeric"
+        },
+        {
+          "column": "d3",
+          "type": "numeric"
+        },
+        {
+          "column": "d4",
+          "type": "numeric"
+        },
+        {
+          "column": "d5",
+          "type": "numeric"
+        },
+        {
+          "column": "d6",
+          "type": "numeric"
+        },
+        {
+          "column": "av1",
+          "type": "numeric"
+        },
+        {
+          "column": "av2",
+          "type": "numeric"
+        },
+        {
+          "column": "av3",
+          "type": "numeric"
+        },
+        {
+          "column": "av4",
+          "type": "numeric"
+        },
+        {
+          "column": "av5",
+          "type": "numeric"
+        },
+        {
+          "column": "av6",
+          "type": "numeric"
+        },
+        {
+          "column": "ev1",
+          "type": "numeric"
+        },
+        {
+          "column": "ev2",
+          "type": "numeric"
+        },
+        {
+          "column": "ev3",
+          "type": "numeric"
+        },
+        {
+          "column": "ev4",
+          "type": "numeric"
+        },
+        {
+          "column": "ev5",
+          "type": "numeric"
+        },
+        {
+          "column": "ev6",
+          "type": "numeric"
+        },
+        {
+          "column": "prepdate",
+          "type": "date"
+        },
+        {
+          "column": "projcode",
+          "type": "string"
+        }
+      ],
+      "sample_rows": [
+        {
+          "market": "UK",
+          "channel": "Convenience",
+          "region": "AllRegion",
+          "category": "Beans",
+          "subcategory": "AllSubCategory",
+          "brand": "HEINZ Flavoured",
+          "variant": "Flavoured",
+          "packtype": "AllPackType",
+          "ppg": "Small Single",
+          "packsize": "AllPackSize",
+          "year": "2021",
+          "month": "1",
+          "week": "2",
+          "date": "09-01-2021",
+          "brcatid": "Brand",
+          "salesvalue": "3658.003155",
+          "volume": "837.7074535",
+          "volumeunits": "3350.829814",
+          "d1": "20.59648688",
+          "d2": "0",
+          "d3": "0",
+          "d4": "0",
+          "d5": "0",
+          "d6": "0",
+          "av1": "0",
+          "av2": "0",
+          "av3": "0",
+          "av4": "0",
+          "av5": "0",
+          "av6": "0",
+          "ev1": "0",
+          "ev2": "0",
+          "ev3": "0",
+          "ev4": "0",
+          "ev5": "0",
+          "ev6": "0",
+          "prepdate": "2024-03-13",
+          "projcode": "UKBeans"
+        },
+        {
+          "market": "UK",
+          "channel": "Convenience",
+          "region": "AllRegion",
+          "category": "Beans",
+          "subcategory": "AllSubCategory",
+          "brand": "HEINZ Flavoured",
+          "variant": "Flavoured",
+          "packtype": "AllPackType",
+          "ppg": "Standard Single",
+          "packsize": "AllPackSize",
+          "year": "2021",
+          "month": "1",
+          "week": "2",
+          "date": "09-01-2021",
+          "brcatid": "Brand",
+          "salesvalue": "2728.807527",
+          "volume": "969.5871204",
+          "volumeunits": "2389.068729",
+          "d1": "15.77914239",
+          "d2": "0",
+          "d3": "0",
+          "d4": "0",
+          "d5": "0",
+          "d6": "0",
+          "av1": "0",
+          "av2": "0",
+          "av3": "0",
+          "av4": "0",
+          "av5": "0",
+          "av6": "0",
+          "ev1": "0",
+          "ev2": "0",
+          "ev3": "0",
+          "ev4": "0",
+          "ev5": "0",
+          "ev6": "0",
+          "prepdate": "2024-03-13",
+          "projcode": "UKBeans"
+        },
+        {
+          "market": "UK",
+          "channel": "Convenience",
+          "region": "AllRegion",
+          "category": "Beans",
+          "subcategory": "AllSubCategory",
+          "brand": "HEINZ Flavoured",
+          "variant": "Flavoured",
+          "packtype": "AllPackType",
+          "ppg": "Small Single",
+          "packsize": "AllPackSize",
+          "year": "2021",
+          "month": "1",
+          "week": "3",
+          "date": "16-01-2021",
+          "brcatid": "Brand",
+          "salesvalue": "3062.782636",
+          "volume": "705.3337904",
+          "volumeunits": "2821.335161",
+          "d1": "19.20211971",
+          "d2": "0",
+          "d3": "0",
+          "d4": "0",
+          "d5": "0",
+          "d6": "0",
+          "av1": "0",
+          "av2": "0",
+          "av3": "0",
+          "av4": "0",
+          "av5": "0",
+          "av6": "0",
+          "ev1": "0",
+          "ev2": "0",
+          "ev3": "0",
+          "ev4": "0",
+          "ev5": "0",
+          "ev6": "0",
+          "prepdate": "2024-03-13",
+          "projcode": "UKBeans"
+        }
+      ],
+      "total_rows": 10244,
+      "total_columns": 38,
+      "column_types": {
+        "market": "string",
+        "channel": "string",
+        "region": "string",
+        "category": "string",
+        "subcategory": "string",
+        "brand": "string",
+        "variant": "string",
+        "packtype": "string",
+        "ppg": "string",
+        "packsize": "string",
+        "year": "numeric",
+        "month": "numeric",
+        "week": "numeric",
+        "date": "string",
+        "brcatid": "string",
+        "salesvalue": "numeric",
+        "volume": "numeric",
+        "volumeunits": "numeric",
+        "d1": "numeric",
+        "d2": "numeric",
+        "d3": "numeric",
+        "d4": "numeric",
+        "d5": "numeric",
+        "d6": "numeric",
+        "av1": "numeric",
+        "av2": "numeric",
+        "av3": "numeric",
+        "av4": "numeric",
+        "av5": "numeric",
+        "av6": "numeric",
+        "ev1": "numeric",
+        "ev2": "numeric",
+        "ev3": "numeric",
+        "ev4": "numeric",
+        "ev5": "numeric",
+        "ev6": "numeric",
+        "prepdate": "date",
+        "projcode": "string"
+      }
+    }
+  },
+  "column_types": {
+    "Master_D0.csv": {
+      "market": "string",
+      "channel": "string",
+      "region": "string",
+      "category": "string",
+      "subcategory": "string",
+      "brand": "string",
+      "variant": "string",
+      "packtype": "string",
+      "ppg": "string",
+      "packsize": "string",
+      "year": "numeric",
+      "month": "numeric",
+      "week": "numeric",
+      "date": "string",
+      "brcatid": "string",
+      "salesvalue": "numeric",
+      "volume": "numeric",
+      "volumeunits": "numeric",
+      "d1": "numeric",
+      "d2": "numeric",
+      "d3": "numeric",
+      "d4": "numeric",
+      "d5": "numeric",
+      "d6": "numeric",
+      "av1": "numeric",
+      "av2": "numeric",
+      "av3": "numeric",
+      "av4": "numeric",
+      "av5": "numeric",
+      "av6": "numeric",
+      "ev1": "numeric",
+      "ev2": "numeric",
+      "ev3": "numeric",
+      "ev4": "numeric",
+      "ev5": "numeric",
+      "ev6": "numeric",
+      "prepdate": "date",
+      "projcode": "string"
+    }
+  },
+  "validation_mode": "simple"
+}
