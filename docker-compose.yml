@@ -75,7 +75,9 @@ services:
   mongo-express:
     image: mongo-express:latest
     environment:
-      ME_CONFIG_MONGODB_URL: "mongodb://mongo:27017"
+      ME_CONFIG_MONGODB_ADMINUSERNAME: root
+      ME_CONFIG_MONGODB_ADMINPASSWORD: rootpass
+      ME_CONFIG_MONGODB_SERVER: mongo
       ME_CONFIG_BASICAUTH_USERNAME: admin
       ME_CONFIG_BASICAUTH_PASSWORD: admin
     ports:
