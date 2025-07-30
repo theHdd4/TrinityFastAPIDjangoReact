@@ -23,9 +23,11 @@ def get_llm_config() -> Dict[str, str]:
     }
 
 
-# Path to DataStorageRetrieval helpers (mounted via volume in docker-compose)
-BACKEND_APP = Path(__file__).resolve().parent / "DataStorageRetrieval"
-sys.path.append(str(BACKEND_APP))
+# Path to backend helpers mounted via volume in docker-compose
+# We add the parent directory so the `DataStorageRetrieval` package
+# can be imported normally.
+BACKEND_ROOT = Path(__file__).resolve().parent
+sys.path.append(str(BACKEND_ROOT))
 
 
 def _fetch_names_from_db() -> tuple[str, str, str]:
