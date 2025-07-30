@@ -16,6 +16,14 @@ def _get_prefix() -> str:
     prefix = os.getenv("MINIO_PREFIX", f"{client}/{app}/{project}/")
     if not prefix.endswith("/"):
         prefix += "/"
+    logger.debug(
+        "prefix resolved to %s using CLIENT_NAME=%s APP_NAME=%s PROJECT_NAME=%s MINIO_PREFIX=%s",
+        prefix,
+        client,
+        app,
+        project,
+        os.getenv("MINIO_PREFIX"),
+    )
     return prefix
 
 
@@ -29,6 +37,10 @@ def _find_latest_object(basename: str, client: Minio, bucket: str, prefix: str) 
             if latest_time is None or obj.last_modified > latest_time:
                 latest_name = obj.object_name
                 latest_time = obj.last_modified
+    if latest_name:
+        logger.debug("latest object for %s under %s is %s", basename, prefix, latest_name)
+    else:
+        logger.debug("no object found for %s under %s", basename, prefix)
     return latest_name
 
 logger = logging.getLogger("trinity.flight")
@@ -66,11 +78,21 @@ def download_dataframe(path: str) -> pd.DataFrame:
     except Exception as e:
         logger.error("❌ flight download failed for %s: %s", path, e)
         arrow_obj = get_arrow_for_flight_path(path)
+        endpoint = os.getenv("MINIO_ENDPOINT", "minio:9000")
+        access_key = os.getenv("MINIO_ACCESS_KEY", "admin_dev")
+        secret_key = os.getenv("MINIO_SECRET_KEY", "pass_dev")
         bucket = os.getenv("MINIO_BUCKET", "trinity")
+        logger.info(
+            "🔍 using MinIO endpoint=%s bucket=%s access_key=%s prefix_env=%s",
+            endpoint,
+            bucket,
+            access_key,
+            os.getenv("MINIO_PREFIX"),
+        )
         m_client = Minio(
-            os.getenv("MINIO_ENDPOINT", "minio:9000"),
-            access_key=os.getenv("MINIO_ACCESS_KEY", "admin_dev"),
-            secret_key=os.getenv("MINIO_SECRET_KEY", "pass_dev"),
+            endpoint,
+            access_key=access_key,
+            secret_key=secret_key,
             secure=False,
         )
         if not arrow_obj:
@@ -79,15 +101,22 @@ def download_dataframe(path: str) -> pd.DataFrame:
             arrow_obj = _find_latest_object(basename + ".arrow", m_client, bucket, prefix)
             if arrow_obj is None:
                 arrow_obj = os.path.join(prefix, basename)
-            logger.info("🪶 inferred arrow object %s", arrow_obj)
+            logger.info(
+                "🪶 searching for %s in bucket=%s prefix=%s -> %s",
+                basename,
+                bucket,
+                prefix,
+                arrow_obj,
+            )
         try:
             resp = m_client.get_object(bucket, arrow_obj)
             data = resp.read()
             table = ipc.RecordBatchFileReader(pa.BufferReader(data)).read_all()
             logger.info(
-                "✔️ fallback minio download %s rows=%d",
+                "✔️ fallback minio download %s rows=%d from %s",
                 path,
                 table.num_rows,
+                arrow_obj,
             )
             # store table back in Flight so future requests succeed
             try:
@@ -123,11 +152,21 @@ def download_table_bytes(path: str) -> bytes:
     except Exception as e:
         logger.error("❌ flight byte download failed for %s: %s", path, e)
         arrow_obj = get_arrow_for_flight_path(path)
+        endpoint = os.getenv("MINIO_ENDPOINT", "minio:9000")
+        access_key = os.getenv("MINIO_ACCESS_KEY", "admin_dev")
+        secret_key = os.getenv("MINIO_SECRET_KEY", "pass_dev")
         bucket = os.getenv("MINIO_BUCKET", "trinity")
+        logger.info(
+            "🔍 using MinIO endpoint=%s bucket=%s access_key=%s prefix_env=%s",
+            endpoint,
+            bucket,
+            access_key,
+            os.getenv("MINIO_PREFIX"),
+        )
         m_client = Minio(
-            os.getenv("MINIO_ENDPOINT", "minio:9000"),
-            access_key=os.getenv("MINIO_ACCESS_KEY", "admin_dev"),
-            secret_key=os.getenv("MINIO_SECRET_KEY", "pass_dev"),
+            endpoint,
+            access_key=access_key,
+            secret_key=secret_key,
             secure=False,
         )
         if not arrow_obj:
@@ -136,12 +175,18 @@ def download_table_bytes(path: str) -> bytes:
             arrow_obj = _find_latest_object(basename + ".arrow", m_client, bucket, prefix)
             if arrow_obj is None:
                 arrow_obj = os.path.join(prefix, basename)
-            logger.info("🪶 inferred arrow object %s", arrow_obj)
+            logger.info(
+                "🪶 searching for %s in bucket=%s prefix=%s -> %s",
+                basename,
+                bucket,
+                prefix,
+                arrow_obj,
+            )
         try:
             resp = m_client.get_object(bucket, arrow_obj)
             data = resp.read()
             table = ipc.RecordBatchFileReader(pa.BufferReader(data)).read_all()
-            logger.info("✔️ fallback minio bytes %s", arrow_obj)
+            logger.info("✔️ fallback minio bytes %s from %s", path, arrow_obj)
             # store table back in Flight for future requests
             try:
                 writer, _ = client.do_put(descriptor, table.schema)
