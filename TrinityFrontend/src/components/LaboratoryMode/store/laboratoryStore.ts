@@ -196,6 +196,7 @@ export interface ChartMakerConfig {
 export interface ChartMakerSettings {
   uploadedData: any; // File, columns, and uniqueValuesByColumn
   fileId?: string; // Backend file ID for API calls
+  dataSource?: string; // Selected dataframe object name
   numberOfCharts: number;
   charts: ChartMakerConfig[];
   chartResponse?: any; // Raw response from the chart API

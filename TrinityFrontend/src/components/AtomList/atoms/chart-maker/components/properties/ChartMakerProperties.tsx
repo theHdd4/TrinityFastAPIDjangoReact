@@ -82,7 +82,7 @@ const ChartMakerProperties: React.FC<Props> = ({ atomId }) => {
     }
   };
 
-  const handleDataUpload = async (data: ChartData, fileId: string) => {
+  const handleDataUpload = async (data: ChartData, fileId: string, dataSource?: string) => {
     try {
       // Remove: setLoading({ uploading: true });
       setError(undefined);
@@ -99,6 +99,7 @@ const ChartMakerProperties: React.FC<Props> = ({ atomId }) => {
       handleSettingsChange({
         uploadedData: data,
         fileId: fileId,
+        dataSource: dataSource || settings.dataSource,
         charts: updatedCharts
       });
 
@@ -319,9 +320,9 @@ const ChartMakerProperties: React.FC<Props> = ({ atomId }) => {
           <ChartMakerSettings
             data={settings.uploadedData}
             onDataUpload={handleDataUpload}
-            onStartUpload={() => setLoading({ uploading: true })}
             loading={settings.loading}
             error={settings.error}
+            dataSource={settings.dataSource}
           />
         </TabsContent>
         
