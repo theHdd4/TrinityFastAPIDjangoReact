@@ -29,6 +29,12 @@ def get_llm_config() -> Dict[str, str]:
 BACKEND_ROOT = Path(__file__).resolve().parent
 sys.path.append(str(BACKEND_ROOT))
 
+# Load environment variables from Redis so subsequent configuration
+# functions see CLIENT_NAME, APP_NAME and PROJECT_NAME
+from DataStorageRetrieval.arrow_client import load_env_from_redis
+
+load_env_from_redis()
+
 
 def _fetch_names_from_db() -> tuple[str, str, str]:
     """Retrieve client, app and project names from the backend database."""
