@@ -23,8 +23,8 @@ def get_llm_config() -> Dict[str, str]:
     }
 
 
-# Path to Django backend for DB helpers
-BACKEND_APP = Path(__file__).resolve().parents[1] / "TrinityBackendFastAPI" / "app"
+# Path to DataStorageRetrieval helpers (mounted via volume in docker-compose)
+BACKEND_APP = Path(__file__).resolve().parent / "DataStorageRetrieval"
 sys.path.append(str(BACKEND_APP))
 
 

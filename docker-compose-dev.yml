@@ -187,6 +187,8 @@ services:
       - ./TrinityBackendDjango/.env
     environment:
       OLLAMA_IP: 10.2.1.65
+    volumes:
+      - ./TrinityBackendFastAPI/app/DataStorageRetrieval:/app/DataStorageRetrieval:ro
     ports:
       - "8005:8002"
     networks:
