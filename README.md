@@ -140,6 +140,12 @@ instead of querying PostgreSQL.
 Set `SIMPLE_TENANT_CREATION=true` in `.env` if your environment cannot run
 database migrations for new tenants.
 
+Saved datasets are uploaded to the MinIO bucket defined by `MINIO_BUCKET`
+(defaults to `trinity`). The object path is constructed from the
+`CLIENT_NAME`, `APP_NAME` and `PROJECT_NAME` environment variables as
+`<client>/<app>/<project>/`. Ensure these variables are configured so the
+AI agents can locate previously uploaded data frames.
+
 ## 2. Start the backend containers
 
 From the repository root run the helper script which builds and starts the

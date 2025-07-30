@@ -56,13 +56,16 @@ def get_minio_config() -> Dict[str, str]:
     """Return MinIO configuration using database names when available."""
     client, app, project = _fetch_names_from_db()
     prefix_default = f"{client}/{app}/{project}/"
+    prefix = os.getenv("MINIO_PREFIX", prefix_default)
+    if not prefix.endswith("/"):
+        prefix += "/"
     return {
         # Default to the development MinIO service if not explicitly configured
         "endpoint": os.getenv("MINIO_ENDPOINT", "minio:9000"),
         "access_key": os.getenv("MINIO_ACCESS_KEY", "minio"),
         "secret_key": os.getenv("MINIO_SECRET_KEY", "minio123"),
         "bucket": os.getenv("MINIO_BUCKET", "trinity"),
-        "prefix": os.getenv("MINIO_PREFIX", prefix_default),
+        "prefix": prefix,
     }
 
 # Ensure the Agent_fetch_atom folder is on the Python path so we can import its modules
