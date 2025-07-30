@@ -74,7 +74,28 @@ const TraceManager: React.FC<TraceManagerProps> = ({
 
   const handleAddTrace = () => {
     if (traces.length >= maxTraces) return;
+    
+    // Get existing filter columns from any existing trace
+    const existingFilterColumns = traces.length > 0 
+      ? Object.keys(traces[0].filters || {})
+      : [];
+    
+    // Create initial filters object with existing columns but empty values
+    const inheritedFilters: Record<string, string[]> = {};
+    existingFilterColumns.forEach(column => {
+      inheritedFilters[column] = [];
+    });
+    
     const updatedChart = addTrace(chart);
+    // Update the new trace with inherited filter columns
+    if (updatedChart.traces && updatedChart.traces.length > 0) {
+      const newTraceIndex = updatedChart.traces.length - 1;
+      updatedChart.traces[newTraceIndex] = {
+        ...updatedChart.traces[newTraceIndex],
+        filters: inheritedFilters
+      };
+    }
+    
     onUpdateChart({ traces: updatedChart.traces });
   };
 
@@ -105,6 +126,62 @@ const TraceManager: React.FC<TraceManagerProps> = ({
     });
   };
 
+  // Global filter management - add a filter column to ALL traces
+  const handleAddGlobalFilter = (column: string) => {
+    if (traces.length === 0) return;
+    
+    // Update all traces to include this filter column with empty values initially
+    const updatedTraces = traces.map(trace => ({
+      ...trace,
+      filters: {
+        ...trace.filters,
+        [column]: []
+      }
+    }));
+    
+    onUpdateChart({ traces: updatedTraces });
+  };
+
+  // Global filter management - remove a filter column from ALL traces
+  const handleRemoveGlobalFilter = (column: string) => {
+    if (traces.length === 0) return;
+    
+    // Remove this filter column from all traces
+    const updatedTraces = traces.map(trace => {
+      const { [column]: removed, ...remainingFilters } = trace.filters || {};
+      return {
+        ...trace,
+        filters: remainingFilters
+      };
+    });
+    
+    onUpdateChart({ traces: updatedTraces });
+  };
+
+  // Get available filter columns (columns that aren't already used as filters)
+  const getAvailableFilterColumns = () => {
+    const usedAsAxis = new Set([chart.xAxis]);
+    traces.forEach(trace => {
+      if (trace.yAxis) usedAsAxis.add(trace.yAxis);
+    });
+    
+    // Get existing filter columns from any trace (they should all have the same columns)
+    const existingFilterColumns = traces.length > 0 
+      ? Object.keys(traces[0].filters || {})
+      : [];
+    
+    return availableColumns.categorical.filter(col => 
+      !usedAsAxis.has(col) && 
+      !existingFilterColumns.includes(col) &&
+      getUniqueValues(col).length > 1
+    );
+  };
+
+  // Get all current filter columns (should be same across all traces)
+  const getCurrentFilterColumns = () => {
+    return traces.length > 0 ? Object.keys(traces[0].filters || {}) : [];
+  };
+
   return (
     <div className="space-y-4">
       {/* Header */}
@@ -124,6 +201,86 @@ const TraceManager: React.FC<TraceManagerProps> = ({
           Add Series
         </Button>
       </div>
+
+      {/* Global Filter Management - only show if we have traces */}
+      {traces.length > 0 && (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm flex items-center gap-2">
+              <Filter className="w-4 h-4" />
+              Global Filters
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {/* Display current filter columns */}
+            {getCurrentFilterColumns().length > 0 && (
+              <div className="space-y-2">
+                <Label className="text-xs">Active Filter Columns</Label>
+                <div className="flex flex-wrap gap-1">
+                  {getCurrentFilterColumns().map(column => (
+                    <Badge key={column} variant="secondary" className="flex items-center gap-1 text-xs">
+                      {column}
+                      <X 
+                        className="w-3 h-3 cursor-pointer hover:text-red-500" 
+                        onClick={() => handleRemoveGlobalFilter(column)}
+                      />
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+            )}
+            
+            {/* Add Global Filter button */}
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  className="w-full h-8"
+                  disabled={
+                    // Disable if no x-axis selected for any trace or no available columns
+                    !chart.xAxis || 
+                    traces.every(trace => !trace.yAxis) ||
+                    getAvailableFilterColumns().length === 0
+                  }
+                >
+                  <Filter className="w-3 h-3 mr-1" />
+                  Add Filter Column
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-64" align="start">
+                <div className="space-y-3">
+                  <Label className="text-xs font-medium">Select Column to Filter</Label>
+                  {(() => {
+                    const availableFilterColumns = getAvailableFilterColumns();
+                    
+                    return availableFilterColumns.length === 0 ? (
+                      <p className="text-xs text-muted-foreground">No more columns available for filtering</p>
+                    ) : (
+                      <div style={{ maxHeight: '200px', overflowY: 'auto' }}>
+                        {availableFilterColumns.map((column) => (
+                          <div key={column}>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="w-full justify-start hover:bg-accent"
+                              onClick={() => {
+                                handleAddGlobalFilter(column);
+                              }}
+                            >
+                              {column}
+                            </Button>
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  })()}
+                </div>
+              </PopoverContent>
+            </Popover>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Traces List */}
       <div className="space-y-3">
@@ -224,101 +381,6 @@ const TraceManager: React.FC<TraceManagerProps> = ({
                     <SelectItem value="max">Maximum</SelectItem>
                   </SelectContent>
                 </Select>
-              </div>
-
-              {/* Filters */}
-              <div className="space-y-2">
-                <Label className="text-xs">Filters for this series</Label>
-                
-                {/* Display existing filters as badges */}
-                {Object.entries(trace.filters || {}).length > 0 && (
-                  <div className="flex flex-wrap gap-1">
-                    {Object.entries(trace.filters || {}).map(([column, values]) => (
-                      <Badge key={column} variant="secondary" className="flex items-center gap-1 text-xs">
-                        {column}
-                        <X 
-                          className="w-3 h-3 cursor-pointer hover:text-red-500" 
-                          onClick={() => {
-                            const { [column]: removed, ...remainingFilters } = trace.filters || {};
-                            handleUpdateTrace(index, { filters: remainingFilters });
-                          }}
-                        />
-                      </Badge>
-                    ))}
-                  </div>
-                )}
-                
-                {/* Add Filter button */}
-                <Popover>
-                  <PopoverTrigger asChild>
-                    <Button 
-                      variant="outline" 
-                      size="sm" 
-                      className="w-full h-8"
-                      disabled={
-                        // Disable if x-axis or y-axis not selected
-                        !chart.xAxis || !trace.yAxis ||
-                        // Or if no available columns for filtering (with more than 1 unique value)
-                        availableColumns.categorical.filter(col => 
-                          col !== chart.xAxis && 
-                          col !== trace.yAxis && 
-                          getUniqueValues(col).length > 1
-                        ).length === 0
-                      }
-                    >
-                      <Filter className="w-3 h-3 mr-1" />
-                      Add Filter
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-64" align="start">
-                    <div className="space-y-3">
-                      <Label className="text-xs font-medium">Select Column to Filter</Label>
-                      {(() => {
-                        const availableFilterColumns = availableColumns.categorical.filter(col => 
-                          col !== chart.xAxis && 
-                          col !== trace.yAxis && 
-                          getUniqueValues(col).length > 1
-                        );
-                        
-                        return availableFilterColumns.length === 0 ? (
-                          <p className="text-xs text-muted-foreground">No more columns available for filtering</p>
-                        ) : (
-                          <div style={{ maxHeight: '200px', overflowY: 'auto' }}>
-                            {availableFilterColumns.map((column) => {
-                              const isAlreadySelected = !!trace.filters?.[column];
-                              return (
-                                <div key={column}>
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    className={`w-full justify-start ${
-                                      isAlreadySelected 
-                                        ? 'text-muted-foreground bg-muted/50 cursor-default' 
-                                        : 'hover:bg-accent'
-                                    }`}
-                                    disabled={isAlreadySelected}
-                                    onClick={() => {
-                                      if (!isAlreadySelected) {
-                                        // Add this column as a filter for this trace with empty selection initially (like single mode)
-                                        const newFilters = { 
-                                          ...trace.filters, 
-                                          [column]: [] 
-                                        };
-                                        handleUpdateTrace(index, { filters: newFilters });
-                                      }
-                                    }}
-                                  >
-                                    {column}
-                                  </Button>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        );
-                      })()}
-                    </div>
-                  </PopoverContent>
-                </Popover>
               </div>
             </CardContent>
           </Card>
