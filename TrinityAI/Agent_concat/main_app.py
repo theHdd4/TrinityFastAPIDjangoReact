@@ -8,14 +8,18 @@ from pydantic import BaseModel
 from typing import Optional
 import time
 from llm_concat import SmartConcatAgent
+import logging
 
 # Allow importing helpers from the parent folder
 PARENT_DIR = Path(__file__).resolve().parent.parent
 sys.path.append(str(PARENT_DIR))
 from main_api import get_llm_config, get_minio_config
 
+logger = logging.getLogger("trinity.concat.app")
+
 cfg_llm = get_llm_config()
 cfg_minio = get_minio_config()
+logger.debug("cfg_minio resolved: %s", cfg_minio)
 
 # Initialize app and agent
 app = FastAPI(title="Smart Concatenation Agent", version="1.0.0")

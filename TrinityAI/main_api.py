@@ -4,6 +4,7 @@ import asyncio
 from pathlib import Path
 import json
 import uvicorn
+import logging
 from fastapi import FastAPI, APIRouter, HTTPException
 from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
@@ -12,6 +13,8 @@ from typing import Dict, Any
 import numpy as np
 from pymongo import MongoClient
 import redis
+
+logger = logging.getLogger("trinity.ai")
 
 
 def get_llm_config() -> Dict[str, str]:
@@ -101,17 +104,21 @@ def _fetch_names_from_db() -> tuple[str, str, str]:
     os.environ["APP_NAME"] = app
     os.environ["PROJECT_NAME"] = project
     load_env_from_redis()
+    logger.debug(
+        "_fetch_names_from_db resolved client=%s app=%s project=%s", client, app, project
+    )
     return client, app, project
 
 
 def get_minio_config() -> Dict[str, str]:
     """Return MinIO configuration using database names when available."""
+    logger.debug("get_minio_config() called")
     client, app, project = _fetch_names_from_db()
     prefix_default = f"{client}/{app}/{project}/"
     prefix = os.getenv("MINIO_PREFIX", prefix_default)
     if not prefix.endswith("/"):
         prefix += "/"
-    return {
+    config = {
         # Default to the development MinIO service if not explicitly configured
         "endpoint": os.getenv("MINIO_ENDPOINT", "minio:9000"),
         "access_key": os.getenv("MINIO_ACCESS_KEY", "minio"),
@@ -119,6 +126,8 @@ def get_minio_config() -> Dict[str, str]:
         "bucket": os.getenv("MINIO_BUCKET", "trinity"),
         "prefix": prefix,
     }
+    logger.debug("minio config resolved: %s", config)
+    return config
 
 # Ensure the Agent_fetch_atom folder is on the Python path so we can import its modules
 AGENT_PATH = Path(__file__).resolve().parent / "Agent_fetch_atom"
