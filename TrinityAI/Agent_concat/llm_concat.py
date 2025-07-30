@@ -339,6 +339,21 @@ from minio import Minio
 from minio.error import S3Error
 from datetime import datetime
 import uuid
+import os
+import logging
+
+logger = logging.getLogger("trinity.concat")
+
+
+def _describe_endpoint(client: Minio) -> str:
+    """Return a human readable endpoint for the given MinIO client."""
+    ep = getattr(client, "_endpoint_url", None)
+    if ep:
+        return str(ep)
+    try:
+        return client._base_url._url.netloc
+    except Exception:
+        return "unknown"
 
 class SmartConcatAgent:
     """Complete LLM-driven concatenation agent with full history context"""
@@ -363,7 +378,10 @@ class SmartConcatAgent:
     def _load_files(self):
         """Load available Arrow files from registry or MinIO."""
         try:
-            from DataStorageRetrieval.flight_registry import ARROW_TO_ORIGINAL, REGISTRY_PATH
+            from DataStorageRetrieval.flight_registry import (
+                ARROW_TO_ORIGINAL,
+                REGISTRY_PATH,
+            )
 
             arrow_objects = list(ARROW_TO_ORIGINAL.keys())
             if not arrow_objects and REGISTRY_PATH.exists():
@@ -378,6 +396,19 @@ class SmartConcatAgent:
             print(f"[WARN] Failed to read arrow registry: {e}")
 
         try:
+            endpoint = _describe_endpoint(self.minio_client)
+            print(
+                f"[DEBUG] listing objects from {endpoint} bucket={self.bucket} prefix={self.prefix}"
+            )
+            print(
+                "[DEBUG] env CLIENT_NAME=%s APP_NAME=%s PROJECT_NAME=%s MINIO_PREFIX=%s"
+                % (
+                    os.getenv("CLIENT_NAME"),
+                    os.getenv("APP_NAME"),
+                    os.getenv("PROJECT_NAME"),
+                    os.getenv("MINIO_PREFIX"),
+                )
+            )
             objects = self.minio_client.list_objects(
                 self.bucket, prefix=self.prefix, recursive=True
             )
