@@ -5,6 +5,7 @@ import json
 import pandas as pd
 import io
 import os
+from app.core.utils import get_env_vars
 from pathlib import Path
 import re
 
@@ -55,12 +56,15 @@ from app.features.data_upload_validate.app.database import (
     get_validation_units_from_mongo,
 )
 
+from app.redis_cache import cache_master_config
+
 
 
 
 from app.features.data_upload_validate.app.database import (
     get_validator_atom_from_mongo,  # Fallback function
-    save_validation_log_to_mongo
+    save_validation_log_to_mongo,
+    log_operation_to_mongo,
 )
 
 # Add this import
@@ -117,6 +121,7 @@ from app.DataStorageRetrieval.minio_utils import (
     upload_to_minio,
     get_client,
     ARROW_DIR,
+    get_arrow_dir,
 )
 import pyarrow as pa
 import pyarrow.ipc as ipc
@@ -125,36 +130,66 @@ import asyncio
 import os
 
 # ✅ MINIO CONFIGURATION - values come from docker-compose/.env
+# Default to the development MinIO service if not explicitly configured
 MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "minio:9000")
 MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY", "minio")
 MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY", "minio123")
 MINIO_BUCKET = os.getenv("MINIO_BUCKET", "trinity")
 
-# Database driven folder names
-USER_ID = int(os.getenv("USER_ID", "0"))
-PROJECT_ID = int(os.getenv("PROJECT_ID", "0"))
 
-CLIENT_NAME = os.getenv("CLIENT_NAME", "default_client")
-APP_NAME = os.getenv("APP_NAME", "default_app")
-PROJECT_NAME = os.getenv("PROJECT_NAME", "default_project")
+def _parse_numeric_id(value: str | int | None) -> int:
+    """Return the numeric component of an ID string like "name_123"."""
+    if value is None:
+        return 0
+    try:
+        return int(str(value).split("_")[-1])
+    except Exception:
+        return 0
 
-def load_names_from_db() -> None:
-    """Lookup client/app/project names from Postgres if ids are provided."""
-    global CLIENT_NAME, APP_NAME, PROJECT_NAME
-    if USER_ID and PROJECT_ID:
+async def get_object_prefix(
+    client_id: str = "",
+    app_id: str = "",
+    project_id: str = "",
+    *,
+    client_name: str = "",
+    app_name: str = "",
+    project_name: str = "",
+) -> str:
+    """Return the MinIO prefix for the current client/app/project."""
+    USER_ID = _parse_numeric_id(os.getenv("USER_ID"))
+    PROJECT_ID = _parse_numeric_id(project_id or os.getenv("PROJECT_ID", "0"))
+    env = await get_env_vars(
+        client_id or os.getenv("CLIENT_ID", ""),
+        app_id or os.getenv("APP_ID", ""),
+        project_id or os.getenv("PROJECT_ID", ""),
+        client_name=client_name or os.getenv("CLIENT_NAME", ""),
+        app_name=app_name or os.getenv("APP_NAME", ""),
+        project_name=project_name or os.getenv("PROJECT_NAME", ""),
+    )
+    print("🔧 fetched env", env)
+    client = env.get("CLIENT_NAME", os.getenv("CLIENT_NAME", "default_client"))
+    app = env.get("APP_NAME", os.getenv("APP_NAME", "default_app"))
+    project = env.get("PROJECT_NAME", os.getenv("PROJECT_NAME", "default_project"))
+
+    if PROJECT_ID and (client == "default_client" or app == "default_app" or project == "default_project"):
         try:
-            CLIENT_NAME_DB, APP_NAME_DB, PROJECT_NAME_DB = asyncio.run(
-                fetch_client_app_project(USER_ID, PROJECT_ID)
+            client_db, app_db, project_db = await fetch_client_app_project(
+                USER_ID if USER_ID else None, PROJECT_ID
             )
-            CLIENT_NAME = CLIENT_NAME_DB or CLIENT_NAME
-            APP_NAME = APP_NAME_DB or APP_NAME
-            PROJECT_NAME = PROJECT_NAME_DB or PROJECT_NAME
-        except Exception as exc:
+            client = client_db or client
+            app = app_db or app
+            project = project_db or project
+        except Exception as exc:  # pragma: no cover - database unreachable
             print(f"⚠️ Failed to load names from DB: {exc}")
 
-load_names_from_db()
-
-OBJECT_PREFIX = f"{CLIENT_NAME}/{APP_NAME}/{PROJECT_NAME}/"
+    os.environ["CLIENT_NAME"] = client
+    os.environ["APP_NAME"] = app
+    os.environ["PROJECT_NAME"] = project
+    prefix = f"{client}/{app}/{project}/"
+    print(
+        f"📦 prefix {prefix} (CLIENT_ID={client_id or os.getenv('CLIENT_ID','')} APP_ID={app_id or os.getenv('APP_ID','')} PROJECT_ID={PROJECT_ID})"
+    )
+    return prefix
 
 # Initialize MinIO client
 minio_client = get_client()
@@ -1278,6 +1313,14 @@ async def configure_validation_config(request: Request):
         + ref_units,
     )
 
+    client_id = os.getenv("CLIENT_ID", "")
+    app_id = os.getenv("APP_ID", "")
+    project_id = os.getenv("PROJECT_ID", "")
+    cache_master_config(client_id, app_id, project_id, file_key, config_data)
+    print(
+        f"📦 Stored in redis namespace {client_id}:{app_id}:{project_id}:{file_key}"
+    )
+
     message = f"Validation config configured successfully for file key '{file_key}' with {total_conditions} conditions"
     if column_frequencies:
         message += f" and frequencies specified for columns: {list(column_frequencies.keys())}"
@@ -1304,7 +1347,9 @@ async def validate(
     validator_atom_id: str = Form(...),
     files: List[UploadFile] = File(...),
     file_keys: str = Form(...),
-    date_frequency: str = Form(default=None)
+    date_frequency: str = Form(default=None),
+    user_id: str = Form(""),
+    client_id: str = Form("")
 ):
     """
     Enhanced validation: mandatory columns + type check + auto-correction + custom conditions + MongoDB logging
@@ -1373,7 +1418,8 @@ async def validate(
     flight_uploads: list = []
     if validation_results["overall_status"] in ["passed", "passed_with_warnings"]:
         for (_, filename, key), (_, df) in zip(file_contents, files_data):
-            arrow_file = ARROW_DIR / f"{validator_atom_id}_{key}.arrow"
+            arrow_file = get_arrow_dir() / f"{validator_atom_id}_{key}.arrow"
+            print(f"📝 saving arrow {arrow_file}")
             save_arrow_table(df, arrow_file)
 
             flight_path = f"{validator_atom_id}/{key}"
@@ -1414,6 +1460,13 @@ async def validate(
     
     # ✅ Save to MongoDB validation logs collection
     mongo_log_result = save_validation_log_to_mongo(validation_log_data)
+    log_operation_to_mongo(
+        user_id=user_id,
+        client_id=client_id,
+        validator_atom_id=validator_atom_id,
+        operation="validate",
+        details={"overall_status": validation_results["overall_status"]},
+    )
 
     return {
         "overall_status": validation_results["overall_status"],
@@ -1808,8 +1861,9 @@ async def validate_mmm_endpoint(
         validator_atom_result = {"status": "skipped", "reason": "validation_failed"}
         
         if validation_report.status == "success":
+            prefix = await get_object_prefix()
             for content, filename, key in file_contents:
-                upload_result = upload_to_minio(content, filename, OBJECT_PREFIX)
+                upload_result = upload_to_minio(content, filename, prefix)
                 minio_uploads.append({
                     "file_key": key,
                     "filename": filename,
@@ -2166,7 +2220,8 @@ async def validate_category_forecasting_endpoint(
         validator_atom_result = {"status": "skipped", "reason": "validation_failed"}
         
         if validation_report.status == "success":
-            upload_result = upload_to_minio(content, file.filename, OBJECT_PREFIX)
+            prefix = await get_object_prefix()
+            upload_result = upload_to_minio(content, file.filename, prefix)
             minio_uploads.append({
                 "file_key": key,
                 "filename": file.filename,
@@ -2352,7 +2407,8 @@ async def validate_promo_endpoint(
         mongo_log_result = {"status": "skipped", "reason": "validation_failed"}
         
         if validation_report.status == "success":
-            upload_result = upload_to_minio(content, file.filename, OBJECT_PREFIX)
+            prefix = await get_object_prefix()
+            upload_result = upload_to_minio(content, file.filename, prefix)
             minio_uploads.append({
                 "file_key": key,
                 "filename": file.filename,
@@ -2474,6 +2530,13 @@ async def save_dataframes(
     files: List[UploadFile] = File(...),
     file_keys: str = Form(...),
     overwrite: bool = Form(False),
+    client_id: str = Form(""),
+    user_id: str = Form(""),
+    app_id: str = Form(""),
+    project_id: str = Form(""),
+    client_name: str = Form(""),
+    app_name: str = Form(""),
+    project_name: str = Form(""),
 ):
     """Save validated dataframes as Arrow tables and upload via Flight."""
     try:
@@ -2485,6 +2548,21 @@ async def save_dataframes(
 
     uploads = []
     flights = []
+    if client_id:
+        os.environ["CLIENT_ID"] = client_id
+    if app_id:
+        os.environ["APP_ID"] = app_id
+    if project_id:
+        os.environ["PROJECT_ID"] = project_id
+    if client_name:
+        os.environ["CLIENT_NAME"] = client_name
+    if app_name:
+        os.environ["APP_NAME"] = app_name
+    if project_name:
+        os.environ["PROJECT_NAME"] = project_name
+    prefix = await get_object_prefix()
+    numeric_pid = _parse_numeric_id(project_id or os.getenv("PROJECT_ID", "0"))
+    print(f"📤 saving to prefix {prefix}")
     for file, key in zip(files, keys):
         content = await file.read()
         if file.filename.lower().endswith(".csv"):
@@ -2498,7 +2576,7 @@ async def save_dataframes(
 
 
         arrow_name = Path(file.filename).stem + ".arrow"
-        exists = await arrow_dataset_exists(PROJECT_ID, validator_atom_id, key)
+        exists = await arrow_dataset_exists(numeric_pid, validator_atom_id, key)
         if exists and not overwrite:
             uploads.append({"file_key": key, "already_saved": True})
             flights.append({"file_key": key})
@@ -2509,7 +2587,7 @@ async def save_dataframes(
         with ipc.new_file(arrow_buf, table.schema) as writer:
             writer.write_table(table)
 
-        result = upload_to_minio(arrow_buf.getvalue(), arrow_name, OBJECT_PREFIX)
+        result = upload_to_minio(arrow_buf.getvalue(), arrow_name, prefix)
         saved_name = Path(result.get("object_name", "")).name or arrow_name
         flight_path = f"{validator_atom_id}/{saved_name}"
         upload_dataframe(df, flight_path)
@@ -2523,7 +2601,7 @@ async def save_dataframes(
         redis_client.set(f"flight:{flight_path}", result.get("object_name", ""))
 
         await record_arrow_dataset(
-            PROJECT_ID,
+            numeric_pid,
             validator_atom_id,
             key,
             result.get("object_name", ""),
@@ -2539,13 +2617,34 @@ async def save_dataframes(
         })
         flights.append({"file_key": key, "flight_path": flight_path})
 
-    return {"minio_uploads": uploads, "flight_uploads": flights}
+    env = {
+        "CLIENT_NAME": os.getenv("CLIENT_NAME"),
+        "APP_NAME": os.getenv("APP_NAME"),
+        "PROJECT_NAME": os.getenv("PROJECT_NAME"),
+    }
+    log_operation_to_mongo(
+        user_id=user_id,
+        client_id=client_id,
+        validator_atom_id=validator_atom_id,
+        operation="save_dataframes",
+        details={"files_saved": uploads, "prefix": prefix},
+    )
+    return {
+        "minio_uploads": uploads,
+        "flight_uploads": flights,
+        "prefix": prefix,
+        "environment": env,
+    }
 
 
 @router.get("/list_saved_dataframes")
-async def list_saved_dataframes():
-    """List saved Arrow dataframes sorted by newest first."""
-    prefix = OBJECT_PREFIX
+async def list_saved_dataframes() -> dict:
+    """List saved Arrow dataframes sorted by newest first.
+
+    The client, app and project names are loaded from environment
+    variables via :func:`get_object_prefix`.
+    """
+    prefix = await get_object_prefix()
     try:
         objects = minio_client.list_objects(MINIO_BUCKET, prefix=prefix, recursive=True)
         latest: dict[str, tuple[datetime, str]] = {}
@@ -2567,7 +2666,8 @@ async def list_saved_dataframes():
         files = [
             {
                 "object_name": name,
-                "csv_name": Path(name).stem,
+                "arrow_name": Path(name).name,
+                "csv_name": Path(name).stem.split("_", 2)[-1],
             }
             for _, name in entries
         ]
@@ -2575,9 +2675,9 @@ async def list_saved_dataframes():
     except S3Error as e:
         if getattr(e, "code", "") == "NoSuchBucket":
             return {"files": []}
-        raise HTTPException(status_code=500, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        return {"files": [], "error": str(e)}
+    except Exception as e:  # pragma: no cover - unexpected error
+        return {"files": [], "error": str(e)}
 
 
 @router.get("/latest_ticket/{file_key}")
@@ -2598,7 +2698,8 @@ async def latest_ticket(file_key: str):
 @router.get("/download_dataframe")
 async def download_dataframe(object_name: str):
     """Return a presigned URL to download a dataframe"""
-    if not object_name.startswith(OBJECT_PREFIX):
+    prefix = await get_object_prefix()
+    if not object_name.startswith(prefix):
         raise HTTPException(status_code=400, detail="Invalid object name")
     try:
         url = minio_client.presigned_get_object(MINIO_BUCKET, object_name)
@@ -2615,7 +2716,8 @@ async def download_dataframe(object_name: str):
 @router.delete("/delete_dataframe")
 async def delete_dataframe(object_name: str):
     """Delete a single saved dataframe"""
-    if not object_name.startswith(OBJECT_PREFIX):
+    prefix = await get_object_prefix()
+    if not object_name.startswith(prefix):
         raise HTTPException(status_code=400, detail="Invalid object name")
     try:
         try:
@@ -2636,7 +2738,7 @@ async def delete_dataframe(object_name: str):
 @router.delete("/delete_all_dataframes")
 async def delete_all_dataframes():
     """Delete all saved dataframes for the current project"""
-    prefix = OBJECT_PREFIX
+    prefix = await get_object_prefix()
     deleted = []
     try:
         objects = minio_client.list_objects(MINIO_BUCKET, prefix=prefix, recursive=True)
@@ -2662,9 +2764,10 @@ async def delete_all_dataframes():
 @router.post("/rename_dataframe")
 async def rename_dataframe(object_name: str = Form(...), new_filename: str = Form(...)):
     """Rename a saved dataframe"""
-    if not object_name.startswith(OBJECT_PREFIX):
+    prefix = await get_object_prefix()
+    if not object_name.startswith(prefix):
         raise HTTPException(status_code=400, detail="Invalid object name")
-    new_object = f"{OBJECT_PREFIX}{new_filename}"
+    new_object = f"{prefix}{new_filename}"
     if new_object == object_name:
         # Nothing to do if the name hasn't changed
         return {"old_name": object_name, "new_name": object_name}

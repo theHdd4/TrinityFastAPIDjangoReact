@@ -21,6 +21,9 @@ import ConcatProperties from '@/components/AtomList/atoms/concat/components/prop
 import MergeProperties from '@/components/AtomList/atoms/merge/components/properties/MergeProperties';
 import ColumnClassifierProperties from '@/components/AtomList/atoms/column-classifier/components/properties/ColumnClassifierProperties';
 import ChartMakerProperties from '@/components/AtomList/atoms/chart-maker/components/properties/ChartMakerProperties';
+import CreateColumnProperties from '@/components/AtomList/atoms/createcolumn/components/properties/CreateColumnProperties';
+import GroupByProperties from '@/components/AtomList/atoms/groupby-wtg-avg/components/properties/GroupByProperties';
+import ScopeSelectorProperties from '@/components/AtomList/atoms/scope-selector/components/properties/ScopeSelectorProperties';
 
 interface SettingsPanelProps {
   isCollapsed: boolean;
@@ -103,6 +106,12 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
             <ColumnClassifierProperties atomId={selectedAtomId} />
           ) : selectedAtomId && atom?.atomId === 'chart-maker' ? (
             <ChartMakerProperties atomId={selectedAtomId} />
+          ) : selectedAtomId && (atom?.atomId === 'create-column' || atom?.atomId === 'createcolumn') ? (
+            <CreateColumnProperties atomId={selectedAtomId} />
+          ) : selectedAtomId && atom?.atomId === 'groupby-wtg-avg' ? (
+            <GroupByProperties atomId={selectedAtomId} />
+          ) : selectedAtomId && atom?.atomId === 'scope-selector' ? (
+            <ScopeSelectorProperties atomId={selectedAtomId} />
           ) : (
           <>
           <Tabs value={tab} onValueChange={setTab} className="w-full">

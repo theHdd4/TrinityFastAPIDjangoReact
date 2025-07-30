@@ -1,16 +1,22 @@
-import React, { useState, useEffect } from 'react';
-import { Card } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Button } from '@/components/ui/button';
-import { FEATURE_OVERVIEW_API } from '@/lib/api';
-import { BarChart3, TrendingUp, Maximize2, X } from 'lucide-react';
+import React, { useState, useEffect } from "react";
+import { Card } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 import {
-  Dialog,
-  DialogContent,
-  DialogTrigger,
-} from '@/components/ui/dialog';
-import D3LineChart from './D3LineChart';
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { Button } from "@/components/ui/button";
+import { FEATURE_OVERVIEW_API } from "@/lib/api";
+import { fetchDimensionMapping } from "@/lib/dimensions";
+import { BarChart3, TrendingUp, Maximize2 } from "lucide-react";
+import { Dialog, DialogContent, DialogTrigger } from "@/components/ui/dialog";
+import D3LineChart from "./D3LineChart";
+import { useAuth } from "@/contexts/AuthContext";
+import { logSessionState, addNavigationItem } from "@/lib/session";
 
 interface ColumnInfo {
   column: string;
@@ -24,9 +30,13 @@ interface FeatureOverviewCanvasProps {
   onUpdateSettings: (s: any) => void;
 }
 
-const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({ settings, onUpdateSettings }) => {
-  const [marketDims, setMarketDims] = useState<string[]>(
-    Array.isArray(settings.marketDims) ? settings.marketDims : []
+const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
+  settings,
+  onUpdateSettings,
+}) => {
+  const { user } = useAuth();
+  const [dimensionMap, setDimensionMap] = useState<Record<string, string[]>>(
+    settings.dimensionMap || {},
   );
   const [productDims, setProductDims] = useState<string[]>(
     Array.isArray(settings.productDims) ? settings.productDims : []
@@ -163,15 +173,25 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({ settings,
         const lower = Array.isArray(settings.numericColumns)
           ? settings.numericColumns.map(c => c.toLowerCase())
           : [];
-        const defaults = ['salesvalue', 'volume'].filter(d => lower.includes(d));
-        if (defaults.length > 0) {
-          newSettings.yAxes = defaults;
-        }
+        const defaults = ["salesvalue", "volume"].filter((d) =>
+          lower.includes(d),
+        );
+      if (defaults.length > 0) {
+        newSettings.yAxes = defaults;
+      }
       }
       onUpdateSettings(newSettings);
+      addNavigationItem(user?.id, {
+        atom: 'feature-overview',
+        action: 'displaySkus',
+        dataSource: settings.dataSource,
+        dimensionMap,
+      });
+      logSessionState(user?.id);
     } catch (e: any) {
-      console.error('⚠️ failed to display SKUs', e);
-      setError(e.message || 'Error displaying SKUs');
+      console.error("⚠️ failed to display SKUs", e);
+      setError(e.message || "Error displaying SKUs");
+      logSessionState(user?.id);
     }
   };
 
@@ -200,9 +220,21 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({ settings,
       setStatDataMap(result);
       setActiveMetric(settings.yAxes[0]);
       setActiveRow(row.id);
-      onUpdateSettings({ statDataMap: result, activeMetric: settings.yAxes[0], activeRow: row.id });
+      onUpdateSettings({
+        statDataMap: result,
+        activeMetric: settings.yAxes[0],
+        activeRow: row.id,
+      });
+      addNavigationItem(user?.id, {
+        atom: 'feature-overview',
+        action: 'viewStats',
+        metric: settings.yAxes[0],
+        combination: combo,
+      });
+      logSessionState(user?.id);
     } catch (e: any) {
-      setError(e.message || 'Error fetching statistics');
+      setError(e.message || "Error fetching statistics");
+      logSessionState(user?.id);
     }
   };
 

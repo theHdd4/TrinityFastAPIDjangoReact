@@ -26,9 +26,14 @@ const ConcatProperties: React.FC<Props> = ({ atomId }) => {
     console.log('🔧 ConcatProperties: Settings updated');
   };
 
+  // Helper function to check if all required options are selected
+  const isConcatReady = () => {
+    return settings.file1 && settings.file2 && settings.direction;
+  };
+
   const handlePerformConcat = async () => {
     console.log('[ConcatProperties] handlePerformConcat settings:', settings);
-    if (!settings.file1 || !settings.file2 || !settings.direction) {
+    if (!isConcatReady()) {
       toast({
         title: "Error",
         description: "Please select both files and direction before performing concatenation.",
@@ -109,7 +114,8 @@ const ConcatProperties: React.FC<Props> = ({ atomId }) => {
           <TabsContent value="inputs" className="space-y-4" forceMount>
             <ConcatInputFiles 
               settings={settings} 
-              onSettingsChange={handleChange} 
+              onSettingsChange={handleChange}
+              onPerformConcat={handlePerformConcat}
             />
           </TabsContent>
           <TabsContent value="options" className="space-y-4" forceMount>
@@ -120,7 +126,10 @@ const ConcatProperties: React.FC<Props> = ({ atomId }) => {
             />
           </TabsContent>
           <TabsContent value="exhibition" className="space-y-4" forceMount>
-            <ConcatExhibition settings={settings} />
+            <ConcatExhibition 
+              settings={settings}
+              onPerformConcat={handlePerformConcat}
+            />
           </TabsContent>
         </div>
       </Tabs>

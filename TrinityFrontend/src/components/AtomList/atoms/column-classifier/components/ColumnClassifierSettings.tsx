@@ -11,7 +11,7 @@ import {
   DEFAULT_COLUMN_CLASSIFIER_SETTINGS
 } from '@/components/LaboratoryMode/store/laboratoryStore';
 
-interface Frame { object_name: string; csv_name: string; }
+interface Frame { object_name: string; csv_name: string; arrow_name?: string }
 
 interface ClassificationResponse {
   final_classification: {
@@ -39,7 +39,26 @@ const ColumnClassifierSettings: React.FC<ColumnClassifierSettingsProps> = ({ ato
   const [error, setError] = useState('');
 
   useEffect(() => {
-    fetch(`${VALIDATE_API}/list_saved_dataframes`)
+    let query = '';
+    const envStr = localStorage.getItem('env');
+    if (envStr) {
+      try {
+        const env = JSON.parse(envStr);
+        query =
+          '?' +
+          new URLSearchParams({
+            client_id: env.CLIENT_ID || '',
+            app_id: env.APP_ID || '',
+            project_id: env.PROJECT_ID || '',
+            client_name: env.CLIENT_NAME || '',
+            app_name: env.APP_NAME || '',
+            project_name: env.PROJECT_NAME || ''
+          }).toString();
+      } catch {
+        /* ignore */
+      }
+    }
+    fetch(`${VALIDATE_API}/list_saved_dataframes${query}`)
       .then(r => r.json())
       .then(d => setFrames(Array.isArray(d.files) ? d.files : []))
       .catch(() => setFrames([]));
@@ -88,7 +107,7 @@ const ColumnClassifierSettings: React.FC<ColumnClassifierSettingsProps> = ({ ato
             <SelectContent>
               {frames.map(f => (
                 <SelectItem key={f.object_name} value={f.object_name}>
-                  {f.csv_name.split('/').pop()}
+                  {f.arrow_name ? f.arrow_name.split('/').pop() : f.csv_name.split('/').pop()}
                 </SelectItem>
               ))}
             </SelectContent>

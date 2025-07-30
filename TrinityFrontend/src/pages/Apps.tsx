@@ -108,6 +108,20 @@ const handleAppSelect = async (appId: string) => {
     'current-app',
     JSON.stringify({ id: backendId, slug: appId })
   );
+  try {
+    const res = await fetch(`${REGISTRY_API}/apps/${backendId}/`, {
+      credentials: 'include'
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (data.environment) {
+        console.log('Environment after app select', data.environment);
+        localStorage.setItem('env', JSON.stringify(data.environment));
+      }
+    }
+  } catch (err) {
+    console.log('App select env fetch error', err);
+  }
   navigate(`/projects?app=${appId}`);
 };
 

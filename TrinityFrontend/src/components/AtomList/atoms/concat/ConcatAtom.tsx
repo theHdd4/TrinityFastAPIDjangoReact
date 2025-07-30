@@ -19,6 +19,7 @@ const ConcatAtom: React.FC<Props> = ({ atomId }) => {
         file1={settings.file1}
         file2={settings.file2}
         direction={settings.direction}
+        fullCsv={settings.concatResults?.data}
       />
     </div>
   );

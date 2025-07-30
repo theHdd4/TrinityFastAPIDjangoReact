@@ -1,5 +1,8 @@
 from rest_framework import viewsets, permissions
+from rest_framework.response import Response
+import os
 from apps.accounts.views import CsrfExemptSessionAuthentication
+from apps.accounts.utils import save_env_var, get_env_dict, load_env_vars
 from .models import App, Project, Session, LaboratoryAction, ArrowDataset
 from .serializers import (
     AppSerializer,
@@ -24,6 +27,22 @@ class AppViewSet(viewsets.ModelViewSet):
         if self.action in ("create", "update", "partial_update", "destroy"):
             return [permissions.IsAdminUser()]
         return super().get_permissions()
+
+    def retrieve(self, request, *args, **kwargs):
+        load_env_vars(request.user)
+        app_obj = self.get_object()
+        os.environ["APP_NAME"] = app_obj.slug
+        os.environ["APP_ID"] = os.environ.get("APP_ID") or f"{app_obj.slug}_{app_obj.id}"
+        print(f"✅ app selected: APP_NAME={os.environ['APP_NAME']}")
+        save_env_var(request.user, "CLIENT_NAME", os.environ.get("CLIENT_NAME", ""))
+        save_env_var(request.user, "CLIENT_ID", os.environ.get("CLIENT_ID", ""))
+        save_env_var(request.user, "APP_NAME", os.environ.get("APP_NAME", ""))
+        save_env_var(request.user, "APP_ID", os.environ.get("APP_ID", ""))
+        print("Current env vars after app select", get_env_dict(request.user))
+        serializer = self.get_serializer(app_obj)
+        data = serializer.data
+        data["environment"] = get_env_dict(request.user)
+        return Response(data)
 
 
 class ProjectViewSet(viewsets.ModelViewSet):
@@ -56,6 +75,43 @@ class ProjectViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         serializer.save(owner=self.request.user)
+
+    def retrieve(self, request, *args, **kwargs):
+        load_env_vars(request.user)
+        project_obj = self.get_object()
+        os.environ["PROJECT_NAME"] = project_obj.name
+        os.environ["PROJECT_ID"] = f"{project_obj.name}_{project_obj.id}"
+        print(
+            f"✅ project selected: PROJECT_ID={os.environ['PROJECT_ID']} PROJECT_NAME={os.environ['PROJECT_NAME']}"
+        )
+        save_env_var(request.user, "CLIENT_NAME", os.environ.get("CLIENT_NAME", ""))
+        save_env_var(request.user, "CLIENT_ID", os.environ.get("CLIENT_ID", ""))
+        save_env_var(request.user, "APP_NAME", os.environ.get("APP_NAME", ""))
+        save_env_var(request.user, "APP_ID", os.environ.get("APP_ID", ""))
+        save_env_var(request.user, "PROJECT_NAME", os.environ["PROJECT_NAME"])
+        save_env_var(request.user, "PROJECT_ID", os.environ["PROJECT_ID"])
+        print("Current env vars after project select", get_env_dict(request.user))
+        serializer = self.get_serializer(project_obj)
+        data = serializer.data
+        data["environment"] = get_env_dict(request.user)
+        return Response(data)
+
+    def perform_update(self, serializer):
+        load_env_vars(self.request.user)
+        project = serializer.save()
+        if "name" in serializer.validated_data:
+            os.environ["PROJECT_NAME"] = project.name
+            os.environ["PROJECT_ID"] = f"{project.name}_{project.id}"
+            print(
+                f"✅ project renamed: PROJECT_ID={os.environ['PROJECT_ID']} PROJECT_NAME={os.environ['PROJECT_NAME']}"
+            )
+            save_env_var(self.request.user, "CLIENT_NAME", os.environ.get("CLIENT_NAME", ""))
+            save_env_var(self.request.user, "CLIENT_ID", os.environ.get("CLIENT_ID", ""))
+            save_env_var(self.request.user, "APP_NAME", os.environ.get("APP_NAME", ""))
+            save_env_var(self.request.user, "APP_ID", os.environ.get("APP_ID", ""))
+            save_env_var(self.request.user, "PROJECT_NAME", os.environ["PROJECT_NAME"])
+            save_env_var(self.request.user, "PROJECT_ID", os.environ["PROJECT_ID"])
+            print("Current env vars after project rename", get_env_dict(self.request.user))
 
 
 class SessionViewSet(viewsets.ModelViewSet):

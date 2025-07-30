@@ -10,5 +10,6 @@ python-multipart
 pyarrow>=15.0.0
 asyncpg
 openpyxl
+xlsxwriter
 pydantic-settings==2.10.1
-httpx
+statsmodels

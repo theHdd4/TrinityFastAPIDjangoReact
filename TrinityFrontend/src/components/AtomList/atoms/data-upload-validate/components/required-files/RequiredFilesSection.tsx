@@ -22,6 +22,7 @@ interface RequiredFilesSectionProps {
   openFile: string | null;
   setOpenFile: (n: string | null) => void;
   getStatusIcon: (status: string, required: boolean) => React.ReactNode;
+  bypassMasterUpload?: boolean;
 }
 
 const RequiredFilesSection: React.FC<RequiredFilesSectionProps> = ({
@@ -34,7 +35,8 @@ const RequiredFilesSection: React.FC<RequiredFilesSectionProps> = ({
   commitRename,
   openFile,
   setOpenFile,
-  getStatusIcon
+  getStatusIcon,
+  bypassMasterUpload
 }) => (
   <Card className="h-full shadow-sm border-0 bg-white">
     <div className="p-4 border-b border-gray-100">
@@ -45,6 +47,11 @@ const RequiredFilesSection: React.FC<RequiredFilesSectionProps> = ({
       <p className="text-xs text-gray-600 mt-1">Upload these files for complete data validation</p>
     </div>
     <div className="p-4 space-y-3 overflow-y-auto h-[calc(100%-80px)]">
+      {files.length === 0 && !bypassMasterUpload && (
+        <p className="text-sm text-gray-500 text-center">
+          Upload a Master File in Properties section to begin upload.
+        </p>
+      )}
       {files.map((file, index) => {
         const types = columnConfig[file.name] || {};
         return (

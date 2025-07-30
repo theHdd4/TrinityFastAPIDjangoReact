@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Button } from '@/components/ui/button';
 import { VALIDATE_API } from '@/lib/api';
 
 interface ConcatInputFilesProps {
@@ -10,15 +11,35 @@ interface ConcatInputFilesProps {
     performConcat: boolean;
   };
   onSettingsChange: (settings: any) => void;
+  onPerformConcat?: () => void;
 }
 
 interface Frame { object_name: string; csv_name: string; }
 
-const ConcatInputFiles: React.FC<ConcatInputFilesProps> = ({ settings, onSettingsChange }) => {
+const ConcatInputFiles: React.FC<ConcatInputFilesProps> = ({ settings, onSettingsChange, onPerformConcat }) => {
   const [frames, setFrames] = useState<Frame[]>([]);
 
   useEffect(() => {
-    fetch(`${VALIDATE_API}/list_saved_dataframes`)
+    let query = '';
+    const envStr = localStorage.getItem('env');
+    if (envStr) {
+      try {
+        const env = JSON.parse(envStr);
+        query =
+          '?' +
+          new URLSearchParams({
+            client_id: env.CLIENT_ID || '',
+            app_id: env.APP_ID || '',
+            project_id: env.PROJECT_ID || '',
+            client_name: env.CLIENT_NAME || '',
+            app_name: env.APP_NAME || '',
+            project_name: env.PROJECT_NAME || ''
+          }).toString();
+      } catch {
+        /* ignore */
+      }
+    }
+    fetch(`${VALIDATE_API}/list_saved_dataframes${query}`)
       .then(r => r.json())
       .then(d => setFrames(Array.isArray(d.files) ? d.files : []))
       .catch(() => setFrames([]));
@@ -61,6 +82,17 @@ const ConcatInputFiles: React.FC<ConcatInputFilesProps> = ({ settings, onSetting
               ))}
             </SelectContent>
           </Select>
+        </div>
+        
+        {/* Perform Concat Button */}
+        <div className="pt-6">
+          <Button
+            className="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 text-base font-medium disabled:bg-gray-400 disabled:cursor-not-allowed"
+            onClick={onPerformConcat}
+            disabled={!settings.file1 || !settings.file2 || !settings.direction}
+          >
+            Perform Concatinate
+          </Button>
         </div>
       </div>
     </div>

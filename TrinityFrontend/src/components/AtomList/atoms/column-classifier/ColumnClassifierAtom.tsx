@@ -1,7 +1,6 @@
 import React from 'react';
 
 import ColumnClassifierCanvas from './components/ColumnClassifierCanvas';
-import ColumnClassifierVisualisation from './components/ColumnClassifierVisualisation';
 import ColumnClassifierDimensionConfig from './components/ColumnClassifierDimensionConfig';
 import {
   useLaboratoryStore,
@@ -12,6 +11,9 @@ import {
   ColumnClassifierColumn
 } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { CLASSIFIER_API } from '@/lib/api';
+import { fetchDimensionMapping } from '@/lib/dimensions';
+import { useAuth } from '@/contexts/AuthContext';
+import { logSessionState, updateSessionState, addNavigationItem } from '@/lib/session';
 
 export type ColumnData = ColumnClassifierColumn;
 export type FileClassification = ColumnClassifierFile;
@@ -27,10 +29,56 @@ const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
     ...DEFAULT_COLUMN_CLASSIFIER_SETTINGS
   };
   const classifierData = settings.data;
+  const { toast } = useToast();
+  const { user } = useAuth();
 
-  const handleClassification = (file: FileClassification) => {
-    updateSettings(atomId, { data: { files: [file], activeFileIndex: 0 } });
-  };
+  React.useEffect(() => {
+    const loadMapping = async () => {
+      const mapping = await fetchDimensionMapping();
+      if (Object.keys(mapping).length && classifierData.files.length > 0) {
+        const file = classifierData.files[0];
+        const updatedFile: ColumnClassifierFile = {
+          ...file,
+          customDimensions: mapping,
+        };
+        updateSettings(atomId, {
+          data: { files: [updatedFile], activeFileIndex: 0 },
+          dimensions: Object.keys(mapping),
+        });
+      }
+    };
+    if (classifierData.files.length > 0) {
+      loadMapping();
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  React.useEffect(() => {
+    const stored = localStorage.getItem('column-classifier-config');
+    if (!stored || !classifierData.files.length) return;
+    try {
+      const cfg = JSON.parse(stored);
+      const file = classifierData.files[0];
+      const updatedFile: ColumnClassifierFile = {
+        ...file,
+        columns: file.columns.map(col => ({
+          ...col,
+          category: cfg.identifiers?.includes(col.name)
+            ? 'identifiers'
+            : cfg.measures?.includes(col.name)
+            ? 'measures'
+            : 'unclassified',
+        })),
+        customDimensions: cfg.dimensions || {},
+      };
+      updateSettings(atomId, {
+        data: { files: [updatedFile], activeFileIndex: 0 },
+        dimensions: Object.keys(cfg.dimensions || {}),
+      });
+    } catch (err) {
+      console.warn('failed to apply stored config', err);
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
 
   const handleColumnMove = (
     columnName: string,
@@ -84,23 +132,6 @@ const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
   };
 
 
-  const handleFileDelete = (fileIndex: number) => {
-    const newFiles = classifierData.files.filter((_, index) => index !== fileIndex);
-    const newActiveIndex =
-      fileIndex === classifierData.activeFileIndex
-        ? Math.max(0, classifierData.activeFileIndex - 1)
-        : classifierData.activeFileIndex > fileIndex
-        ? classifierData.activeFileIndex - 1
-        : classifierData.activeFileIndex;
-
-    updateSettings(atomId, {
-      data: {
-        files: newFiles,
-        activeFileIndex:
-          newFiles.length > 0 ? Math.min(newActiveIndex, newFiles.length - 1) : 0
-      }
-    });
-  };
 
   const setActiveFile = (fileIndex: number) => {
     updateSettings(atomId, { data: { ...classifierData, activeFileIndex: fileIndex } });
@@ -110,18 +141,71 @@ const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
     if (!classifierData.files.length) return;
     const currentFile = classifierData.files[classifierData.activeFileIndex];
     const stored = localStorage.getItem('current-project');
-    const projectId = stored ? JSON.parse(stored).id : null;
-    const form = new FormData();
-    form.append('identifier_assignments', JSON.stringify(currentFile.customDimensions));
-    if (projectId) {
-      form.append('project_id', String(projectId));
-    }
-    console.log('Saving assignments for project', projectId, currentFile.customDimensions);
-    await fetch(`${CLASSIFIER_API}/assign_identifiers_to_dimensions`, {
+    const envStr = localStorage.getItem('env');
+    const project = stored ? JSON.parse(stored) : {};
+    const env = envStr ? JSON.parse(envStr) : {};
+
+    const identifiers = currentFile.columns
+      .filter(c => c.category === 'identifiers')
+      .map(c => c.name);
+    const measures = currentFile.columns
+      .filter(c => c.category === 'measures')
+      .map(c => c.name);
+
+    const payload = {
+      project_id: project.id || null,
+      client_name: env.CLIENT_NAME || '',
+      app_name: env.APP_NAME || '',
+      project_name: env.PROJECT_NAME || '',
+      identifiers,
+      measures,
+      dimensions: currentFile.customDimensions
+    };
+
+    const key = `${payload.client_name}/${payload.app_name}/${payload.project_name}/column_classifier_config`;
+    console.log('🆔 identifiers', identifiers);
+    console.log('🏷️ dimensions', payload.dimensions);
+    console.log('📁 will save configuration to', key);
+    console.log('📦 saving configuration', payload);
+    const res = await fetch(`${CLASSIFIER_API}/save_config`, {
       method: 'POST',
-      body: form,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
       credentials: 'include'
     });
+    console.log('✅ save configuration response', res.status);
+    if (res.ok) {
+      toast({ title: 'Configuration Saved Successfully' });
+      try {
+        const json = await res.json();
+        console.log('📝 configuration save result', json);
+        console.log('🔑 redis namespace', json.key);
+        console.log('📂 saved data', json.data);
+      } catch (err) {
+        console.warn('assignment save result parse error', err);
+      }
+      updateSessionState(user?.id, {
+        identifiers,
+        measures,
+        dimensions: currentFile.customDimensions,
+      });
+      addNavigationItem(user?.id, {
+        atom: 'column-classifier',
+        identifiers,
+        measures,
+        dimensions: currentFile.customDimensions,
+      });
+      logSessionState(user?.id);
+    } else {
+      toast({ title: 'Unable to Save Configuration', variant: 'destructive' });
+      try {
+        const txt = await res.text();
+        console.warn('assignment save error response', txt);
+      } catch (err) {
+        console.warn('assignment save error parse fail', err);
+      }
+      logSessionState(user?.id);
+    }
   };
 
   const saveDisabled =
@@ -136,17 +220,12 @@ const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
   return (
     <div className="w-full h-full bg-white flex flex-col">
       <div className="flex flex-1">
-        <div className="w-3/5 p-4 overflow-y-auto">
+        <div className="w-full p-4 overflow-y-auto">
           <ColumnClassifierCanvas
             data={classifierData}
-            validatorId={settings.validatorId}
             onColumnMove={handleColumnMove}
             onActiveFileChange={setActiveFile}
-            onFileDelete={handleFileDelete}
           />
-        </div>
-        <div className="w-2/5 border-l border-gray-200 bg-gray-50 p-4 overflow-y-auto">
-          <ColumnClassifierVisualisation data={classifierData} />
         </div>
       </div>
       <div className="border-t p-4 overflow-y-auto">

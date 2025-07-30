@@ -94,6 +94,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (res.ok) {
         const data = await res.json();
         console.log('Login success, user:', data.username);
+        if (data.environment) {
+          console.log('Environment after login', data.environment);
+          localStorage.setItem('env', JSON.stringify(data.environment));
+        }
+
+        // Verify that a session cookie was actually set. Without a
+        // valid session further requests (like fetching the apps list)
+        // will fail with a 403. If verification fails we treat the
+        // login as unsuccessful.
+        const verify = await fetch(`${API_BASE}/users/me/`, {
+          credentials: 'include',
+        });
+        if (!verify.ok) {
+          console.log('Session verification failed', verify.status);
+          return false;
+        }
+
         setUser(data);
         localStorage.setItem('isAuthenticated', 'true');
         setIsAuthenticated(true);

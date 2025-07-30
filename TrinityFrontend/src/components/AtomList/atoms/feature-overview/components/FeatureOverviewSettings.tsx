@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Switch } from '@/components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { VALIDATE_API, FEATURE_OVERVIEW_API } from '@/lib/api';
 import { Eye, EyeOff } from 'lucide-react';
@@ -19,7 +20,7 @@ interface ColumnInfo {
 }
 
 const FeatureOverviewSettings: React.FC<FeatureOverviewSettingsProps> = ({ settings, onSettingsChange }) => {
-  interface Frame { object_name: string; csv_name: string }
+  interface Frame { object_name: string; csv_name: string; arrow_name?: string }
   const [frames, setFrames] = useState<Frame[]>([]);
   const [columns, setColumns] = useState<ColumnInfo[]>(
     Array.isArray(settings.allColumns) ? settings.allColumns.filter(Boolean) : []
@@ -27,9 +28,31 @@ const FeatureOverviewSettings: React.FC<FeatureOverviewSettingsProps> = ({ setti
   const [selectedIds, setSelectedIds] = useState<string[]>(
     Array.isArray(settings.selectedColumns) ? settings.selectedColumns : []
   );
+  const [filterUnique, setFilterUnique] = useState<boolean>(
+    settings.filterUnique || false
+  );
 
   useEffect(() => {
-    fetch(`${VALIDATE_API}/list_saved_dataframes`)
+    let query = '';
+    const envStr = localStorage.getItem('env');
+    if (envStr) {
+      try {
+        const env = JSON.parse(envStr);
+        query =
+          '?' +
+          new URLSearchParams({
+            client_id: env.CLIENT_ID || '',
+            app_id: env.APP_ID || '',
+            project_id: env.PROJECT_ID || '',
+            client_name: env.CLIENT_NAME || '',
+            app_name: env.APP_NAME || '',
+            project_name: env.PROJECT_NAME || ''
+          }).toString();
+      } catch {
+        /* ignore */
+      }
+    }
+    fetch(`${VALIDATE_API}/list_saved_dataframes${query}`)
       .then(r => r.json())
       .then(d => setFrames(Array.isArray(d.files) ? d.files : []))
       .catch(() => setFrames([]));
@@ -45,6 +68,10 @@ const FeatureOverviewSettings: React.FC<FeatureOverviewSettingsProps> = ({ setti
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settings.dataSource]);
+
+  useEffect(() => {
+    setFilterUnique(!!settings.filterUnique);
+  }, [settings.filterUnique]);
 
   // restore dropdown state when settings come from store
   useEffect(() => {
@@ -100,6 +127,18 @@ const FeatureOverviewSettings: React.FC<FeatureOverviewSettingsProps> = ({ setti
     onSettingsChange({ selectedColumns: selectedIds, columnSummary: summary });
   };
 
+  const displayedColumns = React.useMemo(
+    () => (filterUnique ? columns.filter(c => c.unique_count > 1) : columns),
+    [columns, filterUnique]
+  );
+
+  useEffect(() => {
+    if (filterUnique) {
+      const allowed = displayedColumns.map(c => c.column);
+      setSelectedIds(ids => ids.filter(id => allowed.includes(id)));
+    }
+  }, [filterUnique, displayedColumns]);
+
   return (
     <div className="space-y-4 p-2">
       <Card className="p-4 space-y-3">
@@ -111,7 +150,7 @@ const FeatureOverviewSettings: React.FC<FeatureOverviewSettingsProps> = ({ setti
           <SelectContent>
             {(Array.isArray(frames) ? frames : []).map(f => (
               <SelectItem key={f.object_name} value={f.object_name}>
-                {f.csv_name.split('/').pop()}
+                {f.arrow_name ? f.arrow_name.split('/').pop() : f.csv_name.split('/').pop()}
               </SelectItem>
             ))}
           </SelectContent>
@@ -121,7 +160,18 @@ const FeatureOverviewSettings: React.FC<FeatureOverviewSettingsProps> = ({ setti
       {columns.length > 0 && (
         <Card className="p-4 space-y-3">
           <div className="flex items-center justify-between mb-2">
-            <span className="text-sm font-medium text-gray-700">Select Identifiers</span>
+            <span className="text-sm font-medium text-gray-700">Select Columns</span>
+          </div>
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs text-gray-500">Fetch columns with more than one unique value</span>
+            <Switch
+              checked={filterUnique}
+              onCheckedChange={val => {
+                setFilterUnique(val);
+                onSettingsChange({ filterUnique: val });
+              }}
+              className="data-[state=checked]:bg-[#458EE2]"
+            />
           </div>
           <select
             multiple
@@ -131,8 +181,8 @@ const FeatureOverviewSettings: React.FC<FeatureOverviewSettingsProps> = ({ setti
             }
             className="w-full border rounded p-1 text-sm h-32"
           >
-            {Array.isArray(columns) &&
-              columns.filter(Boolean).map(c => (
+            {Array.isArray(displayedColumns) &&
+              displayedColumns.filter(Boolean).map(c => (
                 <option key={c.column} value={c.column}>
                   {c.column}
                 </option>

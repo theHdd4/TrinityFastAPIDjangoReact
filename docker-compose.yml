@@ -16,8 +16,26 @@ services:
 
   mongo:
     image: mongo:6
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: root
+      MONGO_INITDB_ROOT_PASSWORD: rootpass
     volumes:
       - mongo_data:/data/db
+    ports:
+      - "27017:27017"
+    networks:
+      - trinity-net
+
+  mongo_admin:
+    image: mongo-express
+    environment:
+      ME_CONFIG_MONGODB_ADMINUSERNAME: root
+      ME_CONFIG_MONGODB_ADMINPASSWORD: rootpass
+      ME_CONFIG_MONGODB_SERVER: mongo
+    ports:
+      - "8081:8081"
+    depends_on:
+      - mongo
     networks:
       - trinity-net
 
@@ -54,11 +72,25 @@ services:
     networks:
       - trinity-net
 
+  mongo-express:
+    image: mongo-express:latest
+    environment:
+      ME_CONFIG_MONGODB_URL: "mongodb://mongo:27017"
+      ME_CONFIG_BASICAUTH_USERNAME: admin
+      ME_CONFIG_BASICAUTH_PASSWORD: admin
+    ports:
+      - "8082:8081"
+    depends_on:
+      - mongo
+    networks:
+      - trinity-net
+
   web:
     build: ./TrinityBackendDjango
     command: gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 3
     volumes:
       - ./TrinityBackendDjango:/code
+      - ./TrinityBackendFastAPI:/code/TrinityBackendFastAPI
     env_file:
       - ./TrinityBackendDjango/.env
     ports:
@@ -91,6 +123,7 @@ services:
     command: celery -A config.celery worker --loglevel=info
     volumes:
       - ./TrinityBackendDjango:/code
+      - ./TrinityBackendFastAPI:/code/TrinityBackendFastAPI
     env_file:
       - ./TrinityBackendDjango/.env
     depends_on:
@@ -119,6 +152,7 @@ services:
       HOST_IP: ${HOST_IP:-192.168.1.98}
       FASTAPI_CORS_ORIGINS: "http://127.0.0.1:8080,http://${HOST_IP:-192.168.1.98}:8080,http://172.17.48.1:8080,http://10.2.1.65:8080,https://trinity.quantmatrixai.com"
       MONGO_URI: "mongodb://mongo:27017/trinity_prod"
+      CLASSIFY_MONGO_URI: "mongodb://mongo:27017"
     ports:
       - "8001:8001"
     depends_on:

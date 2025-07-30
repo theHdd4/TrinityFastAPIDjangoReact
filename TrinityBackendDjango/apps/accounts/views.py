@@ -1,4 +1,5 @@
 from django.contrib.auth import authenticate, login, logout
+import os
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
 from rest_framework import viewsets, permissions, status
@@ -8,6 +9,7 @@ from rest_framework.views import APIView
 from rest_framework.decorators import action
 from .models import User, UserProfile
 from .serializers import UserSerializer, UserProfileSerializer
+from .utils import save_env_var, get_env_dict, load_env_vars
 
 
 class CsrfExemptSessionAuthentication(SessionAuthentication):
@@ -68,7 +70,29 @@ class LoginView(APIView):
         user = authenticate(request, username=username, password=password)
         if user is not None:
             login(request, user)
-            return Response(UserSerializer(user).data)
+            # Ensure environment variables are loaded from Redis or backend
+            loaded_envs = load_env_vars(user)
+            if loaded_envs:
+                print("Loaded env vars from cache", loaded_envs)
+            tenant = getattr(request, "tenant", None)
+            if tenant is not None:
+                os.environ["CLIENT_NAME"] = getattr(
+                    tenant,
+                    "schema_name",
+                    tenant.name if hasattr(tenant, "name") else str(tenant),
+                )
+            os.environ["USER_ID"] = str(user.id)
+            os.environ["USER_NAME"] = user.username
+            print(
+                f"✅ login: USER_ID={os.environ['USER_ID']} CLIENT_NAME={os.environ.get('CLIENT_NAME')}"
+            )
+            save_env_var(user, "CLIENT_NAME", os.environ.get("CLIENT_NAME", ""))
+            save_env_var(user, "CLIENT_ID", os.environ.get("CLIENT_ID", ""))
+            save_env_var(user, "USER_NAME", os.environ.get("USER_NAME", ""))
+            print("Current env vars after login", get_env_dict(user))
+            data = UserSerializer(user).data
+            data["environment"] = get_env_dict(user)
+            return Response(data)
         return Response({"detail": "Invalid credentials"}, status=status.HTTP_400_BAD_REQUEST)
 
 

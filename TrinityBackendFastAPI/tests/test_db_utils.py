@@ -78,3 +78,27 @@ def test_arrow_dataset_exists_missing_flight(monkeypatch):
     assert result is False
     assert dummy_delete.called == "pref/data.arrow"
     assert dummy_remove.called == "pref/data.arrow"
+
+
+def test_upsert_and_fetch_project_state(monkeypatch):
+    stored = {}
+
+    class Conn:
+        async def execute(self, q, *p):
+            if q.strip().startswith("INSERT"):
+                stored[p[0]] = p[3]
+        async def fetchrow(self, q, pid):
+            if pid in stored:
+                return {"state": stored[pid]}
+            return None
+        async def close(self):
+            pass
+
+    async def connect(**kw):
+        return Conn()
+
+    monkeypatch.setattr(db, "asyncpg", types.SimpleNamespace(connect=connect, Json=lambda d: d))
+
+    asyncio.run(db.upsert_project_state("c", "a", "pid", {"x": 1}))
+    res = asyncio.run(db.fetch_project_state("pid"))
+    assert res == {"x": 1}

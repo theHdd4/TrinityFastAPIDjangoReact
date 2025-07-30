@@ -13,7 +13,8 @@ import {
   Zap
 } from 'lucide-react';
 import Header from '@/components/Header';
-import { REGISTRY_API } from '@/lib/api';
+import { REGISTRY_API, CLASSIFIER_API } from '@/lib/api';
+import { fetchDimensionMapping } from '@/lib/dimensions';
 import { molecules } from '@/components/MoleculeList/data/molecules';
 import { safeStringify } from '@/utils/safeStringify';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
@@ -167,6 +168,21 @@ const Projects = () => {
         const project = await res.json();
         localStorage.setItem('current-project', JSON.stringify(project));
 
+        try {
+          const envRes = await fetch(`${REGISTRY_API}/projects/${project.id}/`, {
+            credentials: 'include'
+          });
+          if (envRes.ok) {
+            const envData = await envRes.json();
+            if (envData.environment) {
+              console.log('Environment after project creation', envData.environment);
+              localStorage.setItem('env', JSON.stringify(envData.environment));
+            }
+          }
+        } catch (err) {
+          console.log('Project env fetch error', err);
+        }
+
         const ids = templates[appSlug] || [];
         let layout: any[] = [];
         if (ids.length > 0) {
@@ -244,6 +260,7 @@ const Projects = () => {
       });
       if (res.ok) {
         const updated = await res.json();
+        console.log('Project renamed from projects page', updated);
         setProjects(prev =>
           prev.map(p =>
             p.id === updated.id
@@ -251,6 +268,20 @@ const Projects = () => {
               : p
           )
         );
+        try {
+          const envRes = await fetch(`${REGISTRY_API}/projects/${updated.id}/`, {
+            credentials: 'include'
+          });
+          if (envRes.ok) {
+            const envData = await envRes.json();
+            if (envData.environment) {
+              console.log('Environment after project rename', envData.environment);
+              localStorage.setItem('env', JSON.stringify(envData.environment));
+            }
+          }
+        } catch (err) {
+          console.log('Rename env fetch error', err);
+        }
       }
     } catch {
       /* ignore */
@@ -282,6 +313,31 @@ const Projects = () => {
       const res = await fetch(`${REGISTRY_API}/projects/${project.id}/`, { credentials: 'include' });
       if (res.ok) {
         const data = await res.json();
+        if (data.environment) {
+          console.log('Environment after project select', data.environment);
+          localStorage.setItem('env', JSON.stringify(data.environment));
+          try {
+            await fetch(`${CLASSIFIER_API}/cache_project`, {
+              method: 'POST',
+              credentials: 'include',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                client_name: data.environment.CLIENT_NAME || '',
+                app_name: data.environment.APP_NAME || '',
+                project_name: data.environment.PROJECT_NAME || '',
+                project_id: project.id,
+              }),
+            });
+          } catch (err) {
+            console.warn('cache_project failed', err);
+          }
+        }
+        try {
+          await fetchDimensionMapping();
+        } catch (err) {
+          console.warn('config prefetch failed', err);
+          localStorage.removeItem('column-classifier-config');
+        }
         if (data.state && data.state.workflow_canvas) {
           localStorage.setItem('workflow-canvas-molecules', safeStringify(data.state.workflow_canvas));
         } else {

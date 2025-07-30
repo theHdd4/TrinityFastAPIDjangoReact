@@ -30,6 +30,7 @@ async def save_feature_overview_results(output_store: dict,results_collection,va
         document["output_result"]["detailed_summary"] = detailed_summary
 
     await results_collection.insert_one(document)
+    print(f"📦 Stored in {results_collection.name}: {document}")
 
 
 
@@ -48,6 +49,7 @@ async def save_feature_overview_unique_results(unique_count: dict, results_colle
     }
 
     await results_collection.insert_one(document)
+    print(f"📦 Stored in {results_collection.name}: {document}")
 
 
 

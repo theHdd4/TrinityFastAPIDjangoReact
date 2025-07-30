@@ -269,7 +269,9 @@ def test_rename_dataframe_route(monkeypatch):
     monkeypatch.setattr(routes, "minio_client", DummyMinio())
     monkeypatch.setattr(routes, "redis_client", DummyRedis())
     monkeypatch.setattr(routes, "MINIO_BUCKET", "bucket")
-    monkeypatch.setattr(routes, "OBJECT_PREFIX", "pref/")
+    async def dummy_prefix():
+        return "pref/"
+    monkeypatch.setattr(routes, "get_object_prefix", dummy_prefix)
     monkeypatch.setattr(routes, "rename_arrow_dataset", dummy_db)
     monkeypatch.setattr(routes, "rename_arrow_object", lambda o, n: None)
 
@@ -314,7 +316,9 @@ def test_delete_dataframe_route(monkeypatch):
     monkeypatch.setattr(routes, "minio_client", DummyMinio())
     monkeypatch.setattr(routes, "redis_client", DummyRedis())
     monkeypatch.setattr(routes, "MINIO_BUCKET", "bucket")
-    monkeypatch.setattr(routes, "OBJECT_PREFIX", "pref/")
+    async def dummy_prefix():
+        return "pref/"
+    monkeypatch.setattr(routes, "get_object_prefix", dummy_prefix)
     monkeypatch.setattr(routes, "delete_arrow_dataset", dummy_db_delete)
     monkeypatch.setattr(routes, "remove_arrow_object", lambda o: None)
 
@@ -357,7 +361,9 @@ def test_save_dataframe_skip_existing(monkeypatch):
     monkeypatch.setattr(routes, "minio_client", DummyMinio())
     monkeypatch.setattr(routes, "redis_client", DummyRedis())
     monkeypatch.setattr(routes, "MINIO_BUCKET", "bucket")
-    monkeypatch.setattr(routes, "OBJECT_PREFIX", "pref/")
+    async def dummy_prefix():
+        return "pref/"
+    monkeypatch.setattr(routes, "get_object_prefix", dummy_prefix)
     monkeypatch.setattr(routes, "arrow_dataset_exists", dummy_exists)
     monkeypatch.setattr(routes, "record_arrow_dataset", lambda *a, **k: None)
     monkeypatch.setattr(routes, "upload_dataframe", lambda df, path: None)
@@ -382,4 +388,46 @@ def test_save_dataframe_skip_existing(monkeypatch):
 
     assert resp.status_code == 200
     assert resp.json()["minio_uploads"][0]["already_saved"] is True
+
+
+def test_list_saved_dataframes_env(monkeypatch):
+    routes = load_routes()
+
+    class DummyMinio:
+        def __init__(self):
+            self.objects = {
+                "pref/a.arrow": b"",
+                "pref/b.arrow": b"",
+            }
+
+        def list_objects(self, bucket, prefix="", recursive=False):
+            for name in self.objects:
+                if name.startswith(prefix):
+                    yield types.SimpleNamespace(object_name=name)
+
+        def stat_object(self, bucket, name):
+            return types.SimpleNamespace(last_modified=0)
+
+    monkeypatch.setattr(routes, "minio_client", DummyMinio())
+    monkeypatch.setattr(routes, "MINIO_BUCKET", "bucket")
+
+    async def dummy_prefix(*a, **k):
+        return "pref/"
+
+    monkeypatch.setattr(routes, "get_object_prefix", dummy_prefix)
+
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    app = FastAPI()
+    app.include_router(routes.router)
+    client = TestClient(app)
+
+    resp = client.get("/list_saved_dataframes")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data["files"]) == 2
+    for f in data["files"]:
+        assert "arrow_name" in f
 

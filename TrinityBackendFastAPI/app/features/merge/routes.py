@@ -24,6 +24,10 @@ async def init_merge(
 
         df1.columns = df1.columns.str.strip().str.lower()
         df2.columns = df2.columns.str.strip().str.lower()
+
+        # Clean string values (strip spaces and make lowercase)
+        df1 = df1.applymap(lambda x: x.strip().lower() if isinstance(x, str) else x)
+        df2 = df2.applymap(lambda x: x.strip().lower() if isinstance(x, str) else x)
         common_cols = get_common_columns(df1, df2)
 
 
@@ -118,6 +122,11 @@ async def perform_merge(
         df2 = get_minio_df(bucket_name, file2)
         df1.columns = df1.columns.str.strip().str.lower()
         df2.columns = df2.columns.str.strip().str.lower()
+
+        # Clean string values (strip spaces and make lowercase)
+        df1 = df1.applymap(lambda x: x.strip().lower() if isinstance(x, str) else x)
+        df2 = df2.applymap(lambda x: x.strip().lower() if isinstance(x, str) else x)
+
         join_cols = json.loads(join_columns)
         merged_df = merge_dataframes(df1, df2, join_cols, join_type)
         suffix_columns = [c for c in merged_df.columns if c.endswith("_x") or c.endswith("_y")]
