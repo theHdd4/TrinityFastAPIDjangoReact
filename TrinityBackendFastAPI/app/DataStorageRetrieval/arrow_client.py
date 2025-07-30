@@ -9,7 +9,13 @@ import pyarrow as pa
 import pyarrow.flight as flight
 import pyarrow.ipc as ipc
 from minio import Minio
-from dotenv import load_dotenv
+try:
+    from dotenv import load_dotenv
+except ModuleNotFoundError:  # pragma: no cover - optional dependency
+    def load_dotenv(*_, **__):
+        logging.getLogger("trinity.flight").warning(
+            "python-dotenv not installed; skipping .env loading"
+        )
 
 # Load environment variables from the repo's .env file on import so other
 # modules can rely on CLIENT_NAME/APP_NAME/PROJECT_NAME being set. This

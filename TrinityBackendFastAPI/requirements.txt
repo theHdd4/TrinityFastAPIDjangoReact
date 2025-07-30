@@ -13,3 +13,4 @@ openpyxl
 xlsxwriter
 pydantic-settings==2.10.1
 statsmodels
+python-dotenv
