@@ -89,12 +89,18 @@ def download_dataframe(path: str) -> pd.DataFrame:
             access_key,
             os.getenv("MINIO_PREFIX"),
         )
+        # Log the actual endpoint derived by the client for easier debugging
         m_client = Minio(
             endpoint,
             access_key=access_key,
             secret_key=secret_key,
             secure=False,
         )
+        try:
+            actual = m_client._base_url._url.netloc
+            logger.debug("MinIO client connected to %s", actual)
+        except Exception:
+            logger.debug("MinIO client created for %s", endpoint)
         if not arrow_obj:
             basename = os.path.basename(path)
             prefix = _get_prefix()
@@ -169,6 +175,11 @@ def download_table_bytes(path: str) -> bytes:
             secret_key=secret_key,
             secure=False,
         )
+        try:
+            actual = m_client._base_url._url.netloc
+            logger.debug("MinIO client connected to %s", actual)
+        except Exception:
+            logger.debug("MinIO client created for %s", endpoint)
         if not arrow_obj:
             basename = os.path.basename(path)
             prefix = _get_prefix()
