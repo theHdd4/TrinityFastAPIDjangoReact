@@ -23,7 +23,8 @@ Follow the steps below to run all services together.
    tenant creation fails.
    The frontend `.env` includes `VITE_SUBSCRIPTIONS_API` which should point to
   the Django subscription endpoints and `VITE_TRINITY_AI_API` for the AI
-  service.
+  service. When setting `VITE_TRINITY_AI_API`, provide only the base host and
+  port as the `/trinityai` prefix is appended automatically.
   When exposing the app via Cloudflare Tunnel, you can set
   `VITE_BACKEND_ORIGIN=https://trinity.quantmatrixai.com` so the frontend sends
   API requests through Traefik. The `.env.example` file leaves this variable
@@ -138,6 +139,12 @@ to the `CLIENT_NAME`, `APP_NAME` and `PROJECT_NAME` environment variables
 instead of querying PostgreSQL.
 Set `SIMPLE_TENANT_CREATION=true` in `.env` if your environment cannot run
 database migrations for new tenants.
+
+Saved datasets are uploaded to the MinIO bucket defined by `MINIO_BUCKET`
+(defaults to `trinity`). The object path is constructed from the
+`CLIENT_NAME`, `APP_NAME` and `PROJECT_NAME` environment variables as
+`<client>/<app>/<project>/`. Ensure these variables are configured so the
+AI agents can locate previously uploaded data frames.
 
 ## 2. Start the backend containers
 

@@ -106,12 +106,15 @@ export const CREATECOLUMN_API =
 export const GROUPBY_API =
   import.meta.env.VITE_GROUPBY_API || `${backendOrigin.replace(/:8000$/, ':8001')}/api/groupby`;
 
-const aiBase =
-  normalizeUrl(import.meta.env.VITE_TRINITY_AI_API) ||
-  backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${aiPort}`);
-
-// All Trinity AI endpoints are served under the `/trinityai` prefix
-export const TRINITY_AI_API = `${aiBase}/trinityai`;
+let aiBase = normalizeUrl(import.meta.env.VITE_TRINITY_AI_API);
+if (!aiBase) {
+  aiBase = backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${aiPort}`);
+}
+// Ensure the base URL ends with the `/trinityai` prefix exactly once
+const normalizedAiBase = aiBase.replace(/\/?$/, '');
+export const TRINITY_AI_API = normalizedAiBase.endsWith('/trinityai')
+  ? normalizedAiBase
+  : `${normalizedAiBase}/trinityai`;
 
 export const LAB_ACTIONS_API = `${REGISTRY_API}/laboratory-actions`;
 

@@ -29,6 +29,12 @@ def get_llm_config() -> Dict[str, str]:
 BACKEND_ROOT = Path(__file__).resolve().parent
 sys.path.append(str(BACKEND_ROOT))
 
+# Load environment variables from Redis so subsequent configuration
+# functions see CLIENT_NAME, APP_NAME and PROJECT_NAME
+from DataStorageRetrieval.arrow_client import load_env_from_redis
+
+load_env_from_redis()
+
 
 def _fetch_names_from_db() -> tuple[str, str, str]:
     """Retrieve client, app and project names from the backend database."""
@@ -49,6 +55,11 @@ def _fetch_names_from_db() -> tuple[str, str, str]:
             project = project_db or project
         except Exception as exc:
             print(f"⚠️ Failed to load names from DB: {exc}")
+
+    os.environ["CLIENT_NAME"] = client
+    os.environ["APP_NAME"] = app
+    os.environ["PROJECT_NAME"] = project
+    load_env_from_redis()
     return client, app, project
 
 
@@ -56,13 +67,16 @@ def get_minio_config() -> Dict[str, str]:
     """Return MinIO configuration using database names when available."""
     client, app, project = _fetch_names_from_db()
     prefix_default = f"{client}/{app}/{project}/"
+    prefix = os.getenv("MINIO_PREFIX", prefix_default)
+    if not prefix.endswith("/"):
+        prefix += "/"
     return {
         # Default to the development MinIO service if not explicitly configured
         "endpoint": os.getenv("MINIO_ENDPOINT", "minio:9000"),
         "access_key": os.getenv("MINIO_ACCESS_KEY", "minio"),
         "secret_key": os.getenv("MINIO_SECRET_KEY", "minio123"),
         "bucket": os.getenv("MINIO_BUCKET", "trinity"),
-        "prefix": os.getenv("MINIO_PREFIX", prefix_default),
+        "prefix": prefix,
     }
 
 # Ensure the Agent_fetch_atom folder is on the Python path so we can import its modules
@@ -132,9 +146,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# Mount the API router so all endpoints are served under the `/trinityai` prefix
-app.include_router(api_router)
 
 @api_router.post("")
 @api_router.post("/")
@@ -227,6 +238,9 @@ async def list_available_atoms():
             return {"error": "Processor not available"}
     except Exception as e:
         return {"error": str(e)}
+
+# After defining all endpoints include the router so the app registers them
+app.include_router(api_router)
 
 if __name__ == "__main__":
     # Run the FastAPI application. Using the `app` instance directly
