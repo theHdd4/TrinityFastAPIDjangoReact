@@ -134,6 +134,9 @@ services:
       - trinity-net
     environment:
       MONGO_URI: "mongodb://mongo:27017/trinity_prod"
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: minio
+      MINIO_SECRET_KEY: minio123
 
   fastapi:
     build: ./TrinityBackendDjango
