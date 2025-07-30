@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -34,6 +34,44 @@ const TraceManager: React.FC<TraceManagerProps> = ({
   const traces = chart.traces || [];
   const maxTraces = 5; // Limit for performance
 
+  // Debounce timers for trace name inputs (1.5 seconds)
+  const debounceTimers = useRef<Record<string, NodeJS.Timeout>>({});
+  
+  // Local state for trace name inputs to prevent overwriting during typing
+  const [localTraceNames, setLocalTraceNames] = useState<Record<number, string>>({});
+
+  // Initialize local trace names when traces change
+  useEffect(() => {
+    const newLocalNames: Record<number, string> = {};
+    traces.forEach((trace, index) => {
+      // Only update if we don't already have a local value for this trace
+      if (localTraceNames[index] === undefined) {
+        newLocalNames[index] = trace.name || '';
+      }
+    });
+    if (Object.keys(newLocalNames).length > 0) {
+      setLocalTraceNames(prev => ({ ...prev, ...newLocalNames }));
+    }
+  }, [traces.length]); // Only depend on trace count, not individual trace changes
+
+  // Cleanup debounce timers on unmount
+  useEffect(() => {
+    return () => {
+      Object.values(debounceTimers.current).forEach(timer => {
+        if (timer) clearTimeout(timer);
+      });
+    };
+  }, []);
+
+  // Debounce utility for trace updates (1.5 seconds)
+  const debounceTraceUpdate = (traceIndex: number, fn: () => void, delay: number = 1500) => {
+    const key = `trace-${traceIndex}`;
+    if (debounceTimers.current[key]) {
+      clearTimeout(debounceTimers.current[key]);
+    }
+    debounceTimers.current[key] = setTimeout(fn, delay);
+  };
+
   const handleAddTrace = () => {
     if (traces.length >= maxTraces) return;
     const updatedChart = addTrace(chart);
@@ -43,12 +81,31 @@ const TraceManager: React.FC<TraceManagerProps> = ({
   const handleRemoveTrace = (index: number) => {
     const updatedChart = removeTrace(chart, index);
     onUpdateChart({ traces: updatedChart.traces });
+    // Clean up local state for removed trace
+    setLocalTraceNames(prev => {
+      const newState = { ...prev };
+      delete newState[index];
+      return newState;
+    });
   };
 
   const handleUpdateTrace = (index: number, updates: Partial<ChartTraceConfig>) => {
     const updatedChart = updateTrace(chart, index, updates);
     onUpdateChart({ traces: updatedChart.traces });
-  };  return (
+  };
+
+  // Handle trace name changes with local state and debouncing
+  const handleTraceNameChange = (index: number, newName: string) => {
+    // Update local state immediately for UI responsiveness
+    setLocalTraceNames(prev => ({ ...prev, [index]: newName }));
+    
+    // Debounce the actual trace update
+    debounceTraceUpdate(index, () => {
+      handleUpdateTrace(index, { name: newName });
+    });
+  };
+
+  return (
     <div className="space-y-4">
       {/* Header */}
       <div className="flex items-center justify-between">
@@ -116,8 +173,8 @@ const TraceManager: React.FC<TraceManagerProps> = ({
               <div className="space-y-1">
                 <Label className="text-xs">Series Name (optional)</Label>
                 <Input
-                  value={trace.name || ''}
-                  onChange={(e) => handleUpdateTrace(index, { name: e.target.value })}
+                  value={localTraceNames[index] ?? trace.name ?? ''}
+                  onChange={(e) => handleTraceNameChange(index, e.target.value)}
                   placeholder={trace.yAxis || `Series ${index + 1}`}
                   className="h-8"
                 />
