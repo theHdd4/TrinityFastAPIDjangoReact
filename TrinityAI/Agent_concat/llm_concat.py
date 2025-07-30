@@ -337,8 +337,24 @@ import re
 from pathlib import Path
 from minio import Minio
 from minio.error import S3Error
+from DataStorageRetrieval.arrow_client import load_env_from_redis
 from datetime import datetime
 import uuid
+import os
+import logging
+
+logger = logging.getLogger("trinity.concat")
+
+
+def _describe_endpoint(client: Minio) -> str:
+    """Return a human readable endpoint for the given MinIO client."""
+    ep = getattr(client, "_endpoint_url", None)
+    if ep:
+        return str(ep)
+    try:
+        return client._base_url._url.netloc
+    except Exception:
+        return "unknown"
 
 class SmartConcatAgent:
     """Complete LLM-driven concatenation agent with full history context"""
@@ -363,7 +379,10 @@ class SmartConcatAgent:
     def _load_files(self):
         """Load available Arrow files from registry or MinIO."""
         try:
-            from DataStorageRetrieval.flight_registry import ARROW_TO_ORIGINAL, REGISTRY_PATH
+            from DataStorageRetrieval.flight_registry import (
+                ARROW_TO_ORIGINAL,
+                REGISTRY_PATH,
+            )
 
             arrow_objects = list(ARROW_TO_ORIGINAL.keys())
             if not arrow_objects and REGISTRY_PATH.exists():
@@ -378,6 +397,20 @@ class SmartConcatAgent:
             print(f"[WARN] Failed to read arrow registry: {e}")
 
         try:
+            load_env_from_redis()
+            endpoint = _describe_endpoint(self.minio_client)
+            print(
+                f"[DEBUG] listing objects from {endpoint} bucket={self.bucket} prefix={self.prefix}"
+            )
+            print(
+                "[DEBUG] env CLIENT_NAME=%s APP_NAME=%s PROJECT_NAME=%s MINIO_PREFIX=%s"
+                % (
+                    os.getenv("CLIENT_NAME"),
+                    os.getenv("APP_NAME"),
+                    os.getenv("PROJECT_NAME"),
+                    os.getenv("MINIO_PREFIX"),
+                )
+            )
             objects = self.minio_client.list_objects(
                 self.bucket, prefix=self.prefix, recursive=True
             )
@@ -691,19 +724,62 @@ Return ONLY the JSON response:"""
         return response.json().get('message', {}).get('content', '')
     
     def _extract_json(self, response):
-        """Extract JSON from LLM response"""
-        # Clean response
+        """Extract JSON from LLM response using multiple strategies."""
+        if not response:
+            return None
+
         cleaned = re.sub(r'<think>.*?</think>', '', response, flags=re.DOTALL)
         cleaned = re.sub(r'<reasoning>.*?</reasoning>', '', cleaned, flags=re.DOTALL)
-        
-        # Find JSON
-        json_match = re.search(r'\{.*\}', cleaned, re.DOTALL)
-        if json_match:
-            try:
-                return json.loads(json_match.group())
-            except json.JSONDecodeError:
-                pass
-        
+        cleaned = re.sub(r'```json\s*', '', cleaned)
+        cleaned = re.sub(r'```\s*', '', cleaned)
+
+        json_patterns = [
+            r'\{[^{}]*\{[^{}]*\}[^{}]*\}',
+            r'\{[^{}]+\}',
+            r'\{.*?\}(?=\s*$)',
+            r'\{.*\}',
+        ]
+
+        for pattern in json_patterns:
+            matches = re.findall(pattern, cleaned, re.DOTALL)
+            for match in matches:
+                try:
+                    parsed = json.loads(match)
+                    if isinstance(parsed, dict) and (
+                        'success' in parsed or 'suggestions' in parsed
+                    ):
+                        return parsed
+                except json.JSONDecodeError:
+                    continue
+
+        try:
+            start_idx = cleaned.find('{')
+            if start_idx != -1:
+                brace_count = 0
+                end_idx = start_idx
+                for i in range(start_idx, len(cleaned)):
+                    if cleaned[i] == '{':
+                        brace_count += 1
+                    elif cleaned[i] == '}':
+                        brace_count -= 1
+                        if brace_count == 0:
+                            end_idx = i + 1
+                            break
+                if end_idx > start_idx:
+                    potential_json = cleaned[start_idx:end_idx]
+                    return json.loads(potential_json)
+        except Exception:
+            pass
+
+        try:
+            fixed = re.sub(r',\s*}', '}', cleaned)
+            fixed = re.sub(r',\s*]', ']', fixed)
+            match = re.search(r'\{.*\}', fixed, re.DOTALL)
+            if match:
+                return json.loads(match.group())
+        except Exception:
+            pass
+
         return None
     
     def _create_fallback_response(self, session_id):
