@@ -7,6 +7,12 @@ These names are then used to build the correct MinIO object prefix. Both
 ``load_env_from_redis()`` and ``get_minio_prefix()`` log debug information so
 their output can be inspected in the service logs.
 
+``TrinityAI.main_api`` resolves the active workspace using
+``app.core.utils.get_env_vars`` which communicates with the Django admin or
+FastAPI service.  This ensures ``CLIENT_NAME``, ``APP_NAME`` and
+``PROJECT_NAME`` mirror the backend configuration before building the MinIO
+prefix.
+
 ``TrinityAI.main_api.get_minio_config`` and ``Agent_concat.main_app`` also log
 the resolved settings so you can trace the MinIO configuration flowing into
 ``SmartConcatAgent`` which logs its final endpoint and prefix during

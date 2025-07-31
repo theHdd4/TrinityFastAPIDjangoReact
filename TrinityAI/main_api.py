@@ -30,10 +30,14 @@ def get_llm_config() -> Dict[str, str]:
 
 
 # Path to backend helpers mounted via volume in docker-compose
-# We add the parent directory so the `DataStorageRetrieval` package
-# can be imported normally.
+# We add the AI directory itself and the FastAPI backend so the
+# ``DataStorageRetrieval`` package and ``app`` utilities can be
+# imported normally when running outside Docker.
 BACKEND_ROOT = Path(__file__).resolve().parent
 sys.path.append(str(BACKEND_ROOT))
+BACKEND_API = BACKEND_ROOT.parent / "TrinityBackendFastAPI" / "app"
+if BACKEND_API.exists():
+    sys.path.append(str(BACKEND_API))
 
 # Load environment variables from Redis so subsequent configuration
 # functions see CLIENT_NAME, APP_NAME and PROJECT_NAME
@@ -81,24 +85,45 @@ def get_classifier_config_from_mongo(client: str, app: str, project: str):
 
 
 def _fetch_names_from_db() -> tuple[str, str, str]:
-    """Retrieve client, app and project names from the backend database."""
-    user_id = int(os.getenv("USER_ID", "0"))
-    project_id = int(os.getenv("PROJECT_ID", "0"))
+    """Retrieve client, app and project names using backend helpers."""
     client = os.getenv("CLIENT_NAME", "default_client")
     app = os.getenv("APP_NAME", "default_app")
     project = os.getenv("PROJECT_NAME", "default_project")
-    if user_id and project_id:
+
+    try:
+        # Use the FastAPI/Django helper which queries Redis or Postgres
+        # to determine the active environment variables. This mirrors how
+        # the backend resolves the current workspace for each user.
+        from app.core.utils import get_env_vars
+
+        env = asyncio.run(
+            get_env_vars(
+                client_name=client,
+                app_name=app,
+                project_name=project,
+            )
+        )
+        if env:
+            client = env.get("CLIENT_NAME", client)
+            app = env.get("APP_NAME", app)
+            project = env.get("PROJECT_NAME", project)
+    except Exception as exc:
+        logger.warning("get_env_vars failed: %s", exc)
+        # Fallback to direct DB lookup for older deployments
         try:
             from DataStorageRetrieval.db import fetch_client_app_project
 
-            client_db, app_db, project_db = asyncio.run(
-                fetch_client_app_project(user_id, project_id)
-            )
-            client = client_db or client
-            app = app_db or app
-            project = project_db or project
-        except Exception as exc:
-            print(f"⚠️ Failed to load names from DB: {exc}")
+            user_id = int(os.getenv("USER_ID", "0"))
+            project_id = int(os.getenv("PROJECT_ID", "0"))
+            if user_id and project_id:
+                client_db, app_db, project_db = asyncio.run(
+                    fetch_client_app_project(user_id, project_id)
+                )
+                client = client_db or client
+                app = app_db or app
+                project = project_db or project
+        except Exception as exc_db:  # pragma: no cover - optional path
+            logger.warning("fallback fetch_client_app_project failed: %s", exc_db)
 
     os.environ["CLIENT_NAME"] = client
     os.environ["APP_NAME"] = app
