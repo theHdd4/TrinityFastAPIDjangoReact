@@ -97,6 +97,10 @@ class ProjectViewSet(viewsets.ModelViewSet):
                 client_name,
                 app_name,
                 project_name,
+                client_id=os.environ.get("CLIENT_ID", ""),
+                app_id=os.environ.get("APP_ID", ""),
+                project_id=f"{project_name}_{project.id}",
+                user_id=str(self.request.user.id),
             )
         except Exception:
             pass

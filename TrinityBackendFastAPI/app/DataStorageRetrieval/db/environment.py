@@ -12,8 +12,12 @@ from .connection import (
 _CREATE_TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS registry_environment (
     client_name TEXT,
+    client_id TEXT,
     app_name TEXT,
+    app_id TEXT,
     project_name TEXT,
+    project_id TEXT,
+    user_id TEXT,
     identifiers JSONB,
     measures JSONB,
     dimensions JSONB,
@@ -67,6 +71,10 @@ async def upsert_environment(
     measures: list[str] | None = None,
     dimensions: dict | None = None,
     *,
+    client_id: str = "",
+    app_id: str = "",
+    project_id: str = "",
+    user_id: str = "",
     schema: str | None = None,
 ) -> None:
     """Insert or update an environment record in Postgres."""
@@ -81,17 +89,25 @@ async def upsert_environment(
         await conn.execute(
             """
             INSERT INTO registry_environment
-                (client_name, app_name, project_name, identifiers, measures, dimensions, updated_at)
-            VALUES ($1,$2,$3,$4,$5,$6,NOW())
+                (client_name, client_id, app_name, app_id, project_name, project_id, user_id, identifiers, measures, dimensions, updated_at)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,NOW())
             ON CONFLICT (client_name, app_name, project_name) DO UPDATE
-              SET identifiers=EXCLUDED.identifiers,
+              SET client_id=EXCLUDED.client_id,
+                  app_id=EXCLUDED.app_id,
+                  project_id=EXCLUDED.project_id,
+                  user_id=EXCLUDED.user_id,
+                  identifiers=EXCLUDED.identifiers,
                   measures=EXCLUDED.measures,
                   dimensions=EXCLUDED.dimensions,
                   updated_at=EXCLUDED.updated_at
             """,
             client_name,
+            client_id,
             app_name,
+            app_id,
             project_name,
+            project_id,
+            user_id,
             (__import__("DataStorageRetrieval.db", fromlist=["db"]).asyncpg).Json(identifiers),
             (__import__("DataStorageRetrieval.db", fromlist=["db"]).asyncpg).Json(measures),
             (__import__("DataStorageRetrieval.db", fromlist=["db"]).asyncpg).Json(dimensions),
@@ -161,6 +177,7 @@ async def rename_environment(
     app_name: str,
     old_project_name: str,
     new_project_name: str,
+    new_project_id: str = "",
     *,
     schema: str | None = None,
 ) -> None:
@@ -173,13 +190,16 @@ async def rename_environment(
         await conn.execute(
             """
             UPDATE registry_environment
-            SET project_name=$4, updated_at=NOW()
+            SET project_name=$4,
+                project_id=$5,
+                updated_at=NOW()
             WHERE client_name=$1 AND app_name=$2 AND project_name=$3
             """,
             client_name,
             app_name,
             old_project_name,
             new_project_name,
+            new_project_id,
         )
     finally:
         await conn.close()

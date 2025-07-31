@@ -123,8 +123,12 @@ class RegistryEnvironment(models.Model):
     """Per-tenant environment metadata shared across services."""
 
     client_name = models.CharField(max_length=150)
+    client_id = models.CharField(max_length=255, blank=True)
     app_name = models.CharField(max_length=150)
+    app_id = models.CharField(max_length=255, blank=True)
     project_name = models.CharField(max_length=150)
+    project_id = models.CharField(max_length=255, blank=True)
+    user_id = models.CharField(max_length=255, blank=True)
     identifiers = models.JSONField(blank=True, default=list)
     measures = models.JSONField(blank=True, default=list)
     dimensions = models.JSONField(blank=True, default=dict)

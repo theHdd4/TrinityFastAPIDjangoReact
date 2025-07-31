@@ -36,7 +36,15 @@ def create_project_folder(sender, instance, created, **kwargs):
         create_prefix(prefix)
         if upsert_environment is not None:
             try:
-                async_to_sync(upsert_environment)(tenant, app_slug, instance.name)
+                async_to_sync(upsert_environment)(
+                    tenant,
+                    app_slug,
+                    instance.name,
+                    client_id=os.environ.get("CLIENT_ID", ""),
+                    app_id=os.environ.get("APP_ID", ""),
+                    project_id=f"{instance.name}_{instance.pk}",
+                    user_id=str(instance.owner_id),
+                )
             except Exception:
                 pass
 
@@ -104,7 +112,13 @@ def update_env_vars_on_rename(sender, instance, **kwargs):
         rename_project_folder(tenant, app_slug, old_slug, new_slug)
         if rename_environment is not None:
             try:
-                async_to_sync(rename_environment)(tenant, app_slug, old.name, instance.name)
+                async_to_sync(rename_environment)(
+                    tenant,
+                    app_slug,
+                    old.name,
+                    instance.name,
+                    new_project_id=f"{instance.name}_{instance.pk}",
+                )
             except Exception:
                 pass
 

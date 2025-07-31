@@ -1,8 +1,10 @@
 The environment registry tracks per-tenant variables inside the ``registry_environment`` table in Postgres.
 Whenever an app or project is created, updated or deleted the Django ``registry`` app sends a signal that
 calls ``DataStorageRetrieval.db.environment`` helpers. These helpers insert, update or delete rows so that
-``client_name``, ``app_name`` and ``project_name`` always map to the latest identifiers, measures and
-dimensions defined for that project.
+each record stores ``client_name``, ``client_id``, ``app_name``, ``app_id``, ``project_name``, ``project_id`` and
+``user_id`` along with any configured ``identifiers``, ``measures`` and ``dimensions``. The combination of
+``client_name``, ``app_name`` and ``project_name`` is unique, so a row is created for every new project with
+empty identifier fields until they are configured.
 
 Environment variables for a tenant are first looked up in the ``UserEnvironmentVariable`` table. If they are
 not found there, ``get_env_vars`` (in ``TrinityBackendFastAPI/app/core/utils.py``) queries ``registry_environment``
@@ -17,3 +19,9 @@ identifiers, measures and dimensions for later use.
 To inspect the saved records, open pgAdmin and connect to the ``postgres`` service defined in
 ``docker-compose.yml``. Browse to the ``registry_environment`` table and view its contents. Newly created
 projects should appear automatically and renaming or deleting a project updates the corresponding entry.
+
+The table columns are::
+
+    client_name | client_id | app_name | app_id | project_name | project_id | user_id | identifiers | measures | dimensions | updated_at
+
+When a project is first created the identifier, measure and dimension columns are empty. After configuring the column classifier they will be populated for that project. Verify with ``SELECT * FROM registry_environment`` in ``psql`` or view the table in pgAdmin.

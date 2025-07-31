@@ -629,6 +629,10 @@ async def save_config(req: SaveConfigRequest):
             req.identifiers,
             req.measures,
             req.dimensions,
+            client_id=env.get("CLIENT_ID", ""),
+            app_id=env.get("APP_ID", ""),
+            project_id=env.get("PROJECT_ID", ""),
+            user_id=env.get("USER_ID", ""),
         )
     except Exception:
         pass
