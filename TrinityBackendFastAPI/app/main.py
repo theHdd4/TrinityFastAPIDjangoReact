@@ -10,7 +10,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.router import api_router, text_router
 import os
 from DataStorageRetrieval.arrow_client import load_env_from_redis
-from DataStorageRetrieval.db import init_environment_registry
 
 app = FastAPI()
 
@@ -41,7 +40,6 @@ async def log_env():
     # Load environment variables from Redis so CLIENT_NAME/APP_NAME/PROJECT_NAME
     # are available when the service starts.
     load_env_from_redis()
-    await init_environment_registry()
     from DataStorageRetrieval.arrow_client import get_minio_prefix
     prefix = get_minio_prefix()
     print(

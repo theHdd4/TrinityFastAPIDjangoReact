@@ -47,6 +47,7 @@ async def _query_env_vars(client_id: str, app_id: str, project_id: str) -> Dict[
             user=POSTGRES_USER,
             password=POSTGRES_PASSWORD,
             database=POSTGRES_DB,
+            server_settings={"search_path": client_name},
         )
     except Exception:
         return None
@@ -74,6 +75,7 @@ async def _query_env_vars_by_names(client_name: str, app_name: str, project_name
             user=POSTGRES_USER,
             password=POSTGRES_PASSWORD,
             database=POSTGRES_DB,
+            server_settings={"search_path": client_name},
         )
     except Exception:
         return None
@@ -102,12 +104,13 @@ async def _query_registry_env(client_name: str, app_name: str, project_name: str
             user=POSTGRES_USER,
             password=POSTGRES_PASSWORD,
             database=POSTGRES_DB,
+            server_settings={"search_path": client_name},
         )
     except Exception:
         return None
     try:
         if init_environment_registry is not None:
-            await init_environment_registry()
+            await init_environment_registry(client_name)
         row = await conn.fetchrow(
             """
             SELECT identifiers, measures, dimensions

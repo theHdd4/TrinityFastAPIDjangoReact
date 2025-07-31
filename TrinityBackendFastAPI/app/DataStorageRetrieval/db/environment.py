@@ -22,15 +22,19 @@ CREATE TABLE IF NOT EXISTS registry_environment (
 )
 """
 
-async def _connect():
+async def _connect(schema: str | None = None):
     if asyncpg is None:
         return None
     try:
+        settings = None
+        if schema:
+            settings = {"search_path": schema}
         return await asyncpg.connect(
             host=POSTGRES_HOST,
             user=POSTGRES_USER,
             password=POSTGRES_PASSWORD,
             database=POSTGRES_DB,
+            server_settings=settings,
         )
     except Exception:
         return None
@@ -45,9 +49,9 @@ async def _ensure_table(conn) -> None:
         pass
 
 
-async def init_environment_registry() -> None:
+async def init_environment_registry(schema: str | None = None) -> None:
     """Ensure the registry_environment table exists."""
-    conn = await _connect()
+    conn = await _connect(schema)
     if conn is None:
         return
     try:
@@ -62,9 +66,11 @@ async def upsert_environment(
     identifiers: list[str] | None = None,
     measures: list[str] | None = None,
     dimensions: dict | None = None,
+    *,
+    schema: str | None = None,
 ) -> None:
     """Insert or update an environment record in Postgres."""
-    conn = await _connect()
+    conn = await _connect(schema or client_name)
     if conn is None:
         return
     identifiers = identifiers or []
@@ -93,9 +99,15 @@ async def upsert_environment(
     finally:
         await conn.close()
 
-async def fetch_environment(client_name: str, app_name: str, project_name: str) -> dict | None:
+async def fetch_environment(
+    client_name: str,
+    app_name: str,
+    project_name: str,
+    *,
+    schema: str | None = None,
+) -> dict | None:
     """Retrieve identifiers, measures and dimensions for a project."""
-    conn = await _connect()
+    conn = await _connect(schema or client_name)
     if conn is None:
         return None
     try:
@@ -121,9 +133,15 @@ async def fetch_environment(client_name: str, app_name: str, project_name: str) 
     return None
 
 
-async def delete_environment(client_name: str, app_name: str, project_name: str) -> None:
+async def delete_environment(
+    client_name: str,
+    app_name: str,
+    project_name: str,
+    *,
+    schema: str | None = None,
+) -> None:
     """Remove an environment record."""
-    conn = await _connect()
+    conn = await _connect(schema or client_name)
     if conn is None:
         return
     try:
@@ -143,9 +161,11 @@ async def rename_environment(
     app_name: str,
     old_project_name: str,
     new_project_name: str,
+    *,
+    schema: str | None = None,
 ) -> None:
     """Rename a project entry."""
-    conn = await _connect()
+    conn = await _connect(schema or client_name)
     if conn is None:
         return
     try:
