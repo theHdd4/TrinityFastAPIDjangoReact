@@ -20,6 +20,7 @@ import {
   PaginationPrevious,
 } from '@/components/ui/pagination';
 import { Loader2, Database, GitMerge } from 'lucide-react';
+import { logMinioPrefix } from '@/utils/logPrefix';
 
 interface MergeCanvasProps {
   mergeId?: string;
@@ -146,7 +147,8 @@ const MergeCanvas: React.FC<MergeCanvasProps> = ({
         // Fetch from saved file
         const url = `${MERGE_API}/cached_dataframe?object_name=${encodeURIComponent(resultFilePath)}&page=${page}&page_size=20`;
         console.log('[MergeCanvas] Making request to:', url);
-        
+        logMinioPrefix(resultFilePath);
+
         const response = await fetch(url);
         
         console.log('[MergeCanvas] Response status:', response.status);

@@ -92,8 +92,6 @@ def _fetch_names_from_db() -> tuple[str, str, str]:
 
     try:
         # Use the FastAPI/Django helper which queries Redis or Postgres
-        # to determine the active environment variables. This mirrors how
-        # the backend resolves the current workspace for each user.
         from app.core.utils import get_env_vars
 
         env = asyncio.run(
@@ -109,21 +107,29 @@ def _fetch_names_from_db() -> tuple[str, str, str]:
             project = env.get("PROJECT_NAME", project)
     except Exception as exc:
         logger.warning("get_env_vars failed: %s", exc)
-        # Fallback to direct DB lookup for older deployments
         try:
-            from DataStorageRetrieval.db import fetch_client_app_project
+            from DataStorageRetrieval.db.environment import fetch_environment_names
 
-            user_id = int(os.getenv("USER_ID", "0"))
-            project_id = int(os.getenv("PROJECT_ID", "0"))
-            if user_id and project_id:
-                client_db, app_db, project_db = asyncio.run(
-                    fetch_client_app_project(user_id, project_id)
+            names = asyncio.run(fetch_environment_names(client))
+            if names:
+                client, app, project = names
+        except Exception:
+            try:
+                from DataStorageRetrieval.db import fetch_client_app_project
+
+                user_id = int(os.getenv("USER_ID", "0"))
+                project_id = int(os.getenv("PROJECT_ID", "0"))
+                if user_id and project_id:
+                    client_db, app_db, project_db = asyncio.run(
+                        fetch_client_app_project(user_id, project_id)
+                    )
+                    client = client_db or client
+                    app = app_db or app
+                    project = project_db or project
+            except Exception as exc_db:  # pragma: no cover - optional path
+                logger.warning(
+                    "fallback fetch_client_app_project failed: %s", exc_db
                 )
-                client = client_db or client
-                app = app_db or app
-                project = project_db or project
-        except Exception as exc_db:  # pragma: no cover - optional path
-            logger.warning("fallback fetch_client_app_project failed: %s", exc_db)
 
     os.environ["CLIENT_NAME"] = client
     os.environ["APP_NAME"] = app
@@ -132,6 +138,7 @@ def _fetch_names_from_db() -> tuple[str, str, str]:
     logger.debug(
         "_fetch_names_from_db resolved client=%s app=%s project=%s", client, app, project
     )
+    print(f"ENV resolved -> client={client} app={app} project={project}")
     return client, app, project
 
 
@@ -339,6 +346,26 @@ async def get_config():
         return {"status": "success", "source": "mongo", "data": mongo_data}
 
     raise HTTPException(status_code=404, detail="Configuration not found")
+
+
+@api_router.get("/env")
+async def get_environment():
+    """Return current environment variables and MinIO prefix."""
+    client, app, project = _fetch_names_from_db()
+    prefix = get_minio_config()["prefix"]
+    logger.info(
+        "environment fetched client=%s app=%s project=%s prefix=%s",
+        client,
+        app,
+        project,
+        prefix,
+    )
+    return {
+        "client_name": client,
+        "app_name": app,
+        "project_name": project,
+        "prefix": prefix,
+    }
 
 # After defining all endpoints include the router so the app registers them
 app.include_router(api_router)

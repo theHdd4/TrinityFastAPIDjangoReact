@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Sparkles, Bot, User, X, MessageSquare, Send } from 'lucide-react';
 import { TRINITY_AI_API, CONCAT_API, MERGE_API } from '@/lib/api';
+import { logMinioPrefix } from '@/utils/logPrefix';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 
 interface Message {
@@ -56,13 +57,23 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
     const performEndpoint = PERFORM_ENDPOINTS[atomType];
     if (!inputValue.trim() || !endpoint) return;
 
-    const userMsg: Message = { id: Date.now().toString(), content: inputValue, sender: 'user', timestamp: new Date() };
-    setMessages(prev => [...prev, userMsg]);
-    setInputValue('');
-    setIsLoading(true);
+  const userMsg: Message = { id: Date.now().toString(), content: inputValue, sender: 'user', timestamp: new Date() };
+  setMessages(prev => [...prev, userMsg]);
+  setInputValue('');
+  setIsLoading(true);
 
+  try {
     try {
-      const res = await fetch(endpoint, {
+      const envRes = await fetch(`${TRINITY_AI_API}/env`);
+      if (envRes.ok) {
+        const envData = await envRes.json();
+        console.log('TrinityAI environment', envData);
+        logMinioPrefix(envData.prefix);
+      }
+    } catch (err) {
+      console.log('Env fetch error', err);
+    }
+    const res = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ prompt: userMsg.content }),

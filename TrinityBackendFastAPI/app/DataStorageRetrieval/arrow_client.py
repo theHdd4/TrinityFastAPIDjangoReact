@@ -69,13 +69,33 @@ def load_env_from_redis() -> Dict[str, str]:
 
 
 def get_current_names() -> tuple[str, str, str]:
-    """Return (client, app, project) using environment variables and Redis."""
+    """Return (client, app, project) using Redis and Postgres."""
     env = load_env_from_redis()
     client = os.getenv("CLIENT_NAME", env.get("CLIENT_NAME", "default_client"))
     app = os.getenv("APP_NAME", env.get("APP_NAME", "default_app"))
     project = os.getenv(
         "PROJECT_NAME", env.get("PROJECT_NAME", "default_project")
     )
+    if (
+        client == "default_client" or app == "default_app" or project == "default_project"
+    ):
+        try:
+            import asyncio
+            from app.DataStorageRetrieval.db.environment import fetch_environment_names
+
+            schema = client if client != "default_client" else os.getenv("TENANT_SCHEMA", "")
+            if schema:
+                names = asyncio.run(fetch_environment_names(schema))
+                if names:
+                    client, app, project = names
+                    os.environ["CLIENT_NAME"] = client
+                    os.environ["APP_NAME"] = app
+                    os.environ["PROJECT_NAME"] = project
+                    logger.info(
+                        "📥 loaded env from postgres %s/%s/%s", client, app, project
+                    )
+        except Exception as exc:  # pragma: no cover - db optional
+            logger.warning("fetch_environment_names failed: %s", exc)
     return client, app, project
 
 

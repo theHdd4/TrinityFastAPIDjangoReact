@@ -10,6 +10,7 @@ import { Save, Eye, Calculator, Trash2, Plus, ChevronUp, ChevronDown } from 'luc
 import { useToast } from '@/hooks/use-toast';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { CREATECOLUMN_API, FEATURE_OVERVIEW_API } from '@/lib/api';
+import { logMinioPrefix } from '@/utils/logPrefix';
 import {
   Pagination,
   PaginationContent,
@@ -432,6 +433,7 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
   const fetchPreviewData = async (file: string, page: number = 1) => {
     setPreviewLoading(true);
     try {
+      logMinioPrefix(file);
       const response = await fetch(
         `${CREATECOLUMN_API}/cached_dataframe?object_name=${encodeURIComponent(file)}&page=${page}&page_size=20`
       );

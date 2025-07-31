@@ -21,6 +21,7 @@ import {
 } from '@/components/ui/pagination';
 import { Loader2 } from 'lucide-react';
 import { Database, ArrowDown } from 'lucide-react';
+import { logMinioPrefix } from '@/utils/logPrefix';
 
 interface ConcatCanvasProps {
   concatId?: string;
@@ -84,6 +85,7 @@ const ConcatCanvas: React.FC<ConcatCanvasProps> = ({ concatId, resultFilePath, f
     
     try {
       // console.log(`[ConcatCanvas] Fetching: ${CONCAT_API}/cached_dataframe?object_name=${encodeURIComponent(resultFilePath)}&page=${page}&page_size=25`);
+      logMinioPrefix(resultFilePath);
       const response = await fetch(
         `${CONCAT_API}/cached_dataframe?object_name=${encodeURIComponent(resultFilePath)}&page=${page}&page_size=20`
       );

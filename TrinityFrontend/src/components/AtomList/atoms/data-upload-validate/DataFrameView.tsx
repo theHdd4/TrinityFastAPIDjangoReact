@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { logMinioPrefix } from '@/utils/logPrefix';
 import { Link, useSearchParams } from 'react-router-dom';
 import { FEATURE_OVERVIEW_API } from '@/lib/api';
 import { TrinityAssets } from '@/components/PrimaryMenu';
@@ -67,6 +68,7 @@ const DataFrameView = () => {
 
   useEffect(() => {
     if (!name) return;
+    logMinioPrefix(name);
     fetch(`${FEATURE_OVERVIEW_API}/cached_dataframe?object_name=${encodeURIComponent(name)}`)
       .then(res => res.text())
       .then(text => {
