@@ -84,11 +84,12 @@ def get_classifier_config_from_mongo(client: str, app: str, project: str):
         return None
 
 
-def _fetch_names_from_db() -> tuple[str, str, str]:
+def _fetch_names_from_db() -> tuple[str, str, str, dict]:
     """Retrieve client, app and project names using backend helpers."""
     client = os.getenv("CLIENT_NAME", "")
     app = os.getenv("APP_NAME", "")
     project = os.getenv("PROJECT_NAME", "")
+    debug: Dict[str, Any] = {}
 
     try:
         # Use the FastAPI/Django helper which queries Redis or Postgres
@@ -102,6 +103,7 @@ def _fetch_names_from_db() -> tuple[str, str, str]:
             )
         )
         if env:
+            debug["source"] = "get_env_vars"
             client = env.get("CLIENT_NAME", client)
             app = env.get("APP_NAME", app)
             project = env.get("PROJECT_NAME", project)
@@ -109,18 +111,46 @@ def _fetch_names_from_db() -> tuple[str, str, str]:
         logger.warning("get_env_vars failed: %s", exc)
         try:
             from DataStorageRetrieval.db.environment import fetch_environment_names
+            from DataStorageRetrieval.db.connection import POSTGRES_HOST, POSTGRES_PORT
 
             schema = os.getenv("TENANT_SCHEMA", client)
+            debug.update(
+                {
+                    "source": "fetch_environment_names",
+                    "host": POSTGRES_HOST,
+                    "port": POSTGRES_PORT,
+                    "schema": schema,
+                    "table": "registry_environment",
+                    "query": (
+                        "SELECT client_name, app_name, project_name FROM registry_environment "
+                        "ORDER BY updated_at DESC LIMIT 1"
+                    ),
+                }
+            )
             names = asyncio.run(fetch_environment_names(schema))
             if names:
                 client, app, project = names
         except Exception:
             try:
                 from DataStorageRetrieval.db import fetch_client_app_project
+                from DataStorageRetrieval.db.connection import POSTGRES_HOST, POSTGRES_PORT
 
                 user_id = int(os.getenv("USER_ID", "0"))
                 project_id = int(os.getenv("PROJECT_ID", "0"))
                 if user_id and project_id:
+                    debug.update(
+                        {
+                            "source": "fetch_client_app_project",
+                            "host": POSTGRES_HOST,
+                            "port": POSTGRES_PORT,
+                            "schema": "<default>",
+                            "table": "accounts_userenvironmentvariable",
+                            "query": (
+                                "SELECT client_name, app_name, project_name FROM accounts_userenvironmentvariable "
+                                "WHERE user_id=$1 AND key='PROJECT_NAME' AND project_id LIKE '%' || $2 ORDER BY updated_at DESC LIMIT 1"
+                            ),
+                        }
+                    )
                     client_db, app_db, project_db = asyncio.run(
                         fetch_client_app_project(user_id, project_id)
                     )
@@ -140,13 +170,13 @@ def _fetch_names_from_db() -> tuple[str, str, str]:
         "_fetch_names_from_db resolved client=%s app=%s project=%s", client, app, project
     )
     print(f"ENV resolved -> client={client} app={app} project={project}")
-    return client, app, project
+    return client, app, project, debug
 
 
 def get_minio_config() -> Dict[str, str]:
     """Return MinIO configuration using database names when available."""
     logger.debug("get_minio_config() called")
-    client, app, project = _fetch_names_from_db()
+    client, app, project, _ = _fetch_names_from_db()
     prefix_default = f"{client}/{app}/{project}/" if client and app and project else ""
     prefix = os.getenv("MINIO_PREFIX", prefix_default)
     if not prefix.endswith("/"):
@@ -327,7 +357,7 @@ async def list_available_atoms():
 async def get_config():
     """Return column classifier configuration from cache or MongoDB."""
     load_env_from_redis()
-    client, app_name, project = _fetch_names_from_db()
+    client, app_name, project, _ = _fetch_names_from_db()
     key = f"{client}/{app_name}/{project}/column_classifier_config"
     cached = redis_client.get(key)
     if cached:
@@ -350,7 +380,7 @@ async def get_config():
 @api_router.get("/env")
 async def get_environment():
     """Return current environment variables and MinIO prefix."""
-    client, app, project = _fetch_names_from_db()
+    client, app, project, debug = _fetch_names_from_db()
     prefix = get_minio_config()["prefix"]
     logger.info(
         "environment fetched client=%s app=%s project=%s prefix=%s",
@@ -364,6 +394,7 @@ async def get_environment():
         "app_name": app,
         "project_name": project,
         "prefix": prefix,
+        "debug": debug,
     }
 
 # After defining all endpoints include the router so the app registers them

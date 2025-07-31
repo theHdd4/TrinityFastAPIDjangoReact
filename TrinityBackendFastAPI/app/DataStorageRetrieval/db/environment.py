@@ -33,11 +33,15 @@ async def _connect(schema: str | None = None):
         settings = None
         if schema:
             settings = {"search_path": schema}
+        print(
+            f"\U0001F50E connecting to Postgres host={POSTGRES_HOST} port={POSTGRES_PORT} db={POSTGRES_DB} schema={schema or '<default>'}"
+        )
         return await asyncpg.connect(
             host=POSTGRES_HOST,
             user=POSTGRES_USER,
             password=POSTGRES_PASSWORD,
             database=POSTGRES_DB,
+            port=int(POSTGRES_PORT),
             server_settings=settings,
         )
     except Exception:
@@ -70,11 +74,14 @@ async def fetch_environment_names(schema: str) -> tuple[str, str, str] | None:
         return None
     try:
         await _ensure_table(conn)
-        row = await conn.fetchrow(
-            "SELECT client_name, app_name, project_name"
-            " FROM registry_environment"
+        query = (
+            "SELECT client_name, app_name, project_name FROM registry_environment"
             " ORDER BY updated_at DESC LIMIT 1"
         )
+        print(
+            f"\U0001F4DD {query} (schema={schema}, table=registry_environment)"
+        )
+        row = await conn.fetchrow(query)
         if row:
             return row["client_name"], row["app_name"], row["project_name"]
     finally:

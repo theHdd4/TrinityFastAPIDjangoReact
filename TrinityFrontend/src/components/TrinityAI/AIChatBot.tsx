@@ -67,6 +67,9 @@ const AIChatBot: React.FC<AIChatBotProps> = ({ cardId, cardTitle, onAddAtom, dis
         if (envRes.ok) {
           const envData = await envRes.json();
           console.log('TrinityAI environment', envData);
+          if (envData.debug) {
+            console.log('TrinityAI env debug', envData.debug);
+          }
           logMinioPrefix(envData.prefix);
         }
       } catch (err) {

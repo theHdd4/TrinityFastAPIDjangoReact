@@ -68,6 +68,9 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
       if (envRes.ok) {
         const envData = await envRes.json();
         console.log('TrinityAI environment', envData);
+        if (envData.debug) {
+          console.log('TrinityAI env debug', envData.debug);
+        }
         logMinioPrefix(envData.prefix);
       }
     } catch (err) {
