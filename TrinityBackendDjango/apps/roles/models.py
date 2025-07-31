@@ -28,3 +28,7 @@ class RoleDefinition(models.Model):
 
     def __str__(self):
         return self.name
+
+
+# Backwards compatibility for older imports
+UserRole = RoleDefinition
