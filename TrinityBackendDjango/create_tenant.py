@@ -185,24 +185,30 @@ def main():
             else:
                 print(f"   → App template '{name}' already exists")
 
-        # Assign roles to the default users within this tenant
-        from apps.roles.models import UserRole
+        # Assign group based roles to each default user
+        from django.contrib.auth.models import Group
+        from apps.roles.models import RoleDefinition
+
+        role_map = {
+            "super_admin": "Super Admin",
+            "admin": "Admin",
+            "editor": "Editor",
+            "viewer": "Viewer",
+        }
+
+        # Ensure RoleDefinition entries exist with associated groups
+        for code, name in role_map.items():
+            group, _ = Group.objects.get_or_create(name=name)
+            RoleDefinition.objects.get_or_create(name=code, defaults={"group": group})
 
         for username, _, role, *_ in role_users:
+            group_name = role_map.get(role)
+            if not group_name:
+                continue
             user = User.objects.get(username=username)
-            # Admin, editor and viewer roles are tied to the Quant Matrix AI tenant
-            # so they share the same client UUID. Only the super admin user is not
-            # bound to a specific client.
-            client_uuid = (
-                tenant_client_id if username != "neo" else uuid.uuid4()
-            )
-            UserRole.objects.get_or_create(
-                user=user,
-                client_id=client_uuid,
-                app_id=uuid.uuid4(),
-                project_id=uuid.uuid4(),
-                role=role,
-            )
+            group = Group.objects.get(name=group_name)
+            user.groups.add(group)
+            user.save()
 
     print("All done! Tenant and all tables created.\n")
 
