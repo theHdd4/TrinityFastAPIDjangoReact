@@ -14,6 +14,8 @@ import {
   DEFAULT_DATAUPLOAD_SETTINGS,
   FeatureOverviewSettings,
   DEFAULT_FEATURE_OVERVIEW_SETTINGS,
+  DataFrameOperationsSettings,
+  DEFAULT_DATAFRAME_OPERATIONS_SETTINGS,
 } from '../store/laboratoryStore';
 import DataUploadValidateProperties from '@/components/AtomList/atoms/data-upload-validate/components/properties/DataUploadValidateProperties';
 import FeatureOverviewProperties from '@/components/AtomList/atoms/feature-overview/components/properties/FeatureOverviewProperties';
@@ -23,6 +25,7 @@ import ColumnClassifierProperties from '@/components/AtomList/atoms/column-class
 import CreateColumnProperties from '@/components/AtomList/atoms/createcolumn/components/properties/CreateColumnProperties';
 import GroupByProperties from '@/components/AtomList/atoms/groupby-wtg-avg/components/properties/GroupByProperties';
 import ScopeSelectorProperties from '@/components/AtomList/atoms/scope-selector/components/properties/ScopeSelectorProperties';
+import DataFrameOperationsProperties from '@/components/AtomList/atoms/dataframe-operations/components/properties/DataFrameOperationsProperties';
 
 interface SettingsPanelProps {
   isCollapsed: boolean;
@@ -44,12 +47,14 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
     selectedAtomId ? state.getAtom(selectedAtomId) : undefined
   );
   const updateSettings = useLaboratoryStore(state => state.updateAtomSettings);
-  const settings: TextBoxSettings | DataUploadSettings | FeatureOverviewSettings =
+  const settings: TextBoxSettings | DataUploadSettings | FeatureOverviewSettings | DataFrameOperationsSettings =
     atom?.settings ||
     (atom?.atomId === 'data-upload-validate'
       ? { ...DEFAULT_DATAUPLOAD_SETTINGS }
       : atom?.atomId === 'feature-overview'
       ? { ...DEFAULT_FEATURE_OVERVIEW_SETTINGS }
+      : atom?.atomId === 'dataframe-operations'
+      ? { ...DEFAULT_DATAFRAME_OPERATIONS_SETTINGS }
       : { ...DEFAULT_TEXTBOX_SETTINGS });
 
   useEffect(() => {
@@ -107,6 +112,8 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
             <CreateColumnProperties atomId={selectedAtomId} />
           ) : selectedAtomId && atom?.atomId === 'groupby-wtg-avg' ? (
             <GroupByProperties atomId={selectedAtomId} />
+          ) : selectedAtomId && atom?.atomId === 'dataframe-operations' ? (
+            <DataFrameOperationsProperties atomId={selectedAtomId} />
           ) : selectedAtomId && atom?.atomId === 'scope-selector' ? (
             <ScopeSelectorProperties atomId={selectedAtomId} />
           ) : (
