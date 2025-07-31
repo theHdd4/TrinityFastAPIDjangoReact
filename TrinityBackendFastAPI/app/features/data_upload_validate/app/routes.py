@@ -156,6 +156,10 @@ async def get_object_prefix(
     project_name: str = "",
 ) -> str:
     """Return the MinIO prefix for the current client/app/project."""
+    # Ensure the latest environment variables from Redis are loaded for each
+    # request so the prefix reflects the active workspace.
+    from app.DataStorageRetrieval.arrow_client import load_env_from_redis
+    load_env_from_redis()
     USER_ID = _parse_numeric_id(os.getenv("USER_ID"))
     PROJECT_ID = _parse_numeric_id(project_id or os.getenv("PROJECT_ID", "0"))
     env = await get_env_vars(

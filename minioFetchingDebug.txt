@@ -19,7 +19,12 @@ from DataStorageRetrieval.arrow_client import get_current_names, get_minio_prefi
 
 client, app, project = get_current_names()
 prefix = get_minio_prefix()  # "<client>/<app>/<project>/"
+print(client, app, project)
 ```
+
+The tuple ``(client, app, project)`` corresponds to the folder path
+``<client>/<app>/<project>/`` inside the ``trinity`` bucket. Use this
+prefix whenever saving or retrieving files so each workspace stays isolated.
 
 Any service may combine this prefix with the MinIO bucket name (default
 "trinity") to fetch or store objects:

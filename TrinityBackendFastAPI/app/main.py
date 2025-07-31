@@ -21,7 +21,9 @@ allowed_origins = [o.strip() for o in origins.split(",") if o.strip()]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://10.2.1.206:8080"],  # or ["*"] for all
+    # Allow all origins defined via FASTAPI_CORS_ORIGINS with a sensible fallback
+    # to the common development hosts.
+    allow_origins=allowed_origins or ["http://10.2.1.206:8080"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
