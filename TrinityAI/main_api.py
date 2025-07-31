@@ -86,9 +86,9 @@ def get_classifier_config_from_mongo(client: str, app: str, project: str):
 
 def _fetch_names_from_db() -> tuple[str, str, str]:
     """Retrieve client, app and project names using backend helpers."""
-    client = os.getenv("CLIENT_NAME", "default_client")
-    app = os.getenv("APP_NAME", "default_app")
-    project = os.getenv("PROJECT_NAME", "default_project")
+    client = os.getenv("CLIENT_NAME", "")
+    app = os.getenv("APP_NAME", "")
+    project = os.getenv("PROJECT_NAME", "")
 
     try:
         # Use the FastAPI/Django helper which queries Redis or Postgres
@@ -110,7 +110,8 @@ def _fetch_names_from_db() -> tuple[str, str, str]:
         try:
             from DataStorageRetrieval.db.environment import fetch_environment_names
 
-            names = asyncio.run(fetch_environment_names(client))
+            schema = os.getenv("TENANT_SCHEMA", client)
+            names = asyncio.run(fetch_environment_names(schema))
             if names:
                 client, app, project = names
         except Exception:
@@ -146,7 +147,7 @@ def get_minio_config() -> Dict[str, str]:
     """Return MinIO configuration using database names when available."""
     logger.debug("get_minio_config() called")
     client, app, project = _fetch_names_from_db()
-    prefix_default = f"{client}/{app}/{project}/"
+    prefix_default = f"{client}/{app}/{project}/" if client and app and project else ""
     prefix = os.getenv("MINIO_PREFIX", prefix_default)
     if not prefix.endswith("/"):
         prefix += "/"
@@ -326,9 +327,7 @@ async def list_available_atoms():
 async def get_config():
     """Return column classifier configuration from cache or MongoDB."""
     load_env_from_redis()
-    client = os.getenv("CLIENT_NAME", "default_client")
-    app_name = os.getenv("APP_NAME", "")
-    project = os.getenv("PROJECT_NAME", "default_project")
+    client, app_name, project = _fetch_names_from_db()
     key = f"{client}/{app_name}/{project}/column_classifier_config"
     cached = redis_client.get(key)
     if cached:

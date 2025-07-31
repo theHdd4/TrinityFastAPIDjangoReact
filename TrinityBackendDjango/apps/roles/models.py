@@ -29,3 +29,9 @@ class RoleDefinition(models.Model):
     def __str__(self):
         return self.name
 
+
+# Backwards compatibility alias expected by old scripts
+class UserRole(RoleDefinition):
+    class Meta:
+        proxy = True
+
