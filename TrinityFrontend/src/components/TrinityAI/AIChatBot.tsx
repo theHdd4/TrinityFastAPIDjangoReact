@@ -68,9 +68,12 @@ const AIChatBot: React.FC<AIChatBotProps> = ({ cardId, cardTitle, onAddAtom, dis
         let query = '';
         if (clientEnv) {
           const params = new URLSearchParams();
-          if (clientEnv.CLIENT_NAME) params.append('client', clientEnv.CLIENT_NAME);
-          if (clientEnv.APP_NAME) params.append('app', clientEnv.APP_NAME);
-          if (clientEnv.PROJECT_NAME) params.append('project', clientEnv.PROJECT_NAME);
+          const clientName = clientEnv.CLIENT_NAME || clientEnv.client_name;
+          const appName = clientEnv.APP_NAME || clientEnv.app_name;
+          const projectName = clientEnv.PROJECT_NAME || clientEnv.project_name;
+          if (clientName) params.append('client', clientName);
+          if (appName) params.append('app', appName);
+          if (projectName) params.append('project', projectName);
           const qs = params.toString();
           if (qs) query = `?${qs}`;
         }
@@ -83,6 +86,7 @@ const AIChatBot: React.FC<AIChatBotProps> = ({ cardId, cardTitle, onAddAtom, dis
               `Looking in the postgres server: ${envData.debug.host}:${envData.debug.port} in the schema: ${envData.debug.schema} table: ${envData.debug.table} with the query: ${envData.debug.query} and result fetched are ${JSON.stringify(envData.debug.result)}`
             );
           }
+          console.log('MinIO prefix from /env', envData.prefix);
           logMinioPrefix(envData.prefix);
         }
       } catch (err) {

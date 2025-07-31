@@ -134,6 +134,7 @@ def _fetch_names_from_db(
     project_override: str | None = None,
 ) -> tuple[str, str, str, dict]:
     """Retrieve client, app and project names using backend helpers."""
+    load_env_from_redis()
     client = client_override or os.getenv("CLIENT_NAME", "")
     app = app_override or os.getenv("APP_NAME", "")
     project = project_override or os.getenv("PROJECT_NAME", "")
@@ -252,7 +253,6 @@ def _fetch_names_from_db(
     os.environ["CLIENT_NAME"] = client
     os.environ["APP_NAME"] = app
     os.environ["PROJECT_NAME"] = project
-    load_env_from_redis()
     logger.debug(
         "_fetch_names_from_db resolved client=%s app=%s project=%s", client, app, project
     )
