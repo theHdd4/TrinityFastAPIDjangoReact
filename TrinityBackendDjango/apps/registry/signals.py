@@ -8,11 +8,16 @@ from apps.tenants.models import Tenant
 from apps.accounts.models import UserEnvironmentVariable
 from redis_store.env_cache import invalidate_env
 from asgiref.sync import async_to_sync
-from DataStorageRetrieval.db.environment import (
-    upsert_environment,
-    delete_environment,
-    rename_environment,
-)
+try:
+    from DataStorageRetrieval.db.environment import (
+        upsert_environment,
+        delete_environment,
+        rename_environment,
+    )
+except ModuleNotFoundError:  # pragma: no cover - FastAPI package missing
+    upsert_environment = None
+    delete_environment = None
+    rename_environment = None
 
 
 def _current_tenant_name() -> str:
@@ -29,10 +34,11 @@ def create_project_folder(sender, instance, created, **kwargs):
         project_slug = instance.slug
         prefix = f"{tenant}/{app_slug}/{project_slug}"
         create_prefix(prefix)
-        try:
-            async_to_sync(upsert_environment)(tenant, app_slug, instance.name)
-        except Exception:
-            pass
+        if upsert_environment is not None:
+            try:
+                async_to_sync(upsert_environment)(tenant, app_slug, instance.name)
+            except Exception:
+                pass
 
 
 @receiver(pre_save, sender=Project)
@@ -96,17 +102,19 @@ def update_env_vars_on_rename(sender, instance, **kwargs):
             f"🚚 Project renamed: renaming MinIO folder {old_slug} -> {new_slug}"
         )
         rename_project_folder(tenant, app_slug, old_slug, new_slug)
-        try:
-            async_to_sync(rename_environment)(tenant, app_slug, old.name, instance.name)
-        except Exception:
-            pass
+        if rename_environment is not None:
+            try:
+                async_to_sync(rename_environment)(tenant, app_slug, old.name, instance.name)
+            except Exception:
+                pass
 
 
 @receiver(post_delete, sender=Project)
 def cleanup_environment_entry(sender, instance, **kwargs):
     tenant = _current_tenant_name()
     app_slug = instance.app.slug
-    try:
-        async_to_sync(delete_environment)(tenant, app_slug, instance.name)
-    except Exception:
-        pass
+    if delete_environment is not None:
+        try:
+            async_to_sync(delete_environment)(tenant, app_slug, instance.name)
+        except Exception:
+            pass
