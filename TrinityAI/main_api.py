@@ -128,9 +128,9 @@ def get_classifier_config_from_mongo(client: str, app: str, project: str):
         return None
 
 
-def _fetch_names_from_db() -> tuple[str, str, str, dict]:
+def _fetch_names_from_db(client_override: str | None = None) -> tuple[str, str, str, dict]:
     """Retrieve client, app and project names using backend helpers."""
-    client = os.getenv("CLIENT_NAME", "")
+    client = client_override or os.getenv("CLIENT_NAME", "")
     app = os.getenv("APP_NAME", "")
     project = os.getenv("PROJECT_NAME", "")
     debug: Dict[str, Any] = {}
@@ -154,10 +154,14 @@ def _fetch_names_from_db() -> tuple[str, str, str, dict]:
     except Exception as exc:
         logger.warning("get_env_vars failed: %s", exc)
         try:
-            from DataStorageRetrieval.db.environment import fetch_environment_names
-            from DataStorageRetrieval.db.connection import POSTGRES_HOST, POSTGRES_PORT, get_tenant_schema
+        from DataStorageRetrieval.db.environment import fetch_environment_names
+        from DataStorageRetrieval.db.connection import (
+            POSTGRES_HOST,
+            POSTGRES_PORT,
+            get_tenant_schema,
+        )
 
-            schema = get_tenant_schema() or client
+            schema = get_tenant_schema(client) or client
             query = (
                 "SELECT client_name, app_name, project_name FROM registry_environment "
                 "ORDER BY updated_at DESC LIMIT 1"
@@ -457,19 +461,19 @@ async def get_config():
 
 
 @api_router.get("/env")
-async def get_environment():
+async def get_environment(client: str | None = None):
     """Return current environment variables and MinIO prefix."""
-    client, app, project, debug = _fetch_names_from_db()
+    client_name, app, project, debug = _fetch_names_from_db(client)
     prefix = get_minio_config()["prefix"]
     logger.info(
         "environment fetched client=%s app=%s project=%s prefix=%s",
-        client,
+        client_name,
         app,
         project,
         prefix,
     )
     return {
-        "client_name": client,
+        "client_name": client_name,
         "app_name": app,
         "project_name": project,
         "prefix": prefix,
