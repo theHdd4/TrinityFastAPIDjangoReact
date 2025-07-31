@@ -8,10 +8,11 @@ Environment variables for a tenant are first looked up in the ``UserEnvironmentV
 not found there, ``get_env_vars`` (in ``TrinityBackendFastAPI/app/core/utils.py``) queries ``registry_environment``
 so all services can share the same fallback values.
 
-The Django ``registry`` application ensures the ``registry_environment`` table
-exists for each tenant schema during startup. When new tenants are created the
-table is also initialized so entries can be inserted as soon as projects are
-added.
+The ``registry_environment`` table is created by Django migrations. When new
+tenants are added run ``migrate_schemas`` so the ``registry`` app creates the
+table inside that tenant schema alongside ``registry_app`` and the other
+registry tables. Once the table exists, projects can immediately store
+identifiers, measures and dimensions for later use.
 
 To inspect the saved records, open pgAdmin and connect to the ``postgres`` service defined in
 ``docker-compose.yml``. Browse to the ``registry_environment`` table and view its contents. Newly created
