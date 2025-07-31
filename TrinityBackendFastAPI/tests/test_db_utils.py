@@ -31,6 +31,9 @@ async def dummy_connect(*a, **k):
 
 
 def test_arrow_dataset_exists_missing_object(monkeypatch):
+    arrow_client_stub = types.ModuleType("DataStorageRetrieval.arrow_client")
+    arrow_client_stub.flight_table_exists = lambda p: True
+    monkeypatch.setitem(sys.modules, "DataStorageRetrieval.arrow_client", arrow_client_stub)
     monkeypatch.setattr(db, "asyncpg", types.SimpleNamespace(connect=dummy_connect))
     monkeypatch.setattr(db, "delete_arrow_dataset", dummy_delete)
     monkeypatch.setattr("DataStorageRetrieval.flight_registry.remove_arrow_object", dummy_remove)
@@ -40,7 +43,6 @@ def test_arrow_dataset_exists_missing_object(monkeypatch):
     error_mod.S3Error = DummyS3Error
     monkeypatch.setitem(sys.modules, "minio", minio_mod)
     monkeypatch.setitem(sys.modules, "minio.error", error_mod)
-    monkeypatch.setattr("DataStorageRetrieval.arrow_client.flight_table_exists", lambda p: True)
     monkeypatch.setenv("MINIO_BUCKET", "bucket")
     monkeypatch.setenv("MINIO_ENDPOINT", "minio:9000")
     monkeypatch.setenv("MINIO_ACCESS_KEY", "minio")
@@ -59,6 +61,9 @@ def test_arrow_dataset_exists_missing_flight(monkeypatch):
         def stat_object(self, bucket, obj):
             return True
 
+    arrow_client_stub = types.ModuleType("DataStorageRetrieval.arrow_client")
+    arrow_client_stub.flight_table_exists = lambda p: False
+    monkeypatch.setitem(sys.modules, "DataStorageRetrieval.arrow_client", arrow_client_stub)
     monkeypatch.setattr(db, "asyncpg", types.SimpleNamespace(connect=dummy_connect))
     monkeypatch.setattr(db, "delete_arrow_dataset", dummy_delete)
     monkeypatch.setattr("DataStorageRetrieval.flight_registry.remove_arrow_object", dummy_remove)
@@ -68,7 +73,6 @@ def test_arrow_dataset_exists_missing_flight(monkeypatch):
     error_mod.S3Error = DummyS3Error
     monkeypatch.setitem(sys.modules, "minio", minio_mod)
     monkeypatch.setitem(sys.modules, "minio.error", error_mod)
-    monkeypatch.setattr("DataStorageRetrieval.arrow_client.flight_table_exists", lambda p: False)
     monkeypatch.setenv("MINIO_BUCKET", "bucket")
     monkeypatch.setenv("MINIO_ENDPOINT", "minio:9000")
     monkeypatch.setenv("MINIO_ACCESS_KEY", "minio")
@@ -102,3 +106,48 @@ def test_upsert_and_fetch_project_state(monkeypatch):
     asyncio.run(db.upsert_project_state("c", "a", "pid", {"x": 1}))
     res = asyncio.run(db.fetch_project_state("pid"))
     assert res == {"x": 1}
+
+
+def test_upsert_and_fetch_environment(monkeypatch):
+    stored = {}
+
+    class Conn:
+        async def execute(self, q, *p):
+            if q.strip().startswith("INSERT"):
+                key = (p[0], p[2], p[4])
+                stored[key] = {
+                    "identifiers": p[7],
+                    "measures": p[8],
+                    "dimensions": p[9],
+                }
+
+        async def fetchrow(self, q, client, app, project):
+            data = stored.get((client, app, project))
+            if data:
+                return data
+            return None
+
+        async def close(self):
+            pass
+
+    async def connect(schema=None):
+        return Conn()
+
+    monkeypatch.setattr(db.environment, "_connect", connect)
+    monkeypatch.setattr(db, "asyncpg", types.SimpleNamespace(Json=lambda d: d, connect=lambda **k: None))
+    async def dummy_ensure(c):
+        return None
+    monkeypatch.setattr(db.environment, "_ensure_table", dummy_ensure)
+
+    asyncio.run(
+        db.upsert_environment(
+            "c",
+            "a",
+            "p",
+            ["id"],
+            ["m"],
+            {"dim": ["d"]},
+        )
+    )
+    res = asyncio.run(db.fetch_environment("c", "a", "p"))
+    assert res == {"identifiers": ["id"], "measures": ["m"], "dimensions": {"dim": ["d"]}}

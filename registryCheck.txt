@@ -25,3 +25,8 @@ The table columns are::
     client_name | client_id | app_name | app_id | project_name | project_id | user_id | identifiers | measures | dimensions | updated_at
 
 When a project is first created the identifier, measure and dimension columns are empty. After configuring the column classifier they will be populated for that project. Verify with ``SELECT * FROM registry_environment`` in ``psql`` or view the table in pgAdmin.
+Saving a configuration in the column classifier triggers the FastAPI service to
+call ``upsert_environment`` which stores the ``identifiers``, ``measures`` and
+``dimensions`` JSON directly in the ``registry_environment`` table.  Each entry
+is keyed by ``client_name``, ``app_name`` and ``project_name`` so updates apply
+to the correct tenant schema.
