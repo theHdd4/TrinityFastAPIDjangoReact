@@ -1,6 +1,6 @@
 The environment registry tracks per-tenant variables inside the ``registry_environment`` table in Postgres.
 Whenever an app or project is created, updated or deleted the Django ``registry`` app sends a signal that
-calls ``DataStorageRetrieval.db.environment`` helpers. These helpers insert, update or delete rows so that
+updates the ``RegistryEnvironment`` model. Each signal inserts, updates or deletes a row so that
 each record stores ``client_name``, ``client_id``, ``app_name``, ``app_id``, ``project_name``, ``project_id`` and
 ``user_id`` along with any configured ``identifiers``, ``measures`` and ``dimensions``. The combination of
 ``client_name``, ``app_name`` and ``project_name`` is unique, so a row is created for every new project with

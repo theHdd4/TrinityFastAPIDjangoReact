@@ -1,10 +1,8 @@
 import os
 from django.db.models.signals import post_save, pre_save, post_delete
 from django.dispatch import receiver
-from django.db import connection
-from .models import Project
-from common.minio_utils import create_prefix, rename_prefix, rename_project_folder
-from apps.tenants.models import Tenant
+from .models import Project, RegistryEnvironment
+from common.minio_utils import create_prefix, rename_project_folder
 from apps.accounts.models import UserEnvironmentVariable
 from redis_store.env_cache import invalidate_env
 from asgiref.sync import async_to_sync
@@ -47,6 +45,17 @@ def create_project_folder(sender, instance, created, **kwargs):
                 )
             except Exception:
                 pass
+        RegistryEnvironment.objects.update_or_create(
+            client_name=tenant,
+            app_name=app_slug,
+            project_name=instance.name,
+            defaults={
+                "client_id": os.environ.get("CLIENT_ID", ""),
+                "app_id": os.environ.get("APP_ID", ""),
+                "project_id": f"{instance.name}_{instance.pk}",
+                "user_id": str(instance.owner_id),
+            },
+        )
 
 
 @receiver(pre_save, sender=Project)
@@ -121,6 +130,14 @@ def update_env_vars_on_rename(sender, instance, **kwargs):
                 )
             except Exception:
                 pass
+        RegistryEnvironment.objects.filter(
+            client_name=tenant,
+            app_name=app_slug,
+            project_name=old.name,
+        ).update(
+            project_name=instance.name,
+            project_id=f"{instance.name}_{instance.pk}",
+        )
 
 
 @receiver(post_delete, sender=Project)
@@ -132,3 +149,8 @@ def cleanup_environment_entry(sender, instance, **kwargs):
             async_to_sync(delete_environment)(tenant, app_slug, instance.name)
         except Exception:
             pass
+    RegistryEnvironment.objects.filter(
+        client_name=tenant,
+        app_name=app_slug,
+        project_name=instance.name,
+    ).delete()
