@@ -13,6 +13,7 @@ from .environment import (
     fetch_environment,
     delete_environment,
     rename_environment,
+    init_environment_registry,
 )
 
 __all__ = [
@@ -29,4 +30,5 @@ __all__ = [
     "fetch_environment",
     "delete_environment",
     "rename_environment",
+    "init_environment_registry",
 ]

@@ -8,6 +8,10 @@ Environment variables for a tenant are first looked up in the ``UserEnvironmentV
 not found there, ``get_env_vars`` (in ``TrinityBackendFastAPI/app/core/utils.py``) queries ``registry_environment``
 so all services can share the same fallback values.
 
+The FastAPI app now creates the ``registry_environment`` table during startup if
+it doesn't already exist, so entries can be inserted as soon as projects are
+created.
+
 To inspect the saved records, open pgAdmin and connect to the ``postgres`` service defined in
 ``docker-compose.yml``. Browse to the ``registry_environment`` table and view its contents. Newly created
 projects should appear automatically and renaming or deleting a project updates the corresponding entry.

@@ -6,6 +6,10 @@ import os
 from typing import Dict, Tuple
 import json
 from app.features.feature_overview.deps import redis_client
+try:
+    from DataStorageRetrieval.db import init_environment_registry
+except Exception:  # pragma: no cover - optional
+    init_environment_registry = None
 
 ENV_TTL = 3600
 ENV_NAMESPACE = "env"
@@ -102,6 +106,8 @@ async def _query_registry_env(client_name: str, app_name: str, project_name: str
     except Exception:
         return None
     try:
+        if init_environment_registry is not None:
+            await init_environment_registry()
         row = await conn.fetchrow(
             """
             SELECT identifiers, measures, dimensions
@@ -125,6 +131,8 @@ async def _query_registry_env(client_name: str, app_name: str, project_name: str
             if row["dimensions"] is not None:
                 env["DIMENSIONS"] = json.dumps(row["dimensions"], default=str)
             return env
+    except Exception:
+        return None
     finally:
         await conn.close()
     return None
