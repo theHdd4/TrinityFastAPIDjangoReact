@@ -157,7 +157,10 @@ def _fetch_names_from_db() -> tuple[str, str, str, dict]:
             from DataStorageRetrieval.db.environment import fetch_environment_names
             from DataStorageRetrieval.db.connection import POSTGRES_HOST, POSTGRES_PORT
 
-            schema = os.getenv("TENANT_SCHEMA", client)
+            tenant = os.getenv("TENANT_NAME", client)
+            schema = os.getenv("TENANT_SCHEMA") or (
+                f"{tenant}_schema" if tenant else client
+            )
             query = (
                 "SELECT client_name, app_name, project_name FROM registry_environment "
                 "ORDER BY updated_at DESC LIMIT 1"
