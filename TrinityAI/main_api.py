@@ -154,12 +154,12 @@ def _fetch_names_from_db(client_override: str | None = None) -> tuple[str, str, 
     except Exception as exc:
         logger.warning("get_env_vars failed: %s", exc)
         try:
-        from DataStorageRetrieval.db.environment import fetch_environment_names
-        from DataStorageRetrieval.db.connection import (
-            POSTGRES_HOST,
-            POSTGRES_PORT,
-            get_tenant_schema,
-        )
+            from DataStorageRetrieval.db.environment import fetch_environment_names
+            from DataStorageRetrieval.db.connection import (
+                POSTGRES_HOST,
+                POSTGRES_PORT,
+                get_tenant_schema,
+            )
 
             schema = get_tenant_schema(client) or client
             query = (
