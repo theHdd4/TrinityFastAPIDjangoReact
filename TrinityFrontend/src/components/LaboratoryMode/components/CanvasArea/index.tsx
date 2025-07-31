@@ -23,6 +23,7 @@ import FeatureOverviewAtom from '@/components/AtomList/atoms/feature-overview/Fe
 import ConcatAtom from '@/components/AtomList/atoms/concat/ConcatAtom';
 import MergeAtom from '@/components/AtomList/atoms/merge/MergeAtom';
 import ColumnClassifierAtom from '@/components/AtomList/atoms/column-classifier/ColumnClassifierAtom';
+import DataFrameOperationsAtom from '@/components/AtomList/atoms/dataframe-operations/DataFrameOperationsAtom';
 import ScopeSelectorAtom from '@/components/AtomList/atoms/scope-selector/ScopeSelectorAtom';
 import CreateColumnAtom from '@/components/AtomList/atoms/createcolumn/CreateColumnAtom';
 import GroupByAtom from '@/components/AtomList/atoms/groupby-wtg-avg/GroupByAtom';
@@ -35,6 +36,7 @@ import {
   DEFAULT_TEXTBOX_SETTINGS,
   DEFAULT_DATAUPLOAD_SETTINGS,
   DEFAULT_FEATURE_OVERVIEW_SETTINGS,
+  DEFAULT_DATAFRAME_OPERATIONS_SETTINGS,
   DataUploadSettings,
   ColumnClassifierColumn,
 } from '../../store/laboratoryStore';
@@ -680,6 +682,8 @@ const handleAddDragLeave = (e: React.DragEvent) => {
           ? { ...DEFAULT_DATAUPLOAD_SETTINGS }
           : info.id === 'feature-overview'
           ? { ...DEFAULT_FEATURE_OVERVIEW_SETTINGS }
+          : info.id === 'dataframe-operations'
+          ? { ...DEFAULT_DATAFRAME_OPERATIONS_SETTINGS }
           : undefined,
     };
     setLayoutCards(
@@ -1148,6 +1152,8 @@ const handleAddDragLeave = (e: React.DragEvent) => {
                         <MergeAtom atomId={atom.id} />
                       ) : atom.atomId === 'column-classifier' ? (
                         <ColumnClassifierAtom atomId={atom.id} />
+                      ) : atom.atomId === 'dataframe-operations' ? (
+                        <DataFrameOperationsAtom atomId={atom.id} />
                       ) : atom.atomId === 'create-column' ? (
                         <CreateColumnAtom atomId={atom.id} />
                       ) : atom.atomId === 'groupby-wtg-avg' ? (

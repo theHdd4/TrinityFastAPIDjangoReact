@@ -61,7 +61,7 @@ const AIChatBot: React.FC<AIChatBotProps> = ({ cardId, cardTitle, onAddAtom, dis
     setShowSuggestions(false);
 
     try {
-      const res = await fetch(TRINITY_AI_API, {
+      const res = await fetch(`${TRINITY_AI_API}/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ query: userMessage.content })

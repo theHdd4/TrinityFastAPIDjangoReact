@@ -166,6 +166,33 @@ export const DEFAULT_COLUMN_CLASSIFIER_SETTINGS: ColumnClassifierSettings = {
   assignments: {},
 };
 
+export interface DataFrameOperationsSettings {
+  rowsPerPage: number;
+  searchTerm: string;
+  sortColumns: Array<{ column: string; direction: 'asc' | 'desc' }>;
+  filters: { [key: string]: any };
+  selectedColumns: string[];
+  showRowNumbers: boolean;
+  enableEditing: boolean;
+  uploadedFile?: string;
+  selectedFile?: string;
+  tableData?: any;
+  data?: any;
+}
+
+export const DEFAULT_DATAFRAME_OPERATIONS_SETTINGS: DataFrameOperationsSettings = {
+  rowsPerPage: 15,
+  searchTerm: '',
+  sortColumns: [],
+  filters: {},
+  selectedColumns: [],
+  showRowNumbers: true,
+  enableEditing: true,
+  selectedFile: '',
+  tableData: undefined,
+  data: undefined,
+};
+
 export interface DroppedAtom {
   id: string;
   atomId: string;

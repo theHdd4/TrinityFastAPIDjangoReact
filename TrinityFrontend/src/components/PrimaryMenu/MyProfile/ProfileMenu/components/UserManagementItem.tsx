@@ -1,8 +1,15 @@
 import React from 'react';
 import { DropdownMenuItem } from '@/components/ui/dropdown-menu';
 
-const UserManagementItem: React.FC<{ onSelect: () => void }> = ({ onSelect }) => (
-  <DropdownMenuItem onSelect={onSelect}>User Management</DropdownMenuItem>
+interface Props {
+  onSelect?: () => void;
+  disabled?: boolean;
+}
+
+const UserManagementItem: React.FC<Props> = ({ onSelect, disabled }) => (
+  <DropdownMenuItem onSelect={onSelect} disabled={disabled}>
+    User Management
+  </DropdownMenuItem>
 );
 
 export default UserManagementItem;

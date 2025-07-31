@@ -1,7 +1,8 @@
 import os
 import sys
 import pathlib
-import pandas as pd
+import pytest
+pd = pytest.importorskip("pandas")
 import pyarrow.flight as flight
 import threading
 import json

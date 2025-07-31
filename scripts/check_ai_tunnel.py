@@ -6,7 +6,7 @@ from urllib import request, error
 logging.basicConfig(level=logging.INFO, format='[%(levelname)s] %(message)s')
 logger = logging.getLogger(__name__)
 
-DEFAULT_URL = "https://trinity.quantmatrixai.com/chat"
+DEFAULT_URL = "https://trinity.quantmatrixai.com/trinityai"
 
 
 def get_url() -> str:
@@ -16,7 +16,7 @@ def get_url() -> str:
 
 
 def main() -> int:
-    """Return 0 if the Trinity AI chat endpoint is reachable."""
+    """Return 0 if the Trinity AI endpoint is reachable."""
     url = get_url()
     logger.info("Checking %s", url)
     req = request.Request(url, method="OPTIONS")

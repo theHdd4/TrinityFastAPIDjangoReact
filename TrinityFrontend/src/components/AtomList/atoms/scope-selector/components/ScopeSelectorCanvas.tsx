@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useToast } from '@/hooks/use-toast';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -24,6 +25,10 @@ const ScopeSelectorCanvas: React.FC<ScopeSelectorCanvasProps> = ({ data, onDataC
   }, [data]);
   const [uniqueValues, setUniqueValues] = useState<{[key: string]: string[]}>({});
   const [loadingValues, setLoadingValues] = useState<{[key: string]: boolean}>({});
+  const { toast } = useToast();
+  const [saving, setSaving] = useState(false);
+  // Date range fetched from backend
+  const [dateRange, setDateRange] = useState<{min: string|null; max: string|null; available: boolean}>({ min: null, max: null, available: false });
   
   // Debug log
   useEffect(() => {
@@ -36,6 +41,68 @@ const ScopeSelectorCanvas: React.FC<ScopeSelectorCanvasProps> = ({ data, onDataC
     });
   }, [data, uniqueValues, loadingValues]);
 
+  // =============================
+  // SAVE HANDLER
+  // =============================
+  const handleSave = async () => {
+    if (!data.dataSource) {
+      console.warn('No dataSource selected');
+      return;
+    }
+
+    setSaving(true);
+    try {
+      // Generate a scope_id (simple timestamp for now)
+      const scopeId = `${Date.now()}`;
+
+      // Build request body dynamically based on number of scopes (max 5)
+      const requestBody: any = {
+        file_key: data.dataSource,
+        description: 'Scope generated from Scope Selector',
+      };
+
+      data.scopes.slice(0, 5).forEach((scope, idx) => {
+        const setNum = idx + 1;
+        const identifierFilters: Record<string, string[]> = {};
+        Object.entries(scope.identifiers).forEach(([key, value]) => {
+          if (value) {
+            identifierFilters[key] = [value];
+          }
+        });
+        requestBody[`identifier_filters_${setNum}`] = identifierFilters;
+        if (scope.timeframe.from && scope.timeframe.to) {
+          requestBody[`start_date_${setNum}`] = scope.timeframe.from;
+          requestBody[`end_date_${setNum}`] = scope.timeframe.to;
+        }
+      });
+
+      const response = await fetch(`${SCOPE_SELECTOR_API}/scopes/${scopeId}/create-multi-filtered-scope`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(requestBody),
+      });
+
+      if (!response.ok) {
+        const errText = await response.text();
+        throw new Error(`Save failed: ${response.status} ${errText}`);
+      }
+
+      const result = await response.json();
+      console.log('Save successful:', result);
+      toast({ title: 'Success', description: 'Scope saved successfully.' });
+      // Notify other components (e.g., SavedDataFramesPanel) to refresh list
+      window.dispatchEvent(new CustomEvent('savedDataFrame'));
+    } catch (error) {
+      console.error('Error saving scope:', error);
+    const message = (error instanceof Error ? error.message : 'Failed to save scope');
+    toast({ title: 'Error', description: message, variant: 'destructive' });
+    } finally {
+      setSaving(false);
+    }
+  };
+
   // Helper function to compare arrays
   const arraysEqual = (a: any[] = [], b: any[] = []) => {
     if (a === b) return true;
@@ -43,6 +110,32 @@ const ScopeSelectorCanvas: React.FC<ScopeSelectorCanvasProps> = ({ data, onDataC
     if (a.length !== b.length) return false;
     return a.every((val, index) => val === b[index]);
   };
+
+  // Fetch min/max date whenever the data source changes
+  useEffect(() => {
+    if (!data.dataSource) {
+      setDateRange({ min: null, max: null, available: false });
+      return;
+    }
+
+    const controller = new AbortController();
+    const fetchRange = async () => {
+      try {
+        const url = `${SCOPE_SELECTOR_API}/date_range?object_name=${encodeURIComponent(data.dataSource)}&column_name=date`;
+        const res = await fetch(url, { signal: controller.signal });
+        if (!res.ok) {
+          throw new Error(`Status ${res.status}`);
+        }
+        const json = await res.json();
+        setDateRange({ min: json.min_date, max: json.max_date, available: true });
+      } catch (err) {
+        console.warn('Date range unavailable:', err);
+        setDateRange({ min: null, max: null, available: false });
+      }
+    };
+    fetchRange();
+    return () => controller.abort();
+  }, [data.dataSource]);
 
   // Effect to reset state when data source or selected identifiers change
   useEffect(() => {
@@ -58,6 +151,30 @@ const ScopeSelectorCanvas: React.FC<ScopeSelectorCanvasProps> = ({ data, onDataC
     // Force a re-render to ensure the effect runs again with the new state
     setLoadingValues(prev => ({ ...prev, _forceUpdate: !prev._forceUpdate }));
   }, [data.dataSource, data.selectedIdentifiers?.join(',')]);
+
+  // Auto-select default value if only one unique option is available for an identifier
+  useEffect(() => {
+    if (!data?.scopes?.length) return;
+
+    let hasUpdates = false;
+    const updatedScopes = data.scopes.map(scope => {
+      const updatedIdentifiers = { ...scope.identifiers };
+
+      data.selectedIdentifiers.forEach(identifier => {
+        const values = uniqueValues[identifier];
+        if (values && values.length === 1 && (updatedIdentifiers[identifier] === '' || updatedIdentifiers[identifier] === undefined)) {
+          updatedIdentifiers[identifier] = values[0];
+          hasUpdates = true;
+        }
+      });
+
+      return hasUpdates ? { ...scope, identifiers: updatedIdentifiers } : scope;
+    });
+
+    if (hasUpdates) {
+      onDataChange({ scopes: updatedScopes });
+    }
+  }, [uniqueValues, data.scopes, data.selectedIdentifiers]);
 
   // Fetch unique values for each identifier when selected identifiers change
   useEffect(() => {
@@ -192,8 +309,12 @@ const ScopeSelectorCanvas: React.FC<ScopeSelectorCanvasProps> = ({ data, onDataC
       name: `Scope ${data.scopes.length + 1}`,
       identifiers: initialIdentifiers,
       timeframe: {
-        from: new Date().toISOString().split('T')[0],
-        to: new Date(new Date().setFullYear(new Date().getFullYear() + 1)).toISOString().split('T')[0]
+        from: dateRange.available
+          ? (dateRange.min ?? new Date().toISOString().split('T')[0])
+          : new Date().toISOString().split('T')[0],
+        to: dateRange.available
+          ? (dateRange.max ?? new Date(new Date().setFullYear(new Date().getFullYear() + 1)).toISOString().split('T')[0])
+          : new Date(new Date().setFullYear(new Date().getFullYear() + 1)).toISOString().split('T')[0]
       }
     };
     
@@ -245,6 +366,30 @@ const ScopeSelectorCanvas: React.FC<ScopeSelectorCanvasProps> = ({ data, onDataC
     if (scope) {
       const updatedIdentifiers = { ...scope.identifiers, [identifierKey]: value };
       updateScope(scopeId, { identifiers: updatedIdentifiers });
+
+    // Cascade: update options for the other identifiers based on this selection
+    if (data.dataSource) {
+      data.selectedIdentifiers.forEach(async (otherId) => {
+        if (otherId === identifierKey) return; // skip the one we just set
+        try {
+          setLoadingValues((prev) => ({ ...prev, [otherId]: true }));
+          const url = `${SCOPE_SELECTOR_API}/unique_values_filtered?object_name=${encodeURIComponent(data.dataSource)}&target_column=${encodeURIComponent(otherId)}&filter_column=${encodeURIComponent(identifierKey)}&filter_value=${encodeURIComponent(value)}`;
+          const res = await fetch(url);
+          if (res.ok) {
+            const json = await res.json();
+            if (json.unique_values) {
+              setUniqueValues((prev) => ({ ...prev, [otherId]: json.unique_values }));
+            }
+          } else {
+            console.warn('Filtered unique values failed', res.status);
+          }
+        } catch (err) {
+          console.error('Error fetching filtered unique values', err);
+        } finally {
+          setLoadingValues((prev) => ({ ...prev, [otherId]: false }));
+        }
+      });
+    }
     }
   };
 
@@ -416,7 +561,7 @@ const ScopeSelectorCanvas: React.FC<ScopeSelectorCanvasProps> = ({ data, onDataC
                         onValueChange={(value) => updateScopeIdentifier(scope.id, identifier, value)}
                         disabled={loadingValues[identifier]}
                       >
-                        <SelectTrigger className="bg-white border-blue-200 hover:border-blue-300 focus:border-blue-500 transition-colors w-full max-w-[180px]">
+                        <SelectTrigger className="bg-white border-blue-200 hover:border-blue-300 focus:border-blue-500 transition-colors w-full max-w-[180px] truncate whitespace-nowrap">
                           <div className="flex items-center">
                             {loadingValues[identifier] && (
                               <Loader2 className="mr-2 h-4 w-4 animate-spin text-blue-500" />
@@ -453,9 +598,12 @@ const ScopeSelectorCanvas: React.FC<ScopeSelectorCanvasProps> = ({ data, onDataC
                       <div className="relative">
                         <Input
                           type="date"
+                          disabled={!dateRange.available}
+                          min={dateRange.min ?? undefined}
+                          max={dateRange.max ?? undefined}
                           value={scope.timeframe.from}
                           onChange={(e) => updateTimeframe(scope.id, 'from', e.target.value)}
-                          className="bg-white border-blue-200 hover:border-blue-300 focus:border-blue-500 w-[140px] h-9 text-sm cursor-pointer appearance-none"
+                          className="bg-white border-blue-200 hover:border-blue-300 focus:border-blue-500 w-[140px] h-9 text-sm cursor-pointer appearance-none [&::-webkit-calendar-picker-indicator]:opacity-0"
                         />
                         <div className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none">
                           <Calendar className="w-4 h-4 text-gray-400" />
@@ -467,9 +615,12 @@ const ScopeSelectorCanvas: React.FC<ScopeSelectorCanvasProps> = ({ data, onDataC
                       <div className="relative">
                         <Input
                           type="date"
+                          disabled={!dateRange.available}
+                          min={dateRange.min ?? undefined}
+                          max={dateRange.max ?? undefined}
                           value={scope.timeframe.to}
                           onChange={(e) => updateTimeframe(scope.id, 'to', e.target.value)}
-                          className="bg-white border-blue-200 hover:border-blue-300 focus:border-blue-500 w-[140px] h-9 text-sm cursor-pointer appearance-none"
+                          className="bg-white border-blue-200 hover:border-blue-300 focus:border-blue-500 w-[140px] h-9 text-sm cursor-pointer appearance-none [&::-webkit-calendar-picker-indicator]:opacity-0"
                         />
                         <div className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none">
                           <Calendar className="w-4 h-4 text-gray-400" />
@@ -486,7 +637,7 @@ const ScopeSelectorCanvas: React.FC<ScopeSelectorCanvasProps> = ({ data, onDataC
         {/* Buttons Row */}
         <div className="flex justify-between items-center pt-4">
           {/* Add Scope Button */}
-          <Button 
+          <Button
             onClick={addScope}
             className="bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700 text-white shadow-lg hover:shadow-xl transition-all duration-200"
           >
@@ -495,11 +646,14 @@ const ScopeSelectorCanvas: React.FC<ScopeSelectorCanvasProps> = ({ data, onDataC
           </Button>
 
           {/* Save Button */}
-          <Button 
+          <Button
             size="lg"
-            className="bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white shadow-lg hover:shadow-xl transition-all duration-200 px-8"
+            onClick={handleSave}
+            disabled={saving}
+            className={`bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white shadow-lg hover:shadow-xl transition-all duration-200 px-8 ${saving ? 'opacity-60 cursor-not-allowed' : ''}`}
           >
-            Save
+            {saving && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+            {saving ? 'Saving...' : 'Save'}
           </Button>
         </div>
       </div>
