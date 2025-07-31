@@ -101,6 +101,7 @@ def _fetch_names_from_db() -> tuple[str, str, str]:
                 project_name=project,
             )
         )
+        logger.debug("get_env_vars returned %s", env)
         if env:
             client = env.get("CLIENT_NAME", client)
             app = env.get("APP_NAME", app)
@@ -112,6 +113,7 @@ def _fetch_names_from_db() -> tuple[str, str, str]:
 
             schema = os.getenv("TENANT_SCHEMA", client)
             names = asyncio.run(fetch_environment_names(schema))
+            logger.debug("fetch_environment_names(%s) -> %s", schema, names)
             if names:
                 client, app, project = names
         except Exception:
@@ -123,6 +125,14 @@ def _fetch_names_from_db() -> tuple[str, str, str]:
                 if user_id and project_id:
                     client_db, app_db, project_db = asyncio.run(
                         fetch_client_app_project(user_id, project_id)
+                    )
+                    logger.debug(
+                        "fetch_client_app_project(%s,%s) -> %s %s %s",
+                        user_id,
+                        project_id,
+                        client_db,
+                        app_db,
+                        project_db,
                     )
                     client = client_db or client
                     app = app_db or app

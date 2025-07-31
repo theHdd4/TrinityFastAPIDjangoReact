@@ -5,6 +5,7 @@ import sys
 import os
 from typing import Dict, Tuple
 import json
+import logging
 from app.features.feature_overview.deps import redis_client
 try:
     from DataStorageRetrieval.db import init_environment_registry
@@ -13,6 +14,8 @@ except Exception:  # pragma: no cover - optional
 
 ENV_TTL = 3600
 ENV_NAMESPACE = "env"
+
+logger = logging.getLogger("trinity.backend.utils")
 
 def _redis_env_key(client: str, app: str, project: str) -> str:
     return f"{ENV_NAMESPACE}:{client}:{app}:{project}"
@@ -42,25 +45,34 @@ async def _query_env_vars(client_id: str, app_id: str, project_id: str) -> Dict[
     if asyncpg is None:
         return None
     try:
+        logger.debug(
+            "_query_env_vars connecting host=%s db=%s user=%s schema=%s",
+            POSTGRES_HOST,
+            POSTGRES_DB,
+            POSTGRES_USER,
+            client_id,
+        )
         conn = await asyncpg.connect(
             host=POSTGRES_HOST,
             user=POSTGRES_USER,
             password=POSTGRES_PASSWORD,
             database=POSTGRES_DB,
-            server_settings={"search_path": client_name},
         )
     except Exception:
         return None
     try:
-        rows = await conn.fetch(
-            """
-            SELECT key, value FROM accounts_userenvironmentvariable
-            WHERE client_id = $1 AND app_id = $2 AND project_id = $3
-            """,
+        query = (
+            "SELECT key, value FROM accounts_userenvironmentvariable"
+            " WHERE client_id = $1 AND app_id = $2 AND project_id = $3"
+        )
+        logger.debug(
+            "_query_env_vars executing %s with (%s,%s,%s)",
+            query,
             client_id,
             app_id,
             project_id,
         )
+        rows = await conn.fetch(query, client_id, app_id, project_id)
         return {r["key"]: r["value"] for r in rows}
     finally:
         await conn.close()
@@ -70,6 +82,13 @@ async def _query_env_vars_by_names(client_name: str, app_name: str, project_name
     if asyncpg is None:
         return None
     try:
+        logger.debug(
+            "_query_env_vars_by_names connecting host=%s db=%s user=%s schema=%s",
+            POSTGRES_HOST,
+            POSTGRES_DB,
+            POSTGRES_USER,
+            client_name,
+        )
         conn = await asyncpg.connect(
             host=POSTGRES_HOST,
             user=POSTGRES_USER,
@@ -80,16 +99,19 @@ async def _query_env_vars_by_names(client_name: str, app_name: str, project_name
     except Exception:
         return None
     try:
-        rows = await conn.fetch(
-            """
-            SELECT key, value FROM accounts_userenvironmentvariable
-            WHERE client_name = $1 AND project_name = $3
-              AND ($2 = '' OR app_name = $2)
-            """,
+        query = (
+            "SELECT key, value FROM accounts_userenvironmentvariable"
+            " WHERE client_name = $1 AND project_name = $3"
+            " AND ($2 = '' OR app_name = $2)"
+        )
+        logger.debug(
+            "_query_env_vars_by_names executing %s with (%s,%s,%s)",
+            query,
             client_name,
             app_name,
             project_name,
         )
+        rows = await conn.fetch(query, client_name, app_name, project_name)
         return {r["key"]: r["value"] for r in rows}
     finally:
         await conn.close()
@@ -99,6 +121,13 @@ async def _query_registry_env(client_name: str, app_name: str, project_name: str
     if asyncpg is None:
         return None
     try:
+        logger.debug(
+            "_query_registry_env connecting host=%s db=%s user=%s schema=%s",
+            POSTGRES_HOST,
+            POSTGRES_DB,
+            POSTGRES_USER,
+            client_name,
+        )
         conn = await asyncpg.connect(
             host=POSTGRES_HOST,
             user=POSTGRES_USER,
@@ -111,16 +140,19 @@ async def _query_registry_env(client_name: str, app_name: str, project_name: str
     try:
         if init_environment_registry is not None:
             await init_environment_registry(client_name)
-        row = await conn.fetchrow(
-            """
-            SELECT identifiers, measures, dimensions
-            FROM registry_environment
-            WHERE client_name=$1 AND app_name=$2 AND project_name=$3
-            """,
+        query = (
+            "SELECT identifiers, measures, dimensions"
+            " FROM registry_environment"
+            " WHERE client_name=$1 AND app_name=$2 AND project_name=$3"
+        )
+        logger.debug(
+            "_query_registry_env executing %s with (%s,%s,%s)",
+            query,
             client_name,
             app_name,
             project_name,
         )
+        row = await conn.fetchrow(query, client_name, app_name, project_name)
         if row:
             env: Dict[str, str] = {
                 "CLIENT_NAME": client_name,

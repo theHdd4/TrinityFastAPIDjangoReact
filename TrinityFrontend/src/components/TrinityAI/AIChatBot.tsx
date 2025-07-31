@@ -63,7 +63,12 @@ const AIChatBot: React.FC<AIChatBotProps> = ({ cardId, cardTitle, onAddAtom, dis
 
     try {
       try {
-        const envRes = await fetch(`${TRINITY_AI_API}/env`);
+        const envUrl = `${TRINITY_AI_API}/env`;
+        const parsed = new URL(envUrl);
+        console.log(
+          `Fetching TrinityAI env from ${envUrl} (host=${parsed.hostname} port=${parsed.port} path=${parsed.pathname})`
+        );
+        const envRes = await fetch(envUrl);
         if (envRes.ok) {
           const envData = await envRes.json();
           console.log('TrinityAI environment', envData);
