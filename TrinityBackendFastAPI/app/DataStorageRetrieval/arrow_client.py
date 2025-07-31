@@ -105,19 +105,19 @@ def get_minio_prefix(
     app_override: str | None = None,
     project_override: str | None = None,
 ) -> str:
-    """Return the MinIO object prefix derived from environment variables."""
+    """Return the MinIO object prefix derived from resolved names."""
     logger.debug("get_minio_prefix() called")
-    client, app, project = get_current_names(client_override, app_override, project_override)
-    prefix = os.getenv("MINIO_PREFIX", f"{client}/{app}/{project}/")
-    if not prefix.endswith("/"):
-        prefix += "/"
+    client, app, project = get_current_names(
+        client_override, app_override, project_override
+    )
+    prefix = f"{client}/{app}/{project}/"
+    os.environ["MINIO_PREFIX"] = prefix
     logger.debug(
-        "prefix resolved to %s using CLIENT_NAME=%s APP_NAME=%s PROJECT_NAME=%s MINIO_PREFIX=%s",
+        "prefix resolved to %s using CLIENT_NAME=%s APP_NAME=%s PROJECT_NAME=%s",
         prefix,
         client,
         app,
         project,
-        os.getenv("MINIO_PREFIX"),
     )
     return prefix
 

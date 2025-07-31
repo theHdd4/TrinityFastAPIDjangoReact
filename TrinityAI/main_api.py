@@ -253,6 +253,8 @@ def _fetch_names_from_db(
     os.environ["CLIENT_NAME"] = client
     os.environ["APP_NAME"] = app
     os.environ["PROJECT_NAME"] = project
+    if client and app and project:
+        os.environ["MINIO_PREFIX"] = f"{client}/{app}/{project}/"
     logger.debug(
         "_fetch_names_from_db resolved client=%s app=%s project=%s", client, app, project
     )
@@ -264,10 +266,8 @@ def get_minio_config() -> Dict[str, str]:
     """Return MinIO configuration using database names when available."""
     logger.debug("get_minio_config() called")
     client, app, project, _ = _fetch_names_from_db()
-    prefix_default = f"{client}/{app}/{project}/" if client and app and project else ""
-    prefix = os.getenv("MINIO_PREFIX", prefix_default)
-    if not prefix.endswith("/"):
-        prefix += "/"
+    prefix = f"{client}/{app}/{project}/" if client and app and project else ""
+    os.environ["MINIO_PREFIX"] = prefix
     config = {
         # Default to the development MinIO service if not explicitly configured
         "endpoint": os.getenv("MINIO_ENDPOINT", "minio:9000"),

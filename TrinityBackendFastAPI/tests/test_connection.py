@@ -1,5 +1,11 @@
 import os
 import types
+import pathlib
+import sys
+
+ROOT = pathlib.Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "app"))
+
 from DataStorageRetrieval.db.connection import get_tenant_schema
 
 
