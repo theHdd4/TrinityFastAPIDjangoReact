@@ -44,6 +44,17 @@ class AppViewSet(viewsets.ModelViewSet):
         data["environment"] = get_env_dict(request.user)
         return Response(data)
 
+    def perform_create(self, serializer):
+        app = serializer.save()
+        try:
+            from asgiref.sync import async_to_sync
+            from DataStorageRetrieval.db.environment import upsert_environment
+
+            client_name = os.environ.get("CLIENT_NAME", "")
+            async_to_sync(upsert_environment)(client_name, app.slug, "")
+        except Exception:
+            pass
+
 
 class ProjectViewSet(viewsets.ModelViewSet):
     """
@@ -74,7 +85,21 @@ class ProjectViewSet(viewsets.ModelViewSet):
         return qs
 
     def perform_create(self, serializer):
-        serializer.save(owner=self.request.user)
+        project = serializer.save(owner=self.request.user)
+        try:
+            from asgiref.sync import async_to_sync
+            from DataStorageRetrieval.db.environment import upsert_environment
+
+            client_name = os.environ.get("CLIENT_NAME", "")
+            app_name = project.app.slug
+            project_name = project.name
+            async_to_sync(upsert_environment)(
+                client_name,
+                app_name,
+                project_name,
+            )
+        except Exception:
+            pass
 
     def retrieve(self, request, *args, **kwargs):
         load_env_vars(request.user)
