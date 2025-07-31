@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import os
+import uuid
 import django
 from django.core.management import call_command
 from django.db import transaction, connection
@@ -10,11 +11,12 @@ django.setup()
 # Adjust this import path if your app label is different:
 from apps.tenants.models import Tenant, Domain
 
+
 def main():
-    tenant_name = "acme_corp"
-    tenant_schema = "acme_corp_schema"
+    tenant_name = "Quant_Matrix_AI"
+    tenant_schema = "Quant_Matrix_AI_Schema"
     # Map localhost requests to the default tenant unless overridden
-    primary_domain = os.getenv("PRIMARY_DOMAIN", "localhost")
+    primary_domain = os.getenv("PRIMARY_DOMAIN", "quantmatrix.ai")
 
     print("\n→ 1) Applying SHARED (public) migrations…")
     # Run only shared apps into the public schema
@@ -26,16 +28,70 @@ def main():
     call_command("migrate_schemas", "--shared", interactive=False, verbosity=1)
     print("   ✅ Shared migrations complete.\n")
 
-    # Create an initial admin user for testing login if it doesn't exist
+    # Create the default super admin user for testing login if it doesn't exist
     from django.contrib.auth import get_user_model
+
     User = get_user_model()
-    if not User.objects.filter(username="harsha").exists():
-        User.objects.create_superuser(
-            username="harsha", password="harsha", email=""
-        )
-        print("→ 1b) Created default admin 'harsha' with password 'harsha'")
+    if not User.objects.filter(username="neo").exists():
+        User.objects.create_superuser(username="neo", password="neo_the_one", email="")
+        print("→ 1b) Created default super admin 'neo' with password 'neo_the_one'")
     else:
-        print("→ 1b) Default admin 'harsha' already exists")
+        print("→ 1b) Default super admin 'neo' already exists")
+
+    # Create additional users for each role. The admin, editor and viewer
+    # accounts are tied to the Quant Matrix AI tenant to demonstrate
+    # client-specific privileges. Passwords for the staff list below are set
+    # to the employee ID provided.
+    # Username for staff members uses their Quant Matrix email address
+    email_domain = "quantmatrix.ai"
+    role_users = [
+        ("neo", "neo_the_one", "super_admin", "", ""),
+        ("admin_user", "admin", "admin", "", ""),
+        ("editor_user", "editor", "editor", "", ""),
+        ("viewer_user", "viewer", "viewer", "", ""),
+        (f"gautami.sharma@{email_domain}", "QM250111", "editor", "Gautami", "Sharma"),
+        (f"abhishek.sahu@{email_domain}", "QM240110", "editor", "Abhishek", "Sahu"),
+        (f"aakash.verma@{email_domain}", "QM240109", "editor", "Aakash", "Verma"),
+        (f"sushant.upadhyay@{email_domain}", "QM240108", "admin", "Sushant", "Upadhyay"),
+        (f"mahek.kala@{email_domain}", "QM250107", "editor", "Mahek", "Kala"),
+        (f"abhishek.tiwari@{email_domain}", "QM240106", "editor", "Abhishek", "Tiwari"),
+        (f"sandesh.panale@{email_domain}", "QM240105", "viewer", "Sandesh", "Panale"),
+        (f"rutuja.wagh@{email_domain}", "QM240104", "viewer", "Rutuja", "Wagh"),
+        (f"saahil.kejriwal@{email_domain}", "QM240103", "viewer", "Saahil", "Kejriwal"),
+        (f"harshadip.das@{email_domain}", "QM240102", "admin", "Harshadip", "Das"),
+        (f"venu.gorti@{email_domain}", "QM240110", "admin", "Venu", "Gorti"),
+    ]
+
+    for username, password, role, first, last in role_users:
+        if not User.objects.filter(username=username).exists():
+            is_staff = role in ("admin", "super_admin")
+            User.objects.create_user(
+                username=username,
+                password=password,
+                first_name=first,
+                last_name=last,
+                email=username if "@" in username else "",
+                is_staff=is_staff,
+            )
+            print(f"→ 1c) Created user '{username}' with password '{password}'")
+        else:
+            user = User.objects.get(username=username)
+            update_needed = False
+            if role in ("admin", "super_admin") and not user.is_staff:
+                user.is_staff = True
+                update_needed = True
+            if first and user.first_name != first:
+                user.first_name = first
+                update_needed = True
+            if last and user.last_name != last:
+                user.last_name = last
+                update_needed = True
+            if "@" in username and user.email != username:
+                user.email = username
+                update_needed = True
+            if update_needed:
+                user.save()
+            print(f"→ 1c) User '{username}' already exists")
 
     with transaction.atomic():
         # 2a) Create (or get) the Tenant row in public
@@ -58,6 +114,8 @@ def main():
             print(f"   → Created Domain: {domain_obj}")
         else:
             print(f"   → Domain already existed: {domain_obj}")
+
+        tenant_client_id = uuid.uuid5(uuid.NAMESPACE_DNS, tenant_schema)
 
         # Additional localhost aliases for convenience
         for extra in ("localhost", "127.0.0.1"):
@@ -92,8 +150,17 @@ def main():
     print(f"→ 3) Running TENANT-SCHEMA migrations for '{tenant_schema}'…")
     # Switch into the tenant schema and apply all tenant apps there
     # `migrate_schemas` expects the schema name via the --schema flag.
-    call_command("migrate_schemas", "--schema", tenant_schema, interactive=False, verbosity=1)
+    call_command(
+        "migrate_schemas", "--schema", tenant_schema, interactive=False, verbosity=1
+    )
     print("   ✅ Tenant-schema migrations complete.\n")
+
+    # Load atom catalogue from FastAPI features
+    try:
+        call_command("sync_features")
+        print("   ✅ Atom catalogue synced from features folder")
+    except Exception as exc:
+        print(f"   ⚠️  Failed to sync atoms: {exc}")
 
     # Seed default App templates if none exist
     from apps.registry.models import App
@@ -118,7 +185,27 @@ def main():
             else:
                 print(f"   → App template '{name}' already exists")
 
+        # Assign roles to the default users within this tenant
+        from apps.roles.models import UserRole
+
+        for username, _, role, *_ in role_users:
+            user = User.objects.get(username=username)
+            # Admin, editor and viewer roles are tied to the Quant Matrix AI tenant
+            # so they share the same client UUID. Only the super admin user is not
+            # bound to a specific client.
+            client_uuid = (
+                tenant_client_id if username != "neo" else uuid.uuid4()
+            )
+            UserRole.objects.get_or_create(
+                user=user,
+                client_id=client_uuid,
+                app_id=uuid.uuid4(),
+                project_id=uuid.uuid4(),
+                role=role,
+            )
+
     print("All done! Tenant and all tables created.\n")
+
 
 if __name__ == "__main__":
     main()
