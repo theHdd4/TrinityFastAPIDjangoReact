@@ -128,11 +128,15 @@ def get_classifier_config_from_mongo(client: str, app: str, project: str):
         return None
 
 
-def _fetch_names_from_db(client_override: str | None = None) -> tuple[str, str, str, dict]:
+def _fetch_names_from_db(
+    client_override: str | None = None,
+    app_override: str | None = None,
+    project_override: str | None = None,
+) -> tuple[str, str, str, dict]:
     """Retrieve client, app and project names using backend helpers."""
     client = client_override or os.getenv("CLIENT_NAME", "")
-    app = os.getenv("APP_NAME", "")
-    project = os.getenv("PROJECT_NAME", "")
+    app = app_override or os.getenv("APP_NAME", "")
+    project = project_override or os.getenv("PROJECT_NAME", "")
     debug: Dict[str, Any] = {}
 
     try:
@@ -461,21 +465,25 @@ async def get_config():
 
 
 @api_router.get("/env")
-async def get_environment(client: str | None = None):
+async def get_environment(
+    client: str | None = None,
+    app: str | None = None,
+    project: str | None = None,
+):
     """Return current environment variables and MinIO prefix."""
-    client_name, app, project, debug = _fetch_names_from_db(client)
+    client_name, app_name, project_name, debug = _fetch_names_from_db(client, app, project)
     prefix = get_minio_config()["prefix"]
     logger.info(
         "environment fetched client=%s app=%s project=%s prefix=%s",
         client_name,
-        app,
-        project,
+        app_name,
+        project_name,
         prefix,
     )
     return {
         "client_name": client_name,
-        "app_name": app,
-        "project_name": project,
+        "app_name": app_name,
+        "project_name": project_name,
         "prefix": prefix,
         "debug": debug,
     }

@@ -1,13 +1,14 @@
 The frontend stores environment details (``CLIENT_NAME``, ``APP_NAME`` and
 ``PROJECT_NAME``) in ``localStorage`` after a user logs in or selects a
 project.  Components such as the chat bots retrieve these values with
-``localStorage.getItem('env')``.  If a ``CLIENT_NAME`` value is present it is
-appended as a ``?client=`` query parameter when requesting
-``/env`` from Trinity AI.
+``localStorage.getItem('env')``.  When available, these names are appended as
+query parameters when requesting ``/env`` from Trinity AI.  For example the
+request may be ``/env?client=Demo&app=MyApp&project=Sales``.
 
-The AI backend uses this client name to derive the tenant schema via
-``get_tenant_schema``.  It then queries ``registry_environment`` in the
-appropriate schema and returns the result along with a debug object that
+The AI backend uses these names to derive the tenant schema via
+``get_tenant_schema`` and to look up any missing values.  It queries
+``registry_environment`` in the appropriate schema and returns the result along
+with a debug object that
 includes the host, port, schema, table and SQL used.  The React components log
 this debug information to the browser console so you can see exactly which
 schema was queried and the fetched values.

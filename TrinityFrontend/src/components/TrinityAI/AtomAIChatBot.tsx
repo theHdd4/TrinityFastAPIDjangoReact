@@ -66,7 +66,15 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
     try {
       const envStr = localStorage.getItem('env');
       const clientEnv = envStr ? JSON.parse(envStr) : null;
-      const query = clientEnv && clientEnv.CLIENT_NAME ? `?client=${encodeURIComponent(clientEnv.CLIENT_NAME)}` : '';
+      let query = '';
+      if (clientEnv) {
+        const params = new URLSearchParams();
+        if (clientEnv.CLIENT_NAME) params.append('client', clientEnv.CLIENT_NAME);
+        if (clientEnv.APP_NAME) params.append('app', clientEnv.APP_NAME);
+        if (clientEnv.PROJECT_NAME) params.append('project', clientEnv.PROJECT_NAME);
+        const qs = params.toString();
+        if (qs) query = `?${qs}`;
+      }
       const envRes = await fetch(`${TRINITY_AI_API}/env${query}`);
       if (envRes.ok) {
         const envData = await envRes.json();

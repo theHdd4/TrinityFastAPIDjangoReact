@@ -68,12 +68,16 @@ def load_env_from_redis() -> Dict[str, str]:
     return env
 
 
-def get_current_names(client_override: str | None = None) -> tuple[str, str, str]:
+def get_current_names(
+    client_override: str | None = None,
+    app_override: str | None = None,
+    project_override: str | None = None,
+) -> tuple[str, str, str]:
     """Return (client, app, project) using Redis and Postgres."""
     env = load_env_from_redis()
     client = client_override or os.getenv("CLIENT_NAME", env.get("CLIENT_NAME", ""))
-    app = os.getenv("APP_NAME", env.get("APP_NAME", ""))
-    project = os.getenv("PROJECT_NAME", env.get("PROJECT_NAME", ""))
+    app = app_override or os.getenv("APP_NAME", env.get("APP_NAME", ""))
+    project = project_override or os.getenv("PROJECT_NAME", env.get("PROJECT_NAME", ""))
     if not client or not app or not project:
         try:
             import asyncio
@@ -96,10 +100,14 @@ def get_current_names(client_override: str | None = None) -> tuple[str, str, str
     return client, app, project
 
 
-def get_minio_prefix(client_override: str | None = None) -> str:
+def get_minio_prefix(
+    client_override: str | None = None,
+    app_override: str | None = None,
+    project_override: str | None = None,
+) -> str:
     """Return the MinIO object prefix derived from environment variables."""
     logger.debug("get_minio_prefix() called")
-    client, app, project = get_current_names(client_override)
+    client, app, project = get_current_names(client_override, app_override, project_override)
     prefix = os.getenv("MINIO_PREFIX", f"{client}/{app}/{project}/")
     if not prefix.endswith("/"):
         prefix += "/"
