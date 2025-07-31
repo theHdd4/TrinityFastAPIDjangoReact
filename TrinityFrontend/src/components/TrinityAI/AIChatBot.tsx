@@ -68,7 +68,9 @@ const AIChatBot: React.FC<AIChatBotProps> = ({ cardId, cardTitle, onAddAtom, dis
           const envData = await envRes.json();
           console.log('TrinityAI environment', envData);
           if (envData.debug) {
-            console.log('TrinityAI env debug', envData.debug);
+            console.log(
+              `Looking in the postgres server: ${envData.debug.host}:${envData.debug.port} in the schema: ${envData.debug.schema} table: ${envData.debug.table} with the query: ${envData.debug.query} and result fetched are ${JSON.stringify(envData.debug.result)}`
+            );
           }
           logMinioPrefix(envData.prefix);
         }

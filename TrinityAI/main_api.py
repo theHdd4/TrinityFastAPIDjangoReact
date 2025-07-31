@@ -9,7 +9,7 @@ from fastapi import FastAPI, APIRouter, HTTPException
 from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import Dict, Any
+from typing import Dict, Any, Tuple
 import numpy as np
 from pymongo import MongoClient
 import redis
@@ -72,6 +72,50 @@ except Exception as exc:  # pragma: no cover - optional Mongo
 CACHE_TTL = 3600
 
 
+async def _query_registry_names(schema: str) -> Tuple[Tuple[str, str, str] | None, str]:
+    """Directly query Postgres for client/app/project names."""
+    try:
+        from DataStorageRetrieval.db.connection import (
+            asyncpg,
+            POSTGRES_HOST,
+            POSTGRES_USER,
+            POSTGRES_PASSWORD,
+            POSTGRES_DB,
+            POSTGRES_PORT,
+        )
+        if asyncpg is None:
+            return None, "asyncpg not available"
+        conn = await asyncpg.connect(
+            host=POSTGRES_HOST,
+            user=POSTGRES_USER,
+            password=POSTGRES_PASSWORD,
+            database=POSTGRES_DB,
+            port=int(POSTGRES_PORT),
+            server_settings={"search_path": schema},
+        )
+        query = (
+            "SELECT client_name, app_name, project_name FROM registry_environment "
+            "ORDER BY updated_at DESC LIMIT 1"
+        )
+        message = (
+            f"Looking in the postgres server: {POSTGRES_HOST}:{POSTGRES_PORT} in the schema: {schema} "
+            f"table: registry_environment with the query: {query}"
+        )
+        print(f"\U0001F50E {message}")
+        row = await conn.fetchrow(query)
+        await conn.close()
+        if row:
+            names = (row["client_name"], row["app_name"], row["project_name"])
+            result_msg = f"result fetched are {names}"
+            print(f"\U0001F4DD {result_msg}")
+            return names, f"{message} and {result_msg}"
+        return None, message
+    except Exception as exc:
+        err = f"direct query failed: {exc}"
+        print(f"\u26a0\ufe0f {err}")
+        return None, err
+
+
 def get_classifier_config_from_mongo(client: str, app: str, project: str):
     """Load classifier configuration from MongoDB."""
     if config_db is None:
@@ -114,6 +158,14 @@ def _fetch_names_from_db() -> tuple[str, str, str, dict]:
             from DataStorageRetrieval.db.connection import POSTGRES_HOST, POSTGRES_PORT
 
             schema = os.getenv("TENANT_SCHEMA", client)
+            query = (
+                "SELECT client_name, app_name, project_name FROM registry_environment "
+                "ORDER BY updated_at DESC LIMIT 1"
+            )
+            message = (
+                f"Looking in the postgres server: {POSTGRES_HOST}:{POSTGRES_PORT} in the schema: {schema} "
+                f"table: registry_environment with the query: {query}"
+            )
             debug.update(
                 {
                     "source": "fetch_environment_names",
@@ -121,15 +173,31 @@ def _fetch_names_from_db() -> tuple[str, str, str, dict]:
                     "port": POSTGRES_PORT,
                     "schema": schema,
                     "table": "registry_environment",
-                    "query": (
-                        "SELECT client_name, app_name, project_name FROM registry_environment "
-                        "ORDER BY updated_at DESC LIMIT 1"
-                    ),
+                    "query": query,
+                    "message": message,
                 }
             )
             names = asyncio.run(fetch_environment_names(schema))
             if names:
                 client, app, project = names
+                debug["result"] = {
+                    "client": client,
+                    "app": app,
+                    "project": project,
+                }
+                debug["message"] = message + f" and result fetched are {(client, app, project)}"
+            else:
+                names, msg = asyncio.run(_query_registry_names(schema))
+                debug["message"] = msg
+                if names:
+                    debug["source"] = "direct_query"
+                    client, app, project = names
+                    debug["result"] = {
+                        "client": client,
+                        "app": app,
+                        "project": project,
+                    }
+                    debug["message"] = msg
         except Exception:
             try:
                 from DataStorageRetrieval.db import fetch_client_app_project
@@ -157,6 +225,17 @@ def _fetch_names_from_db() -> tuple[str, str, str, dict]:
                     client = client_db or client
                     app = app_db or app
                     project = project_db or project
+                    debug["result"] = {
+                        "client": client,
+                        "app": app,
+                        "project": project,
+                    }
+                    debug["message"] = (
+                        f"Looking in the postgres server: {POSTGRES_HOST}:{POSTGRES_PORT} in the schema: <default> "
+                        "table: accounts_userenvironmentvariable with the query: "
+                        + debug.get("query", "")
+                        + f" and result fetched are {(client, app, project)}"
+                    )
             except Exception as exc_db:  # pragma: no cover - optional path
                 logger.warning(
                     "fallback fetch_client_app_project failed: %s", exc_db
