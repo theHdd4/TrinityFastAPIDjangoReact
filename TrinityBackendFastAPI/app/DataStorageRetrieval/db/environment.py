@@ -93,3 +93,61 @@ async def fetch_environment(client_name: str, app_name: str, project_name: str) 
     finally:
         await conn.close()
     return None
+
+
+async def delete_environment(client_name: str, app_name: str, project_name: str) -> None:
+    """Remove an environment record."""
+    if __import__("DataStorageRetrieval.db", fromlist=["db"]).asyncpg is None:
+        return
+    try:
+        conn = await (__import__("DataStorageRetrieval.db", fromlist=["db"]).asyncpg).connect(
+            host=POSTGRES_HOST,
+            user=POSTGRES_USER,
+            password=POSTGRES_PASSWORD,
+            database=POSTGRES_DB,
+        )
+    except Exception:
+        return
+    try:
+        await conn.execute(
+            "DELETE FROM registry_environment WHERE client_name=$1 AND app_name=$2 AND project_name=$3",
+            client_name,
+            app_name,
+            project_name,
+        )
+    finally:
+        await conn.close()
+
+
+async def rename_environment(
+    client_name: str,
+    app_name: str,
+    old_project_name: str,
+    new_project_name: str,
+) -> None:
+    """Rename a project entry."""
+    if __import__("DataStorageRetrieval.db", fromlist=["db"]).asyncpg is None:
+        return
+    try:
+        conn = await (__import__("DataStorageRetrieval.db", fromlist=["db"]).asyncpg).connect(
+            host=POSTGRES_HOST,
+            user=POSTGRES_USER,
+            password=POSTGRES_PASSWORD,
+            database=POSTGRES_DB,
+        )
+    except Exception:
+        return
+    try:
+        await conn.execute(
+            """
+            UPDATE registry_environment
+            SET project_name=$4, updated_at=NOW()
+            WHERE client_name=$1 AND app_name=$2 AND project_name=$3
+            """,
+            client_name,
+            app_name,
+            old_project_name,
+            new_project_name,
+        )
+    finally:
+        await conn.close()

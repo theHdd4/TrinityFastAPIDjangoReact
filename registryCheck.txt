@@ -1,0 +1,13 @@
+The environment registry tracks per-tenant variables inside the ``registry_environment`` table in Postgres.
+Whenever an app or project is created, updated or deleted the Django ``registry`` app sends a signal that
+calls ``DataStorageRetrieval.db.environment`` helpers. These helpers insert, update or delete rows so that
+``client_name``, ``app_name`` and ``project_name`` always map to the latest identifiers, measures and
+dimensions defined for that project.
+
+Environment variables for a tenant are first looked up in the ``UserEnvironmentVariable`` table. If they are
+not found there, ``get_env_vars`` (in ``TrinityBackendFastAPI/app/core/utils.py``) queries ``registry_environment``
+so all services can share the same fallback values.
+
+To inspect the saved records, open pgAdmin and connect to the ``postgres`` service defined in
+``docker-compose.yml``. Browse to the ``registry_environment`` table and view its contents. Newly created
+projects should appear automatically and renaming or deleting a project updates the corresponding entry.
