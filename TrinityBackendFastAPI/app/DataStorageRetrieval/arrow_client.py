@@ -78,9 +78,9 @@ def get_current_names() -> tuple[str, str, str]:
         try:
             import asyncio
             from app.DataStorageRetrieval.db.environment import fetch_environment_names
+            from app.DataStorageRetrieval.db.connection import get_tenant_schema
 
-            tenant = os.getenv("TENANT_NAME", client)
-            schema = os.getenv("TENANT_SCHEMA") or (f"{tenant}_schema" if tenant else client)
+            schema = get_tenant_schema() or client
             if schema:
                 names = asyncio.run(fetch_environment_names(schema))
                 if names:

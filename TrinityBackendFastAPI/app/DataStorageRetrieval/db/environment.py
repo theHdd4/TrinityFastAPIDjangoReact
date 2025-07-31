@@ -30,6 +30,9 @@ async def _connect(schema: str | None = None):
     if asyncpg is None:
         return None
     try:
+        from .connection import get_tenant_schema
+        if schema is None:
+            schema = get_tenant_schema()
         settings = None
         if schema:
             settings = {"search_path": schema}

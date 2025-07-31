@@ -155,12 +155,9 @@ def _fetch_names_from_db() -> tuple[str, str, str, dict]:
         logger.warning("get_env_vars failed: %s", exc)
         try:
             from DataStorageRetrieval.db.environment import fetch_environment_names
-            from DataStorageRetrieval.db.connection import POSTGRES_HOST, POSTGRES_PORT
+            from DataStorageRetrieval.db.connection import POSTGRES_HOST, POSTGRES_PORT, get_tenant_schema
 
-            tenant = os.getenv("TENANT_NAME", client)
-            schema = os.getenv("TENANT_SCHEMA") or (
-                f"{tenant}_schema" if tenant else client
-            )
+            schema = get_tenant_schema() or client
             query = (
                 "SELECT client_name, app_name, project_name FROM registry_environment "
                 "ORDER BY updated_at DESC LIMIT 1"
