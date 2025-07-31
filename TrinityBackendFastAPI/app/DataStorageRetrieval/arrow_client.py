@@ -1,6 +1,7 @@
 import os
 import logging
 import json
+from pathlib import Path
 from typing import Dict
 
 import pandas as pd
@@ -8,6 +9,15 @@ import pyarrow as pa
 import pyarrow.flight as flight
 import pyarrow.ipc as ipc
 from minio import Minio
+from dotenv import load_dotenv
+
+# Load environment variables from the repo's .env file on import so other
+# modules can rely on CLIENT_NAME/APP_NAME/PROJECT_NAME being set. This
+# mirrors how the backend loads its environment when running inside Docker.
+ENV_FILE = Path(__file__).resolve().parents[2] / ".env.dev"
+if not ENV_FILE.exists():
+    ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
+load_dotenv(ENV_FILE, override=False)
 
 try:
     import redis  # type: ignore
@@ -24,7 +34,9 @@ _redis_client = (
 
 def load_env_from_redis() -> Dict[str, str]:
     """Load environment variables from Redis and update ``os.environ``."""
+    logger.debug("load_env_from_redis() called")
     if _redis_client is None:
+        logger.debug("redis client not available")
         return {}
     env: Dict[str, str] = {}
     user_id = os.getenv("USER_ID", "")
@@ -52,17 +64,25 @@ def load_env_from_redis() -> Dict[str, str]:
                     os.environ[k] = v
             except Exception as exc:  # pragma: no cover
                 logger.error("failed to decode %s: %s", env_key, exc)
+    logger.debug("env after redis load: %s", env)
     return env
 
 
-def _get_prefix() -> str:
-    """Return the MinIO object prefix derived from environment variables."""
+def get_current_names() -> tuple[str, str, str]:
+    """Return (client, app, project) using environment variables and Redis."""
     env = load_env_from_redis()
     client = os.getenv("CLIENT_NAME", env.get("CLIENT_NAME", "default_client"))
     app = os.getenv("APP_NAME", env.get("APP_NAME", "default_app"))
     project = os.getenv(
         "PROJECT_NAME", env.get("PROJECT_NAME", "default_project")
     )
+    return client, app, project
+
+
+def get_minio_prefix() -> str:
+    """Return the MinIO object prefix derived from environment variables."""
+    logger.debug("get_minio_prefix() called")
+    client, app, project = get_current_names()
     prefix = os.getenv("MINIO_PREFIX", f"{client}/{app}/{project}/")
     if not prefix.endswith("/"):
         prefix += "/"
@@ -75,6 +95,10 @@ def _get_prefix() -> str:
         os.getenv("MINIO_PREFIX"),
     )
     return prefix
+
+
+# Backwards compatibility
+_get_prefix = get_minio_prefix
 
 
 def _find_latest_object(basename: str, client: Minio, bucket: str, prefix: str) -> str | None:
@@ -153,7 +177,7 @@ def download_dataframe(path: str) -> pd.DataFrame:
             logger.debug("MinIO client created for %s", endpoint)
         if not arrow_obj:
             basename = os.path.basename(path)
-            prefix = _get_prefix()
+            prefix = get_minio_prefix()
             arrow_obj = _find_latest_object(basename + ".arrow", m_client, bucket, prefix)
             if arrow_obj is None:
                 arrow_obj = os.path.join(prefix, basename)
@@ -232,7 +256,7 @@ def download_table_bytes(path: str) -> bytes:
             logger.debug("MinIO client created for %s", endpoint)
         if not arrow_obj:
             basename = os.path.basename(path)
-            prefix = _get_prefix()
+            prefix = get_minio_prefix()
             arrow_obj = _find_latest_object(basename + ".arrow", m_client, bucket, prefix)
             if arrow_obj is None:
                 arrow_obj = os.path.join(prefix, basename)
