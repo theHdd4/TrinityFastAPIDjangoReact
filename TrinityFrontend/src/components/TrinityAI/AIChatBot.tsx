@@ -63,10 +63,30 @@ const AIChatBot: React.FC<AIChatBotProps> = ({ cardId, cardTitle, onAddAtom, dis
 
     try {
       try {
-        const envRes = await fetch(`${TRINITY_AI_API}/env`);
+        const envStr = localStorage.getItem('env');
+        const clientEnv = envStr ? JSON.parse(envStr) : null;
+        let query = '';
+        if (clientEnv) {
+          const params = new URLSearchParams();
+          const clientName = clientEnv.CLIENT_NAME || clientEnv.client_name;
+          const appName = clientEnv.APP_NAME || clientEnv.app_name;
+          const projectName = clientEnv.PROJECT_NAME || clientEnv.project_name;
+          if (clientName) params.append('client', clientName);
+          if (appName) params.append('app', appName);
+          if (projectName) params.append('project', projectName);
+          const qs = params.toString();
+          if (qs) query = `?${qs}`;
+        }
+        const envRes = await fetch(`${TRINITY_AI_API}/env${query}`);
         if (envRes.ok) {
           const envData = await envRes.json();
           console.log('TrinityAI environment', envData);
+          if (envData.debug) {
+            console.log(
+              `Looking in the postgres server: ${envData.debug.host}:${envData.debug.port} in the schema: ${envData.debug.schema} table: ${envData.debug.table} with the query: ${envData.debug.query} and result fetched are ${JSON.stringify(envData.debug.result)}`
+            );
+          }
+          console.log('MinIO prefix from /env', envData.prefix);
           logMinioPrefix(envData.prefix);
         }
       } catch (err) {

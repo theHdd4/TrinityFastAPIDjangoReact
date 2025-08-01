@@ -9,7 +9,7 @@ from fastapi import FastAPI, APIRouter, HTTPException
 from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import Dict, Any
+from typing import Dict, Any, Tuple
 import numpy as np
 from pymongo import MongoClient
 import redis
@@ -72,6 +72,50 @@ except Exception as exc:  # pragma: no cover - optional Mongo
 CACHE_TTL = 3600
 
 
+async def _query_registry_names(schema: str) -> Tuple[Tuple[str, str, str] | None, str]:
+    """Directly query Postgres for client/app/project names."""
+    try:
+        from DataStorageRetrieval.db.connection import (
+            asyncpg,
+            POSTGRES_HOST,
+            POSTGRES_USER,
+            POSTGRES_PASSWORD,
+            POSTGRES_DB,
+            POSTGRES_PORT,
+        )
+        if asyncpg is None:
+            return None, "asyncpg not available"
+        conn = await asyncpg.connect(
+            host=POSTGRES_HOST,
+            user=POSTGRES_USER,
+            password=POSTGRES_PASSWORD,
+            database=POSTGRES_DB,
+            port=int(POSTGRES_PORT),
+            server_settings={"search_path": schema},
+        )
+        query = (
+            "SELECT client_name, app_name, project_name FROM registry_environment "
+            "ORDER BY updated_at DESC LIMIT 1"
+        )
+        message = (
+            f"Looking in the postgres server: {POSTGRES_HOST}:{POSTGRES_PORT} in the schema: {schema} "
+            f"table: registry_environment with the query: {query}"
+        )
+        print(f"\U0001F50E {message}")
+        row = await conn.fetchrow(query)
+        await conn.close()
+        if row:
+            names = (row["client_name"], row["app_name"], row["project_name"])
+            result_msg = f"result fetched are {names}"
+            print(f"\U0001F4DD {result_msg}")
+            return names, f"{message} and {result_msg}"
+        return None, message
+    except Exception as exc:
+        err = f"direct query failed: {exc}"
+        print(f"\u26a0\ufe0f {err}")
+        return None, err
+
+
 def get_classifier_config_from_mongo(client: str, app: str, project: str):
     """Load classifier configuration from MongoDB."""
     if config_db is None:
@@ -84,11 +128,17 @@ def get_classifier_config_from_mongo(client: str, app: str, project: str):
         return None
 
 
-def _fetch_names_from_db() -> tuple[str, str, str]:
+def _fetch_names_from_db(
+    client_override: str | None = None,
+    app_override: str | None = None,
+    project_override: str | None = None,
+) -> tuple[str, str, str, dict]:
     """Retrieve client, app and project names using backend helpers."""
-    client = os.getenv("CLIENT_NAME", "")
-    app = os.getenv("APP_NAME", "")
-    project = os.getenv("PROJECT_NAME", "")
+    load_env_from_redis()
+    client = client_override or os.getenv("CLIENT_NAME", "")
+    app = app_override or os.getenv("APP_NAME", "")
+    project = project_override or os.getenv("PROJECT_NAME", "")
+    debug: Dict[str, Any] = {}
 
     try:
         # Use the FastAPI/Django helper which queries Redis or Postgres
@@ -102,6 +152,7 @@ def _fetch_names_from_db() -> tuple[str, str, str]:
             )
         )
         if env:
+            debug["source"] = "get_env_vars"
             client = env.get("CLIENT_NAME", client)
             app = env.get("APP_NAME", app)
             project = env.get("PROJECT_NAME", project)
@@ -109,24 +160,91 @@ def _fetch_names_from_db() -> tuple[str, str, str]:
         logger.warning("get_env_vars failed: %s", exc)
         try:
             from DataStorageRetrieval.db.environment import fetch_environment_names
+            from DataStorageRetrieval.db.connection import (
+                POSTGRES_HOST,
+                POSTGRES_PORT,
+                get_tenant_schema,
+            )
 
-            schema = os.getenv("TENANT_SCHEMA", client)
+            schema = get_tenant_schema(client) or client
+            query = (
+                "SELECT client_name, app_name, project_name FROM registry_environment "
+                "ORDER BY updated_at DESC LIMIT 1"
+            )
+            message = (
+                f"Looking in the postgres server: {POSTGRES_HOST}:{POSTGRES_PORT} in the schema: {schema} "
+                f"table: registry_environment with the query: {query}"
+            )
+            debug.update(
+                {
+                    "source": "fetch_environment_names",
+                    "host": POSTGRES_HOST,
+                    "port": POSTGRES_PORT,
+                    "schema": schema,
+                    "table": "registry_environment",
+                    "query": query,
+                    "message": message,
+                }
+            )
             names = asyncio.run(fetch_environment_names(schema))
             if names:
                 client, app, project = names
+                debug["result"] = {
+                    "client": client,
+                    "app": app,
+                    "project": project,
+                }
+                debug["message"] = message + f" and result fetched are {(client, app, project)}"
+            else:
+                names, msg = asyncio.run(_query_registry_names(schema))
+                debug["message"] = msg
+                if names:
+                    debug["source"] = "direct_query"
+                    client, app, project = names
+                    debug["result"] = {
+                        "client": client,
+                        "app": app,
+                        "project": project,
+                    }
+                    debug["message"] = msg
         except Exception:
             try:
                 from DataStorageRetrieval.db import fetch_client_app_project
+                from DataStorageRetrieval.db.connection import POSTGRES_HOST, POSTGRES_PORT
 
                 user_id = int(os.getenv("USER_ID", "0"))
                 project_id = int(os.getenv("PROJECT_ID", "0"))
                 if user_id and project_id:
+                    debug.update(
+                        {
+                            "source": "fetch_client_app_project",
+                            "host": POSTGRES_HOST,
+                            "port": POSTGRES_PORT,
+                            "schema": "<default>",
+                            "table": "accounts_userenvironmentvariable",
+                            "query": (
+                                "SELECT client_name, app_name, project_name FROM accounts_userenvironmentvariable "
+                                "WHERE user_id=$1 AND key='PROJECT_NAME' AND project_id LIKE '%' || $2 ORDER BY updated_at DESC LIMIT 1"
+                            ),
+                        }
+                    )
                     client_db, app_db, project_db = asyncio.run(
                         fetch_client_app_project(user_id, project_id)
                     )
                     client = client_db or client
                     app = app_db or app
                     project = project_db or project
+                    debug["result"] = {
+                        "client": client,
+                        "app": app,
+                        "project": project,
+                    }
+                    debug["message"] = (
+                        f"Looking in the postgres server: {POSTGRES_HOST}:{POSTGRES_PORT} in the schema: <default> "
+                        "table: accounts_userenvironmentvariable with the query: "
+                        + debug.get("query", "")
+                        + f" and result fetched are {(client, app, project)}"
+                    )
             except Exception as exc_db:  # pragma: no cover - optional path
                 logger.warning(
                     "fallback fetch_client_app_project failed: %s", exc_db
@@ -135,22 +253,21 @@ def _fetch_names_from_db() -> tuple[str, str, str]:
     os.environ["CLIENT_NAME"] = client
     os.environ["APP_NAME"] = app
     os.environ["PROJECT_NAME"] = project
-    load_env_from_redis()
+    if client and app and project:
+        os.environ["MINIO_PREFIX"] = f"{client}/{app}/{project}/"
     logger.debug(
         "_fetch_names_from_db resolved client=%s app=%s project=%s", client, app, project
     )
     print(f"ENV resolved -> client={client} app={app} project={project}")
-    return client, app, project
+    return client, app, project, debug
 
 
 def get_minio_config() -> Dict[str, str]:
     """Return MinIO configuration using database names when available."""
     logger.debug("get_minio_config() called")
-    client, app, project = _fetch_names_from_db()
-    prefix_default = f"{client}/{app}/{project}/" if client and app and project else ""
-    prefix = os.getenv("MINIO_PREFIX", prefix_default)
-    if not prefix.endswith("/"):
-        prefix += "/"
+    client, app, project, _ = _fetch_names_from_db()
+    prefix = f"{client}/{app}/{project}/" if client and app and project else ""
+    os.environ["MINIO_PREFIX"] = prefix
     config = {
         # Default to the development MinIO service if not explicitly configured
         "endpoint": os.getenv("MINIO_ENDPOINT", "minio:9000"),
@@ -327,7 +444,7 @@ async def list_available_atoms():
 async def get_config():
     """Return column classifier configuration from cache or MongoDB."""
     load_env_from_redis()
-    client, app_name, project = _fetch_names_from_db()
+    client, app_name, project, _ = _fetch_names_from_db()
     key = f"{client}/{app_name}/{project}/column_classifier_config"
     cached = redis_client.get(key)
     if cached:
@@ -348,22 +465,27 @@ async def get_config():
 
 
 @api_router.get("/env")
-async def get_environment():
+async def get_environment(
+    client: str | None = None,
+    app: str | None = None,
+    project: str | None = None,
+):
     """Return current environment variables and MinIO prefix."""
-    client, app, project = _fetch_names_from_db()
+    client_name, app_name, project_name, debug = _fetch_names_from_db(client, app, project)
     prefix = get_minio_config()["prefix"]
     logger.info(
         "environment fetched client=%s app=%s project=%s prefix=%s",
-        client,
-        app,
-        project,
+        client_name,
+        app_name,
+        project_name,
         prefix,
     )
     return {
-        "client_name": client,
-        "app_name": app,
-        "project_name": project,
+        "client_name": client_name,
+        "app_name": app_name,
+        "project_name": project_name,
         "prefix": prefix,
+        "debug": debug,
     }
 
 # After defining all endpoints include the router so the app registers them

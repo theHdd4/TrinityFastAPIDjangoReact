@@ -68,18 +68,23 @@ def load_env_from_redis() -> Dict[str, str]:
     return env
 
 
-def get_current_names() -> tuple[str, str, str]:
+def get_current_names(
+    client_override: str | None = None,
+    app_override: str | None = None,
+    project_override: str | None = None,
+) -> tuple[str, str, str]:
     """Return (client, app, project) using Redis and Postgres."""
     env = load_env_from_redis()
-    client = os.getenv("CLIENT_NAME", env.get("CLIENT_NAME", ""))
-    app = os.getenv("APP_NAME", env.get("APP_NAME", ""))
-    project = os.getenv("PROJECT_NAME", env.get("PROJECT_NAME", ""))
+    client = client_override or os.getenv("CLIENT_NAME", env.get("CLIENT_NAME", ""))
+    app = app_override or os.getenv("APP_NAME", env.get("APP_NAME", ""))
+    project = project_override or os.getenv("PROJECT_NAME", env.get("PROJECT_NAME", ""))
     if not client or not app or not project:
         try:
             import asyncio
             from app.DataStorageRetrieval.db.environment import fetch_environment_names
+            from app.DataStorageRetrieval.db.connection import get_tenant_schema
 
-            schema = os.getenv("TENANT_SCHEMA", client)
+            schema = get_tenant_schema(client) or client
             if schema:
                 names = asyncio.run(fetch_environment_names(schema))
                 if names:
@@ -95,20 +100,24 @@ def get_current_names() -> tuple[str, str, str]:
     return client, app, project
 
 
-def get_minio_prefix() -> str:
-    """Return the MinIO object prefix derived from environment variables."""
+def get_minio_prefix(
+    client_override: str | None = None,
+    app_override: str | None = None,
+    project_override: str | None = None,
+) -> str:
+    """Return the MinIO object prefix derived from resolved names."""
     logger.debug("get_minio_prefix() called")
-    client, app, project = get_current_names()
-    prefix = os.getenv("MINIO_PREFIX", f"{client}/{app}/{project}/")
-    if not prefix.endswith("/"):
-        prefix += "/"
+    client, app, project = get_current_names(
+        client_override, app_override, project_override
+    )
+    prefix = f"{client}/{app}/{project}/"
+    os.environ["MINIO_PREFIX"] = prefix
     logger.debug(
-        "prefix resolved to %s using CLIENT_NAME=%s APP_NAME=%s PROJECT_NAME=%s MINIO_PREFIX=%s",
+        "prefix resolved to %s using CLIENT_NAME=%s APP_NAME=%s PROJECT_NAME=%s",
         prefix,
         client,
         app,
         project,
-        os.getenv("MINIO_PREFIX"),
     )
     return prefix
 
