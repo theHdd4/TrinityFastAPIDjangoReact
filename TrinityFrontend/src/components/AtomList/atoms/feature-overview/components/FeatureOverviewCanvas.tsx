@@ -17,6 +17,7 @@ import { Dialog, DialogContent, DialogTrigger } from "@/components/ui/dialog";
 import D3LineChart from "./D3LineChart";
 import { useAuth } from "@/contexts/AuthContext";
 import { logSessionState, addNavigationItem } from "@/lib/session";
+import { logMinioPrefix } from '@/utils/logPrefix';
 
 interface ColumnInfo {
   column: string;
@@ -153,6 +154,7 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
     setError(null);
     try {
       console.log("🔎 fetching cached dataframe for", settings.dataSource);
+      logMinioPrefix(settings.dataSource);
       const res = await fetch(
         `${FEATURE_OVERVIEW_API}/cached_dataframe?object_name=${encodeURIComponent(
           settings.dataSource,

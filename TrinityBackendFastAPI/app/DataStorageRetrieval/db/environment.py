@@ -63,6 +63,24 @@ async def init_environment_registry(schema: str | None = None) -> None:
     finally:
         await conn.close()
 
+async def fetch_environment_names(schema: str) -> tuple[str, str, str] | None:
+    """Return the latest client/app/project names for a tenant schema."""
+    conn = await _connect(schema)
+    if conn is None:
+        return None
+    try:
+        await _ensure_table(conn)
+        row = await conn.fetchrow(
+            "SELECT client_name, app_name, project_name"
+            " FROM registry_environment"
+            " ORDER BY updated_at DESC LIMIT 1"
+        )
+        if row:
+            return row["client_name"], row["app_name"], row["project_name"]
+    finally:
+        await conn.close()
+    return None
+
 async def upsert_environment(
     client_name: str,
     app_name: str,

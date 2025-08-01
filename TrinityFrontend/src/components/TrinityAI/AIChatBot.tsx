@@ -7,6 +7,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Send, X, MessageSquare, Bot, User, Sparkles } from 'lucide-react';
 import ChatSuggestions from './ChatSuggestions';
 import { TRINITY_AI_API } from '@/lib/api';
+import { logMinioPrefix } from '@/utils/logPrefix';
 
 interface Message {
   id: string;
@@ -61,6 +62,16 @@ const AIChatBot: React.FC<AIChatBotProps> = ({ cardId, cardTitle, onAddAtom, dis
     setShowSuggestions(false);
 
     try {
+      try {
+        const envRes = await fetch(`${TRINITY_AI_API}/env`);
+        if (envRes.ok) {
+          const envData = await envRes.json();
+          console.log('TrinityAI environment', envData);
+          logMinioPrefix(envData.prefix);
+        }
+      } catch (err) {
+        console.log('Env fetch error', err);
+      }
       const res = await fetch(`${TRINITY_AI_API}/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

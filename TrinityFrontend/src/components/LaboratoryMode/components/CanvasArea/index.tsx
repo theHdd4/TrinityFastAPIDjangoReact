@@ -27,6 +27,7 @@ import ScopeSelectorAtom from '@/components/AtomList/atoms/scope-selector/ScopeS
 import CreateColumnAtom from '@/components/AtomList/atoms/createcolumn/CreateColumnAtom';
 import GroupByAtom from '@/components/AtomList/atoms/groupby-wtg-avg/GroupByAtom';
 import { fetchDimensionMapping } from '@/lib/dimensions';
+import { logMinioPrefix } from '@/utils/logPrefix';
 
 import {
   useLaboratoryStore,
@@ -105,6 +106,7 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
   const prefetchDataframe = async (name: string) => {
     if (!name) return;
     try {
+      logMinioPrefix(name);
       console.log('✈️ fetching flight table', name);
       const fr = await fetch(
         `${FEATURE_OVERVIEW_API}/flight_table?object_name=${encodeURIComponent(name)}`,
