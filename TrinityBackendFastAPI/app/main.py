@@ -19,9 +19,11 @@ origins = os.getenv(
 )
 allowed_origins = [o.strip() for o in origins.split(",") if o.strip()]
 
+# Allow requests from the frontend hosts configured in FASTAPI_CORS_ORIGINS.
+# Fallback to a sensible default list if the variable is not set.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://10.2.1.65:8081"],  # or ["*"] for all
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
