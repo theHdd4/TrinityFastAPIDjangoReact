@@ -81,12 +81,12 @@ class ProjectViewSet(viewsets.ModelViewSet):
         name = base_name
         counter = 1
         while Project.objects.filter(owner=user, app=app, name=name).exists():
+            name = f"{base_name} {counter}"
             counter += 1
-            name = f"{base_name}-{counter}"
 
         slug = serializer.validated_data.get("slug")
         if not slug:
-            slug_base = slugify(base_name)
+            slug_base = slugify(name)
         else:
             slug_base = slug
         slug_val = slug_base
