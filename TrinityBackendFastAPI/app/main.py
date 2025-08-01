@@ -15,13 +15,15 @@ app = FastAPI()
 
 origins = os.getenv(
     "FASTAPI_CORS_ORIGINS",
-    "http://10.2.1.206:8081,http://127.0.0.1:8081,http://10.2.1.242:8081,http://10.2.1.65:8081,https://trinity.quantmatrixai.com",
+    "http://10.2.1.242:8080,http://127.0.0.1:8080,http://10.2.1.242:8080,http://10.2.1.65:8080,https://trinity.quantmatrixai.com",
 )
 allowed_origins = [o.strip() for o in origins.split(",") if o.strip()]
 
+# Allow requests from the frontend hosts configured in FASTAPI_CORS_ORIGINS.
+# Fallback to a sensible default list if the variable is not set.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://10.2.1.65:8081"],  # or ["*"] for all
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

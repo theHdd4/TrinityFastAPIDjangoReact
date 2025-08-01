@@ -2,6 +2,9 @@
 
 Smart concatenation helper for the Concat atom. It uses an LLM to suggest files and orientation based on a text prompt.
 
+The prompt template and response parsing live in `ai_logic.py`. Adjust that file
+to change how the assistant works.
+
 ## Endpoints
 
 - `POST http://10.2.1.242:8002/concat` – process a prompt and return concatenation instructions.
@@ -13,3 +16,8 @@ Smart concatenation helper for the Concat atom. It uses an LLM to suggest files 
 ## Usage
 
 POST to `/concat` with `{ "prompt": "concat sales_2023.csv with sales_2024.csv" }`. The response includes a `concat_json` section that can be passed to the backend `/api/concat/perform` endpoint.
+
+If the environment variable `CONCAT_PERFORM_URL` is set, the service will
+automatically call this URL after a successful prompt parse and include the
+`concat_result` from the backend in the response. It defaults to
+`http://<HOST_IP>:<FASTAPI_PORT>/api/concat/perform`.

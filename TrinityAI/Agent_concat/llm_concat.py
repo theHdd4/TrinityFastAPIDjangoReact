@@ -334,10 +334,11 @@
 import requests
 import json
 import re
+from ai_logic import build_prompt, call_llm, extract_json
 from pathlib import Path
 from minio import Minio
 from minio.error import S3Error
-from DataStorageRetrieval.arrow_client import load_env_from_redis
+
 from datetime import datetime
 import uuid
 import os
@@ -381,6 +382,25 @@ class SmartConcatAgent:
         
         # Load files once
         self._load_files()
+
+    def _maybe_update_prefix(self) -> None:
+        """Rebuild ``self.prefix`` from env vars and update ``MINIO_PREFIX``."""
+        client = os.getenv("CLIENT_NAME", "").strip()
+        app = os.getenv("APP_NAME", "").strip()
+        project = os.getenv("PROJECT_NAME", "").strip()
+
+        current = f"{client}/{app}/{project}/" if any([client, app, project]) else ""
+
+        current = current.lstrip("/")
+        if current and not current.endswith("/"):
+            current += "/"
+
+        if os.getenv("MINIO_PREFIX") != current:
+            os.environ["MINIO_PREFIX"] = current
+
+        if current != self.prefix:
+            logger.info("minio prefix updated from %s to %s", self.prefix, current)
+            self.prefix = current
     
     def _load_files(self):
         """Load available Arrow files from registry or MinIO."""
@@ -397,50 +417,35 @@ class SmartConcatAgent:
                     arrow_objects = list(data.get("arrow_to_original", {}).keys())
             if arrow_objects:
                 self.available_files = [Path(a).name for a in arrow_objects]
-                print(f"[SYSTEM] Loaded {len(self.available_files)} arrow files from registry")
+                logger.info(
+                    "loaded %d arrow files from registry",
+                    len(self.available_files),
+                )
                 return
         except Exception as e:
-            print(f"[WARN] Failed to read arrow registry: {e}")
+            logger.warning("failed to read arrow registry: %s", e)
 
         try:
-            load_env_from_redis()
+            self._maybe_update_prefix()
+            prefix = self.prefix.lstrip("/")
             endpoint = _describe_endpoint(self.minio_client)
             logger.debug(
                 "listing objects from %s bucket=%s prefix=%s",
                 endpoint,
                 self.bucket,
-                self.prefix,
-            )
-            print(
-                f"[DEBUG] listing objects from {endpoint} bucket={self.bucket} prefix={self.prefix}"
-            )
-            print(
-                "[DEBUG] env CLIENT_NAME=%s APP_NAME=%s PROJECT_NAME=%s MINIO_PREFIX=%s"
-                % (
-                    os.getenv("CLIENT_NAME"),
-                    os.getenv("APP_NAME"),
-                    os.getenv("PROJECT_NAME"),
-                    os.getenv("MINIO_PREFIX"),
-                )
-            )
-            logger.debug(
-                "env CLIENT_NAME=%s APP_NAME=%s PROJECT_NAME=%s MINIO_PREFIX=%s",
-                os.getenv("CLIENT_NAME"),
-                os.getenv("APP_NAME"),
-                os.getenv("PROJECT_NAME"),
-                os.getenv("MINIO_PREFIX"),
+                prefix,
             )
             objects = self.minio_client.list_objects(
-                self.bucket, prefix=self.prefix, recursive=True
+                self.bucket, prefix=prefix, recursive=True
             )
             self.available_files = [
                 obj.object_name.split("/")[-1]
                 for obj in objects
                 if obj.object_name.endswith(".arrow")
             ]
-            print(f"[SYSTEM] Loaded {len(self.available_files)} arrow files from MinIO")
+            logger.info("loaded %d arrow files from MinIO under prefix %s", len(self.available_files), self.prefix)
         except S3Error as e:
-            print(f"[ERROR] MinIO connection failed: {e}")
+            logger.error("MinIO connection failed: %s", e)
             self.available_files = []
     
     def create_session(self, session_id=None):
@@ -474,83 +479,15 @@ class SmartConcatAgent:
             session_id = self.create_session()
         
         session = self.get_session(session_id)
+        self._maybe_update_prefix()
+        if not self.available_files:
+            self._load_files()
         
         # Build rich conversation context with complete JSON history
         context = self._build_rich_context(session_id)
         
-        # Create comprehensive LLM prompt with complete history
-        prompt = f"""You are an intelligent concatenation assistant with perfect memory access to complete conversation history.
-
-USER INPUT: "{user_prompt}"
-
-AVAILABLE FILES:
-{json.dumps(self.available_files, indent=2)}
-
-COMPLETE CONVERSATION CONTEXT:
-{context}
-
-TASK: Analyze the user input along with the complete conversation history to provide the most appropriate response.
-
-SUCCESS RESPONSE (when you have all required info):
-{{
-  "success": true,
-  "concat_json": {{
-    "bucket_name": "trinity",
-    "file1": ["exact_filename1.csv"],
-    "file2": ["exact_filename2.csv"],
-    "concat_direction": "vertical"
-  }},
-  "message": "Concatenation configuration completed successfully",
-  "reasoning": "Found all required components with context from history",
-  "used_memory": true
-}}
-
-FAILURE RESPONSE (when information is missing or unclear):
-{{
-  "success": false,
-  "suggestions": [
-    "Based on your previous interactions, I suggest...",
-    "From available files are {self.available_files}, these match your context:",
-    "Previous successful pattern was: file1 + file2",
-    "Try: 'concatenate [specific_file1] with [specific_file2] [direction]'"
-  ],
-  "message": "More information needed - Write in better Way !",
-  "reasoning": "Missing information but providing context-aware suggestions",
-  "recommended_files": ["file1.csv", "file2.csv"],
-  "next_steps": [
-    "Specify the exact files you want to concatenate",
-    "Choose vertical or horizontal direction",
-    "Or say 'yes' to use my suggestions"
-  ]
-}}
-
-INTELLIGENCE RULES:
-1. USE COMPLETE HISTORY: Reference previous interactions, successful configs, and user preferences
-2. FUZZY MATCHING: "beans" matches "D0_KHC_UK_Beans.csv"
-3. CONTEXT AWARENESS: Understand "yes", "no", "use those", "combine them" based on conversation
-4. MEMORY UTILIZATION: Suggest files user has successfully used before
-5. PATTERN RECOGNITION: Identify user's preferred file combinations and directions
-
-CONVERSATIONAL HANDLING:
-- "yes" after suggestions → Use the suggested configuration
-- "no" after suggestions → Ask for different preferences
-- "use those files" → Apply to most recent file suggestion
-- "combine them" → Use default vertical direction with identified files
-- "horizontally" or "vertically" → Apply to most recent file context
-
-SUGGESTION QUALITY:
-- Always provide specific file names from available files
-- Use memory to suggest files user has worked with before
-- Explain WHY you're suggesting specific files
-- Provide concrete next steps, not generic advice
-
-EXAMPLES OF SMART BEHAVIOR:
-- If user previously used "beans.csv + mayo.csv", suggest similar food files
-- If user always chooses "vertical", default to that direction
-- If user says "yes" after you suggested files, complete the configuration
-- If user mentions partial names, match to their previous successful patterns
-
-Return ONLY the JSON response:"""
+        # Create LLM prompt using the shared AI logic
+        prompt = build_prompt(user_prompt, self.available_files, context)
 
         try:
             # Call LLM
@@ -569,7 +506,7 @@ Return ONLY the JSON response:"""
             return processed_result
             
         except Exception as e:
-            print(f"[ERROR] Processing failed: {e}")
+            logger.error("Processing failed: %s", e)
             return self._create_error_response(session_id, str(e))
     
     def _build_rich_context(self, session_id):
@@ -720,86 +657,12 @@ Return ONLY the JSON response:"""
             session["successful_configs"] = session["successful_configs"][-100:]
     
     def _call_llm(self, prompt):
-        """Call LLM with optimized settings"""
-        payload = {
-            "model": self.model_name,
-            "messages": [{"role": "user", "content": prompt}],
-            "stream": False,
-            "options": {
-                "temperature": 0.2,
-                "top_p": 0.9,
-                "num_predict": 1000
-            }
-        }
-        
-        headers = {
-            "Authorization": f"Bearer {self.bearer_token}",
-            "Content-Type": "application/json"
-        }
-        
-        response = requests.post(self.api_url, json=payload, headers=headers, timeout=90)
-        response.raise_for_status()
-        
-        return response.json().get('message', {}).get('content', '')
+        """Delegate to the shared AI logic module."""
+        return call_llm(self.api_url, self.model_name, self.bearer_token, prompt)
     
     def _extract_json(self, response):
-        """Extract JSON from LLM response using multiple strategies."""
-        if not response:
-            return None
-
-        cleaned = re.sub(r'<think>.*?</think>', '', response, flags=re.DOTALL)
-        cleaned = re.sub(r'<reasoning>.*?</reasoning>', '', cleaned, flags=re.DOTALL)
-        cleaned = re.sub(r'```json\s*', '', cleaned)
-        cleaned = re.sub(r'```\s*', '', cleaned)
-
-        json_patterns = [
-            r'\{[^{}]*\{[^{}]*\}[^{}]*\}',
-            r'\{[^{}]+\}',
-            r'\{.*?\}(?=\s*$)',
-            r'\{.*\}',
-        ]
-
-        for pattern in json_patterns:
-            matches = re.findall(pattern, cleaned, re.DOTALL)
-            for match in matches:
-                try:
-                    parsed = json.loads(match)
-                    if isinstance(parsed, dict) and (
-                        'success' in parsed or 'suggestions' in parsed
-                    ):
-                        return parsed
-                except json.JSONDecodeError:
-                    continue
-
-        try:
-            start_idx = cleaned.find('{')
-            if start_idx != -1:
-                brace_count = 0
-                end_idx = start_idx
-                for i in range(start_idx, len(cleaned)):
-                    if cleaned[i] == '{':
-                        brace_count += 1
-                    elif cleaned[i] == '}':
-                        brace_count -= 1
-                        if brace_count == 0:
-                            end_idx = i + 1
-                            break
-                if end_idx > start_idx:
-                    potential_json = cleaned[start_idx:end_idx]
-                    return json.loads(potential_json)
-        except Exception:
-            pass
-
-        try:
-            fixed = re.sub(r',\s*}', '}', cleaned)
-            fixed = re.sub(r',\s*]', ']', fixed)
-            match = re.search(r'\{.*\}', fixed, re.DOTALL)
-            if match:
-                return json.loads(match.group())
-        except Exception:
-            pass
-
-        return None
+        """Delegate JSON extraction to the AI logic module."""
+        return extract_json(response)
     
     def _create_fallback_response(self, session_id):
         """Create fallback response when LLM fails"""
