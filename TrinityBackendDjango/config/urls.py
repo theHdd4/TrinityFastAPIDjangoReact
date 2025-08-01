@@ -1,6 +1,9 @@
 from django.contrib import admin
 from django.urls import path, include
 
+# Apply custom admin branding
+from . import admin as _admin_setup  # noqa: F401
+
 urlpatterns = [
     path("admin/", admin.site.urls),
 

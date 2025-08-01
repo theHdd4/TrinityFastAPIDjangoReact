@@ -1,14 +1,15 @@
 # app/routes.py
 
-from fastapi import APIRouter, Form, HTTPException, Body, Query
+from fastapi import APIRouter, Form, HTTPException, Body, Query, Depends
 from fastapi.responses import StreamingResponse
-import json, io, uuid, datetime
+import json, io, uuid, datetime, os
 import pandas as pd
 import pyarrow as pa
 import pyarrow.ipc as ipc
 import numpy as np
+from ..data_upload_validate.app.routes import get_object_prefix
 from .merge.base import get_common_columns, merge_dataframes
-from .deps import get_minio_df, minio_client, MINIO_BUCKET, OBJECT_PREFIX, redis_client
+from .deps import get_minio_df, minio_client, MINIO_BUCKET, redis_client
 
 router = APIRouter()
 
@@ -153,23 +154,33 @@ async def save_merged_dataframe(
             filename = f"{merge_id}_merge.arrow"
         if not filename.endswith('.arrow'):
             filename += '.arrow'
-        if not filename.startswith(OBJECT_PREFIX):
-            filename = OBJECT_PREFIX + filename
+            
+        # Get the standard prefix using get_object_prefix
+        prefix = await get_object_prefix()
+        # Create full path with standard structure
+        full_path = f"{prefix}merged-data/{filename}"
+        
+        # Convert to Arrow format
         table = pa.Table.from_pandas(df)
         arrow_buffer = pa.BufferOutputStream()
         with ipc.new_file(arrow_buffer, table.schema) as writer:
             writer.write_table(table)
         arrow_bytes = arrow_buffer.getvalue().to_pybytes()
+        
+        # Upload to MinIO
         minio_client.put_object(
             MINIO_BUCKET,
-            filename,
+            full_path,
             data=io.BytesIO(arrow_bytes),
             length=len(arrow_bytes),
             content_type="application/octet-stream",
         )
-        redis_client.setex(filename, 3600, arrow_bytes)
+        
+        # Cache in Redis
+        redis_client.setex(full_path, 3600, arrow_bytes)
+        
         return {
-            "result_file": filename,
+            "result_file": full_path,
             "shape": df.shape,
             "columns": list(df.columns),
             "message": "DataFrame saved successfully"

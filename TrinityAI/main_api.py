@@ -2,13 +2,16 @@ import os
 import sys
 import asyncio
 from pathlib import Path
+import json
 import uvicorn
-from fastapi import FastAPI, APIRouter
+from fastapi import FastAPI, APIRouter, HTTPException
 from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Dict, Any
 import numpy as np
+from pymongo import MongoClient
+import redis
 
 
 def get_llm_config() -> Dict[str, str]:
@@ -34,6 +37,44 @@ sys.path.append(str(BACKEND_ROOT))
 from DataStorageRetrieval.arrow_client import load_env_from_redis
 
 load_env_from_redis()
+
+# ---------------------------------------------------------------------------
+# Redis and Mongo configuration
+# ---------------------------------------------------------------------------
+REDIS_HOST = os.getenv("REDIS_HOST", "redis")
+redis_client = redis.Redis(host=REDIS_HOST, port=6379, decode_responses=True)
+
+MONGO_URI = os.getenv(
+    "CLASSIFY_MONGO_URI",
+    "mongodb://admin_dev:pass_dev@10.2.1.65:9005/?authSource=admin",
+)
+CONFIG_DB = os.getenv("CLASSIFIER_CONFIG_DB", "trinity_prod")
+CONFIG_COLLECTION = os.getenv(
+    "CLASSIFIER_CONFIGS_COLLECTION",
+    "column_classifier_configs",
+)
+
+try:
+    mongo_client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000)
+    config_db = mongo_client[CONFIG_DB]
+except Exception as exc:  # pragma: no cover - optional Mongo
+    print(f"⚠️ Mongo connection failed: {exc}")
+    mongo_client = None
+    config_db = None
+
+CACHE_TTL = 3600
+
+
+def get_classifier_config_from_mongo(client: str, app: str, project: str):
+    """Load classifier configuration from MongoDB."""
+    if config_db is None:
+        return None
+    try:
+        document_id = f"{client}/{app}/{project}"
+        return config_db[CONFIG_COLLECTION].find_one({"_id": document_id})
+    except Exception as exc:  # pragma: no cover - runtime failures
+        print(f"⚠️ Mongo read error: {exc}")
+        return None
 
 
 def _fetch_names_from_db() -> tuple[str, str, str]:
@@ -238,6 +279,32 @@ async def list_available_atoms():
             return {"error": "Processor not available"}
     except Exception as e:
         return {"error": str(e)}
+
+
+@api_router.get("/get_config")
+async def get_config():
+    """Return column classifier configuration from cache or MongoDB."""
+    load_env_from_redis()
+    client = os.getenv("CLIENT_NAME", "default_client")
+    app_name = os.getenv("APP_NAME", "")
+    project = os.getenv("PROJECT_NAME", "default_project")
+    key = f"{client}/{app_name}/{project}/column_classifier_config"
+    cached = redis_client.get(key)
+    if cached:
+        try:
+            return {"status": "success", "source": "redis", "data": json.loads(cached)}
+        except Exception:
+            pass
+
+    mongo_data = get_classifier_config_from_mongo(client, app_name, project)
+    if mongo_data:
+        try:
+            redis_client.setex(key, CACHE_TTL, json.dumps(mongo_data, default=str))
+        except Exception:
+            pass
+        return {"status": "success", "source": "mongo", "data": mongo_data}
+
+    raise HTTPException(status_code=404, detail="Configuration not found")
 
 # After defining all endpoints include the router so the app registers them
 app.include_router(api_router)

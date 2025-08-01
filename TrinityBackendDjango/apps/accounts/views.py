@@ -91,6 +91,17 @@ class LoginView(APIView):
             save_env_var(user, "USER_NAME", os.environ.get("USER_NAME", ""))
             print("Current env vars after login", get_env_dict(user))
             data = UserSerializer(user).data
+            # Include the first assigned role if available
+            try:
+                from apps.roles.models import UserRole
+
+                role_obj = UserRole.objects.filter(user=user).first()
+                if role_obj:
+                    data["role"] = role_obj.role
+            except Exception:
+                # Roles app may not be migrated yet; ignore errors
+                pass
+
             data["environment"] = get_env_dict(user)
             return Response(data)
         return Response({"detail": "Invalid credentials"}, status=status.HTTP_400_BAD_REQUEST)

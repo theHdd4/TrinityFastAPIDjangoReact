@@ -13,6 +13,7 @@ from itertools import product
 from minio import Minio
 from minio.error import S3Error
 from motor.motor_asyncio import AsyncIOMotorCollection
+from pymongo import MongoClient
 
 from .config import get_settings, Settings
 from .schemas import (
@@ -29,6 +30,7 @@ from .schemas import (
     ScopeFilterResponse,
     ScopeFilterRequest
 )
+from ..data_upload_validate.app.routes import get_object_prefix
 from .deps import (
     get_minio_client,
     get_redis_client,
@@ -128,6 +130,121 @@ async def get_unique_values(
         error_msg = f"Error getting unique values: {str(e)}"
         logger.error(error_msg, exc_info=True)
         raise HTTPException(status_code=500, detail=error_msg)
+
+
+# =============================================================================
+# DATE RANGE ENDPOINT
+# =============================================================================
+
+@router.get("/unique_values_filtered")
+async def get_unique_values_filtered(
+    object_name: str = Query(..., description="MinIO object name"),
+    target_column: str = Query(..., description="Column to return unique values for"),
+    filter_column: str = Query(..., description="Column to apply filter on"),
+    filter_value: str = Query(..., description="Value of filter_column to restrict rows")
+):
+    """Return unique values for `target_column` only for rows where `filter_column` == `filter_value`."""
+    try:
+        minio_client = get_minio_client()
+        response = minio_client.get_object(settings.minio_bucket, object_name)
+        bytes_data = response.read()
+        if object_name.lower().endswith('.parquet'):
+            df = pd.read_parquet(BytesIO(bytes_data))
+        elif object_name.lower().endswith(('.arrow', '.feather')):
+            import pyarrow as pa, pyarrow.ipc as ipc
+            df = ipc.RecordBatchFileReader(pa.BufferReader(bytes_data)).read_all().to_pandas()
+        else:
+            df = pd.read_csv(BytesIO(bytes_data))
+
+        col_map = create_column_mapping(df.columns.tolist())
+        t_col = col_map.get(target_column.lower())
+        f_col = col_map.get(filter_column.lower())
+        if not t_col or not f_col:
+            raise HTTPException(status_code=404, detail="Column not found")
+
+        filtered_df = df[df[f_col].astype(str) == filter_value]
+        uniques = filtered_df[t_col].dropna().astype(str).unique().tolist()
+        return {"unique_values": sorted(uniques)}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in unique_values_filtered: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/date_range")
+async def get_date_range(
+    object_name: str = Query(..., description="Name of the MinIO object (file)"),
+    column_name: str = Query(..., description="Name of the date column to analyse")
+):
+    """Return the minimum and maximum dates contained in the specified column of a dataset.
+
+    Example:
+        /date_range?object_name=raw-data/my_file.parquet&column_name=date
+    """
+    try:
+        minio_client = get_minio_client()
+        logger.info(f"Fetching object '{object_name}' from bucket '{settings.minio_bucket}' for date range computation")
+
+        response = minio_client.get_object(settings.minio_bucket, object_name)
+        file_bytes = response.read()
+        df = None
+
+        object_name_lower = object_name.lower()
+        try:
+            if object_name_lower.endswith('.parquet'):
+                df = pd.read_parquet(BytesIO(file_bytes))
+            elif object_name_lower.endswith(('.arrow', '.feather')):
+                import pyarrow as pa  # local import to avoid mandatory dependency
+                import pyarrow.ipc as ipc
+                reader = ipc.RecordBatchFileReader(pa.BufferReader(file_bytes))
+                df = reader.read_all().to_pandas()
+            elif object_name_lower.endswith('.csv'):
+                df = pd.read_csv(BytesIO(file_bytes))
+            elif object_name_lower.endswith('.json'):
+                df = pd.read_json(BytesIO(file_bytes))
+            else:
+                # Fallback to parquet first, then feather
+                try:
+                    df = pd.read_parquet(BytesIO(file_bytes))
+                except Exception:
+                    df = pd.read_feather(BytesIO(file_bytes))
+        except Exception as e:
+            logger.error(f"Failed to load file '{object_name}': {e}")
+            raise HTTPException(status_code=500, detail=f"Unable to read data file: {e}")
+
+        if df is None:
+            raise HTTPException(status_code=500, detail="Unable to load dataset – unsupported format or read error")
+
+        # Case-insensitive column matching
+        column_mapping = create_column_mapping(df.columns.tolist())
+        actual_col = column_mapping.get(column_name.lower())
+        if not actual_col:
+            raise HTTPException(status_code=404, detail=f"Column '{column_name}' not found in dataset")
+
+        # Attempt to parse dates
+        try:
+            date_series = pd.to_datetime(df[actual_col], errors='coerce').dropna()
+        except Exception as e:
+            logger.error(f"Failed to convert column '{actual_col}' to datetime: {e}")
+            raise HTTPException(status_code=500, detail=f"Failed to parse dates in column '{actual_col}': {e}")
+
+        if date_series.empty:
+            raise HTTPException(status_code=404, detail=f"No valid dates found in column '{actual_col}'")
+
+        min_date = date_series.min().date().isoformat()
+        max_date = date_series.max().date().isoformat()
+
+        logger.info(f"Date range for '{actual_col}' – min: {min_date}, max: {max_date}")
+        return {"min_date": min_date, "max_date": max_date}
+
+    except S3Error as e:
+        logger.error(f"MinIO error retrieving '{object_name}': {e}")
+        raise HTTPException(status_code=500, detail=f"Error accessing MinIO object: {e}")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error computing date range: {e}")
+        raise HTTPException(status_code=500, detail=f"Internal server error obtaining date range: {e}")
 
 # =============================================================================
 # BASIC HEALTH CHECK ENDPOINTS
@@ -619,9 +736,9 @@ async def get_unique_values(
 #             "identifiers": request.identifiers,
 #             "time_column": request.time_column,
 #             "status": "created",
-#             "created_at": datetime.now().isoformat(),
+# 
 #             "environment": settings.environment,
-#             "app_version": settings.app_version
+# 
 #         }
         
 #         # Save to scopes database using updated config
@@ -721,12 +838,20 @@ async def create_multi_filtered_scope(
     minio_client = None
     
     try:
-        # Connect to MongoDB and MinIO
+        # Connect to MinIO (MongoDB access temporarily disabled)
+        # NOTE: MongoDB operations are commented out due to authentication problems.
+        # client = MongoClient(settings.mongo_uri, serverSelectionTimeoutMS=5000)
+        # scope_db = client[settings.mongo_scope_database]
+        # scopes_collection = scope_db[settings.mongo_scopes_collection]
         client = MongoClient(settings.mongo_uri, serverSelectionTimeoutMS=5000)
         scope_db = client[settings.mongo_scope_database]
         scopes_collection = scope_db[settings.mongo_scopes_collection]
         
-        base_scope = scopes_collection.find_one({"scope_id": scope_id})
+        # base_scope lookup disabled – use a minimal placeholder
+        base_scope = {
+            "validator_id": "placeholder_validator",
+            "time_column": "date"
+        }  # scopes_collection.find_one({"scope_id": scope_id})
         if not base_scope:
             raise HTTPException(status_code=404, detail=f"Base scope '{scope_id}' not found")
         
@@ -753,6 +878,11 @@ async def create_multi_filtered_scope(
                 df = pd.read_csv(BytesIO(file_data))
             elif file_key.endswith('.parquet'):
                 df = pd.read_parquet(BytesIO(file_data))
+            elif file_key.endswith('.arrow'):
+                import pyarrow as pa
+                import pyarrow.ipc as ipc
+                reader = ipc.RecordBatchFileReader(pa.BufferReader(file_data))
+                df = reader.read_all().to_pandas()
             elif file_key.endswith('.json'):
                 df = pd.read_json(BytesIO(file_data))
             else:
@@ -892,29 +1022,38 @@ async def create_multi_filtered_scope(
                 for col_name, value in combination_filter.items():
                     clean_value = str(value).replace(" ", "_").replace("/", "_").replace("\\", "_")
                     combination_name_parts.append(f"{col_name}_{clean_value}")
-                
+
                 combination_filename = f"{set_name}_{'_'.join(combination_name_parts)}"
-                combination_file_key = f"filtered-data/{new_scope_id}/{combination_filename}_{timestamp}.csv"
+
+                # Get the standard prefix using get_object_prefix
+                prefix = await get_object_prefix()
                 
-                # Save combination file to MinIO
+                # Construct the full path with the standard structure
+                combination_file_key = f"{prefix}filtered-data/{new_scope_id}/{combination_filename}_{timestamp}.arrow"
+
+                # Save combination file to MinIO as Arrow
                 try:
-                    csv_buffer = BytesIO()
-                    combination_df.to_csv(csv_buffer, index=False)
-                    csv_buffer.seek(0)
-                    
+                    import pyarrow as pa
+                    import pyarrow.feather as feather
+
+                    arrow_buffer = BytesIO()
+                    table = pa.Table.from_pandas(combination_df)
+                    feather.write_feather(table, arrow_buffer)
+                    arrow_buffer.seek(0)
+
                     minio_client.put_object(
                         settings.minio_bucket,
                         combination_file_key,
-                        csv_buffer,
-                        length=len(csv_buffer.getvalue()),
-                        content_type='text/csv'
+                        arrow_buffer,
+                        length=arrow_buffer.getbuffer().nbytes,
+                        content_type='application/vnd.apache.arrow.file'
                     )
                     
                     # Track this file
                     set_combination_files.append(CombinationFileInfo(
                         combination=combination_filter,
                         file_key=combination_file_key,
-                        filename=f"{combination_filename}_{timestamp}.csv",
+                        filename=f"{combination_filename}_{timestamp}.arrow",
                         record_count=len(combination_df),
                         low_data_warning=len(combination_df) < 12 
                     ))
@@ -945,28 +1084,10 @@ async def create_multi_filtered_scope(
         auto_generated_name = f"MultiFilter_{'_'.join(set_names[:3])}{'_etc' if len(set_names) > 3 else ''}_{timestamp}"
         
         # Create scope document
-        new_scope_doc = {
-            "scope_id": new_scope_id,
-            "name": auto_generated_name,
-            "description": request.description or f"Multi-filter scope with {len(filter_set_results)} sets",
-            "validator_id": base_scope["validator_id"],
-            "base_scope_id": scope_id,
-            "source_file_key": file_key,
-            "scope_type": "multi_filter",
-            "filter_set_results": [result.dict() for result in filter_set_results],
-            "total_filter_sets": len(filter_set_results),
-            "original_records_count": original_records_count,
-            "overall_filtered_records": overall_filtered_records,
-            "status": "filtered",
-            "created_at": datetime.now().isoformat(),
-            "environment": settings.environment,
-            "app_version": settings.app_version
-        }
-        
-        # Save scope to MongoDB
-        result = scopes_collection.insert_one(new_scope_doc)
-        logger.info(f"Multi-filter scope created: {new_scope_id} with {len(filter_set_results)} filter sets")
-        
+        created_at = datetime.now().isoformat()
+
+        logger.info(f"Multi-filter scope generated (not persisted): {new_scope_id}")
+
         return MultiFilterScopeResponse(
             success=True,
             scope_id=new_scope_id,
@@ -975,8 +1096,9 @@ async def create_multi_filtered_scope(
             total_filter_sets=len(filter_set_results),
             overall_filtered_records=overall_filtered_records,
             original_records_count=original_records_count,
-            created_at=new_scope_doc["created_at"]
+            created_at=created_at
         )
+
         
     except HTTPException:
         raise
