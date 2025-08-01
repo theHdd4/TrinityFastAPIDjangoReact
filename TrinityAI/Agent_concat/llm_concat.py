@@ -334,7 +334,7 @@
 import requests
 import json
 import re
-from .ai_logic import build_prompt, call_llm, extract_json
+from ai_logic import build_prompt, call_llm, extract_json
 from pathlib import Path
 from minio import Minio
 from minio.error import S3Error
