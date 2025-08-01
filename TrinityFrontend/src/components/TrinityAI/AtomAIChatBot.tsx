@@ -69,9 +69,10 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
       });
       if (res.ok) {
         const data = await res.json();
-        const aiText = Array.isArray(data.suggestions) && data.suggestions.length
-          ? data.suggestions.join('\n')
-          : (data.message || data.response || data.final_response || 'AI response');
+        const aiText =
+          !data.success && Array.isArray(data.suggestions) && data.suggestions.length
+            ? data.suggestions.join('\n')
+            : (data.message || data.response || data.final_response || 'AI response');
         const aiMsg: Message = { id: (Date.now() + 1).toString(), content: aiText, sender: 'ai', timestamp: new Date() };
         setMessages(prev => [...prev, aiMsg]);
         if (atomType === 'concat' && data.concat_json) {
