@@ -117,3 +117,26 @@ class ArrowDataset(models.Model):
 
     def __str__(self):
         return f"{self.atom_id}:{self.file_key}"
+
+
+class RegistryEnvironment(models.Model):
+    """Per-tenant environment metadata shared across services."""
+
+    client_name = models.CharField(max_length=150)
+    client_id = models.CharField(max_length=255, blank=True)
+    app_name = models.CharField(max_length=150)
+    app_id = models.CharField(max_length=255, blank=True)
+    project_name = models.CharField(max_length=150)
+    project_id = models.CharField(max_length=255, blank=True)
+    user_id = models.CharField(max_length=255, blank=True)
+    identifiers = models.JSONField(blank=True, default=list)
+    measures = models.JSONField(blank=True, default=list)
+    dimensions = models.JSONField(blank=True, default=dict)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "registry_environment"
+        unique_together = ("client_name", "app_name", "project_name")
+
+    def __str__(self) -> str:  # pragma: no cover - basic repr
+        return f"{self.client_name}/{self.app_name}/{self.project_name}"

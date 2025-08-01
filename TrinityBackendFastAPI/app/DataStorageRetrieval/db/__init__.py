@@ -8,6 +8,13 @@ from .arrow_dataset import (
     get_dataset_info,
 )
 from .project_state import upsert_project_state, fetch_project_state
+from .environment import (
+    upsert_environment,
+    fetch_environment,
+    delete_environment,
+    rename_environment,
+    init_environment_registry,
+)
 
 __all__ = [
     "asyncpg", "POSTGRES_HOST", "POSTGRES_USER", "POSTGRES_PASSWORD", "POSTGRES_DB",
@@ -19,4 +26,9 @@ __all__ = [
     "get_dataset_info",
     "upsert_project_state",
     "fetch_project_state",
+    "upsert_environment",
+    "fetch_environment",
+    "delete_environment",
+    "rename_environment",
+    "init_environment_registry",
 ]

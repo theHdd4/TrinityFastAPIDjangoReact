@@ -7,5 +7,5 @@ class RegistryConfig(AppConfig):
     verbose_name = "App / Session / Project Registry"
 
     def ready(self):
-        # Register signal handlers for project folder management
+        """Register signal handlers."""
         from . import signals  # noqa: F401

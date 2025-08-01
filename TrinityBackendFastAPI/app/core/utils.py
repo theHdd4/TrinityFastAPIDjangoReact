@@ -6,6 +6,10 @@ import os
 from typing import Dict, Tuple
 import json
 from app.features.feature_overview.deps import redis_client
+try:
+    from DataStorageRetrieval.db import init_environment_registry
+except Exception:  # pragma: no cover - optional
+    init_environment_registry = None
 
 ENV_TTL = 3600
 ENV_NAMESPACE = "env"
@@ -43,6 +47,7 @@ async def _query_env_vars(client_id: str, app_id: str, project_id: str) -> Dict[
             user=POSTGRES_USER,
             password=POSTGRES_PASSWORD,
             database=POSTGRES_DB,
+            server_settings={"search_path": client_name},
         )
     except Exception:
         return None
@@ -70,6 +75,7 @@ async def _query_env_vars_by_names(client_name: str, app_name: str, project_name
             user=POSTGRES_USER,
             password=POSTGRES_PASSWORD,
             database=POSTGRES_DB,
+            server_settings={"search_path": client_name},
         )
     except Exception:
         return None
@@ -87,6 +93,52 @@ async def _query_env_vars_by_names(client_name: str, app_name: str, project_name
         return {r["key"]: r["value"] for r in rows}
     finally:
         await conn.close()
+
+
+async def _query_registry_env(client_name: str, app_name: str, project_name: str) -> Dict[str, str] | None:
+    if asyncpg is None:
+        return None
+    try:
+        conn = await asyncpg.connect(
+            host=POSTGRES_HOST,
+            user=POSTGRES_USER,
+            password=POSTGRES_PASSWORD,
+            database=POSTGRES_DB,
+            server_settings={"search_path": client_name},
+        )
+    except Exception:
+        return None
+    try:
+        if init_environment_registry is not None:
+            await init_environment_registry(client_name)
+        row = await conn.fetchrow(
+            """
+            SELECT identifiers, measures, dimensions
+            FROM registry_environment
+            WHERE client_name=$1 AND app_name=$2 AND project_name=$3
+            """,
+            client_name,
+            app_name,
+            project_name,
+        )
+        if row:
+            env: Dict[str, str] = {
+                "CLIENT_NAME": client_name,
+                "APP_NAME": app_name,
+                "PROJECT_NAME": project_name,
+            }
+            if row["identifiers"] is not None:
+                env["IDENTIFIERS"] = json.dumps(row["identifiers"], default=str)
+            if row["measures"] is not None:
+                env["MEASURES"] = json.dumps(row["measures"], default=str)
+            if row["dimensions"] is not None:
+                env["DIMENSIONS"] = json.dumps(row["dimensions"], default=str)
+            return env
+    except Exception:
+        return None
+    finally:
+        await conn.close()
+    return None
 
 
 async def get_env_vars(
@@ -141,6 +193,8 @@ async def get_env_vars(
         env = await _query_env_vars(client_id, app_id, project_id)
     if not env and client_name and project_name:
         env = await _query_env_vars_by_names(client_name, app_name, project_name)
+    if not env and client_name and project_name:
+        env = await _query_registry_env(client_name, app_name, project_name)
     if not env:
         env = {
             "CLIENT_NAME": os.getenv("CLIENT_NAME", "default_client"),

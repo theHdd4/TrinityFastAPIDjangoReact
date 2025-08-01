@@ -619,6 +619,23 @@ async def save_config(req: SaveConfigRequest):
         redis_client.setex(map_key, 3600, json.dumps(req.dimensions, default=str))
     mongo_result = save_classifier_config_to_mongo(data)
     print(f"📦 mongo save result {mongo_result}")
+    try:
+        from DataStorageRetrieval.db.environment import upsert_environment
+
+        await upsert_environment(
+            req.client_name,
+            req.app_name,
+            req.project_name,
+            req.identifiers,
+            req.measures,
+            req.dimensions,
+            client_id=env.get("CLIENT_ID", ""),
+            app_id=env.get("APP_ID", ""),
+            project_id=env.get("PROJECT_ID", ""),
+            user_id=env.get("USER_ID", ""),
+        )
+    except Exception:
+        pass
     return {"status": "success", "key": key, "data": data, "mongo": mongo_result}
 
 
