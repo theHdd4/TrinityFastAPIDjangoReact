@@ -100,6 +100,13 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
                   concatResults: result,
                   concatId: result.concat_id,
                 });
+                const doneMsg: Message = {
+                  id: (Date.now() + 1).toString(),
+                  content: result.message || 'Concatenation completed',
+                  sender: 'ai',
+                  timestamp: new Date(),
+                };
+                setMessages(prev => [...prev, doneMsg]);
               } else {
                 updateAtomSettings(atomId, { file1, file2, direction });
               }
