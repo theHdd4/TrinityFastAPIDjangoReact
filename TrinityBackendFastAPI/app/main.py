@@ -19,9 +19,11 @@ origins = os.getenv(
 )
 allowed_origins = [o.strip() for o in origins.split(",") if o.strip()]
 
+# Respect the FASTAPI_CORS_ORIGINS env var.  Fallback to allowing
+# any origin if no value is provided.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://10.2.1.65:8081"],  # or ["*"] for all
+    allow_origins=allowed_origins or ["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
