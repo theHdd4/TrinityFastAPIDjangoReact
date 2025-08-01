@@ -337,7 +337,7 @@ import re
 from pathlib import Path
 from minio import Minio
 from minio.error import S3Error
-from DataStorageRetrieval.arrow_client import load_env_from_redis
+
 from datetime import datetime
 import uuid
 import os
@@ -383,12 +383,21 @@ class SmartConcatAgent:
         self._load_files()
 
     def _maybe_update_prefix(self) -> None:
-        """Reload environment from Redis and update prefix if changed."""
-        load_env_from_redis()
-        current = os.getenv("MINIO_PREFIX", self.prefix)
+        """Refresh ``self.prefix`` from environment variables."""
+        current = os.getenv("MINIO_PREFIX")
+        if not current:
+            client = os.getenv("CLIENT_NAME", "")
+            app = os.getenv("APP_NAME", "")
+            project = os.getenv("PROJECT_NAME", "")
+            if client or app or project:
+                current = f"{client}/{app}/{project}/"
+            else:
+                current = ""
+
+        current = current.lstrip("/")
         if current and not current.endswith("/"):
             current += "/"
-        if current and current != self.prefix:
+        if current != self.prefix:
             logger.info("minio prefix updated from %s to %s", self.prefix, current)
             self.prefix = current
     
@@ -417,15 +426,16 @@ class SmartConcatAgent:
 
         try:
             self._maybe_update_prefix()
+            prefix = self.prefix.lstrip("/")
             endpoint = _describe_endpoint(self.minio_client)
             logger.debug(
                 "listing objects from %s bucket=%s prefix=%s",
                 endpoint,
                 self.bucket,
-                self.prefix,
+                prefix,
             )
             objects = self.minio_client.list_objects(
-                self.bucket, prefix=self.prefix, recursive=True
+                self.bucket, prefix=prefix, recursive=True
             )
             self.available_files = [
                 obj.object_name.split("/")[-1]

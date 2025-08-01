@@ -50,8 +50,8 @@ def concatenate_files(request: ConcatRequest):
     """Smart concatenation endpoint with complete memory"""
     start_time = time.time()
     
-    print(f"\n[REQUEST] Prompt: {request.prompt}")
-    print(f"[REQUEST] Session: {request.session_id}")
+    logger.info("Prompt: %s", request.prompt)
+    logger.info("Session: %s", request.session_id)
     
     # Process with complete memory context
     result = agent.process_request(request.prompt, request.session_id)
@@ -60,9 +60,9 @@ def concatenate_files(request: ConcatRequest):
     processing_time = round(time.time() - start_time, 2)
     result["processing_time"] = processing_time
 
-    print(f"[RESULT] Success: {result.get('success', False)}")
-    print(f"[RESULT] Used Memory: {result.get('used_memory', False)}")
-    print(f"[RESULT] Time: {processing_time}s")
+    logger.info("Result Success: %s", result.get("success", False))
+    logger.info("Used Memory: %s", result.get("used_memory", False))
+    logger.info("Processing Time: %ss", processing_time)
 
     if result.get("success") and result.get("concat_json"):
         cfg = result["concat_json"]
