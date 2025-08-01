@@ -337,7 +337,7 @@ import re
 from pathlib import Path
 from minio import Minio
 from minio.error import S3Error
-from DataStorageRetrieval.arrow_client import load_env_from_redis
+
 from datetime import datetime
 import uuid
 import os
@@ -381,6 +381,25 @@ class SmartConcatAgent:
         
         # Load files once
         self._load_files()
+
+    def _maybe_update_prefix(self) -> None:
+        """Rebuild ``self.prefix`` from env vars and update ``MINIO_PREFIX``."""
+        client = os.getenv("CLIENT_NAME", "").strip()
+        app = os.getenv("APP_NAME", "").strip()
+        project = os.getenv("PROJECT_NAME", "").strip()
+
+        current = f"{client}/{app}/{project}/" if any([client, app, project]) else ""
+
+        current = current.lstrip("/")
+        if current and not current.endswith("/"):
+            current += "/"
+
+        if os.getenv("MINIO_PREFIX") != current:
+            os.environ["MINIO_PREFIX"] = current
+
+        if current != self.prefix:
+            logger.info("minio prefix updated from %s to %s", self.prefix, current)
+            self.prefix = current
     
     def _load_files(self):
         """Load available Arrow files from registry or MinIO."""
@@ -397,50 +416,35 @@ class SmartConcatAgent:
                     arrow_objects = list(data.get("arrow_to_original", {}).keys())
             if arrow_objects:
                 self.available_files = [Path(a).name for a in arrow_objects]
-                print(f"[SYSTEM] Loaded {len(self.available_files)} arrow files from registry")
+                logger.info(
+                    "loaded %d arrow files from registry",
+                    len(self.available_files),
+                )
                 return
         except Exception as e:
-            print(f"[WARN] Failed to read arrow registry: {e}")
+            logger.warning("failed to read arrow registry: %s", e)
 
         try:
-            load_env_from_redis()
+            self._maybe_update_prefix()
+            prefix = self.prefix.lstrip("/")
             endpoint = _describe_endpoint(self.minio_client)
             logger.debug(
                 "listing objects from %s bucket=%s prefix=%s",
                 endpoint,
                 self.bucket,
-                self.prefix,
-            )
-            print(
-                f"[DEBUG] listing objects from {endpoint} bucket={self.bucket} prefix={self.prefix}"
-            )
-            print(
-                "[DEBUG] env CLIENT_NAME=%s APP_NAME=%s PROJECT_NAME=%s MINIO_PREFIX=%s"
-                % (
-                    os.getenv("CLIENT_NAME"),
-                    os.getenv("APP_NAME"),
-                    os.getenv("PROJECT_NAME"),
-                    os.getenv("MINIO_PREFIX"),
-                )
-            )
-            logger.debug(
-                "env CLIENT_NAME=%s APP_NAME=%s PROJECT_NAME=%s MINIO_PREFIX=%s",
-                os.getenv("CLIENT_NAME"),
-                os.getenv("APP_NAME"),
-                os.getenv("PROJECT_NAME"),
-                os.getenv("MINIO_PREFIX"),
+                prefix,
             )
             objects = self.minio_client.list_objects(
-                self.bucket, prefix=self.prefix, recursive=True
+                self.bucket, prefix=prefix, recursive=True
             )
             self.available_files = [
                 obj.object_name.split("/")[-1]
                 for obj in objects
                 if obj.object_name.endswith(".arrow")
             ]
-            print(f"[SYSTEM] Loaded {len(self.available_files)} arrow files from MinIO")
+            logger.info("loaded %d arrow files from MinIO under prefix %s", len(self.available_files), self.prefix)
         except S3Error as e:
-            print(f"[ERROR] MinIO connection failed: {e}")
+            logger.error("MinIO connection failed: %s", e)
             self.available_files = []
     
     def create_session(self, session_id=None):
@@ -474,6 +478,9 @@ class SmartConcatAgent:
             session_id = self.create_session()
         
         session = self.get_session(session_id)
+        self._maybe_update_prefix()
+        if not self.available_files:
+            self._load_files()
         
         # Build rich conversation context with complete JSON history
         context = self._build_rich_context(session_id)
@@ -569,7 +576,7 @@ Return ONLY the JSON response:"""
             return processed_result
             
         except Exception as e:
-            print(f"[ERROR] Processing failed: {e}")
+            logger.error("Processing failed: %s", e)
             return self._create_error_response(session_id, str(e))
     
     def _build_rich_context(self, session_id):

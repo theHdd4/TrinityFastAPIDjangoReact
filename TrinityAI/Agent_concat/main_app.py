@@ -7,6 +7,7 @@ from fastapi import FastAPI
 from pydantic import BaseModel
 from typing import Optional
 import time
+import requests
 from llm_concat import SmartConcatAgent
 import logging
 
@@ -34,6 +35,12 @@ agent = SmartConcatAgent(
     cfg_minio["prefix"],
 )
 
+# Backend concat API for performing the actual concatenation
+PERFORM_URL = os.getenv(
+    "CONCAT_PERFORM_URL",
+    f"http://{os.getenv('HOST_IP', 'localhost')}:{os.getenv('FASTAPI_PORT', '8004')}/api/concat/perform",
+)
+
 class ConcatRequest(BaseModel):
     prompt: str
     session_id: Optional[str] = None
@@ -43,20 +50,41 @@ def concatenate_files(request: ConcatRequest):
     """Smart concatenation endpoint with complete memory"""
     start_time = time.time()
     
-    print(f"\n[REQUEST] Prompt: {request.prompt}")
-    print(f"[REQUEST] Session: {request.session_id}")
+    logger.info("Prompt: %s", request.prompt)
+    logger.info("Session: %s", request.session_id)
     
     # Process with complete memory context
     result = agent.process_request(request.prompt, request.session_id)
-    
+
     # Add timing
     processing_time = round(time.time() - start_time, 2)
     result["processing_time"] = processing_time
-    
-    print(f"[RESULT] Success: {result.get('success', False)}")
-    print(f"[RESULT] Used Memory: {result.get('used_memory', False)}")
-    print(f"[RESULT] Time: {processing_time}s")
-    
+
+    logger.info("Result Success: %s", result.get("success", False))
+    logger.info("Used Memory: %s", result.get("used_memory", False))
+    logger.info("Processing Time: %ss", processing_time)
+
+    if result.get("success") and result.get("concat_json"):
+        cfg = result["concat_json"]
+        file1 = cfg.get("file1")
+        if isinstance(file1, list):
+            file1 = file1[0] if file1 else ""
+        file2 = cfg.get("file2")
+        if isinstance(file2, list):
+            file2 = file2[0] if file2 else ""
+        payload = {
+            "file1": file1,
+            "file2": file2,
+            "concat_direction": cfg.get("concat_direction", "vertical"),
+        }
+        try:
+            resp = requests.post(PERFORM_URL, json=payload, timeout=60)
+            resp.raise_for_status()
+            result["concat_result"] = resp.json()
+        except Exception as exc:
+            result["concat_result"] = None
+            result["message"] = f"Concat operation failed: {exc}"
+
     return result
 
 @app.get("/history/{session_id}")

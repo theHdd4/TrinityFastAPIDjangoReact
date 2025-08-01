@@ -65,7 +65,7 @@ try:
     mongo_client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000)
     config_db = mongo_client[CONFIG_DB]
 except Exception as exc:  # pragma: no cover - optional Mongo
-    print(f"⚠️ Mongo connection failed: {exc}")
+    logger.warning("Mongo connection failed: %s", exc)
     mongo_client = None
     config_db = None
 
@@ -101,18 +101,18 @@ async def _query_registry_names(schema: str) -> Tuple[Tuple[str, str, str] | Non
             f"Looking in the postgres server: {POSTGRES_HOST}:{POSTGRES_PORT} in the schema: {schema} "
             f"table: registry_environment with the query: {query}"
         )
-        print(f"\U0001F50E {message}")
+        logger.debug(message)
         row = await conn.fetchrow(query)
         await conn.close()
         if row:
             names = (row["client_name"], row["app_name"], row["project_name"])
             result_msg = f"result fetched are {names}"
-            print(f"\U0001F4DD {result_msg}")
+            logger.debug(result_msg)
             return names, f"{message} and {result_msg}"
         return None, message
     except Exception as exc:
         err = f"direct query failed: {exc}"
-        print(f"\u26a0\ufe0f {err}")
+        logger.warning(err)
         return None, err
 
 
@@ -124,7 +124,7 @@ def get_classifier_config_from_mongo(client: str, app: str, project: str):
         document_id = f"{client}/{app}/{project}"
         return config_db[CONFIG_COLLECTION].find_one({"_id": document_id})
     except Exception as exc:  # pragma: no cover - runtime failures
-        print(f"⚠️ Mongo read error: {exc}")
+        logger.warning("Mongo read error: %s", exc)
         return None
 
 
@@ -258,7 +258,7 @@ def _fetch_names_from_db(
     logger.debug(
         "_fetch_names_from_db resolved client=%s app=%s project=%s", client, app, project
     )
-    print(f"ENV resolved -> client={client} app={app} project={project}")
+    logger.info("ENV resolved -> client=%s app=%s project=%s", client, app, project)
     return client, app, project, debug
 
 
@@ -317,7 +317,7 @@ def initialize_single_llm_system():
         )
         return processor
     except Exception as e:
-        print(f"System initialization error: {e}")
+        logger.error("System initialization error: %s", e)
         return None
 
 processor = initialize_single_llm_system()
@@ -359,7 +359,7 @@ async def chat_endpoint(request: QueryRequest):
     - Maintains backward compatible JSON format
     """
     try:
-        print(f"🚀 Single LLM API Request: {request.query}")
+        logger.info("Single LLM API Request: %s", request.query)
         
         if not processor:
             return jsonable_encoder({
@@ -376,14 +376,16 @@ async def chat_endpoint(request: QueryRequest):
         # Single LLM processing
         result = processor.process_query(request.query)
         
-        print(f"🎯 Single LLM API Response Status: {result.get('domain_status', 'unknown')}")
+        logger.info(
+            "Single LLM API Response Status: %s", result.get("domain_status", "unknown")
+        )
         
         # Clean and return the result
         clean_result = convert_numpy(result)
         return jsonable_encoder(clean_result)
         
     except Exception as e:
-        print(f"❌ Single LLM API Error: {e}")
+        logger.error("Single LLM API Error: %s", e)
         error_response = {
             "domain_status": "in_domain",
             "llm2_status": "error",
