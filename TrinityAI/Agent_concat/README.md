@@ -2,6 +2,9 @@
 
 Smart concatenation helper for the Concat atom. It uses an LLM to suggest files and orientation based on a text prompt.
 
+The prompt template and response parsing live in `ai_logic.py`. Adjust that file
+to change how the assistant works.
+
 ## Endpoints
 
 - `POST http://10.2.1.242:8002/concat` – process a prompt and return concatenation instructions.

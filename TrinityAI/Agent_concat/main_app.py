@@ -81,9 +81,15 @@ def concatenate_files(request: ConcatRequest):
             resp = requests.post(PERFORM_URL, json=payload, timeout=60)
             resp.raise_for_status()
             result["concat_result"] = resp.json()
+            # Override message with backend result on success so the
+            # frontend only displays the successful message
+            if isinstance(result["concat_result"], dict):
+                result["message"] = result["concat_result"].get(
+                    "message", "Concatenation completed successfully"
+                )
         except Exception as exc:
             result["concat_result"] = None
-            result["message"] = f"Concat operation failed: {exc}"
+            logger.error("concat perform failed: %s", exc)
 
     return result
 

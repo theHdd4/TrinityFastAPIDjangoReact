@@ -9,6 +9,12 @@ The frontend references these URLs directly so the host and port must match your
 - **Agent_Merge** – assists with dataset merges.
 - **Agent_chart_maker** – internal helpers for chart making (no standalone API).
 
+Each agent folder uses a small `ai_logic.py` module that contains only the
+prompt building and JSON parsing required for the language model. The FastAPI
+apps and file management code import this module so an AI expert can adjust the
+behaviour by editing a single file. To create a new agent simply copy an
+existing folder, tweak `ai_logic.py` and wire up the endpoints.
+
 See the individual READMEs for details and exact endpoints.
 
 The AI agents read `MINIO_ENDPOINT`, `MINIO_ACCESS_KEY` and
