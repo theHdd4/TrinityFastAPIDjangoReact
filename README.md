@@ -48,6 +48,9 @@ Follow the steps below to run all services together.
   `docker-compose-dev.yml`) it automatically switches API calls to the backend
   ports `8003`–`8005`. Custom `.env` files can override these defaults with
   `VITE_DJANGO_PORT`, `VITE_FASTAPI_PORT` and `VITE_AI_PORT`.
+  The AI container listens on port `8002` in the standard setup, so set
+  `VITE_AI_PORT=8002` or `VITE_TRINITY_AI_API` accordingly when running it
+  outside the dev stack.
 
   The frontend is exposed at `https://trinity.quantmatrixai.com` through
   Cloudflare Tunnel while Traefik proxies `/admin/` to the Django container and

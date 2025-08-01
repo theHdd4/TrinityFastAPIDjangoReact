@@ -46,7 +46,10 @@ class Project(models.Model):
     history = HistoricalRecords()
 
     class Meta:
-        unique_together = ("slug", "owner")
+        unique_together = (
+            ("slug", "owner"),
+            ("owner", "app", "name"),
+        )
         ordering = ["-updated_at"]
 
     def __str__(self):

@@ -1,5 +1,6 @@
 from rest_framework import viewsets, permissions
 from rest_framework.response import Response
+from django.utils.text import slugify
 import os
 from apps.accounts.views import CsrfExemptSessionAuthentication
 from apps.accounts.utils import save_env_var, get_env_dict, load_env_vars
@@ -74,7 +75,27 @@ class ProjectViewSet(viewsets.ModelViewSet):
         return qs
 
     def perform_create(self, serializer):
-        serializer.save(owner=self.request.user)
+        user = self.request.user
+        app = serializer.validated_data.get("app")
+        base_name = serializer.validated_data.get("name")
+        name = base_name
+        counter = 1
+        while Project.objects.filter(owner=user, app=app, name=name).exists():
+            name = f"{base_name} {counter}"
+            counter += 1
+
+        slug = serializer.validated_data.get("slug")
+        if not slug:
+            slug_base = slugify(name)
+        else:
+            slug_base = slug
+        slug_val = slug_base
+        s_count = 1
+        while Project.objects.filter(owner=user, slug=slug_val).exists():
+            s_count += 1
+            slug_val = f"{slug_base}-{s_count}"
+
+        serializer.save(owner=user, name=name, slug=slug_val)
 
     def retrieve(self, request, *args, **kwargs):
         load_env_vars(request.user)
