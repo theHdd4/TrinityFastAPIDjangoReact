@@ -89,7 +89,7 @@ def concatenate_files(request: ConcatRequest):
                 )
         except Exception as exc:
             result["concat_result"] = None
-            result["message"] = f"Concat operation failed: {exc}"
+            logger.error("concat perform failed: %s", exc)
 
     return result
 
