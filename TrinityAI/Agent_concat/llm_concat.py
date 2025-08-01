@@ -383,20 +383,20 @@ class SmartConcatAgent:
         self._load_files()
 
     def _maybe_update_prefix(self) -> None:
-        """Refresh ``self.prefix`` from environment variables."""
-        current = os.getenv("MINIO_PREFIX")
-        if not current:
-            client = os.getenv("CLIENT_NAME", "")
-            app = os.getenv("APP_NAME", "")
-            project = os.getenv("PROJECT_NAME", "")
-            if client or app or project:
-                current = f"{client}/{app}/{project}/"
-            else:
-                current = ""
+        """Rebuild ``self.prefix`` from env vars and update ``MINIO_PREFIX``."""
+        client = os.getenv("CLIENT_NAME", "").strip()
+        app = os.getenv("APP_NAME", "").strip()
+        project = os.getenv("PROJECT_NAME", "").strip()
+
+        current = f"{client}/{app}/{project}/" if any([client, app, project]) else ""
 
         current = current.lstrip("/")
         if current and not current.endswith("/"):
             current += "/"
+
+        if os.getenv("MINIO_PREFIX") != current:
+            os.environ["MINIO_PREFIX"] = current
+
         if current != self.prefix:
             logger.info("minio prefix updated from %s to %s", self.prefix, current)
             self.prefix = current
