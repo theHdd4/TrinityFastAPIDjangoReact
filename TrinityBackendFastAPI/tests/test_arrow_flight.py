@@ -417,6 +417,14 @@ def test_list_saved_dataframes_env(monkeypatch):
         def set(self, key, value):
             self.mapping[key] = value
 
+        def hgetall(self, key):
+            return self.mapping.get(key, {})
+
+        def hset(self, key, mapping=None, **kwargs):
+            self.mapping.setdefault(key, {})
+            if mapping:
+                self.mapping[key].update(mapping)
+
     # Redis still holds the old names; ``get_object_prefix`` should ignore
     # these stale values, consult ``get_env_vars`` with the correct new names
     # and then refresh the cache.
@@ -477,6 +485,85 @@ def test_list_saved_dataframes_env(monkeypatch):
     assert redis_mapping["env:1:2:3:PROJECT_NAME"] == "proj"
 
 
+def test_list_saved_dataframes_updates_currentenv(monkeypatch):
+    routes = load_routes()
+
+    os.environ.update(
+        {
+            "USER_ID": "42",
+            "CLIENT_ID": "1",
+            "APP_ID": "2",
+            "PROJECT_ID": "3",
+            "CLIENT_NAME": "client",
+            "APP_NAME": "app",
+            "PROJECT_NAME": "proj",
+        }
+    )
+
+    class DummyRedis:
+        def __init__(self, mapping):
+            self.mapping = mapping
+
+        def get(self, key):
+            return self.mapping.get(key)
+
+        def set(self, key, value):
+            self.mapping[key] = value
+
+        def hgetall(self, key):
+            return self.mapping.get(key, {})
+
+        def hset(self, key, mapping=None, **kwargs):
+            self.mapping.setdefault(key, {})
+            if mapping:
+                self.mapping[key].update(mapping)
+
+    redis_mapping = {
+        "env:1:2:3:CLIENT_NAME": b"old_client",
+        "env:1:2:3:APP_NAME": b"old_app",
+        "env:1:2:3:PROJECT_NAME": b"old_project",
+        "currentenv:42": {
+            "client_id": "1",
+            "app_id": "2",
+            "project_id": "3",
+            "client_name": "old_client",
+            "app_name": "old_app",
+            "project_name": "old_project",
+        },
+    }
+
+    monkeypatch.setattr(routes, "redis_client", DummyRedis(redis_mapping))
+
+    async def fake_get_env_vars(client_id, app_id, project_id, *, client_name, app_name, project_name, **k):
+        return {"CLIENT_NAME": "client", "APP_NAME": "app", "PROJECT_NAME": "proj"}
+
+    monkeypatch.setattr(routes, "get_env_vars", fake_get_env_vars)
+
+    class DummyMinio:
+        def list_objects(self, bucket, prefix="", recursive=False):
+            yield types.SimpleNamespace(object_name=f"{prefix}df.arrow")
+
+        def stat_object(self, bucket, name):
+            return types.SimpleNamespace(last_modified=0)
+
+    monkeypatch.setattr(routes, "minio_client", DummyMinio())
+    monkeypatch.setattr(routes, "MINIO_BUCKET", "bucket")
+
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    app = FastAPI()
+    app.include_router(routes.router)
+    client = TestClient(app)
+
+    resp = client.get("/list_saved_dataframes")
+    assert resp.status_code == 200
+    current = redis_mapping["currentenv:42"]
+    assert current["client_name"] == "client"
+    assert current["app_name"] == "app"
+    assert current["project_name"] == "proj"
+
+
 def test_list_saved_dataframes_current_env_override(monkeypatch):
     routes = load_routes()
 
@@ -530,6 +617,14 @@ def test_list_saved_dataframes_current_env_override(monkeypatch):
 
         def set(self, key, value):
             self.mapping[key] = value
+
+        def hgetall(self, key):
+            return self.mapping.get(key, {})
+
+        def hset(self, key, mapping=None, **kwargs):
+            self.mapping.setdefault(key, {})
+            if mapping:
+                self.mapping[key].update(mapping)
 
     monkeypatch.setattr(routes, "redis_client", DummyRedis())
 

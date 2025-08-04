@@ -164,14 +164,15 @@ async def get_object_prefix(
     project_name: str = "",
 ) -> str:
     """Return the MinIO prefix for the current client/app/project."""
-    USER_ID = _parse_numeric_id(os.getenv("USER_ID"))
+    USER_ID_RAW = os.getenv("USER_ID", "")
+    USER_ID = _parse_numeric_id(USER_ID_RAW)
     PROJECT_ID = _parse_numeric_id(project_id or os.getenv("PROJECT_ID", "0"))
 
     # Pull the most recent client/app/project selection from Redis so that
     # renaming a project immediately reflects in subsequent API calls. If Redis
     # doesn't have the information we fall back to whatever was passed in or is
     # stored in environment variables.
-    current_env = _get_current_env(str(USER_ID))
+    current_env = _get_current_env(USER_ID_RAW)
 
     client_id_env = client_id or current_env.get("client_id") or os.getenv("CLIENT_ID", "")
     app_id_env = app_id or current_env.get("app_id") or os.getenv("APP_ID", "")
@@ -224,6 +225,23 @@ async def get_object_prefix(
                 redis_client.set(f"{base}:CLIENT_NAME", env.get("CLIENT_NAME", ""))
                 redis_client.set(f"{base}:APP_NAME", env.get("APP_NAME", ""))
                 redis_client.set(f"{base}:PROJECT_NAME", env.get("PROJECT_NAME", ""))
+            except Exception:
+                pass
+        # Refresh the user-scoped environment so subsequent requests pick up
+        # the latest client/app/project selection.
+        if USER_ID_RAW:
+            try:
+                redis_client.hset(
+                    f"currentenv:{USER_ID_RAW}",
+                    mapping={
+                        "client_id": client_id_env,
+                        "app_id": app_id_env,
+                        "project_id": project_id_env,
+                        "client_name": env.get("CLIENT_NAME", ""),
+                        "app_name": env.get("APP_NAME", ""),
+                        "project_name": env.get("PROJECT_NAME", ""),
+                    },
+                )
             except Exception:
                 pass
 
