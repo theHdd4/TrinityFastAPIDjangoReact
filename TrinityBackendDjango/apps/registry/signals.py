@@ -55,8 +55,48 @@ def update_env_vars_on_rename(sender, instance, **kwargs):
     if old.name != instance.name:
         old_pid = f"{old.name}_{old.pk}"
         new_pid = f"{instance.name}_{instance.pk}"
-        qs = UserEnvironmentVariable.objects.filter(project_id=old_pid)
+        tenant = _current_tenant_name()
+        app_slug = instance.app.slug
         print(f"🗄️ Renaming project in Postgres: {old.name} -> {instance.name}")
+
+        # Ensure the registry entry is updated even if no user-specific
+        # environment variables exist for this project. The Saved DataFrames
+        # panel reads from this table when resolving MinIO prefixes.
+        reg_obj = RegistryEnvironment.objects.filter(
+            client_name=tenant, app_name=app_slug, project_name=old.name
+        ).first()
+        if reg_obj:
+            env = reg_obj.envvars or {}
+            env.update(
+                {
+                    "CLIENT_NAME": tenant,
+                    "APP_NAME": app_slug,
+                    "PROJECT_NAME": instance.name,
+                    "PROJECT_ID": new_pid,
+                }
+            )
+            reg_obj.project_name = instance.name
+            reg_obj.envvars = env
+            reg_obj.save(update_fields=["project_name", "envvars"])
+            print(
+                f"🗃️ RegistryEnvironment updated for {tenant}/{app_slug} -> {instance.name}"
+            )
+        else:
+            RegistryEnvironment.objects.update_or_create(
+                client_name=tenant,
+                app_name=app_slug,
+                project_name=instance.name,
+                defaults={
+                    "envvars": {
+                        "CLIENT_NAME": tenant,
+                        "APP_NAME": app_slug,
+                        "PROJECT_NAME": instance.name,
+                        "PROJECT_ID": new_pid,
+                    }
+                },
+            )
+
+        qs = UserEnvironmentVariable.objects.filter(project_id=old_pid)
         cache_entries = list(
             qs.values(
                 "user_id",
@@ -92,41 +132,6 @@ def update_env_vars_on_rename(sender, instance, **kwargs):
             print(
                 f"♻️ Redis env updated for user {entry['user_id']} to {instance.name}"
             )
-            reg_obj = RegistryEnvironment.objects.filter(
-                client_name=entry["client_name"],
-                app_name=entry["app_name"],
-                project_name=entry["project_name"],
-            ).first()
-            if reg_obj:
-                reg_obj.project_name = instance.name
-                env = reg_obj.envvars or {}
-                env.update(
-                    {
-                        "CLIENT_NAME": entry["client_name"],
-                        "APP_NAME": entry["app_name"],
-                        "PROJECT_NAME": instance.name,
-                        "PROJECT_ID": new_pid,
-                    }
-                )
-                reg_obj.envvars = env
-                reg_obj.save(update_fields=["project_name", "envvars"])
-                print(
-                    f"🗃️ RegistryEnvironment updated for {entry['client_name']}/{entry['app_name']} -> {instance.name}"
-                )
-            else:
-                RegistryEnvironment.objects.update_or_create(
-                    client_name=entry["client_name"],
-                    app_name=entry["app_name"],
-                    project_name=instance.name,
-                    defaults={
-                        "envvars": {
-                            "CLIENT_NAME": entry["client_name"],
-                            "APP_NAME": entry["app_name"],
-                            "PROJECT_NAME": instance.name,
-                            "PROJECT_ID": new_pid,
-                        }
-                    },
-                )
             try:
                 mc = MongoClient(
                     getattr(settings, "MONGO_URI", "mongodb://mongo:27017/trinity"),
@@ -155,8 +160,6 @@ def update_env_vars_on_rename(sender, instance, **kwargs):
                 )
             except Exception:
                 pass
-        tenant = _current_tenant_name()
-        app_slug = instance.app.slug
         rename_project_folder(tenant, app_slug, old.name, instance.name, old.slug)
         new_slug_base = slugify(instance.name)
         slug_val = new_slug_base

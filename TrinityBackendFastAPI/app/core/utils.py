@@ -222,11 +222,21 @@ async def get_env_vars(
                 client_db, app_db, project_db = await fetch_client_app_project(
                     None, numeric_pid
                 )
-                env = {
-                    "CLIENT_NAME": client_db,
-                    "APP_NAME": app_db,
-                    "PROJECT_NAME": project_db,
-                }
+                # Fetch the authoritative environment row using the resolved
+                # names so renames are reflected immediately.
+                reg_env = await _query_registry_env(
+                    client_db or "",
+                    app_db or "",
+                    project_db or "",
+                )
+                if reg_env:
+                    env = reg_env
+                else:
+                    env = {
+                        "CLIENT_NAME": client_db,
+                        "APP_NAME": app_db,
+                        "PROJECT_NAME": project_db,
+                    }
                 source = "postgres"
             except Exception:
                 env = {
