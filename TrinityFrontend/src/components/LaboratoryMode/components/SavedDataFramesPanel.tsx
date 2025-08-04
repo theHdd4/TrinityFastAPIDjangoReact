@@ -31,7 +31,9 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle }) => {
     if (envStr) {
       try {
         const env = JSON.parse(envStr);
-        setPrefix(`${env.CLIENT_NAME}/${env.APP_NAME}/${env.PROJECT_NAME}/`);
+        const pref = `${env.CLIENT_NAME}/${env.APP_NAME}/${env.PROJECT_NAME}/`;
+        setPrefix(pref);
+        console.log('📁 SavedDataFramesPanel looking in MinIO:', pref);
         query =
           '?' +
           new URLSearchParams({
@@ -39,14 +41,19 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle }) => {
             app_name: env.APP_NAME || '',
             project_name: env.PROJECT_NAME || ''
           }).toString();
-      } catch {
-        /* ignore */
+      } catch (err) {
+        console.error('Failed to parse env from localStorage', err);
       }
+    } else {
+      console.log('📁 SavedDataFramesPanel looking in MinIO root');
     }
-    fetch(`${VALIDATE_API}/list_saved_dataframes${query}`)
+    fetch(`${VALIDATE_API}/list_saved_dataframes${query}`, { credentials: 'include' })
       .then(res => res.json())
       .then(data => setFiles(Array.isArray(data.files) ? data.files : []))
-      .catch(() => setFiles([]));
+      .catch(err => {
+        console.error('Failed to load saved dataframes', err);
+        setFiles([]);
+      });
   }, [isOpen]);
 
   const handleOpen = (obj: string) => {
