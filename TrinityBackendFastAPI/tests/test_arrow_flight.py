@@ -413,18 +413,23 @@ def test_list_saved_dataframes_env(monkeypatch):
         def get(self, key):
             return self.mapping.get(key)
 
-    # Redis has the updated names after a rename
-    monkeypatch.setattr(
-        routes,
-        "redis_client",
-        DummyRedis(
-            {
-                "env:1:2:3:CLIENT_NAME": b"client",
-                "env:1:2:3:APP_NAME": b"app",
-                "env:1:2:3:PROJECT_NAME": b"proj",
-            }
-        ),
-    )
+        def set(self, key, value):
+            self.mapping[key] = value
+
+    # Redis still holds the old names; ``get_env_vars`` will return the new
+    # values after a rename. ``get_object_prefix`` should refresh Redis and use
+    # the new values when building the prefix.
+    redis_mapping = {
+        "env:1:2:3:CLIENT_NAME": b"old_client",
+        "env:1:2:3:APP_NAME": b"old_app",
+        "env:1:2:3:PROJECT_NAME": b"old_project",
+    }
+    monkeypatch.setattr(routes, "redis_client", DummyRedis(redis_mapping))
+
+    async def fake_get_env_vars(*a, **k):
+        return {"CLIENT_NAME": "client", "APP_NAME": "app", "PROJECT_NAME": "proj"}
+
+    monkeypatch.setattr(routes, "get_env_vars", fake_get_env_vars)
 
     class DummyMinio:
         def list_objects(self, bucket, prefix="", recursive=False):
@@ -461,4 +466,7 @@ def test_list_saved_dataframes_env(monkeypatch):
     assert data["environment"]["CLIENT_NAME"] == "client"
     assert data["environment"]["APP_NAME"] == "app"
     assert data["environment"]["PROJECT_NAME"] == "proj"
+    assert redis_mapping["env:1:2:3:CLIENT_NAME"] == "client"
+    assert redis_mapping["env:1:2:3:APP_NAME"] == "app"
+    assert redis_mapping["env:1:2:3:PROJECT_NAME"] == "proj"
 

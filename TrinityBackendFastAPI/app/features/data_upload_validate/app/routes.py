@@ -168,6 +168,7 @@ async def get_object_prefix(
     project_id_env = project_id or os.getenv("PROJECT_ID", "")
 
     env = {}
+    base = ""
     if client_id_env or app_id_env or project_id_env:
         base = f"env:{client_id_env}:{app_id_env}:{project_id_env}"
         try:
@@ -186,16 +187,34 @@ async def get_object_prefix(
         except Exception:
             env = {}
 
-    if not env:
-        env = await get_env_vars(
-            client_id_env,
-            app_id_env,
-            project_id_env,
-            client_name=client_name or os.getenv("CLIENT_NAME", ""),
-            app_name=app_name or os.getenv("APP_NAME", ""),
-            project_name=project_name or os.getenv("PROJECT_NAME", ""),
-            use_cache=False,
-        )
+    # Always refresh from the authoritative source to ensure renamed
+    # projects update the Redis cache. ``get_env_vars`` will consult
+    # Postgres/Django and return the latest names for the provided
+    # identifiers.
+    fresh_env = await get_env_vars(
+        client_id_env,
+        app_id_env,
+        project_id_env,
+        client_name=env.get("CLIENT_NAME")
+        or client_name
+        or os.getenv("CLIENT_NAME", ""),
+        app_name=env.get("APP_NAME")
+        or app_name
+        or os.getenv("APP_NAME", ""),
+        project_name=env.get("PROJECT_NAME")
+        or project_name
+        or os.getenv("PROJECT_NAME", ""),
+        use_cache=False,
+    )
+    if fresh_env:
+        env = fresh_env
+        if base:
+            try:
+                redis_client.set(f"{base}:CLIENT_NAME", env.get("CLIENT_NAME", ""))
+                redis_client.set(f"{base}:APP_NAME", env.get("APP_NAME", ""))
+                redis_client.set(f"{base}:PROJECT_NAME", env.get("PROJECT_NAME", ""))
+            except Exception:
+                pass
 
     print("🔧 fetched env", env)
     client = env.get("CLIENT_NAME", os.getenv("CLIENT_NAME", "default_client"))
