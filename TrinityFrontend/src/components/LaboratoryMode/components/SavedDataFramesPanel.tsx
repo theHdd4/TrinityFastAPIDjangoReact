@@ -29,12 +29,48 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle }) => {
 
     const fetchAndSetFiles = async () => {
       try {
-        const envRes = await fetch(`${VALIDATE_API}/get_environment_variables`, { credentials: 'include' });
-        const env = await envRes.json();
+        // Prefer localStorage env vars so UI reflects most recent project selection/rename
+        let env: any = {};
+        const storedEnv = localStorage.getItem('env');
+        if (storedEnv) {
+          try {
+            env = JSON.parse(storedEnv);
+          } catch {
+            // ignore parse errors and fall back to fetch
+          }
+        }
+
+        // If a current project is stored locally, trust its slug as the project name
+        const storedProject = localStorage.getItem('current-project');
+        if (storedProject) {
+          try {
+            const proj = JSON.parse(storedProject);
+            if (proj?.slug) env.PROJECT_NAME = proj.slug;
+          } catch {
+            // ignore parse errors
+          }
+        }
+
+        // If any of the names are missing, fetch from API (redis) and merge
+        if (!env?.CLIENT_NAME || !env?.APP_NAME || !env?.PROJECT_NAME) {
+          const envRes = await fetch(`${VALIDATE_API}/get_environment_variables`, {
+            credentials: 'include'
+          });
+          const fetched = await envRes.json();
+          env = { ...fetched, ...env };
+          try {
+            localStorage.setItem('env', JSON.stringify(env));
+          } catch {
+            // ignore storage errors
+          }
+        }
+
         const newPrefix = `${env.CLIENT_NAME}/${env.APP_NAME}/${env.PROJECT_NAME}/`;
         setPrefix(newPrefix);
 
-        const dfRes = await fetch(`${VALIDATE_API}/list_saved_dataframes`, { credentials: 'include' });
+        const dfRes = await fetch(`${VALIDATE_API}/list_saved_dataframes`, {
+          credentials: 'include'
+        });
         const data = await dfRes.json();
 
         const filteredFiles = Array.isArray(data.files)
