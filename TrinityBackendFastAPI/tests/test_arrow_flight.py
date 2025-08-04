@@ -394,15 +394,16 @@ def test_save_dataframe_skip_existing(monkeypatch):
 def test_list_saved_dataframes_env(monkeypatch):
     routes = load_routes()
 
-    # Environment variables hold stale names but correct numeric IDs
+    # Environment variables already contain the renamed values while Redis
+    # still has the old names cached for the same IDs.
     os.environ.update(
         {
             "CLIENT_ID": "1",
             "APP_ID": "2",
             "PROJECT_ID": "3",
-            "CLIENT_NAME": "old_client",
-            "APP_NAME": "old_app",
-            "PROJECT_NAME": "old_project",
+            "CLIENT_NAME": "client",
+            "APP_NAME": "app",
+            "PROJECT_NAME": "proj",
         }
     )
 
@@ -416,9 +417,9 @@ def test_list_saved_dataframes_env(monkeypatch):
         def set(self, key, value):
             self.mapping[key] = value
 
-    # Redis still holds the old names; ``get_env_vars`` will return the new
-    # values after a rename. ``get_object_prefix`` should refresh Redis and use
-    # the new values when building the prefix.
+    # Redis still holds the old names; ``get_object_prefix`` should ignore
+    # these stale values, consult ``get_env_vars`` with the correct new names
+    # and then refresh the cache.
     redis_mapping = {
         "env:1:2:3:CLIENT_NAME": b"old_client",
         "env:1:2:3:APP_NAME": b"old_app",
@@ -426,8 +427,13 @@ def test_list_saved_dataframes_env(monkeypatch):
     }
     monkeypatch.setattr(routes, "redis_client", DummyRedis(redis_mapping))
 
-    async def fake_get_env_vars(*a, **k):
-        return {"CLIENT_NAME": "client", "APP_NAME": "app", "PROJECT_NAME": "proj"}
+    async def fake_get_env_vars(client_id, app_id, project_id, *, client_name, app_name, project_name, **k):
+        # Simulate a DB lookup that simply echoes back the provided names.
+        return {
+            "CLIENT_NAME": client_name,
+            "APP_NAME": app_name,
+            "PROJECT_NAME": project_name,
+        }
 
     monkeypatch.setattr(routes, "get_env_vars", fake_get_env_vars)
 

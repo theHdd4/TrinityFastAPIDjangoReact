@@ -195,15 +195,9 @@ async def get_object_prefix(
         client_id_env,
         app_id_env,
         project_id_env,
-        client_name=env.get("CLIENT_NAME")
-        or client_name
-        or os.getenv("CLIENT_NAME", ""),
-        app_name=env.get("APP_NAME")
-        or app_name
-        or os.getenv("APP_NAME", ""),
-        project_name=env.get("PROJECT_NAME")
-        or project_name
-        or os.getenv("PROJECT_NAME", ""),
+        client_name=client_name or os.getenv("CLIENT_NAME", ""),
+        app_name=app_name or os.getenv("APP_NAME", ""),
+        project_name=project_name or os.getenv("PROJECT_NAME", ""),
         use_cache=False,
     )
     if fresh_env:
