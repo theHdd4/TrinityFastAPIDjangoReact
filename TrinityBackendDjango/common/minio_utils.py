@@ -3,6 +3,7 @@ import io
 from minio import Minio
 from minio.error import S3Error
 from minio.commonconfig import CopySource
+from typing import Optional
 
 # Default to the development MinIO service if not explicitly configured
 MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "minio:9000")
@@ -88,18 +89,70 @@ def rename_prefix(old_prefix: str, new_prefix: str) -> None:
     print(f"✅ Prefix renamed to {new_prefix}")
 
 
+def _list_objects(prefix: str):
+    """Return a list of objects for a given prefix."""
+    if not ensure_bucket():
+        return []
+    if not prefix.endswith("/"):
+        prefix += "/"
+    try:
+        return list(
+            _client.list_objects(MINIO_BUCKET, prefix=prefix, recursive=True)
+        )
+    except S3Error as exc:
+        print(f"MinIO connection error: {exc}")
+        return []
+
+
+def remove_prefix(prefix: str) -> None:
+    """Remove all objects under the given prefix."""
+    objects = _list_objects(prefix)
+    for obj in objects:
+        try:
+            _client.remove_object(MINIO_BUCKET, obj.object_name)
+        except S3Error as exc:
+            print(f"MinIO connection error: {exc}")
+
+
+def rename_existing_prefix(old_prefix: str, new_prefix: str) -> bool:
+    """Rename the prefix only if it currently exists.
+
+    Returns True if a rename was performed.
+    """
+    if _list_objects(old_prefix):
+        rename_prefix(old_prefix, new_prefix)
+        return True
+    return False
+
+
 def rename_project_folder(
     client_slug: str,
     app_slug: str,
-    old_project_slug: str,
-    new_project_slug: str,
+    old_project_name: str,
+    new_project_name: str,
+    old_project_slug: Optional[str] = None,
 ) -> None:
-    """Rename a project's folder prefix when the project is renamed."""
-    old_prefix = f"{client_slug}/{app_slug}/{old_project_slug}"
-    new_prefix = f"{client_slug}/{app_slug}/{new_project_slug}"
-    print(
-        f"📁 Renaming project folder in MinIO: {old_prefix} -> {new_prefix}"
+    """Rename a project's folder prefix when the project is renamed.
+
+    The folder name mirrors the project's display name exactly. If a legacy
+    slug-based folder exists, it will also be cleaned up.
+    """
+    old_name_prefix = f"{client_slug}/{app_slug}/{old_project_name}"
+    new_prefix = f"{client_slug}/{app_slug}/{new_project_name}"
+    slug_prefix = (
+        f"{client_slug}/{app_slug}/{old_project_slug}"
+        if old_project_slug
+        else None
     )
-    rename_prefix(old_prefix, new_prefix)
-    print(f"📁 MinIO project folder updated: {new_prefix}")
+
+    renamed = rename_existing_prefix(old_name_prefix, new_prefix)
+    if not renamed and slug_prefix:
+        renamed = rename_existing_prefix(slug_prefix, new_prefix)
+    if not renamed:
+        create_prefix(new_prefix)
+    else:
+        print(f"📁 MinIO project folder updated: {new_prefix}")
+
+    if slug_prefix and slug_prefix != new_prefix:
+        remove_prefix(slug_prefix)
 
