@@ -146,6 +146,18 @@ def _parse_numeric_id(value: str | int | None) -> int:
     except Exception:
         return 0
 
+
+def _strip_suffix(name: str) -> str:
+    """Remove a trailing ``_<digits>`` pattern from project names.
+
+    When new projects are created the UI may pass a value like
+    ``"myproj_12345"`` to identify the project. Objects in MinIO,
+    however, are stored under the plain project name. This helper
+    ensures we always derive the correct prefix.
+    """
+    parts = name.rsplit("_", 1)
+    return parts[0] if len(parts) == 2 and parts[1].isdigit() else name
+
 async def get_object_prefix(
     client_id: str = "",
     app_id: str = "",
@@ -191,13 +203,14 @@ async def get_object_prefix(
     # projects update the Redis cache. ``get_env_vars`` will consult
     # Postgres/Django and return the latest names for the provided
     # identifiers.
+    project_name_input = _strip_suffix(project_name or os.getenv("PROJECT_NAME", ""))
     fresh_env = await get_env_vars(
         client_id_env,
         app_id_env,
         project_id_env,
         client_name=client_name or os.getenv("CLIENT_NAME", ""),
         app_name=app_name or os.getenv("APP_NAME", ""),
-        project_name=project_name or os.getenv("PROJECT_NAME", ""),
+        project_name=project_name_input,
         use_cache=False,
     )
     if fresh_env:
@@ -213,7 +226,7 @@ async def get_object_prefix(
     print("🔧 fetched env", env)
     client = env.get("CLIENT_NAME", os.getenv("CLIENT_NAME", "default_client"))
     app = env.get("APP_NAME", os.getenv("APP_NAME", "default_app"))
-    project = env.get("PROJECT_NAME", os.getenv("PROJECT_NAME", "default_project"))
+    project = _strip_suffix(env.get("PROJECT_NAME", os.getenv("PROJECT_NAME", "default_project")))
 
     if PROJECT_ID and (client == "default_client" or app == "default_app" or project == "default_project"):
         try:

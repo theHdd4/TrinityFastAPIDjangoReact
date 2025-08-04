@@ -4,6 +4,8 @@ from django.utils.text import slugify
 import os
 from apps.accounts.views import CsrfExemptSessionAuthentication
 from apps.accounts.utils import save_env_var, get_env_dict, load_env_vars
+from pymongo import MongoClient
+from django.conf import settings
 from .models import App, Project, Session, LaboratoryAction, ArrowDataset
 from .serializers import (
     AppSerializer,
@@ -119,13 +121,31 @@ class ProjectViewSet(viewsets.ModelViewSet):
 
     def perform_update(self, serializer):
         load_env_vars(self.request.user)
+        old_name = serializer.instance.name
         project = serializer.save()
         if "name" in serializer.validated_data:
             os.environ["PROJECT_NAME"] = project.name
             os.environ["PROJECT_ID"] = f"{project.name}_{project.id}"
+            old_project_id = f"{old_name}_{project.id}"
+            new_project_id = os.environ["PROJECT_ID"]
             print(
                 f"✅ project renamed: PROJECT_ID={os.environ['PROJECT_ID']} PROJECT_NAME={os.environ['PROJECT_NAME']}"
             )
+            try:
+                mc = MongoClient(getattr(settings, "MONGO_URI", "mongodb://mongo:27017/trinity"))
+                db = mc.get_default_database()
+                db.session_state.update_many(
+                    {"project_id": old_project_id},
+                    {
+                        "$set": {
+                            "project_id": new_project_id,
+                            "state.project_id": new_project_id,
+                            "state.project_name": project.name,
+                        }
+                    },
+                )
+            except Exception:
+                pass
             save_env_var(self.request.user, "CLIENT_NAME", os.environ.get("CLIENT_NAME", ""))
             save_env_var(self.request.user, "CLIENT_ID", os.environ.get("CLIENT_ID", ""))
             save_env_var(self.request.user, "APP_NAME", os.environ.get("APP_NAME", ""))

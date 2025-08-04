@@ -110,6 +110,16 @@ class SessionInitView(APIView):
         )
         redis_client.setex(session_id, TTL, json.dumps(session, default=str))
         redis_client.setex(ns, TTL, session_id)
+        try:
+            mc = _mongo_client()
+            db = mc.get_default_database()
+            db.session_state.update_one(
+                {"_id": session_id},
+                {"$set": {"state": session, "project_id": project_id}},
+                upsert=True,
+            )
+        except Exception:
+            pass
         return Response({"session_id": session_id, "state": session})
 
 
@@ -222,7 +232,7 @@ class SessionUpdateView(APIView):
             db = mc.get_default_database()
             db.session_state.update_one(
                 {"_id": session_id},
-                {"$set": {"state": session}},
+                {"$set": {"state": session, "project_id": session.get("project_id", "")}},
                 upsert=True,
             )
         except Exception:
