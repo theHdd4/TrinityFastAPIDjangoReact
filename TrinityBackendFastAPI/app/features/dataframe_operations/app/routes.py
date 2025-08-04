@@ -124,27 +124,3 @@ async def save_dataframe(
         }
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
-
-@router.get("/list_saved_dataframes")
-async def list_saved_dataframes():
-    print("[DFOPS] --- /list_saved_dataframes called ---")
-    try:
-        files = []
-        # List all objects in the bucket and filter for .arrow files
-        objects = minio_client.list_objects(MINIO_BUCKET, recursive=True)
-        for obj in objects:
-            if obj.object_name.endswith('.arrow'):
-                # Extract a display name for the UI
-                display_name = obj.object_name.split('/')[-1] if '/' in obj.object_name else obj.object_name
-                files.append({
-                    "object_name": obj.object_name,
-                    "csv_name": obj.object_name,  # Use full path for API calls
-                    "size": obj.size,
-                    "last_modified": obj.last_modified.isoformat() if obj.last_modified else None,
-                    "display_name": display_name
-                })
-        print(f"[DFOPS] Found {len(files)} files")
-        return {"files": files}
-    except Exception as e:
-        print(f"[DFOPS] list_saved_dataframes error: {e}")
-        return {"files": []} 

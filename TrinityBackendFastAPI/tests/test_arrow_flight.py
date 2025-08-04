@@ -413,6 +413,9 @@ def test_list_saved_dataframes_env(monkeypatch):
     monkeypatch.setattr(routes, "MINIO_BUCKET", "bucket")
 
     async def dummy_prefix(*a, **k):
+        os.environ["CLIENT_NAME"] = "client"
+        os.environ["APP_NAME"] = "app"
+        os.environ["PROJECT_NAME"] = "proj"
         return "pref/"
 
     monkeypatch.setattr(routes, "get_object_prefix", dummy_prefix)
@@ -433,4 +436,7 @@ def test_list_saved_dataframes_env(monkeypatch):
     assert len(data["files"]) == 2
     for f in data["files"]:
         assert "arrow_name" in f
+    assert data["environment"]["CLIENT_NAME"] == "client"
+    assert data["environment"]["APP_NAME"] == "app"
+    assert data["environment"]["PROJECT_NAME"] == "proj"
 

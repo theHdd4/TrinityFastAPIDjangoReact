@@ -26,28 +26,12 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle }) => {
 
   useEffect(() => {
     if (!isOpen) return;
-    let query = '';
-    const envStr = localStorage.getItem('env');
-    if (envStr) {
-      try {
-        const env = JSON.parse(envStr);
-        query =
-          '?' +
-          new URLSearchParams({
-            client_name: env.CLIENT_NAME || '',
-            app_name: env.APP_NAME || '',
-            project_name: env.PROJECT_NAME || ''
-          }).toString();
-      } catch (err) {
-        console.error('Failed to parse env from localStorage', err);
-      }
-    }
-    fetch(`${VALIDATE_API}/list_saved_dataframes${query}`, { credentials: 'include' })
+    fetch(`${VALIDATE_API}/list_saved_dataframes`, { credentials: 'include' })
       .then(res => res.json())
       .then(data => {
         setPrefix(data.prefix || '');
         console.log(
-          `📁 SavedDataFramesPanel looking in MinIO bucket "${data.bucket}" folder "${data.prefix}"`
+          `📁 SavedDataFramesPanel looking in MinIO bucket "${data.bucket}" folder "${data.prefix}" (CLIENT_NAME=${data.environment?.CLIENT_NAME} APP_NAME=${data.environment?.APP_NAME} PROJECT_NAME=${data.environment?.PROJECT_NAME})`
         );
         setFiles(Array.isArray(data.files) ? data.files : []);
       })

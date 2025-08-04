@@ -2659,9 +2659,16 @@ async def list_saved_dataframes(
         app_name=app_name,
         project_name=project_name,
     )
+    env = {
+        "CLIENT_NAME": os.getenv("CLIENT_NAME"),
+        "APP_NAME": os.getenv("APP_NAME"),
+        "PROJECT_NAME": os.getenv("PROJECT_NAME"),
+    }
 
     try:
-        print(f"🪣 listing from bucket '{MINIO_BUCKET}' prefix '{prefix}'")
+        print(
+            f"🪣 listing from bucket '{MINIO_BUCKET}' prefix '{prefix}'"
+        )
         objects = list(
             minio_client.list_objects(
                 MINIO_BUCKET, prefix=prefix, recursive=True
@@ -2677,15 +2684,26 @@ async def list_saved_dataframes(
             }
             for obj in sorted(objects, key=lambda o: o.object_name)
         ]
-        return {"bucket": MINIO_BUCKET, "prefix": prefix, "files": files}
+        return {
+            "bucket": MINIO_BUCKET,
+            "prefix": prefix,
+            "files": files,
+            "environment": env,
+        }
     except S3Error as e:
         if getattr(e, "code", "") == "NoSuchBucket":
-            return {"bucket": MINIO_BUCKET, "prefix": prefix, "files": []}
+            return {
+                "bucket": MINIO_BUCKET,
+                "prefix": prefix,
+                "files": [],
+                "environment": env,
+            }
         return {
             "bucket": MINIO_BUCKET,
             "prefix": prefix,
             "files": [],
             "error": str(e),
+            "environment": env,
         }
     except Exception as e:  # pragma: no cover - unexpected error
         return {
@@ -2693,6 +2711,7 @@ async def list_saved_dataframes(
             "prefix": prefix,
             "files": [],
             "error": str(e),
+            "environment": env,
         }
 
 

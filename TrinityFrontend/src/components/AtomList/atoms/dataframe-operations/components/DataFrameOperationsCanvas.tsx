@@ -23,7 +23,7 @@ import {
   ChevronDown, ChevronUp, X, PlusCircle, MinusCircle, Save
 } from 'lucide-react';
 import { DataFrameData, DataFrameSettings } from '../DataFrameOperationsAtom';
-import { DATAFRAME_OPERATIONS_API } from '@/lib/api';
+import { DATAFRAME_OPERATIONS_API, VALIDATE_API } from '@/lib/api';
 import { toast } from '@/components/ui/use-toast';
 
 interface DataFrameOperationsCanvasProps {
@@ -133,7 +133,9 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
 
   const fetchSavedDataFrames = async () => {
     try {
-      const res = await fetch('/dataframe-operations/list_saved_dataframes');
+      const res = await fetch(`${VALIDATE_API}/list_saved_dataframes`, {
+        credentials: 'include'
+      });
       const data = await res.json();
       setSavedFiles(data.files || []);
     } catch (e) {
