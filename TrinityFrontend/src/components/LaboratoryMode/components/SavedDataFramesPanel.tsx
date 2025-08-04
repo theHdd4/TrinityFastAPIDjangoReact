@@ -65,7 +65,8 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle }) => {
           }
         }
 
-        const newPrefix = `${env.CLIENT_NAME}/${env.APP_NAME}/${env.PROJECT_NAME}/`;
+        const project = (env.PROJECT_NAME || '').replace(/[-_]\d+$/, '');
+        const newPrefix = `${env.CLIENT_NAME}/${env.APP_NAME}/${project}/`;
         setPrefix(newPrefix);
 
         const dfRes = await fetch(`${VALIDATE_API}/list_saved_dataframes`, {
@@ -78,7 +79,7 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle }) => {
           : [];
 
         console.log(
-          `📁 [SavedDataFramesPanel] Using prefix "${newPrefix}" from env CLIENT=${env.CLIENT_NAME} APP=${env.APP_NAME} PROJECT=${env.PROJECT_NAME}`
+          `📁 [SavedDataFramesPanel] Using prefix "${newPrefix}" from env CLIENT=${env.CLIENT_NAME} APP=${env.APP_NAME} PROJECT=${project}`
         );
 
         setFiles(filteredFiles);

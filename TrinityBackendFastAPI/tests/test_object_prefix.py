@@ -48,3 +48,11 @@ def test_prefix_uses_plain_project_name():
     os.environ["PROJECT_NAME"] = "proj_999"
     prefix = asyncio.run(get_object_prefix())
     assert prefix == "c/a/proj/"
+
+
+def test_prefix_strips_hyphen_suffix():
+    os.environ["CLIENT_NAME"] = "c"
+    os.environ["APP_NAME"] = "a"
+    os.environ["PROJECT_NAME"] = "proj-12345"
+    prefix = asyncio.run(get_object_prefix())
+    assert prefix == "c/a/proj/"

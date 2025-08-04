@@ -7,7 +7,6 @@ import io
 import os
 from app.core.utils import get_env_vars
 from pathlib import Path
-import re
 
 # Add this line with your other imports
 from datetime import datetime
@@ -148,15 +147,17 @@ def _parse_numeric_id(value: str | int | None) -> int:
 
 
 def _strip_suffix(name: str) -> str:
-    """Remove a trailing ``_<digits>`` pattern from project names.
+    """Remove a trailing ``_<digits>`` or ``-<digits>`` pattern from project names.
 
-    When new projects are created the UI may pass a value like
-    ``"myproj_12345"`` to identify the project. Objects in MinIO,
-    however, are stored under the plain project name. This helper
-    ensures we always derive the correct prefix.
+    The UI may append a numeric identifier to new project names using either an
+    underscore or hyphen separator (e.g. ``"myproj_12345"`` or
+    ``"myproj-12345"``). Objects in MinIO, however, are stored under the plain
+    project name. This helper normalises the value so we always derive the
+    correct prefix.
     """
-    parts = name.rsplit("_", 1)
-    return parts[0] if len(parts) == 2 and parts[1].isdigit() else name
+    import re
+
+    return re.sub(r"[-_]\d+$", "", name)
 
 async def get_object_prefix(
     client_id: str = "",
