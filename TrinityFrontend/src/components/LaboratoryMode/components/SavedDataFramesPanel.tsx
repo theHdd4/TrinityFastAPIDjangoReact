@@ -26,19 +26,33 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle }) => {
 
   useEffect(() => {
     if (!isOpen) return;
-    fetch(`${VALIDATE_API}/list_saved_dataframes`, { credentials: 'include' })
-      .then(res => res.json())
-      .then(data => {
-        setPrefix(data.prefix || '');
+
+    const fetchAndSetFiles = async () => {
+      try {
+        const envRes = await fetch(`${VALIDATE_API}/get_environment_variables`, { credentials: 'include' });
+        const env = await envRes.json();
+        const newPrefix = `${env.CLIENT_NAME}/${env.APP_NAME}/${env.PROJECT_NAME}/`;
+        setPrefix(newPrefix);
+
+        const dfRes = await fetch(`${VALIDATE_API}/list_saved_dataframes`, { credentials: 'include' });
+        const data = await dfRes.json();
+
+        const filteredFiles = Array.isArray(data.files)
+          ? data.files.filter(f => f.object_name.startsWith(newPrefix))
+          : [];
+
         console.log(
-          `📁 SavedDataFramesPanel looking in MinIO bucket "${data.bucket}" folder "${data.prefix}" (CLIENT_NAME=${data.environment?.CLIENT_NAME} APP_NAME=${data.environment?.APP_NAME} PROJECT_NAME=${data.environment?.PROJECT_NAME})`
+          `📁 [SavedDataFramesPanel] Using prefix "${newPrefix}" from env CLIENT=${env.CLIENT_NAME} APP=${env.APP_NAME} PROJECT=${env.PROJECT_NAME}`
         );
-        setFiles(Array.isArray(data.files) ? data.files : []);
-      })
-      .catch(err => {
-        console.error('Failed to load saved dataframes', err);
+
+        setFiles(filteredFiles);
+      } catch (err) {
+        console.error('❌ Error loading environment or dataframes:', err);
         setFiles([]);
-      });
+      }
+    };
+
+    fetchAndSetFiles();
   }, [isOpen]);
 
   const handleOpen = (obj: string) => {
