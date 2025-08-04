@@ -154,8 +154,14 @@ async def get_object_prefix(
     client_name: str = "",
     app_name: str = "",
     project_name: str = "",
-) -> str:
-    """Return the MinIO prefix for the current client/app/project."""
+    include_env: bool = False,
+) -> str | tuple[str, dict[str, str], str]:
+    """Return the MinIO prefix for the current client/app/project.
+
+    When ``include_env`` is True a tuple of ``(prefix, env, source)`` is
+    returned where ``source`` describes where the environment variables were
+    loaded from.
+    """
     USER_ID = _parse_numeric_id(os.getenv("USER_ID"))
     PROJECT_ID = _parse_numeric_id(project_id or os.getenv("PROJECT_ID", "0"))
     # Attempt to pull the latest names from Redis first. Redis keys follow the
@@ -167,7 +173,8 @@ async def get_object_prefix(
     app_id_env = app_id or os.getenv("APP_ID", "")
     project_id_env = project_id or os.getenv("PROJECT_ID", "")
 
-    env = {}
+    env: dict[str, str] = {}
+    env_source = "unknown"
     base = ""
     if client_id_env or app_id_env or project_id_env:
         base = f"env:{client_id_env}:{app_id_env}:{project_id_env}"
@@ -184,6 +191,7 @@ async def get_object_prefix(
                     "APP_NAME": _decode(app_r) if app_r else "default_app",
                     "PROJECT_NAME": _decode(project_r),
                 }
+                env_source = "redis"
         except Exception:
             env = {}
 
@@ -191,7 +199,7 @@ async def get_object_prefix(
     # projects update the Redis cache. ``get_env_vars`` will consult
     # Postgres/Django and return the latest names for the provided
     # identifiers.
-    fresh_env = await get_env_vars(
+    fresh = await get_env_vars(
         client_id_env,
         app_id_env,
         project_id_env,
@@ -199,9 +207,15 @@ async def get_object_prefix(
         app_name=app_name or os.getenv("APP_NAME", ""),
         project_name=project_name or os.getenv("PROJECT_NAME", ""),
         use_cache=False,
+        return_source=True,
     )
+    if isinstance(fresh, tuple):
+        fresh_env, fresh_source = fresh
+    else:
+        fresh_env, fresh_source = fresh, "unknown"
     if fresh_env:
         env = fresh_env
+        env_source = fresh_source
         if base:
             try:
                 redis_client.set(f"{base}:CLIENT_NAME", env.get("CLIENT_NAME", ""))
@@ -210,7 +224,7 @@ async def get_object_prefix(
             except Exception:
                 pass
 
-    print("🔧 fetched env", env)
+    print(f"🔧 fetched env {env} (source={env_source})")
     client = env.get("CLIENT_NAME", os.getenv("CLIENT_NAME", "default_client"))
     app = env.get("APP_NAME", os.getenv("APP_NAME", "default_app"))
     project = env.get("PROJECT_NAME", os.getenv("PROJECT_NAME", "default_project"))
@@ -233,6 +247,8 @@ async def get_object_prefix(
     print(
         f"📦 prefix {prefix} (CLIENT_ID={client_id or os.getenv('CLIENT_ID','')} APP_ID={app_id or os.getenv('APP_ID','')} PROJECT_ID={PROJECT_ID})"
     )
+    if include_env:
+        return prefix, env, env_source
     return prefix
 
 # Initialize MinIO client
@@ -2697,20 +2713,16 @@ async def list_saved_dataframes(
     resolved prefix.
     """
 
-    prefix = await get_object_prefix(
+    prefix, env, env_source = await get_object_prefix(
         client_name=client_name,
         app_name=app_name,
         project_name=project_name,
+        include_env=True,
     )
-    env = {
-        "CLIENT_NAME": os.getenv("CLIENT_NAME"),
-        "APP_NAME": os.getenv("APP_NAME"),
-        "PROJECT_NAME": os.getenv("PROJECT_NAME"),
-    }
 
     try:
         print(
-            f"🪣 listing from bucket '{MINIO_BUCKET}' prefix '{prefix}'"
+            f"🪣 listing from bucket '{MINIO_BUCKET}' prefix '{prefix}' (source={env_source})"
         )
         objects = list(
             minio_client.list_objects(
@@ -2732,6 +2744,7 @@ async def list_saved_dataframes(
             "prefix": prefix,
             "files": files,
             "environment": env,
+            "env_source": env_source,
         }
     except S3Error as e:
         if getattr(e, "code", "") == "NoSuchBucket":

@@ -149,8 +149,19 @@ async def get_env_vars(
     app_name: str = "",
     project_name: str = "",
     use_cache: bool = True,
-) -> Dict[str, Any]:
-    """Return environment variables for a client/app/project combo."""
+    return_source: bool = False,
+) -> Dict[str, Any] | tuple[Dict[str, Any], str]:
+    """Return environment variables for a client/app/project combo.
+
+    Parameters
+    ----------
+    return_source:
+        When ``True`` the function returns a tuple of ``(env, source)`` where
+        ``source`` indicates where the variables were loaded from
+        (e.g. ``"redis"`` or ``"postgres"``).  The default behaviour of
+        returning just the ``env`` dictionary is preserved for existing callers.
+    """
+    source = "unknown"
     if django_get_env_vars is not None:
         try:
             env = await django_get_env_vars(
@@ -162,18 +173,20 @@ async def get_env_vars(
                 project_name=project_name,
                 use_cache=use_cache,
             )
+            source = "django"
             print(
                 f"🔧 django_get_env_vars({client_id},{app_id},{project_id},{client_name},{app_name},{project_name}) -> {env}"
             )
-            return env
+            return (env, source) if return_source else env
         except Exception:  # pragma: no cover - Django misconfigured
             pass
 
     key = (client_id, app_id, project_id, client_name, app_name, project_name)
     if use_cache and key in _ENV_CACHE:
         env = _ENV_CACHE[key]
+        source = "cache"
         print(f"🔧 cached_env_vars{key} -> {env}")
-        return env
+        return (env, source) if return_source else env
 
     if use_cache and client_name and project_name:
         redis_key = _redis_env_key(client_name, app_name, project_name)
@@ -182,18 +195,22 @@ async def get_env_vars(
             try:
                 env = json.loads(cached)
                 _ENV_CACHE[key] = env
+                source = "redis"
                 print(f"🔧 redis_env_vars{redis_key} -> {env}")
-                return env
+                return (env, source) if return_source else env
             except Exception:
                 pass
 
     env = {}
     if client_id or app_id or project_id:
         env = await _query_env_vars(client_id, app_id, project_id)
+        source = "postgres"
     if not env and client_name and project_name:
         env = await _query_env_vars_by_names(client_name, app_name, project_name)
+        source = "postgres" if env else source
     if not env and client_name and project_name:
         env = await _query_registry_env(client_name, app_name, project_name)
+        source = "postgres" if env else source
     if not env:
         numeric_pid = _parse_numeric_id(project_id)
         if numeric_pid:
@@ -206,18 +223,21 @@ async def get_env_vars(
                     "APP_NAME": app_db,
                     "PROJECT_NAME": project_db,
                 }
+                source = "postgres"
             except Exception:
                 env = {
                     "CLIENT_NAME": os.getenv("CLIENT_NAME", "default_client"),
                     "APP_NAME": os.getenv("APP_NAME", "default_app"),
                     "PROJECT_NAME": os.getenv("PROJECT_NAME", "default_project"),
                 }
+                source = "defaults"
         else:
             env = {
                 "CLIENT_NAME": os.getenv("CLIENT_NAME", "default_client"),
                 "APP_NAME": os.getenv("APP_NAME", "default_app"),
                 "PROJECT_NAME": os.getenv("PROJECT_NAME", "default_project"),
             }
+            source = "defaults"
 
     if use_cache:
         _ENV_CACHE[key] = env
@@ -229,8 +249,8 @@ async def get_env_vars(
             )
             redis_client.setex(redis_key, ENV_TTL, json.dumps(env, default=str))
 
-    print(f"🔧 db_env_vars{key} -> {env}")
-    return env
+    print(f"🔧 db_env_vars{key} -> {env} (source={source})")
+    return (env, source) if return_source else env
 
 
 __all__ = ["get_env_vars"]

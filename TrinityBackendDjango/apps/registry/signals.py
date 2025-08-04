@@ -39,6 +39,7 @@ def update_env_vars_on_rename(sender, instance, **kwargs):
         old_pid = f"{old.name}_{old.pk}"
         new_pid = f"{instance.name}_{instance.pk}"
         qs = UserEnvironmentVariable.objects.filter(project_id=old_pid)
+        print(f"🗄️ Renaming project in Postgres: {old.name} -> {instance.name}")
         cache_entries = list(
             qs.values(
                 "user_id",
@@ -71,18 +72,24 @@ def update_env_vars_on_rename(sender, instance, **kwargs):
                 app_name=entry["app_name"],
                 project_name=instance.name,
             )
+            print(
+                f"♻️ Redis env updated for user {entry['user_id']} to {instance.name}"
+            )
             RegistryEnvironment.objects.filter(
                 client_name=entry["client_name"],
                 app_name=entry["app_name"],
                 project_name=entry["project_name"],
             ).update(project_name=instance.name)
+            print(
+                f"🗃️ RegistryEnvironment updated for {entry['client_name']}/{entry['app_name']} -> {instance.name}"
+            )
             try:
                 mc = MongoClient(
                     getattr(settings, "MONGO_URI", "mongodb://mongo:27017/trinity"),
                     serverSelectionTimeoutMS=5000,
                 )
                 db = mc.get_default_database()
-                db.session_state.update_many(
+                result = db.session_state.update_many(
                     {
                         "state.client_name": entry["client_name"],
                         "state.app_name": entry["app_name"],
@@ -90,11 +97,17 @@ def update_env_vars_on_rename(sender, instance, **kwargs):
                     },
                     {"$set": {"state.project_name": instance.name}},
                 )
+                print(
+                    f"🍃 MongoDB session_state updated {result.modified_count} docs for {entry['project_name']} -> {instance.name}"
+                )
             except Exception:
                 pass
             try:
                 redis_client.delete(
                     f"{entry['client_name']}/{entry['app_name']}/{entry['project_name']}"
+                )
+                print(
+                    f"🧹 Cleared Redis session cache {entry['client_name']}/{entry['app_name']}/{entry['project_name']}"
                 )
             except Exception:
                 pass
