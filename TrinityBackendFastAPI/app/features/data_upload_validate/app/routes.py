@@ -150,7 +150,8 @@ def _parse_numeric_id(value: str | int | None) -> int:
 def _get_current_env(user_id: str) -> dict:
     """Return the latest environment selection for a user from Redis."""
     try:
-        raw = redis_client.hgetall(f"currentenv:{user_id}")
+        key = f"currentenv:{user_id}" if user_id else "currentenv"
+        raw = redis_client.hgetall(key)
         # ``redis-py`` returns ``bytes`` for keys and values when
         # ``decode_responses`` is disabled. Looking up using ``str`` keys would
         # therefore fail, causing stale environment variables to linger. Decode
@@ -238,21 +239,21 @@ async def get_object_prefix(
                 pass
         # Refresh the user-scoped environment so subsequent requests pick up
         # the latest client/app/project selection.
-        if USER_ID_RAW:
-            try:
-                redis_client.hset(
-                    f"currentenv:{USER_ID_RAW}",
-                    mapping={
-                        "client_id": client_id_env,
-                        "app_id": app_id_env,
-                        "project_id": project_id_env,
-                        "client_name": env.get("CLIENT_NAME", ""),
-                        "app_name": env.get("APP_NAME", ""),
-                        "project_name": env.get("PROJECT_NAME", ""),
-                    },
-                )
-            except Exception:
-                pass
+        current_key = f"currentenv:{USER_ID_RAW}" if USER_ID_RAW else "currentenv"
+        try:
+            redis_client.hset(
+                current_key,
+                mapping={
+                    "client_id": client_id_env,
+                    "app_id": app_id_env,
+                    "project_id": project_id_env,
+                    "client_name": env.get("CLIENT_NAME", ""),
+                    "app_name": env.get("APP_NAME", ""),
+                    "project_name": env.get("PROJECT_NAME", ""),
+                },
+            )
+        except Exception:
+            pass
 
     print("🔧 fetched env", env)
     client = env.get("CLIENT_NAME", os.getenv("CLIENT_NAME", "default_client"))

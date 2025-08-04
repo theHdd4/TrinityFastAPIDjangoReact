@@ -668,3 +668,96 @@ def test_list_saved_dataframes_current_env_override(monkeypatch):
     assert data["environment"]["APP_NAME"] == "app"
     assert data["environment"]["PROJECT_NAME"] == "proj"
 
+
+def test_list_saved_dataframes_global_currentenv(monkeypatch):
+    routes = load_routes()
+
+    # No USER_ID is available but a global ``currentenv`` hash exists with the
+    # latest project selection. Environment variables still reflect an older
+    # project and would normally cause the wrong MinIO prefix to be used.
+    os.environ.update(
+        {
+            "CLIENT_ID": "old_cid",
+            "APP_ID": "old_aid",
+            "PROJECT_ID": "old_pid",
+            "CLIENT_NAME": "old_client",
+            "APP_NAME": "old_app",
+            "PROJECT_NAME": "old_proj",
+        }
+    )
+    os.environ.pop("USER_ID", None)
+
+    async def fake_get_env_vars(client_id, app_id, project_id, *, client_name, app_name, project_name, **k):
+        # ``get_object_prefix`` should prefer the identifiers from the global
+        # ``currentenv`` hash (``cid``, ``aid``, ``pid``) instead of the stale
+        # environment variables above.
+        assert client_id == "cid"
+        assert app_id == "aid"
+        assert project_id == "pid"
+        return {
+            "CLIENT_NAME": "client",
+            "APP_NAME": "app",
+            "PROJECT_NAME": "proj",
+        }
+
+    monkeypatch.setattr(routes, "get_env_vars", fake_get_env_vars)
+
+    class DummyRedis:
+        def __init__(self):
+            self.mapping = {
+                "currentenv": {
+                    "client_id": "cid",
+                    "app_id": "aid",
+                    "project_id": "pid",
+                    "client_name": "client",
+                    "app_name": "app",
+                    "project_name": "proj",
+                }
+            }
+
+        def get(self, key):
+            return None
+
+        def set(self, key, value):
+            self.mapping[key] = value
+
+        def hgetall(self, key):
+            raw = self.mapping.get(key, {})
+            return {
+                k.encode() if isinstance(k, str) else k:
+                v.encode() if isinstance(v, str) else v
+                for k, v in raw.items()
+            }
+
+        def hset(self, key, mapping=None, **kwargs):
+            self.mapping.setdefault(key, {})
+            if mapping:
+                self.mapping[key].update(mapping)
+
+    monkeypatch.setattr(routes, "redis_client", DummyRedis())
+
+    class DummyMinio:
+        def list_objects(self, bucket, prefix="", recursive=False):
+            yield types.SimpleNamespace(object_name=f"{prefix}df.arrow")
+
+        def stat_object(self, bucket, name):
+            return types.SimpleNamespace(last_modified=0)
+
+    monkeypatch.setattr(routes, "minio_client", DummyMinio())
+    monkeypatch.setattr(routes, "MINIO_BUCKET", "bucket")
+
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    app = FastAPI()
+    app.include_router(routes.router)
+    client = TestClient(app)
+
+    resp = client.get("/list_saved_dataframes")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["prefix"] == "client/app/proj/"
+    assert data["environment"]["CLIENT_NAME"] == "client"
+    assert data["environment"]["APP_NAME"] == "app"
+    assert data["environment"]["PROJECT_NAME"] == "proj"
+
