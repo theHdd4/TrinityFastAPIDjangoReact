@@ -428,6 +428,8 @@ def test_list_saved_dataframes_env(monkeypatch):
 
     assert resp.status_code == 200
     data = resp.json()
+    assert data["bucket"] == "bucket"
+    assert data["prefix"] == "pref/"
     assert len(data["files"]) == 2
     for f in data["files"]:
         assert "arrow_name" in f

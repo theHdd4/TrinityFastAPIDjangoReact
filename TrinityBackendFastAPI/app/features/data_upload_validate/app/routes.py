@@ -2661,6 +2661,7 @@ async def list_saved_dataframes(
     )
 
     try:
+        print(f"🪣 listing from bucket '{MINIO_BUCKET}' prefix '{prefix}'")
         objects = list(
             minio_client.list_objects(
                 MINIO_BUCKET, prefix=prefix, recursive=True
@@ -2676,13 +2677,23 @@ async def list_saved_dataframes(
             }
             for obj in sorted(objects, key=lambda o: o.object_name)
         ]
-        return {"files": files}
+        return {"bucket": MINIO_BUCKET, "prefix": prefix, "files": files}
     except S3Error as e:
         if getattr(e, "code", "") == "NoSuchBucket":
-            return {"files": []}
-        return {"files": [], "error": str(e)}
+            return {"bucket": MINIO_BUCKET, "prefix": prefix, "files": []}
+        return {
+            "bucket": MINIO_BUCKET,
+            "prefix": prefix,
+            "files": [],
+            "error": str(e),
+        }
     except Exception as e:  # pragma: no cover - unexpected error
-        return {"files": [], "error": str(e)}
+        return {
+            "bucket": MINIO_BUCKET,
+            "prefix": prefix,
+            "files": [],
+            "error": str(e),
+        }
 
 
 @router.get("/latest_ticket/{file_key}")
