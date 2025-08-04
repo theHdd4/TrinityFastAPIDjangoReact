@@ -125,9 +125,13 @@ async def _query_registry_env(
         )
         if row:
             env = dict(row["envvars"] or {})
-            env.setdefault("CLIENT_NAME", client_name)
-            env.setdefault("APP_NAME", app_name)
-            env.setdefault("PROJECT_NAME", project_name)
+            env.update(
+                {
+                    "CLIENT_NAME": client_name,
+                    "APP_NAME": app_name,
+                    "PROJECT_NAME": project_name,
+                }
+            )
             if row.get("identifiers") is not None:
                 env["identifiers"] = row["identifiers"]
             if row.get("measures") is not None:

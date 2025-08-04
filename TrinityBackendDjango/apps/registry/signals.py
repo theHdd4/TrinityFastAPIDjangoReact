@@ -20,11 +20,28 @@ def _current_tenant_name() -> str:
 @receiver(post_save, sender=Project)
 def create_project_folder(sender, instance, created, **kwargs):
     if created:
-        tenant = _current_tenant_name()
+        tenant = os.getenv("CLIENT_NAME", _current_tenant_name())
         app_slug = instance.app.slug
         project_name = instance.name
         prefix = f"{tenant}/{app_slug}/{project_name}"
         create_prefix(prefix)
+        envvars = {
+            "CLIENT_NAME": tenant,
+            "APP_NAME": app_slug,
+            "PROJECT_NAME": project_name,
+            "PROJECT_ID": f"{project_name}_{instance.pk}",
+        }
+        RegistryEnvironment.objects.update_or_create(
+            client_name=tenant,
+            app_name=app_slug,
+            project_name=project_name,
+            defaults={
+                "envvars": envvars,
+                "identifiers": [],
+                "measures": [],
+                "dimensions": {},
+            },
+        )
 
 
 @receiver(pre_save, sender=Project)
@@ -75,14 +92,41 @@ def update_env_vars_on_rename(sender, instance, **kwargs):
             print(
                 f"♻️ Redis env updated for user {entry['user_id']} to {instance.name}"
             )
-            RegistryEnvironment.objects.filter(
+            reg_obj = RegistryEnvironment.objects.filter(
                 client_name=entry["client_name"],
                 app_name=entry["app_name"],
                 project_name=entry["project_name"],
-            ).update(project_name=instance.name)
-            print(
-                f"🗃️ RegistryEnvironment updated for {entry['client_name']}/{entry['app_name']} -> {instance.name}"
-            )
+            ).first()
+            if reg_obj:
+                reg_obj.project_name = instance.name
+                env = reg_obj.envvars or {}
+                env.update(
+                    {
+                        "CLIENT_NAME": entry["client_name"],
+                        "APP_NAME": entry["app_name"],
+                        "PROJECT_NAME": instance.name,
+                        "PROJECT_ID": new_pid,
+                    }
+                )
+                reg_obj.envvars = env
+                reg_obj.save(update_fields=["project_name", "envvars"])
+                print(
+                    f"🗃️ RegistryEnvironment updated for {entry['client_name']}/{entry['app_name']} -> {instance.name}"
+                )
+            else:
+                RegistryEnvironment.objects.update_or_create(
+                    client_name=entry["client_name"],
+                    app_name=entry["app_name"],
+                    project_name=instance.name,
+                    defaults={
+                        "envvars": {
+                            "CLIENT_NAME": entry["client_name"],
+                            "APP_NAME": entry["app_name"],
+                            "PROJECT_NAME": instance.name,
+                            "PROJECT_ID": new_pid,
+                        }
+                    },
+                )
             try:
                 mc = MongoClient(
                     getattr(settings, "MONGO_URI", "mongodb://mongo:27017/trinity"),
