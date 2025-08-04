@@ -6,6 +6,7 @@ import os
 from typing import Dict, Tuple
 import json
 from app.features.feature_overview.deps import redis_client
+from app.DataStorageRetrieval.db import fetch_client_app_project
 
 ENV_TTL = 3600
 ENV_NAMESPACE = "env"
@@ -31,6 +32,13 @@ POSTGRES_USER = os.getenv("POSTGRES_USER", "trinity_user")
 POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD", "trinity_pass")
 
 _ENV_CACHE: Dict[Tuple[str, str, str, str, str], Dict[str, str]] = {}
+
+
+def _parse_numeric_id(value: str | int | None) -> int:
+    try:
+        return int(str(value).split("_")[-1])
+    except Exception:
+        return 0
 
 
 async def _query_env_vars(client_id: str, app_id: str, project_id: str) -> Dict[str, str] | None:
@@ -142,11 +150,29 @@ async def get_env_vars(
     if not env and client_name and project_name:
         env = await _query_env_vars_by_names(client_name, app_name, project_name)
     if not env:
-        env = {
-            "CLIENT_NAME": os.getenv("CLIENT_NAME", "default_client"),
-            "APP_NAME": os.getenv("APP_NAME", "default_app"),
-            "PROJECT_NAME": os.getenv("PROJECT_NAME", "default_project"),
-        }
+        numeric_pid = _parse_numeric_id(project_id)
+        if numeric_pid:
+            try:
+                client_db, app_db, project_db = await fetch_client_app_project(
+                    None, numeric_pid
+                )
+                env = {
+                    "CLIENT_NAME": client_db,
+                    "APP_NAME": app_db,
+                    "PROJECT_NAME": project_db,
+                }
+            except Exception:
+                env = {
+                    "CLIENT_NAME": os.getenv("CLIENT_NAME", "default_client"),
+                    "APP_NAME": os.getenv("APP_NAME", "default_app"),
+                    "PROJECT_NAME": os.getenv("PROJECT_NAME", "default_project"),
+                }
+        else:
+            env = {
+                "CLIENT_NAME": os.getenv("CLIENT_NAME", "default_client"),
+                "APP_NAME": os.getenv("APP_NAME", "default_app"),
+                "PROJECT_NAME": os.getenv("PROJECT_NAME", "default_project"),
+            }
 
     if use_cache:
         _ENV_CACHE[key] = env

@@ -5,7 +5,7 @@ from django.utils.text import slugify
 from .models import Project
 from common.minio_utils import create_prefix, rename_project_folder
 from apps.accounts.models import UserEnvironmentVariable
-from redis_store.env_cache import invalidate_env
+from redis_store.env_cache import invalidate_env, set_current_env
 
 
 def _current_tenant_name() -> str:
@@ -58,6 +58,15 @@ def update_env_vars_on_rename(sender, instance, **kwargs):
                 client_name=entry["client_name"],
                 app_name=entry["app_name"],
                 project_name=entry["project_name"],
+            )
+            set_current_env(
+                str(entry["user_id"]),
+                client_id=entry["client_id"],
+                app_id=entry["app_id"],
+                project_id=new_pid,
+                client_name=entry["client_name"],
+                app_name=entry["app_name"],
+                project_name=instance.name,
             )
         tenant = _current_tenant_name()
         app_slug = instance.app.slug
