@@ -227,7 +227,7 @@ async def get_object_prefix(
     print("🔧 fetched env", env)
     client = env.get("CLIENT_NAME", os.getenv("CLIENT_NAME", "default_client"))
     app = env.get("APP_NAME", os.getenv("APP_NAME", "default_app"))
-    project = _strip_suffix(env.get("PROJECT_NAME", os.getenv("PROJECT_NAME", "default_project")))
+    project = env.get("PROJECT_NAME", os.getenv("PROJECT_NAME", "default_project"))
 
     if PROJECT_ID and (client == "default_client" or app == "default_app" or project == "default_project"):
         try:

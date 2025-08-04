@@ -28,10 +28,10 @@ class DummyRedis:
         self.store[a[0]] = a[1] if len(a) > 1 else None
 
 async def fake_get_env_vars(*a, **k):
-    return {"CLIENT_NAME": "c", "APP_NAME": "a", "PROJECT_NAME": "proj_999"}
+    return {"CLIENT_NAME": "c", "APP_NAME": "a", "PROJECT_NAME": "Proj Name"}
 
 async def fake_fetch(*a, **k):
-    return ("c", "a", "proj")
+    return ("c", "a", "Proj Name")
 
 ns.update({
     "redis_client": DummyRedis(),
@@ -45,14 +45,14 @@ get_object_prefix = ns["get_object_prefix"]
 def test_prefix_uses_plain_project_name():
     os.environ["CLIENT_NAME"] = "c"
     os.environ["APP_NAME"] = "a"
-    os.environ["PROJECT_NAME"] = "proj_999"
+    os.environ["PROJECT_NAME"] = "Proj Name"
     prefix = asyncio.run(get_object_prefix())
-    assert prefix == "c/a/proj/"
+    assert prefix == "c/a/Proj Name/"
 
 
 def test_prefix_strips_hyphen_suffix():
     os.environ["CLIENT_NAME"] = "c"
     os.environ["APP_NAME"] = "a"
-    os.environ["PROJECT_NAME"] = "proj-12345"
+    os.environ["PROJECT_NAME"] = "Proj Name-12345"
     prefix = asyncio.run(get_object_prefix())
-    assert prefix == "c/a/proj/"
+    assert prefix == "c/a/Proj Name/"

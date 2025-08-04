@@ -69,9 +69,18 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle }) => {
         const newPrefix = `${env.CLIENT_NAME}/${env.APP_NAME}/${project}/`;
         setPrefix(newPrefix);
 
-        const dfRes = await fetch(`${VALIDATE_API}/list_saved_dataframes`, {
-          credentials: 'include'
+        const params = new URLSearchParams({
+          client_name: env.CLIENT_NAME,
+          app_name: env.APP_NAME,
+          project_name: project
         });
+
+        const dfRes = await fetch(
+          `${VALIDATE_API}/list_saved_dataframes?${params.toString()}`,
+          {
+            credentials: 'include'
+          }
+        );
         const data = await dfRes.json();
 
         const filteredFiles = Array.isArray(data.files)

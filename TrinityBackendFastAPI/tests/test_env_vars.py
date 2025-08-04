@@ -36,8 +36,8 @@ def test_project_id_override(monkeypatch):
         return None
 
     async def fake_query_env_vars_by_names(client_name, app_name, project_name):
-        # ensure the inferred name from project_id is used
-        assert project_name == "newproj"
+        # ensure the inferred name from project_id is used with original case
+        assert project_name == "NewProj"
         return {
             "CLIENT_NAME": client_name,
             "APP_NAME": app_name,
@@ -51,7 +51,7 @@ def test_project_id_override(monkeypatch):
         utils.get_env_vars(
             "cid",
             "aid",
-            "newproj_1",
+            "NewProj_1",
             client_name="client",
             app_name="app",
             project_name="oldproj",
@@ -59,6 +59,6 @@ def test_project_id_override(monkeypatch):
         )
     )
 
-    assert env["PROJECT_NAME"] == "newproj"
+    assert env["PROJECT_NAME"] == "NewProj"
     assert env["CLIENT_NAME"] == "client"
     assert env["APP_NAME"] == "app"
