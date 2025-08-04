@@ -1,8 +1,11 @@
 import os
-from django.db.models.signals import post_save, pre_save
+from django.db.models.signals import post_save, pre_save, post_delete
 from django.dispatch import receiver
 from django.utils.text import slugify
-from .models import Project
+from django.conf import settings
+from pymongo import MongoClient
+from redis_store.redis_client import redis_client
+from .models import Project, RegistryEnvironment
 from common.minio_utils import create_prefix, rename_project_folder
 from apps.accounts.models import UserEnvironmentVariable
 from redis_store.env_cache import invalidate_env, set_current_env
@@ -68,6 +71,33 @@ def update_env_vars_on_rename(sender, instance, **kwargs):
                 app_name=entry["app_name"],
                 project_name=instance.name,
             )
+            RegistryEnvironment.objects.filter(
+                client_name=entry["client_name"],
+                app_name=entry["app_name"],
+                project_name=entry["project_name"],
+            ).update(project_name=instance.name)
+            try:
+                mc = MongoClient(
+                    getattr(settings, "MONGO_URI", "mongodb://mongo:27017/trinity"),
+                    serverSelectionTimeoutMS=5000,
+                )
+                db = mc.get_default_database()
+                db.session_state.update_many(
+                    {
+                        "state.client_name": entry["client_name"],
+                        "state.app_name": entry["app_name"],
+                        "state.project_name": entry["project_name"],
+                    },
+                    {"$set": {"state.project_name": instance.name}},
+                )
+            except Exception:
+                pass
+            try:
+                redis_client.delete(
+                    f"{entry['client_name']}/{entry['app_name']}/{entry['project_name']}"
+                )
+            except Exception:
+                pass
         tenant = _current_tenant_name()
         app_slug = instance.app.slug
         rename_project_folder(tenant, app_slug, old.name, instance.name, old.slug)
@@ -84,3 +114,57 @@ def update_env_vars_on_rename(sender, instance, **kwargs):
         if old.slug != slug_val:
             print(f"🔖 Project slug updated: {old.slug} -> {slug_val}")
         instance.slug = slug_val
+
+
+@receiver(post_delete, sender=Project)
+def cleanup_on_delete(sender, instance, **kwargs):
+    """Remove cached environment and session state for deleted projects."""
+    pid = f"{instance.name}_{instance.pk}"
+    qs = UserEnvironmentVariable.objects.filter(project_id=pid)
+    cache_entries = list(
+        qs.values(
+            "user_id",
+            "client_id",
+            "app_id",
+            "client_name",
+            "app_name",
+            "project_name",
+        ).distinct()
+    )
+    qs.delete()
+    for entry in cache_entries:
+        invalidate_env(
+            str(entry["user_id"]),
+            entry["client_id"],
+            entry["app_id"],
+            pid,
+            client_name=entry["client_name"],
+            app_name=entry["app_name"],
+            project_name=entry["project_name"],
+        )
+        RegistryEnvironment.objects.filter(
+            client_name=entry["client_name"],
+            app_name=entry["app_name"],
+            project_name=entry["project_name"],
+        ).delete()
+        try:
+            mc = MongoClient(
+                getattr(settings, "MONGO_URI", "mongodb://mongo:27017/trinity"),
+                serverSelectionTimeoutMS=5000,
+            )
+            db = mc.get_default_database()
+            db.session_state.delete_many(
+                {
+                    "state.client_name": entry["client_name"],
+                    "state.app_name": entry["app_name"],
+                    "state.project_name": entry["project_name"],
+                }
+            )
+        except Exception:
+            pass
+        try:
+            redis_client.delete(
+                f"{entry['client_name']}/{entry['app_name']}/{entry['project_name']}"
+            )
+        except Exception:
+            pass

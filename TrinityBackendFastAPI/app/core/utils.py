@@ -3,7 +3,7 @@
 from pathlib import Path
 import sys
 import os
-from typing import Dict, Tuple
+from typing import Dict, Tuple, Any
 import json
 from app.features.feature_overview.deps import redis_client
 from app.DataStorageRetrieval.db import fetch_client_app_project
@@ -31,7 +31,7 @@ POSTGRES_DB = os.getenv("POSTGRES_DB", "trinity_db")
 POSTGRES_USER = os.getenv("POSTGRES_USER", "trinity_user")
 POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD", "trinity_pass")
 
-_ENV_CACHE: Dict[Tuple[str, str, str, str, str], Dict[str, str]] = {}
+_ENV_CACHE: Dict[Tuple[str, str, str, str, str], Dict[str, Any]] = {}
 
 
 def _parse_numeric_id(value: str | int | None) -> int:
@@ -97,6 +97,49 @@ async def _query_env_vars_by_names(client_name: str, app_name: str, project_name
         await conn.close()
 
 
+async def _query_registry_env(
+    client_name: str, app_name: str, project_name: str
+) -> Dict[str, Any] | None:
+    """Fetch environment data from registry_environment table."""
+    if asyncpg is None:
+        return None
+    try:
+        conn = await asyncpg.connect(
+            host=POSTGRES_HOST,
+            user=POSTGRES_USER,
+            password=POSTGRES_PASSWORD,
+            database=POSTGRES_DB,
+        )
+    except Exception:
+        return None
+    try:
+        row = await conn.fetchrow(
+            """
+            SELECT envvars, identifiers, measures, dimensions
+            FROM registry_environment
+            WHERE client_name = $1 AND app_name = $2 AND project_name = $3
+            """,
+            client_name,
+            app_name,
+            project_name,
+        )
+        if row:
+            env = dict(row["envvars"] or {})
+            env.setdefault("CLIENT_NAME", client_name)
+            env.setdefault("APP_NAME", app_name)
+            env.setdefault("PROJECT_NAME", project_name)
+            if row.get("identifiers") is not None:
+                env["identifiers"] = row["identifiers"]
+            if row.get("measures") is not None:
+                env["measures"] = row["measures"]
+            if row.get("dimensions") is not None:
+                env["dimensions"] = row["dimensions"]
+            return env
+        return None
+    finally:
+        await conn.close()
+
+
 async def get_env_vars(
     client_id: str = "",
     app_id: str = "",
@@ -106,7 +149,7 @@ async def get_env_vars(
     app_name: str = "",
     project_name: str = "",
     use_cache: bool = True,
-) -> Dict[str, str]:
+) -> Dict[str, Any]:
     """Return environment variables for a client/app/project combo."""
     if django_get_env_vars is not None:
         try:
@@ -149,6 +192,8 @@ async def get_env_vars(
         env = await _query_env_vars(client_id, app_id, project_id)
     if not env and client_name and project_name:
         env = await _query_env_vars_by_names(client_name, app_name, project_name)
+    if not env and client_name and project_name:
+        env = await _query_registry_env(client_name, app_name, project_name)
     if not env:
         numeric_pid = _parse_numeric_id(project_id)
         if numeric_pid:

@@ -7,6 +7,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from apps.accounts.models import UserEnvironmentVariable
+from django.apps import apps
 
 from .redis_client import redis_client
 
@@ -77,8 +78,26 @@ def _fetch_from_db(
             qs = qs.filter(app_name=app_name)
     else:
         return {}
-
-    return {o.key: o.value for o in qs}
+    env = {o.key: o.value for o in qs}
+    if env:
+        return env
+    if client_name and project_name:
+        try:
+            model = apps.get_model("registry", "RegistryEnvironment")
+            obj = model.objects.filter(
+                client_name=client_name,
+                app_name=app_name,
+                project_name=project_name,
+            ).first()
+            if obj and isinstance(obj.envvars, dict):
+                env = obj.envvars.copy()
+                env.setdefault("CLIENT_NAME", client_name)
+                env.setdefault("APP_NAME", app_name)
+                env.setdefault("PROJECT_NAME", project_name)
+                return env
+        except Exception:
+            pass
+    return env
 
 
 def get_env_vars(
