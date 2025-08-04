@@ -175,10 +175,13 @@ async def get_object_prefix(
             app_r = redis_client.get(f"{base}:APP_NAME")
             project_r = redis_client.get(f"{base}:PROJECT_NAME")
             if client_r and project_r:
+                def _decode(val):
+                    return val.decode() if isinstance(val, bytes) else val
+
                 env = {
-                    "CLIENT_NAME": client_r,
-                    "APP_NAME": app_r or "default_app",
-                    "PROJECT_NAME": project_r,
+                    "CLIENT_NAME": _decode(client_r),
+                    "APP_NAME": _decode(app_r) if app_r else "default_app",
+                    "PROJECT_NAME": _decode(project_r),
                 }
         except Exception:
             env = {}

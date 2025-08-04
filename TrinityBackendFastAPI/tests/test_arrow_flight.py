@@ -419,9 +419,9 @@ def test_list_saved_dataframes_env(monkeypatch):
         "redis_client",
         DummyRedis(
             {
-                "env:1:2:3:CLIENT_NAME": "client",
-                "env:1:2:3:APP_NAME": "app",
-                "env:1:2:3:PROJECT_NAME": "proj",
+                "env:1:2:3:CLIENT_NAME": b"client",
+                "env:1:2:3:APP_NAME": b"app",
+                "env:1:2:3:PROJECT_NAME": b"proj",
             }
         ),
     )
