@@ -139,6 +139,14 @@ async def get_env_vars(
     env = {}
     if client_id or app_id or project_id:
         env = await _query_env_vars(client_id, app_id, project_id)
+    # If direct lookup by identifiers fails, the project may have been
+    # renamed. ``project_id`` embeds the name as ``<name>_<pk>`` so derive the
+    # name from it before falling back to the possibly stale "project_name"
+    # parameter.
+    if not env and client_name and project_id:
+        inferred = project_id.rsplit("_", 1)[0]
+        if inferred and inferred != project_name:
+            env = await _query_env_vars_by_names(client_name, app_name, inferred)
     if not env and client_name and project_name:
         env = await _query_env_vars_by_names(client_name, app_name, project_name)
     if not env:
