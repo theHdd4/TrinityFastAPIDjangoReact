@@ -165,6 +165,7 @@ async def get_object_prefix(
         client_name=client_name or os.getenv("CLIENT_NAME", ""),
         app_name=app_name or os.getenv("APP_NAME", ""),
         project_name=project_name or os.getenv("PROJECT_NAME", ""),
+        use_cache=False,
     )
     print("🔧 fetched env", env)
     client = env.get("CLIENT_NAME", os.getenv("CLIENT_NAME", "default_client"))
