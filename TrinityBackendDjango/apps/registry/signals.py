@@ -2,6 +2,7 @@ import os
 from django.db.models.signals import post_save, pre_save
 from django.dispatch import receiver
 from django.db import connection
+from django.utils.text import slugify
 from .models import Project
 from common.minio_utils import create_prefix, rename_prefix, rename_project_folder
 from apps.tenants.models import Tenant
@@ -80,9 +81,20 @@ def update_env_vars_on_rename(sender, instance, **kwargs):
             )
         tenant = _current_tenant_name()
         app_slug = instance.app.slug
-        old_slug = old.name.replace(" ", "_")
-        new_slug = instance.name.replace(" ", "_")
-        print(
-            f"🚚 Project renamed: renaming MinIO folder {old_slug} -> {new_slug}"
-        )
-        rename_project_folder(tenant, app_slug, old_slug, new_slug)
+        old_slug = old.slug
+        new_slug_base = slugify(instance.name)
+        slug_val = new_slug_base
+        counter = 1
+        while (
+            Project.objects.filter(owner=instance.owner, slug=slug_val)
+            .exclude(pk=instance.pk)
+            .exists()
+        ):
+            slug_val = f"{new_slug_base}-{counter}"
+            counter += 1
+        if old_slug != slug_val:
+            print(
+                f"🚚 Project renamed: renaming MinIO folder {old_slug} -> {slug_val}"
+            )
+            rename_project_folder(tenant, app_slug, old_slug, slug_val)
+        instance.slug = slug_val
