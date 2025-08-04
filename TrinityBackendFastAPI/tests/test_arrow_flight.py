@@ -418,7 +418,12 @@ def test_list_saved_dataframes_env(monkeypatch):
             self.mapping[key] = value
 
         def hgetall(self, key):
-            return self.mapping.get(key, {})
+            raw = self.mapping.get(key, {})
+            return {
+                k.encode() if isinstance(k, str) else k:
+                v.encode() if isinstance(v, str) else v
+                for k, v in raw.items()
+            }
 
         def hset(self, key, mapping=None, **kwargs):
             self.mapping.setdefault(key, {})
@@ -511,7 +516,12 @@ def test_list_saved_dataframes_updates_currentenv(monkeypatch):
             self.mapping[key] = value
 
         def hgetall(self, key):
-            return self.mapping.get(key, {})
+            raw = self.mapping.get(key, {})
+            return {
+                k.encode() if isinstance(k, str) else k:
+                v.encode() if isinstance(v, str) else v
+                for k, v in raw.items()
+            }
 
         def hset(self, key, mapping=None, **kwargs):
             self.mapping.setdefault(key, {})
@@ -619,7 +629,12 @@ def test_list_saved_dataframes_current_env_override(monkeypatch):
             self.mapping[key] = value
 
         def hgetall(self, key):
-            return self.mapping.get(key, {})
+            raw = self.mapping.get(key, {})
+            return {
+                k.encode() if isinstance(k, str) else k:
+                v.encode() if isinstance(v, str) else v
+                for k, v in raw.items()
+            }
 
         def hset(self, key, mapping=None, **kwargs):
             self.mapping.setdefault(key, {})

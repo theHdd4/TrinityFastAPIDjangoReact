@@ -150,7 +150,16 @@ def _parse_numeric_id(value: str | int | None) -> int:
 def _get_current_env(user_id: str) -> dict:
     """Return the latest environment selection for a user from Redis."""
     try:
-        return redis_client.hgetall(f"currentenv:{user_id}")
+        raw = redis_client.hgetall(f"currentenv:{user_id}")
+        # ``redis-py`` returns ``bytes`` for keys and values when
+        # ``decode_responses`` is disabled. Looking up using ``str`` keys would
+        # therefore fail, causing stale environment variables to linger. Decode
+        # everything to ``str`` so callers always receive the expected mapping.
+        return {
+            k.decode() if isinstance(k, bytes) else k:
+            v.decode() if isinstance(v, bytes) else v
+            for k, v in raw.items()
+        }
     except Exception:
         return {}
 
