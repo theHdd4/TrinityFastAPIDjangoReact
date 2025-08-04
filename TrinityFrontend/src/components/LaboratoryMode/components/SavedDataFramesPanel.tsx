@@ -104,7 +104,7 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle }) => {
   };
 
   const buildTree = (frames: Frame[], pref: string): TreeNode[] => {
-    const root: any = {};
+    const root: any = { children: {} };
     frames.forEach(f => {
       const rel = f.object_name.startsWith(pref)
         ? f.object_name.slice(pref.length)
@@ -114,7 +114,6 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle }) => {
       let currentPath = pref;
       parts.forEach((part, idx) => {
         currentPath += part + (idx < parts.length - 1 ? '/' : '');
-        node.children = node.children || {};
         if (!node.children[part]) {
           node.children[part] = { name: part, path: currentPath, children: {} };
         }
@@ -131,7 +130,7 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle }) => {
         frame: c.frame,
         children: toArr(c)
       }));
-    return toArr({ children: root });
+    return toArr(root);
   };
 
   const tree = buildTree(files, prefix);
