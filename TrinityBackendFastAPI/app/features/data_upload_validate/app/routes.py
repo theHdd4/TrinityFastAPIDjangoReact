@@ -2644,41 +2644,37 @@ async def list_saved_dataframes(
     app_name: str = "",
     project_name: str = "",
 ) -> dict:
-    """List saved Arrow dataframes sorted by newest first.
+    """List all objects stored under the client/app/project prefix.
 
-    The client, app and project names are loaded from environment
-    variables via :func:`get_object_prefix`.
+    Previously this endpoint returned only the latest ``.arrow`` file for each
+    dataset which meant any additional files or nested directories inside the
+    user's namespace were ignored by the UI. The Saved DataFrames panel now
+    expects a complete listing so it can render a tree view of folders and
+    files. To support this we simply return every object MinIO reports for the
+    resolved prefix.
     """
+
     prefix = await get_object_prefix(
         client_name=client_name,
         app_name=app_name,
         project_name=project_name,
     )
+
     try:
-        objects = minio_client.list_objects(MINIO_BUCKET, prefix=prefix, recursive=True)
-        latest: dict[str, tuple[datetime, str]] = {}
-        for obj in objects:
-            if not obj.object_name.endswith(".arrow"):
-                continue
-            try:
-                stat = minio_client.stat_object(MINIO_BUCKET, obj.object_name)
-                base = Path(obj.object_name).stem.split("_", 2)
-                key = base[2] if len(base) >= 3 else base[-1]
-                if key not in latest or stat.last_modified > latest[key][0]:
-                    latest[key] = (stat.last_modified, obj.object_name)
-            except S3Error as e:
-                if getattr(e, "code", "") in {"NoSuchKey", "NoSuchBucket"}:
-                    redis_client.delete(obj.object_name)
-                    continue
-                raise
-        entries = sorted(latest.values(), key=lambda x: x[0], reverse=True)
+        objects = list(
+            minio_client.list_objects(
+                MINIO_BUCKET, prefix=prefix, recursive=True
+            )
+        )
         files = [
             {
-                "object_name": name,
-                "arrow_name": Path(name).name,
-                "csv_name": Path(name).stem.split("_", 2)[-1],
+                "object_name": obj.object_name,
+                "arrow_name": Path(obj.object_name).name
+                if obj.object_name.endswith(".arrow")
+                else None,
+                "csv_name": Path(obj.object_name).name,
             }
-            for _, name in entries
+            for obj in sorted(objects, key=lambda o: o.object_name)
         ]
         return {"files": files}
     except S3Error as e:
