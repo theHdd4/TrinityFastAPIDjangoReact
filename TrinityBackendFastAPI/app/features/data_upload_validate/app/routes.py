@@ -158,15 +158,42 @@ async def get_object_prefix(
     """Return the MinIO prefix for the current client/app/project."""
     USER_ID = _parse_numeric_id(os.getenv("USER_ID"))
     PROJECT_ID = _parse_numeric_id(project_id or os.getenv("PROJECT_ID", "0"))
-    env = await get_env_vars(
-        client_id or os.getenv("CLIENT_ID", ""),
-        app_id or os.getenv("APP_ID", ""),
-        project_id or os.getenv("PROJECT_ID", ""),
-        client_name=client_name or os.getenv("CLIENT_NAME", ""),
-        app_name=app_name or os.getenv("APP_NAME", ""),
-        project_name=project_name or os.getenv("PROJECT_NAME", ""),
-        use_cache=False,
-    )
+    # Attempt to pull the latest names from Redis first. Redis keys follow the
+    # pattern ``env:<client_id>:<app_id>:<project_id>:<VAR>``. This lets us read
+    # the current client/app/project names without knowing them ahead of time.
+    # If Redis lacks the information we fall back to Postgres via
+    # ``get_env_vars``.
+    client_id_env = client_id or os.getenv("CLIENT_ID", "")
+    app_id_env = app_id or os.getenv("APP_ID", "")
+    project_id_env = project_id or os.getenv("PROJECT_ID", "")
+
+    env = {}
+    if client_id_env or app_id_env or project_id_env:
+        base = f"env:{client_id_env}:{app_id_env}:{project_id_env}"
+        try:
+            client_r = redis_client.get(f"{base}:CLIENT_NAME")
+            app_r = redis_client.get(f"{base}:APP_NAME")
+            project_r = redis_client.get(f"{base}:PROJECT_NAME")
+            if client_r and project_r:
+                env = {
+                    "CLIENT_NAME": client_r,
+                    "APP_NAME": app_r or "default_app",
+                    "PROJECT_NAME": project_r,
+                }
+        except Exception:
+            env = {}
+
+    if not env:
+        env = await get_env_vars(
+            client_id_env,
+            app_id_env,
+            project_id_env,
+            client_name=client_name or os.getenv("CLIENT_NAME", ""),
+            app_name=app_name or os.getenv("APP_NAME", ""),
+            project_name=project_name or os.getenv("PROJECT_NAME", ""),
+            use_cache=False,
+        )
+
     print("🔧 fetched env", env)
     client = env.get("CLIENT_NAME", os.getenv("CLIENT_NAME", "default_client"))
     app = env.get("APP_NAME", os.getenv("APP_NAME", "default_app"))

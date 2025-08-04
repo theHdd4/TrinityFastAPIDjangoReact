@@ -394,31 +394,53 @@ def test_save_dataframe_skip_existing(monkeypatch):
 def test_list_saved_dataframes_env(monkeypatch):
     routes = load_routes()
 
-    class DummyMinio:
-        def __init__(self):
-            self.objects = {
-                "pref/a.arrow": b"",
-                "pref/b.arrow": b"",
-            }
+    # Environment variables hold stale names but correct numeric IDs
+    os.environ.update(
+        {
+            "CLIENT_ID": "1",
+            "APP_ID": "2",
+            "PROJECT_ID": "3",
+            "CLIENT_NAME": "old_client",
+            "APP_NAME": "old_app",
+            "PROJECT_NAME": "old_project",
+        }
+    )
 
+    class DummyRedis:
+        def __init__(self, mapping):
+            self.mapping = mapping
+
+        def get(self, key):
+            return self.mapping.get(key)
+
+    # Redis has the updated names after a rename
+    monkeypatch.setattr(
+        routes,
+        "redis_client",
+        DummyRedis(
+            {
+                "env:1:2:3:CLIENT_NAME": "client",
+                "env:1:2:3:APP_NAME": "app",
+                "env:1:2:3:PROJECT_NAME": "proj",
+            }
+        ),
+    )
+
+    class DummyMinio:
         def list_objects(self, bucket, prefix="", recursive=False):
-            for name in self.objects:
-                if name.startswith(prefix):
-                    yield types.SimpleNamespace(object_name=name)
+            # Yield objects that live under the resolved prefix
+            objects = [
+                types.SimpleNamespace(object_name=f"{prefix}a.arrow"),
+                types.SimpleNamespace(object_name=f"{prefix}b.arrow"),
+            ]
+            for obj in objects:
+                yield obj
 
         def stat_object(self, bucket, name):
             return types.SimpleNamespace(last_modified=0)
 
     monkeypatch.setattr(routes, "minio_client", DummyMinio())
     monkeypatch.setattr(routes, "MINIO_BUCKET", "bucket")
-
-    async def dummy_prefix(*a, **k):
-        os.environ["CLIENT_NAME"] = "client"
-        os.environ["APP_NAME"] = "app"
-        os.environ["PROJECT_NAME"] = "proj"
-        return "pref/"
-
-    monkeypatch.setattr(routes, "get_object_prefix", dummy_prefix)
 
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
@@ -432,7 +454,7 @@ def test_list_saved_dataframes_env(monkeypatch):
     assert resp.status_code == 200
     data = resp.json()
     assert data["bucket"] == "bucket"
-    assert data["prefix"] == "pref/"
+    assert data["prefix"] == "client/app/proj/"
     assert len(data["files"]) == 2
     for f in data["files"]:
         assert "arrow_name" in f
