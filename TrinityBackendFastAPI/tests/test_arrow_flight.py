@@ -476,3 +476,85 @@ def test_list_saved_dataframes_env(monkeypatch):
     assert redis_mapping["env:1:2:3:APP_NAME"] == "app"
     assert redis_mapping["env:1:2:3:PROJECT_NAME"] == "proj"
 
+
+def test_list_saved_dataframes_current_env_override(monkeypatch):
+    routes = load_routes()
+
+    # Environment variables still point at the old project while Redis holds
+    # the new selection after a rename.
+    os.environ.update(
+        {
+            "USER_ID": "42",
+            "CLIENT_ID": "old_cid",
+            "APP_ID": "old_aid",
+            "PROJECT_ID": "old_pid",
+            "CLIENT_NAME": "old_client",
+            "APP_NAME": "old_app",
+            "PROJECT_NAME": "old_proj",
+        }
+    )
+
+    def fake_current_env(user_id: str):
+        assert user_id == "42"
+        return {
+            "client_id": "cid",
+            "app_id": "aid",
+            "project_id": "pid",
+            "client_name": "client",
+            "app_name": "app",
+            "project_name": "proj",
+        }
+
+    monkeypatch.setattr(routes, "_get_current_env", fake_current_env)
+
+    async def fake_get_env_vars(client_id, app_id, project_id, *, client_name, app_name, project_name, **k):
+        # ``get_object_prefix`` should consult the new identifiers provided by
+        # ``get_current_env``.
+        assert client_id == "cid"
+        assert app_id == "aid"
+        assert project_id == "pid"
+        return {
+            "CLIENT_NAME": "client",
+            "APP_NAME": "app",
+            "PROJECT_NAME": "proj",
+        }
+
+    monkeypatch.setattr(routes, "get_env_vars", fake_get_env_vars)
+
+    class DummyRedis:
+        def __init__(self):
+            self.mapping = {}
+
+        def get(self, key):
+            return self.mapping.get(key)
+
+        def set(self, key, value):
+            self.mapping[key] = value
+
+    monkeypatch.setattr(routes, "redis_client", DummyRedis())
+
+    class DummyMinio:
+        def list_objects(self, bucket, prefix="", recursive=False):
+            yield types.SimpleNamespace(object_name=f"{prefix}df.arrow")
+
+        def stat_object(self, bucket, name):
+            return types.SimpleNamespace(last_modified=0)
+
+    monkeypatch.setattr(routes, "minio_client", DummyMinio())
+    monkeypatch.setattr(routes, "MINIO_BUCKET", "bucket")
+
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    app = FastAPI()
+    app.include_router(routes.router)
+    client = TestClient(app)
+
+    resp = client.get("/list_saved_dataframes")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["prefix"] == "client/app/proj/"
+    assert data["environment"]["CLIENT_NAME"] == "client"
+    assert data["environment"]["APP_NAME"] == "app"
+    assert data["environment"]["PROJECT_NAME"] == "proj"
+

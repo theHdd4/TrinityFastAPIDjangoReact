@@ -146,6 +146,14 @@ def _parse_numeric_id(value: str | int | None) -> int:
     except Exception:
         return 0
 
+
+def _get_current_env(user_id: str) -> dict:
+    """Return the latest environment selection for a user from Redis."""
+    try:
+        return redis_client.hgetall(f"currentenv:{user_id}")
+    except Exception:
+        return {}
+
 async def get_object_prefix(
     client_id: str = "",
     app_id: str = "",
@@ -158,14 +166,23 @@ async def get_object_prefix(
     """Return the MinIO prefix for the current client/app/project."""
     USER_ID = _parse_numeric_id(os.getenv("USER_ID"))
     PROJECT_ID = _parse_numeric_id(project_id or os.getenv("PROJECT_ID", "0"))
-    # Attempt to pull the latest names from Redis first. Redis keys follow the
-    # pattern ``env:<client_id>:<app_id>:<project_id>:<VAR>``. This lets us read
-    # the current client/app/project names without knowing them ahead of time.
-    # If Redis lacks the information we fall back to Postgres via
-    # ``get_env_vars``.
-    client_id_env = client_id or os.getenv("CLIENT_ID", "")
-    app_id_env = app_id or os.getenv("APP_ID", "")
-    project_id_env = project_id or os.getenv("PROJECT_ID", "")
+
+    # Pull the most recent client/app/project selection from Redis so that
+    # renaming a project immediately reflects in subsequent API calls. If Redis
+    # doesn't have the information we fall back to whatever was passed in or is
+    # stored in environment variables.
+    current_env = _get_current_env(str(USER_ID))
+
+    client_id_env = client_id or current_env.get("client_id") or os.getenv("CLIENT_ID", "")
+    app_id_env = app_id or current_env.get("app_id") or os.getenv("APP_ID", "")
+    project_id_env = project_id or current_env.get("project_id") or os.getenv("PROJECT_ID", "")
+
+    # Allow overrides for names if they were provided; otherwise prefer the
+    # values from ``current_env`` before falling back to existing environment
+    # variables. This ensures renamed projects are picked up immediately.
+    client_name = client_name or current_env.get("client_name", "")
+    app_name = app_name or current_env.get("app_name", "")
+    project_name = project_name or current_env.get("project_name", "")
 
     env = {}
     base = ""
