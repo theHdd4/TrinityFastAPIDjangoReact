@@ -13,10 +13,14 @@ from apps.tenants.models import Tenant, Domain
 
 
 def main():
-    tenant_name = "Quant_Matrix_AI"
+    tenant_name = "Quant Matrix AI"
     tenant_schema = "Quant_Matrix_AI_Schema"
-    # Map localhost requests to the default tenant unless overridden
     primary_domain = os.getenv("PRIMARY_DOMAIN", "quantmatrix.ai")
+    seats_allowed = int(os.getenv("TENANT_SEATS", 20))
+    project_cap = int(os.getenv("TENANT_PROJECT_CAP", 5))
+    projects_allowed = ["Demo Project"]
+    admin_username = "neo"
+    admin_email = f"{admin_username}@{primary_domain}"
 
     print("\n→ 1) Applying SHARED (public) migrations…")
     # Run only shared apps into the public schema
@@ -32,10 +36,20 @@ def main():
     from django.contrib.auth import get_user_model
 
     User = get_user_model()
-    if not User.objects.filter(username="neo").exists():
-        User.objects.create_superuser(username="neo", password="neo_the_one", email="")
-        print("→ 1b) Created default super admin 'neo' with password 'neo_the_one'")
+    if not User.objects.filter(username=admin_username).exists():
+        User.objects.create_superuser(
+            username=admin_username,
+            password="neo_the_one",
+            email=admin_email,
+        )
+        print(
+            "→ 1b) Created default super admin 'neo' with password 'neo_the_one'"
+        )
     else:
+        user = User.objects.get(username=admin_username)
+        if user.email != admin_email:
+            user.email = admin_email
+            user.save()
         print("→ 1b) Default super admin 'neo' already exists")
 
     # Create additional users for each role. The admin, editor and viewer
@@ -45,8 +59,7 @@ def main():
     # Username for staff members uses their Quant Matrix email address
     email_domain = "quantmatrix.ai"
     role_users = [
-        ("neo", "neo_the_one", "super_admin", "", ""),
-        ("admin_user", "admin", "admin", "", ""),
+        (admin_username, "neo_the_one", "admin", "", ""),
         ("editor_user", "editor", "editor", "", ""),
         ("viewer_user", "viewer", "viewer", "", ""),
         (f"gautami.sharma@{email_domain}", "QM250111", "editor", "Gautami", "Sharma"),
@@ -59,12 +72,12 @@ def main():
         (f"rutuja.wagh@{email_domain}", "QM240104", "viewer", "Rutuja", "Wagh"),
         (f"saahil.kejriwal@{email_domain}", "QM240103", "viewer", "Saahil", "Kejriwal"),
         (f"harshadip.das@{email_domain}", "QM240102", "admin", "Harshadip", "Das"),
-        (f"venu.gorti@{email_domain}", "QM240110", "admin", "Venu", "Gorti"),
+        (f"venu.gorti@{email_domain}", "QM240101", "admin", "Venu", "Gorti"),
     ]
 
     for username, password, role, first, last in role_users:
+        is_staff = role == "admin"
         if not User.objects.filter(username=username).exists():
-            is_staff = role in ("admin", "super_admin")
             User.objects.create_user(
                 username=username,
                 password=password,
@@ -77,7 +90,7 @@ def main():
         else:
             user = User.objects.get(username=username)
             update_needed = False
-            if role in ("admin", "super_admin") and not user.is_staff:
+            if is_staff and not user.is_staff:
                 user.is_staff = True
                 update_needed = True
             if first and user.first_name != first:
@@ -89,22 +102,34 @@ def main():
             if "@" in username and user.email != username:
                 user.email = username
                 update_needed = True
+            if not user.check_password(password):
+                user.set_password(password)
+                update_needed = True
             if update_needed:
                 user.save()
             print(f"→ 1c) User '{username}' already exists")
 
     with transaction.atomic():
-        # 2a) Create (or get) the Tenant row in public
+        tenant_defaults = {
+            "name": tenant_name,
+            "primary_domain": primary_domain,
+            "seats_allowed": seats_allowed,
+            "project_cap": project_cap,
+            "projects_allowed": projects_allowed,
+            "admin_name": admin_username,
+            "admin_email": admin_email,
+        }
         tenant_obj, created = Tenant.objects.get_or_create(
-            schema_name=tenant_schema,
-            defaults={"name": tenant_name},
+            schema_name=tenant_schema, defaults={**tenant_defaults, "allowed_apps": []}
         )
         if created:
             print(f"→ 2) Created Tenant: {tenant_obj}")
         else:
-            print(f"→ 2) Tenant already existed: {tenant_obj}")
+            for field, value in tenant_defaults.items():
+                setattr(tenant_obj, field, value)
+            tenant_obj.save()
+            print(f"→ 2) Updated Tenant: {tenant_obj}")
 
-        # 2b) Create its primary Domain in public
         domain_obj, domain_created = Domain.objects.get_or_create(
             domain=primary_domain,
             tenant=tenant_obj,
@@ -173,6 +198,7 @@ def main():
         ("Blank App", "blank", "Start from an empty canvas"),
     ]
 
+    allowed_app_ids = []
     # Ensure we're operating within the tenant schema when seeding data
     with schema_context(tenant_schema):
         for name, slug, desc in default_apps:
@@ -180,29 +206,31 @@ def main():
                 slug=slug,
                 defaults={"name": name, "description": desc},
             )
+            allowed_app_ids.append(obj.id)
             if created:
                 print(f"   → Created App template '{name}'")
             else:
                 print(f"   → App template '{name}' already exists")
 
-        # Assign roles to the default users within this tenant
         from apps.roles.models import UserRole
 
         for username, _, role, *_ in role_users:
             user = User.objects.get(username=username)
-            # Admin, editor and viewer roles are tied to the Quant Matrix AI tenant
-            # so they share the same client UUID. Only the super admin user is not
-            # bound to a specific client.
-            client_uuid = (
-                tenant_client_id if username != "neo" else uuid.uuid4()
-            )
-            UserRole.objects.get_or_create(
+            UserRole.objects.update_or_create(
                 user=user,
-                client_id=client_uuid,
+                client_id=tenant_client_id,
                 app_id=uuid.uuid4(),
-                project_id=uuid.uuid4(),
-                role=role,
+                defaults={
+                    "role": role,
+                    "allowed_apps": allowed_app_ids,
+                    "client_name": tenant_obj.name,
+                    "email": user.email,
+                },
             )
+
+    Tenant.objects.filter(id=tenant_obj.id).update(
+        allowed_apps=allowed_app_ids, users_in_use=len(role_users)
+    )
 
     print("All done! Tenant and all tables created.\n")
 

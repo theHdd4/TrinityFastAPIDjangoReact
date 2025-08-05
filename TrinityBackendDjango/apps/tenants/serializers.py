@@ -17,6 +17,9 @@ class TenantSerializer(serializers.ModelSerializer):
         child=serializers.CharField(), required=False
     )
     users_in_use = serializers.IntegerField(read_only=True)
+    admin_name = serializers.CharField()
+    admin_email = serializers.EmailField()
+    admin_password = serializers.CharField(write_only=True)
 
     class Meta:
         model = Tenant
@@ -31,6 +34,9 @@ class TenantSerializer(serializers.ModelSerializer):
             "allowed_apps",
             "projects_allowed",
             "users_in_use",
+            "admin_name",
+            "admin_email",
+            "admin_password",
         ]
         read_only_fields = ["id", "created_on", "users_in_use"]
 
@@ -49,6 +55,7 @@ class TenantSerializer(serializers.ModelSerializer):
         domain = validated_data.pop("primary_domain", "")
         allowed_apps = validated_data.pop("allowed_apps", [])
         projects_allowed = validated_data.pop("projects_allowed", [])
+        admin_password = validated_data.pop("admin_password")
 
         schema = (
             validated_data.get("schema_name", "")
@@ -108,6 +115,22 @@ class TenantSerializer(serializers.ModelSerializer):
                 ]
                 for name, slug, desc in default_apps:
                     App.objects.get_or_create(slug=slug, defaults={"name": name, "description": desc})
+
+        with schema_context(tenant.schema_name):
+            from apps.accounts.models import User
+            from apps.roles.models import UserRole
+
+            admin_user = User.objects.create_user(
+                username=validated_data["admin_name"],
+                email=validated_data["admin_email"],
+                password=admin_password,
+            )
+            UserRole.objects.filter(user=admin_user).update(
+                role=UserRole.ROLE_ADMIN,
+                allowed_apps=tenant.allowed_apps,
+                client_name=tenant.name,
+                email=validated_data["admin_email"],
+            )
 
         print("Tenant creation complete")
         return tenant

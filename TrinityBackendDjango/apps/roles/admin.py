@@ -11,6 +11,12 @@ class RoleDefinitionAdmin(admin.ModelAdmin):
 
 @admin.register(UserRole)
 class UserRoleAdmin(admin.ModelAdmin):
-    list_display = ("user", "role", "client_id", "app_id", "project_id")
+    list_display = ("user", "email", "client_name", "role", "client_id", "app_id")
     list_filter = ("role",)
-    search_fields = ("user__username", "client_id", "app_id", "project_id")
+    search_fields = (
+        "user__username",
+        "email",
+        "client_name",
+        "client_id",
+        "app_id",
+    )

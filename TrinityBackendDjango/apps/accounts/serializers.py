@@ -6,6 +6,9 @@ class UserSerializer(serializers.ModelSerializer):
     """Serializer for the custom User model with password handling."""
 
     password = serializers.CharField(write_only=True, required=False)
+    allowed_apps = serializers.ListField(
+        child=serializers.IntegerField(), write_only=True, required=False, default=list
+    )
 
     class Meta:
         model = User
@@ -19,12 +22,16 @@ class UserSerializer(serializers.ModelSerializer):
             "mfa_enabled",
             "preferences",
             "is_staff",
+            "allowed_apps",
         ]
         read_only_fields = ["id", "is_staff"]
 
     def create(self, validated_data):
         password = validated_data.pop("password", None)
+        allowed_apps = validated_data.pop("allowed_apps", None)
         user = User(**validated_data)
+        if allowed_apps is not None:
+            user._allowed_apps = allowed_apps
         if password:
             user.set_password(password)
         else:

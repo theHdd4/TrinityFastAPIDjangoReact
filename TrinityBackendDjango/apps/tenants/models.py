@@ -13,6 +13,8 @@ class Tenant(TenantMixin):
     users_in_use = models.PositiveIntegerField(default=0)
     project_cap = models.PositiveIntegerField(default=0)
     projects_allowed = models.JSONField(default=list, blank=True)
+    admin_name = models.CharField(max_length=255, blank=True)
+    admin_email = models.EmailField(blank=True)
 
     auto_create_schema = True
 

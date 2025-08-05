@@ -32,7 +32,7 @@ class RoleDefinition(models.Model):
 
 
 class UserRole(models.Model):
-    """Assign a role to a user for a specific client/app/project."""
+    """Assign a role to a user for a specific client and app."""
 
     ROLE_ADMIN = "admin"
     ROLE_EDITOR = "editor"
@@ -52,8 +52,9 @@ class UserRole(models.Model):
         related_name="role_assignments",
     )
     client_id = models.UUIDField()
+    client_name = models.CharField(max_length=255, blank=True)
+    email = models.EmailField(blank=True)
     app_id = models.UUIDField()
-    project_id = models.UUIDField()
     role = models.CharField(max_length=20, choices=ROLE_CHOICES)
     allowed_apps = models.JSONField(
         default=list,
@@ -64,7 +65,7 @@ class UserRole(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        unique_together = ("user", "client_id", "app_id", "project_id")
+        unique_together = ("user", "client_id", "app_id")
         verbose_name = "User Role"
         verbose_name_plural = "User Roles"
 

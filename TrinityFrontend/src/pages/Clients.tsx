@@ -44,6 +44,8 @@ interface Tenant {
   allowed_apps: number[];
   projects_allowed: string[];
   users_in_use: number;
+  admin_name?: string;
+  admin_email?: string;
 }
 
 interface App {
@@ -59,10 +61,6 @@ const Clients = () => {
     role === 'super_admin' ||
     user?.is_staff ||
     user?.is_superuser;
-
-  if (!hasAccess) {
-    return <NotFound />;
-  }
   const [tenants, setTenants] = useState<Tenant[]>([]);
   const [apps, setApps] = useState<App[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
@@ -75,6 +73,9 @@ const Clients = () => {
     project_cap: '',
     apps_allowed: [] as number[],
     projects_allowed: '',
+    admin_name: '',
+    admin_email: '',
+    admin_password: '',
   });
 
   const navigate = useNavigate();
@@ -111,9 +112,10 @@ const Clients = () => {
 
   useEffect(() => {
     console.log('Clients page mounted');
+    if (!hasAccess) return;
     loadTenants();
     loadApps();
-  }, []);
+  }, [hasAccess]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value, options } = e.target as HTMLSelectElement;
@@ -140,6 +142,9 @@ const Clients = () => {
         .split(',')
         .map((p) => p.trim())
         .filter((p) => p.length > 0),
+      admin_name: form.admin_name,
+      admin_email: form.admin_email,
+      admin_password: form.admin_password,
     };
     console.log('Submitting tenant payload', payload);
     try {
@@ -161,6 +166,9 @@ const Clients = () => {
             project_cap: '',
             apps_allowed: [],
             projects_allowed: '',
+            admin_name: '',
+            admin_email: '',
+            admin_password: '',
           });
           loadTenants();
         }
@@ -189,6 +197,10 @@ const Clients = () => {
     t.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
     t.primary_domain.toLowerCase().includes(searchTerm.toLowerCase())
   );
+
+  if (!hasAccess) {
+    return <NotFound />;
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-gray-50">
@@ -316,6 +328,48 @@ const Clients = () => {
                     onChange={handleChange}
                     placeholder="project1, project2"
                     className="border-gray-200 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  />
+                </div>
+
+                <div className="space-y-2 md:col-span-2 lg:col-span-3">
+                  <h3 className="text-lg font-semibold text-gray-800">Admin Details</h3>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="admin_name" className="text-sm font-medium text-gray-700">Admin Username *</Label>
+                  <Input
+                    id="admin_name"
+                    name="admin_name"
+                    value={form.admin_name}
+                    onChange={handleChange}
+                    placeholder="admin"
+                    className="border-gray-200 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    required
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="admin_email" className="text-sm font-medium text-gray-700">Admin Email *</Label>
+                  <Input
+                    id="admin_email"
+                    name="admin_email"
+                    type="email"
+                    value={form.admin_email}
+                    onChange={handleChange}
+                    placeholder="admin@example.com"
+                    className="border-gray-200 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    required
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="admin_password" className="text-sm font-medium text-gray-700">Admin Password *</Label>
+                  <Input
+                    id="admin_password"
+                    name="admin_password"
+                    type="password"
+                    value={form.admin_password}
+                    onChange={handleChange}
+                    placeholder="********"
+                    className="border-gray-200 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    required
                   />
                 </div>
 

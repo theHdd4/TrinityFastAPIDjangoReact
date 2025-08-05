@@ -27,7 +27,6 @@ class Migration(migrations.Migration):
                 ),
                 ("client_id", models.UUIDField()),
                 ("app_id", models.UUIDField()),
-                ("project_id", models.UUIDField()),
                 (
                     "role",
                     models.CharField(
@@ -54,7 +53,7 @@ class Migration(migrations.Migration):
             options={
                 "verbose_name": "User Role",
                 "verbose_name_plural": "User Roles",
-                "unique_together": {("user", "client_id", "app_id", "project_id")},
+                "unique_together": {("user", "client_id", "app_id")},
             },
         ),
     ]
