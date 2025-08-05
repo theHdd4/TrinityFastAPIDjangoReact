@@ -61,10 +61,6 @@ const Clients = () => {
     role === 'super_admin' ||
     user?.is_staff ||
     user?.is_superuser;
-
-  if (!hasAccess) {
-    return <NotFound />;
-  }
   const [tenants, setTenants] = useState<Tenant[]>([]);
   const [apps, setApps] = useState<App[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
@@ -116,9 +112,10 @@ const Clients = () => {
 
   useEffect(() => {
     console.log('Clients page mounted');
+    if (!hasAccess) return;
     loadTenants();
     loadApps();
-  }, []);
+  }, [hasAccess]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value, options } = e.target as HTMLSelectElement;
@@ -200,6 +197,10 @@ const Clients = () => {
     t.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
     t.primary_domain.toLowerCase().includes(searchTerm.toLowerCase())
   );
+
+  if (!hasAccess) {
+    return <NotFound />;
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-gray-50">
@@ -342,6 +343,7 @@ const Clients = () => {
                     onChange={handleChange}
                     placeholder="admin"
                     className="border-gray-200 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    required
                   />
                 </div>
                 <div className="space-y-2">
@@ -354,6 +356,7 @@ const Clients = () => {
                     onChange={handleChange}
                     placeholder="admin@example.com"
                     className="border-gray-200 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    required
                   />
                 </div>
                 <div className="space-y-2">
@@ -366,6 +369,7 @@ const Clients = () => {
                     onChange={handleChange}
                     placeholder="********"
                     className="border-gray-200 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    required
                   />
                 </div>
 

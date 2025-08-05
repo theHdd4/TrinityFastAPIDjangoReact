@@ -56,10 +56,6 @@ const Users = () => {
     role === 'super_admin' ||
     user?.is_staff ||
     user?.is_superuser;
-
-  if (!hasAccess) {
-    return <NotFound />;
-  }
   const [users, setUsers] = useState<User[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedRole, setSelectedRole] = useState<string>('All');
@@ -127,11 +123,12 @@ const Users = () => {
   };
 
   useEffect(() => {
+    if (!hasAccess) return;
     loadUsers();
     loadDomains();
     loadApps();
     loadTenantApps();
-  }, []);
+  }, [hasAccess]);
 
   const handleFormChange = (
     e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>,
@@ -162,7 +159,7 @@ const Users = () => {
         body: JSON.stringify(form),
       });
       if (res.ok) {
-        setForm({ username: '', password: '', email: '' });
+        setForm({ username: '', password: '', email: '', allowed_apps: [] });
         setShowAddForm(false);
         await loadUsers();
       }
@@ -218,6 +215,10 @@ const Users = () => {
     const matchesStatus = selectedStatus === 'All' || status === selectedStatus;
     return matchesSearch && matchesRole && matchesStatus;
   });
+
+  if (!hasAccess) {
+    return <NotFound />;
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-gray-50">
