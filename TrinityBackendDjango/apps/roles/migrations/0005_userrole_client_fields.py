@@ -7,9 +7,8 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
-        migrations.RemoveField(
-            model_name="userrole",
-            name="project_id",
+        migrations.RunSQL(
+            "ALTER TABLE roles_userrole DROP COLUMN IF EXISTS project_id;"
         ),
         migrations.AddField(
             model_name="userrole",
