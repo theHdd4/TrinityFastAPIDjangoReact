@@ -5,7 +5,7 @@ import os
 from apps.accounts.views import CsrfExemptSessionAuthentication
 from apps.accounts.utils import save_env_var, get_env_dict, load_env_vars
 from .models import App, Project, Session, LaboratoryAction, ArrowDataset
-from .atom_config import save_atom_list_configuration
+from .atom_config import save_atom_list_configuration, load_atom_list_configuration
 from .serializers import (
     AppSerializer,
     ProjectSerializer,
@@ -116,6 +116,19 @@ class ProjectViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(project_obj)
         data = serializer.data
         data["environment"] = get_env_dict(request.user)
+
+        state = data.get("state") or {}
+        for field, mode in [
+            ("laboratory_config", "lab"),
+            ("workflow_config", "workflow"),
+            ("exhibition_config", "exhibition"),
+        ]:
+            cfg = load_atom_list_configuration(project_obj, mode)
+            if cfg:
+                state[field] = cfg
+        if state:
+            data["state"] = state
+
         return Response(data)
 
     def perform_update(self, serializer):

@@ -107,3 +107,58 @@ def save_atom_list_configuration(
             coll.insert_many(docs)
     except Exception as exc:  # pragma: no cover - logging only
         logger.error("Failed to save atom configuration: %s", exc)
+
+
+def load_atom_list_configuration(
+    project: Project, mode: str
+) -> Dict[str, Any] | None:
+    """Return atom configuration for a project/mode from MongoDB.
+
+    Reconstructs the layout cards and atom order as previously persisted by
+    :func:`save_atom_list_configuration`.
+    """
+    client_id, app_id, project_id = _get_env_ids(project)
+    try:
+        mc = MongoClient(
+            getattr(settings, "MONGO_URI", "mongodb://mongo:27017/trinity_prod")
+        )
+        coll = mc["trinity_prod"]["atom_list_configuration"]
+        cursor = coll.find(
+            {
+                "client_id": client_id,
+                "app_id": app_id,
+                "project_id": project_id,
+                "mode": mode,
+            }
+        ).sort([("canvas_position", 1), ("atom_positions", 1)])
+
+        cards: Dict[int, Dict[str, Any]] = {}
+        for doc in cursor:
+            cpos = doc.get("canvas_position", 0)
+            card = cards.setdefault(
+                cpos,
+                {
+                    "id": (doc.get("mode_meta") or {}).get("card_id"),
+                    "collapsed": doc.get("open_cards", "yes") != "yes",
+                    "isExhibited": doc.get("exhibition_previews", "no") == "yes",
+                    "scroll_position": doc.get("scroll_position", 0),
+                    "atoms": [],
+                },
+            )
+            card["atoms"].append(
+                {
+                    "id": (doc.get("mode_meta") or {}).get("atom_id"),
+                    "atomId": doc.get("atom_name"),
+                    "title": doc.get("atom_name"),
+                    "settings": doc.get("atom_configs", {}),
+                }
+            )
+
+        if not cards:
+            return None
+
+        ordered_cards = [cards[i] for i in sorted(cards)]
+        return {"cards": ordered_cards}
+    except Exception as exc:  # pragma: no cover - logging only
+        logger.error("Failed to load atom configuration: %s", exc)
+        return None
