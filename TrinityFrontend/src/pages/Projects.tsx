@@ -268,6 +268,20 @@ const Projects = () => {
               : p
           )
         );
+
+        // Update localStorage so other panels see the new project name
+        const stored = localStorage.getItem('current-project');
+        if (stored) {
+          try {
+            const obj = JSON.parse(stored);
+            if (obj && obj.id === updated.id) {
+              localStorage.setItem('current-project', JSON.stringify(updated));
+            }
+          } catch {
+            /* ignore */
+          }
+        }
+
         try {
           const envRes = await fetch(`${REGISTRY_API}/projects/${updated.id}/`, {
             credentials: 'include'

@@ -62,10 +62,16 @@ def update_env_vars_on_rename(sender, instance, **kwargs):
 
         # Ensure the registry entry is updated even if no user-specific
         # environment variables exist for this project. The Saved DataFrames
-        # panel reads from this table when resolving MinIO prefixes.
-        reg_obj = RegistryEnvironment.objects.filter(
-            client_name=tenant, app_name=app_slug, project_name=old.name
-        ).first()
+        # panel reads from this table when resolving MinIO prefixes. Match the
+        # existing row either by the previous name or the stored ``PROJECT_ID``
+        # inside the JSON field so we can safely update renames even if the
+        # name changed elsewhere previously.
+        reg_obj = (
+            RegistryEnvironment.objects.filter(
+                Q(client_name=tenant, app_name=app_slug, project_name=old.name)
+                | Q(envvars__PROJECT_ID=old_pid)
+            ).first()
+        )
         if reg_obj:
             env = reg_obj.envvars or {}
             env.update(
@@ -83,7 +89,7 @@ def update_env_vars_on_rename(sender, instance, **kwargs):
                 f"🗃️ RegistryEnvironment updated for {tenant}/{app_slug} -> {instance.name}"
             )
         else:
-            RegistryEnvironment.objects.update_or_create(
+            reg_obj, _ = RegistryEnvironment.objects.update_or_create(
                 client_name=tenant,
                 app_name=app_slug,
                 project_name=instance.name,
@@ -93,9 +99,21 @@ def update_env_vars_on_rename(sender, instance, **kwargs):
                         "APP_NAME": app_slug,
                         "PROJECT_NAME": instance.name,
                         "PROJECT_ID": new_pid,
-                    }
+                    },
+                    "identifiers": [],
+                    "measures": [],
+                    "dimensions": {},
                 },
             )
+
+        # Remove any lingering rows that still reference the old project name
+        # or ID to avoid stale lookups returning outdated names.
+        RegistryEnvironment.objects.filter(
+            client_name=tenant,
+            app_name=app_slug,
+        ).filter(
+            Q(project_name=old.name) | Q(envvars__PROJECT_ID=old_pid)
+        ).exclude(pk=reg_obj.pk).delete()
 
         # Projects may be stored with different ``project_id`` formats across
         # user environment variable rows (e.g. "name_1" or just "1"). When a
