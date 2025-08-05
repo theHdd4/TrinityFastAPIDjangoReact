@@ -55,6 +55,11 @@ class UserRole(models.Model):
     app_id = models.UUIDField()
     project_id = models.UUIDField()
     role = models.CharField(max_length=20, choices=ROLE_CHOICES)
+    allowed_apps = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="Apps the user is permitted to access",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

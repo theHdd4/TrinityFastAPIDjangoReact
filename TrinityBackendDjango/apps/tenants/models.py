@@ -7,6 +7,12 @@ class Tenant(TenantMixin):
 
     name = models.CharField(max_length=255, unique=True)
     created_on = models.DateField(auto_now_add=True)
+    primary_domain = models.CharField(max_length=253, blank=True)
+    allowed_apps = models.JSONField(default=list, blank=True)
+    seats_allowed = models.PositiveIntegerField(default=0)
+    users_in_use = models.PositiveIntegerField(default=0)
+    project_cap = models.PositiveIntegerField(default=0)
+    projects_allowed = models.JSONField(default=list, blank=True)
 
     auto_create_schema = True
 
