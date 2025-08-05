@@ -5,6 +5,7 @@ import os
 from apps.accounts.views import CsrfExemptSessionAuthentication
 from apps.accounts.utils import save_env_var, get_env_dict, load_env_vars
 from .models import App, Project, Session, LaboratoryAction, ArrowDataset
+from .atom_config import save_atom_list_configuration
 from .serializers import (
     AppSerializer,
     ProjectSerializer,
@@ -133,6 +134,18 @@ class ProjectViewSet(viewsets.ModelViewSet):
             save_env_var(self.request.user, "PROJECT_NAME", os.environ["PROJECT_NAME"])
             save_env_var(self.request.user, "PROJECT_ID", os.environ["PROJECT_ID"])
             print("Current env vars after project rename", get_env_dict(self.request.user))
+
+        state_data = self.request.data.get("state", {})
+        if isinstance(state_data, dict):
+            if "laboratory_config" in state_data:
+                cards = state_data["laboratory_config"].get("cards", [])
+                save_atom_list_configuration(project, "lab", cards)
+            if "workflow_config" in state_data:
+                cards = state_data["workflow_config"].get("cards", [])
+                save_atom_list_configuration(project, "workflow", cards)
+            if "exhibition_config" in state_data:
+                cards = state_data["exhibition_config"].get("cards", [])
+                save_atom_list_configuration(project, "exhibition", cards)
 
 
 class SessionViewSet(viewsets.ModelViewSet):
