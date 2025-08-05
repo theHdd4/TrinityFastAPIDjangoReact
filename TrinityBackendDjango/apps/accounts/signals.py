@@ -26,10 +26,11 @@ def create_userrole_and_increment(sender, instance, created, **kwargs):
             UserRole.objects.create(
                 user=instance,
                 client_id=uuid.uuid4(),
+                client_name=tenant.name,
+                email=instance.email,
                 app_id=uuid.uuid4(),
-                project_id=uuid.uuid4(),
                 role=UserRole.ROLE_VIEWER,
-                allowed_apps=tenant.allowed_apps,
+                allowed_apps=getattr(instance, "_allowed_apps", tenant.allowed_apps),
             )
     except Exception:
         pass

@@ -331,10 +331,10 @@ const Clients = () => {
                 </div>
 
                 <div className="space-y-2 md:col-span-2 lg:col-span-3">
-                  <h3 className="text-lg font-semibold text-gray-800">Admin User</h3>
+                  <h3 className="text-lg font-semibold text-gray-800">Admin Details</h3>
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="admin_name" className="text-sm font-medium text-gray-700">Admin Name *</Label>
+                  <Label htmlFor="admin_name" className="text-sm font-medium text-gray-700">Admin Username *</Label>
                   <Input
                     id="admin_name"
                     name="admin_name"

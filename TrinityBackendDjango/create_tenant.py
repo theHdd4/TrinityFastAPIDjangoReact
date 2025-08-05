@@ -219,8 +219,9 @@ def main():
             UserRole.objects.update_or_create(
                 user=user,
                 client_id=tenant_client_id,
+                client_name=tenant_obj.name,
+                email=user.email,
                 app_id=uuid.uuid4(),
-                project_id=uuid.uuid4(),
                 defaults={"role": role, "allowed_apps": allowed_app_ids},
             )
 
