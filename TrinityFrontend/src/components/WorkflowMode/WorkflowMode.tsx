@@ -24,6 +24,13 @@ const WorkflowMode = () => {
   const navigate = useNavigate();
 
   useEffect(() => {
+    if (localStorage.getItem('workflow-canvas-molecules')) {
+      console.log('Successfully Loaded Existing Project State');
+      toast({ title: 'Successfully Loaded Existing Project State' });
+    }
+  }, [toast]);
+
+  useEffect(() => {
     const envStr = localStorage.getItem('env');
     if (envStr) {
       try {

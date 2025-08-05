@@ -4,9 +4,18 @@ import { Presentation } from 'lucide-react';
 import Header from '@/components/Header';
 import { useExhibitionStore } from './store/exhibitionStore';
 import TextBoxDisplay from '@/components/AtomList/atoms/text-box/TextBoxDisplay';
+import { useToast } from '@/hooks/use-toast';
 
 const ExhibitionMode = () => {
   const { exhibitedCards, cards, loadSavedConfiguration } = useExhibitionStore();
+  const { toast } = useToast();
+
+  useEffect(() => {
+    if (localStorage.getItem('laboratory-config')) {
+      console.log('Successfully Loaded Existing Project State');
+      toast({ title: 'Successfully Loaded Existing Project State' });
+    }
+  }, [toast]);
 
   useEffect(() => {
     if (cards.length === 0) {

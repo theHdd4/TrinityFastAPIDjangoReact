@@ -1,5 +1,5 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Play, Save, Share2, Undo2, AlertTriangle, List } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
@@ -27,6 +27,13 @@ const LaboratoryMode = () => {
   const setLabCards = useLaboratoryStore(state => state.setCards);
   const { user } = useAuth();
   const isViewer = user?.role === 'viewer';
+
+  useEffect(() => {
+    if (localStorage.getItem('laboratory-config')) {
+      console.log('Successfully Loaded Existing Project State');
+      toast({ title: 'Successfully Loaded Existing Project State' });
+    }
+  }, [toast]);
 
   const handleUndo = async () => {
     const current = localStorage.getItem('current-project');
