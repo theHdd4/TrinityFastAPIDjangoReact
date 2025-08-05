@@ -1,0 +1,25 @@
+Session State Management Overview
+=================================
+
+User Sessions (Django backend)
+-----------------------------
+- Users authenticate via the Django API, which establishes a `sessionid` cookie.
+- Session-related endpoints live under `/api/session/` and are handled by `apps.session_state`.
+- `SessionInitView` builds a session ID in the form `session:<client_id>:<user_id>:<app_id>:<project_id>`. It loads any existing state from Redis or MongoDB, or constructs a default state with environment variables and classifier config. The result is cached in Redis for 2 hours and the namespace key is stored for lookup.
+- `SessionStateView` retrieves session state, falling back to MongoDB or reconstructing defaults if Redis is empty. It refreshes the Redis cache when state is rebuilt.
+- `SessionUpdateView` updates individual keys or navigation entries in the session state. Updates are written to Redis and persisted to MongoDB.
+- `SessionEndView` deletes the session from Redis and MongoDB.
+
+Frontend Integration
+--------------------
+- After login, the frontend saves environment data to `localStorage` and verifies a session cookie is set before considering the user authenticated.
+- Helper functions in `src/lib/session.ts` assemble the session ID and namespace from stored environment variables and the user ID.
+- `updateSessionState` sends PATCH requests to the Django session API to update keys; `addNavigationItem` specializes this for navigation; `logSessionState` fetches the full state for debugging.
+
+Project State (FastAPI backend)
+------------------------------
+- A separate project-state module in the FastAPI app manages state per client/app/project.
+- `save_state` writes the project state to Redis (TTL 1 hour), persists it via `upsert_project_state`, and stores a timestamped snapshot in MinIO.
+- `load_state` first checks Redis, then the database, and finally the latest MinIO snapshot to rebuild the state if needed.
+
+This setup provides quick session access via Redis, durability through MongoDB (for user sessions) or the application database/MinIO (for project state), and coordination with the frontend through a consistent session identifier.

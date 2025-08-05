@@ -38,7 +38,14 @@ interface Tenant {
   name: string;
   schema_name: string;
   created_on: string;
-  domain: string;
+  primary_domain: string;
+  seats_allowed: number;
+  project_cap: number;
+  allowed_apps: number[];
+  projects_allowed: string[];
+  users_in_use: number;
+  admin_name?: string;
+  admin_email?: string;
 }
 
 interface App {
@@ -65,10 +72,14 @@ const Clients = () => {
   const [form, setForm] = useState({
     name: '',
     schema_name: '',
-    domain: '',
+    primary_domain: '',
     seats_allowed: '',
     project_cap: '',
     apps_allowed: [] as number[],
+    projects_allowed: '',
+    admin_name: '',
+    admin_email: '',
+    admin_password: '',
   });
 
   const navigate = useNavigate();
@@ -82,25 +93,7 @@ const Clients = () => {
       if (res.ok) {
         const data = await res.json();
         console.log('Tenants data', data);
-        // fetch first domain for each tenant
-        const domainsRes = await fetch(`${TENANTS_API}/domains/`, {
-          credentials: 'include',
-        });
-        let domains: any[] = [];
-        console.log('Domains fetch status', domainsRes.status);
-        if (domainsRes.ok) {
-          domains = await domainsRes.json();
-          console.log('Domains data', domains);
-        } else {
-          console.log('Domains fetch error', await domainsRes.text());
-        }
-        setTenants(
-          data.map((t: any) => ({
-            ...t,
-            domain:
-              domains.find((d) => d.tenant === t.id && d.is_primary)?.domain || '',
-          }))
-        );
+        setTenants(data);
       }
     } catch {
       console.log('Load tenants error');
@@ -144,10 +137,17 @@ const Clients = () => {
     const payload = {
       name: form.name,
       schema_name: form.schema_name,
-      domain: form.domain,
+      primary_domain: form.primary_domain,
       seats_allowed: Number(form.seats_allowed),
       project_cap: Number(form.project_cap),
-      apps_allowed: form.apps_allowed,
+      allowed_apps: form.apps_allowed,
+      projects_allowed: form.projects_allowed
+        .split(',')
+        .map((p) => p.trim())
+        .filter((p) => p.length > 0),
+      admin_name: form.admin_name,
+      admin_email: form.admin_email,
+      admin_password: form.admin_password,
     };
     console.log('Submitting tenant payload', payload);
     try {
@@ -160,17 +160,21 @@ const Clients = () => {
       console.log('Create tenant status', res.status);
       const body = await res.text();
       console.log('Create tenant body', body);
-      if (res.ok) {
-        setForm({
-          name: '',
-          schema_name: '',
-          domain: '',
-          seats_allowed: '',
-          project_cap: '',
-          apps_allowed: [],
-        });
-        loadTenants();
-      }
+        if (res.ok) {
+          setForm({
+            name: '',
+            schema_name: '',
+            primary_domain: '',
+            seats_allowed: '',
+            project_cap: '',
+            apps_allowed: [],
+            projects_allowed: '',
+            admin_name: '',
+            admin_email: '',
+            admin_password: '',
+          });
+          loadTenants();
+        }
     } catch (err) {
       console.log('Tenant creation error', err);
     }
@@ -194,7 +198,7 @@ const Clients = () => {
 
   const filteredTenants = tenants.filter((t) =>
     t.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    t.domain.toLowerCase().includes(searchTerm.toLowerCase())
+    t.primary_domain.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
   return (
@@ -263,11 +267,11 @@ const Clients = () => {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="domain" className="text-sm font-medium text-gray-700">Primary Domain</Label>
+                  <Label htmlFor="primary_domain" className="text-sm font-medium text-gray-700">Primary Domain</Label>
                   <Input
-                    id="domain"
-                    name="domain"
-                    value={form.domain}
+                    id="primary_domain"
+                    name="primary_domain"
+                    value={form.primary_domain}
                     onChange={handleChange}
                     placeholder="client.example.com"
                     className="border-gray-200 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
@@ -313,6 +317,56 @@ const Clients = () => {
                       </option>
                     ))}
                   </select>
+                </div>
+                <div className="space-y-2 md:col-span-2 lg:col-span-3">
+                  <Label htmlFor="projects_allowed" className="text-sm font-medium text-gray-700">Allowed Projects (comma separated)</Label>
+                  <Input
+                    id="projects_allowed"
+                    name="projects_allowed"
+                    value={form.projects_allowed}
+                    onChange={handleChange}
+                    placeholder="project1, project2"
+                    className="border-gray-200 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  />
+                </div>
+
+                <div className="space-y-2 md:col-span-2 lg:col-span-3">
+                  <h3 className="text-lg font-semibold text-gray-800">Admin User</h3>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="admin_name" className="text-sm font-medium text-gray-700">Admin Name *</Label>
+                  <Input
+                    id="admin_name"
+                    name="admin_name"
+                    value={form.admin_name}
+                    onChange={handleChange}
+                    placeholder="admin"
+                    className="border-gray-200 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="admin_email" className="text-sm font-medium text-gray-700">Admin Email *</Label>
+                  <Input
+                    id="admin_email"
+                    name="admin_email"
+                    type="email"
+                    value={form.admin_email}
+                    onChange={handleChange}
+                    placeholder="admin@example.com"
+                    className="border-gray-200 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="admin_password" className="text-sm font-medium text-gray-700">Admin Password *</Label>
+                  <Input
+                    id="admin_password"
+                    name="admin_password"
+                    type="password"
+                    value={form.admin_password}
+                    onChange={handleChange}
+                    placeholder="********"
+                    className="border-gray-200 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  />
                 </div>
 
                 <div className="md:col-span-2 lg:col-span-3 flex justify-end">
@@ -405,7 +459,7 @@ const Clients = () => {
                       <h3 className="font-semibold text-gray-900 group-hover:text-blue-600 transition-colors">
                         {client.name}
                       </h3>
-                      <p className="text-sm text-gray-500">{client.domain}</p>
+                      <p className="text-sm text-gray-500">{client.primary_domain}</p>
                     </div>
                   </div>
 
@@ -437,11 +491,21 @@ const Clients = () => {
                 <div className="space-y-3 mb-4">
                   <div className="flex items-center text-sm text-gray-600">
                     <Mail className="w-4 h-4 mr-2" />
-                    <span>{client.domain}</span>
+                    <span>{client.primary_domain}</span>
                   </div>
                   <div className="flex items-center text-sm text-gray-600">
                     <MapPin className="w-4 h-4 mr-2" />
                     <span>Schema: {client.schema_name}</span>
+                  </div>
+                  <div className="flex items-center text-sm text-gray-600">
+                    <Users className="w-4 h-4 mr-2" />
+                    <span>
+                      Users: {client.users_in_use}/{client.seats_allowed}
+                    </span>
+                  </div>
+                  <div className="flex items-center text-sm text-gray-600">
+                    <Calendar className="w-4 h-4 mr-2" />
+                    <span>Projects allowed: {client.project_cap}</span>
                   </div>
                 </div>
 
