@@ -28,35 +28,38 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle }) => {
     if (!isOpen) return;
     const load = async () => {
       let env: any = null;
-      let query = '';
-      const envStr = localStorage.getItem('env');
-      if (envStr) {
-        try {
-          env = JSON.parse(envStr);
-        } catch {
-          /* ignore */
-        }
-      }
-      if (!env) {
-        try {
-          const projStr = localStorage.getItem('current-project');
-          if (projStr) {
-            const proj = JSON.parse(projStr);
-            const res = await fetch(`${REGISTRY_API}/projects/${proj.id}/`, {
-              credentials: 'include'
-            });
-            if (res.ok) {
-              const envData = await res.json();
-              if (envData.environment) {
-                env = envData.environment;
-                localStorage.setItem('env', JSON.stringify(env));
-              }
+
+      try {
+        const projStr = localStorage.getItem('current-project');
+        if (projStr) {
+          const proj = JSON.parse(projStr);
+          const res = await fetch(`${REGISTRY_API}/projects/${proj.id}/`, {
+            credentials: 'include'
+          });
+          if (res.ok) {
+            const envData = await res.json();
+            if (envData.environment) {
+              env = envData.environment;
+              localStorage.setItem('env', JSON.stringify(env));
             }
           }
-        } catch (err) {
-          console.log('env fetch error', err);
+        }
+      } catch (err) {
+        console.log('env fetch error', err);
+      }
+
+      if (!env) {
+        const envStr = localStorage.getItem('env');
+        if (envStr) {
+          try {
+            env = JSON.parse(envStr);
+          } catch {
+            /* ignore */
+          }
         }
       }
+
+      let query = '';
       if (env) {
         query =
           '?' +
