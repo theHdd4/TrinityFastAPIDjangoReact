@@ -3,7 +3,18 @@
 from pymongo import MongoClient
 from datetime import datetime
 import logging
+import os
 from .config import settings
+
+try:
+    import asyncpg  # type: ignore
+except ModuleNotFoundError:  # pragma: no cover
+    asyncpg = None
+
+POSTGRES_HOST = os.getenv("POSTGRES_HOST", "postgres")
+POSTGRES_DB = os.getenv("POSTGRES_DB", "trinity_db")
+POSTGRES_USER = os.getenv("POSTGRES_USER", "trinity_user")
+POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD", "trinity_pass")
 
 # MongoDB Configuration
 MONGODB_URL = settings.mongo_uri
@@ -405,3 +416,47 @@ def get_classifier_config_from_mongo(client: str, app: str, project: str):
     except Exception as exc:
         logging.error(f"MongoDB read error for classifier config: {exc}")
         return None
+
+
+async def save_classifier_config_to_postgres(config: dict):
+    """Persist classifier identifiers/measures/dimensions to Postgres."""
+    if asyncpg is None:
+        return {"status": "error", "error": "asyncpg not available"}
+    try:
+        conn = await asyncpg.connect(
+            host=POSTGRES_HOST,
+            user=POSTGRES_USER,
+            password=POSTGRES_PASSWORD,
+            database=POSTGRES_DB,
+        )
+    except Exception as exc:
+        logging.error(f"Postgres connection failed: {exc}")
+        return {"status": "error", "error": str(exc)}
+    try:
+        await conn.execute(
+            """
+            INSERT INTO registry_environment (
+                client_name, app_name, project_name,
+                envvars, identifiers, measures, dimensions
+            ) VALUES ($1,$2,$3,$4,$5,$6,$7)
+            ON CONFLICT (client_name, app_name, project_name) DO UPDATE
+            SET envvars = $4,
+                identifiers = $5,
+                measures = $6,
+                dimensions = $7,
+                updated_at = NOW()
+            """,
+            config.get("client_name", ""),
+            config.get("app_name", ""),
+            config.get("project_name", ""),
+            asyncpg.Json(config.get("env", {})),
+            asyncpg.Json(config.get("identifiers", [])),
+            asyncpg.Json(config.get("measures", [])),
+            asyncpg.Json(config.get("dimensions", {})),
+        )
+        return {"status": "success"}
+    except Exception as exc:
+        logging.error(f"Postgres save error for classifier config: {exc}")
+        return {"status": "error", "error": str(exc)}
+    finally:
+        await conn.close()

@@ -23,6 +23,7 @@ from app.features.column_classifier.database import (
     save_business_dimensions_to_mongo,
     save_project_dimension_mapping,
     save_classifier_config_to_mongo,
+    save_classifier_config_to_postgres,
     get_classifier_config_from_mongo,
     get_project_dimension_mapping,
 )
@@ -618,8 +619,16 @@ async def save_config(req: SaveConfigRequest):
         map_key = f"project:{req.project_id}:dimensions"
         redis_client.setex(map_key, 3600, json.dumps(req.dimensions, default=str))
     mongo_result = save_classifier_config_to_mongo(data)
+    postgres_result = await save_classifier_config_to_postgres(data)
     print(f"📦 mongo save result {mongo_result}")
-    return {"status": "success", "key": key, "data": data, "mongo": mongo_result}
+    print(f"🗃 postgres save result {postgres_result}")
+    return {
+        "status": "success",
+        "key": key,
+        "data": data,
+        "mongo": mongo_result,
+        "postgres": postgres_result,
+    }
 
 
 @router.get("/get_config")
