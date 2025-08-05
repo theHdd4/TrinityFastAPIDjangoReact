@@ -47,9 +47,18 @@ def save_atom_list_configuration(
     """Persist atom configurations for a project/mode into MongoDB."""
     client_id, app_id, project_id = _get_env_ids(project)
     try:
-        mc = MongoClient(getattr(settings, "MONGO_URI", "mongodb://mongo:27017/trinity_db"))
-        db = mc["trinity_db"]
+        mc = MongoClient(
+            getattr(settings, "MONGO_URI", "mongodb://mongo:27017/trinity_prod")
+        )
+        db = mc["trinity_prod"]
         coll = db["atom_list_configuration"]
+
+        # Drop legacy collection from previous `trinity_db` database if it exists
+        try:
+            legacy_db = mc["trinity_db"]
+            legacy_db.drop_collection("atom_list_configuration")
+        except Exception:  # pragma: no cover - best effort cleanup
+            pass
 
         coll.delete_many(
             {
