@@ -1,4 +1,4 @@
-import types, asyncio, sys
+import types, asyncio, sys, pytest
 from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "app"))
@@ -57,3 +57,36 @@ def test_register_project_session(monkeypatch):
     assert any("registry_session" in q for q, _ in executed)
     assert json_payloads[0] == data["env_variables"]
     assert json_payloads[1] == data["env_variables"]
+
+
+def test_register_project_session_missing_env_keys(monkeypatch):
+    class Conn:
+        async def execute(self, *a, **kw):
+            pass
+        async def close(self):
+            pass
+    async def connect(**kw):
+        return Conn()
+    monkeypatch.setattr(
+        registry,
+        "asyncpg",
+        types.SimpleNamespace(connect=connect, Json=lambda d: d),
+    )
+    data = {
+        "user_id": 1,
+        "username": "user",
+        "role": "role",
+        "client_id": 2,
+        "client_name": "client",
+        "app_id": 3,
+        "app_name": "app",
+        "project_id": 4,
+        "project_name": "project",
+        "session_id": "sess",
+        "active_mode": "mode",
+        "minio_prefix": "pref",
+        "env_variables": {},
+        "tenant_schema_name": "tenant",
+    }
+    with pytest.raises(ValueError):
+        asyncio.run(registry.register_project_session(data))
