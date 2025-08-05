@@ -195,7 +195,7 @@ ASGI_APPLICATION = "config.asgi.application"
 DATABASES = {
     "default": {
         "ENGINE": "django_tenants.postgresql_backend",
-        "NAME": os.getenv("POSTGRES_DB", "trinity_db"),
+        "NAME": os.getenv("POSTGRES_DB", "trinity_prod"),
         "USER": os.getenv("POSTGRES_USER", "trinity_user"),
         "PASSWORD": os.getenv("POSTGRES_PASSWORD", "trinity_pass"),
         "HOST": os.getenv("POSTGRES_HOST", "postgres"),
