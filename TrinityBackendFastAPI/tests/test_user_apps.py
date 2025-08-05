@@ -18,14 +18,18 @@ def test_fetch_allowed_apps(monkeypatch):
 
 def test_register_project_session(monkeypatch):
     executed = []
+    json_payloads = []
     class Conn:
         async def execute(self, query, *params):
-            executed.append(query)
+            executed.append((query, params))
         async def close(self):
             pass
     async def connect(**kw):
         return Conn()
-    monkeypatch.setattr(registry, "asyncpg", types.SimpleNamespace(connect=connect, Json=lambda d: d))
+    def Json(d):
+        json_payloads.append(d)
+        return d
+    monkeypatch.setattr(registry, "asyncpg", types.SimpleNamespace(connect=connect, Json=Json))
     data = {
         "user_id": 1,
         "username": "user",
@@ -39,9 +43,15 @@ def test_register_project_session(monkeypatch):
         "session_id": "sess",
         "active_mode": "mode",
         "minio_prefix": "pref",
-        "env_variables": {"k": "v"},
+        "env_variables": {
+            "identifiers": ["id"],
+            "measures": ["m"],
+            "dimension_mapping": {"id": "dim"},
+        },
         "tenant_schema_name": "tenant",
     }
     asyncio.run(registry.register_project_session(data))
-    assert any("registry_project" in q for q in executed)
-    assert any("registry_session" in q for q in executed)
+    assert any("registry_project" in q for q, _ in executed)
+    assert any("registry_session" in q for q, _ in executed)
+    assert json_payloads[0] == data["env_variables"]
+    assert json_payloads[1] == data["env_variables"]

@@ -1,5 +1,18 @@
 from pydantic import BaseModel
-from typing import Dict, Any
+from typing import Dict, Any, List
+
+
+class EnvVariables(BaseModel):
+    """Environment metadata for a project selection.
+
+    ``identifiers`` and ``measures`` capture the relevant columns while
+    ``dimension_mapping`` links identifier columns to their dimensions.
+    """
+
+    identifiers: List[str]
+    measures: List[str]
+    dimension_mapping: Dict[str, str]
+
 
 class AppSelection(BaseModel):
     user_id: int
@@ -14,5 +27,5 @@ class AppSelection(BaseModel):
     session_id: str
     active_mode: str
     minio_prefix: str
-    env_variables: Dict[str, Any]
+    env_variables: EnvVariables
     tenant_schema_name: str
