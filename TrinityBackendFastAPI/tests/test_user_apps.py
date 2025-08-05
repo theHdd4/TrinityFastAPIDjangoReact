@@ -51,6 +51,8 @@ def test_register_project_session(monkeypatch):
         "tenant_schema_name": "tenant",
     }
     asyncio.run(registry.register_project_session(data))
+    # first query sets search path to the tenant schema
+    assert executed[0][0].startswith("SET search_path TO tenant")
     assert any("registry_project" in q for q, _ in executed)
     assert any("registry_session" in q for q, _ in executed)
     assert json_payloads[0] == data["env_variables"]

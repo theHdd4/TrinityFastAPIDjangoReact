@@ -48,6 +48,11 @@ async def register_project_session(data: dict) -> None:
     )
     try:
         env_vars = getattr(data["env_variables"], "dict", lambda: data["env_variables"])()
+        # Operate within the tenant schema so each tenant maintains its own
+        # registry tables rather than writing to the public schema.
+        await conn.execute(
+            f"SET search_path TO {data['tenant_schema_name']}, public"
+        )
         await conn.execute(
             """
             CREATE TABLE IF NOT EXISTS registry_project (
