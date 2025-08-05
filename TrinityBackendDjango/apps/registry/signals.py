@@ -1,5 +1,6 @@
 import os
 from django.db.models.signals import post_save, pre_save, post_delete
+from django.db.models import Q
 from django.dispatch import receiver
 from django.utils.text import slugify
 from django.conf import settings
@@ -96,7 +97,17 @@ def update_env_vars_on_rename(sender, instance, **kwargs):
                 },
             )
 
-        qs = UserEnvironmentVariable.objects.filter(project_id=old_pid)
+        # Projects may be stored with different ``project_id`` formats across
+        # user environment variable rows (e.g. "name_1" or just "1"). When a
+        # project is renamed we need to update *all* variants so lookups by
+        # numeric ID resolve to the new name. Include entries matching the old
+        # composed ID, any plain numeric ID, or anything that ends with the
+        # project PK.
+        qs = UserEnvironmentVariable.objects.filter(
+            Q(project_id=old_pid)
+            | Q(project_id=str(instance.pk))
+            | Q(project_id__endswith=f"_{instance.pk}")
+        )
         cache_entries = list(
             qs.values(
                 "user_id",
@@ -105,17 +116,20 @@ def update_env_vars_on_rename(sender, instance, **kwargs):
                 "client_name",
                 "app_name",
                 "project_name",
+                "project_id",
             ).distinct()
         )
         qs.update(project_name=instance.name, project_id=new_pid)
         qs.filter(key="PROJECT_NAME").update(value=instance.name)
         qs.filter(key="PROJECT_ID").update(value=new_pid)
         for entry in cache_entries:
+            # Invalidate using the precise project_id stored on the record so
+            # cache keys with just the numeric ID are also removed.
             invalidate_env(
                 str(entry["user_id"]),
                 entry["client_id"],
                 entry["app_id"],
-                old_pid,
+                entry["project_id"],
                 client_name=entry["client_name"],
                 app_name=entry["app_name"],
                 project_name=entry["project_name"],
@@ -180,7 +194,11 @@ def update_env_vars_on_rename(sender, instance, **kwargs):
 def cleanup_on_delete(sender, instance, **kwargs):
     """Remove cached environment and session state for deleted projects."""
     pid = f"{instance.name}_{instance.pk}"
-    qs = UserEnvironmentVariable.objects.filter(project_id=pid)
+    qs = UserEnvironmentVariable.objects.filter(
+        Q(project_id=pid)
+        | Q(project_id=str(instance.pk))
+        | Q(project_id__endswith=f"_{instance.pk}")
+    )
     cache_entries = list(
         qs.values(
             "user_id",
@@ -189,6 +207,7 @@ def cleanup_on_delete(sender, instance, **kwargs):
             "client_name",
             "app_name",
             "project_name",
+            "project_id",
         ).distinct()
     )
     qs.delete()
@@ -197,7 +216,7 @@ def cleanup_on_delete(sender, instance, **kwargs):
             str(entry["user_id"]),
             entry["client_id"],
             entry["app_id"],
-            pid,
+            entry["project_id"],
             client_name=entry["client_name"],
             app_name=entry["app_name"],
             project_name=entry["project_name"],
