@@ -135,22 +135,6 @@ const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
     updateSettings(atomId, { data: updated });
   };
 
-  const handleAddCustomDimension = (dimensionName: string) => {
-    const lower = dimensionName.toLowerCase();
-    const dims = Array.from(new Set([...(settings.dimensions || []), lower]));
-    const updatedFiles = classifierData.files.map((file, index) => {
-      if (index !== classifierData.activeFileIndex) return file;
-      return {
-        ...file,
-        customDimensions: { ...file.customDimensions, [lower]: [] },
-      };
-    });
-    updateSettings(atomId, {
-      dimensions: dims,
-      data: { ...classifierData, files: updatedFiles },
-    });
-  };
-
   const handleRemoveCustomDimension = (dimensionName: string) => {
     const dims = (settings.dimensions || []).filter(d => d !== dimensionName);
     const updatedFiles = classifierData.files.map((file, index) => {
@@ -282,7 +266,6 @@ const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
             customDimensions={
               classifierData.files[classifierData.activeFileIndex]?.customDimensions || {}
             }
-            onCustomDimensionAdd={handleAddCustomDimension}
             onRemoveDimension={handleRemoveCustomDimension}
             onDimensionUpdate={handleDimensionUpdate}
           />

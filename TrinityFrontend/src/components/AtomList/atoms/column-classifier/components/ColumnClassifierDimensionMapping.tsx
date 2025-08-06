@@ -1,8 +1,7 @@
 import React, { useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
-import { Tag, Plus, X, GripVertical } from 'lucide-react';
+import { Tag, X, GripVertical } from 'lucide-react';
 import {
   DndContext,
   DragOverlay,
@@ -18,18 +17,15 @@ import {
 
 interface DimensionMappingProps {
   customDimensions: Record<string, string[]>;
-  onCustomDimensionAdd: (dimensionName: string) => void;
   onRemoveDimension: (dimensionName: string) => void;
   onDimensionUpdate: (dimensions: Record<string, string[]>) => void;
 }
 
 const ColumnClassifierDimensionMapping: React.FC<DimensionMappingProps> = ({
   customDimensions,
-  onCustomDimensionAdd,
   onRemoveDimension,
   onDimensionUpdate
 }) => {
-  const [newDimensionName, setNewDimensionName] = useState('');
   const [activeId, setActiveId] = useState<string | null>(null);
 
   const sensors = useSensors(
@@ -37,16 +33,6 @@ const ColumnClassifierDimensionMapping: React.FC<DimensionMappingProps> = ({
       activationConstraint: { distance: 8 }
     })
   );
-
-  const handleAddNewDimension = () => {
-    if (
-      newDimensionName.trim() &&
-      !customDimensions[newDimensionName.toLowerCase()]
-    ) {
-      onCustomDimensionAdd(newDimensionName.toLowerCase());
-      setNewDimensionName('');
-    }
-  };
 
   const handleDragStart = (event: DragStartEvent) => {
     setActiveId(event.active.id as string);
@@ -81,25 +67,13 @@ const ColumnClassifierDimensionMapping: React.FC<DimensionMappingProps> = ({
       ? { transform: `translate3d(${transform.x}px, ${transform.y}px, 0)` }
       : undefined;
 
-    const sectionColors = {
-      unclassified:
-        'from-slate-100/80 to-slate-50/60 border-slate-200/70 text-slate-700 hover:from-slate-200/90 hover:to-slate-100/70 hover:border-slate-300 hover:text-slate-800',
-      identifiers:
-        'from-blue-100/80 to-blue-50/60 border-blue-200/70 text-blue-700 hover:from-blue-200/90 hover:to-blue-100/70 hover:border-blue-300 hover:text-blue-800',
-      measures:
-        'from-emerald-100/80 to-emerald-50/60 border-emerald-200/70 text-emerald-700 hover:from-emerald-200/90 hover:to-emerald-100/70 hover:border-emerald-300 hover:text-emerald-800'
-    } as const;
-
     return (
       <div
         ref={setNodeRef}
         style={style}
         {...listeners}
         {...attributes}
-        className={`group relative flex items-center gap-2 px-3 py-2 bg-gradient-to-r ${
-          sectionColors[section as keyof typeof sectionColors] ||
-          sectionColors.identifiers
-        } border rounded-full text-sm font-medium cursor-grab active:cursor-grabbing transition-all duration-200 hover:scale-[1.02] hover:shadow-lg backdrop-blur-sm min-w-0 w-full ${
+        className={`group relative flex items-center gap-2 px-3 py-2 bg-white border border-blue-400 text-black hover:bg-blue-50 rounded-full text-sm font-medium cursor-grab active:cursor-grabbing transition-all duration-200 hover:scale-[1.02] hover:shadow-lg backdrop-blur-sm min-w-0 w-full ${
           isDragging ? 'opacity-70 shadow-2xl scale-105 rotate-2' : 'hover:shadow-md'
         }`}
       >
@@ -110,7 +84,7 @@ const ColumnClassifierDimensionMapping: React.FC<DimensionMappingProps> = ({
         >
           {name}
         </span>
-        <div className="absolute inset-0 rounded-full bg-gradient-to-r from-transparent via-white/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+        <div className="absolute inset-0 rounded-full bg-black/5 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
       </div>
     );
   };
@@ -126,14 +100,14 @@ const ColumnClassifierDimensionMapping: React.FC<DimensionMappingProps> = ({
     return (
       <div
         ref={setNodeRef}
-        className={`relative overflow-hidden bg-card border-2 ${
-          isOver ? 'border-primary shadow-xl scale-105' : 'border-border'
+        className={`relative overflow-hidden bg-white border-2 ${
+          isOver ? 'border-blue-400 shadow-xl scale-105' : 'border-blue-200'
         } rounded-xl transition-all duration-300 hover:shadow-lg group`}
       >
-        <div className="relative px-4 py-3 border-b border-border bg-card">
+        <div className="relative px-4 py-3 border-b border-blue-200 bg-white">
           <div className="flex items-center justify-between">
             <h4 className="text-sm font-bold text-foreground capitalize flex items-center gap-2">
-              <div className="w-2 h-2 rounded-full bg-purple-500 animate-pulse" />
+              <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
               {title}
             </h4>
             {id !== 'unattributed' && (
@@ -149,8 +123,8 @@ const ColumnClassifierDimensionMapping: React.FC<DimensionMappingProps> = ({
           </div>
         </div>
         <div
-          className={`relative p-4 min-h-[200px] bg-card transition-all duration-300 ${
-            isOver ? 'bg-muted/30' : ''
+          className={`relative p-4 min-h-[200px] bg-white transition-all duration-300 ${
+            isOver ? 'bg-blue-50' : ''
           }`}
         >
           <div className="grid grid-cols-1 gap-2">
@@ -173,8 +147,8 @@ const ColumnClassifierDimensionMapping: React.FC<DimensionMappingProps> = ({
             </div>
           )}
           {isOver && (
-            <div className="absolute inset-4 border-2 border-dashed border-purple-400/50 rounded-xl bg-purple-400/5 flex items-center justify-center animate-pulse">
-              <span className="text-purple-600 font-medium text-sm">Drop identifier here</span>
+            <div className="absolute inset-4 border-2 border-dashed border-blue-400/50 rounded-xl bg-blue-400/5 flex items-center justify-center animate-pulse">
+              <span className="text-blue-600 font-medium text-sm">Drop identifier here</span>
             </div>
           )}
         </div>
@@ -189,40 +163,17 @@ const ColumnClassifierDimensionMapping: React.FC<DimensionMappingProps> = ({
       onDragStart={handleDragStart}
       onDragEnd={handleDragEnd}
     >
-      <div className="flex items-center justify-between mb-6">
-        <div className="flex items-center gap-3">
-          <div className="p-2 bg-gradient-to-br from-purple-500/20 to-purple-400/10 rounded-xl">
-            <Tag className="w-5 h-5 text-purple-600" />
-          </div>
-          <h3 className="text-xl font-bold text-foreground">Dimension Mapping</h3>
-          <Badge
-            variant="secondary"
-            className="bg-gradient-to-r from-purple-100 to-purple-50 text-purple-700 border-purple-200"
-          >
-            Assign identifiers to business dimensions
-          </Badge>
+      <div className="flex items-center gap-3 mb-6">
+        <div className="p-2 bg-gradient-to-br from-blue-500/20 to-blue-400/10 rounded-xl">
+          <Tag className="w-5 h-5 text-blue-600" />
         </div>
-        <div className="flex items-center gap-2">
-          <Input
-            placeholder="New dimension name"
-            value={newDimensionName}
-            onChange={e => setNewDimensionName(e.target.value)}
-            className="w-48 h-9 text-sm"
-            onKeyPress={e => {
-              if (e.key === 'Enter' && newDimensionName.trim()) {
-                handleAddNewDimension();
-              }
-            }}
-          />
-          <Button
-            onClick={handleAddNewDimension}
-            disabled={!newDimensionName.trim()}
-            size="sm"
-            className="h-9 px-3 bg-gradient-to-r from-purple-600 to-purple-500 hover:from-purple-700 hover:to-purple-600"
-          >
-            <Plus className="w-4 h-4" />
-          </Button>
-        </div>
+        <h3 className="text-xl font-bold text-foreground">Dimension Mapping</h3>
+        <Badge
+          variant="secondary"
+          className="bg-gradient-to-r from-blue-100 to-blue-50 text-blue-700 border-blue-200"
+        >
+          Assign identifiers to business dimensions
+        </Badge>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -238,7 +189,7 @@ const ColumnClassifierDimensionMapping: React.FC<DimensionMappingProps> = ({
       </div>
       <DragOverlay>
         {activeId ? (
-          <div className="group relative inline-flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-purple-200 to-purple-100 text-purple-700 border border-purple-200 rounded-full text-sm font-medium shadow-2xl backdrop-blur-sm scale-110 rotate-3">
+          <div className="group relative inline-flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-blue-200 to-blue-100 text-blue-700 border border-blue-200 rounded-full text-sm font-medium shadow-2xl backdrop-blur-sm scale-110 rotate-3">
             <GripVertical className="w-3 h-3 opacity-60" />
             <span className="select-none font-medium tracking-wide">
               {activeId.split('-').slice(1).join('-')}
