@@ -203,8 +203,8 @@ const ColumnClassifierCanvas: React.FC<ColumnClassifierCanvasProps> = ({
       onDragStart={handleDragStart}
       onDragEnd={handleDragEnd}
     >
-      <div className="w-full h-full p-6 pb-[50px] bg-gradient-to-br from-slate-50 to-blue-50 overflow-y-auto">
-        <div className="border-b border-border bg-gradient-to-r from-card via-card/95 to-card backdrop-blur-sm">
+      <div className="w-full h-full p-4">
+        <div className="border-b border-blue-200 bg-blue-50">
           <div className="flex items-center px-6 py-4 space-x-3">
             {data.files.map((file, index) => (
               <div key={index} className="relative">
@@ -226,8 +226,8 @@ const ColumnClassifierCanvas: React.FC<ColumnClassifierCanvasProps> = ({
             ))}
           </div>
         </div>
-        <div className="p-8 h-[calc(100%-160px)] overflow-auto">
-          <div className="grid grid-cols-3 gap-8 max-w-7xl mx-auto">
+        <div className="p-4">
+          <div className="grid grid-cols-3 gap-6">
             <DroppableSection
               id="unclassified"
               title="Unclassified"

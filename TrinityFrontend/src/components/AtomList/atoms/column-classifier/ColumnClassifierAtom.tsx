@@ -252,7 +252,7 @@ const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
   return (
     <div className="w-full h-full bg-white flex flex-col">
       <div className="flex flex-1">
-        <div className="w-full p-4 overflow-y-auto">
+        <div className="w-full p-4">
           <ColumnClassifierCanvas
             data={classifierData}
             onColumnMove={handleColumnMove}
