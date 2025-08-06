@@ -2,7 +2,8 @@ import React, { useEffect, useState } from 'react';
 import { Database, ChevronRight, ChevronDown, Trash2, Pencil } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { VALIDATE_API } from '@/lib/api';
+import { VALIDATE_API, SESSION_API } from '@/lib/api';
+import { useAuth } from '@/contexts/AuthContext';
 
 interface Props {
   isOpen: boolean;
@@ -24,28 +25,69 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle }) => {
   const [renameTarget, setRenameTarget] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
 
+  const { user } = useAuth();
+
   useEffect(() => {
     if (!isOpen) return;
     const load = async () => {
       try {
         let query = '';
+        let env: any = {};
         const envStr = localStorage.getItem('env');
         if (envStr) {
           try {
-            const env = JSON.parse(envStr);
-            query =
-              '?' +
-              new URLSearchParams({
-                client_id: env.CLIENT_ID || '',
-                app_id: env.APP_ID || '',
-                project_id: env.PROJECT_ID || '',
-                client_name: env.CLIENT_NAME || '',
-                app_name: env.APP_NAME || '',
-                project_name: env.PROJECT_NAME || ''
-              }).toString();
+            env = JSON.parse(envStr);
+            console.log('📦 localStorage env', {
+              CLIENT_NAME: env.CLIENT_NAME,
+              APP_NAME: env.APP_NAME,
+              PROJECT_NAME: env.PROJECT_NAME
+            });
           } catch {
-            /* ignore */
+            env = {};
           }
+        }
+
+        if (user && env.CLIENT_ID && env.APP_ID && env.PROJECT_ID) {
+          try {
+            const redisRes = await fetch(`${SESSION_API}/init`, {
+              method: 'POST',
+              credentials: 'include',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                client_id: env.CLIENT_ID,
+                user_id: user.id,
+                app_id: env.APP_ID,
+                project_id: env.PROJECT_ID,
+                client_name: env.CLIENT_NAME,
+                app_name: env.APP_NAME,
+                project_name: env.PROJECT_NAME
+              })
+            });
+            if (redisRes.ok) {
+              const redisData = await redisRes.json();
+              const redisEnv = redisData.state?.envvars;
+              if (redisEnv) {
+                console.log('🧠 redis env', redisEnv);
+                env = { ...env, ...redisEnv };
+                localStorage.setItem('env', JSON.stringify(env));
+              }
+            }
+          } catch (err) {
+            console.warn('Redis env fetch failed', err);
+          }
+        }
+
+        if (env && (env.CLIENT_ID || env.CLIENT_NAME)) {
+          query =
+            '?' +
+            new URLSearchParams({
+              client_id: env.CLIENT_ID || '',
+              app_id: env.APP_ID || '',
+              project_id: env.PROJECT_ID || '',
+              client_name: env.CLIENT_NAME || '',
+              app_name: env.APP_NAME || '',
+              project_name: env.PROJECT_NAME || ''
+            }).toString();
         }
         const res = await fetch(
           `${VALIDATE_API}/list_saved_dataframes${query}`,
@@ -68,7 +110,7 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle }) => {
       }
     };
     load();
-  }, [isOpen]);
+  }, [isOpen, user]);
 
   const handleOpen = (obj: string) => {
     window.open(`/dataframe?name=${encodeURIComponent(obj)}`, '_blank');
