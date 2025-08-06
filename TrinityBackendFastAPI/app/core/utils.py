@@ -196,9 +196,17 @@ async def get_env_vars(
     key = (client_id, app_id, project_id, client_name, app_name, project_name)
     if use_cache and key in _ENV_CACHE:
         env = _ENV_CACHE[key]
-        source = "cache"
-        print(f"🔧 cached_env_vars{key} -> {env}")
-        return (env, source) if return_source else env
+        if (
+            (client_name and env.get("CLIENT_NAME") != client_name)
+            or (app_name and env.get("APP_NAME") != app_name)
+            or (project_name and env.get("PROJECT_NAME") != project_name)
+        ):
+            # Stale entry; ignore and continue to fetch fresh values
+            pass
+        else:
+            source = "cache"
+            print(f"🔧 cached_env_vars{key} -> {env}")
+            return (env, source) if return_source else env
 
     if use_cache and client_name and project_name:
         redis_key = _redis_env_key(client_name, app_name, project_name)
@@ -206,10 +214,18 @@ async def get_env_vars(
         if cached:
             try:
                 env = json.loads(cached)
-                _ENV_CACHE[key] = env
-                source = "redis"
-                print(f"🔧 redis_env_vars{redis_key} -> {env}")
-                return (env, source) if return_source else env
+                if (
+                    (client_name and env.get("CLIENT_NAME") != client_name)
+                    or (app_name and env.get("APP_NAME") != app_name)
+                    or (project_name and env.get("PROJECT_NAME") != project_name)
+                ):
+                    # Stale entry for another project
+                    pass
+                else:
+                    _ENV_CACHE[key] = env
+                    source = "redis"
+                    print(f"🔧 redis_env_vars{redis_key} -> {env}")
+                    return (env, source) if return_source else env
             except Exception:
                 pass
 
@@ -262,7 +278,17 @@ async def get_env_vars(
             source = "defaults"
 
     if use_cache:
-        _ENV_CACHE[key] = env
+        cache_key = (
+            client_id,
+            app_id,
+            project_id,
+            env.get("CLIENT_NAME", client_name),
+            env.get("APP_NAME", app_name),
+            env.get("PROJECT_NAME", project_name),
+        )
+        _ENV_CACHE[cache_key] = env
+        if key != cache_key:
+            _ENV_CACHE.pop(key, None)
         if env.get("CLIENT_NAME") and env.get("PROJECT_NAME"):
             redis_key = _redis_env_key(
                 env.get("CLIENT_NAME", ""),
