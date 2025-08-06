@@ -2,7 +2,8 @@ import React, { useEffect, useState } from 'react';
 import { Database, ChevronRight, ChevronDown, Trash2, Pencil } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { VALIDATE_API, REGISTRY_API } from '@/lib/api';
+import { VALIDATE_API, SESSION_API } from '@/lib/api';
+import { useAuth } from '@/contexts/AuthContext';
 
 interface Props {
   isOpen: boolean;
@@ -24,72 +25,114 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle }) => {
   const [renameTarget, setRenameTarget] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
 
+  const { user } = useAuth();
+
   useEffect(() => {
     if (!isOpen) return;
     const load = async () => {
-      let env: any = null;
-
       try {
-        const projStr = localStorage.getItem('current-project');
-        if (projStr) {
-          const proj = JSON.parse(projStr);
-          const res = await fetch(`${REGISTRY_API}/projects/${proj.id}/`, {
-            credentials: 'include'
-          });
-          if (res.ok) {
-            const envData = await res.json();
-            if (envData.environment) {
-              env = envData.environment;
-              localStorage.setItem('env', JSON.stringify(env));
-            }
-          }
-        }
-      } catch (err) {
-        console.log('env fetch error', err);
-      }
-
-      if (!env) {
+        let env: any = {};
         const envStr = localStorage.getItem('env');
         if (envStr) {
           try {
             env = JSON.parse(envStr);
           } catch {
-            /* ignore */
+            env = {};
           }
         }
-      }
 
-      let query = '';
-      if (env) {
-        query =
-          '?' +
-          new URLSearchParams({
-            client_id: env.CLIENT_ID || '',
-            app_id: env.APP_ID || '',
-            project_id: env.PROJECT_ID || '',
-            client_name: env.CLIENT_NAME || '',
-            app_name: env.APP_NAME || '',
-            project_name: env.PROJECT_NAME || ''
-          }).toString();
-      }
+        if (user) {
+          try {
+            const payload: any = { user_id: user.id };
+            if (env.CLIENT_ID) payload.client_id = env.CLIENT_ID;
+            if (env.APP_ID) payload.app_id = env.APP_ID;
+            if (env.PROJECT_ID) payload.project_id = env.PROJECT_ID;
+            const redisRes = await fetch(`${SESSION_API}/init`, {
+              method: 'POST',
+              credentials: 'include',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload)
+            });
+            if (redisRes.ok) {
+              const redisData = await redisRes.json();
+              const redisEnv = redisData.state?.envvars;
+              if (redisEnv) {
+                env = { ...env, ...redisEnv };
+                localStorage.setItem('env', JSON.stringify(env));
+              }
+            }
+          } catch (err) {
+            console.warn('Redis env fetch failed', err);
+          }
+        }
 
-      try {
-        const res = await fetch(`${VALIDATE_API}/list_saved_dataframes${query}`, {
-          credentials: 'include'
+        console.log('📦 env', {
+          CLIENT_NAME: env.CLIENT_NAME,
+          APP_NAME: env.APP_NAME,
+          PROJECT_NAME: env.PROJECT_NAME
         });
-        const data = await res.json();
-        setPrefix(data.prefix || '');
-        console.log(
-          `📁 SavedDataFramesPanel looking in MinIO bucket "${data.bucket}" folder "${data.prefix}" via ${data.env_source} (CLIENT_NAME=${data.environment?.CLIENT_NAME} APP_NAME=${data.environment?.APP_NAME} PROJECT_NAME=${data.environment?.PROJECT_NAME})`
-        );
-        setFiles(Array.isArray(data.files) ? data.files : []);
+
+        try {
+          const buildQuery = () =>
+            new URLSearchParams({
+              client_name: env.CLIENT_NAME || '',
+              app_name: env.APP_NAME || '',
+              project_name: env.PROJECT_NAME || ''
+            }).toString();
+          let query = buildQuery();
+          const prefRes = await fetch(
+            `${VALIDATE_API}/get_object_prefix?${query}`,
+            { credentials: 'include' }
+          );
+          if (prefRes.ok) {
+            const prefData = await prefRes.json();
+            setPrefix(prefData.prefix || '');
+            if (prefData.environment) {
+              env = { ...env, ...prefData.environment };
+              localStorage.setItem('env', JSON.stringify(env));
+            }
+            // Rebuild query using any refreshed environment variables so the
+            // subsequent listing request targets the current namespace.
+            query = buildQuery();
+          }
+
+          const listRes = await fetch(
+            `${VALIDATE_API}/list_saved_dataframes?${query}`,
+            { credentials: 'include' }
+          );
+          let data: any = null;
+          if (listRes.ok) {
+            try {
+              data = await listRes.json();
+            } catch (e) {
+              console.warn('Failed to parse list_saved_dataframes response', e);
+            }
+          } else {
+            console.warn('list_saved_dataframes failed', listRes.status);
+          }
+          if (data) {
+            setPrefix(data.prefix || '');
+            if (data.environment) {
+              localStorage.setItem('env', JSON.stringify({ ...env, ...data.environment }));
+            }
+            console.log(
+              `📁 SavedDataFramesPanel looking in MinIO bucket "${data.bucket}" folder "${data.prefix}" via ${data.env_source} (CLIENT_NAME=${data.environment?.CLIENT_NAME} APP_NAME=${data.environment?.APP_NAME} PROJECT_NAME=${data.environment?.PROJECT_NAME})`
+            );
+            setFiles(Array.isArray(data.files) ? data.files : []);
+          } else {
+            setFiles([]);
+          }
+        } catch (err) {
+          console.warn('get_object_prefix or list_saved_dataframes failed', err);
+          setFiles([]);
+        }
       } catch (err) {
         console.error('Failed to load saved dataframes', err);
         setFiles([]);
       }
     };
     load();
-  }, [isOpen]);
+  }, [isOpen, user]);
 
   const handleOpen = (obj: string) => {
     window.open(`/dataframe?name=${encodeURIComponent(obj)}`, '_blank');

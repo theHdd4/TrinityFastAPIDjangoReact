@@ -164,41 +164,17 @@ async def get_object_prefix(
     """
     USER_ID = _parse_numeric_id(os.getenv("USER_ID"))
     PROJECT_ID = _parse_numeric_id(project_id or os.getenv("PROJECT_ID", "0"))
-    # Attempt to pull the latest names from Redis first. Redis keys follow the
-    # pattern ``env:<client_id>:<app_id>:<project_id>:<VAR>``. This lets us read
-    # the current client/app/project names without knowing them ahead of time.
-    # If Redis lacks the information we fall back to Postgres via
-    # ``get_env_vars``.
     client_id_env = client_id or os.getenv("CLIENT_ID", "")
     app_id_env = app_id or os.getenv("APP_ID", "")
     project_id_env = project_id or os.getenv("PROJECT_ID", "")
 
+    # Resolve environment variables using ``get_env_vars`` which consults the
+    # Redis cache keyed by ``<client>/<app>/<project>`` and falls back to
+    # Postgres when missing.  This ensures we always load the latest names for
+    # the currently selected namespace instead of defaulting to
+    # ``default_client/default_app/default_project``.
     env: dict[str, str] = {}
     env_source = "unknown"
-    base = ""
-    if client_id_env or app_id_env or project_id_env:
-        base = f"env:{client_id_env}:{app_id_env}:{project_id_env}"
-        try:
-            client_r = redis_client.get(f"{base}:CLIENT_NAME")
-            app_r = redis_client.get(f"{base}:APP_NAME")
-            project_r = redis_client.get(f"{base}:PROJECT_NAME")
-            if client_r and project_r:
-                def _decode(val):
-                    return val.decode() if isinstance(val, bytes) else val
-
-                env = {
-                    "CLIENT_NAME": _decode(client_r),
-                    "APP_NAME": _decode(app_r) if app_r else "default_app",
-                    "PROJECT_NAME": _decode(project_r),
-                }
-                env_source = "redis"
-        except Exception:
-            env = {}
-
-    # Always refresh from the authoritative source to ensure renamed
-    # projects update the Redis cache. ``get_env_vars`` will consult
-    # Postgres/Django and return the latest names for the provided
-    # identifiers.
     fresh = await get_env_vars(
         client_id_env,
         app_id_env,
@@ -206,23 +182,13 @@ async def get_object_prefix(
         client_name=client_name or os.getenv("CLIENT_NAME", ""),
         app_name=app_name or os.getenv("APP_NAME", ""),
         project_name=project_name or os.getenv("PROJECT_NAME", ""),
-        use_cache=False,
+        use_cache=True,
         return_source=True,
     )
     if isinstance(fresh, tuple):
-        fresh_env, fresh_source = fresh
+        env, env_source = fresh
     else:
-        fresh_env, fresh_source = fresh, "unknown"
-    if fresh_env:
-        env = fresh_env
-        env_source = fresh_source
-        if base:
-            try:
-                redis_client.set(f"{base}:CLIENT_NAME", env.get("CLIENT_NAME", ""))
-                redis_client.set(f"{base}:APP_NAME", env.get("APP_NAME", ""))
-                redis_client.set(f"{base}:PROJECT_NAME", env.get("PROJECT_NAME", ""))
-            except Exception:
-                pass
+        env, env_source = fresh, "unknown"
 
     print(f"🔧 fetched env {env} (source={env_source})")
     client = env.get("CLIENT_NAME", os.getenv("CLIENT_NAME", "default_client"))
@@ -250,6 +216,28 @@ async def get_object_prefix(
     if include_env:
         return prefix, env, env_source
     return prefix
+
+
+@router.get("/get_object_prefix")
+async def get_object_prefix_endpoint(
+    client_name: str = "",
+    app_name: str = "",
+    project_name: str = "",
+) -> dict:
+    """Expose ``get_object_prefix`` as an API endpoint.
+
+    The endpoint resolves the MinIO prefix for the provided client/app/project
+    combination. Environment variables are sourced from Redis when available
+    and otherwise retrieved from Postgres' ``registry_environment`` table.
+    """
+
+    prefix, env, env_source = await get_object_prefix(
+        client_name=client_name,
+        app_name=app_name,
+        project_name=project_name,
+        include_env=True,
+    )
+    return {"prefix": prefix, "environment": env, "source": env_source}
 
 # Initialize MinIO client
 minio_client = get_client()

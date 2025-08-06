@@ -417,15 +417,10 @@ def test_list_saved_dataframes_env(monkeypatch):
         def set(self, key, value):
             self.mapping[key] = value
 
-    # Redis still holds the old names; ``get_object_prefix`` should ignore
-    # these stale values, consult ``get_env_vars`` with the correct new names
-    # and then refresh the cache.
-    redis_mapping = {
-        "env:1:2:3:CLIENT_NAME": b"old_client",
-        "env:1:2:3:APP_NAME": b"old_app",
-        "env:1:2:3:PROJECT_NAME": b"old_project",
-    }
-    monkeypatch.setattr(routes, "redis_client", DummyRedis(redis_mapping))
+    # Provide a dummy Redis client; ``get_object_prefix`` now relies solely on
+    # ``get_env_vars`` to resolve the current environment and no longer reads
+    # per-ID cache entries.
+    monkeypatch.setattr(routes, "redis_client", DummyRedis({}))
 
     async def fake_get_env_vars(client_id, app_id, project_id, *, client_name, app_name, project_name, **k):
         # Simulate a DB lookup that simply echoes back the provided names.
@@ -472,7 +467,4 @@ def test_list_saved_dataframes_env(monkeypatch):
     assert data["environment"]["CLIENT_NAME"] == "client"
     assert data["environment"]["APP_NAME"] == "app"
     assert data["environment"]["PROJECT_NAME"] == "proj"
-    assert redis_mapping["env:1:2:3:CLIENT_NAME"] == "client"
-    assert redis_mapping["env:1:2:3:APP_NAME"] == "app"
-    assert redis_mapping["env:1:2:3:PROJECT_NAME"] == "proj"
 
