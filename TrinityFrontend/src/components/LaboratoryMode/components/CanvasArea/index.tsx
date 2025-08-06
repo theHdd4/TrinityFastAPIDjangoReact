@@ -214,13 +214,14 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
       if (res.ok) {
         const data = await res.json();
         const files = Array.isArray(data.files) ? data.files : [];
-        const file = files.find(
+        const validFiles = files.filter(
           (f: any) =>
             typeof f.object_name === 'string' &&
             /\.[^/]+$/.test(f.object_name.trim())
         );
+        const file = validFiles[validFiles.length - 1];
         if (file && file.object_name) {
-          console.log('✔️ defaulting to first saved dataframe', file.object_name);
+          console.log('✔️ defaulting to latest saved dataframe', file.object_name);
           await prefetchDataframe(file.object_name);
           const cols = await fetchColumnSummary(file.object_name);
           return { csv: file.object_name, display: file.csv_name, ...(cols || {}) };
