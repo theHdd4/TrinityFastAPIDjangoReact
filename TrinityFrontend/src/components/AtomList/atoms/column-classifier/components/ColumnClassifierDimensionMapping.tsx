@@ -73,15 +73,12 @@ const ColumnClassifierDimensionMapping: React.FC<DimensionMappingProps> = ({
         style={style}
         {...listeners}
         {...attributes}
-        className={`group relative flex items-center gap-2 px-3 py-2 bg-white border border-blue-400 text-black hover:bg-blue-50 rounded-full text-sm font-medium cursor-grab active:cursor-grabbing transition-all duration-200 hover:scale-[1.02] hover:shadow-lg backdrop-blur-sm min-w-0 w-full ${
+        className={`group relative flex items-center gap-2 px-3 py-2 bg-white border border-blue-400 text-black hover:bg-blue-50 rounded-full text-sm font-medium cursor-grab active:cursor-grabbing transition-all duration-200 hover:scale-[1.02] hover:shadow-lg backdrop-blur-sm ${
           isDragging ? 'opacity-70 shadow-2xl scale-105 rotate-2' : 'hover:shadow-md'
         }`}
       >
         <GripVertical className="w-3 h-3 opacity-40 group-hover:opacity-60 transition-opacity flex-shrink-0" />
-        <span
-          className="select-none font-medium tracking-wide truncate flex-1 min-w-0"
-          title={name}
-        >
+        <span className="select-none font-medium tracking-wide whitespace-nowrap" title={name}>
           {name}
         </span>
         <div className="absolute inset-0 rounded-full bg-black/5 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
@@ -127,7 +124,7 @@ const ColumnClassifierDimensionMapping: React.FC<DimensionMappingProps> = ({
             isOver ? 'bg-blue-50' : ''
           } overflow-y-auto`}
         >
-          <div className="grid grid-cols-1 gap-2">
+          <div className="flex flex-wrap gap-2">
             {columns.map((column, index) => (
               <DraggableColumnPill
                 key={`${id}-${column}-${index}`}

@@ -1,5 +1,4 @@
 import React, { useState } from 'react';
-import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
 import { Database, FileText, GripVertical } from 'lucide-react';
 import { ClassifierData } from '../ColumnClassifierAtom';
@@ -83,15 +82,12 @@ const ColumnClassifierCanvas: React.FC<ColumnClassifierCanvasProps> = ({
         {...attributes}
         className={`group relative flex items-center gap-2 px-3 py-2 ${
           sectionColors[section as keyof typeof sectionColors]
-        } rounded-full text-sm font-medium cursor-grab active:cursor-grabbing transition-all duration-200 hover:scale-[1.02] hover:shadow-lg backdrop-blur-sm min-w-0 w-full ${
+        } rounded-full text-sm font-medium cursor-grab active:cursor-grabbing transition-all duration-200 hover:scale-[1.02] hover:shadow-lg backdrop-blur-sm ${
           isDragging ? 'opacity-70 shadow-2xl scale-105 rotate-2' : 'hover:shadow-md'
         }`}
       >
         <GripVertical className="w-3 h-3 opacity-40 group-hover:opacity-60 transition-opacity flex-shrink-0" />
-        <span
-          className="select-none font-medium tracking-wide truncate flex-1 min-w-0"
-          title={name}
-        >
+        <span className="select-none font-medium tracking-wide whitespace-nowrap" title={name}>
           {name}
         </span>
         <div className="absolute inset-0 rounded-full bg-black/5 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
@@ -143,7 +139,7 @@ const ColumnClassifierCanvas: React.FC<ColumnClassifierCanvasProps> = ({
                   isOver ? 'bg-primary/5' : ''
                 }`}
               >
-                <div className="grid grid-cols-2 gap-3">
+                <div className="flex flex-wrap gap-3">
                   {columns.map((column, index) => (
                     <DraggableColumnPill
                       key={`${id}-${column}-${index}`}
@@ -209,23 +205,7 @@ const ColumnClassifierCanvas: React.FC<ColumnClassifierCanvasProps> = ({
     >
       <div className="w-full h-full p-6 pb-[50px] bg-gradient-to-br from-slate-50 to-blue-50 overflow-y-auto">
         <div className="border-b border-border bg-gradient-to-r from-card via-card/95 to-card backdrop-blur-sm">
-          <div className="flex items-center justify-between p-6">
-            <div className="flex items-center gap-3">
-              <div className="p-2 bg-gradient-to-br from-primary/20 to-primary/10 rounded-xl">
-                <Database className="w-6 h-6 text-primary" />
-              </div>
-              <h2 className="text-2xl font-bold bg-gradient-to-r from-foreground to-foreground/70 bg-clip-text text-transparent">
-                Column Classifier
-              </h2>
-            </div>
-            <Badge
-              variant="secondary"
-              className="bg-gradient-to-r from-primary/10 to-primary/5 text-primary border-primary/20"
-            >
-              Interactive
-            </Badge>
-          </div>
-          <div className="flex items-center px-6 pb-4 space-x-3">
+          <div className="flex items-center px-6 py-4 space-x-3">
             {data.files.map((file, index) => (
               <div key={index} className="relative">
                 <button
