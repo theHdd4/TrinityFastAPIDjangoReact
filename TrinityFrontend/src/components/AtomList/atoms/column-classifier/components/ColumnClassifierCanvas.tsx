@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Card } from '@/components/ui/card';
 import { Database, FileText, GripVertical } from 'lucide-react';
 import { ClassifierData } from '../ColumnClassifierAtom';
+import ColClassifierColumnView from './ColClassifierColumnView';
 import {
   DndContext,
   DragEndEvent,
@@ -23,12 +24,18 @@ interface ColumnClassifierCanvasProps {
     fileIndex?: number
   ) => void;
   onActiveFileChange: (fileIndex: number) => void;
+  showColumnView: boolean;
+  filterUnique: boolean;
+  onFilterToggle: (val: boolean) => void;
 }
 
 const ColumnClassifierCanvas: React.FC<ColumnClassifierCanvasProps> = ({
   data,
   onColumnMove,
   onActiveFileChange,
+  showColumnView,
+  filterUnique,
+  onFilterToggle,
 }) => {
   const [activeId, setActiveId] = useState<string | null>(null);
 
@@ -226,7 +233,15 @@ const ColumnClassifierCanvas: React.FC<ColumnClassifierCanvasProps> = ({
             ))}
           </div>
         </div>
-        <div className="p-4">
+        <div className="p-4 space-y-6">
+          {showColumnView && currentFile && (
+            <ColClassifierColumnView
+              objectName={currentFile.fileName}
+              columns={columnsByCategory}
+              filterUnique={filterUnique}
+              onFilterToggle={onFilterToggle}
+            />
+          )}
           <div className="grid grid-cols-3 gap-6">
             <DroppableSection
               id="unclassified"

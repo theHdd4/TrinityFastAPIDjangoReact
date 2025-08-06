@@ -154,6 +154,8 @@ export interface ColumnClassifierSettings {
   dimensions: string[];
   assignments: { [key: string]: string[] };
   enableDimensionMapping?: boolean;
+  enableColumnView?: boolean;
+  filterColumnViewUnique?: boolean;
 }
 
 export const DEFAULT_COLUMN_CLASSIFIER_SETTINGS: ColumnClassifierSettings = {
@@ -166,6 +168,8 @@ export const DEFAULT_COLUMN_CLASSIFIER_SETTINGS: ColumnClassifierSettings = {
   dimensions: [],
   assignments: {},
   enableDimensionMapping: false,
+  enableColumnView: false,
+  filterColumnViewUnique: false,
 };
 
 export interface DataFrameOperationsSettings {

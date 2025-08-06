@@ -163,6 +163,10 @@ const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
   };
 
 
+  const handleFilterToggle = (val: boolean) => {
+    updateSettings(atomId, { filterColumnViewUnique: val });
+  };
+
 
   const setActiveFile = (fileIndex: number) => {
     updateSettings(atomId, { data: { ...classifierData, activeFileIndex: fileIndex } });
@@ -251,15 +255,18 @@ const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
 
   return (
     <div className="w-full h-full bg-white flex flex-col">
-      <div className="flex flex-1">
-        <div className="w-full p-4">
-          <ColumnClassifierCanvas
-            data={classifierData}
-            onColumnMove={handleColumnMove}
-            onActiveFileChange={setActiveFile}
-          />
+        <div className="flex flex-1">
+          <div className="w-full p-4">
+            <ColumnClassifierCanvas
+              data={classifierData}
+              onColumnMove={handleColumnMove}
+              onActiveFileChange={setActiveFile}
+              showColumnView={settings.enableColumnView || false}
+              filterUnique={settings.filterColumnViewUnique || false}
+              onFilterToggle={handleFilterToggle}
+            />
+          </div>
         </div>
-      </div>
       {settings.enableDimensionMapping && (
         <div className="border-t p-4 overflow-y-auto">
           <ColumnClassifierDimensionMapping

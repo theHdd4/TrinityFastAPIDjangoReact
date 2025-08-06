@@ -3,6 +3,7 @@ import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Switch } from '@/components/ui/switch';
 import { VALIDATE_API, CLASSIFIER_API } from '@/lib/api';
 import type { FileClassification, ColumnData } from '../ColumnClassifierAtom';
 import {
@@ -37,6 +38,9 @@ const ColumnClassifierSettings: React.FC<ColumnClassifierSettingsProps> = ({ ato
   const [savedId, setSavedId] = useState(settings.validatorId || '');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [enableColumnView, setEnableColumnView] = useState<boolean>(
+    settings.enableColumnView || false
+  );
 
   useEffect(() => {
     let query = '';
@@ -63,6 +67,10 @@ const ColumnClassifierSettings: React.FC<ColumnClassifierSettingsProps> = ({ ato
       .then(d => setFrames(Array.isArray(d.files) ? d.files : []))
       .catch(() => setFrames([]));
   }, []);
+
+  useEffect(() => {
+    setEnableColumnView(settings.enableColumnView || false);
+  }, [settings.enableColumnView]);
 
   const classify = async () => {
     if (!savedId) return;
@@ -123,6 +131,20 @@ const ColumnClassifierSettings: React.FC<ColumnClassifierSettingsProps> = ({ ato
         >
           Classify Columns
         </Button>
+      </Card>
+
+      <Card className="p-4 flex items-center justify-between">
+        <Label htmlFor={`${atomId}-enable-colview`} className="text-sm">
+          Enable Column View
+        </Label>
+        <Switch
+          id={`${atomId}-enable-colview`}
+          checked={enableColumnView}
+          onCheckedChange={val => {
+            setEnableColumnView(val);
+            updateSettings(atomId, { enableColumnView: val });
+          }}
+        />
       </Card>
     </div>
   );
