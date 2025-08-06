@@ -139,6 +139,7 @@ services:
   fastapi:
     build: ./TrinityBackendDjango
     command: uvicorn apps.orchestration.fastapi_app:app --host 0.0.0.0 --port 8001
+    volumes:
       - ./TrinityBackendDjango:/code
       - ./TrinityBackendFastAPI:/code/TrinityBackendFastAPI
     env_file:
@@ -196,6 +197,8 @@ services:
       - ./TrinityBackendDjango/.env
     environment:
       OLLAMA_IP: 10.2.1.65
+      MONGO_URI: "mongodb://root:rootpass@mongo:27017/trinity_dev?authSource=admin"
+      CLASSIFY_MONGO_URI: "mongodb://root:rootpass@mongo:27017/?authSource=admin"
     volumes:
       - ./TrinityBackendFastAPI/app/DataStorageRetrieval:/app/DataStorageRetrieval:ro
     ports:
