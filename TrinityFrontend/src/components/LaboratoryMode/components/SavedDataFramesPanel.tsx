@@ -73,19 +73,23 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle }) => {
           PROJECT_NAME: env.PROJECT_NAME
         });
 
-        const params = new URLSearchParams();
-        if (env.CLIENT_NAME && env.CLIENT_NAME !== 'default_client') {
-          params.set('client_name', env.CLIENT_NAME);
+        try {
+          const prefRes = await fetch(`${VALIDATE_API}/get_object_prefix`, {
+            credentials: 'include'
+          });
+          if (prefRes.ok) {
+            const prefData = await prefRes.json();
+            setPrefix(prefData.prefix || '');
+            if (prefData.environment) {
+              env = { ...env, ...prefData.environment };
+              localStorage.setItem('env', JSON.stringify(env));
+            }
+          }
+        } catch (err) {
+          console.warn('get_object_prefix failed', err);
         }
-        if (env.APP_NAME && env.APP_NAME !== 'default_app') {
-          params.set('app_name', env.APP_NAME);
-        }
-        if (env.PROJECT_NAME && env.PROJECT_NAME !== 'default_project') {
-          params.set('project_name', env.PROJECT_NAME);
-        }
-        const query = params.toString() ? `?${params.toString()}` : '';
 
-        const res = await fetch(`${VALIDATE_API}/list_saved_dataframes${query}`, {
+        const res = await fetch(`${VALIDATE_API}/list_saved_dataframes`, {
           credentials: 'include'
         });
         const data = await res.json();
