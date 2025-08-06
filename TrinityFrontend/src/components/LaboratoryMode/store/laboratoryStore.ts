@@ -153,6 +153,7 @@ export interface ColumnClassifierSettings {
   fileKey?: string;
   dimensions: string[];
   assignments: { [key: string]: string[] };
+  enableDimensionMapping?: boolean;
 }
 
 export const DEFAULT_COLUMN_CLASSIFIER_SETTINGS: ColumnClassifierSettings = {
@@ -164,6 +165,7 @@ export const DEFAULT_COLUMN_CLASSIFIER_SETTINGS: ColumnClassifierSettings = {
   fileKey: "",
   dimensions: [],
   assignments: {},
+  enableDimensionMapping: false,
 };
 
 export interface DataFrameOperationsSettings {
