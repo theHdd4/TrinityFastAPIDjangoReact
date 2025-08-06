@@ -113,6 +113,14 @@ async def _query_registry_env(
     except Exception:
         return None
     try:
+        # Each client has its own schema.  Ensure we query the tenant's
+        # ``registry_environment`` table by setting the search path before
+        # fetching the row.
+        schema = client_name.lower()
+        try:
+            await conn.execute(f'SET search_path TO "{schema}", public')
+        except Exception:
+            pass
         row = await conn.fetchrow(
             """
             SELECT envvars, identifiers, measures, dimensions

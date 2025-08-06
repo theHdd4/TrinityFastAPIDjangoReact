@@ -196,9 +196,8 @@ async def get_object_prefix(
             env = {}
 
     # Always refresh from the authoritative source to ensure renamed
-    # projects update the Redis cache. ``get_env_vars`` will consult
-    # Postgres/Django and return the latest names for the provided
-    # identifiers.
+    # projects update the Redis cache. ``get_env_vars`` prefers any cached
+    # Redis values and falls back to Postgres/Django when missing.
     fresh = await get_env_vars(
         client_id_env,
         app_id_env,
@@ -206,7 +205,7 @@ async def get_object_prefix(
         client_name=client_name or os.getenv("CLIENT_NAME", ""),
         app_name=app_name or os.getenv("APP_NAME", ""),
         project_name=project_name or os.getenv("PROJECT_NAME", ""),
-        use_cache=False,
+        use_cache=True,
         return_source=True,
     )
     if isinstance(fresh, tuple):
@@ -250,6 +249,28 @@ async def get_object_prefix(
     if include_env:
         return prefix, env, env_source
     return prefix
+
+
+@router.get("/get_object_prefix")
+async def get_object_prefix_endpoint(
+    client_name: str = "",
+    app_name: str = "",
+    project_name: str = "",
+) -> dict:
+    """Expose ``get_object_prefix`` as an API endpoint.
+
+    The endpoint resolves the MinIO prefix for the provided client/app/project
+    combination. Environment variables are sourced from Redis when available
+    and otherwise retrieved from Postgres' ``registry_environment`` table.
+    """
+
+    prefix, env, env_source = await get_object_prefix(
+        client_name=client_name,
+        app_name=app_name,
+        project_name=project_name,
+        include_env=True,
+    )
+    return {"prefix": prefix, "environment": env, "source": env_source}
 
 # Initialize MinIO client
 minio_client = get_client()
