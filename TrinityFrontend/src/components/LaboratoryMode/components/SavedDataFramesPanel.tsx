@@ -41,18 +41,17 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle }) => {
           }
         }
 
-        if (user && env.CLIENT_ID && env.APP_ID && env.PROJECT_ID) {
+        if (user) {
           try {
+            const payload: any = { user_id: user.id };
+            if (env.CLIENT_ID) payload.client_id = env.CLIENT_ID;
+            if (env.APP_ID) payload.app_id = env.APP_ID;
+            if (env.PROJECT_ID) payload.project_id = env.PROJECT_ID;
             const redisRes = await fetch(`${SESSION_API}/init`, {
               method: 'POST',
               credentials: 'include',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                client_id: env.CLIENT_ID,
-                user_id: user.id,
-                app_id: env.APP_ID,
-                project_id: env.PROJECT_ID
-              })
+              body: JSON.stringify(payload)
             });
             if (redisRes.ok) {
               const redisData = await redisRes.json();
@@ -74,9 +73,15 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle }) => {
         });
 
         try {
-          const prefRes = await fetch(`${VALIDATE_API}/get_object_prefix`, {
-            credentials: 'include'
-          });
+          const query = new URLSearchParams({
+            client_name: env.CLIENT_NAME || '',
+            app_name: env.APP_NAME || '',
+            project_name: env.PROJECT_NAME || ''
+          }).toString();
+          const prefRes = await fetch(
+            `${VALIDATE_API}/get_object_prefix?${query}`,
+            { credentials: 'include' }
+          );
           if (prefRes.ok) {
             const prefData = await prefRes.json();
             setPrefix(prefData.prefix || '');
@@ -85,22 +90,37 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle }) => {
               localStorage.setItem('env', JSON.stringify(env));
             }
           }
-        } catch (err) {
-          console.warn('get_object_prefix failed', err);
-        }
 
-        const res = await fetch(`${VALIDATE_API}/list_saved_dataframes`, {
-          credentials: 'include'
-        });
-        const data = await res.json();
-        setPrefix(data.prefix || '');
-        if (data.environment) {
-          localStorage.setItem('env', JSON.stringify({ ...env, ...data.environment }));
+          const listRes = await fetch(
+            `${VALIDATE_API}/list_saved_dataframes?${query}`,
+            { credentials: 'include' }
+          );
+          let data: any = null;
+          if (listRes.ok) {
+            try {
+              data = await listRes.json();
+            } catch (e) {
+              console.warn('Failed to parse list_saved_dataframes response', e);
+            }
+          } else {
+            console.warn('list_saved_dataframes failed', listRes.status);
+          }
+          if (data) {
+            setPrefix(data.prefix || '');
+            if (data.environment) {
+              localStorage.setItem('env', JSON.stringify({ ...env, ...data.environment }));
+            }
+            console.log(
+              `📁 SavedDataFramesPanel looking in MinIO bucket "${data.bucket}" folder "${data.prefix}" via ${data.env_source} (CLIENT_NAME=${data.environment?.CLIENT_NAME} APP_NAME=${data.environment?.APP_NAME} PROJECT_NAME=${data.environment?.PROJECT_NAME})`
+            );
+            setFiles(Array.isArray(data.files) ? data.files : []);
+          } else {
+            setFiles([]);
+          }
+        } catch (err) {
+          console.warn('get_object_prefix or list_saved_dataframes failed', err);
+          setFiles([]);
         }
-        console.log(
-          `📁 SavedDataFramesPanel looking in MinIO bucket "${data.bucket}" folder "${data.prefix}" via ${data.env_source} (CLIENT_NAME=${data.environment?.CLIENT_NAME} APP_NAME=${data.environment?.APP_NAME} PROJECT_NAME=${data.environment?.PROJECT_NAME})`
-        );
-        setFiles(Array.isArray(data.files) ? data.files : []);
       } catch (err) {
         console.error('Failed to load saved dataframes', err);
         setFiles([]);
