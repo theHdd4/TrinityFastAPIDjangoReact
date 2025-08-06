@@ -102,7 +102,7 @@ const ColumnClassifierDimensionMapping: React.FC<DimensionMappingProps> = ({
         ref={setNodeRef}
         className={`relative overflow-hidden bg-white border-2 ${
           isOver ? 'border-blue-400 shadow-xl scale-105' : 'border-blue-200'
-        } rounded-xl transition-all duration-300 hover:shadow-lg group`}
+        } rounded-xl transition-all duration-300 hover:shadow-lg group h-64 flex flex-col`}
       >
         <div className="relative px-4 py-3 border-b border-blue-200 bg-white">
           <div className="flex items-center justify-between">
@@ -123,9 +123,9 @@ const ColumnClassifierDimensionMapping: React.FC<DimensionMappingProps> = ({
           </div>
         </div>
         <div
-          className={`relative p-4 min-h-[200px] bg-white transition-all duration-300 ${
+          className={`relative p-4 flex-1 bg-white transition-all duration-300 ${
             isOver ? 'bg-blue-50' : ''
-          }`}
+          } overflow-y-auto`}
         >
           <div className="grid grid-cols-1 gap-2">
             {columns.map((column, index) => (
@@ -137,7 +137,7 @@ const ColumnClassifierDimensionMapping: React.FC<DimensionMappingProps> = ({
             ))}
           </div>
           {columns.length === 0 && (
-            <div className="flex flex-col items-center justify-center h-32 text-muted-foreground">
+            <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
               <Tag className="w-8 h-8 mb-2 opacity-40" />
               <span className="text-xs italic text-center">
                 Drag identifier columns here
@@ -176,16 +176,29 @@ const ColumnClassifierDimensionMapping: React.FC<DimensionMappingProps> = ({
         </Badge>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {Object.entries(customDimensions).map(([dimensionName, assignedColumns]) => (
+      {customDimensions['unattributed'] && (
+        <div className="mb-6">
           <DimensionDropZone
-            key={dimensionName}
-            id={dimensionName}
-            title={dimensionName}
-            columns={assignedColumns}
+            id="unattributed"
+            title="unattributed"
+            columns={customDimensions['unattributed']}
             onRemoveDimension={onRemoveDimension}
           />
-        ))}
+        </div>
+      )}
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+        {Object.entries(customDimensions)
+          .filter(([name]) => name !== 'unattributed')
+          .map(([dimensionName, assignedColumns]) => (
+            <DimensionDropZone
+              key={dimensionName}
+              id={dimensionName}
+              title={dimensionName}
+              columns={assignedColumns}
+              onRemoveDimension={onRemoveDimension}
+            />
+          ))}
       </div>
       <DragOverlay>
         {activeId ? (
