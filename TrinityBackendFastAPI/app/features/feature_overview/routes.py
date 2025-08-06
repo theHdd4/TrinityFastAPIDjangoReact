@@ -271,31 +271,41 @@ class DimensionMappingRequest(BaseModel):
 
 @router.post("/dimension_mapping")
 async def dimension_mapping(req: DimensionMappingRequest):
-    """Return dimension to identifier mapping from Redis or MongoDB."""
+    """Return dimension to identifier mapping.
+
+    Checks the ``env`` namespace in Redis for a cached environment entry.  When
+    not found, the column classifier configuration is loaded from MongoDB.
+    This ensures Feature Overview can prefetch dimension mappings and render
+    SKU tables and charts correctly.
+    """
+
     payload = req.dict()
     print(f"🛰️ dimension_mapping payload: {payload}")
     client = req.client_name
     app = req.app_name
     project = req.project_name
-    key = f"{client}/{app}/{project}/column_classifier_config"
-    print(f"🔑 config key {key}")
-    cached = redis_client.get(key)
-    if cached:
-        print("✅ found cached config")
+
+    env_key = f"env:{client}:{app}:{project}"
+    cached_env = redis_client.get(env_key)
+    if cached_env:
+        print("✅ found env in redis")
         try:
-            cfg = json.loads(cached)
-            dims = cfg.get("dimensions")
+            env = json.loads(cached_env)
+            dims = env.get("dimensions")
             if isinstance(dims, dict):
-                return {"mapping": dims, "config": cfg}
-        except Exception as exc:
-            print(f"⚠️ dimension_mapping redis parse error: {exc}")
+                return {"mapping": dims, "source": "env"}
+        except Exception as exc:  # pragma: no cover
+            print(f"⚠️ dimension_mapping env parse error: {exc}")
     else:
-        print("🔍 config not in redis")
+        print("🔍 env not in redis")
 
     mongo_cfg = get_classifier_config_from_mongo(client, app, project)
     if mongo_cfg and mongo_cfg.get("dimensions"):
         print("📦 loaded mapping from MongoDB")
-        redis_client.setex(key, 3600, json.dumps(mongo_cfg, default=str))
+        try:
+            redis_client.setex(env_key, 3600, json.dumps(mongo_cfg, default=str))
+        except Exception:
+            pass
         return {"mapping": mongo_cfg["dimensions"], "config": mongo_cfg}
 
     raise HTTPException(status_code=404, detail="Mapping not found")
