@@ -105,7 +105,7 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
   };
 
   const prefetchDataframe = async (name: string) => {
-    if (!name) return;
+    if (!name || !/\.[^/]+$/.test(name.trim())) return;
     try {
       console.log('✈️ fetching flight table', name);
       const fr = await fetch(
@@ -213,8 +213,13 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
       const res = await fetch(`${VALIDATE_API}/list_saved_dataframes${query}`);
       if (res.ok) {
         const data = await res.json();
-        const file = Array.isArray(data.files) ? data.files[0] : null;
-        if (file) {
+        const files = Array.isArray(data.files) ? data.files : [];
+        const file = files.find(
+          (f: any) =>
+            typeof f.object_name === 'string' &&
+            /\.[^/]+$/.test(f.object_name.trim())
+        );
+        if (file && file.object_name) {
           console.log('✔️ defaulting to first saved dataframe', file.object_name);
           await prefetchDataframe(file.object_name);
           const cols = await fetchColumnSummary(file.object_name);
