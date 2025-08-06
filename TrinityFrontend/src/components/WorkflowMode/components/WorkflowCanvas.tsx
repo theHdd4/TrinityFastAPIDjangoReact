@@ -197,7 +197,7 @@ const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
           .catch(() => {});
       }
     }
-  }, [onAtomToggle, onAtomReorder, onMoleculeSelect, removeNode, toast]);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!onCanvasMoleculesUpdate) return;

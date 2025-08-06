@@ -33,7 +33,7 @@ const LaboratoryMode = () => {
       console.log('Successfully Loaded Existing Project State');
       toast({ title: 'Successfully Loaded Existing Project State' });
     }
-  }, [toast]);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleUndo = async () => {
     const current = localStorage.getItem('current-project');

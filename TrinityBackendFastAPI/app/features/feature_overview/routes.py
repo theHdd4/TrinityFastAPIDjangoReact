@@ -26,6 +26,7 @@ from .mongodb_saver import (
     save_feature_overview_unique_results,
     fetch_dimensions_dict,
 )
+from app.features.data_upload_validate.app.routes import get_object_prefix
 
 from .feature_overview.base import (
     run_unique_count,
@@ -33,8 +34,6 @@ from .feature_overview.base import (
     output_store,
     unique_count,
 )
-from app.DataStorageRetrieval.db import fetch_client_app_project
-from app.core.utils import get_env_vars
 
 
 def _parse_numeric_id(value: str | int | None) -> int:
@@ -71,31 +70,10 @@ MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY", "admin_dev")
 MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY", "pass_dev")
 MINIO_BUCKET = os.getenv("MINIO_BUCKET", "trinity")
 
-USER_ID = int(os.getenv("USER_ID", "0"))
-PROJECT_ID = int(os.getenv("PROJECT_ID", "0"))
-
-CLIENT_NAME = os.getenv("CLIENT_NAME", "default_client")
-APP_NAME = os.getenv("APP_NAME", "default_app")
-PROJECT_NAME = os.getenv("PROJECT_NAME", "default_project")
-
-
-def load_names_from_db() -> None:
-    global CLIENT_NAME, APP_NAME, PROJECT_NAME
-    if USER_ID and PROJECT_ID:
-        try:
-            CLIENT_NAME_DB, APP_NAME_DB, PROJECT_NAME_DB = asyncio.run(
-                fetch_client_app_project(USER_ID, PROJECT_ID)
-            )
-            CLIENT_NAME = CLIENT_NAME_DB or CLIENT_NAME
-            APP_NAME = APP_NAME_DB or APP_NAME
-            PROJECT_NAME = PROJECT_NAME_DB or PROJECT_NAME
-        except Exception as exc:
-            print(f"⚠️ Failed to load names from DB: {exc}")
-
-
-load_names_from_db()
-
-OBJECT_PREFIX = f"{CLIENT_NAME}/{APP_NAME}/{PROJECT_NAME}/"
+# Legacy environment lookups are replaced by per-request prefix calculation via
+# ``get_object_prefix`` from the data upload feature.  This ensures all feature
+# overview endpoints operate on the same client/app/project namespace as the
+# rest of the system without relying on global environment variables.
 
 minio_client = Minio(
     MINIO_ENDPOINT,
@@ -127,9 +105,16 @@ async def column_summary(object_name: str):
     """Return column summary statistics for a saved dataframe."""
     object_name = unquote(object_name)
     print(f"➡️ column_summary request: {object_name}")
-    if not object_name.startswith(OBJECT_PREFIX):
+    parts = object_name.split("/", 3)
+    client = parts[0] if len(parts) > 0 else ""
+    app = parts[1] if len(parts) > 1 else ""
+    project = parts[2] if len(parts) > 2 else ""
+    prefix = await get_object_prefix(
+        client_name=client, app_name=app, project_name=project
+    )
+    if not object_name.startswith(prefix):
         print(
-            f"⚠️ column_summary prefix mismatch: {object_name} (expected {OBJECT_PREFIX})"
+            f"⚠️ column_summary prefix mismatch: {object_name} (expected {prefix})"
         )
     try:
         flight_path = get_flight_path_for_csv(object_name)
@@ -200,9 +185,16 @@ async def cached_dataframe(object_name: str):
     Prefers Arrow Flight for the latest data, then falls back to Redis/MinIO."""
     object_name = unquote(object_name)
     print(f"➡️ cached_dataframe request: {object_name}")
-    if not object_name.startswith(OBJECT_PREFIX):
+    parts = object_name.split("/", 3)
+    client = parts[0] if len(parts) > 0 else ""
+    app = parts[1] if len(parts) > 1 else ""
+    project = parts[2] if len(parts) > 2 else ""
+    prefix = await get_object_prefix(
+        client_name=client, app_name=app, project_name=project
+    )
+    if not object_name.startswith(prefix):
         print(
-            f"⚠️ cached_dataframe prefix mismatch: {object_name} (expected {OBJECT_PREFIX})"
+            f"⚠️ cached_dataframe prefix mismatch: {object_name} (expected {prefix})"
         )
     try:
         try:
@@ -244,6 +236,11 @@ async def cached_dataframe(object_name: str):
 async def flight_table(object_name: str):
     """Return the Arrow IPC file for the given object via Arrow Flight."""
     object_name = unquote(object_name)
+    parts = object_name.split("/", 3)
+    client = parts[0] if len(parts) > 0 else ""
+    app = parts[1] if len(parts) > 1 else ""
+    project = parts[2] if len(parts) > 2 else ""
+    await get_object_prefix(client_name=client, app_name=app, project_name=project)
     flight_path = get_flight_path_for_csv(object_name)
     if not flight_path:
         info = await get_dataset_info(object_name)
@@ -318,8 +315,15 @@ async def sku_stats(
     """Return time series and summary for a specific SKU combination."""
     object_name = unquote(object_name)
     print(f"➡️ sku_stats request: {object_name}")
-    if not object_name.startswith(OBJECT_PREFIX):
-        print(f"⚠️ sku_stats prefix mismatch: {object_name} (expected {OBJECT_PREFIX})")
+    parts = object_name.split("/", 3)
+    client = parts[0] if len(parts) > 0 else ""
+    app = parts[1] if len(parts) > 1 else ""
+    project = parts[2] if len(parts) > 2 else ""
+    prefix = await get_object_prefix(
+        client_name=client, app_name=app, project_name=project
+    )
+    if not object_name.startswith(prefix):
+        print(f"⚠️ sku_stats prefix mismatch: {object_name} (expected {prefix})")
     try:
         combo = json.loads(combination)
     except Exception as e:
