@@ -193,23 +193,54 @@ async def get_env_vars(
         except Exception:  # pragma: no cover - Django misconfigured
             pass
 
+    # Resolve authoritative names for ID-based lookups so renamed projects are
+    # reflected even when callers pass only identifiers.
+    resolved_client = client_name
+    resolved_app = app_name
+    resolved_project = project_name
+    numeric_pid = _parse_numeric_id(project_id)
+    if numeric_pid:
+        try:
+            client_db, app_db, project_db = await fetch_client_app_project(None, numeric_pid)
+            resolved_client = client_db or resolved_client
+            resolved_app = app_db or resolved_app
+            resolved_project = project_db or resolved_project
+        except Exception:
+            pass
+
     key = (client_id, app_id, project_id, client_name, app_name, project_name)
     if use_cache and key in _ENV_CACHE:
         env = _ENV_CACHE[key]
-        source = "cache"
-        print(f"🔧 cached_env_vars{key} -> {env}")
-        return (env, source) if return_source else env
+        if (
+            (resolved_client and env.get("CLIENT_NAME") != resolved_client)
+            or (resolved_app and env.get("APP_NAME") != resolved_app)
+            or (resolved_project and env.get("PROJECT_NAME") != resolved_project)
+        ):
+            # Stale entry; ignore and continue to fetch fresh values
+            _ENV_CACHE.pop(key, None)
+        else:
+            source = "cache"
+            print(f"🔧 cached_env_vars{key} -> {env}")
+            return (env, source) if return_source else env
 
-    if use_cache and client_name and project_name:
-        redis_key = _redis_env_key(client_name, app_name, project_name)
+    if use_cache and resolved_client and resolved_project:
+        redis_key = _redis_env_key(resolved_client, resolved_app, resolved_project)
         cached = redis_client.get(redis_key)
         if cached:
             try:
                 env = json.loads(cached)
-                _ENV_CACHE[key] = env
-                source = "redis"
-                print(f"🔧 redis_env_vars{redis_key} -> {env}")
-                return (env, source) if return_source else env
+                if (
+                    (resolved_client and env.get("CLIENT_NAME") != resolved_client)
+                    or (resolved_app and env.get("APP_NAME") != resolved_app)
+                    or (resolved_project and env.get("PROJECT_NAME") != resolved_project)
+                ):
+                    # Stale entry for another project
+                    pass
+                else:
+                    _ENV_CACHE[key] = env
+                    source = "redis"
+                    print(f"🔧 redis_env_vars{redis_key} -> {env}")
+                    return (env, source) if return_source else env
             except Exception:
                 pass
 
@@ -217,21 +248,24 @@ async def get_env_vars(
     if client_id or app_id or project_id:
         env = await _query_env_vars(client_id, app_id, project_id)
         source = "postgres"
-    if not env and client_name and project_name:
-        env = await _query_env_vars_by_names(client_name, app_name, project_name)
+    if not env and resolved_client and resolved_project:
+        env = await _query_env_vars_by_names(resolved_client, resolved_app, resolved_project)
         source = "postgres" if env else source
-    if not env and client_name and project_name:
-        env = await _query_registry_env(client_name, app_name, project_name)
+    if not env and resolved_client and resolved_project:
+        env = await _query_registry_env(resolved_client, resolved_app, resolved_project)
         source = "postgres" if env else source
     if not env:
-        numeric_pid = _parse_numeric_id(project_id)
         if numeric_pid:
             try:
-                client_db, app_db, project_db = await fetch_client_app_project(
-                    None, numeric_pid
-                )
-                # Fetch the authoritative environment row using the resolved
-                # names so renames are reflected immediately.
+                # ``fetch_client_app_project`` may have already been called above;
+                # reuse the resolved names so renames are reflected immediately.
+                client_db = resolved_client
+                app_db = resolved_app
+                project_db = resolved_project
+                if not (client_db or app_db or project_db):
+                    client_db, app_db, project_db = await fetch_client_app_project(
+                        None, numeric_pid
+                    )
                 reg_env = await _query_registry_env(
                     client_db or "",
                     app_db or "",
@@ -261,14 +295,32 @@ async def get_env_vars(
             }
             source = "defaults"
 
+    # Ensure the returned environment carries the authoritative names.
+    env_client = env.get("CLIENT_NAME") or resolved_client
+    env_app = env.get("APP_NAME") or resolved_app
+    env_project = env.get("PROJECT_NAME") or resolved_project
+    env.update(
+        {
+            "CLIENT_NAME": env_client,
+            "APP_NAME": env_app,
+            "PROJECT_NAME": env_project,
+        }
+    )
+
     if use_cache:
-        _ENV_CACHE[key] = env
-        if env.get("CLIENT_NAME") and env.get("PROJECT_NAME"):
-            redis_key = _redis_env_key(
-                env.get("CLIENT_NAME", ""),
-                env.get("APP_NAME", ""),
-                env.get("PROJECT_NAME", ""),
-            )
+        cache_key = (
+            client_id,
+            app_id,
+            project_id,
+            env_client,
+            env_app,
+            env_project,
+        )
+        _ENV_CACHE[cache_key] = env
+        if key != cache_key:
+            _ENV_CACHE.pop(key, None)
+        if env_client and env_project:
+            redis_key = _redis_env_key(env_client, env_app, env_project)
             redis_client.setex(redis_key, ENV_TTL, json.dumps(env, default=str))
 
     print(f"🔧 db_env_vars{key} -> {env} (source={source})")
