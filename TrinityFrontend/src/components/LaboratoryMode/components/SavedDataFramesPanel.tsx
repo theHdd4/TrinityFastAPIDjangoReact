@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Database, ChevronRight, ChevronDown, Trash2, Pencil } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { VALIDATE_API, REGISTRY_API } from '@/lib/api';
+import { VALIDATE_API } from '@/lib/api';
 
 interface Props {
   isOpen: boolean;
@@ -27,58 +27,15 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle }) => {
   useEffect(() => {
     if (!isOpen) return;
     const load = async () => {
-      let env: any = null;
-
       try {
-        const projStr = localStorage.getItem('current-project');
-        if (projStr) {
-          const proj = JSON.parse(projStr);
-          const res = await fetch(`${REGISTRY_API}/projects/${proj.id}/`, {
-            credentials: 'include'
-          });
-          if (res.ok) {
-            const envData = await res.json();
-            if (envData.environment) {
-              env = envData.environment;
-              localStorage.setItem('env', JSON.stringify(env));
-            }
-          }
-        }
-      } catch (err) {
-        console.log('env fetch error', err);
-      }
-
-      if (!env) {
-        const envStr = localStorage.getItem('env');
-        if (envStr) {
-          try {
-            env = JSON.parse(envStr);
-          } catch {
-            /* ignore */
-          }
-        }
-      }
-
-      let query = '';
-      if (env) {
-        query =
-          '?' +
-          new URLSearchParams({
-            client_id: env.CLIENT_ID || '',
-            app_id: env.APP_ID || '',
-            project_id: env.PROJECT_ID || '',
-            client_name: env.CLIENT_NAME || '',
-            app_name: env.APP_NAME || '',
-            project_name: env.PROJECT_NAME || ''
-          }).toString();
-      }
-
-      try {
-        const res = await fetch(`${VALIDATE_API}/list_saved_dataframes${query}`, {
+        const res = await fetch(`${VALIDATE_API}/list_saved_dataframes`, {
           credentials: 'include'
         });
         const data = await res.json();
         setPrefix(data.prefix || '');
+        if (data.environment) {
+          localStorage.setItem('env', JSON.stringify(data.environment));
+        }
         console.log(
           `📁 SavedDataFramesPanel looking in MinIO bucket "${data.bucket}" folder "${data.prefix}" via ${data.env_source} (CLIENT_NAME=${data.environment?.CLIENT_NAME} APP_NAME=${data.environment?.APP_NAME} PROJECT_NAME=${data.environment?.PROJECT_NAME})`
         );
