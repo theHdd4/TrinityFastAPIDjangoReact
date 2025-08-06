@@ -30,13 +30,20 @@ interface FeatureOverviewCanvasProps {
   onUpdateSettings: (s: any) => void;
 }
 
+const filterUnattributed = (mapping: Record<string, string[]>) =>
+  Object.fromEntries(
+    Object.entries(mapping || {}).filter(
+      ([key]) => key.toLowerCase() !== "unattributed",
+    ),
+  );
+
 const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
   settings,
   onUpdateSettings,
 }) => {
   const { user } = useAuth();
   const [dimensionMap, setDimensionMap] = useState<Record<string, string[]>>(
-    settings.dimensionMap || {},
+    filterUnattributed(settings.dimensionMap || {}),
   );
   const hasMappedIdentifiers = Object.values(dimensionMap).some(
     (ids) => ids.length > 0,
@@ -72,12 +79,13 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
   }, [settings.yAxes]);
 
   useEffect(() => {
-    setDimensionMap(settings.dimensionMap || {});
+    setDimensionMap(filterUnattributed(settings.dimensionMap || {}));
   }, [settings.dimensionMap]);
 
   useEffect(() => {
     const loadMapping = async () => {
-      const mapping = await fetchDimensionMapping();
+      const raw = await fetchDimensionMapping();
+      const mapping = filterUnattributed(raw);
       setDimensionMap(mapping);
       onUpdateSettings({ dimensionMap: mapping });
     };

@@ -236,7 +236,12 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
     }
     console.log('ℹ️ prefill data source details', prev);
     await prefetchDataframe(prev.csv);
-    const mapping = await fetchDimensionMapping();
+    const rawMapping = await fetchDimensionMapping();
+    const mapping = Object.fromEntries(
+      Object.entries(rawMapping).filter(
+        ([key]) => key.toLowerCase() !== 'unattributed',
+      ),
+    );
     console.log('✅ pre-filling feature overview with', prev.csv);
     const summary = Array.isArray(prev.summary) ? prev.summary : [];
     const identifiers = Array.isArray(prev.identifiers) ? prev.identifiers : [];
