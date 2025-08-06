@@ -73,11 +73,13 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle }) => {
         });
 
         try {
-          const query = new URLSearchParams({
-            client_name: env.CLIENT_NAME || '',
-            app_name: env.APP_NAME || '',
-            project_name: env.PROJECT_NAME || ''
-          }).toString();
+          const buildQuery = () =>
+            new URLSearchParams({
+              client_name: env.CLIENT_NAME || '',
+              app_name: env.APP_NAME || '',
+              project_name: env.PROJECT_NAME || ''
+            }).toString();
+          let query = buildQuery();
           const prefRes = await fetch(
             `${VALIDATE_API}/get_object_prefix?${query}`,
             { credentials: 'include' }
@@ -89,6 +91,9 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle }) => {
               env = { ...env, ...prefData.environment };
               localStorage.setItem('env', JSON.stringify(env));
             }
+            // Rebuild query using any refreshed environment variables so the
+            // subsequent listing request targets the current namespace.
+            query = buildQuery();
           }
 
           const listRes = await fetch(
