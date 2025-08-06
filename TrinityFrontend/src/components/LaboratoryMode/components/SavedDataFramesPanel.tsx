@@ -27,20 +27,21 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle }) => {
 
   const { user } = useAuth();
 
-  const sanitizeEnv = (env: any) => {
+  const syncEnv = (env: any) => {
     try {
       const projStr = localStorage.getItem('current-project');
       if (projStr) {
         const proj = JSON.parse(projStr);
-        if (proj?.id) env.PROJECT_ID = proj.id;
-        if (proj?.name) env.PROJECT_NAME = proj.name;
+        if (proj?.id && env.PROJECT_ID === proj.id && proj?.name) {
+          env.PROJECT_NAME = proj.name;
+        }
       }
       const appStr = localStorage.getItem('current-app');
       if (appStr) {
         const app = JSON.parse(appStr);
-        if (app?.id) env.APP_ID = app.id;
-        // "slug" holds the human readable app name
-        if (app?.slug) env.APP_NAME = app.slug;
+        if (app?.id && env.APP_ID === app.id && app?.slug) {
+          env.APP_NAME = app.slug;
+        }
       }
     } catch {
       /* ignore */
@@ -61,7 +62,7 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle }) => {
             env = {};
           }
         }
-        env = sanitizeEnv(env);
+        env = syncEnv(env);
         localStorage.setItem('env', JSON.stringify(env));
 
         if (user) {
@@ -80,7 +81,7 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle }) => {
               const redisData = await redisRes.json();
               const redisEnv = redisData.state?.envvars;
               if (redisEnv) {
-                env = sanitizeEnv({ ...env, ...redisEnv });
+                env = syncEnv({ ...env, ...redisEnv });
                 localStorage.setItem('env', JSON.stringify(env));
               }
             }
@@ -111,7 +112,7 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle }) => {
             const prefData = await prefRes.json();
             setPrefix(prefData.prefix || '');
             if (prefData.environment) {
-              env = sanitizeEnv({ ...env, ...prefData.environment });
+              env = syncEnv({ ...env, ...prefData.environment });
               localStorage.setItem('env', JSON.stringify(env));
             }
             // Rebuild query using any refreshed environment variables so the
@@ -136,7 +137,7 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle }) => {
           if (data) {
             setPrefix(data.prefix || '');
             if (data.environment) {
-              env = sanitizeEnv({ ...env, ...data.environment });
+              env = syncEnv({ ...env, ...data.environment });
               localStorage.setItem('env', JSON.stringify(env));
             }
             console.log(
