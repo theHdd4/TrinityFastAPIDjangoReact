@@ -31,17 +31,11 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle }) => {
     if (!isOpen) return;
     const load = async () => {
       try {
-        let query = '';
         let env: any = {};
         const envStr = localStorage.getItem('env');
         if (envStr) {
           try {
             env = JSON.parse(envStr);
-            console.log('📦 localStorage env', {
-              CLIENT_NAME: env.CLIENT_NAME,
-              APP_NAME: env.APP_NAME,
-              PROJECT_NAME: env.PROJECT_NAME
-            });
           } catch {
             env = {};
           }
@@ -57,17 +51,13 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle }) => {
                 client_id: env.CLIENT_ID,
                 user_id: user.id,
                 app_id: env.APP_ID,
-                project_id: env.PROJECT_ID,
-                client_name: env.CLIENT_NAME,
-                app_name: env.APP_NAME,
-                project_name: env.PROJECT_NAME
+                project_id: env.PROJECT_ID
               })
             });
             if (redisRes.ok) {
               const redisData = await redisRes.json();
               const redisEnv = redisData.state?.envvars;
               if (redisEnv) {
-                console.log('🧠 redis env', redisEnv);
                 env = { ...env, ...redisEnv };
                 localStorage.setItem('env', JSON.stringify(env));
               }
@@ -77,28 +67,31 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle }) => {
           }
         }
 
-        if (env && (env.CLIENT_ID || env.CLIENT_NAME)) {
-          query =
-            '?' +
-            new URLSearchParams({
-              client_id: env.CLIENT_ID || '',
-              app_id: env.APP_ID || '',
-              project_id: env.PROJECT_ID || '',
-              client_name: env.CLIENT_NAME || '',
-              app_name: env.APP_NAME || '',
-              project_name: env.PROJECT_NAME || ''
-            }).toString();
+        console.log('📦 env', {
+          CLIENT_NAME: env.CLIENT_NAME,
+          APP_NAME: env.APP_NAME,
+          PROJECT_NAME: env.PROJECT_NAME
+        });
+
+        const params = new URLSearchParams();
+        if (env.CLIENT_NAME && env.CLIENT_NAME !== 'default_client') {
+          params.set('client_name', env.CLIENT_NAME);
         }
-        const res = await fetch(
-          `${VALIDATE_API}/list_saved_dataframes${query}`,
-          {
-            credentials: 'include'
-          }
-        );
+        if (env.APP_NAME && env.APP_NAME !== 'default_app') {
+          params.set('app_name', env.APP_NAME);
+        }
+        if (env.PROJECT_NAME && env.PROJECT_NAME !== 'default_project') {
+          params.set('project_name', env.PROJECT_NAME);
+        }
+        const query = params.toString() ? `?${params.toString()}` : '';
+
+        const res = await fetch(`${VALIDATE_API}/list_saved_dataframes${query}`, {
+          credentials: 'include'
+        });
         const data = await res.json();
         setPrefix(data.prefix || '');
         if (data.environment) {
-          localStorage.setItem('env', JSON.stringify(data.environment));
+          localStorage.setItem('env', JSON.stringify({ ...env, ...data.environment }));
         }
         console.log(
           `📁 SavedDataFramesPanel looking in MinIO bucket "${data.bucket}" folder "${data.prefix}" via ${data.env_source} (CLIENT_NAME=${data.environment?.CLIENT_NAME} APP_NAME=${data.environment?.APP_NAME} PROJECT_NAME=${data.environment?.PROJECT_NAME})`
