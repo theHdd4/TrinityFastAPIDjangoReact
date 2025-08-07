@@ -292,7 +292,7 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
           </div>
 
           <Card className="border-0 shadow-xl bg-white/80 backdrop-blur-sm mb-6 overflow-hidden">
-            <div className="bg-gradient-to-r from-blue-500 to-blue-600 p-1">
+            <div className="bg-gradient-to-r from-blue-500 to-blue-600 p-0.5">
               <div className="bg-white rounded-sm">
                 <Table>
                   <TableHeader>
@@ -393,7 +393,7 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
                       {ids.map((id) => (
                         <span
                           key={id}
-                          className="px-3 py-1.5 bg-white rounded-full text-sm shadow-sm"
+                          className="px-3 py-1.5 bg-white rounded-full text-sm shadow-sm border border-blue-200"
                         >
                           {id}
                         </span>
@@ -411,7 +411,7 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
 
           {skuRows.length > 0 && (
             <Card className="border-0 shadow-xl bg-white/80 backdrop-blur-sm overflow-hidden">
-              <div className="bg-gradient-to-r from-purple-500 to-purple-600 p-1">
+              <div className="bg-gradient-to-r from-purple-500 to-purple-600 p-0.5">
                 <div className="bg-white rounded-sm overflow-auto">
                   <Table>
                     <TableHeader>
