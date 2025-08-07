@@ -93,13 +93,13 @@ const ColClassifierColumnView: React.FC<ColClassifierColumnViewProps> = ({
           <div className="min-w-max">
             <div className="grid grid-rows-4 gap-0">
               <div className="flex bg-white border-b border-gray-200">
-                <div className="w-40 px-4 py-[0.16px] font-bold text-black bg-gray-100 border-r border-gray-300">
+                <div className="w-40 font-bold text-black bg-gray-100 border-r border-gray-300 flex items-center justify-center">
                   Columns
                 </div>
                 {displayed.map((col, index) => (
                   <div
                     key={index}
-                    className="w-32 px-4 py-[0.16px] text-sm font-semibold text-black border-r border-gray-200 text-center"
+                    className="w-32 text-sm font-semibold text-black border-r border-gray-200 flex items-center justify-center"
                   >
                     {col.column}
                   </div>
@@ -107,17 +107,17 @@ const ColClassifierColumnView: React.FC<ColClassifierColumnViewProps> = ({
               </div>
 
               <div className="flex bg-white border-b border-gray-200">
-                <div className="w-40 px-4 py-[0.5px] font-bold text-black bg-gray-100 border-r border-gray-300">
+                <div className="w-40 font-bold text-black bg-gray-100 border-r border-gray-300 flex items-center justify-center">
                   Data Type
                 </div>
                 {displayed.map((col, index) => (
                   <div
                     key={index}
-                    className="w-32 px-4 py-[0.5px] text-sm border-r border-gray-200 text-center"
+                    className="w-32 text-sm border-r border-gray-200 flex items-center justify-center"
                   >
                     <Badge
                       variant="outline"
-                      className="text-xs font-medium bg-gray-50 text-black border-gray-300"
+                      className="p-0 text-xs font-medium bg-gray-50 text-black border-gray-300"
                     >
                       {col.data_type}
                     </Badge>
@@ -126,13 +126,13 @@ const ColClassifierColumnView: React.FC<ColClassifierColumnViewProps> = ({
               </div>
 
               <div className="flex bg-gray-50 border-b border-gray-200">
-                <div className="w-40 px-4 py-[0.16px] font-bold text-black bg-gray-100 border-r border-gray-300">
+                <div className="w-40 font-bold text-black bg-gray-100 border-r border-gray-300 flex items-center justify-center">
                   Unique Counts
                 </div>
                 {displayed.map((col, index) => (
                   <div
                     key={index}
-                    className="w-32 px-4 py-[0.16px] text-sm text-black border-r border-gray-200 text-center font-medium"
+                    className="w-32 text-sm text-black border-r border-gray-200 flex items-center justify-center font-medium"
                   >
                     {col.unique_count}
                   </div>
@@ -140,20 +140,20 @@ const ColClassifierColumnView: React.FC<ColClassifierColumnViewProps> = ({
               </div>
 
               <div className="flex bg-white">
-                <div className="w-40 px-4 py-[0.16px] font-bold text-black bg-gray-100 border-r border-gray-300">
+                <div className="w-40 font-bold text-black bg-gray-100 border-r border-gray-300 flex items-center justify-center">
                   Unique Values
                 </div>
                 {displayed.map((col, index) => (
                   <div
                     key={index}
-                    className="w-32 px-4 py-[0.16px] text-sm border-r border-gray-200 text-center"
+                    className="w-32 text-sm border-r border-gray-200 flex items-center justify-center"
                   >
                     <div className="flex flex-col gap-px items-center">
                       {col.unique_values.slice(0, 2).map((val, i) => (
                         <Badge
                           key={i}
                           variant="outline"
-                          className="text-xs bg-gray-50 text-black border-gray-300"
+                          className="p-0 text-xs bg-gray-50 text-black border-gray-300"
                         >
                           {String(val)}
                         </Badge>
