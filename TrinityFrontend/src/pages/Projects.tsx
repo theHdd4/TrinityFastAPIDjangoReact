@@ -406,15 +406,11 @@ const Projects = () => {
             className={`group transition-all duration-300 border-2 border-dashed border-gray-200 bg-white ${
               canCreate
                 ? 'cursor-pointer hover:shadow-lg hover:border-gray-300'
-                : 'opacity-50 cursor-not-allowed'
+                : 'opacity-50 cursor-not-allowed pointer-events-none'
             }`}
             onClick={canCreate ? createNewProject : undefined}
           >
-            <div
-              className={`p-6 flex flex-col items-center justify-center h-48 space-y-4 ${
-                canCreate ? '' : 'pointer-events-none'
-              }`}
-            >
+            <div className="p-6 flex flex-col items-center justify-center h-48 space-y-4">
               <div className="w-16 h-16 rounded-full border-2 border-dashed border-gray-300 flex items-center justify-center group-hover:border-gray-400 group-hover:bg-gray-50 transition-all duration-300">
                 <Plus className="w-8 h-8 text-gray-400 group-hover:text-gray-600 transition-colors duration-300" />
               </div>
