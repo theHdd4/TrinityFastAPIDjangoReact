@@ -25,7 +25,7 @@ const LaboratoryMode = () => {
   const { toast } = useToast();
   const { cards, setCards } = useExhibitionStore();
   const setLabCards = useLaboratoryStore(state => state.setCards);
-  const { hasPermission } = useAuth();
+  const { hasPermission, user } = useAuth();
   const canEdit = hasPermission('laboratory:edit');
 
   useEffect(() => {
