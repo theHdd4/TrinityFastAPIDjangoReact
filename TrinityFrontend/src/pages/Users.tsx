@@ -39,6 +39,7 @@ interface User {
   // optional custom fields
   phone?: string;
   department?: string;
+  role?: string;
 }
 
 const API_BASE = ACCOUNTS_API;
@@ -183,17 +184,22 @@ const Users = () => {
     }
   };
 
-  const getRole = (u: User) => (u.is_staff ? 'Admin' : 'Analyst');
+  const getRole = (u: User) => {
+    const r = u.role?.toLowerCase();
+    if (u.is_staff || r === 'admin') return 'Admin';
+    if (r === 'editor') return 'Editor';
+    return 'Viewer';
+  };
   const getStatus = (_u: User) => 'Active';
 
   const getRoleColor = (role: string) => {
     switch (role) {
       case 'Admin':
         return 'bg-red-100 text-red-800 border-red-200';
-      case 'Analyst':
-        return 'bg-blue-100 text-blue-800 border-blue-200';
+      case 'Editor':
+        return 'bg-[#fec107]/20 text-[#fec107] border-[#fec107]/30';
       case 'Viewer':
-        return 'bg-gray-100 text-gray-800 border-gray-200';
+        return 'bg-green-100 text-green-800 border-green-200';
       default:
         return 'bg-gray-100 text-gray-800 border-gray-200';
     }
@@ -326,7 +332,7 @@ const Users = () => {
               >
                 <option value="All">All Roles</option>
                 <option value="Admin">Admin</option>
-                <option value="Analyst">Analyst</option>
+                <option value="Editor">Editor</option>
                 <option value="Viewer">Viewer</option>
               </select>
 

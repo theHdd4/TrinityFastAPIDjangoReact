@@ -79,9 +79,16 @@ class ProjectViewSet(viewsets.ModelViewSet):
         user = self.request.user
         app = serializer.validated_data.get("app")
         base_name = serializer.validated_data.get("name")
+
+        # Ensure the project name is unique across the client/app combination.
+        # The RegistryEnvironment model enforces a unique constraint on
+        # ``client_name``, ``app_name`` and ``project_name``. When multiple
+        # users attempt to create projects with the same name under the same
+        # app, we need to automatically append a counter so the environment
+        # entry remains unique instead of raising an integrity error.
         name = base_name
         counter = 1
-        while Project.objects.filter(owner=user, app=app, name=name).exists():
+        while Project.objects.filter(app=app, name=name).exists():
             name = f"{base_name} {counter}"
             counter += 1
 
