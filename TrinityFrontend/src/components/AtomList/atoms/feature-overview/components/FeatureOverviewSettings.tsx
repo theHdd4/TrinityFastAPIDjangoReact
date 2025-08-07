@@ -29,7 +29,7 @@ const FeatureOverviewSettings: React.FC<FeatureOverviewSettingsProps> = ({ setti
     Array.isArray(settings.selectedColumns) ? settings.selectedColumns : []
   );
   const [filterUnique, setFilterUnique] = useState<boolean>(
-    settings.filterUnique || false
+    settings.filterUnique ?? true
   );
 
   useEffect(() => {
@@ -70,7 +70,7 @@ const FeatureOverviewSettings: React.FC<FeatureOverviewSettingsProps> = ({ setti
   }, [settings.dataSource]);
 
   useEffect(() => {
-    setFilterUnique(!!settings.filterUnique);
+    setFilterUnique(settings.filterUnique ?? true);
   }, [settings.filterUnique]);
 
   // restore dropdown state when settings come from store

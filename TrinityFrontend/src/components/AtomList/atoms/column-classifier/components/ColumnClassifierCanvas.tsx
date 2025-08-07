@@ -213,24 +213,27 @@ const ColumnClassifierCanvas: React.FC<ColumnClassifierCanvasProps> = ({
       <div className="w-full h-full p-4">
         <div className="border-b border-blue-200 bg-blue-50">
           <div className="flex items-center px-6 py-4 space-x-3">
-            {data.files.map((file, index) => (
-              <div key={index} className="relative">
-                <button
-                  onClick={() => onActiveFileChange(index)}
-                  className={`flex items-center space-x-2 px-5 py-3 rounded-t-xl text-sm font-medium border-t border-l border-r transition-all duration-200 hover:scale-105 ${
-                    index === data.activeFileIndex
-                      ? 'bg-gradient-to-b from-card to-card/90 text-foreground border-border/50 border-b-card -mb-px shadow-lg'
-                      : 'bg-gradient-to-b from-muted/50 to-muted/30 text-muted-foreground hover:from-muted/70 hover:to-muted/50 border-border/30'
-                  }`}
-                >
-                  <FileText className="w-4 h-4" />
-                  <span>{file.fileName}</span>
-                  {index === data.activeFileIndex && (
-                    <div className="w-2 h-2 rounded-full bg-primary animate-pulse" />
-                  )}
-                </button>
-              </div>
-            ))}
+            {data.files.map((file, index) => {
+              const displayName = file.fileName.split('/').pop();
+              return (
+                <div key={index} className="relative">
+                  <button
+                    onClick={() => onActiveFileChange(index)}
+                    className={`flex items-center space-x-2 px-5 py-3 rounded-t-xl text-sm font-medium border-t border-l border-r transition-all duration-200 hover:scale-105 ${
+                      index === data.activeFileIndex
+                        ? 'bg-gradient-to-b from-card to-card/90 text-foreground border-border/50 border-b-card -mb-px shadow-lg'
+                        : 'bg-gradient-to-b from-muted/50 to-muted/30 text-muted-foreground hover:from-muted/70 hover:to-muted/50 border-border/30'
+                    }`}
+                  >
+                    <FileText className="w-4 h-4" />
+                    <span>{displayName}</span>
+                    {index === data.activeFileIndex && (
+                      <div className="w-2 h-2 rounded-full bg-primary animate-pulse" />
+                    )}
+                  </button>
+                </div>
+              );
+            })}
           </div>
         </div>
         <div className="p-4 space-y-6">

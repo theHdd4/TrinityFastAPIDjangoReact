@@ -110,7 +110,7 @@ export const DEFAULT_FEATURE_OVERVIEW_SETTINGS: FeatureOverviewSettings = {
   activeMetric: "",
   activeRow: null,
   dimensionMap: {},
-  filterUnique: false,
+  filterUnique: true,
 };
 
 export interface ConcatSettings {
