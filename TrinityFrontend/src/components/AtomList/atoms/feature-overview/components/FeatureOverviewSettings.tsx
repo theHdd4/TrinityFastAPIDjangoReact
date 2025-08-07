@@ -85,7 +85,6 @@ const FeatureOverviewSettings: React.FC<FeatureOverviewSettingsProps> = ({ setti
     if (!val.endsWith('.arrow')) {
       val += '.arrow';
     }
-    setSelectedIds([]);
     const res = await fetch(
       `${FEATURE_OVERVIEW_API}/column_summary?object_name=${encodeURIComponent(val)}`
     );
@@ -106,16 +105,20 @@ const FeatureOverviewSettings: React.FC<FeatureOverviewSettingsProps> = ({ setti
         xField = summary[0].column;
       }
     }
+    const filtered = filterUnique ? summary.filter(c => c.unique_count > 1) : summary;
+    const selected = filtered.map(c => c.column);
+    setSelectedIds(selected);
     onSettingsChange({
       dataSource: val,
       csvDisplay:
         (Array.isArray(frames) ? frames : [])
           .find(f => f.object_name === val)?.csv_name || val,
-      selectedColumns: [],
-      columnSummary: [],
+      selectedColumns: selected,
+      columnSummary: filtered,
       allColumns: summary,
       numericColumns: numeric,
       xAxis: xField,
+      filterUnique,
     });
   };
 
