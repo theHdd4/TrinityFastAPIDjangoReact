@@ -1,11 +1,12 @@
 export type AppPermission =
   | 'workflow:edit'
   | 'laboratory:edit'
-  | 'exhibition:edit';
+  | 'exhibition:edit'
+  | 'project:create';
 
 const rolePermissions: Record<string, AppPermission[]> = {
-  admin: ['workflow:edit', 'laboratory:edit', 'exhibition:edit'],
-  editor: ['workflow:edit', 'laboratory:edit', 'exhibition:edit'],
+  admin: ['workflow:edit', 'laboratory:edit', 'exhibition:edit', 'project:create'],
+  editor: ['workflow:edit', 'laboratory:edit', 'exhibition:edit', 'project:create'],
   viewer: [],
 };
 

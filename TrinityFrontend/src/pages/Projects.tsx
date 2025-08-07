@@ -19,6 +19,7 @@ import { molecules } from '@/components/MoleculeList/data/molecules';
 import { safeStringify } from '@/utils/safeStringify';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { useExhibitionStore } from '@/components/ExhibitionMode/store/exhibitionStore';
+import { useAuth } from '@/contexts/AuthContext';
 
 interface Project {
   id: number;
@@ -48,6 +49,8 @@ const Projects = () => {
   const [editName, setEditName] = useState('');
   const resetLaboratory = useLaboratoryStore(state => state.reset);
   const resetExhibition = useExhibitionStore(state => state.reset);
+  const { hasPermission } = useAuth();
+  const canCreate = hasPermission('project:create');
 
   const getAppDetails = () => {
     switch (appSlug) {
@@ -153,7 +156,7 @@ const Projects = () => {
   }, [loadProjects]);
 
   const createNewProject = async () => {
-    if (!appId || !appSlug) return;
+    if (!canCreate || !appId || !appSlug) return;
     const name = `${appSlug} project`;
     const slug = `${appSlug}-${Date.now()}`;
 
@@ -400,10 +403,18 @@ const Projects = () => {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
           {/* Create New Project Card */}
           <Card
-            className="group cursor-pointer hover:shadow-lg transition-all duration-300 border-2 border-dashed border-gray-200 hover:border-gray-300 bg-white"
-            onClick={createNewProject}
+            className={`group transition-all duration-300 border-2 border-dashed border-gray-200 bg-white ${
+              canCreate
+                ? 'cursor-pointer hover:shadow-lg hover:border-gray-300'
+                : 'opacity-50 cursor-not-allowed'
+            }`}
+            onClick={canCreate ? createNewProject : undefined}
           >
-            <div className="p-6 flex flex-col items-center justify-center h-48 space-y-4">
+            <div
+              className={`p-6 flex flex-col items-center justify-center h-48 space-y-4 ${
+                canCreate ? '' : 'pointer-events-none'
+              }`}
+            >
               <div className="w-16 h-16 rounded-full border-2 border-dashed border-gray-300 flex items-center justify-center group-hover:border-gray-400 group-hover:bg-gray-50 transition-all duration-300">
                 <Plus className="w-8 h-8 text-gray-400 group-hover:text-gray-600 transition-colors duration-300" />
               </div>
@@ -477,7 +488,13 @@ const Projects = () => {
             <p className="text-gray-500 mb-6">
               Create your first {appDetails.title.toLowerCase()} project to start analyzing your data.
             </p>
-            <Button onClick={createNewProject} className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white">
+            <Button
+              onClick={canCreate ? createNewProject : undefined}
+              disabled={!canCreate}
+              className={`bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white ${
+                canCreate ? '' : 'opacity-50 cursor-not-allowed'
+              }`}
+            >
               <Plus className="w-4 h-4 mr-2" />
               Create Your First Project
             </Button>
