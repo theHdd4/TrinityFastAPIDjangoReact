@@ -16,6 +16,8 @@ import {
   DEFAULT_FEATURE_OVERVIEW_SETTINGS,
   DataFrameOperationsSettings,
   DEFAULT_DATAFRAME_OPERATIONS_SETTINGS,
+  CorrelationSettings,
+  DEFAULT_CORRELATION_SETTINGS,
 } from '../../store/laboratoryStore';
 import DataUploadValidateProperties from '@/components/AtomList/atoms/data-upload-validate/components/properties/DataUploadValidateProperties';
 import FeatureOverviewProperties from '@/components/AtomList/atoms/feature-overview/components/properties/FeatureOverviewProperties';
@@ -23,6 +25,7 @@ import ConcatProperties from '@/components/AtomList/atoms/concat/components/prop
 import MergeProperties from '@/components/AtomList/atoms/merge/components/properties/MergeProperties';
 import ColumnClassifierProperties from '@/components/AtomList/atoms/column-classifier/components/properties/ColumnClassifierProperties';
 import DataFrameOperationsProperties from '@/components/AtomList/atoms/dataframe-operations/components/properties/DataFrameOperationsProperties';
+import CorrelationProperties from '@/components/AtomList/atoms/correlation/components/properties/CorrelationProperties';
 import AtomSettingsTabs from "./AtomSettingsTabs";
 
 interface SettingsPanelProps {
@@ -45,9 +48,11 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
     selectedAtomId ? state.getAtom(selectedAtomId) : undefined
   );
   const updateSettings = useLaboratoryStore(state => state.updateAtomSettings);
-  const settings: TextBoxSettings | DataUploadSettings | FeatureOverviewSettings | DataFrameOperationsSettings =
+  const settings: TextBoxSettings | DataUploadSettings | FeatureOverviewSettings | DataFrameOperationsSettings | CorrelationSettings =
     atom?.settings ||
-    (atom?.atomId === 'data-upload-validate'
+    (atom?.atomId === 'correlation'
+      ? { ...DEFAULT_CORRELATION_SETTINGS }
+      : atom?.atomId === 'data-upload-validate'
       ? { ...DEFAULT_DATAUPLOAD_SETTINGS }
       : atom?.atomId === 'feature-overview'
       ? { ...DEFAULT_FEATURE_OVERVIEW_SETTINGS }
@@ -108,6 +113,8 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
             <ColumnClassifierProperties atomId={selectedAtomId} />
           ) : selectedAtomId && atom?.atomId === 'dataframe-operations' ? (
             <DataFrameOperationsProperties atomId={selectedAtomId} />
+          ) : selectedAtomId && atom?.atomId === 'correlation' ? (
+            <CorrelationProperties atomId={selectedAtomId} />
           ) : (
           <AtomSettingsTabs tab={tab} setTab={setTab} selectedAtomId={selectedAtomId!} cardExhibited={cardExhibited} settings={settings as TextBoxSettings} updateSettings={updateSettings} />
         )}
