@@ -108,22 +108,34 @@ const ColumnClassifierCanvas: React.FC<ColumnClassifierCanvasProps> = ({
     columns: string[];
   }> = ({ id, title, columns }) => {
     const { setNodeRef, isOver } = useDroppable({ id });
-    const indicators = {
-      unclassified: 'bg-gradient-to-r from-gray-400 to-gray-500',
-      identifiers: 'bg-gradient-to-r from-blue-500 to-blue-600',
-      measures: 'bg-gradient-to-r from-emerald-500 to-emerald-600',
+    const sectionStyles = {
+      unclassified: {
+        indicator: 'bg-gradient-to-r from-gray-400 to-gray-500',
+        border: 'border-[#fec107]',
+        active: 'border-[#fec107]',
+      },
+      identifiers: {
+        indicator: 'bg-gradient-to-r from-blue-500 to-blue-600',
+        border: 'border-blue-200',
+        active: 'border-blue-400',
+      },
+      measures: {
+        indicator: 'bg-gradient-to-r from-emerald-500 to-emerald-600',
+        border: 'border-emerald-400',
+        active: 'border-emerald-500',
+      },
     }[id];
 
     return (
       <Card
         ref={setNodeRef}
         className={`h-full bg-white/80 backdrop-blur-sm overflow-hidden transform transition-all duration-300 border-2 rounded-xl ${
-          isOver ? 'border-blue-400 shadow-xl scale-105' : 'border-blue-200 hover:shadow-lg'
+          isOver ? `${sectionStyles.active} shadow-xl scale-105` : `${sectionStyles.border} hover:shadow-lg`
         } flex flex-col`}
       >
         <div className="p-6 flex flex-col h-full">
           <div className="flex items-center mb-4">
-            <div className={`w-2 h-8 rounded-full mr-3 ${indicators}`} />
+            <div className={`w-2 h-8 rounded-full mr-3 ${sectionStyles.indicator}`} />
             <h4 className="text-lg font-bold text-gray-900">{title}</h4>
           </div>
           <div

@@ -118,8 +118,7 @@ const ColClassifierColumnView: React.FC<ColClassifierColumnViewProps> = ({
                     className="w-32 text-sm border-r border-gray-200 flex items-center justify-center"
                   >
                     <Badge
-                      variant="outline"
-                      className="p-0 text-xs font-medium bg-gray-50 text-black border-gray-300"
+                      className="p-0 text-xs font-medium bg-gray-50 text-black"
                     >
                       {col.data_type}
                     </Badge>
@@ -154,8 +153,7 @@ const ColClassifierColumnView: React.FC<ColClassifierColumnViewProps> = ({
                       {col.unique_values.slice(0, 2).map((val, i) => (
                         <Badge
                           key={i}
-                          variant="outline"
-                          className="p-0 text-xs bg-gray-50 text-black border-gray-300"
+                          className="p-0 text-xs bg-gray-50 text-black"
                         >
                           {String(val)}
                         </Badge>
