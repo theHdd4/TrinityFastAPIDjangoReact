@@ -244,14 +244,9 @@ async def perform_concat(
             writer.write_table(table)
         arrow_bytes = arrow_buffer.getvalue().to_pybytes()
         
-        # Save to MinIO
-        minio_client.put_object(
-            MINIO_BUCKET,
-            concat_key,
-            data=io.BytesIO(arrow_bytes),
-            length=len(arrow_bytes),
-            content_type="application/octet-stream",
-        )
+        # NOTE: Do not persist result to MinIO during `/perform`.
+        # The dataframe is cached in Redis for quick retrieval by `/results`.
+        # Actual persistence is handled by the dedicated `/save` endpoint.
         # Cache in Redis
         redis_client.setex(concat_key, 3600, arrow_bytes)
 

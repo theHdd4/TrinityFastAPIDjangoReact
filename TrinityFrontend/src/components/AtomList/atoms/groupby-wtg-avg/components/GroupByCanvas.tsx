@@ -23,6 +23,18 @@ const GroupByCanvas: React.FC<GroupByCanvasProps> = ({ atomId }) => {
   const selectedMeasures = settings.selectedMeasures || [];
   const measures = settings.measures || [];
   const selectedIdentifiers = settings.selectedIdentifiers || [];
+  const identifiers = settings.identifiers || [];
+  const derivedIdentifiers = identifiers.length > 0 ? identifiers : (settings.allColumns || []).filter((c: any) => c.data_type && (
+    c.data_type.toLowerCase().includes('object') ||
+    c.data_type.toLowerCase().includes('string') ||
+    c.data_type.toLowerCase().includes('category')
+  )).map((c: any) => c.column);
+  const availableIdentifiers = derivedIdentifiers.filter((id: string) => !selectedIdentifiers.includes(id));
+  const [addingIdentifier, setAddingIdentifier] = useState(false);
+  const handleAddIdentifier = (id: string) => {
+    updateSettings(atomId, { selectedIdentifiers: [...selectedIdentifiers, id] });
+    setAddingIdentifier(false);
+  };
 
   // Helper: do any measures use Weighted Mean?
   const hasWeightedMean = selectedMeasures.some((m: any) => m.aggregator === 'Weighted Mean');
@@ -314,7 +326,7 @@ const GroupByCanvas: React.FC<GroupByCanvasProps> = ({ atomId }) => {
           <div className="bg-emerald-50 rounded-lg p-3 shadow-sm">
             <div className="flex flex-wrap gap-1 items-center">
               <div className="font-semibold text-green-600 mr-2 text-sm">Level:</div>
-              {selectedIdentifiers.map((identifier: string) => (
+               {selectedIdentifiers.map((identifier: string) => (
                 <div key={identifier} className="flex items-center gap-1 text-xs font-medium text-green-700 bg-gradient-to-r from-blue-50 to-indigo-50 px-2 py-1 rounded-full border border-blue-200 shadow-sm">
                 <span>{identifier}</span>
                 <button
@@ -325,9 +337,26 @@ const GroupByCanvas: React.FC<GroupByCanvasProps> = ({ atomId }) => {
                   <X className="h-3 w-3" />
                 </button>
               </div>
-              ))}
-            </div>
-          </div>
+               ))}
+               {/* Add Identifier Button / Selector */}
+               {addingIdentifier ? (
+                 <Select onValueChange={handleAddIdentifier} value="">
+                   <SelectTrigger className="w-40 bg-white text-xs">
+                     <SelectValue placeholder="Select identifier" />
+                   </SelectTrigger>
+                   <SelectContent className="max-h-48 overflow-auto">
+                     {availableIdentifiers.map(id => (
+                       <SelectItem key={id} value={id} className="text-xs">{id}</SelectItem>
+                     ))}
+                   </SelectContent>
+                 </Select>
+               ) : (
+                 <Button variant="ghost" size="sm" className="text-green-700 hover:bg-green-100" onClick={() => setAddingIdentifier(true)}>
+                   <Plus className="h-4 w-4" />
+                 </Button>
+               )}
+             </div>
+           </div>
           {/* Field and Aggregator Selectors */}
           <div className="space-y-4 pt-4 border-t border-slate-200">
             <h3 className="font-semibold text-slate-700 flex items-center gap-2">

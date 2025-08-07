@@ -1,5 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { MERGE_API } from '@/lib/api';
+import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
+import { VALIDATE_API } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -19,15 +21,40 @@ import {
   PaginationNext,
   PaginationPrevious,
 } from '@/components/ui/pagination';
-import { Loader2, Database, GitMerge } from 'lucide-react';
+// Icons
+const Loader2 = ({ className }: { className?: string }) => (
+  <svg className={className} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+  </svg>
+);
+
+// removed unused Database icon
+/* const Database = ({ className }: { className?: string }) => (
+  <svg className={className} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <ellipse cx="12" cy="5" rx="9" ry="3" />
+    <path d="M3 5V19A9 3 0 0 0 12 22h0a9 3 0 0 0 9-3V5" />
+    <path d="M3 12a9 3 0 0 0 9 3h0a9 3 0 0 0 9-3" />
+  </svg>
+);
+
+*/
+const GitMerge = ({ className }: { className?: string }) => (
+  <svg className={className} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="18" cy="18" r="3" />
+    <circle cx="6" cy="6" r="3" />
+    <path d="M6 21V9a9 9 0 0 0 9 9" />
+  </svg>
+);
 
 interface MergeCanvasProps {
+  atomId: string; // id of the atom – required to update store
   mergeId?: string;
   resultFilePath?: string;
   file1?: string;
   file2?: string;
   joinColumns?: string[];
   joinType?: string;
+  availableColumns?: string[];
   unsavedData?: string; // Add support for unsaved data
 }
 
@@ -45,13 +72,14 @@ interface DataResponse {
   pagination: PaginationInfo;
 }
 
-const MergeCanvas: React.FC<MergeCanvasProps> = ({ 
+const MergeCanvas: React.FC<MergeCanvasProps> = ({ atomId, 
   mergeId, 
   resultFilePath, 
   file1, 
   file2, 
   joinColumns = [], 
   joinType = 'inner',
+  availableColumns = [],
   unsavedData
 }) => {
   console.log('🔧 MergeCanvas: Props received:', { 
@@ -75,6 +103,51 @@ const MergeCanvas: React.FC<MergeCanvasProps> = ({
   const [saveLoading, setSaveLoading] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saveSuccess, setSaveSuccess] = useState(false);
+
+  // list of saved dataframes
+  interface Frame { object_name: string; csv_name: string; }
+  const [frames, setFrames] = useState<Frame[]>([]);
+  useEffect(() => {
+    // fetch list once
+    const envStr = localStorage.getItem('env');
+    let query = '';
+    if (envStr) {
+      try {
+        const env = JSON.parse(envStr);
+        query = '?' + new URLSearchParams({
+          client_id: env.CLIENT_ID || '',
+          app_id: env.APP_ID || '',
+          project_id: env.PROJECT_ID || '',
+          client_name: env.CLIENT_NAME || '',
+          app_name: env.APP_NAME || '',
+          project_name: env.PROJECT_NAME || ''
+        }).toString();
+      } catch {/* ignore */}
+    }
+    fetch(`${VALIDATE_API}/list_saved_dataframes${query}`)
+      .then(r=>r.json()).then(d=>setFrames(Array.isArray(d.files)? d.files : []))
+      .catch(()=>setFrames([]));
+  }, []);
+
+  const handleFile1Change = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    updateSettings(atomId, { file1: e.target.value });
+  };
+  const handleFile2Change = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    updateSettings(atomId, { file2: e.target.value });
+  };
+
+  // ==== Store updater for settings ====
+  const updateSettings = useLaboratoryStore(state => state.updateAtomSettings);
+
+  const handleJoinTypeChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    updateSettings(atomId, { joinType: e.target.value });
+  };
+
+  const handleJoinColumnsChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const selected = Array.from(e.target.selectedOptions).map(o => (o as HTMLOptionElement).value);
+    updateSettings(atomId, { joinColumns: selected });
+  };
+
 
   const parseCSV = (csvText: string): { headers: string[]; rows: Record<string, any>[] } => {
     const lines = csvText.split(/\r?\n/).filter(line => line.trim());
@@ -282,10 +355,13 @@ const MergeCanvas: React.FC<MergeCanvasProps> = ({
                   </div>
                   <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
                     <div className="flex items-center space-x-2">
-                      <Database className="w-4 h-4 text-blue-600 flex-shrink-0" />
-                      <span className="text-sm font-medium text-gray-800 truncate" title={file1 ? file1.split('/').pop() : 'N/A'}>
-                        {file1 ? file1.split('/').pop() : 'N/A'}
-                      </span>
+                      <select value={file1} onChange={handleFile1Change} className="w-full bg-transparent text-sm font-medium text-gray-800 focus:outline-none cursor-pointer">
+                        <option value="">Select file</option>
+                        {frames.map(f => (
+                          <option key={f.object_name} value={f.object_name}>{f.csv_name.split('/').pop()}</option>
+                        ))}
+                      </select>
+                      
                     </div>
                   </div>
                 </div>
@@ -296,10 +372,13 @@ const MergeCanvas: React.FC<MergeCanvasProps> = ({
                   </div>
                   <div className="bg-green-50 border border-green-200 rounded-lg p-3">
                     <div className="flex items-center space-x-2">
-                      <Database className="w-4 h-4 text-green-600 flex-shrink-0" />
-                      <span className="text-sm font-medium text-gray-800 truncate" title={file2 ? file2.split('/').pop() : 'N/A'}>
-                        {file2 ? file2.split('/').pop() : 'N/A'}
-                      </span>
+                      <select value={file2} onChange={handleFile2Change} className="w-full bg-transparent text-sm font-medium text-gray-800 focus:outline-none cursor-pointer">
+                        <option value="">Select file</option>
+                        {frames.map(f => (
+                          <option key={f.object_name} value={f.object_name}>{f.csv_name.split('/').pop()}</option>
+                        ))}
+                      </select>
+                      
                     </div>
                   </div>
                 </div>
@@ -310,20 +389,46 @@ const MergeCanvas: React.FC<MergeCanvasProps> = ({
                   </div>
                   <div className="bg-purple-50 border border-purple-200 rounded-lg p-3">
                     <div className="flex items-center space-x-2">
-                      <GitMerge className="w-4 h-4 text-purple-600" />
-                      <span className="text-sm font-medium text-gray-800 capitalize">{joinType || 'N/A'}</span>
+                      <GitMerge className="w-4 h-4 text-purple-600 flex-shrink-0" />
+                      <select
+                        value={joinType}
+                        onChange={handleJoinTypeChange}
+                        className="text-sm font-medium text-gray-800 bg-transparent capitalize focus:outline-none cursor-pointer"
+                      >
+                        <option value="inner">Inner</option>
+                        <option value="outer">Outer</option>
+                        <option value="left">Left</option>
+                        <option value="right">Right</option>
+                      </select>
                     </div>
                   </div>
                 </div>
                 <div>
                   <div className="flex items-center mb-2">
-                    <div className="w-2 h-2 bg-orange-500 rounded-full mr-2"></div>
+                    <div className="w-2 h-2 bg-amber-500 rounded-full mr-2"></div>
                     <span className="font-medium text-gray-700">Join Columns</span>
                   </div>
-                  <div className="bg-orange-50 border border-orange-200 rounded-lg p-3">
-                    <div className="flex items-center space-x-2">
-                      <GitMerge className="w-4 h-4 text-orange-600" />
-                      <span className="text-sm font-medium text-gray-800">{joinColumns.length} column(s)</span>
+                  <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+                    <div className="max-h-28 overflow-y-auto space-y-1">
+                      {availableColumns.length === 0 ? (
+                        <span className="text-sm text-gray-500">No columns</span>
+                      ) : (
+                        availableColumns.map(col => (
+                          <label key={col} className="flex items-center space-x-2 text-sm text-gray-800">
+                            <input
+                              type="checkbox"
+                              checked={joinColumns.includes(col)}
+                              onChange={() => {
+                                const next = joinColumns.includes(col)
+                                  ? joinColumns.filter(c => c !== col)
+                                  : [...joinColumns, col];
+                                updateSettings(atomId, { joinColumns: next });
+                              }}
+                            />
+                            <span>{col}</span>
+                          </label>
+                        ))
+                      )}
                     </div>
                   </div>
                 </div>
@@ -334,7 +439,7 @@ const MergeCanvas: React.FC<MergeCanvasProps> = ({
       </Card>
 
       {/* Merge Results */}
-      <Card className="border-0 shadow-xl bg-white/80 backdrop-blur-sm overflow-hidden">
+      <Card className="border-0 shadow-xl bg-white/80 backdrop-blur-sm overflow-hidden mt-6">
         <div className="bg-gradient-to-r from-green-500 to-green-600 p-1">
           <div className="bg-white rounded-sm">
             <div className="p-4">
@@ -343,9 +448,9 @@ const MergeCanvas: React.FC<MergeCanvasProps> = ({
                   <div className="w-1 h-8 bg-gradient-to-b from-green-500 to-green-600 rounded-full mr-4"></div>
                   <h3 className="text-xl font-bold text-gray-900">Merge Results</h3>
                   {headers.length > 0 && data.length > 0 && (
-                    <Badge variant="outline" className="bg-green-50 border-green-200 text-green-700 ml-3">
+                    <div className="flex items-center bg-green-50 border border-green-200 text-green-700 text-xs font-medium px-2.5 py-0.5 rounded-full ml-3">
                       {data.length.toLocaleString()} rows • {headers.length} columns
-                    </Badge>
+                    </div>
                   )}
                 </div>
                 {headers.length > 0 && data.length > 0 && (
@@ -385,7 +490,7 @@ const MergeCanvas: React.FC<MergeCanvasProps> = ({
                               {row[header] !== null && row[header] !== undefined && row[header] !== '' ? (
                                 typeof row[header] === 'number' ? row[header] : String(row[header])
                               ) : (
-                                <Badge variant="outline" className="text-gray-500">null</Badge>
+                                <span className="px-2 py-0.5 text-xs font-medium text-gray-500 border border-gray-300 rounded-full">null</span>
                               )}
                             </TableCell>
                           ))}

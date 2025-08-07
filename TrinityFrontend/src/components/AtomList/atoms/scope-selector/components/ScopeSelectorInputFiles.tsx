@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Card } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { VALIDATE_API, FEATURE_OVERVIEW_API } from '@/lib/api';
+import { VALIDATE_API, FEATURE_OVERVIEW_API, SCOPE_SELECTOR_API } from '@/lib/api';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 
 interface Props {
@@ -29,14 +29,36 @@ const ScopeSelectorInputFiles: React.FC<Props> = ({ atomId }) => {
     }
     
     try {
-      // Fetch column summary
+      // Try Redis/Mongo identifier list first
+      // Extract client/app/project from path if available
+      const pathParts = val.split('/')
+      const clientName = pathParts[0] ?? ''
+      const appName = pathParts[1] ?? ''
+      const projectName = pathParts[2] ?? ''
+
+      let categoricalColumns: string[] = []
+      try {
+        if (clientName && appName && projectName) {
+          const identRes = await fetch(`${SCOPE_SELECTOR_API}/identifier_options?client_name=${encodeURIComponent(clientName)}&app_name=${encodeURIComponent(appName)}&project_name=${encodeURIComponent(projectName)}`)
+          if (identRes.ok) {
+            const identJson = await identRes.json()
+            if (Array.isArray(identJson.identifiers) && identJson.identifiers.length > 0) {
+              categoricalColumns = identJson.identifiers
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('identifier_options fetch failed', err)
+      }
+
+      // If identifiers not found via config, fall back to column summary
       const res = await fetch(`${FEATURE_OVERVIEW_API}/column_summary?object_name=${encodeURIComponent(val)}`);
       if (res.ok) {
         const data = await res.json();
         const allColumns = Array.isArray(data.summary) ? data.summary.filter(Boolean) : [];
         
         // Only include object type columns as categorical
-        const categoricalColumns = allColumns
+        const finalCats = categoricalColumns.length > 0 ? categoricalColumns : allColumns
           .filter(col => {
             const dataType = col.data_type?.toLowerCase() || '';
             return (dataType === 'object' || dataType === 'category') && col.column;
@@ -47,8 +69,8 @@ const ScopeSelectorInputFiles: React.FC<Props> = ({ atomId }) => {
         updateSettings(atomId, {
           dataSource: val,
           allColumns,
-          availableIdentifiers: categoricalColumns,
-          selectedIdentifiers: [...categoricalColumns] // Select all categorical columns by default
+          availableIdentifiers: finalCats,
+          selectedIdentifiers: [...finalCats] // Select all categorical columns by default
         });
       }
     } catch (error) {
@@ -99,14 +121,7 @@ const ScopeSelectorInputFiles: React.FC<Props> = ({ atomId }) => {
                   return (
                     <tr key={col.column} className="hover:bg-yellow-50 transition-colors">
                       <td className="px-4 py-2 font-medium text-gray-900">
-                        <div className="flex items-center">
-                          {col.column}
-                          {isCategorical && (
-                            <span className="ml-2 px-2 py-0.5 text-xs rounded-full bg-blue-100 text-blue-700 font-semibold">
-                              Identifier
-                            </span>
-                          )}
-                        </div>
+                        {col.column}
                       </td>
                       <td className="px-4 py-2">
                         <span className={`inline-block px-2 py-0.5 rounded text-xs font-semibold 

@@ -16,11 +16,27 @@ MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY", "admin_dev")
 MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY", "pass_dev")
 MINIO_BUCKET = os.getenv("MINIO_BUCKET", "trinity")
 
-# Common prefix for stored objects (client/app/project)
-CLIENT_NAME = os.getenv("CLIENT_NAME", "default_client")
-APP_NAME = os.getenv("APP_NAME", "default_app")
-PROJECT_NAME = os.getenv("PROJECT_NAME", "default_project")
-OBJECT_PREFIX = f"{CLIENT_NAME}/{APP_NAME}/{PROJECT_NAME}/"
+# -------- Runtime object prefix helper (client/app/project) --------
+
+def _current_names() -> tuple[str, str, str]:
+    """Return current (client, app, project) names from env vars."""
+    return (
+        os.getenv("CLIENT_NAME", "default_client"),
+        os.getenv("APP_NAME", "default_app"),
+        os.getenv("PROJECT_NAME", "default_project"),
+    )
+
+def _object_prefix() -> str:
+    """Return the current `<client>/<app>/<project>/` prefix **from environment vars**.
+
+    Environment variables may change during the lifetime of the FastAPI process
+    (e.g. set per-request by a middleware). Therefore we must build the prefix
+    at *call time*, not import time.
+    """
+    client = os.getenv("CLIENT_NAME", "default_client")
+    app = os.getenv("APP_NAME", "default_app")
+    project = os.getenv("PROJECT_NAME", "default_project")
+    return f"{client}/{app}/{project}/"
 
 # ------------------------
 # Redis configuration
@@ -36,7 +52,7 @@ def redis_classifier_config() -> dict | None:
 
     Returns a parsed dict or None if key missing/invalid.
     """
-    key = f"{OBJECT_PREFIX}column_classifier_config"
+    key = f"{_object_prefix()}column_classifier_config"
     try:
         data_str = redis_client.get(key)
         print(f"🔍 redis_classifier_config GET {key} => {'hit' if data_str else 'miss'}")
@@ -104,42 +120,73 @@ async def fetch_measures_list(
     file_key: str,
     collection: AsyncIOMotorCollection,
 ) -> list:
-    """Return measures list, preferring Redis classifier config, then MongoDB."""
+    """Return **measures** list with the unified Redis→Mongo→legacy resolution chain."""
+
+    # 1️⃣  Redis fast-path
     cfg = redis_classifier_config()
     if cfg and isinstance(cfg.get("measures"), list):
-        print("🔵 fetch_measures_list: returning measures from Redis", cfg.get("measures"))
         return cfg["measures"]
 
-    # Fallback to MongoDB
-    document = await collection.find_one(
-        {"validator_atom_id": validator_atom_id, "file_key": file_key}
-    )
+    # 2️⃣  MongoDB classifier_configs (persistent source)
+    try:
+        from app.features.column_classifier.database import get_classifier_config_from_mongo
+        mongo_cfg: dict | None = get_classifier_config_from_mongo(CLIENT_NAME, APP_NAME, PROJECT_NAME)
+        if mongo_cfg and isinstance(mongo_cfg.get("measures"), list):
+            # Cache back to Redis for 1 h
+            try:
+                import json
+                key = f"{CLIENT_NAME}/{APP_NAME}/{PROJECT_NAME}/column_classifier_config"
+                redis_client.setex(key, 3600, json.dumps(mongo_cfg, default=str))
+            except Exception as exc:
+                print(f"⚠️ Redis setex in fetch_measures_list: {exc}")
+            return mongo_cfg["measures"]
+    except Exception as exc:
+        print(f"⚠️ Mongo classifier config lookup failed: {exc}")
+
+    # 3️⃣  Legacy per-file fallback
+    document = await collection.find_one({"validator_atom_id": validator_atom_id, "file_key": file_key})
     if not document or "final_classification" not in document:
-        raise HTTPException(status_code=404, detail="Final classification not found in MongoDB")
-    measures = document["final_classification"].get("measures", [])
-    return measures
+        raise HTTPException(status_code=404, detail="Final classification not found in MongoDB or Redis")
+    return document["final_classification"].get("measures", [])
 
 async def fetch_identifiers_and_measures(
     validator_atom_id: str,
     file_key: str,
     collection: AsyncIOMotorCollection,
 ) -> Tuple[list, list]:
-    """Return identifiers and measures with Redis-first logic and basic filtering."""
+    """Return identifiers & measures using Redis→Mongo→legacy strategy with filtering."""
+
+    # 1️⃣  Redis cache
     cfg = redis_classifier_config()
     if cfg and isinstance(cfg.get("identifiers"), list) and isinstance(cfg.get("measures"), list):
-        print("🔵 fetch_identifiers_and_measures: using Redis data", cfg)
         identifiers = cfg["identifiers"]
         measures = cfg["measures"]
     else:
-        document = await collection.find_one(
-            {"validator_atom_id": validator_atom_id, "file_key": file_key}
-        )
-        if not document or "final_classification" not in document:
-            raise HTTPException(status_code=404, detail="Final classification not found in MongoDB")
-        identifiers = document["final_classification"].get("identifiers", [])
-        measures = document["final_classification"].get("measures", [])
+        # 2️⃣  MongoDB classifier_configs
+        try:
+            from app.features.column_classifier.database import get_classifier_config_from_mongo
+            mongo_cfg: dict | None = get_classifier_config_from_mongo(CLIENT_NAME, APP_NAME, PROJECT_NAME)
+            if mongo_cfg and isinstance(mongo_cfg.get("identifiers"), list) and isinstance(mongo_cfg.get("measures"), list):
+                identifiers = mongo_cfg["identifiers"]
+                measures = mongo_cfg["measures"]
+                # Write back to Redis
+                try:
+                    import json
+                    key = f"{CLIENT_NAME}/{APP_NAME}/{PROJECT_NAME}/column_classifier_config"
+                    redis_client.setex(key, 3600, json.dumps(mongo_cfg, default=str))
+                except Exception as exc:
+                    print(f"⚠️ Redis setex in fetch_identifiers_and_measures: {exc}")
+            else:
+                raise ValueError("config not found in Mongo")
+        except Exception as exc:
+            # 3️⃣  Legacy collection fallback
+            document = await collection.find_one({"validator_atom_id": validator_atom_id, "file_key": file_key})
+            if not document or "final_classification" not in document:
+                raise HTTPException(status_code=404, detail="Final classification not found in MongoDB or Redis")
+            identifiers = document["final_classification"].get("identifiers", [])
+            measures = document["final_classification"].get("measures", [])
 
-    # Filter out common time-related identifiers
+    # Strip common time keywords
     time_keywords = {"date", "time", "month", "months", "week", "weeks", "year"}
     identifiers = [i for i in identifiers if i and i.lower() not in time_keywords]
 

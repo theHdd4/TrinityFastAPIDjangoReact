@@ -1,4 +1,6 @@
 import React, { useEffect, useState } from 'react';
+import { VALIDATE_API } from '@/lib/api';
+import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { CONCAT_API } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -20,9 +22,10 @@ import {
   PaginationPrevious,
 } from '@/components/ui/pagination';
 import { Loader2 } from 'lucide-react';
-import { Database, ArrowDown } from 'lucide-react';
+import { Database, ArrowDown, ArrowRight } from 'lucide-react';
 
 interface ConcatCanvasProps {
+  atomId: string;
   concatId?: string;
   resultFilePath?: string;
   file1?: string;
@@ -45,7 +48,11 @@ interface DataResponse {
   pagination: PaginationInfo;
 }
 
-const ConcatCanvas: React.FC<ConcatCanvasProps> = ({ concatId, resultFilePath, file1, file2, direction, fullCsv }) => {
+interface Frame { object_name: string; csv_name: string; }
+
+const ConcatCanvas: React.FC<ConcatCanvasProps> = ({ atomId, concatId, resultFilePath, file1, file2, direction, fullCsv }) => {
+  const updateSettings = useLaboratoryStore(state => state.updateAtomSettings);
+  const [frames, setFrames] = useState<Frame[]>([]);
   const [data, setData] = useState<Record<string, any>[]>([]);
   const [headers, setHeaders] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
@@ -57,6 +64,45 @@ const ConcatCanvas: React.FC<ConcatCanvasProps> = ({ concatId, resultFilePath, f
   const [saveLoading, setSaveLoading] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saveSuccess, setSaveSuccess] = useState(false);
+
+  // Fetch available saved dataframes once
+  useEffect(() => {
+    let query = '';
+    const envStr = localStorage.getItem('env');
+    if (envStr) {
+      try {
+        const env = JSON.parse(envStr);
+        query =
+          '?' +
+          new URLSearchParams({
+            client_id: env.CLIENT_ID || '',
+            app_id: env.APP_ID || '',
+            project_id: env.PROJECT_ID || '',
+            client_name: env.CLIENT_NAME || '',
+            app_name: env.APP_NAME || '',
+            project_name: env.PROJECT_NAME || '',
+          }).toString();
+      } catch {
+        /* ignore */
+      }
+    }
+    fetch(`${VALIDATE_API}/list_saved_dataframes${query}`)
+      .then(r => r.json())
+      .then(d => setFrames(Array.isArray(d.files) ? d.files : []))
+      .catch(() => setFrames([]));
+  }, []);
+
+  const handleFile1Change: React.ChangeEventHandler<HTMLSelectElement> = (e) => {
+    updateSettings(atomId, { file1: e.target.value });
+  };
+
+  const handleFile2Change: React.ChangeEventHandler<HTMLSelectElement> = (e) => {
+    updateSettings(atomId, { file2: e.target.value });
+  };
+
+  const handleDirectionChange: React.ChangeEventHandler<HTMLSelectElement> = (e) => {
+    updateSettings(atomId, { direction: e.target.value });
+  };
 
   const parseCSV = (csvText: string): { headers: string[]; rows: Record<string, any>[] } => {
     const lines = csvText.split(/\r?\n/).filter(line => line.trim());
@@ -209,34 +255,53 @@ const ConcatCanvas: React.FC<ConcatCanvasProps> = ({ concatId, resultFilePath, f
                 <h3 className="text-xl font-bold text-gray-900">Current Selection</h3>
               </div>
               <div className="grid grid-cols-3 gap-6">
+                {/* Primary Source */}
                 <div>
                   <div className="flex items-center mb-2">
                     <div className="w-2 h-2 bg-blue-500 rounded-full mr-2"></div>
                     <span className="font-medium text-gray-700">Primary Source</span>
                   </div>
                   <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
-                    <div className="flex items-center space-x-2">
-                      <Database className="w-4 h-4 text-blue-600 flex-shrink-0" />
-                      <span className="text-sm font-medium text-gray-800 truncate" title={file1 ? file1.split('/').pop() : 'N/A'}>
-                        {file1 ? file1.split('/').pop() : 'N/A'}
-                      </span>
+                    <div className="flex items-center space-x-2 w-full">
+                      <select
+                        value={file1 || ''}
+                        onChange={handleFile1Change}
+                        className="w-full bg-transparent text-sm font-medium text-gray-800 focus:outline-none cursor-pointer"
+                      >
+                        <option value="">Select file</option>
+                        {frames.map(f => (
+                          <option key={f.object_name} value={f.object_name}>
+                            {f.csv_name.split('/').pop()}
+                          </option>
+                        ))}
+                      </select>
                     </div>
                   </div>
                 </div>
+                {/* Secondary Source */}
                 <div>
                   <div className="flex items-center mb-2">
                     <div className="w-2 h-2 bg-green-500 rounded-full mr-2"></div>
                     <span className="font-medium text-gray-700">Secondary Source</span>
                   </div>
                   <div className="bg-green-50 border border-green-200 rounded-lg p-3">
-                    <div className="flex items-center space-x-2">
-                      <Database className="w-4 h-4 text-green-600 flex-shrink-0" />
-                      <span className="text-sm font-medium text-gray-800 truncate" title={file2 ? file2.split('/').pop() : 'N/A'}>
-                        {file2 ? file2.split('/').pop() : 'N/A'}
-                      </span>
+                    <div className="flex items-center space-x-2 w-full">
+                      <select
+                        value={file2 || ''}
+                        onChange={handleFile2Change}
+                        className="w-full bg-transparent text-sm font-medium text-gray-800 focus:outline-none cursor-pointer"
+                      >
+                        <option value="">Select file</option>
+                        {frames.map(f => (
+                          <option key={f.object_name} value={f.object_name}>
+                            {f.csv_name.split('/').pop()}
+                          </option>
+                        ))}
+                      </select>
                     </div>
                   </div>
                 </div>
+                {/* Strategy */}
                 <div>
                   <div className="flex items-center mb-2">
                     <div className="w-2 h-2 bg-purple-500 rounded-full mr-2"></div>
@@ -244,8 +309,16 @@ const ConcatCanvas: React.FC<ConcatCanvasProps> = ({ concatId, resultFilePath, f
                   </div>
                   <div className="bg-purple-50 border border-purple-200 rounded-lg p-3">
                     <div className="flex items-center space-x-2">
-                      <ArrowDown className="w-4 h-4 text-purple-600" />
-                      <span className="text-sm font-medium text-gray-800 capitalize">{direction || 'N/A'}</span>
+                      <ArrowDown className="w-4 h-4 text-purple-600 flex-shrink-0" />
+                      <select
+                        value={direction || ''}
+                        onChange={handleDirectionChange}
+                        className="text-sm font-medium text-gray-800 bg-transparent capitalize focus:outline-none cursor-pointer"
+                      >
+                        <option value="">Select</option>
+                        <option value="vertical">Vertical</option>
+                        <option value="horizontal">Horizontal</option>
+                      </select>
                     </div>
                   </div>
                 </div>
