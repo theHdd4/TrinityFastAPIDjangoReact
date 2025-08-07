@@ -2,6 +2,8 @@ import React, { useEffect, useState, useMemo } from 'react';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { Plus } from 'lucide-react';
 import { FEATURE_OVERVIEW_API } from '@/lib/api';
 
 interface ColumnInfo {
@@ -93,7 +95,7 @@ const ColClassifierColumnView: React.FC<ColClassifierColumnViewProps> = ({
           <div className="min-w-max">
             <div className="grid grid-rows-4 gap-0">
               <div className="flex bg-white border-b border-gray-200">
-                <div className="w-40 font-bold text-black bg-gray-100 border-r border-gray-300 flex items-center justify-center">
+                <div className="w-40 font-bold text-black bg-gray-100 border-r border-gray-300 flex items-center justify-center sticky left-0 z-10">
                   Columns
                 </div>
                 {displayed.map((col, index) => (
@@ -107,7 +109,7 @@ const ColClassifierColumnView: React.FC<ColClassifierColumnViewProps> = ({
               </div>
 
               <div className="flex bg-white border-b border-gray-200">
-                <div className="w-40 font-bold text-black bg-gray-100 border-r border-gray-300 flex items-center justify-center">
+                <div className="w-40 font-bold text-black bg-gray-100 border-r border-gray-300 flex items-center justify-center sticky left-0 z-10">
                   Data Type
                 </div>
                 {displayed.map((col, index) => (
@@ -126,7 +128,7 @@ const ColClassifierColumnView: React.FC<ColClassifierColumnViewProps> = ({
               </div>
 
               <div className="flex bg-gray-50 border-b border-gray-200">
-                <div className="w-40 font-bold text-black bg-gray-100 border-r border-gray-300 flex items-center justify-center">
+                <div className="w-40 font-bold text-black bg-gray-100 border-r border-gray-300 flex items-center justify-center sticky left-0 z-10">
                   Unique Counts
                 </div>
                 {displayed.map((col, index) => (
@@ -140,13 +142,13 @@ const ColClassifierColumnView: React.FC<ColClassifierColumnViewProps> = ({
               </div>
 
               <div className="flex bg-white">
-                <div className="w-40 font-bold text-black bg-gray-100 border-r border-gray-300 flex items-center justify-center">
+                <div className="w-40 font-bold text-black bg-gray-100 border-r border-gray-300 flex items-center justify-center sticky left-0 z-10 py-1">
                   Unique Values
                 </div>
                 {displayed.map((col, index) => (
                   <div
                     key={index}
-                    className="w-32 text-sm border-r border-gray-200 flex items-center justify-center"
+                    className="w-32 text-sm border-r border-gray-200 flex items-center justify-center py-1"
                   >
                     <div className="flex flex-col gap-px items-center">
                       {col.unique_values.slice(0, 2).map((val, i) => (
@@ -159,9 +161,20 @@ const ColClassifierColumnView: React.FC<ColClassifierColumnViewProps> = ({
                         </Badge>
                       ))}
                       {col.unique_values.length > 2 && (
-                        <span className="text-xs text-gray-600 font-medium">
-                          +{col.unique_values.length - 2}
-                        </span>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <span className="flex items-center gap-0.5 text-xs text-gray-600 font-medium cursor-pointer">
+                              <Plus className="w-3 h-3" />
+                              {col.unique_values.length - 2}
+                            </span>
+                          </TooltipTrigger>
+                          <TooltipContent className="text-xs max-w-xs whitespace-pre-wrap">
+                            {col.unique_values
+                              .slice(2)
+                              .map(val => String(val))
+                              .join(', ')}
+                          </TooltipContent>
+                        </Tooltip>
                       )}
                     </div>
                   </div>
