@@ -1,4 +1,4 @@
-from rest_framework import viewsets, permissions
+from rest_framework import viewsets, permissions, status
 from rest_framework.response import Response
 from django.utils.text import slugify
 import os
@@ -75,35 +75,35 @@ class ProjectViewSet(viewsets.ModelViewSet):
 
         return qs
 
+    def create(self, request, *args, **kwargs):
+        data = request.data.copy()
+        app = data.get("app")
+        base_name = data.get("name", "")
+        if app and base_name:
+            name = base_name
+            counter = 1
+            while Project.objects.filter(app_id=app, name=name).exists():
+                name = f"{base_name} {counter}"
+                counter += 1
+            data["name"] = name
+
+        serializer = self.get_serializer(data=data)
+        serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+        headers = self.get_success_headers(serializer.data)
+        return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
+
     def perform_create(self, serializer):
         user = self.request.user
-        app = serializer.validated_data.get("app")
-        base_name = serializer.validated_data.get("name")
-
-        # Ensure the project name is unique across the client/app combination.
-        # The RegistryEnvironment model enforces a unique constraint on
-        # ``client_name``, ``app_name`` and ``project_name``. When multiple
-        # users attempt to create projects with the same name under the same
-        # app, we need to automatically append a counter so the environment
-        # entry remains unique instead of raising an integrity error.
-        name = base_name
+        name = serializer.validated_data.get("name")
+        slug = serializer.validated_data.get("slug") or slugify(name)
+        slug_val = slug
         counter = 1
-        while Project.objects.filter(app=app, name=name).exists():
-            name = f"{base_name} {counter}"
+        while Project.objects.filter(owner=user, slug=slug_val).exists():
+            slug_val = f"{slug}-{counter}"
             counter += 1
 
-        slug = serializer.validated_data.get("slug")
-        if not slug:
-            slug_base = slugify(name)
-        else:
-            slug_base = slug
-        slug_val = slug_base
-        s_count = 1
-        while Project.objects.filter(owner=user, slug=slug_val).exists():
-            s_count += 1
-            slug_val = f"{slug_base}-{s_count}"
-
-        serializer.save(owner=user, name=name, slug=slug_val)
+        serializer.save(owner=user, slug=slug_val)
 
     def retrieve(self, request, *args, **kwargs):
         load_env_vars(request.user)
