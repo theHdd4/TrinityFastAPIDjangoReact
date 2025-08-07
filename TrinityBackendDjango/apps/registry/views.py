@@ -25,6 +25,25 @@ class AppViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
     authentication_classes = [CsrfExemptSessionAuthentication]
 
+    def get_queryset(self):
+        qs = super().get_queryset()
+        user = self.request.user
+        if not user.is_staff:
+            try:
+                from apps.roles.models import UserRole
+
+                roles = UserRole.objects.filter(user=user)
+                allowed = set()
+                for role in roles:
+                    allowed.update(role.allowed_apps or [])
+                if allowed:
+                    qs = qs.filter(id__in=allowed)
+                else:
+                    qs = qs.none()
+            except Exception:
+                qs = qs.none()
+        return qs
+
     def get_permissions(self):
         if self.action in ("create", "update", "partial_update", "destroy"):
             return [permissions.IsAdminUser()]
@@ -61,11 +80,21 @@ class ProjectViewSet(viewsets.ModelViewSet):
         user = self.request.user
         qs = self.queryset
 
-        # Restrict to projects owned by the user unless admin
         if not user.is_staff:
-            qs = qs.filter(owner=user)
+            try:
+                from apps.roles.models import UserRole
 
-        # Optional filtering by app via query parameter
+                roles = UserRole.objects.filter(user=user)
+                allowed = set()
+                for role in roles:
+                    allowed.update(role.allowed_apps or [])
+                if allowed:
+                    qs = qs.filter(app_id__in=allowed)
+                else:
+                    return Project.objects.none()
+            except Exception:
+                return Project.objects.none()
+
         app_param = self.request.query_params.get("app")
         if app_param:
             if app_param.isdigit():
@@ -74,6 +103,29 @@ class ProjectViewSet(viewsets.ModelViewSet):
                 qs = qs.filter(app__slug=app_param)
 
         return qs
+
+    def _can_edit(self, user):
+        perms = [
+            "permissions.workflow_edit",
+            "permissions.laboratory_edit",
+            "permissions.exhibition_edit",
+        ]
+        return user.is_staff or any(user.has_perm(p) for p in perms)
+
+    def update(self, request, *args, **kwargs):
+        if not self._can_edit(request.user):
+            return Response({"detail": "Permission denied."}, status=status.HTTP_403_FORBIDDEN)
+        return super().update(request, *args, **kwargs)
+
+    def partial_update(self, request, *args, **kwargs):
+        if not self._can_edit(request.user):
+            return Response({"detail": "Permission denied."}, status=status.HTTP_403_FORBIDDEN)
+        return super().partial_update(request, *args, **kwargs)
+
+    def destroy(self, request, *args, **kwargs):
+        if not self._can_edit(request.user):
+            return Response({"detail": "Permission denied."}, status=status.HTTP_403_FORBIDDEN)
+        return super().destroy(request, *args, **kwargs)
 
     def create(self, request, *args, **kwargs):
         data = request.data.copy()
