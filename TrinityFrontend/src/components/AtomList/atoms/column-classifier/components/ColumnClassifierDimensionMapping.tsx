@@ -73,7 +73,7 @@ const ColumnClassifierDimensionMapping: React.FC<DimensionMappingProps> = ({
         style={style}
         {...listeners}
         {...attributes}
-        className={`group relative flex items-center gap-2 px-3 py-2 bg-white border border-gray-300 text-black hover:bg-gray-50 rounded-full text-sm font-medium cursor-grab active:cursor-grabbing transition-all duration-200 hover:scale-[1.02] hover:shadow-lg backdrop-blur-sm ${
+        className={`group relative flex items-center gap-2 px-3 py-2 bg-white text-black hover:bg-gray-50 rounded-full text-sm font-medium cursor-grab active:cursor-grabbing transition-all duration-200 hover:scale-[1.02] hover:shadow-lg backdrop-blur-sm ${
           isDragging ? 'opacity-70 shadow-2xl scale-105 rotate-2' : 'hover:shadow-md'
         }`}
       >
@@ -199,7 +199,7 @@ const ColumnClassifierDimensionMapping: React.FC<DimensionMappingProps> = ({
       </div>
       <DragOverlay>
         {activeId ? (
-          <div className="group relative inline-flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-gray-200 to-gray-100 text-gray-700 border border-gray-300 rounded-full text-sm font-medium shadow-2xl backdrop-blur-sm scale-110 rotate-3">
+          <div className="group relative inline-flex items-center gap-2 px-4 py-2.5 bg-white text-gray-700 rounded-full text-sm font-medium shadow-2xl backdrop-blur-sm scale-110 rotate-3">
             <GripVertical className="w-3 h-3 opacity-60" />
             <span className="select-none font-medium tracking-wide">
               {activeId.split('-').slice(1).join('-')}
