@@ -206,7 +206,7 @@ const Users = () => {
       case 'Admin':
         return 'bg-red-100 text-red-800 border-red-200';
       case 'Editor':
-        return 'bg-[#fec107]/20 text-black border-black';
+        return 'bg-[#fec107] text-black border-black';
       case 'Viewer':
         return 'bg-green-100 text-green-800 border-green-200';
       default:
