@@ -265,8 +265,8 @@ const LaboratoryMode = () => {
 
         <div className="flex-1 flex overflow-hidden">
           {/* Atoms Sidebar */}
-          <div className={canEdit ? '' : 'cursor-not-allowed'}>
-            <div className={canEdit ? '' : 'pointer-events-none'}>
+          <div className={`${canEdit ? '' : 'cursor-not-allowed'} h-full`}>
+            <div className={`${canEdit ? '' : 'pointer-events-none'} h-full`}>
               <AuxiliaryMenuLeft onAtomDragStart={handleAtomDragStart} />
             </div>
           </div>
@@ -283,7 +283,7 @@ const LaboratoryMode = () => {
                 : undefined
             }
           >
-            <div className={canEdit ? '' : 'pointer-events-none'}>
+            <div className={`${canEdit ? '' : 'pointer-events-none'} h-full`}>
               <CanvasArea
                 onAtomSelect={handleAtomSelect}
                 onCardSelect={handleCardSelect}
@@ -294,8 +294,8 @@ const LaboratoryMode = () => {
           </div>
 
           {/* Auxiliary menu */}
-          <div className={canEdit ? '' : 'cursor-not-allowed'}>
-            <div className={canEdit ? '' : 'pointer-events-none'}>
+          <div className={`${canEdit ? '' : 'cursor-not-allowed'} h-full`}>
+            <div className={`${canEdit ? '' : 'pointer-events-none'} h-full`}>
               <AuxiliaryMenu
                 selectedAtomId={selectedAtomId}
                 selectedCardId={selectedCardId}
