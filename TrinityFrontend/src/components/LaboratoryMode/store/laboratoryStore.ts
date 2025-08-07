@@ -168,7 +168,7 @@ export const DEFAULT_COLUMN_CLASSIFIER_SETTINGS: ColumnClassifierSettings = {
   dimensions: [],
   assignments: {},
   enableDimensionMapping: false,
-  enableColumnView: false,
+  enableColumnView: true,
   filterColumnViewUnique: false,
 };
 

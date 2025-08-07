@@ -26,7 +26,11 @@ const ColumnClassifierProperties: React.FC<Props> = ({ atomId }) => {
   };
 
   const handleClassification = (file: FileClassification) => {
-    updateSettings(atomId, { data: { files: [file], activeFileIndex: 0 }, assignments: {} });
+    updateSettings(atomId, {
+      data: { files: [file], activeFileIndex: 0 },
+      assignments: {},
+      filterColumnViewUnique: true,
+    });
   };
 
   return (
