@@ -9,6 +9,7 @@ import WorkflowCanvas from './components/WorkflowCanvas';
 import MoleculeList from '@/components/MoleculeList/MoleculeList';
 import { useToast } from '@/hooks/use-toast';
 import { REGISTRY_API } from '@/lib/api';
+import { useAuth } from '@/contexts/AuthContext';
 
 interface SelectedAtom {
   atomName: string;
@@ -22,6 +23,8 @@ const WorkflowMode = () => {
   const [canvasMolecules, setCanvasMolecules] = useState<any[]>([]);
   const { toast } = useToast();
   const navigate = useNavigate();
+  const { hasPermission } = useAuth();
+  const canEdit = hasPermission('workflow:edit');
 
   useEffect(() => {
     if (localStorage.getItem('workflow-canvas-molecules')) {
@@ -43,29 +46,35 @@ const WorkflowMode = () => {
   }, []);
 
   const handleMoleculeSelect = (moleculeId: string) => {
+    if (!canEdit) return;
     setSelectedMoleculeId(moleculeId);
   };
 
-  const handleCanvasMoleculesUpdate = useCallback((molecules: any[]) => {
-    setCanvasMolecules(molecules);
+  const handleCanvasMoleculesUpdate = useCallback(
+    (molecules: any[]) => {
+      if (!canEdit) return;
+      setCanvasMolecules(molecules);
 
-    const current = localStorage.getItem('current-project');
-    if (current) {
-      try {
-        const proj = JSON.parse(current);
-        fetch(`${REGISTRY_API}/projects/${proj.id}/`, {
-          method: 'PATCH',
-          credentials: 'include',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ state: { workflow_canvas: molecules } })
-        }).catch(() => {});
-      } catch {
-        /* ignore */
+      const current = localStorage.getItem('current-project');
+      if (current) {
+        try {
+          const proj = JSON.parse(current);
+          fetch(`${REGISTRY_API}/projects/${proj.id}/`, {
+            method: 'PATCH',
+            credentials: 'include',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ state: { workflow_canvas: molecules } })
+          }).catch(() => {});
+        } catch {
+          /* ignore */
+        }
       }
-    }
-  }, []);
+    },
+    [canEdit]
+  );
 
   const renderWorkflow = async () => {
+    if (!canEdit) return;
     console.log('Rendering workflow with molecules:', canvasMolecules);
 
     // Ensure every molecule is part of a flow (has an incoming or outgoing connection)
@@ -195,17 +204,34 @@ const WorkflowMode = () => {
           </div>
           
           <div className="flex items-center space-x-4">
-            <Button variant="outline" size="sm" className="font-light border-gray-300 hover:border-gray-400">
+            <Button
+              variant="outline"
+              size="sm"
+              className={`font-light border-gray-300 ${
+                canEdit ? 'hover:border-gray-400' : 'opacity-50 cursor-not-allowed'
+              }`}
+              disabled={!canEdit}
+            >
               <Save className="w-4 h-4 mr-2" />
               Save
             </Button>
-            <Button variant="outline" size="sm" className="font-light border-gray-300 hover:border-gray-400">
+            <Button
+              variant="outline"
+              size="sm"
+              className={`font-light border-gray-300 ${
+                canEdit ? 'hover:border-gray-400' : 'opacity-50 cursor-not-allowed'
+              }`}
+              disabled={!canEdit}
+            >
               <Share2 className="w-4 h-4 mr-2" />
               Share
             </Button>
-            <Button 
-              className="bg-gray-900 hover:bg-gray-800 text-white font-light px-6"
-              onClick={renderWorkflow}
+            <Button
+              className={`bg-gray-900 text-white font-light px-6 ${
+                canEdit ? 'hover:bg-gray-800' : 'opacity-50 cursor-not-allowed'
+              }`}
+              onClick={canEdit ? renderWorkflow : undefined}
+              disabled={!canEdit}
             >
               <Play className="w-4 h-4 mr-2" />
               Render Workflow
@@ -216,16 +242,20 @@ const WorkflowMode = () => {
 
       <div className="flex-1 flex">
         {/* Workflow Canvas */}
-        <div className="flex-1 p-8">
-          <WorkflowCanvas 
-            onMoleculeSelect={handleMoleculeSelect}
-            onCanvasMoleculesUpdate={handleCanvasMoleculesUpdate}
-          />
+        <div className={`flex-1 p-8 ${canEdit ? '' : 'cursor-not-allowed'}`}>
+          <div className={canEdit ? '' : 'pointer-events-none'}>
+            <WorkflowCanvas
+              onMoleculeSelect={handleMoleculeSelect}
+              onCanvasMoleculesUpdate={handleCanvasMoleculesUpdate}
+            />
+          </div>
         </div>
 
         {/* Molecule List */}
-        <div className="w-80 bg-white border-l border-gray-200">
-          <MoleculeList />
+        <div className={`w-80 bg-white border-l border-gray-200 ${canEdit ? '' : 'cursor-not-allowed'}`}>
+          <div className={canEdit ? '' : 'pointer-events-none'}>
+            <MoleculeList />
+          </div>
         </div>
       </div>
     </div>

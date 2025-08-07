@@ -1,6 +1,10 @@
 
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { ACCOUNTS_API } from '@/lib/api';
+import {
+  hasPermission as checkPermission,
+  AppPermission,
+} from '@/lib/permissions';
 
 interface UserInfo {
   id: number;
@@ -24,6 +28,7 @@ interface AuthContextType {
   profile: ProfileInfo | null;
   login: (username: string, password: string) => Promise<boolean>;
   logout: () => Promise<void>;
+  hasPermission: (permission: AppPermission) => boolean;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -36,6 +41,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   );
   const [user, setUser] = useState<UserInfo | null>(null);
   const [profile, setProfile] = useState<ProfileInfo | null>(null);
+
+  const hasPermission = (permission: AppPermission) =>
+    checkPermission(user?.role, permission);
 
   const loadProfile = async () => {
     try {
@@ -149,7 +157,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   return (
-    <AuthContext.Provider value={{ isAuthenticated, user, profile, login, logout }}>
+    <AuthContext.Provider
+      value={{ isAuthenticated, user, profile, login, logout, hasPermission }}
+    >
       {children}
     </AuthContext.Provider>
   );
