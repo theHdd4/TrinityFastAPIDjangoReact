@@ -186,9 +186,18 @@ const Users = () => {
 
   const getRole = (u: User) => {
     const r = u.role?.toLowerCase();
-    if (u.is_staff || r === 'admin') return 'Admin';
-    if (r === 'editor') return 'Editor';
-    return 'Viewer';
+    switch (r) {
+      case 'admin':
+      case 'super_admin':
+        return 'Admin';
+      case 'editor':
+        return 'Editor';
+      case 'viewer':
+      case 'analyst':
+        return 'Viewer';
+      default:
+        return u.is_staff ? 'Admin' : 'Viewer';
+    }
   };
   const getStatus = (_u: User) => 'Active';
 
