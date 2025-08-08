@@ -415,10 +415,10 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
           {skuRows.length > 0 && (
             <Card className="border-0 shadow-xl bg-white/80 backdrop-blur-sm overflow-hidden">
               <div className="bg-gradient-to-r from-purple-500 to-purple-600 p-0.5">
-                <div className="bg-white rounded-sm">
-                  <Table maxHeight="max-h-96">
-                    <TableHeader>
-                      <TableRow className="sticky top-0 bg-white z-10">
+                <div className="bg-white rounded-sm overflow-x-auto">
+                  <Table className="min-w-max" maxHeight="max-h-96">
+                    <TableHeader className="sticky top-0 z-10 bg-white">
+                      <TableRow>
                         <TableHead>SR NO.</TableHead>
                         {dimensionCols.map((d) => (
                           <TableHead key={d}>{d}</TableHead>
@@ -468,10 +468,10 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
                                           </DialogContent>
                                         </Dialog>
                                       </div>
-                                      <div className="p-6 flex-1 flex items-end justify-center overflow-hidden">
+                                      <div className="p-6 flex-1 flex items-end justify-center">
                                         <D3LineChart
                                           data={statDataMap[activeMetric]?.timeseries || []}
-                                          height={280}
+                                          height={320}
                                           xLabel={settings.xAxis || "Date"}
                                           yLabel={activeMetric || "Value"}
                                         />
