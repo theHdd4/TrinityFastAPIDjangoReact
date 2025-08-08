@@ -24,10 +24,18 @@ export function useResponsiveChartLayout(
   React.useEffect(() => {
     function calculateLayout() {
       const width = containerRef.current?.offsetWidth ?? window.innerWidth;
-      let columns = 1;
-      if (width >= 1280) {
+
+      // For one chart use a single column, for two charts always use two columns
+      // regardless of available width. For three or more charts fall back to a
+      // width-based decision between two and three columns.
+      let columns: 1 | 2 | 3 = 1;
+      if (chartCount === 1) {
+        columns = 1;
+      } else if (chartCount === 2) {
+        columns = 2;
+      } else if (width >= 1280) {
         columns = 3;
-      } else if (width >= 768) {
+      } else {
         columns = 2;
       }
 
