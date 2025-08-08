@@ -24,7 +24,9 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { ACCOUNTS_API, TENANTS_API } from '@/lib/api';
+import { ACCOUNTS_API, TENANTS_API, REGISTRY_API } from '@/lib/api';
+import { useAuth } from '@/contexts/AuthContext';
+import NotFound from './NotFound';
 
 interface User {
   id: number;
@@ -37,19 +39,39 @@ interface User {
   // optional custom fields
   phone?: string;
   department?: string;
+  role?: string;
 }
 
 const API_BASE = ACCOUNTS_API;
 
+interface App {
+  id: number;
+  name: string;
+}
+
 const Users = () => {
+  const { user } = useAuth();
+  const role = user?.role?.toLowerCase();
+  const hasAccess =
+    role === 'admin' ||
+    role === 'super_admin' ||
+    user?.is_staff ||
+    user?.is_superuser;
   const [users, setUsers] = useState<User[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedRole, setSelectedRole] = useState<string>('All');
   const [selectedStatus, setSelectedStatus] = useState<string>('All');
 
   const [showAddForm, setShowAddForm] = useState(false);
-  const [form, setForm] = useState({ username: '', password: '', email: '' });
+  const [form, setForm] = useState({
+    username: '',
+    password: '',
+    email: '',
+    allowed_apps: [] as number[],
+  });
   const [allowedDomains, setAllowedDomains] = useState<string[]>([]);
+  const [apps, setApps] = useState<App[]>([]);
+  const [tenantAppIds, setTenantAppIds] = useState<number[]>([]);
 
   const loadUsers = async () => {
     try {
@@ -75,13 +97,52 @@ const Users = () => {
     }
   };
 
+  const loadApps = async () => {
+    try {
+      const res = await fetch(`${REGISTRY_API}/apps/`, { credentials: 'include' });
+      if (res.ok) {
+        const data = await res.json();
+        setApps(data);
+      }
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const loadTenantApps = async () => {
+    try {
+      const res = await fetch(`${TENANTS_API}/tenants/`, { credentials: 'include' });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.length > 0) {
+          setTenantAppIds(data[0].allowed_apps || []);
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+  };
+
   useEffect(() => {
+    if (!hasAccess) return;
     loadUsers();
     loadDomains();
-  }, []);
+    loadApps();
+    loadTenantApps();
+  }, [hasAccess]);
 
-  const handleFormChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setForm({ ...form, [e.target.name]: e.target.value });
+  const handleFormChange = (
+    e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>,
+  ) => {
+    const { name, value, options } = e.target as HTMLSelectElement;
+    if (name === 'allowed_apps') {
+      const selected = Array.from(options)
+        .filter((o) => o.selected)
+        .map((o) => Number(o.value));
+      setForm({ ...form, allowed_apps: selected });
+    } else {
+      setForm({ ...form, [name]: value });
+    }
   };
 
   const handleAddUser = async (e: React.FormEvent) => {
@@ -99,7 +160,7 @@ const Users = () => {
         body: JSON.stringify(form),
       });
       if (res.ok) {
-        setForm({ username: '', password: '', email: '' });
+        setForm({ username: '', password: '', email: '', allowed_apps: [] });
         setShowAddForm(false);
         await loadUsers();
       }
@@ -123,17 +184,31 @@ const Users = () => {
     }
   };
 
-  const getRole = (u: User) => (u.is_staff ? 'Admin' : 'Analyst');
+  const getRole = (u: User) => {
+    const r = u.role?.toLowerCase();
+    switch (r) {
+      case 'admin':
+      case 'super_admin':
+        return 'Admin';
+      case 'editor':
+        return 'Editor';
+      case 'viewer':
+      case 'analyst':
+        return 'Viewer';
+      default:
+        return u.is_staff ? 'Admin' : 'Viewer';
+    }
+  };
   const getStatus = (_u: User) => 'Active';
 
   const getRoleColor = (role: string) => {
     switch (role) {
       case 'Admin':
         return 'bg-red-100 text-red-800 border-red-200';
-      case 'Analyst':
-        return 'bg-blue-100 text-blue-800 border-blue-200';
+      case 'Editor':
+        return 'bg-[#fec107] text-black border-black';
       case 'Viewer':
-        return 'bg-gray-100 text-gray-800 border-gray-200';
+        return 'bg-green-100 text-green-800 border-green-200';
       default:
         return 'bg-gray-100 text-gray-800 border-gray-200';
     }
@@ -155,6 +230,10 @@ const Users = () => {
     const matchesStatus = selectedStatus === 'All' || status === selectedStatus;
     return matchesSearch && matchesRole && matchesStatus;
   });
+
+  if (!hasAccess) {
+    return <NotFound />;
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-gray-50">
@@ -205,7 +284,7 @@ const Users = () => {
                   onChange={handleFormChange}
                   className="border-gray-200"
                 />
-                <Input
+              <Input
                   name="email"
                   type="email"
                   placeholder="Email"
@@ -213,6 +292,27 @@ const Users = () => {
                   onChange={handleFormChange}
                   className="border-gray-200"
                 />
+                <div className="md:col-span-3 space-y-2">
+                  <label htmlFor="allowed_apps" className="text-sm font-medium text-gray-700">
+                    Allowed Apps
+                  </label>
+                  <select
+                    id="allowed_apps"
+                    name="allowed_apps"
+                    multiple
+                    value={form.allowed_apps.map(String)}
+                    onChange={handleFormChange}
+                    className="w-full border border-gray-200 rounded-md px-3 py-2"
+                  >
+                    {apps
+                      .filter((a) => tenantAppIds.includes(a.id))
+                      .map((a) => (
+                        <option key={a.id} value={a.id}>
+                          {a.name}
+                        </option>
+                      ))}
+                  </select>
+                </div>
                 <div className="md:col-span-3 flex justify-end">
                   <Button type="submit" className="bg-gradient-to-r from-green-500 to-emerald-600">
                     <Save className="w-4 h-4 mr-2" /> Save User
@@ -241,7 +341,7 @@ const Users = () => {
               >
                 <option value="All">All Roles</option>
                 <option value="Admin">Admin</option>
-                <option value="Analyst">Analyst</option>
+                <option value="Editor">Editor</option>
                 <option value="Viewer">Viewer</option>
               </select>
 

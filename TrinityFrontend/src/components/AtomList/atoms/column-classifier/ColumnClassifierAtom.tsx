@@ -2,7 +2,8 @@ import React from 'react';
 import { useToast } from '@/hooks/use-toast';
 
 import ColumnClassifierCanvas from './components/ColumnClassifierCanvas';
-import ColumnClassifierDimensionConfig from './components/ColumnClassifierDimensionConfig';
+import ColumnClassifierDimensionMapping from './components/ColumnClassifierDimensionMapping';
+import { Button } from '@/components/ui/button';
 import {
   useLaboratoryStore,
   DEFAULT_COLUMN_CLASSIFIER_SETTINGS,
@@ -45,6 +46,7 @@ const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
         updateSettings(atomId, {
           data: { files: [updatedFile], activeFileIndex: 0 },
           dimensions: Object.keys(mapping),
+          enableDimensionMapping: true,
         });
       }
     };
@@ -74,6 +76,8 @@ const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
       updateSettings(atomId, {
         data: { files: [updatedFile], activeFileIndex: 0 },
         dimensions: Object.keys(cfg.dimensions || {}),
+        enableDimensionMapping: Object.keys(cfg.dimensions || {}).length > 0,
+        filterColumnViewUnique: true,
       });
     } catch (err) {
       console.warn('failed to apply stored config', err);
@@ -132,6 +136,37 @@ const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
     updateSettings(atomId, { data: updated });
   };
 
+  const handleRemoveCustomDimension = (dimensionName: string) => {
+    const dims = (settings.dimensions || []).filter(d => d !== dimensionName);
+    const updatedFiles = classifierData.files.map((file, index) => {
+      if (index !== classifierData.activeFileIndex) return file;
+      const updatedCustom = { ...file.customDimensions };
+      const removedCols = updatedCustom[dimensionName] || [];
+      delete updatedCustom[dimensionName];
+      updatedCustom['unattributed'] = Array.from(
+        new Set([...(updatedCustom['unattributed'] || []), ...removedCols])
+      );
+      return { ...file, customDimensions: updatedCustom };
+    });
+    updateSettings(atomId, {
+      dimensions: dims,
+      data: { ...classifierData, files: updatedFiles },
+    });
+  };
+
+  const handleDimensionUpdate = (dimensions: Record<string, string[]>) => {
+    const updatedFiles = classifierData.files.map((file, index) =>
+      index === classifierData.activeFileIndex
+        ? { ...file, customDimensions: dimensions }
+        : file
+    );
+    updateSettings(atomId, { data: { ...classifierData, files: updatedFiles } });
+  };
+
+
+  const handleFilterToggle = (val: boolean) => {
+    updateSettings(atomId, { filterColumnViewUnique: val });
+  };
 
 
   const setActiveFile = (fileIndex: number) => {
@@ -210,6 +245,7 @@ const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
   };
 
   const saveDisabled =
+    !settings.enableDimensionMapping ||
     !classifierData.files.length ||
     Object.keys(
       classifierData.files[classifierData.activeFileIndex]?.customDimensions || {}
@@ -220,23 +256,36 @@ const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
 
   return (
     <div className="w-full h-full bg-white flex flex-col">
-      <div className="flex flex-1">
-        <div className="w-full p-4 overflow-y-auto">
-          <ColumnClassifierCanvas
-            data={classifierData}
-            onColumnMove={handleColumnMove}
-            onActiveFileChange={setActiveFile}
-          />
+        <div className="flex flex-1">
+          <div className="w-full p-4">
+            <ColumnClassifierCanvas
+              data={classifierData}
+              onColumnMove={handleColumnMove}
+              onActiveFileChange={setActiveFile}
+              showColumnView={settings.enableColumnView ?? true}
+              filterUnique={settings.filterColumnViewUnique || false}
+              onFilterToggle={handleFilterToggle}
+            />
+          </div>
         </div>
-      </div>
-      <div className="border-t p-4 overflow-y-auto">
-        <ColumnClassifierDimensionConfig
-          data={classifierData}
-          onColumnMove={handleColumnMove}
-          onSave={saveAssignments}
-          saveDisabled={saveDisabled}
-        />
-      </div>
+      {settings.enableDimensionMapping && (
+        <div className="border-t p-4 overflow-y-auto">
+          <ColumnClassifierDimensionMapping
+            customDimensions={
+              classifierData.files[classifierData.activeFileIndex]?.customDimensions || {}
+            }
+            onRemoveDimension={handleRemoveCustomDimension}
+            onDimensionUpdate={handleDimensionUpdate}
+          />
+          <Button
+            disabled={saveDisabled}
+            onClick={saveAssignments}
+            className="w-full h-12 text-sm font-semibold bg-gradient-to-r from-gray-800 to-gray-900 hover:from-gray-900 hover:to-black mt-4"
+          >
+            Save Configuration
+          </Button>
+        </div>
+      )}
     </div>
   );
 };

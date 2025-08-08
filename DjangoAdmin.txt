@@ -1,0 +1,76 @@
+Trinity Administrator Guide
+==========================
+
+1. **Start the backend services**
+   From the repository root run:
+   
+   ```bash
+   ./scripts/start_backend.sh
+   ```
+
+   This builds the containers and exposes the Django service at `http://<HOST_IP>:8000/`.
+   Set `HOST_IP` in `TrinityBackendDjango/.env` to the address of your host machine.
+
+   If you are running locally outside of Docker, install the Python
+   dependencies first:
+
+   ```bash
+   pip install -r TrinityBackendDjango/requirements.txt
+   ```
+
+2. **Create the initial tenant and users**
+   Once the containers are running execute:
+
+   ```bash
+   docker compose exec web python create_tenant.py
+   ```
+
+   The script creates the default tenant (`Quant_Matrix_AI`) and seeds login accounts.
+   You will get an admin user called `admin_user` with password `admin` and a
+   super admin `neo` with password `neo_the_only_one` along with role‑based users:
+
+   - `editor_user` / `editor` (client editor)
+   - `viewer_user` / `viewer` (client viewer)
+
+3. **Log in to the Trinity Administrator**
+   Visit `http://<HOST_IP>:8000/admin/` in your browser and sign in with one
+   of the credentials above. Use `neo` for full super admin access. The
+   `admin_user` account demonstrates the Admin role while the other accounts
+   show Client Editor and Client Viewer permissions. The default domain is
+   `quantmatrix.ai`.
+
+   If you hit a *500 Internal Server Error* on the login page make sure the
+   database is running and that migrations have been applied:
+
+   ```bash
+   docker compose exec web python manage.py migrate
+   ```
+
+   After migrating collect static files so CSS/JS assets load correctly:
+
+   ```bash
+   docker compose exec web python manage.py collectstatic --noinput
+   ```
+
+   Finally import the available FastAPI atoms so they appear under
+   **Atoms → Atom** in the admin interface:
+
+   ```bash
+   docker compose exec web python manage.py sync_features
+   ```
+
+4. **Managing tenants**
+   The admin interface exposes models for Users, Roles and Tenants. When adding
+   extra domains be sure to update `ADDITIONAL_DOMAINS` and `CSRF_TRUSTED_ORIGINS`
+   in `TrinityBackendDjango/.env` so the login session is accepted from those hosts.
+
+5. **Static Files**
+   If the admin pages show missing CSS or JavaScript files, run:
+
+   ```bash
+   docker compose exec web python manage.py collectstatic --noinput
+   ```
+
+   This gathers all static assets into `staticfiles/` so they can be served by
+   the built-in WhiteNoise middleware.
+

@@ -6,6 +6,10 @@ class UserSerializer(serializers.ModelSerializer):
     """Serializer for the custom User model with password handling."""
 
     password = serializers.CharField(write_only=True, required=False)
+    allowed_apps = serializers.ListField(
+        child=serializers.IntegerField(), write_only=True, required=False, default=list
+    )
+    role = serializers.SerializerMethodField()
 
     class Meta:
         model = User
@@ -19,12 +23,17 @@ class UserSerializer(serializers.ModelSerializer):
             "mfa_enabled",
             "preferences",
             "is_staff",
+            "allowed_apps",
+            "role",
         ]
-        read_only_fields = ["id", "is_staff"]
+        read_only_fields = ["id", "is_staff", "role"]
 
     def create(self, validated_data):
         password = validated_data.pop("password", None)
+        allowed_apps = validated_data.pop("allowed_apps", None)
         user = User(**validated_data)
+        if allowed_apps is not None:
+            user._allowed_apps = allowed_apps
         if password:
             user.set_password(password)
         else:
@@ -40,6 +49,19 @@ class UserSerializer(serializers.ModelSerializer):
             instance.set_password(password)
         instance.save()
         return instance
+
+    def get_role(self, obj):
+        """Return the first assigned role for the user if available."""
+        try:
+            from apps.roles.models import UserRole
+
+            role_obj = UserRole.objects.filter(user=obj).first()
+            if role_obj:
+                return role_obj.role
+        except Exception:
+            # Roles app may not be migrated yet; ignore errors
+            pass
+        return None
 
 
 class UserProfileSerializer(serializers.ModelSerializer):

@@ -23,6 +23,7 @@ import FeatureOverviewAtom from '@/components/AtomList/atoms/feature-overview/Fe
 import ConcatAtom from '@/components/AtomList/atoms/concat/ConcatAtom';
 import MergeAtom from '@/components/AtomList/atoms/merge/MergeAtom';
 import ColumnClassifierAtom from '@/components/AtomList/atoms/column-classifier/ColumnClassifierAtom';
+import DataFrameOperationsAtom from '@/components/AtomList/atoms/dataframe-operations/DataFrameOperationsAtom';
 import ScopeSelectorAtom from '@/components/AtomList/atoms/scope-selector/ScopeSelectorAtom';
 import CreateColumnAtom from '@/components/AtomList/atoms/createcolumn/CreateColumnAtom';
 import GroupByAtom from '@/components/AtomList/atoms/groupby-wtg-avg/GroupByAtom';
@@ -35,6 +36,7 @@ import {
   DEFAULT_TEXTBOX_SETTINGS,
   DEFAULT_DATAUPLOAD_SETTINGS,
   DEFAULT_FEATURE_OVERVIEW_SETTINGS,
+  DEFAULT_DATAFRAME_OPERATIONS_SETTINGS,
   DataUploadSettings,
   ColumnClassifierColumn,
 } from '../../store/laboratoryStore';
@@ -103,7 +105,7 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
   };
 
   const prefetchDataframe = async (name: string) => {
-    if (!name) return;
+    if (!name || !/\.[^/]+$/.test(name.trim())) return;
     try {
       console.log('✈️ fetching flight table', name);
       const fr = await fetch(
@@ -211,9 +213,15 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
       const res = await fetch(`${VALIDATE_API}/list_saved_dataframes${query}`);
       if (res.ok) {
         const data = await res.json();
-        const file = Array.isArray(data.files) ? data.files[0] : null;
-        if (file) {
-          console.log('✔️ defaulting to first saved dataframe', file.object_name);
+        const files = Array.isArray(data.files) ? data.files : [];
+        const validFiles = files.filter(
+          (f: any) =>
+            typeof f.object_name === 'string' &&
+            /\.[^/]+$/.test(f.object_name.trim())
+        );
+        const file = validFiles[validFiles.length - 1];
+        if (file && file.object_name) {
+          console.log('✔️ defaulting to latest saved dataframe', file.object_name);
           await prefetchDataframe(file.object_name);
           const cols = await fetchColumnSummary(file.object_name);
           return { csv: file.object_name, display: file.csv_name, ...(cols || {}) };
@@ -234,7 +242,12 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
     }
     console.log('ℹ️ prefill data source details', prev);
     await prefetchDataframe(prev.csv);
-    const mapping = await fetchDimensionMapping();
+    const rawMapping = await fetchDimensionMapping();
+    const mapping = Object.fromEntries(
+      Object.entries(rawMapping).filter(
+        ([key]) => key.toLowerCase() !== 'unattributed',
+      ),
+    );
     console.log('✅ pre-filling feature overview with', prev.csv);
     const summary = Array.isArray(prev.summary) ? prev.summary : [];
     const identifiers = Array.isArray(prev.identifiers) ? prev.identifiers : [];
@@ -680,6 +693,8 @@ const handleAddDragLeave = (e: React.DragEvent) => {
           ? { ...DEFAULT_DATAUPLOAD_SETTINGS }
           : info.id === 'feature-overview'
           ? { ...DEFAULT_FEATURE_OVERVIEW_SETTINGS }
+          : info.id === 'dataframe-operations'
+          ? { ...DEFAULT_DATAFRAME_OPERATIONS_SETTINGS }
           : undefined,
     };
     setLayoutCards(
@@ -1148,6 +1163,8 @@ const handleAddDragLeave = (e: React.DragEvent) => {
                         <MergeAtom atomId={atom.id} />
                       ) : atom.atomId === 'column-classifier' ? (
                         <ColumnClassifierAtom atomId={atom.id} />
+                      ) : atom.atomId === 'dataframe-operations' ? (
+                        <DataFrameOperationsAtom atomId={atom.id} />
                       ) : atom.atomId === 'create-column' ? (
                         <CreateColumnAtom atomId={atom.id} />
                       ) : atom.atomId === 'groupby-wtg-avg' ? (

@@ -1,12 +1,14 @@
 """Redis based environment variable store with namespacing."""
 
 import os
+import json
 from typing import Dict, Optional
 
 from django.db import transaction
 from django.utils import timezone
 
 from apps.accounts.models import UserEnvironmentVariable
+from django.apps import apps
 
 from .redis_client import redis_client
 
@@ -77,8 +79,26 @@ def _fetch_from_db(
             qs = qs.filter(app_name=app_name)
     else:
         return {}
-
-    return {o.key: o.value for o in qs}
+    env = {o.key: o.value for o in qs}
+    if env:
+        return env
+    if client_name and project_name:
+        try:
+            model = apps.get_model("registry", "RegistryEnvironment")
+            obj = model.objects.filter(
+                client_name=client_name,
+                app_name=app_name,
+                project_name=project_name,
+            ).first()
+            if obj and isinstance(obj.envvars, dict):
+                env = obj.envvars.copy()
+                env.setdefault("CLIENT_NAME", client_name)
+                env.setdefault("APP_NAME", app_name)
+                env.setdefault("PROJECT_NAME", project_name)
+                return env
+        except Exception:
+            pass
+    return env
 
 
 def get_env_vars(
@@ -155,6 +175,27 @@ def set_env_var(
     redis_client.set(full_key, value, ex=TTL)
     redis_client.sadd(set_key, full_key)
     redis_client.expire(set_key, TTL)
+    try:
+        model = apps.get_model("registry", "RegistryEnvironment")
+        if client_name and project_name:
+            reg_obj, _ = model.objects.get_or_create(
+                client_name=client_name,
+                app_name=app_name,
+                project_name=project_name,
+            )
+            if key == "identifiers":
+                reg_obj.identifiers = json.loads(value) if value else []
+            elif key == "measures":
+                reg_obj.measures = json.loads(value) if value else []
+            elif key == "dimensions":
+                reg_obj.dimensions = json.loads(value) if value else {}
+            else:
+                env = reg_obj.envvars or {}
+                env[key] = value
+                reg_obj.envvars = env
+            reg_obj.save()
+    except Exception:
+        pass
     return obj
 
 

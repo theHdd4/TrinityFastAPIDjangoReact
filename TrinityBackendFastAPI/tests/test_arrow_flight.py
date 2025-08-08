@@ -1,7 +1,8 @@
 import os
 import sys
 import pathlib
-import pandas as pd
+import pytest
+pd = pytest.importorskip("pandas")
 import pyarrow.flight as flight
 import threading
 import json
@@ -393,28 +394,59 @@ def test_save_dataframe_skip_existing(monkeypatch):
 def test_list_saved_dataframes_env(monkeypatch):
     routes = load_routes()
 
-    class DummyMinio:
-        def __init__(self):
-            self.objects = {
-                "pref/a.arrow": b"",
-                "pref/b.arrow": b"",
-            }
+    # Environment variables already contain the renamed values while Redis
+    # still has the old names cached for the same IDs.
+    os.environ.update(
+        {
+            "CLIENT_ID": "1",
+            "APP_ID": "2",
+            "PROJECT_ID": "3",
+            "CLIENT_NAME": "client",
+            "APP_NAME": "app",
+            "PROJECT_NAME": "proj",
+        }
+    )
 
+    class DummyRedis:
+        def __init__(self, mapping):
+            self.mapping = mapping
+
+        def get(self, key):
+            return self.mapping.get(key)
+
+        def set(self, key, value):
+            self.mapping[key] = value
+
+    # Provide a dummy Redis client; ``get_object_prefix`` now relies solely on
+    # ``get_env_vars`` to resolve the current environment and no longer reads
+    # per-ID cache entries.
+    monkeypatch.setattr(routes, "redis_client", DummyRedis({}))
+
+    async def fake_get_env_vars(client_id, app_id, project_id, *, client_name, app_name, project_name, **k):
+        # Simulate a DB lookup that simply echoes back the provided names.
+        return {
+            "CLIENT_NAME": client_name,
+            "APP_NAME": app_name,
+            "PROJECT_NAME": project_name,
+        }
+
+    monkeypatch.setattr(routes, "get_env_vars", fake_get_env_vars)
+
+    class DummyMinio:
         def list_objects(self, bucket, prefix="", recursive=False):
-            for name in self.objects:
-                if name.startswith(prefix):
-                    yield types.SimpleNamespace(object_name=name)
+            # Yield objects that live under the resolved prefix
+            objects = [
+                types.SimpleNamespace(object_name=f"{prefix}a.arrow"),
+                types.SimpleNamespace(object_name=f"{prefix}b.arrow"),
+            ]
+            for obj in objects:
+                yield obj
 
         def stat_object(self, bucket, name):
             return types.SimpleNamespace(last_modified=0)
 
     monkeypatch.setattr(routes, "minio_client", DummyMinio())
     monkeypatch.setattr(routes, "MINIO_BUCKET", "bucket")
-
-    async def dummy_prefix(*a, **k):
-        return "pref/"
-
-    monkeypatch.setattr(routes, "get_object_prefix", dummy_prefix)
 
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
@@ -427,7 +459,12 @@ def test_list_saved_dataframes_env(monkeypatch):
 
     assert resp.status_code == 200
     data = resp.json()
+    assert data["bucket"] == "bucket"
+    assert data["prefix"] == "client/app/proj/"
     assert len(data["files"]) == 2
     for f in data["files"]:
         assert "arrow_name" in f
+    assert data["environment"]["CLIENT_NAME"] == "client"
+    assert data["environment"]["APP_NAME"] == "app"
+    assert data["environment"]["PROJECT_NAME"] == "proj"
 

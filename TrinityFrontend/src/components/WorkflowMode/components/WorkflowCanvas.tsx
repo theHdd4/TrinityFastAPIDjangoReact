@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { safeStringify } from '@/utils/safeStringify';
+import { useToast } from '@/hooks/use-toast';
 import ReactFlow, {
   Background,
   Controls,
@@ -35,6 +36,7 @@ const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
   const [edges, setEdges] = useState<Edge[]>([]);
   const reactFlowWrapper = useRef<HTMLDivElement | null>(null);
   const [reactFlowInstance, setReactFlowInstance] = useState<any>(null);
+  const { toast } = useToast();
 
   const onNodesChange = useCallback(
     (changes: NodeChange[]) => setNodes(ns => applyNodeChanges(changes, ns)),
@@ -165,6 +167,8 @@ const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
 
         setNodes(loadedNodes);
         setEdges(loadedEdges);
+        console.log('Successfully Loaded Existing Project State');
+        toast({ title: 'Successfully Loaded Existing Project State' });
       } catch (e) {
         console.error('Failed to parse workflow layout', e);
       }
@@ -193,7 +197,7 @@ const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
           .catch(() => {});
       }
     }
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!onCanvasMoleculesUpdate) return;

@@ -1,9 +1,11 @@
-from rest_framework import viewsets, permissions
+from rest_framework import viewsets, permissions, status
 from rest_framework.response import Response
+from django.utils.text import slugify
 import os
 from apps.accounts.views import CsrfExemptSessionAuthentication
 from apps.accounts.utils import save_env_var, get_env_dict, load_env_vars
 from .models import App, Project, Session, LaboratoryAction, ArrowDataset
+from .atom_config import save_atom_list_configuration, load_atom_list_configuration
 from .serializers import (
     AppSerializer,
     ProjectSerializer,
@@ -22,6 +24,25 @@ class AppViewSet(viewsets.ModelViewSet):
     serializer_class = AppSerializer
     permission_classes = [permissions.IsAuthenticated]
     authentication_classes = [CsrfExemptSessionAuthentication]
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        user = self.request.user
+        if not user.is_staff:
+            try:
+                from apps.roles.models import UserRole
+
+                roles = UserRole.objects.filter(user=user)
+                allowed = set()
+                for role in roles:
+                    allowed.update(role.allowed_apps or [])
+                if allowed:
+                    qs = qs.filter(id__in=allowed)
+                else:
+                    qs = qs.none()
+            except Exception:
+                qs = qs.none()
+        return qs
 
     def get_permissions(self):
         if self.action in ("create", "update", "partial_update", "destroy"):
@@ -59,11 +80,21 @@ class ProjectViewSet(viewsets.ModelViewSet):
         user = self.request.user
         qs = self.queryset
 
-        # Restrict to projects owned by the user unless admin
         if not user.is_staff:
-            qs = qs.filter(owner=user)
+            try:
+                from apps.roles.models import UserRole
 
-        # Optional filtering by app via query parameter
+                roles = UserRole.objects.filter(user=user)
+                allowed = set()
+                for role in roles:
+                    allowed.update(role.allowed_apps or [])
+                if allowed:
+                    qs = qs.filter(app_id__in=allowed)
+                else:
+                    return Project.objects.none()
+            except Exception:
+                return Project.objects.none()
+
         app_param = self.request.query_params.get("app")
         if app_param:
             if app_param.isdigit():
@@ -73,8 +104,58 @@ class ProjectViewSet(viewsets.ModelViewSet):
 
         return qs
 
+    def _can_edit(self, user):
+        perms = [
+            "permissions.workflow_edit",
+            "permissions.laboratory_edit",
+            "permissions.exhibition_edit",
+        ]
+        return user.is_staff or any(user.has_perm(p) for p in perms)
+
+    def update(self, request, *args, **kwargs):
+        if not self._can_edit(request.user):
+            return Response({"detail": "Permission denied."}, status=status.HTTP_403_FORBIDDEN)
+        return super().update(request, *args, **kwargs)
+
+    def partial_update(self, request, *args, **kwargs):
+        if not self._can_edit(request.user):
+            return Response({"detail": "Permission denied."}, status=status.HTTP_403_FORBIDDEN)
+        return super().partial_update(request, *args, **kwargs)
+
+    def destroy(self, request, *args, **kwargs):
+        if not self._can_edit(request.user):
+            return Response({"detail": "Permission denied."}, status=status.HTTP_403_FORBIDDEN)
+        return super().destroy(request, *args, **kwargs)
+
+    def create(self, request, *args, **kwargs):
+        data = request.data.copy()
+        app = data.get("app")
+        base_name = data.get("name", "")
+        if app and base_name:
+            name = base_name
+            counter = 1
+            while Project.objects.filter(app_id=app, name=name).exists():
+                name = f"{base_name} {counter}"
+                counter += 1
+            data["name"] = name
+
+        serializer = self.get_serializer(data=data)
+        serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+        headers = self.get_success_headers(serializer.data)
+        return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
+
     def perform_create(self, serializer):
-        serializer.save(owner=self.request.user)
+        user = self.request.user
+        name = serializer.validated_data.get("name")
+        slug = serializer.validated_data.get("slug") or slugify(name)
+        slug_val = slug
+        counter = 1
+        while Project.objects.filter(owner=user, slug=slug_val).exists():
+            slug_val = f"{slug}-{counter}"
+            counter += 1
+
+        serializer.save(owner=user, slug=slug_val)
 
     def retrieve(self, request, *args, **kwargs):
         load_env_vars(request.user)
@@ -94,6 +175,19 @@ class ProjectViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(project_obj)
         data = serializer.data
         data["environment"] = get_env_dict(request.user)
+
+        state = data.get("state") or {}
+        for field, mode in [
+            ("laboratory_config", "lab"),
+            ("workflow_config", "workflow"),
+            ("exhibition_config", "exhibition"),
+        ]:
+            cfg = load_atom_list_configuration(project_obj, mode)
+            if cfg:
+                state[field] = cfg
+        if state:
+            data["state"] = state
+
         return Response(data)
 
     def perform_update(self, serializer):
@@ -112,6 +206,18 @@ class ProjectViewSet(viewsets.ModelViewSet):
             save_env_var(self.request.user, "PROJECT_NAME", os.environ["PROJECT_NAME"])
             save_env_var(self.request.user, "PROJECT_ID", os.environ["PROJECT_ID"])
             print("Current env vars after project rename", get_env_dict(self.request.user))
+
+        state_data = self.request.data.get("state", {})
+        if isinstance(state_data, dict):
+            if "laboratory_config" in state_data:
+                cards = state_data["laboratory_config"].get("cards", [])
+                save_atom_list_configuration(project, "lab", cards)
+            if "workflow_config" in state_data:
+                cards = state_data["workflow_config"].get("cards", [])
+                save_atom_list_configuration(project, "workflow", cards)
+            if "exhibition_config" in state_data:
+                cards = state_data["exhibition_config"].get("cards", [])
+                save_atom_list_configuration(project, "exhibition", cards)
 
 
 class SessionViewSet(viewsets.ModelViewSet):
