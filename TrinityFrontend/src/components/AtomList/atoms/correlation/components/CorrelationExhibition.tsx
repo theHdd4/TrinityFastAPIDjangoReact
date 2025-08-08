@@ -273,52 +273,52 @@ const CorrelationExhibition: React.FC<CorrelationExhibitionProps> = ({ data }) =
         </CardContent>
       </Card>
 
-      {/* Enhanced Interpretation Guide */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <Card className="shadow-lg border-0 bg-gradient-to-br from-card to-card/50">
-          <CardHeader>
-            <CardTitle className="text-lg">Correlation Strength Guide</CardTitle>
+      {/* Ultra Compact Interpretation Guide */}
+      <div className="grid grid-cols-1 gap-1.5">
+        <Card className="shadow-sm border-0 bg-gradient-to-br from-card to-card/50">
+          <CardHeader className="pb-1">
+            <CardTitle className="text-xs">Strength Guide</CardTitle>
           </CardHeader>
-          <CardContent>
-            <div className="space-y-3">
+          <CardContent className="pt-0">
+            <div className="space-y-1">
               {[
-                { range: '0.8 - 1.0', label: 'Very Strong', color: 'destructive', desc: 'Highly predictable relationship' },
-                { range: '0.6 - 0.8', label: 'Strong', color: 'default', desc: 'Substantial relationship' },
-                { range: '0.4 - 0.6', label: 'Moderate', color: 'secondary', desc: 'Moderate relationship' },
-                { range: '0.0 - 0.4', label: 'Weak', color: 'outline', desc: 'Limited relationship' },
+                { range: '0.8-1.0', label: 'V.Strong', color: 'bg-red-100 text-red-800', desc: 'Predictable' },
+                { range: '0.6-0.8', label: 'Strong', color: 'bg-orange-100 text-orange-800', desc: 'Substantial' },
+                { range: '0.4-0.6', label: 'Moderate', color: 'bg-yellow-100 text-yellow-800', desc: 'Moderate' },
+                { range: '0.0-0.4', label: 'Weak', color: 'bg-gray-100 text-gray-800', desc: 'Limited' },
               ].map((item, index) => (
-                <div key={index} className="flex items-center justify-between p-3 bg-muted/30 rounded-lg">
-                  <div className="flex items-center space-x-3">
-                    <Badge variant={item.color as any} className="text-xs min-w-[80px] justify-center">
+                <div key={index} className="flex items-center justify-between p-1 bg-muted/20 rounded text-[10px]">
+                  <div className="flex items-center space-x-1">
+                    <span className={`px-1 py-0 rounded text-[9px] font-medium ${item.color}`}>
                       {item.label}
-                    </Badge>
-                    <span className="text-sm font-medium">{item.range}</span>
+                    </span>
+                    <span className="font-medium">{item.range}</span>
                   </div>
-                  <span className="text-xs text-muted-foreground">{item.desc}</span>
+                  <span className="text-muted-foreground">{item.desc}</span>
                 </div>
               ))}
             </div>
           </CardContent>
         </Card>
         
-        <Card className="shadow-lg border-0 bg-gradient-to-br from-card to-card/50">
-          <CardHeader>
-            <CardTitle className="text-lg">Statistical Significance</CardTitle>
+        <Card className="shadow-sm border-0 bg-gradient-to-br from-card to-card/50">
+          <CardHeader className="pb-1">
+            <CardTitle className="text-xs">Significance</CardTitle>
           </CardHeader>
-          <CardContent>
-            <div className="space-y-3">
+          <CardContent className="pt-0">
+            <div className="space-y-1">
               {[
-                { threshold: 'p < 0.001', label: 'Highly Significant', color: 'text-green-600', desc: 'Extremely strong evidence' },
-                { threshold: 'p < 0.01', label: 'Very Significant', color: 'text-green-500', desc: 'Strong evidence' },
-                { threshold: 'p < 0.05', label: 'Significant', color: 'text-yellow-600', desc: 'Moderate evidence' },
-                { threshold: 'p ≥ 0.05', label: 'Not Significant', color: 'text-red-600', desc: 'Insufficient evidence' },
+                { threshold: 'p<0.001', label: 'High Sig', color: 'text-green-600', desc: 'Strong' },
+                { threshold: 'p<0.01', label: 'Very Sig', color: 'text-green-500', desc: 'Good' },
+                { threshold: 'p<0.05', label: 'Significant', color: 'text-yellow-600', desc: 'Moderate' },
+                { threshold: 'p≥0.05', label: 'Not Sig', color: 'text-red-600', desc: 'Weak' },
               ].map((item, index) => (
-                <div key={index} className="flex items-center justify-between p-3 bg-muted/30 rounded-lg">
-                  <div className="flex items-center space-x-3">
-                    <span className="text-sm font-medium min-w-[80px]">{item.threshold}</span>
-                    <span className={`text-sm font-medium ${item.color}`}>{item.label}</span>
+                <div key={index} className="flex items-center justify-between p-1 bg-muted/20 rounded text-[10px]">
+                  <div className="flex items-center space-x-1">
+                    <span className="font-medium min-w-[45px]">{item.threshold}</span>
+                    <span className={`font-medium ${item.color}`}>{item.label}</span>
                   </div>
-                  <span className="text-xs text-muted-foreground">{item.desc}</span>
+                  <span className="text-muted-foreground">{item.desc}</span>
                 </div>
               ))}
             </div>
