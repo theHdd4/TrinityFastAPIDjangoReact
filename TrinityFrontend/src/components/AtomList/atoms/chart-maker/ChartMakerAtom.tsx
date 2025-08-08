@@ -10,16 +10,6 @@ import {
   validateChart 
 } from './utils/traceUtils';
 
-export interface ChartData {
-  columns: string[];
-  rows: Record<string, any>[];
-  numeric_columns?: string[];
-  categorical_columns?: string[];
-  unique_values?: Record<string, string[]>;
-  file_id?: string;
-  row_count?: number;
-}
-
 export interface ChartConfig {
   id: string;
   title: string;

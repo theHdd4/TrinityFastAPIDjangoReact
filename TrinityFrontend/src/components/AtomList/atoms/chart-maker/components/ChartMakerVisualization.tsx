@@ -11,7 +11,6 @@ import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Plus, Minus, BarChart3, Filter, X, Layers, LineChart } from 'lucide-react';
-import { ChartConfig } from '../ChartMakerAtom';
 import { ChartMakerSettings, ChartMakerConfig } from '@/components/LaboratoryMode/store/laboratoryStore';
 import TraceManager from './TraceManager';
 import { migrateLegacyChart, toggleChartMode, validateChart } from '../utils/traceUtils';

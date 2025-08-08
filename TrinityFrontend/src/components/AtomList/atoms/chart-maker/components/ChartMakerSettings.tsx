@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Loader2, AlertCircle, Database } from 'lucide-react';
-import { ChartData } from '../ChartMakerAtom';
+import { ChartData } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { chartMakerApi } from '../services/chartMakerApi';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';

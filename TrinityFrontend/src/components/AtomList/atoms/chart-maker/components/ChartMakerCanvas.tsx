@@ -11,8 +11,7 @@ import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
-import { ChartData, ChartConfig } from '../ChartMakerAtom';
-import { ChartMakerConfig } from '@/components/LaboratoryMode/store/laboratoryStore';
+import { ChartData, ChartMakerConfig } from '@/components/LaboratoryMode/store/laboratoryStore';
 import './ChartMakerCanvas.css';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { useResponsiveChartLayout } from '@/hooks/useResponsiveChartLayout';
@@ -27,7 +26,7 @@ interface ChartDataWithUniqueValues extends ChartData {
 interface ChartMakerCanvasProps {
   charts: ChartMakerConfig[];
   data: ChartData | null;
-  onChartTypeChange?: (chartId: string, newType: ChartConfig['type']) => void;
+  onChartTypeChange?: (chartId: string, newType: ChartMakerConfig['type']) => void;
   onChartFilterChange?: (chartId: string, column: string, values: string[]) => void;
   onTraceFilterChange?: (chartId: string, traceIndex: number, column: string, values: string[]) => void;
   isFullWidthMode?: boolean; // When atom list and global properties tabs are hidden
@@ -38,7 +37,7 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
   const [fullscreenChart, setFullscreenChart] = useState<ChartMakerConfig | null>(null);
   const [fullscreenIndex, setFullscreenIndex] = useState<number | null>(null);
   const [lastSelectedIdx, setLastSelectedIdx] = useState<number | null>(null);
-  const [previewTypes, setPreviewTypes] = useState<Record<string, ChartConfig['type'] | null>>({});
+  const [previewTypes, setPreviewTypes] = useState<Record<string, ChartMakerConfig['type'] | null>>({});
   const [currentTraceIndex, setCurrentTraceIndex] = useState<Record<string, number>>({});
   const [currentTracePages, setCurrentTracePages] = useState<Record<string, number>>({});
   const [emphasizedTrace, setEmphasizedTrace] = useState<Record<string, string | null>>({});
@@ -235,7 +234,7 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
 
   const handleChartTypeSelect = (type: string) => {
     if (chatBubble.chartId) {
-      onChartTypeChange?.(chatBubble.chartId, type as ChartConfig['type']);
+      onChartTypeChange?.(chatBubble.chartId, type as ChartMakerConfig['type']);
       setChatBubble({ ...chatBubble, visible: false });
     }
   };
