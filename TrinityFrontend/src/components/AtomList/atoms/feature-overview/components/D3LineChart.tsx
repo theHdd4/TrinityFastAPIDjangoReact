@@ -1,5 +1,6 @@
 import React, { useRef, useEffect } from 'react';
 import * as d3 from 'd3';
+import './D3LineChart.css';
 
 interface DataPoint {
   date: string;
@@ -85,12 +86,24 @@ const D3LineChart: React.FC<Props> = ({
       .x(d => x(d.date))
       .y(d => y(d.value));
 
-    g.append('path')
+    const path = g
+      .append('path')
       .datum(dataParsed)
+      .attr('class', 'chart-line')
       .attr('fill', 'none')
       .attr('stroke', '#e74c3c')
       .attr('stroke-width', 4)
       .attr('d', line);
+
+    // Animate line drawing
+    const totalLength = (path.node() as SVGPathElement).getTotalLength();
+    path
+      .attr('stroke-dasharray', `${totalLength} ${totalLength}`)
+      .attr('stroke-dashoffset', totalLength)
+      .transition()
+      .duration(1000)
+      .ease(d3.easeCubic)
+      .attr('stroke-dashoffset', 0);
 
     g.selectAll('.dot')
       .data(dataParsed)
@@ -99,8 +112,12 @@ const D3LineChart: React.FC<Props> = ({
       .attr('class', 'dot')
       .attr('cx', d => x(d.date))
       .attr('cy', d => y(d.value))
-      .attr('r', 4)
-      .attr('fill', '#e74c3c');
+      .attr('r', 0)
+      .attr('fill', '#e74c3c')
+      .transition()
+      .delay((_, i) => i * 100)
+      .duration(500)
+      .attr('r', 4);
 
     // Legend
     const legend = g
@@ -155,7 +172,15 @@ const D3LineChart: React.FC<Props> = ({
       });
   }, [data, height, width, xLabel, yLabel]);
 
-  return <svg ref={ref} width="100%" height={height} viewBox={`0 0 ${width} ${height}`} />;
+  return (
+    <svg
+      ref={ref}
+      className="d3-line-chart"
+      width="100%"
+      height="100%"
+      viewBox={`0 0 ${width} ${height}`}
+    />
+  );
 };
 
 export default D3LineChart;
