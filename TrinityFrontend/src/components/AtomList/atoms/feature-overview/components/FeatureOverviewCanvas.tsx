@@ -416,130 +416,132 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
             <Card className="border-0 shadow-xl bg-white/80 backdrop-blur-sm overflow-hidden">
               <div className="bg-gradient-to-r from-purple-500 to-purple-600 p-0.5">
                 <div className="bg-white rounded-sm overflow-x-auto">
-                  <Table className="min-w-max" maxHeight="max-h-96">
-                    <TableHeader className="sticky top-0 z-10 bg-white">
-                      <TableRow>
-                        <TableHead>SR NO.</TableHead>
-                        {dimensionCols.map((d) => (
-                          <TableHead key={d}>{d}</TableHead>
-                        ))}
-                        <TableHead>View Stat</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {(Array.isArray(skuRows) ? skuRows : []).map((row) => (
-                        <React.Fragment key={row.id}>
-                          <TableRow className="border-b">
-                            <TableCell>{row.id}</TableCell>
-                            {dimensionCols.map((d) => (
-                              <TableCell key={d}>{row[d.toLowerCase()]}</TableCell>
-                            ))}
-                            <TableCell>
-                              <Button size="sm" onClick={() => viewStats(row)}>
-                                View Stat
-                              </Button>
-                            </TableCell>
-                          </TableRow>
-                          {activeRow === row.id && (
-                            <TableRow>
-                              <TableCell colSpan={colSpan}>
-                                <div className="grid grid-cols-1 xl:grid-cols-2 gap-8 mt-6">
-                                  <div className="xl:col-span-1">
-                                    <Card className="border-0 shadow-xl bg-white/90 backdrop-blur-sm overflow-hidden h-96 flex flex-col">
-                                      <div className="bg-gradient-to-r from-indigo-500 to-purple-600 p-4 flex items-center justify-between">
-                                        <h4 className="font-bold text-white text-lg flex items-center">
-                                          <TrendingUp className="w-5 h-5 mr-2" />
-                                          {activeMetric || "Trend Analysis"}
-                                        </h4>
-                                        <Dialog>
-                                          <DialogTrigger asChild>
-                                            <button type="button" aria-label="Full screen">
-                                              <Maximize2 className="w-5 h-5 text-white" />
-                                            </button>
-                                          </DialogTrigger>
-                                          <DialogContent className="max-w-4xl">
-                                            <D3LineChart
-                                              data={statDataMap[activeMetric]?.timeseries || []}
-                                              width={900}
-                                              height={500}
-                                              xLabel={settings.xAxis || "Date"}
-                                              yLabel={activeMetric || "Value"}
-                                            />
-                                          </DialogContent>
-                                        </Dialog>
-                                      </div>
-                                      <div className="p-6 flex-1 flex items-end justify-center">
-                                        <D3LineChart
-                                          data={statDataMap[activeMetric]?.timeseries || []}
-                                          height={320}
-                                          xLabel={settings.xAxis || "Date"}
-                                          yLabel={activeMetric || "Value"}
-                                        />
-                                      </div>
-                                    </Card>
-                                  </div>
-                                  <div className="xl:col-span-1">
-                                    <Card className="border-0 shadow-xl bg-white/90 backdrop-blur-sm overflow-hidden h-96 flex flex-col">
-                                      <div className="bg-gradient-to-r from-emerald-500 to-teal-600 p-4">
-                                        <h5 className="font-bold text-white text-sm flex items-center">
-                                          <BarChart3 className="w-4 h-4 mr-2" />
-                                          Statistical Summary
-                                        </h5>
-                                      </div>
-                                      <div className="p-4 overflow-auto flex-1">
-                                        <div className="overflow-x-auto">
-                                          <table className="min-w-full text-xs whitespace-nowrap">
-                                            <thead>
-                                              <tr className="border-b border-gray-200">
-                                                <th className="p-2 text-left whitespace-nowrap sticky left-0 bg-white z-10">
-                                                  Metric
-                                                </th>
-                                                <th className="p-2 text-right whitespace-nowrap">Avg</th>
-                                                <th className="p-2 text-right whitespace-nowrap">Min</th>
-                                                <th className="p-2 text-right whitespace-nowrap">Max</th>
-                                                <th className="p-2 text-right whitespace-nowrap">Action</th>
-                                              </tr>
-                                            </thead>
-                                            <tbody>
-                                              {(Array.isArray(settings.yAxes) ? settings.yAxes : []).map((m) => (
-                                                <tr key={m} className="border-b last:border-0">
-                                                  <td className="p-2 whitespace-nowrap sticky left-0 bg-white z-10">{m}</td>
-                                                  <td className="p-2 text-right whitespace-nowrap">
-                                                    {statDataMap[m]?.summary.avg?.toFixed(2) ?? "-"}
-                                                  </td>
-                                                  <td className="p-2 text-right whitespace-nowrap">
-                                                    {statDataMap[m]?.summary.min?.toFixed(2) ?? "-"}
-                                                  </td>
-                                                  <td className="p-2 text-right whitespace-nowrap">
-                                                    {statDataMap[m]?.summary.max?.toFixed(2) ?? "-"}
-                                                  </td>
-                                                  <td className="p-2 text-right whitespace-nowrap">
-                                                    <button
-                                                      className="text-blue-600 hover:text-blue-800 font-medium underline transition-colors"
-                                                      onClick={() => {
-                                                        setActiveMetric(m);
-                                                        onUpdateSettings({ activeMetric: m });
-                                                      }}
-                                                    >
-                                                      View
-                                                    </button>
-                                                  </td>
-                                                </tr>
-                                              ))}
-                                            </tbody>
-                                          </table>
-                                        </div>
-                                      </div>
-                                    </Card>
-                                  </div>
-                                </div>
+                  <div className="max-h-[600px] overflow-y-auto">
+                    <Table className="min-w-max">
+                      <TableHeader className="sticky top-0 z-10 bg-white">
+                        <TableRow>
+                          <TableHead>SR NO.</TableHead>
+                          {dimensionCols.map((d) => (
+                            <TableHead key={d}>{d}</TableHead>
+                          ))}
+                          <TableHead>View Stat</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {(Array.isArray(skuRows) ? skuRows : []).map((row) => (
+                          <React.Fragment key={row.id}>
+                            <TableRow className="border-b">
+                              <TableCell>{row.id}</TableCell>
+                              {dimensionCols.map((d) => (
+                                <TableCell key={d}>{row[d.toLowerCase()]}</TableCell>
+                              ))}
+                              <TableCell>
+                                <Button size="sm" onClick={() => viewStats(row)}>
+                                  View Stat
+                                </Button>
                               </TableCell>
                             </TableRow>
-                          )}
-                        </React.Fragment>
-                      ))}
-                    </TableBody>
-                  </Table>
+                            {activeRow === row.id && (
+                              <TableRow>
+                                <TableCell colSpan={colSpan}>
+                                  <div className="grid grid-cols-1 xl:grid-cols-2 gap-8 mt-6">
+                                    <div className="xl:col-span-1">
+                                      <Card className="border-0 shadow-xl bg-white/90 backdrop-blur-sm overflow-hidden h-96 flex flex-col">
+                                        <div className="bg-gradient-to-r from-indigo-500 to-purple-600 p-4 flex items-center justify-between">
+                                          <h4 className="font-bold text-white text-lg flex items-center">
+                                            <TrendingUp className="w-5 h-5 mr-2" />
+                                            {activeMetric || "Trend Analysis"}
+                                          </h4>
+                                          <Dialog>
+                                            <DialogTrigger asChild>
+                                              <button type="button" aria-label="Full screen">
+                                                <Maximize2 className="w-5 h-5 text-white" />
+                                              </button>
+                                            </DialogTrigger>
+                                            <DialogContent className="max-w-4xl">
+                                              <D3LineChart
+                                                data={statDataMap[activeMetric]?.timeseries || []}
+                                                width={900}
+                                                height={500}
+                                                xLabel={settings.xAxis || "Date"}
+                                                yLabel={activeMetric || "Value"}
+                                              />
+                                            </DialogContent>
+                                          </Dialog>
+                                        </div>
+                                        <div className="p-6 flex-1 flex items-end justify-center">
+                                          <D3LineChart
+                                            data={statDataMap[activeMetric]?.timeseries || []}
+                                            height={320}
+                                            xLabel={settings.xAxis || "Date"}
+                                            yLabel={activeMetric || "Value"}
+                                          />
+                                        </div>
+                                      </Card>
+                                    </div>
+                                    <div className="xl:col-span-1">
+                                      <Card className="border-0 shadow-xl bg-white/90 backdrop-blur-sm overflow-hidden h-96 flex flex-col">
+                                        <div className="bg-gradient-to-r from-emerald-500 to-teal-600 p-4">
+                                          <h5 className="font-bold text-white text-sm flex items-center">
+                                            <BarChart3 className="w-4 h-4 mr-2" />
+                                            Statistical Summary
+                                          </h5>
+                                        </div>
+                                        <div className="p-4 overflow-auto flex-1">
+                                          <div className="overflow-x-auto">
+                                            <table className="min-w-full text-xs whitespace-nowrap">
+                                              <thead>
+                                                <tr className="border-b border-gray-200">
+                                                  <th className="p-2 text-left whitespace-nowrap sticky left-0 bg-white z-10">
+                                                    Metric
+                                                  </th>
+                                                  <th className="p-2 text-right whitespace-nowrap">Avg</th>
+                                                  <th className="p-2 text-right whitespace-nowrap">Min</th>
+                                                  <th className="p-2 text-right whitespace-nowrap">Max</th>
+                                                  <th className="p-2 text-right whitespace-nowrap">Action</th>
+                                                </tr>
+                                              </thead>
+                                              <tbody>
+                                                {(Array.isArray(settings.yAxes) ? settings.yAxes : []).map((m) => (
+                                                  <tr key={m} className="border-b last:border-0">
+                                                    <td className="p-2 whitespace-nowrap sticky left-0 bg-white z-10">{m}</td>
+                                                    <td className="p-2 text-right whitespace-nowrap">
+                                                      {statDataMap[m]?.summary.avg?.toFixed(2) ?? "-"}
+                                                    </td>
+                                                    <td className="p-2 text-right whitespace-nowrap">
+                                                      {statDataMap[m]?.summary.min?.toFixed(2) ?? "-"}
+                                                    </td>
+                                                    <td className="p-2 text-right whitespace-nowrap">
+                                                      {statDataMap[m]?.summary.max?.toFixed(2) ?? "-"}
+                                                    </td>
+                                                    <td className="p-2 text-right whitespace-nowrap">
+                                                      <button
+                                                        className="text-blue-600 hover:text-blue-800 font-medium underline transition-colors"
+                                                        onClick={() => {
+                                                          setActiveMetric(m);
+                                                          onUpdateSettings({ activeMetric: m });
+                                                        }}
+                                                      >
+                                                        View
+                                                      </button>
+                                                    </td>
+                                                  </tr>
+                                                ))}
+                                              </tbody>
+                                            </table>
+                                          </div>
+                                        </div>
+                                      </Card>
+                                    </div>
+                                  </div>
+                                </TableCell>
+                              </TableRow>
+                            )}
+                          </React.Fragment>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
                 </div>
               </div>
             </Card>
