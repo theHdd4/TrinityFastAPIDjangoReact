@@ -6,7 +6,6 @@ import {
   BarChart3, 
   ScatterChart, 
   TrendingUp, 
-  Download, 
   Maximize2, 
   RefreshCw, 
   Settings,
@@ -69,9 +68,6 @@ const CorrelationVisualisation: React.FC<CorrelationVisualisationProps> = ({ dat
         <div className="flex items-center space-x-0.5">
           <Button variant="outline" size="sm" onClick={refreshData} disabled={isLoading} className="h-5 px-1 text-[10px]">
             <RefreshCw className={`h-2.5 w-2.5 ${isLoading ? 'animate-spin' : ''}`} />
-          </Button>
-          <Button variant="outline" size="sm" className="h-5 px-1 text-[10px]">
-            <Download className="h-2.5 w-2.5" />
           </Button>
         </div>
       </div>
@@ -197,72 +193,6 @@ const CorrelationVisualisation: React.FC<CorrelationVisualisationProps> = ({ dat
           </CardContent>
         </Card>
       </div>
-
-      {/* Ultra Compact Main Visualization */}
-      <Card className="shadow-sm border-0 bg-gradient-to-br from-card to-card/50 flex-1">
-        <CardHeader className="pb-1">
-          <div className="flex items-center justify-between">
-            <CardTitle className="flex items-center space-x-0.5 text-[11px]">
-              {React.createElement(vizOptions.find(v => v.id === selectedViz)?.icon || BarChart3, { className: "h-3 w-3" })}
-              <span>{vizOptions.find(v => v.id === selectedViz)?.name}</span>
-            </CardTitle>
-            <div className="flex items-center space-x-0.5">
-              {selectedViz === 'heatmap' && (
-                <span className="text-[8px] bg-muted px-1 py-0 rounded">
-                  {variables.length}×{variables.length}
-                </span>
-              )}
-              {selectedViz === 'scatter' && (
-                <span className="text-[8px] bg-muted px-1 py-0 rounded">
-                  75 pts
-                </span>
-              )}
-              {selectedViz === 'network' && (
-                <span className="text-[8px] bg-muted px-1 py-0 rounded">
-                  {variables.length} nodes
-                </span>
-              )}
-            </div>
-          </div>
-        </CardHeader>
-        <CardContent className="pt-0 p-1">
-          <div className="bg-muted/20 rounded-md p-2 min-h-[180px] flex items-center justify-center">
-            <div className="text-center">
-              <div className="h-16 w-16 bg-muted rounded-lg flex items-center justify-center mx-auto mb-2">
-                {React.createElement(vizOptions.find(v => v.id === selectedViz)?.icon || BarChart3, { 
-                  className: "h-8 w-8 text-muted-foreground" 
-                })}
-              </div>
-              <p className="text-[10px] text-muted-foreground">
-                {isLoading ? "Loading..." : `${vizOptions.find(v => v.id === selectedViz)?.name} Chart`}
-              </p>
-              <p className="text-[8px] text-muted-foreground mt-1">
-                Interactive visualization placeholder
-              </p>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Ultra Compact Export */}
-      <Card className="shadow-sm border-0 bg-gradient-to-br from-card to-card/50">
-        <CardContent className="p-1">
-          <div className="grid grid-cols-4 gap-0.5">
-            <Button variant="outline" className="h-5 text-[9px] px-1">
-              PNG
-            </Button>
-            <Button variant="outline" className="h-5 text-[9px] px-1">
-              SVG
-            </Button>
-            <Button variant="outline" className="h-5 text-[9px] px-1">
-              PDF
-            </Button>
-            <Button variant="outline" className="h-5 text-[9px] px-1">
-              Data
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
     </div>
   );
 };

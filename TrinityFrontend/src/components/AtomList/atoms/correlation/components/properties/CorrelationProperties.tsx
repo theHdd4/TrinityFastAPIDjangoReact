@@ -28,13 +28,13 @@ const CorrelationProperties: React.FC<Props> = ({ atomId }) => {
             <Settings className="w-3 h-3 mr-1" />
             Settings
           </TabsTrigger>
-          <TabsTrigger value="exhibition" className="text-xs">
-            <Eye className="w-3 h-3 mr-1" />
-            Exhibition
-          </TabsTrigger>
           <TabsTrigger value="visualisation" className="text-xs">
             <BarChart3 className="w-3 h-3 mr-1" />
             Visualisation
+          </TabsTrigger>
+          <TabsTrigger value="exhibition" className="text-xs">
+            <Eye className="w-3 h-3 mr-1" />
+            Exhibition
           </TabsTrigger>
         </TabsList>
 
@@ -42,11 +42,11 @@ const CorrelationProperties: React.FC<Props> = ({ atomId }) => {
           <TabsContent value="settings" className="space-y-4" forceMount>
             <CorrelationSettings data={settings} onDataChange={handleChange} />
           </TabsContent>
-          <TabsContent value="exhibition" className="space-y-4" forceMount>
-            <CorrelationExhibition data={settings} />
-          </TabsContent>
           <TabsContent value="visualisation" className="space-y-4" forceMount>
             <CorrelationVisualisation data={settings} />
+          </TabsContent>
+          <TabsContent value="exhibition" className="space-y-4" forceMount>
+            <CorrelationExhibition data={settings} />
           </TabsContent>
         </div>
       </Tabs>
