@@ -373,10 +373,14 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
     }
 
     if (workflowAtoms.length > 0) {
+      const normalize = (s: string) => s.toLowerCase().replace(/[\s_-]/g, '');
       initialCards = workflowAtoms.map(atom => {
         const atomInfo =
-          allAtoms.find(a => a.id === atom.atomName || a.title === atom.atomName) ||
-          ({} as any);
+          allAtoms.find(
+            a =>
+              normalize(a.id) === normalize(atom.atomName) ||
+              normalize(a.title) === normalize(atom.atomName)
+          ) || ({} as any);
         const atomId = atomInfo.id || atom.atomName;
         const dropped: DroppedAtom = {
           id: `${atom.atomName}-${Date.now()}-${Math.random()}`,
