@@ -415,9 +415,9 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
           {skuRows.length > 0 && (
             <Card className="border-0 shadow-xl bg-white/80 backdrop-blur-sm overflow-hidden">
               <div className="bg-gradient-to-r from-purple-500 to-purple-600 p-0.5">
-                <div className="bg-white rounded-sm max-h-96 overflow-auto">
+                <div className="bg-white rounded-sm max-h-96 overflow-auto relative">
                   <Table>
-                    <TableHeader>
+                    <TableHeader className="sticky top-0 bg-white z-10">
                       <TableRow>
                         <TableHead>SR NO.</TableHead>
                         {dimensionCols.map((d) => (

@@ -272,7 +272,7 @@ const ChartMakerVisualization: React.FC<ChartMakerVisualizationProps> = ({
       </Card>
 
       <div className="flex-1 overflow-hidden">
-        <ScrollArea className="h-full">
+        <ScrollArea>
           <div className="space-y-4 pr-4">
             {settings.charts.slice(0, settings.numberOfCharts).map((chart, index) => {
               // Migrate legacy chart format

@@ -310,7 +310,11 @@ const ChartMakerProperties: React.FC<Props> = ({ atomId }) => {
   // REMOVE notification useEffects
 
   return (
-    <Tabs value={tab} onValueChange={setTab} className="w-full">
+    <Tabs
+      value={tab}
+      onValueChange={setTab}
+      className="flex flex-col h-full w-full"
+    >
       <TabsList className="grid w-full grid-cols-2 mx-4 my-4">
         <TabsTrigger value="settings" className="text-xs">
           <Settings className="w-3 h-3 mr-1" />
@@ -322,7 +326,7 @@ const ChartMakerProperties: React.FC<Props> = ({ atomId }) => {
         </TabsTrigger>
       </TabsList>
 
-      <div className="px-4">
+      <div className="px-4 flex-1 overflow-y-auto overflow-x-hidden">
         <TabsContent value="settings" className="space-y-4" forceMount>
           <ChartMakerSettings
             data={settings.uploadedData}
