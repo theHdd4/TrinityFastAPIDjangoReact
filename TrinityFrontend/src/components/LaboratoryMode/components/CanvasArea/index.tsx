@@ -48,6 +48,7 @@ interface CanvasAreaProps {
   onCardSelect?: (cardId: string, exhibited: boolean) => void;
   selectedCardId?: string;
   onToggleSettingsPanel?: () => void;
+  canEdit: boolean;
 }
 
 
@@ -59,7 +60,13 @@ const LLM_MAP: Record<string, string> = {
   merge: 'Agent Merge',
 };
 
-const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, selectedCardId, onToggleSettingsPanel }) => {
+const CanvasArea: React.FC<CanvasAreaProps> = ({
+  onAtomSelect,
+  onCardSelect,
+  selectedCardId,
+  onToggleSettingsPanel,
+  canEdit,
+}) => {
   const { cards: layoutCards, setCards: setLayoutCards, updateAtomSettings } = useLaboratoryStore();
   const [workflowMolecules, setWorkflowMolecules] = useState<WorkflowMolecule[]>([]);
   const [activeTab, setActiveTab] = useState<string>('');
@@ -827,8 +834,9 @@ const handleAddDragLeave = (e: React.DragEvent) => {
   if (workflowMolecules.length > 0) {
     return (
       <div className="h-full bg-gradient-to-br from-gray-50 to-gray-100 rounded-xl border border-gray-200 shadow-sm overflow-auto">
-        <div className="p-6">
-          <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+        <div className={canEdit ? '' : 'pointer-events-none'}>
+          <div className="p-6">
+            <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
             <div className="mb-6 bg-white rounded-lg border border-gray-200 p-1 shadow-sm">
               <TabsList className="grid auto-cols-fr grid-flow-col w-full h-12 bg-transparent p-0 gap-1">
                 {workflowMolecules.map((molecule) => (
@@ -1009,11 +1017,13 @@ const handleAddDragLeave = (e: React.DragEvent) => {
           </Tabs>
         </div>
       </div>
+      </div>
     );
   }
 
   return (
     <div className="h-full w-full bg-gradient-to-br from-gray-50 to-gray-100 rounded-xl border border-gray-200 shadow-sm overflow-auto">
+      <div className={canEdit ? '' : 'pointer-events-none'}>
       {/* Layout Cards Container */}
       <div className="p-6 space-y-6 w-full">
         {Array.isArray(layoutCards) && layoutCards.map((card, index) => {
@@ -1232,6 +1242,7 @@ const handleAddDragLeave = (e: React.DragEvent) => {
             </span>
           </button>
         </div>
+      </div>
       </div>
     </div>
   );
