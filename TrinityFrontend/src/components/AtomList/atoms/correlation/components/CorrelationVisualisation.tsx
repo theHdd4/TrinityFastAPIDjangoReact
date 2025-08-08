@@ -23,6 +23,20 @@ import { CorrelationSettings } from '@/components/LaboratoryMode/store/laborator
 interface CorrelationVisualisationProps {
   data: CorrelationSettings;
 }
+      <div className="grid grid-cols-1 gap-1">
+        {selectedViz === 'heatmap' && (
+          <Card>
+            <CardHeader className="pb-0.5">
+              <CardTitle className="text-[10px] flex items-center space-x-0.5">
+                <Palette className="h-2.5 w-2.5" />
+                <span>Color</span>
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="pt-0">
+              <Select value={colorScheme} onValueChange={setColorScheme}>
+                <SelectTrigger className="h-5 text-[10px]">lisationProps {
+  data: CorrelationSettings;
+}
 
 const CorrelationVisualisation: React.FC<CorrelationVisualisationProps> = ({ data }) => {
   const heatmapRef = useRef<SVGSVGElement>(null);
@@ -660,44 +674,42 @@ const CorrelationVisualisation: React.FC<CorrelationVisualisationProps> = ({ dat
   ];
 
   return (
-    <div className="p-3 space-y-3 h-full overflow-auto bg-gradient-to-br from-background via-background to-muted/10">
-      {/* Compact Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center space-x-2">
-          <div className="p-1 bg-primary/10 rounded">
-            <Eye className="h-4 w-4 text-primary" />
+    <div className="p-1.5 space-y-1.5 h-full overflow-auto bg-gradient-to-br from-background via-background to-muted/10">
+      {/* Ultra Compact Header */}
+      <div className="flex items-center justify-between mb-1">
+        <div className="flex items-center space-x-1">
+          <div className="p-0.5 bg-primary/10 rounded-sm">
+            <Eye className="h-3 w-3 text-primary" />
           </div>
           <div>
-            <h2 className="text-lg font-bold">Visualizations</h2>
-            <p className="text-xs text-muted-foreground">Interactive charts</p>
+            <h2 className="text-sm font-semibold">Charts</h2>
+            <p className="text-[10px] text-muted-foreground leading-none">Interactive viz</p>
           </div>
         </div>
-        <div className="flex items-center space-x-1">
-          <Button variant="outline" size="sm" onClick={refreshData} disabled={isLoading} className="h-7 px-2 text-xs">
-            <RefreshCw className={`h-3 w-3 mr-1 ${isLoading ? 'animate-spin' : ''}`} />
-            {isLoading ? 'Loading' : 'Refresh'}
+        <div className="flex items-center space-x-0.5">
+          <Button variant="outline" size="sm" onClick={refreshData} disabled={isLoading} className="h-5 px-1 text-[10px]">
+            <RefreshCw className={`h-2.5 w-2.5 ${isLoading ? 'animate-spin' : ''}`} />
           </Button>
-          <Button variant="outline" size="sm" className="h-7 px-2 text-xs">
-            <Download className="h-3 w-3 mr-1" />
-            Export
+          <Button variant="outline" size="sm" className="h-5 px-1 text-[10px]">
+            <Download className="h-2.5 w-2.5" />
           </Button>
         </div>
       </div>
 
-      {/* Compact Visualization Selection */}
+      {/* Ultra Compact Visualization Selection */}
       <Card className="shadow-sm border bg-gradient-to-br from-card to-card/50">
-        <CardContent className="p-2">
-          <div className="grid grid-cols-3 gap-1">
+        <CardContent className="p-1">
+          <div className="grid grid-cols-3 gap-0.5">
             {vizOptions.map((option) => (
               <Button
                 key={option.id}
                 variant={selectedViz === option.id ? 'default' : 'outline'}
-                className={`h-auto p-2 flex flex-col items-center space-y-1 text-xs ${
+                className={`h-auto p-1 flex flex-col items-center space-y-0 text-[10px] ${
                   selectedViz === option.id ? 'bg-primary text-primary-foreground' : ''
                 }`}
                 onClick={() => setSelectedViz(option.id)}
               >
-                <option.icon className="h-3 w-3" />
+                <option.icon className="h-2.5 w-2.5 mb-0.5" />
                 <span className="font-medium text-[10px] leading-tight text-center">{option.name}</span>
               </Button>
             ))}
