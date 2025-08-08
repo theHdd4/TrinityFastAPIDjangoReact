@@ -27,7 +27,7 @@ Trinity Administrator Guide
 
    The script creates the default tenant (`Quant_Matrix_AI`) and seeds login accounts.
    You will get an admin user called `admin_user` with password `admin` and a
-   super admin `neo` with password `neo_the_one` along with role‑based users:
+   super admin `neo` with password `neo_the_only_one` along with role‑based users:
 
    - `editor_user` / `editor` (client editor)
    - `viewer_user` / `viewer` (client viewer)

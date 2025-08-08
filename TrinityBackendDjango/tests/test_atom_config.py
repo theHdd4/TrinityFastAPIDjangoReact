@@ -133,3 +133,46 @@ def test_load_atom_list_configuration_rebuilds_cards(monkeypatch):
             },
         ]
     }
+
+
+def test_load_atom_list_configuration_uses_atom_title(monkeypatch):
+    docs = [
+        {
+            "client_id": "c1",
+            "app_id": "a1",
+            "project_id": "p1",
+            "mode": "lab",
+            "atom_name": "atom-a",
+            "atom_title": "Atom A",
+            "canvas_position": 0,
+            "atom_positions": 0,
+            "atom_configs": {},
+            "open_cards": "yes",
+            "scroll_position": 0,
+            "exhibition_previews": "no",
+            "mode_meta": {"card_id": "card1", "atom_id": "atomA"},
+        }
+    ]
+
+    monkeypatch.setattr(atom_config, "MongoClient", lambda uri: FakeClient(docs))
+    monkeypatch.setattr(atom_config, "_get_env_ids", lambda project: ("c1", "a1", "p1"))
+
+    result = load_atom_list_configuration(object(), "lab")
+    assert result == {
+        "cards": [
+            {
+                "id": "card1",
+                "collapsed": False,
+                "isExhibited": False,
+                "scroll_position": 0,
+                "atoms": [
+                    {
+                        "id": "atomA",
+                        "atomId": "atom-a",
+                        "title": "Atom A",
+                        "settings": {},
+                    }
+                ],
+            }
+        ]
+    }

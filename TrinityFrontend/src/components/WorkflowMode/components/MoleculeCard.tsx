@@ -12,9 +12,10 @@ interface MoleculeCardProps {
     tag: string;
     atoms: string[];
   };
+  canEdit: boolean;
 }
 
-const MoleculeCard: React.FC<MoleculeCardProps> = ({ molecule }) => {
+const MoleculeCard: React.FC<MoleculeCardProps> = ({ molecule, canEdit }) => {
   const [isExpanded, setIsExpanded] = useState(false);
 
   const getTypeColor = (type: string) => {
@@ -29,6 +30,7 @@ const MoleculeCard: React.FC<MoleculeCardProps> = ({ molecule }) => {
   };
 
   const handleDragStart = (e: React.DragEvent) => {
+    if (!canEdit) return;
     console.log('Starting drag for molecule:', molecule.id);
     e.dataTransfer.setData('application/json', JSON.stringify(molecule));
     e.dataTransfer.effectAllowed = 'copy';
@@ -38,9 +40,9 @@ const MoleculeCard: React.FC<MoleculeCardProps> = ({ molecule }) => {
   const hasMoreAtoms = molecule.atoms.length > 3;
 
   return (
-    <Card 
-      className={`p-4 cursor-grab active:cursor-grabbing hover:shadow-md transition-all duration-200 ${getTypeColor(molecule.type)} border-2`}
-      draggable
+    <Card
+      className={`p-4 ${canEdit ? 'cursor-grab active:cursor-grabbing hover:shadow-md' : 'cursor-not-allowed'} transition-all duration-200 ${getTypeColor(molecule.type)} border-2`}
+      draggable={canEdit}
       onDragStart={handleDragStart}
     >
       <div className="mb-3">

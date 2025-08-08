@@ -76,7 +76,8 @@ def save_atom_list_configuration(
             exhibition_preview = "yes" if card.get("isExhibited") else "no"
             scroll_pos = card.get("scroll_position", 0)
             for atom_pos, atom in enumerate(card.get("atoms", [])):
-                atom_name = atom.get("atomId") or atom.get("title") or "unknown"
+                atom_id = atom.get("atomId") or atom.get("title") or "unknown"
+                atom_title = atom.get("title") or atom_id
                 atom_settings = atom.get("settings", {})
                 version_hash = hashlib.sha256(
                     json.dumps(atom_settings, sort_keys=True).encode()
@@ -87,7 +88,8 @@ def save_atom_list_configuration(
                         "app_id": app_id,
                         "project_id": project_id,
                         "mode": mode,
-                        "atom_name": atom_name,
+                        "atom_name": atom_id,
+                        "atom_title": atom_title,
                         "canvas_position": canvas_pos,
                         "atom_positions": atom_pos,
                         "atom_configs": atom_settings,
@@ -145,11 +147,13 @@ def load_atom_list_configuration(
                     "atoms": [],
                 },
             )
+            atom_slug = doc.get("atom_name")
+            atom_title = doc.get("atom_title") or atom_slug
             card["atoms"].append(
                 {
                     "id": (doc.get("mode_meta") or {}).get("atom_id"),
-                    "atomId": doc.get("atom_name"),
-                    "title": doc.get("atom_name"),
+                    "atomId": atom_slug,
+                    "title": atom_title,
                     "settings": doc.get("atom_configs", {}),
                 }
             )

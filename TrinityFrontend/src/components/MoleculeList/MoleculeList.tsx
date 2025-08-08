@@ -1,10 +1,13 @@
 
 import React from 'react';
-import { Card } from '@/components/ui/card';
 import MoleculeCard from '../WorkflowMode/components/MoleculeCard';
 import { molecules } from './data/molecules';
 
-const MoleculeList = () => {
+interface MoleculeListProps {
+  canEdit: boolean;
+}
+
+const MoleculeList: React.FC<MoleculeListProps> = ({ canEdit }) => {
   return (
     <div className="h-full flex flex-col">
       <div className="p-6 border-b border-gray-200">
@@ -14,7 +17,7 @@ const MoleculeList = () => {
       
       <div className="flex-1 p-6 overflow-y-auto space-y-4">
         {molecules.map(molecule => (
-          <MoleculeCard key={molecule.id} molecule={molecule} />
+          <MoleculeCard key={molecule.id} molecule={molecule} canEdit={canEdit} />
         ))}
       </div>
     </div>

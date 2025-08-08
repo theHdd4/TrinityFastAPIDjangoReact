@@ -5,10 +5,13 @@ import Header from '@/components/Header';
 import { useExhibitionStore } from './store/exhibitionStore';
 import TextBoxDisplay from '@/components/AtomList/atoms/text-box/TextBoxDisplay';
 import { useToast } from '@/hooks/use-toast';
+import { useAuth } from '@/contexts/AuthContext';
 
 const ExhibitionMode = () => {
   const { exhibitedCards, cards, loadSavedConfiguration } = useExhibitionStore();
   const { toast } = useToast();
+  const { hasPermission } = useAuth();
+  const canEdit = hasPermission('exhibition:edit');
 
   useEffect(() => {
     if (localStorage.getItem('laboratory-config')) {
@@ -53,7 +56,12 @@ const ExhibitionMode = () => {
         ) : (
           <div className="space-y-6">
             {exhibitedCards.map((card) => (
-              <div key={card.id} className="w-full bg-white rounded-2xl border border-gray-200 shadow-sm p-6">
+              <div
+                key={card.id}
+                className={`w-full bg-white rounded-2xl border border-gray-200 shadow-sm p-6 ${
+                  canEdit ? '' : 'cursor-not-allowed'
+                }`}
+              >
                 <h3 className="text-xl font-semibold text-gray-900 mb-4">
                   {card.moleculeTitle ? (
                     card.atoms.length > 0
