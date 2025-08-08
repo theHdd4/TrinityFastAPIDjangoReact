@@ -159,6 +159,16 @@ export interface CorrelationSettings {
     selectFilter: string;
     uploadedFile?: string;
   };
+  // File processing related data
+  fileData?: {
+    fileName: string;
+    rawData: any[];
+    numericColumns: string[];
+    dateColumns: string[];
+    categoricalColumns: string[];
+    isProcessed: boolean;
+  };
+  isUsingFileData?: boolean;
 }
 
 export const DEFAULT_CORRELATION_SETTINGS: CorrelationSettings = {
@@ -197,7 +207,9 @@ export const DEFAULT_CORRELATION_SETTINGS: CorrelationSettings = {
     selectData: 'Single Selection',
     selectFilter: 'Multi Selection',
     uploadedFile: 'sales_data.csv'
-  }
+  },
+  fileData: undefined,
+  isUsingFileData: false
 };
 
 export interface ColumnClassifierColumn {

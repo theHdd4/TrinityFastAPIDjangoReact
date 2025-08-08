@@ -35,14 +35,19 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
     const g = svg.append("g")
       .attr("transform", `translate(${margin.left},${margin.top})`);
 
+    // Get variables from file data or default
+    const variables = data.isUsingFileData && data.fileData?.numericColumns 
+      ? data.fileData.numericColumns 
+      : data.variables;
+
     // Create scales
     const xScale = d3.scaleBand()
-      .domain(data.variables)
+      .domain(variables)
       .range([0, width])
       .padding(0.05);
 
     const yScale = d3.scaleBand()
-      .domain(data.variables)
+      .domain(variables)
       .range([0, height])
       .padding(0.05);
 
@@ -50,9 +55,11 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
       .domain([1, -1]);
 
     // Add cells
-    data.variables.forEach((yVar, i) => {
-      data.variables.forEach((xVar, j) => {
-        const correlation = data.correlationMatrix[i][j];
+    variables.forEach((yVar, i) => {
+      variables.forEach((xVar, j) => {
+        const correlation = data.correlationMatrix[i] && data.correlationMatrix[i][j] !== undefined 
+          ? data.correlationMatrix[i][j] 
+          : (i === j ? 1.0 : 0.0);
         
         g.append("rect")
           .attr("x", xScale(xVar))
@@ -111,7 +118,7 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
 
     // Add axis labels
     g.selectAll(".x-label")
-      .data(data.variables)
+      .data(variables)
       .enter().append("text")
       .attr("class", "x-label")
       .attr("x", d => xScale(d)! + xScale.bandwidth() / 2)
@@ -123,7 +130,7 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
       .text(d => d);
 
     g.selectAll(".y-label")
-      .data(data.variables)
+      .data(variables)
       .enter().append("text")
       .attr("class", "y-label")
       .attr("x", -10)
@@ -135,7 +142,7 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
       .style("fill", "#666")
       .text(d => d);
 
-  }, [data.correlationMatrix, data.variables]);
+  }, [data.correlationMatrix, data.variables, data.isUsingFileData, data.fileData]);
 
   // Draw time series chart
   useEffect(() => {
@@ -233,13 +240,22 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
   }, [data.timeSeriesData, data.selectedVar1, data.selectedVar2]);
 
   const getCorrelationValue = () => {
-    const var1Index = data.variables.indexOf(data.selectedVar1);
-    const var2Index = data.variables.indexOf(data.selectedVar2);
-    if (var1Index !== -1 && var2Index !== -1) {
+    const variables = data.isUsingFileData && data.fileData?.numericColumns 
+      ? data.fileData.numericColumns 
+      : data.variables;
+    
+    const var1Index = variables.indexOf(data.selectedVar1);
+    const var2Index = variables.indexOf(data.selectedVar2);
+    if (var1Index !== -1 && var2Index !== -1 && data.correlationMatrix[var1Index] && data.correlationMatrix[var1Index][var2Index] !== undefined) {
       return data.correlationMatrix[var1Index][var2Index];
     }
     return 0;
   };
+
+  // Get current variables for display
+  const currentVariables = data.isUsingFileData && data.fileData?.numericColumns 
+    ? data.fileData.numericColumns 
+    : data.variables;
 
   return (
     <div className="w-full h-full bg-background p-6 overflow-y-auto">
@@ -248,11 +264,16 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
         <div className="flex items-center justify-between mb-4">
           <div>
             <h1 className="text-2xl font-bold text-foreground">Correlation Analysis</h1>
-            <p className="text-muted-foreground text-sm">Discover relationships between your variables</p>
+            <p className="text-muted-foreground text-sm">
+              {data.isUsingFileData && data.fileData 
+                ? `Analyzing ${data.fileData.fileName} (${data.fileData.rawData.length} rows, ${data.fileData.numericColumns.length} numeric columns)`
+                : 'Discover relationships between your variables'
+              }
+            </p>
           </div>
           <Badge variant="outline" className="flex items-center gap-2">
-            <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-            Live Analysis
+            <div className={`w-2 h-2 rounded-full ${data.isUsingFileData ? 'bg-blue-500' : 'bg-green-500'} animate-pulse`}></div>
+            {data.isUsingFileData ? 'File Data' : 'Mock Data'}
           </Badge>
         </div>
 
@@ -351,7 +372,7 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {data.variables.map(variable => (
+                    {currentVariables.map(variable => (
                       <SelectItem key={variable} value={variable}>{variable}</SelectItem>
                     ))}
                   </SelectContent>
@@ -368,7 +389,7 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {data.variables.map(variable => (
+                    {currentVariables.map(variable => (
                       <SelectItem key={variable} value={variable}>{variable}</SelectItem>
                     ))}
                   </SelectContent>
