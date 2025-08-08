@@ -27,6 +27,7 @@ import DataFrameOperationsAtom from '@/components/AtomList/atoms/dataframe-opera
 import ScopeSelectorAtom from '@/components/AtomList/atoms/scope-selector/ScopeSelectorAtom';
 import CreateColumnAtom from '@/components/AtomList/atoms/createcolumn/CreateColumnAtom';
 import GroupByAtom from '@/components/AtomList/atoms/groupby-wtg-avg/GroupByAtom';
+import ChartMakerAtom from '@/components/AtomList/atoms/chart-maker/ChartMakerAtom';
 import { fetchDimensionMapping } from '@/lib/dimensions';
 
 import {
@@ -37,6 +38,7 @@ import {
   DEFAULT_DATAUPLOAD_SETTINGS,
   DEFAULT_FEATURE_OVERVIEW_SETTINGS,
   DEFAULT_DATAFRAME_OPERATIONS_SETTINGS,
+  DEFAULT_CHART_MAKER_SETTINGS,
   DataUploadSettings,
   ColumnClassifierColumn,
 } from '../../store/laboratoryStore';
@@ -545,6 +547,8 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
             ? { ...DEFAULT_DATAUPLOAD_SETTINGS }
             : atom.id === 'feature-overview'
             ? { ...DEFAULT_FEATURE_OVERVIEW_SETTINGS }
+            : atom.id === 'chart-maker'
+            ? { ...DEFAULT_CHART_MAKER_SETTINGS }
             : undefined,
       };
       
@@ -608,6 +612,8 @@ const addNewCardWithAtom = (
         ? { ...DEFAULT_DATAUPLOAD_SETTINGS }
         : atomId === 'feature-overview'
         ? { ...DEFAULT_FEATURE_OVERVIEW_SETTINGS }
+        : atomId === 'chart-maker'
+        ? { ...DEFAULT_CHART_MAKER_SETTINGS }
         : undefined,
   };
   const newCard: LayoutCard = {
@@ -977,6 +983,8 @@ const handleAddDragLeave = (e: React.DragEvent) => {
                                       <DataUploadValidateAtom atomId={atom.id} />
                                     ) : atom.atomId === 'feature-overview' ? (
                                       <FeatureOverviewAtom atomId={atom.id} />
+                                    ) : atom.atomId === 'chart-maker' ? (
+                                      <ChartMakerAtom atomId={atom.id} />
                                     ) : (
                                       <div>
                                         <h4 className="font-semibold text-gray-900 mb-1 text-sm">{atom.title}</h4>
@@ -1171,6 +1179,8 @@ const handleAddDragLeave = (e: React.DragEvent) => {
                         <DataUploadValidateAtom atomId={atom.id} />
                       ) : atom.atomId === 'feature-overview' ? (
                         <FeatureOverviewAtom atomId={atom.id} />
+                      ) : atom.atomId === 'chart-maker' ? (
+                        <ChartMakerAtom atomId={atom.id} />
                       ) : atom.atomId === 'concat' ? (
                         <ConcatAtom atomId={atom.id} />
                       ) : atom.atomId === 'merge' ? (
