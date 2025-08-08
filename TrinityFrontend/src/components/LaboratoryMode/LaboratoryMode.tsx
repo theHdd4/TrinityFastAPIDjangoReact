@@ -286,6 +286,7 @@ const LaboratoryMode = () => {
               onCardSelect={handleCardSelect}
               selectedCardId={selectedCardId}
               onToggleSettingsPanel={toggleSettingsPanel}
+              canEdit={canEdit}
             />
           </div>
 
