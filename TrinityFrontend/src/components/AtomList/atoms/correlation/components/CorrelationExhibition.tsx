@@ -109,186 +109,186 @@ const CorrelationExhibition: React.FC<CorrelationExhibitionProps> = ({ data }) =
     correlationResults.filter(r => r.risk === selectedMetric);
 
   return (
-    <div className="p-6 space-y-6 h-full overflow-auto bg-gradient-to-br from-background via-background to-muted/10">
-      {/* Enhanced Header */}
+    <div className="p-3 space-y-3 h-full overflow-auto bg-gradient-to-br from-background via-background to-muted/10">
+      {/* Compact Header */}
       <div className="flex items-center justify-between">
-        <div className="flex items-center space-x-3">
-          <div className="p-2 bg-primary/10 rounded-lg">
-            <Eye className="h-6 w-6 text-primary" />
+        <div className="flex items-center space-x-2">
+          <div className="p-1 bg-primary/10 rounded">
+            <Eye className="h-4 w-4 text-primary" />
           </div>
           <div>
-            <h2 className="text-2xl font-bold">Analysis Results</h2>
-            <p className="text-sm text-muted-foreground">Comprehensive correlation findings</p>
+            <h2 className="text-lg font-bold">Analysis Results</h2>
+            <p className="text-xs text-muted-foreground">Correlation findings</p>
           </div>
         </div>
-        <div className="flex items-center space-x-2">
-          <Badge variant="outline" className="bg-primary/10 border-primary/30">
+        <div className="flex items-center space-x-1">
+          <Badge variant="outline" className="bg-primary/10 border-primary/30 text-xs py-0">
             <Target className="h-3 w-3 mr-1" />
-            {correlationResults.length} Correlations
+            {correlationResults.length}
           </Badge>
-          <Button variant="outline" size="sm">
-            <Share className="h-4 w-4 mr-2" />
+          <Button variant="outline" size="sm" className="h-7 px-2 text-xs">
+            <Share className="h-3 w-3 mr-1" />
             Share
           </Button>
-          <Button variant="outline" size="sm">
-            <Download className="h-4 w-4 mr-2" />
+          <Button variant="outline" size="sm" className="h-7 px-2 text-xs">
+            <Download className="h-3 w-3 mr-1" />
             Export
           </Button>
         </div>
       </div>
 
-      {/* Filter Buttons */}
-      <div className="flex items-center space-x-2 p-2 bg-muted/50 rounded-lg">
-        <span className="text-sm font-medium text-muted-foreground">Filter by risk:</span>
+      {/* Compact Filter Buttons */}
+      <div className="flex items-center space-x-1 p-1 bg-muted/50 rounded">
+        <span className="text-xs font-medium text-muted-foreground">Filter:</span>
         {['all', 'low', 'medium', 'high'].map((risk) => (
           <Button
             key={risk}
             variant={selectedMetric === risk ? 'default' : 'ghost'}
             size="sm"
             onClick={() => setSelectedMetric(risk)}
-            className="capitalize"
+            className="capitalize h-6 px-2 text-xs"
           >
             {risk === 'all' ? 'All Results' : `${risk} Risk`}
           </Button>
         ))}
       </div>
 
-      {/* Enhanced Summary Statistics */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+      {/* Compact Summary Statistics */}
+      <div className="grid grid-cols-2 gap-2">
         <Card className="bg-gradient-to-br from-green-50 to-green-100 dark:from-green-900/20 dark:to-green-900/10 border-green-200 dark:border-green-800">
-          <CardContent className="p-4">
+          <CardContent className="p-2">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm font-medium text-green-700 dark:text-green-300">Strongest Positive</p>
-                <p className="text-2xl font-bold text-green-800 dark:text-green-200">+0.89</p>
-                <p className="text-xs text-green-600 dark:text-green-400 mt-1">Sales × Marketing</p>
+                <p className="text-xs font-medium text-green-700 dark:text-green-300">Strongest +</p>
+                <p className="text-lg font-bold text-green-800 dark:text-green-200">+0.89</p>
+                <p className="text-[10px] text-green-600 dark:text-green-400 truncate">Sales × Marketing</p>
               </div>
-              <TrendingUp className="h-8 w-8 text-green-600 opacity-60" />
+              <TrendingUp className="h-5 w-5 text-green-600 opacity-60" />
             </div>
           </CardContent>
         </Card>
         
         <Card className="bg-gradient-to-br from-red-50 to-red-100 dark:from-red-900/20 dark:to-red-900/10 border-red-200 dark:border-red-800">
-          <CardContent className="p-4">
+          <CardContent className="p-2">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm font-medium text-red-700 dark:text-red-300">Strongest Negative</p>
-                <p className="text-2xl font-bold text-red-800 dark:text-red-200">-0.72</p>
-                <p className="text-xs text-red-600 dark:text-red-400 mt-1">Price × Demand</p>
+                <p className="text-xs font-medium text-red-700 dark:text-red-300">Strongest -</p>
+                <p className="text-lg font-bold text-red-800 dark:text-red-200">-0.72</p>
+                <p className="text-[10px] text-red-600 dark:text-red-400 truncate">Price × Demand</p>
               </div>
-              <TrendingDown className="h-8 w-8 text-red-600 opacity-60" />
+              <TrendingDown className="h-5 w-5 text-red-600 opacity-60" />
             </div>
           </CardContent>
         </Card>
         
         <Card className="bg-gradient-to-br from-blue-50 to-blue-100 dark:from-blue-900/20 dark:to-blue-900/10 border-blue-200 dark:border-blue-800">
-          <CardContent className="p-4">
+          <CardContent className="p-2">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm font-medium text-blue-700 dark:text-blue-300">Average Strength</p>
-                <p className="text-2xl font-bold text-blue-800 dark:text-blue-200">0.66</p>
-                <p className="text-xs text-blue-600 dark:text-blue-400 mt-1">Absolute correlation</p>
+                <p className="text-xs font-medium text-blue-700 dark:text-blue-300">Avg Strength</p>
+                <p className="text-lg font-bold text-blue-800 dark:text-blue-200">0.66</p>
+                <p className="text-[10px] text-blue-600 dark:text-blue-400 truncate">Absolute</p>
               </div>
-              <Target className="h-8 w-8 text-blue-600 opacity-60" />
+              <Target className="h-5 w-5 text-blue-600 opacity-60" />
             </div>
           </CardContent>
         </Card>
         
         <Card className="bg-gradient-to-br from-purple-50 to-purple-100 dark:from-purple-900/20 dark:to-purple-900/10 border-purple-200 dark:border-purple-800">
-          <CardContent className="p-4">
+          <CardContent className="p-2">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm font-medium text-purple-700 dark:text-purple-300">Significant Results</p>
-                <p className="text-2xl font-bold text-purple-800 dark:text-purple-200">5/5</p>
-                <p className="text-xs text-purple-600 dark:text-purple-400 mt-1">p &lt; 0.05</p>
+                <p className="text-xs font-medium text-purple-700 dark:text-purple-300">Significant</p>
+                <p className="text-lg font-bold text-purple-800 dark:text-purple-200">5/5</p>
+                <p className="text-[10px] text-purple-600 dark:text-purple-400 truncate">p &lt; 0.05</p>
               </div>
-              <Award className="h-8 w-8 text-purple-600 opacity-60" />
+              <Award className="h-5 w-5 text-purple-600 opacity-60" />
             </div>
           </CardContent>
         </Card>
       </div>
 
-      {/* Enhanced Detailed Results */}
-      <Card className="shadow-lg border-0 bg-gradient-to-br from-card to-card/50">
-        <CardHeader>
-          <CardTitle className="flex items-center space-x-2">
-            <BookOpen className="h-5 w-5" />
-            <span>Detailed Correlation Analysis</span>
+      {/* Compact Detailed Results */}
+      <Card className="shadow-sm border bg-gradient-to-br from-card to-card/50">
+        <CardHeader className="pb-2">
+          <CardTitle className="flex items-center space-x-2 text-sm">
+            <BookOpen className="h-4 w-4" />
+            <span>Detailed Analysis</span>
           </CardTitle>
         </CardHeader>
-        <CardContent>
-          <div className="space-y-6">
+        <CardContent className="pt-0">
+          <div className="space-y-3">
             {filteredResults.map((result, index) => (
-              <div key={index} className="border border-border rounded-xl p-6 space-y-4 bg-gradient-to-r from-background to-muted/30">
+              <div key={index} className="border border-border rounded-lg p-3 space-y-2 bg-gradient-to-r from-background to-muted/30">
                 <div className="flex items-start justify-between">
-                  <div className="space-y-2">
-                    <h4 className="font-semibold text-lg flex items-center space-x-2">
-                      <span>{result.var1} × {result.var2}</span>
+                  <div className="space-y-1 flex-1 min-w-0">
+                    <h4 className="font-semibold text-sm flex items-center space-x-1">
+                      <span className="truncate">{result.var1} × {result.var2}</span>
                       {result.correlation >= 0 ? (
-                        <TrendingUp className="h-4 w-4 text-green-600" />
+                        <TrendingUp className="h-3 w-3 text-green-600 flex-shrink-0" />
                       ) : (
-                        <TrendingDown className="h-4 w-4 text-red-600" />
+                        <TrendingDown className="h-3 w-3 text-red-600 flex-shrink-0" />
                       )}
                     </h4>
-                    <div className="flex items-center space-x-3">
-                      <Badge variant="outline" className="text-xs">
-                        p-value: {result.pValue}
+                    <div className="flex items-center space-x-2 text-xs">
+                      <Badge variant="outline" className="text-[10px] py-0 px-1">
+                        p: {result.pValue}
                       </Badge>
-                      <Badge variant="outline" className="text-xs">
+                      <Badge variant="outline" className="text-[10px] py-0 px-1">
                         CI: {result.confidence * 100}%
                       </Badge>
-                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${getRiskColor(result.risk)}`}>
-                        {result.risk} risk
+                      <span className={`px-1 py-0 rounded text-[10px] font-medium ${getRiskColor(result.risk)}`}>
+                        {result.risk}
                       </span>
                     </div>
                   </div>
-                  <div className="text-right space-y-2">
-                    <div className="text-2xl font-bold">
+                  <div className="text-right space-y-1 ml-2">
+                    <div className="text-lg font-bold">
                       {result.correlation.toFixed(3)}
                     </div>
-                    <Badge variant={getStrengthColor(result.correlation)} className="text-xs">
+                    <Badge variant={getStrengthColor(result.correlation)} className="text-[10px] py-0">
                       {result.strength}
                     </Badge>
                   </div>
                 </div>
                 
-                <div className="space-y-3">
-                  <div className="flex justify-between items-center text-sm">
-                    <span className="font-medium">Correlation Strength</span>
+                <div className="space-y-2">
+                  <div className="flex justify-between items-center text-xs">
+                    <span className="font-medium">Strength</span>
                     <span className="text-muted-foreground">{Math.abs(result.correlation).toFixed(3)}</span>
                   </div>
                   <Progress 
                     value={getProgressValue(result.correlation)} 
-                    className="h-3"
+                    className="h-2"
                   />
                 </div>
 
-                <Separator />
+                <Separator className="my-2" />
 
-                <div className="space-y-3">
-                  <div className="flex items-start space-x-2">
-                    <Info className="h-4 w-4 text-blue-600 mt-0.5 flex-shrink-0" />
-                    <div>
-                      <p className="text-sm font-medium text-blue-700 dark:text-blue-300">Interpretation</p>
-                      <p className="text-sm text-muted-foreground mt-1">{result.interpretation}</p>
+                <div className="space-y-2">
+                  <div className="flex items-start space-x-1">
+                    <Info className="h-3 w-3 text-blue-600 mt-0.5 flex-shrink-0" />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs font-medium text-blue-700 dark:text-blue-300">Interpretation</p>
+                      <p className="text-xs text-muted-foreground mt-0.5 leading-tight">{result.interpretation}</p>
                     </div>
                   </div>
                   
-                  <div className="flex items-start space-x-2">
-                    <CheckCircle2 className="h-4 w-4 text-green-600 mt-0.5 flex-shrink-0" />
-                    <div>
-                      <p className="text-sm font-medium text-green-700 dark:text-green-300">Recommendation</p>
-                      <p className="text-sm text-muted-foreground mt-1">{result.recommendation}</p>
+                  <div className="flex items-start space-x-1">
+                    <CheckCircle2 className="h-3 w-3 text-green-600 mt-0.5 flex-shrink-0" />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs font-medium text-green-700 dark:text-green-300">Recommendation</p>
+                      <p className="text-xs text-muted-foreground mt-0.5 leading-tight">{result.recommendation}</p>
                     </div>
                   </div>
                   
                   {result.risk === 'high' && (
-                    <div className="flex items-start space-x-2">
-                      <AlertTriangle className="h-4 w-4 text-orange-600 mt-0.5 flex-shrink-0" />
-                      <div>
-                        <p className="text-sm font-medium text-orange-700 dark:text-orange-300">Caution</p>
-                        <p className="text-sm text-muted-foreground mt-1">
-                          Low statistical power. Consider collecting more data or investigating confounding variables.
+                    <div className="flex items-start space-x-1">
+                      <AlertTriangle className="h-3 w-3 text-orange-600 mt-0.5 flex-shrink-0" />
+                      <div className="min-w-0 flex-1">
+                        <p className="text-xs font-medium text-orange-700 dark:text-orange-300">Caution</p>
+                        <p className="text-xs text-muted-foreground mt-0.5 leading-tight">
+                          Low statistical power. Consider more data.
                         </p>
                       </div>
                     </div>

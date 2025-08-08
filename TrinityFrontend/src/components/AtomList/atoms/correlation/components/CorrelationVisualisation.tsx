@@ -660,75 +660,72 @@ const CorrelationVisualisation: React.FC<CorrelationVisualisationProps> = ({ dat
   ];
 
   return (
-    <div className="p-6 space-y-6 h-full overflow-auto bg-gradient-to-br from-background via-background to-muted/10">
-      {/* Enhanced Header */}
+    <div className="p-3 space-y-3 h-full overflow-auto bg-gradient-to-br from-background via-background to-muted/10">
+      {/* Compact Header */}
       <div className="flex items-center justify-between">
-        <div className="flex items-center space-x-3">
-          <div className="p-2 bg-primary/10 rounded-lg">
-            <Eye className="h-6 w-6 text-primary" />
+        <div className="flex items-center space-x-2">
+          <div className="p-1 bg-primary/10 rounded">
+            <Eye className="h-4 w-4 text-primary" />
           </div>
           <div>
-            <h2 className="text-2xl font-bold">Advanced Visualizations</h2>
-            <p className="text-sm text-muted-foreground">Interactive correlation charts</p>
+            <h2 className="text-lg font-bold">Visualizations</h2>
+            <p className="text-xs text-muted-foreground">Interactive charts</p>
           </div>
         </div>
-        <div className="flex items-center space-x-2">
-          <Button variant="outline" size="sm" onClick={refreshData} disabled={isLoading}>
-            <RefreshCw className={`h-4 w-4 mr-2 ${isLoading ? 'animate-spin' : ''}`} />
-            {isLoading ? 'Loading...' : 'Refresh'}
+        <div className="flex items-center space-x-1">
+          <Button variant="outline" size="sm" onClick={refreshData} disabled={isLoading} className="h-7 px-2 text-xs">
+            <RefreshCw className={`h-3 w-3 mr-1 ${isLoading ? 'animate-spin' : ''}`} />
+            {isLoading ? 'Loading' : 'Refresh'}
           </Button>
-          <Button variant="outline" size="sm">
-            <Download className="h-4 w-4 mr-2" />
+          <Button variant="outline" size="sm" className="h-7 px-2 text-xs">
+            <Download className="h-3 w-3 mr-1" />
             Export
           </Button>
         </div>
       </div>
 
-      {/* Visualization Selection */}
-      <Card className="shadow-lg border-0 bg-gradient-to-br from-card to-card/50">
-        <CardContent className="p-4">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      {/* Compact Visualization Selection */}
+      <Card className="shadow-sm border bg-gradient-to-br from-card to-card/50">
+        <CardContent className="p-2">
+          <div className="grid grid-cols-3 gap-1">
             {vizOptions.map((option) => (
               <Button
                 key={option.id}
                 variant={selectedViz === option.id ? 'default' : 'outline'}
-                className={`h-auto p-4 flex flex-col items-start space-y-2 ${
+                className={`h-auto p-2 flex flex-col items-center space-y-1 text-xs ${
                   selectedViz === option.id ? 'bg-primary text-primary-foreground' : ''
                 }`}
                 onClick={() => setSelectedViz(option.id)}
               >
-                <div className="flex items-center space-x-2 w-full">
-                  <option.icon className="h-5 w-5" />
-                  <span className="font-medium">{option.name}</span>
-                </div>
-                <p className="text-xs opacity-80 text-left">{option.desc}</p>
+                <option.icon className="h-3 w-3" />
+                <span className="font-medium text-[10px] leading-tight text-center">{option.name}</span>
               </Button>
             ))}
           </div>
         </CardContent>
       </Card>
 
-      {/* Chart Controls */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+      {/* Compact Chart Controls */}
+      <div className="grid grid-cols-1 gap-2">{/* Changed from lg:grid-cols-3 gap-4 */}
         {selectedViz === 'heatmap' && (
           <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm flex items-center space-x-2">
-                <Palette className="h-4 w-4" />
+            <CardHeader className="pb-1">
+              <CardTitle className="text-xs flex items-center space-x-1">
+                <Palette className="h-3 w-3" />
                 <span>Color Scheme</span>
               </CardTitle>
             </CardHeader>
             <CardContent className="pt-0">
               <Select value={colorScheme} onValueChange={setColorScheme}>
-                <SelectTrigger>
+                <SelectTrigger className="h-7 text-xs">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
                   {colorSchemes.map((scheme) => (
                     <SelectItem key={scheme.id} value={scheme.id}>
-                      <div className="flex items-center space-x-2">
-                        <div className={`w-4 h-4 rounded bg-gradient-to-r ${scheme.preview}`}></div>
-                        <span>{scheme.name}</span>
+                      <div className="flex items-center space-x-1">
+                        <div className={`w-3 h-3 rounded bg-gradient-to-r ${scheme.preview}`}></div>
+                        <span className="text-xs">{scheme.name}</span>
                       </div>
                     </SelectItem>
                   ))}
@@ -739,22 +736,23 @@ const CorrelationVisualisation: React.FC<CorrelationVisualisationProps> = ({ dat
         )}
 
         {selectedViz === 'scatter' && (
-          <>
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-sm">X-Axis Variable</CardTitle>
-              </CardHeader>
-              <CardContent className="pt-0">
+          <Card>
+            <CardHeader className="pb-1">
+              <CardTitle className="text-xs">Variables</CardTitle>
+            </CardHeader>
+            <CardContent className="pt-0 space-y-2">
+              <div>
+                <label className="text-xs text-muted-foreground">X-Axis</label>
                 <Select value={selectedVar1} onValueChange={setSelectedVar1}>
-                  <SelectTrigger>
+                  <SelectTrigger className="h-7 text-xs">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
                     {variables.map((variable) => (
                       <SelectItem key={variable.id} value={variable.id}>
                         <div className="flex flex-col">
-                          <span>{variable.name}</span>
-                          <Badge variant="outline" className="text-xs w-fit">
+                          <span className="text-xs">{variable.name}</span>
+                          <Badge variant="outline" className="text-[10px] w-fit py-0">
                             {variable.category}
                           </Badge>
                         </div>
@@ -762,24 +760,20 @@ const CorrelationVisualisation: React.FC<CorrelationVisualisationProps> = ({ dat
                     ))}
                   </SelectContent>
                 </Select>
-              </CardContent>
-            </Card>
+              </div>
 
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-sm">Y-Axis Variable</CardTitle>
-              </CardHeader>
-              <CardContent className="pt-0">
+              <div>
+                <label className="text-xs text-muted-foreground">Y-Axis</label>
                 <Select value={selectedVar2} onValueChange={setSelectedVar2}>
-                  <SelectTrigger>
+                  <SelectTrigger className="h-7 text-xs">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
                     {variables.map((variable) => (
                       <SelectItem key={variable.id} value={variable.id}>
                         <div className="flex flex-col">
-                          <span>{variable.name}</span>
-                          <Badge variant="outline" className="text-xs w-fit">
+                          <span className="text-xs">{variable.name}</span>
+                          <Badge variant="outline" className="text-[10px] w-fit py-0">
                             {variable.category}
                           </Badge>
                         </div>
@@ -787,65 +781,65 @@ const CorrelationVisualisation: React.FC<CorrelationVisualisationProps> = ({ dat
                     ))}
                   </SelectContent>
                 </Select>
-              </CardContent>
-            </Card>
-          </>
+              </div>
+            </CardContent>
+          </Card>
         )}
 
         <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm flex items-center space-x-2">
-              <Settings className="h-4 w-4" />
-              <span>Display Options</span>
+          <CardHeader className="pb-1">
+            <CardTitle className="text-xs flex items-center space-x-1">
+              <Settings className="h-3 w-3" />
+              <span>Display</span>
             </CardTitle>
           </CardHeader>
-          <CardContent className="pt-0 space-y-3">
-            <Button variant="outline" size="sm" className="w-full justify-start">
-              <Grid className="h-4 w-4 mr-2" />
-              Toggle Grid
+          <CardContent className="pt-0 space-y-2">
+            <Button variant="outline" size="sm" className="w-full justify-start h-6 text-xs px-2">
+              <Grid className="h-3 w-3 mr-1" />
+              Grid
             </Button>
-            <Button variant="outline" size="sm" className="w-full justify-start">
-              <Maximize2 className="h-4 w-4 mr-2" />
-              Full Screen
+            <Button variant="outline" size="sm" className="w-full justify-start h-6 text-xs px-2">
+              <Maximize2 className="h-3 w-3 mr-1" />
+              Fullscreen
             </Button>
           </CardContent>
         </Card>
       </div>
 
-      {/* Main Visualization */}
-      <Card className="shadow-xl border-0 bg-gradient-to-br from-card to-card/50">
-        <CardHeader>
+      {/* Compact Main Visualization */}
+      <Card className="shadow-lg border-0 bg-gradient-to-br from-card to-card/50">
+        <CardHeader className="pb-2">
           <div className="flex items-center justify-between">
-            <CardTitle className="flex items-center space-x-2">
-              {React.createElement(vizOptions.find(v => v.id === selectedViz)?.icon || BarChart3, { className: "h-5 w-5" })}
+            <CardTitle className="flex items-center space-x-1 text-sm">
+              {React.createElement(vizOptions.find(v => v.id === selectedViz)?.icon || BarChart3, { className: "h-4 w-4" })}
               <span>{vizOptions.find(v => v.id === selectedViz)?.name}</span>
             </CardTitle>
-            <div className="flex items-center space-x-2">
+            <div className="flex items-center space-x-1">
               {selectedViz === 'heatmap' && (
-                <Badge variant="outline" className="text-xs">
-                  {variables.length}×{variables.length} Matrix
+                <Badge variant="outline" className="text-[10px] py-0 px-1">
+                  {variables.length}×{variables.length}
                 </Badge>
               )}
               {selectedViz === 'scatter' && (
-                <Badge variant="outline" className="text-xs">
-                  {scatterData.length} Points
+                <Badge variant="outline" className="text-[10px] py-0 px-1">
+                  {scatterData.length} pts
                 </Badge>
               )}
               {selectedViz === 'network' && (
-                <Badge variant="outline" className="text-xs">
-                  {variables.length} Nodes
+                <Badge variant="outline" className="text-[10px] py-0 px-1">
+                  {variables.length} nodes
                 </Badge>
               )}
             </div>
           </div>
         </CardHeader>
-        <CardContent>
-          <div className="bg-muted/30 rounded-lg p-6">
+        <CardContent className="pt-0">
+          <div className="bg-muted/30 rounded-lg p-3">
             {selectedViz === 'heatmap' && (
               <svg
                 ref={heatmapRef}
-                width={700}
-                height={600}
+                width={500}
+                height={400}
                 className="w-full h-auto drop-shadow-lg"
               />
             )}
@@ -853,8 +847,8 @@ const CorrelationVisualisation: React.FC<CorrelationVisualisationProps> = ({ dat
             {selectedViz === 'scatter' && (
               <svg
                 ref={scatterRef}
-                width={600}
-                height={450}
+                width={450}
+                height={350}
                 className="w-full h-auto drop-shadow-lg"
               />
             )}
@@ -862,8 +856,8 @@ const CorrelationVisualisation: React.FC<CorrelationVisualisationProps> = ({ dat
             {selectedViz === 'network' && (
               <svg
                 ref={networkRef}
-                width={600}
-                height={500}
+                width={450}
+                height={350}
                 className="w-full h-auto drop-shadow-lg"
               />
             )}
@@ -871,27 +865,23 @@ const CorrelationVisualisation: React.FC<CorrelationVisualisationProps> = ({ dat
         </CardContent>
       </Card>
 
-      {/* Chart Actions */}
+      {/* Compact Chart Actions */}
       <Card className="shadow-lg border-0 bg-gradient-to-br from-card to-card/50">
-        <CardHeader>
-          <CardTitle className="text-lg">Export & Share</CardTitle>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm">Export</CardTitle>
         </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <Button variant="outline" className="h-12">
-              <Download className="h-4 w-4 mr-2" />
-              PNG
+        <CardContent className="pt-0">
+          <div className="grid grid-cols-4 gap-1">
+            <Button variant="outline" className="h-7 text-xs px-2">
+              <Download className="h-3 w-3" />
             </Button>
-            <Button variant="outline" className="h-12">
-              <Download className="h-4 w-4 mr-2" />
+            <Button variant="outline" className="h-7 text-xs px-2">
               SVG
             </Button>
-            <Button variant="outline" className="h-12">
-              <Download className="h-4 w-4 mr-2" />
+            <Button variant="outline" className="h-7 text-xs px-2">
               PDF
             </Button>
-            <Button variant="outline" className="h-12">
-              <Download className="h-4 w-4 mr-2" />
+            <Button variant="outline" className="h-7 text-xs px-2">
               Data
             </Button>
           </div>

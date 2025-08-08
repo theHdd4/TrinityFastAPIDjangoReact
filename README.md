@@ -13,7 +13,7 @@ Follow the steps below to run all services together.
 1. Edit `TrinityBackendDjango/.env` and `TrinityFrontend/.env` to set the
    `HOST_IP` variable. In most setups this is the IP of the machine running the
    containers. For the current deployment the main services use
-   `HOST_IP=192.168.1.98`.
+   `HOST_IP=10.2.2.37`.
    The Trinity AI container communicates with an external Ollama server so set
    `OLLAMA_IP=10.2.1.65` either in `docker-compose.yml` or the environment to
    reach that server.
@@ -88,7 +88,7 @@ If you still hit **403 Forbidden** after submitting valid credentials:
 
    ```bash
    curl -b cookies.txt -c cookies.txt \
-     -X GET http://192.168.1.98:8080/admin/api/accounts/users/me/
+     -X GET http://10.2.2.37:8080/admin/api/accounts/users/me/
    ```
 
    Replace `cookies.txt` with a file captured from the login response. A JSON
@@ -111,13 +111,13 @@ If you still hit **403 Forbidden** after submitting valid credentials:
 
   If the request instead fails with **Failed to fetch** and the console shows a
   `net::ERR_FAILED` message with status **202**, verify the API URL points at the
-  host address reachable from your browser (for example `192.168.1.98`). Using the
+  host address reachable from your browser (for example `10.2.2.37`). Using the
   Docker gateway address (`172.x.x.x`) won't work from outside the containers.
 
   Update `CSRF_TRUSTED_ORIGINS` and `CORS_ALLOWED_ORIGINS` in
   `TrinityBackendDjango/.env` so the following hosts are trusted:
-  `http://192.168.1.98:8080`, `http://172.17.48.1:8080`,
-  `http://10.2.1.65:8080`, `http://192.168.1.98:8081`,
+  `http://10.2.2.37:8080`, `http://172.17.48.1:8080`,
+  `http://10.2.1.65:8080`, `http://10.2.2.37:8081`,
   `http://172.17.48.1:8081`, `http://10.2.1.65:8081`,
   `https://trinity.quantmatrixai.com` and
   `https://trinity-dev.quantmatrixai.com`.
