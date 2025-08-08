@@ -26,6 +26,7 @@ import ColumnClassifierAtom from '@/components/AtomList/atoms/column-classifier/
 import ScopeSelectorAtom from '@/components/AtomList/atoms/scope-selector/ScopeSelectorAtom';
 import CreateColumnAtom from '@/components/AtomList/atoms/createcolumn/CreateColumnAtom';
 import GroupByAtom from '@/components/AtomList/atoms/groupby-wtg-avg/GroupByAtom';
+import BuildModelFeatureBasedAtom from '@/components/AtomList/atoms/build-model-feature-based/BuildModelFeatureBasedAtom';
 import { fetchDimensionMapping } from '@/lib/dimensions';
 
 import {
@@ -1152,7 +1153,9 @@ const handleAddDragLeave = (e: React.DragEvent) => {
                         <CreateColumnAtom atomId={atom.id} />
                       ) : atom.atomId === 'groupby-wtg-avg' ? (
                         <GroupByAtom atomId={atom.id} />
-                      ) : atom.atomId === 'scope-selector' ? (
+                      ) : atom.atomId === 'build-model-feature-based' ? (
+                          <BuildModelFeatureBasedAtom atomId={atom.id} />
+                       ) : atom.atomId === 'scope-selector' ? (
                         <ScopeSelectorAtom atomId={atom.id} />
                       ) : (
                         <div>

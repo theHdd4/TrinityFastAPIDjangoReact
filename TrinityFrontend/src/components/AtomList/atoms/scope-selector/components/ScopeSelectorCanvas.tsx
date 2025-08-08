@@ -698,10 +698,27 @@ const ScopeSelectorCanvas: React.FC<ScopeSelectorCanvasProps> = ({ data, onDataC
                           </Button>
                         </PopoverTrigger>
                         <PopoverContent className="bg-white border-blue-200 max-h-60 overflow-y-auto w-56 p-2">
-                          {getIdentifierOptions(scope.id, identifier, scope.identifiers[identifier]).map((option) => {
+                          {(() => {
+                              const options = getIdentifierOptions(scope.id, identifier, scope.identifiers[identifier]);
+                              const allChecked = Array.isArray(scope.identifiers[identifier]) && options.length > 0 && (scope.identifiers[identifier] as string[]).length === options.length;
+                              return (
+                                <>
+                                  <div key="select-all" className="flex items-center gap-2 py-1">
+                                    <Checkbox
+                                      id={`${scope.id}-${identifier}-all`}
+                                      checked={allChecked}
+                                      onCheckedChange={(isChecked) => {
+                                        updateScopeIdentifier(scope.id, identifier, isChecked ? options : []);
+                                      }}
+                                    />
+                                    <label htmlFor={`${scope.id}-${identifier}-all`} className="text-sm text-gray-700">
+                                      Select All
+                                    </label>
+                                  </div>
+                                  {options.map((option) => {
                             const checked = scope.identifiers[identifier]?.includes(option);
-                            return (
-                              <div key={option} className="flex items-center gap-2 py-1">
+                                                                    return (
+                                          <div key={option} className="flex items-center gap-2 py-1">
                                 <Checkbox
                                   id={`${scope.id}-${identifier}-${option}`}
                                   checked={checked}
@@ -719,7 +736,10 @@ const ScopeSelectorCanvas: React.FC<ScopeSelectorCanvasProps> = ({ data, onDataC
                               </div>
                             );
                           })}
-                        </PopoverContent>
+                                  </>
+                                );
+                              })()}
+                         </PopoverContent>
                       </Popover>
                     </div>
                   </div>

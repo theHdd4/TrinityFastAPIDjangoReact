@@ -308,12 +308,12 @@ const ConcatCanvas: React.FC<ConcatCanvasProps> = ({ atomId, concatId, resultFil
                     <span className="font-medium text-gray-700">Strategy</span>
                   </div>
                   <div className="bg-purple-50 border border-purple-200 rounded-lg p-3">
-                    <div className="flex items-center space-x-2">
+                    <div className="flex items-center space-x-2 w-full">
                       <ArrowDown className="w-4 h-4 text-purple-600 flex-shrink-0" />
                       <select
                         value={direction || ''}
                         onChange={handleDirectionChange}
-                        className="text-sm font-medium text-gray-800 bg-transparent capitalize focus:outline-none cursor-pointer"
+                        className="w-full bg-transparent text-sm font-medium text-gray-800 capitalize focus:outline-none cursor-pointer"
                       >
                         <option value="">Select</option>
                         <option value="vertical">Vertical</option>

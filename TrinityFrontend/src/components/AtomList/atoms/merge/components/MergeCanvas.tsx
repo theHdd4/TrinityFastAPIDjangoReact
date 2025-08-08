@@ -393,7 +393,7 @@ const MergeCanvas: React.FC<MergeCanvasProps> = ({ atomId,
                       <select
                         value={joinType}
                         onChange={handleJoinTypeChange}
-                        className="text-sm font-medium text-gray-800 bg-transparent capitalize focus:outline-none cursor-pointer"
+                        className="w-full bg-transparent text-sm font-medium text-gray-800 capitalize focus:outline-none cursor-pointer"
                       >
                         <option value="inner">Inner</option>
                         <option value="outer">Outer</option>
@@ -409,7 +409,7 @@ const MergeCanvas: React.FC<MergeCanvasProps> = ({ atomId,
                     <span className="font-medium text-gray-700">Join Columns</span>
                   </div>
                   <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
-                    <div className="max-h-28 overflow-y-auto space-y-1">
+                    <div className="max-h-20 overflow-y-auto space-y-1">
                       {availableColumns.length === 0 ? (
                         <span className="text-sm text-gray-500">No columns</span>
                       ) : (
