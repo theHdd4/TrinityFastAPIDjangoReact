@@ -38,7 +38,7 @@ const RequiredFilesSection: React.FC<RequiredFilesSectionProps> = ({
   getStatusIcon,
   bypassMasterUpload
 }) => (
-  <Card className="h-full shadow-sm border-0 bg-white">
+  <Card className="h-full shadow-sm border-2 border-blue-200 bg-white">
     <div className="p-4 border-b border-gray-100">
       <h4 className="font-semibold text-gray-900 flex items-center space-x-2">
         <FileText className="w-4 h-4 text-blue-500" />

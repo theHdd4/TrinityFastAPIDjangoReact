@@ -23,9 +23,11 @@ import FeatureOverviewAtom from '@/components/AtomList/atoms/feature-overview/Fe
 import ConcatAtom from '@/components/AtomList/atoms/concat/ConcatAtom';
 import MergeAtom from '@/components/AtomList/atoms/merge/MergeAtom';
 import ColumnClassifierAtom from '@/components/AtomList/atoms/column-classifier/ColumnClassifierAtom';
+import DataFrameOperationsAtom from '@/components/AtomList/atoms/dataframe-operations/DataFrameOperationsAtom';
 import ScopeSelectorAtom from '@/components/AtomList/atoms/scope-selector/ScopeSelectorAtom';
 import CreateColumnAtom from '@/components/AtomList/atoms/createcolumn/CreateColumnAtom';
 import GroupByAtom from '@/components/AtomList/atoms/groupby-wtg-avg/GroupByAtom';
+import ChartMakerAtom from '@/components/AtomList/atoms/chart-maker/ChartMakerAtom';
 import { fetchDimensionMapping } from '@/lib/dimensions';
 
 import {
@@ -35,6 +37,8 @@ import {
   DEFAULT_TEXTBOX_SETTINGS,
   DEFAULT_DATAUPLOAD_SETTINGS,
   DEFAULT_FEATURE_OVERVIEW_SETTINGS,
+  DEFAULT_DATAFRAME_OPERATIONS_SETTINGS,
+  DEFAULT_CHART_MAKER_SETTINGS,
   DataUploadSettings,
   ColumnClassifierColumn,
 } from '../../store/laboratoryStore';
@@ -46,6 +50,7 @@ interface CanvasAreaProps {
   onCardSelect?: (cardId: string, exhibited: boolean) => void;
   selectedCardId?: string;
   onToggleSettingsPanel?: () => void;
+  canEdit: boolean;
 }
 
 
@@ -57,7 +62,13 @@ const LLM_MAP: Record<string, string> = {
   merge: 'Agent Merge',
 };
 
-const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, selectedCardId, onToggleSettingsPanel }) => {
+const CanvasArea: React.FC<CanvasAreaProps> = ({
+  onAtomSelect,
+  onCardSelect,
+  selectedCardId,
+  onToggleSettingsPanel,
+  canEdit,
+}) => {
   const { cards: layoutCards, setCards: setLayoutCards, updateAtomSettings } = useLaboratoryStore();
   const [workflowMolecules, setWorkflowMolecules] = useState<WorkflowMolecule[]>([]);
   const [activeTab, setActiveTab] = useState<string>('');
@@ -103,7 +114,7 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
   };
 
   const prefetchDataframe = async (name: string) => {
-    if (!name) return;
+    if (!name || !/\.[^/]+$/.test(name.trim())) return;
     try {
       console.log('✈️ fetching flight table', name);
       const fr = await fetch(
@@ -211,9 +222,15 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
       const res = await fetch(`${VALIDATE_API}/list_saved_dataframes${query}`);
       if (res.ok) {
         const data = await res.json();
-        const file = Array.isArray(data.files) ? data.files[0] : null;
-        if (file) {
-          console.log('✔️ defaulting to first saved dataframe', file.object_name);
+        const files = Array.isArray(data.files) ? data.files : [];
+        const validFiles = files.filter(
+          (f: any) =>
+            typeof f.object_name === 'string' &&
+            /\.[^/]+$/.test(f.object_name.trim())
+        );
+        const file = validFiles[validFiles.length - 1];
+        if (file && file.object_name) {
+          console.log('✔️ defaulting to latest saved dataframe', file.object_name);
           await prefetchDataframe(file.object_name);
           const cols = await fetchColumnSummary(file.object_name);
           return { csv: file.object_name, display: file.csv_name, ...(cols || {}) };
@@ -234,7 +251,12 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
     }
     console.log('ℹ️ prefill data source details', prev);
     await prefetchDataframe(prev.csv);
-    const mapping = await fetchDimensionMapping();
+    const rawMapping = await fetchDimensionMapping();
+    const mapping = Object.fromEntries(
+      Object.entries(rawMapping).filter(
+        ([key]) => key.toLowerCase() !== 'unattributed',
+      ),
+    );
     console.log('✅ pre-filling feature overview with', prev.csv);
     const summary = Array.isArray(prev.summary) ? prev.summary : [];
     const identifiers = Array.isArray(prev.identifiers) ? prev.identifiers : [];
@@ -360,10 +382,14 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
     }
 
     if (workflowAtoms.length > 0) {
+      const normalize = (s: string) => s.toLowerCase().replace(/[\s_-]/g, '');
       initialCards = workflowAtoms.map(atom => {
         const atomInfo =
-          allAtoms.find(a => a.id === atom.atomName || a.title === atom.atomName) ||
-          ({} as any);
+          allAtoms.find(
+            a =>
+              normalize(a.id) === normalize(atom.atomName) ||
+              normalize(a.title) === normalize(atom.atomName)
+          ) || ({} as any);
         const atomId = atomInfo.id || atom.atomName;
         const dropped: DroppedAtom = {
           id: `${atom.atomName}-${Date.now()}-${Math.random()}`,
@@ -521,6 +547,8 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({ onAtomSelect, onCardSelect, sel
             ? { ...DEFAULT_DATAUPLOAD_SETTINGS }
             : atom.id === 'feature-overview'
             ? { ...DEFAULT_FEATURE_OVERVIEW_SETTINGS }
+            : atom.id === 'chart-maker'
+            ? { ...DEFAULT_CHART_MAKER_SETTINGS }
             : undefined,
       };
       
@@ -584,6 +612,8 @@ const addNewCardWithAtom = (
         ? { ...DEFAULT_DATAUPLOAD_SETTINGS }
         : atomId === 'feature-overview'
         ? { ...DEFAULT_FEATURE_OVERVIEW_SETTINGS }
+        : atomId === 'chart-maker'
+        ? { ...DEFAULT_CHART_MAKER_SETTINGS }
         : undefined,
   };
   const newCard: LayoutCard = {
@@ -680,6 +710,8 @@ const handleAddDragLeave = (e: React.DragEvent) => {
           ? { ...DEFAULT_DATAUPLOAD_SETTINGS }
           : info.id === 'feature-overview'
           ? { ...DEFAULT_FEATURE_OVERVIEW_SETTINGS }
+          : info.id === 'dataframe-operations'
+          ? { ...DEFAULT_DATAFRAME_OPERATIONS_SETTINGS }
           : undefined,
     };
     setLayoutCards(
@@ -808,8 +840,9 @@ const handleAddDragLeave = (e: React.DragEvent) => {
   if (workflowMolecules.length > 0) {
     return (
       <div className="h-full bg-gradient-to-br from-gray-50 to-gray-100 rounded-xl border border-gray-200 shadow-sm overflow-auto">
-        <div className="p-6">
-          <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+        <div className={canEdit ? '' : 'pointer-events-none'}>
+          <div className="p-6">
+            <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
             <div className="mb-6 bg-white rounded-lg border border-gray-200 p-1 shadow-sm">
               <TabsList className="grid auto-cols-fr grid-flow-col w-full h-12 bg-transparent p-0 gap-1">
                 {workflowMolecules.map((molecule) => (
@@ -950,6 +983,8 @@ const handleAddDragLeave = (e: React.DragEvent) => {
                                       <DataUploadValidateAtom atomId={atom.id} />
                                     ) : atom.atomId === 'feature-overview' ? (
                                       <FeatureOverviewAtom atomId={atom.id} />
+                                    ) : atom.atomId === 'chart-maker' ? (
+                                      <ChartMakerAtom atomId={atom.id} />
                                     ) : (
                                       <div>
                                         <h4 className="font-semibold text-gray-900 mb-1 text-sm">{atom.title}</h4>
@@ -990,11 +1025,13 @@ const handleAddDragLeave = (e: React.DragEvent) => {
           </Tabs>
         </div>
       </div>
+      </div>
     );
   }
 
   return (
     <div className="h-full w-full bg-gradient-to-br from-gray-50 to-gray-100 rounded-xl border border-gray-200 shadow-sm overflow-auto">
+      <div className={canEdit ? '' : 'pointer-events-none'}>
       {/* Layout Cards Container */}
       <div className="p-6 space-y-6 w-full">
         {Array.isArray(layoutCards) && layoutCards.map((card, index) => {
@@ -1142,12 +1179,16 @@ const handleAddDragLeave = (e: React.DragEvent) => {
                         <DataUploadValidateAtom atomId={atom.id} />
                       ) : atom.atomId === 'feature-overview' ? (
                         <FeatureOverviewAtom atomId={atom.id} />
+                      ) : atom.atomId === 'chart-maker' ? (
+                        <ChartMakerAtom atomId={atom.id} />
                       ) : atom.atomId === 'concat' ? (
                         <ConcatAtom atomId={atom.id} />
                       ) : atom.atomId === 'merge' ? (
                         <MergeAtom atomId={atom.id} />
                       ) : atom.atomId === 'column-classifier' ? (
                         <ColumnClassifierAtom atomId={atom.id} />
+                      ) : atom.atomId === 'dataframe-operations' ? (
+                        <DataFrameOperationsAtom atomId={atom.id} />
                       ) : atom.atomId === 'create-column' ? (
                         <CreateColumnAtom atomId={atom.id} />
                       ) : atom.atomId === 'groupby-wtg-avg' ? (
@@ -1211,6 +1252,7 @@ const handleAddDragLeave = (e: React.DragEvent) => {
             </span>
           </button>
         </div>
+      </div>
       </div>
     </div>
   );

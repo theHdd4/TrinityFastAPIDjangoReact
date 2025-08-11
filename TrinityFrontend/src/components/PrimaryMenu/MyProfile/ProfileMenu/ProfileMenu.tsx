@@ -18,6 +18,12 @@ import ProfileInformationItem from './components/ProfileInformationItem';
 
 const ProfileMenu: React.FC = () => {
   const { logout, user, profile } = useAuth();
+  const role = user?.role?.toLowerCase();
+  const canManage =
+    role === 'admin' ||
+    role === 'super_admin' ||
+    user?.is_staff ||
+    user?.is_superuser;
   const navigate = useNavigate();
 
   const handleLogout = () => {
@@ -35,8 +41,14 @@ const ProfileMenu: React.FC = () => {
       <DropdownMenuContent align="end" className="w-56">
         <UserInfo user={user} profile={profile} />
         <ProfileInformationItem />
-        <UserManagementItem onSelect={() => navigate('/users')} />
-        <ClientManagementItem onSelect={() => navigate('/clients')} />
+        <UserManagementItem
+          onSelect={() => navigate('/users')}
+          disabled={!canManage}
+        />
+        <ClientManagementItem
+          onSelect={() => navigate('/clients')}
+          disabled={!canManage}
+        />
         <BillingPlansItem />
         <DropdownMenuSeparator />
         <DropdownMenuItem onSelect={handleLogout}>Sign Out</DropdownMenuItem>

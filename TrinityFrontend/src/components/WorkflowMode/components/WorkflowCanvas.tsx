@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { safeStringify } from '@/utils/safeStringify';
+import { useToast } from '@/hooks/use-toast';
 import ReactFlow, {
   Background,
   Controls,
@@ -21,6 +22,7 @@ import { REGISTRY_API } from '@/lib/api';
 interface WorkflowCanvasProps {
   onMoleculeSelect: (moleculeId: string) => void;
   onCanvasMoleculesUpdate?: (molecules: any[]) => void;
+  canEdit: boolean;
 }
 
 const nodeTypes = { molecule: MoleculeNode };
@@ -29,12 +31,14 @@ const STORAGE_KEY = 'workflow-canvas-molecules';
 
 const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
   onMoleculeSelect,
-  onCanvasMoleculesUpdate
+  onCanvasMoleculesUpdate,
+  canEdit
 }) => {
   const [nodes, setNodes] = useState<Node<MoleculeNodeData>[]>([]);
   const [edges, setEdges] = useState<Edge[]>([]);
   const reactFlowWrapper = useRef<HTMLDivElement | null>(null);
   const [reactFlowInstance, setReactFlowInstance] = useState<any>(null);
+  const { toast } = useToast();
 
   const onNodesChange = useCallback(
     (changes: NodeChange[]) => setNodes(ns => applyNodeChanges(changes, ns)),
@@ -165,6 +169,8 @@ const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
 
         setNodes(loadedNodes);
         setEdges(loadedEdges);
+        console.log('Successfully Loaded Existing Project State');
+        toast({ title: 'Successfully Loaded Existing Project State' });
       } catch (e) {
         console.error('Failed to parse workflow layout', e);
       }
@@ -193,7 +199,7 @@ const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
           .catch(() => {});
       }
     }
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!onCanvasMoleculesUpdate) return;
@@ -219,13 +225,16 @@ const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
         <ReactFlow
           nodes={nodes}
           edges={edges}
-          onNodesChange={onNodesChange}
-          onEdgesChange={onEdgesChange}
-          onConnect={onConnect}
+          onNodesChange={canEdit ? onNodesChange : undefined}
+          onEdgesChange={canEdit ? onEdgesChange : undefined}
+          onConnect={canEdit ? onConnect : undefined}
           nodeTypes={nodeTypes}
           onInit={setReactFlowInstance}
-          onDrop={onDrop}
-          onDragOver={onDragOver}
+          onDrop={canEdit ? onDrop : undefined}
+          onDragOver={canEdit ? onDragOver : undefined}
+          nodesDraggable={canEdit}
+          nodesConnectable={canEdit}
+          elementsSelectable={canEdit}
           fitView
           proOptions={{ hideAttribution: true }}
         >

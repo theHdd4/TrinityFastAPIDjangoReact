@@ -1,24 +1,25 @@
 from rest_framework import serializers
-from django.utils import timezone
 from django_tenants.utils import schema_context
 from django.core.management import call_command
 from django.db import transaction, connection
-from common.minio_utils import create_prefix
 import os
 import re
 from .models import Tenant, Domain
-from apps.subscriptions.models import Company, SubscriptionPlan
-from apps.config_store.models import TenantConfig
 from apps.registry.models import App
 
 
 class TenantSerializer(serializers.ModelSerializer):
-    domain = serializers.CharField(write_only=True, required=False)
-    seats_allowed = serializers.IntegerField(write_only=True, required=False)
-    project_cap = serializers.IntegerField(write_only=True, required=False)
-    apps_allowed = serializers.ListField(
-        child=serializers.IntegerField(), write_only=True, required=False
+    primary_domain = serializers.CharField(required=False, allow_blank=True)
+    allowed_apps = serializers.ListField(
+        child=serializers.IntegerField(), required=False
     )
+    projects_allowed = serializers.ListField(
+        child=serializers.CharField(), required=False
+    )
+    users_in_use = serializers.IntegerField(read_only=True)
+    admin_name = serializers.CharField()
+    admin_email = serializers.EmailField()
+    admin_password = serializers.CharField(write_only=True)
 
     class Meta:
         model = Tenant
@@ -27,12 +28,17 @@ class TenantSerializer(serializers.ModelSerializer):
             "name",
             "schema_name",
             "created_on",
-            "domain",
+            "primary_domain",
             "seats_allowed",
             "project_cap",
-            "apps_allowed",
+            "allowed_apps",
+            "projects_allowed",
+            "users_in_use",
+            "admin_name",
+            "admin_email",
+            "admin_password",
         ]
-        read_only_fields = ["id", "created_on"]
+        read_only_fields = ["id", "created_on", "users_in_use"]
 
     def create(self, validated_data):
         """Create a new tenant using the same steps as create_tenant.py."""
@@ -46,10 +52,10 @@ class TenantSerializer(serializers.ModelSerializer):
         except Exception:
             pass
 
-        domain = validated_data.pop("domain", None)
-        seats = validated_data.pop("seats_allowed", None)
-        project_cap = validated_data.pop("project_cap", None)
-        apps_allowed = validated_data.pop("apps_allowed", None)
+        domain = validated_data.pop("primary_domain", "")
+        allowed_apps = validated_data.pop("allowed_apps", [])
+        projects_allowed = validated_data.pop("projects_allowed", [])
+        admin_password = validated_data.pop("admin_password")
 
         schema = (
             validated_data.get("schema_name", "")
@@ -62,21 +68,22 @@ class TenantSerializer(serializers.ModelSerializer):
         validated_data["schema_name"] = schema
 
         with transaction.atomic():
-            tenant = Tenant.objects.create(**validated_data)
+            tenant = Tenant.objects.create(
+                **validated_data,
+                primary_domain=domain,
+                allowed_apps=allowed_apps,
+                projects_allowed=projects_allowed,
+            )
             print("→ Created tenant", tenant)
             if domain:
                 if Domain.objects.filter(domain=domain).exists():
-                    raise serializers.ValidationError({"domain": "Domain already exists"})
-                Domain.objects.create(
-                    domain=domain,
-                    tenant=tenant,
-                    is_primary=True,
-                )
+                    raise serializers.ValidationError({"primary_domain": "Domain already exists"})
+                Domain.objects.create(domain=domain, tenant=tenant, is_primary=True)
                 print("→ Created primary domain", domain)
 
-            primary_domain = os.getenv("PRIMARY_DOMAIN", "localhost")
+            primary = os.getenv("PRIMARY_DOMAIN", "localhost")
             for alias in ("localhost", "127.0.0.1"):
-                if alias != primary_domain and alias != domain and not Domain.objects.filter(domain=alias).exists():
+                if alias != primary and alias != domain and not Domain.objects.filter(domain=alias).exists():
                     Domain.objects.create(domain=alias, tenant=tenant, is_primary=False)
 
         # Allow skipping heavy migration logic when running in simple mode
@@ -109,18 +116,21 @@ class TenantSerializer(serializers.ModelSerializer):
                 for name, slug, desc in default_apps:
                     App.objects.get_or_create(slug=slug, defaults={"name": name, "description": desc})
 
-                if seats is not None or project_cap is not None:
-                    company = Company.objects.create(tenant=tenant)
-                    SubscriptionPlan.objects.create(
-                        company=company,
-                        plan_name="Default",
-                        seats_allowed=seats or 0,
-                        project_cap=project_cap or 0,
-                        renewal_date=timezone.now().date(),
-                    )
+        with schema_context(tenant.schema_name):
+            from apps.accounts.models import User
+            from apps.roles.models import UserRole
 
-                if apps_allowed:
-                    TenantConfig.objects.create(tenant=tenant, key="apps_allowed", value=apps_allowed)
+            admin_user = User.objects.create_user(
+                username=validated_data["admin_name"],
+                email=validated_data["admin_email"],
+                password=admin_password,
+            )
+            UserRole.objects.filter(user=admin_user).update(
+                role=UserRole.ROLE_ADMIN,
+                allowed_apps=tenant.allowed_apps,
+                client_name=tenant.name,
+                email=validated_data["admin_email"],
+            )
 
         print("Tenant creation complete")
         return tenant

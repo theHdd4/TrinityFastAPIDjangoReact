@@ -46,7 +46,10 @@ class Project(models.Model):
     history = HistoricalRecords()
 
     class Meta:
-        unique_together = ("slug", "owner")
+        unique_together = (
+            ("slug", "owner"),
+            ("owner", "app", "name"),
+        )
         ordering = ["-updated_at"]
 
     def __str__(self):
@@ -117,3 +120,29 @@ class ArrowDataset(models.Model):
 
     def __str__(self):
         return f"{self.atom_id}:{self.file_key}"
+
+
+class RegistryEnvironment(models.Model):
+    """Cached environment and schema configuration per project.
+
+    The table stores the resolved client/app/project names alongside any
+    additional environment variables or column classification data. It lives
+    in each tenant's schema so lookups remain local to the tenant database.
+    """
+
+    client_name = models.CharField(max_length=255)
+    app_name = models.CharField(max_length=255)
+    project_name = models.CharField(max_length=255)
+    envvars = models.JSONField(default=dict, blank=True)
+    identifiers = models.JSONField(default=list, blank=True)
+    measures = models.JSONField(default=list, blank=True)
+    dimensions = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "registry_environment"
+        unique_together = ("client_name", "app_name", "project_name")
+
+    def __str__(self):
+        return f"{self.client_name}/{self.app_name}/{self.project_name}"

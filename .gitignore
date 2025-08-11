@@ -1,3 +1,6 @@
+﻿TrinityBackendDjango/.env
+TrinityFrontend/.env
+
 # === Python ===
 __pycache__/
 *.py[cod]
@@ -107,7 +110,24 @@ TrinityAI/Agent_fetch_atom/models/
 arrow_data/
 cloudflared/tunnelCreds/credentials.json
 cloudflared/tunnelCreds/cert.pem
+node_modules/
 
 
+# Python cache files
+__pycache__/
+*.pyc
 
-.yml
+# Django/FastAPI cache and generated files
+*.pyo
+*.pyd
+
+# Custom validator JSON files
+TrinityBackendDjango/custom_validations/*.json
+
+# Arrow data directory
+
+TrinityBackendDjango/arrow_data/
+
+
+#jenkinsfile
+Jenkinsfile

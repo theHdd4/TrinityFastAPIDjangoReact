@@ -1,6 +1,6 @@
 # app/routes.py
 
-from fastapi import APIRouter, Form, HTTPException, Query, File, UploadFile, Body
+from fastapi import APIRouter, Form, HTTPException, Query, File, UploadFile, Body, Depends
 from fastapi.responses import Response, JSONResponse, StreamingResponse
 from urllib.parse import unquote
 from typing import List
@@ -11,13 +11,13 @@ import pyarrow.ipc as ipc
 from minio.error import S3Error
 import uuid
 import datetime
+from ..data_upload_validate.app.routes import get_object_prefix
 from .deps import (
     minio_client,
     load_dataframe,
     save_concat_result_to_minio,
     get_concat_results_collection,
     save_concat_metadata_to_mongo,
-    OBJECT_PREFIX,
     MINIO_BUCKET,
     redis_client,
 )
@@ -39,8 +39,6 @@ async def column_summary(object_name: str):
     """Return column summary statistics for a saved dataframe."""
     object_name = unquote(object_name)
     print(f"➡️ column_summary request: {object_name}")
-    if not object_name.startswith(OBJECT_PREFIX):
-        print(f"⚠️ column_summary prefix mismatch: {object_name} (expected {OBJECT_PREFIX})")
     try:
         df = load_dataframe(object_name)
         df.columns = df.columns.str.lower()
@@ -86,8 +84,6 @@ async def cached_dataframe(
     """Return the saved dataframe as CSV text from Redis or MinIO with pagination."""
     object_name = unquote(object_name)
     print(f"➡️ cached_dataframe request: {object_name}, page={page}, page_size={page_size}")
-    if not object_name.startswith(OBJECT_PREFIX):
-        print(f"⚠️ cached_dataframe prefix mismatch: {object_name} (expected {OBJECT_PREFIX})")
     try:
         content = redis_client.get(object_name)
         if content is None:
@@ -233,9 +229,10 @@ async def perform_concat(
         # Prepare full CSV for response (used later by /save to persist full data)
         csv_text_full = result.to_csv(index=False)
 
-        # Generate auto concat ID
+        # Generate auto concat ID and get standard prefix
         concat_id = str(uuid.uuid4())[:8]  # Shorten UUID for readability
-        concat_key = f"{concat_id}_concat.arrow"
+        prefix = await get_object_prefix()
+        concat_key = f"{prefix}concat-data/{concat_id}_concat.arrow"
 
         print('Received:', file1, file2, concat_direction)
 
@@ -296,14 +293,16 @@ async def save_concat_dataframe(
         # 1. Load dataframe from CSV payload (expected full data, not a preview)
         df = pd.read_csv(io.StringIO(csv_data))
 
-        # 2. Determine output filename
+        # 2. Determine output filename with standard prefix
         if not filename:
             concat_id = str(uuid.uuid4())[:8]
             filename = f"{concat_id}_concat.arrow"
         if not filename.endswith(".arrow"):
             filename += ".arrow"
-        if not filename.startswith(OBJECT_PREFIX):
-            filename = OBJECT_PREFIX + filename
+            
+        # Get standard prefix and create full path
+        prefix = await get_object_prefix()
+        filename = f"{prefix}concat-data/{filename}"
 
         # 3. Convert to Arrow bytes
         table = pa.Table.from_pandas(df)
@@ -344,8 +343,10 @@ async def get_concat_data(
        maintains backward-compatibility with previously saved results.
     """
     try:
-        arrow_key = f"{concat_id}_concat.arrow"
-        csv_key = f"{concat_id}_concat.csv"  # legacy
+        # Get the standard prefix
+        prefix = await get_object_prefix()
+        arrow_key = f"{prefix}concat-data/{concat_id}_concat.arrow"
+        csv_key = f"{prefix}concat-data/{concat_id}_concat.csv"  # legacy
 
         # Helper to load DataFrame from raw bytes depending on extension
         def _bytes_to_df(key: str, raw: bytes) -> pd.DataFrame:
