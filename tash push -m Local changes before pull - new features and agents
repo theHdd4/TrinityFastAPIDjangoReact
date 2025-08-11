@@ -1,0 +1,17 @@
+[1mdiff --git a/TrinityBackendFastAPI/app/api/router.py b/TrinityBackendFastAPI/app/api/router.py[m
+[1mindex 39fd03a3..73a3529b 100644[m
+[1m--- a/TrinityBackendFastAPI/app/api/router.py[m
+[1m+++ b/TrinityBackendFastAPI/app/api/router.py[m
+[36m@@ -12,6 +12,7 @@[m [mfrom app.features.groupby_weighted_avg.endpoint import router as groupby_router[m
+ from app.features.project_state.endpoint import router as project_state_router[m
+ from app.features.scope_selector.endpoint import router as scope_selector_router[m
+ from app.features.user_apps.endpoint import router as user_apps_router[m
+[32m+[m[32mfrom app.features.feature_create_transform.endpoint import router as create_transform_router[m
+ [m
+ api_router = APIRouter()[m
+ text_router  = APIRouter()[m
+[36m@@ -32,3 +33,4 @@[m [mapi_router.include_router(groupby_router)[m
+ api_router.include_router(project_state_router)[m
+ api_router.include_router(scope_selector_router)[m
+ api_router.include_router(user_apps_router)[m
+[32m+[m[32mapi_router.include_router(create_transform_router)[m

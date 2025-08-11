@@ -1,0 +1,146 @@
+{
+  "config": {
+    "base_url": "http://10.2.1.65:11434",
+    "chat_url": "http://10.2.1.65:11434/api/chat",
+    "tags_url": "http://10.2.1.65:11434/api/tags",
+    "bearer_token": "aakash_api_key"
+  },
+  "models": [
+    {
+      "name": "gpt-oss:20b",
+      "size": 12.8,
+      "details": {
+        "parent_model": "",
+        "format": "gguf",
+        "family": "gptoss",
+        "families": [
+          "gptoss"
+        ],
+        "parameter_size": "20.9B",
+        "quantization_level": "MXFP4"
+      }
+    },
+    {
+      "name": "mistral:7b",
+      "size": 4.1,
+      "details": {
+        "parent_model": "",
+        "format": "gguf",
+        "family": "llama",
+        "families": [
+          "llama"
+        ],
+        "parameter_size": "7.2B",
+        "quantization_level": "Q4_K_M"
+      }
+    },
+    {
+      "name": "command-r:35b",
+      "size": 17.4,
+      "details": {
+        "parent_model": "",
+        "format": "gguf",
+        "family": "command-r",
+        "families": [
+          "command-r"
+        ],
+        "parameter_size": "32.3B",
+        "quantization_level": "Q4_0"
+      }
+    },
+    {
+      "name": "gemma3:27b",
+      "size": 16.2,
+      "details": {
+        "parent_model": "",
+        "format": "gguf",
+        "family": "gemma3",
+        "families": [
+          "gemma3"
+        ],
+        "parameter_size": "27.4B",
+        "quantization_level": "Q4_K_M"
+      }
+    },
+    {
+      "name": "deepseek-r1:32b",
+      "size": 18.5,
+      "details": {
+        "parent_model": "",
+        "format": "gguf",
+        "family": "qwen2",
+        "families": [
+          "qwen2"
+        ],
+        "parameter_size": "32.8B",
+        "quantization_level": "Q4_K_M"
+      }
+    },
+    {
+      "name": "deepseek-r1:1.5b",
+      "size": 1.0,
+      "details": {
+        "parent_model": "",
+        "format": "gguf",
+        "family": "qwen2",
+        "families": [
+          "qwen2"
+        ],
+        "parameter_size": "1.8B",
+        "quantization_level": "Q4_K_M"
+      }
+    }
+  ],
+  "test_results": {
+    "gpt-oss:20b": {
+      "status": "success",
+      "response_time": 3.35,
+      "content": "OK",
+      "response_length": 2
+    },
+    "mistral:7b": {
+      "status": "success",
+      "response_time": 1.17,
+      "content": "OK",
+      "response_length": 2
+    },
+    "command-r:35b": {
+      "status": "success",
+      "response_time": 3.38,
+      "content": "OK",
+      "response_length": 2
+    },
+    "gemma3:27b": {
+      "status": "success",
+      "response_time": 3.81,
+      "content": "OK",
+      "response_length": 2
+    },
+    "deepseek-r1:32b": {
+      "status": "success",
+      "response_time": 4.73,
+      "content": "<think>\nOkay, so I need to figure out how to solve this problem where the user just said \"Hello!\" an...",
+      "response_length": 216
+    },
+    "deepseek-r1:1.5b": {
+      "status": "success",
+      "response_time": 1.36,
+      "content": "<think>\nOkay, so I'm trying to figure out how to approach this problem where I need to find the sum ...",
+      "response_length": 193
+    }
+  },
+  "summary": {
+    "total_models": 6,
+    "working_models": 6,
+    "failed_models": 0,
+    "working_model_list": [
+      "gpt-oss:20b",
+      "mistral:7b",
+      "command-r:35b",
+      "gemma3:27b",
+      "deepseek-r1:32b",
+      "deepseek-r1:1.5b"
+    ],
+    "failed_model_list": []
+  }
+}
