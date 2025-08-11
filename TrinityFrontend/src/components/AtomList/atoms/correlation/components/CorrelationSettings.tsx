@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Calendar, X, Upload, FileText, AlertCircle, CheckCircle, Loader2 } from 'lucide-react';
 import {
   Select,
@@ -12,17 +12,151 @@ import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { VALIDATE_API } from '@/lib/api';
 import type { CorrelationSettings } from '@/components/LaboratoryMode/store/laboratoryStore';
-import { processCSVFile, calculateCorrelationFromData } from '../utils/csvProcessor';
+import { correlationAPI, handleAPIError, type FilterAndCorrelateRequest } from '../helpers/correlationAPI';
 
 interface CorrelationSettingsProps {
   data: CorrelationSettings;
   onDataChange: (newData: Partial<CorrelationSettings>) => void;
 }
 
+interface Frame { 
+  object_name: string; 
+  csv_name: string; 
+}
+
 const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataChange }) => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [processingError, setProcessingError] = useState<string | null>(null);
+  const [frames, setFrames] = useState<Frame[]>([]);
+  const [availableColumns, setAvailableColumns] = useState<{identifiers: string[], measures: string[]}>({
+    identifiers: [],
+    measures: []
+  });
+
+  // Load available dataframes on component mount
+  useEffect(() => {
+    let query = '';
+    const envStr = localStorage.getItem('env');
+    if (envStr) {
+      try {
+        const env = JSON.parse(envStr);
+        query =
+          '?' +
+          new URLSearchParams({
+            client_id: env.CLIENT_ID || '',
+            app_id: env.APP_ID || '',
+            project_id: env.PROJECT_ID || '',
+            client_name: env.CLIENT_NAME || '',
+            app_name: env.APP_NAME || '',
+            project_name: env.PROJECT_NAME || ''
+          }).toString();
+      } catch {
+        /* ignore */
+      }
+    }
+    fetch(`${VALIDATE_API}/list_saved_dataframes${query}`)
+      .then(r => r.json())
+      .then(d => setFrames(Array.isArray(d.files) ? d.files : []))
+      .catch(() => setFrames([]));
+  }, []);
+
+  // Load columns when a file is selected
+  useEffect(() => {
+    if (data.selectedFile && data.validatorAtomId) {
+      loadColumns(data.validatorAtomId);
+    }
+  }, [data.selectedFile, data.validatorAtomId]);
+
+  const loadColumns = async (validatorAtomId: string) => {
+    try {
+      const columns = await correlationAPI.getColumns(validatorAtomId);
+      setAvailableColumns(columns);
+    } catch (error) {
+      console.error('Failed to load columns:', error);
+      setProcessingError(handleAPIError(error));
+    }
+  };
+
+  const handleFileSelection = (objectName: string) => {
+    onDataChange({
+      selectedFile: objectName,
+      fileData: null,
+      correlationMatrix: null,
+      timeSeriesData: null
+    });
+  };
+
+  const handleRunCorrelation = async () => {
+    if (!data.selectedFile) {
+      setProcessingError('Please select a file first');
+      return;
+    }
+
+    setIsProcessing(true);
+    setProcessingError(null);
+
+    try {
+      const request: FilterAndCorrelateRequest = {
+        file_path: data.selectedFile,
+        method: data.settings.correlationMethod as any,
+        include_preview: true,
+        preview_limit: 10,
+        save_filtered: true
+      };
+
+      // Add column selections if specified
+      if (data.selectedColumns && data.selectedColumns.length > 0) {
+        // Separate columns by type based on available columns
+        const selectedIdentifiers = data.selectedColumns.filter(col => 
+          availableColumns.identifiers.includes(col)
+        );
+        const selectedMeasures = data.selectedColumns.filter(col => 
+          availableColumns.measures.includes(col)
+        );
+        
+        if (selectedIdentifiers.length > 0) {
+          request.identifier_columns = selectedIdentifiers;
+        }
+        if (selectedMeasures.length > 0) {
+          request.measure_columns = selectedMeasures;
+        }
+      }
+
+      const result = await correlationAPI.filterAndCorrelate(request);
+      
+      // Transform backend result to match existing interface
+      const transformedResult = {
+        variables: result.columns_used,
+        correlationMatrix: result.correlation_results.correlation_matrix || [],
+        timeSeriesData: result.preview_data || []
+      };
+
+      onDataChange({
+        correlationMatrix: transformedResult.correlationMatrix,
+        timeSeriesData: transformedResult.timeSeriesData,
+        variables: transformedResult.variables,
+        fileData: {
+          fileName: data.selectedFile,
+          rawData: result.preview_data || [],
+          numericColumns: result.columns_used.filter(col => 
+            availableColumns.measures.includes(col)
+          ),
+          dateColumns: [],
+          categoricalColumns: result.columns_used.filter(col => 
+            availableColumns.identifiers.includes(col)
+          ),
+          isProcessed: true
+        }
+      });
+
+    } catch (error) {
+      setProcessingError(handleAPIError(error));
+    } finally {
+      setIsProcessing(false);
+    }
+  };
 
   const handleSettingsChange = (key: string, value: any) => {
     onDataChange({
@@ -56,53 +190,13 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
     setProcessingError(null);
 
     try {
-      // Process the CSV file
-      const fileData = await processCSVFile(file);
-      
-      if (fileData.numericColumns.length < 2) {
-        throw new Error('CSV file must contain at least 2 numeric columns for correlation analysis');
-      }
-
-      // Calculate correlations from the file data
-      const correlationMethod = data.settings.correlationMethod.toLowerCase() as 'pearson' | 'spearman';
-      const correlationResult = calculateCorrelationFromData(fileData, correlationMethod);
-
-      // Update the store with processed data
-      onDataChange({
-        fileData,
-        isUsingFileData: true,
-        variables: correlationResult.variables,
-        correlationMatrix: correlationResult.correlationMatrix,
-        timeSeriesData: correlationResult.timeSeriesData,
-        selectedVar1: correlationResult.variables[0],
-        selectedVar2: correlationResult.variables[1] || correlationResult.variables[0],
-        // Ensure identifiers object exists
-        identifiers: data.identifiers || {
-          identifier3: 'All',
-          identifier4: 'All',
-          identifier6: 'All',
-          identifier7: 'All',
-          identifier15: 'All'
-        },
-        settings: {
-          ...data.settings,
-          uploadedFile: file.name,
-          dataSource: 'CSV'
-        }
-      });
-
-      console.log('File processed successfully:', {
-        fileName: file.name,
-        numericColumns: fileData.numericColumns,
-        rows: fileData.rawData.length
-      });
-
+      // For now, we'll just store the file name and prompt user to use saved dataframes
+      // In the future, we could implement file upload to backend
+      setProcessingError('Please use saved dataframes from the dropdown below instead of uploading files directly.');
     } catch (error) {
-      console.error('Error processing file:', error);
-      setProcessingError(error.message || 'Failed to process the uploaded file');
+      setProcessingError('Failed to process file. Please try again.');
     } finally {
       setIsProcessing(false);
-      // Reset the input
       event.target.value = '';
     }
   };
@@ -114,11 +208,10 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
     if (data.isUsingFileData && data.fileData?.isProcessed) {
       try {
         const correlationMethod = method.toLowerCase() as 'pearson' | 'spearman';
-        const correlationResult = calculateCorrelationFromData(data.fileData, correlationMethod);
+        // Recalculation will be done when user clicks "Run Correlation"
+        // This keeps the UI simpler and more predictable
         
         onDataChange({
-          correlationMatrix: correlationResult.correlationMatrix,
-          timeSeriesData: correlationResult.timeSeriesData,
           settings: {
             ...data.settings,
             correlationMethod: method
@@ -134,16 +227,8 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
   const handleApplySettings = () => {
     if (data.isUsingFileData && data.fileData?.isProcessed) {
       try {
-        const correlationMethod = data.settings.correlationMethod.toLowerCase() as 'pearson' | 'spearman';
-        const correlationResult = calculateCorrelationFromData(data.fileData, correlationMethod);
-        
-        onDataChange({
-          correlationMatrix: correlationResult.correlationMatrix,
-          timeSeriesData: correlationResult.timeSeriesData,
-          variables: correlationResult.variables,
-          selectedVar1: correlationResult.variables[0],
-          selectedVar2: correlationResult.variables[1] || correlationResult.variables[0],
-        });
+        // Run correlation analysis with current settings
+        handleRunCorrelation();
         
         setProcessingError(null);
       } catch (error) {
@@ -176,6 +261,41 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
               <AlertCircle className="h-4 w-4" />
               <AlertDescription>{processingError}</AlertDescription>
             </Alert>
+          )}
+
+          {/* Saved Dataframes Selection */}
+          <div className="space-y-2">
+            <Label className="text-sm font-medium">Select Saved Dataframe</Label>
+            <Select value={data.selectedFile || ''} onValueChange={handleFileSelection}>
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="Choose a saved dataframe..." />
+              </SelectTrigger>
+              <SelectContent>
+                {frames.map((frame) => (
+                  <SelectItem key={frame.object_name} value={frame.object_name}>
+                    {frame.csv_name.split('/').pop()}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Run Correlation Button */}
+          {data.selectedFile && (
+            <Button 
+              onClick={handleRunCorrelation} 
+              disabled={isProcessing}
+              className="w-full"
+            >
+              {isProcessing ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Running Correlation Analysis...
+                </>
+              ) : (
+                'Run Correlation Analysis'
+              )}
+            </Button>
           )}
           
           <div className="space-y-3">

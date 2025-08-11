@@ -124,3 +124,7 @@ export const CLASSIFIER_API =
 
 export const DATAFRAME_OPERATIONS_API =
   import.meta.env.VITE_DATAFRAME_OPERATIONS_API || `${backendOrigin.replace(/:8000$/, ':8001')}/api/dataframe-operations`;
+
+export const CORRELATION_API =
+  normalizeUrl(import.meta.env.VITE_CORRELATION_API) ||
+  `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/correlation`;

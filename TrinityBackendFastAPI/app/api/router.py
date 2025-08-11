@@ -12,6 +12,7 @@ from app.features.groupby_weighted_avg.endpoint import router as groupby_router
 from app.features.project_state.endpoint import router as project_state_router
 from app.features.scope_selector.endpoint import router as scope_selector_router
 from app.features.user_apps.endpoint import router as user_apps_router
+from app.features.correlation.endpoint import router as correlation_router
 
 api_router = APIRouter()
 text_router  = APIRouter()
@@ -32,3 +33,4 @@ api_router.include_router(groupby_router)
 api_router.include_router(project_state_router)
 api_router.include_router(scope_selector_router)
 api_router.include_router(user_apps_router)
+api_router.include_router(correlation_router)

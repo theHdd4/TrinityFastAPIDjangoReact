@@ -6,7 +6,7 @@ from scipy.stats import pearsonr, spearmanr, chi2_contingency
 from minio import Minio
 from minio.error import S3Error
 from fastapi import HTTPException
-from config import settings
+from .config import settings  # Use local config instead of global config
 from typing import List, Dict, Any, Literal, Optional, Union
 
 
@@ -169,7 +169,7 @@ def save_correlation_results_to_minio(df: pd.DataFrame, correlation_results: dic
 
 
 # Import schemas for filter functions
-from schemas import IdentifierFilter, MeasureFilter
+from .schema import IdentifierFilter, MeasureFilter
 
 
 def apply_identifier_filters(df: pd.DataFrame, identifier_filters: List[IdentifierFilter]) -> pd.DataFrame:
