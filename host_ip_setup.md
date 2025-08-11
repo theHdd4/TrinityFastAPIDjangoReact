@@ -1,7 +1,7 @@
 # Configuring HOST_IP
 
 The backend and frontend read the `HOST_IP` variable from their respective
-`.env` files. These examples use `10.2.2.37` as the address of the main host.
+`.env` files. These examples use `192.168.1.98` as the address of the main host.
 Adjust this value when deploying to a different machine.
 
 The Trinity AI container may need to reach an external Ollama server. Set

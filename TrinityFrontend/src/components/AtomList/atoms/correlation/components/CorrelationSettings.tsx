@@ -76,6 +76,14 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
         timeSeriesData: correlationResult.timeSeriesData,
         selectedVar1: correlationResult.variables[0],
         selectedVar2: correlationResult.variables[1] || correlationResult.variables[0],
+        // Ensure identifiers object exists
+        identifiers: data.identifiers || {
+          identifier3: 'All',
+          identifier4: 'All',
+          identifier6: 'All',
+          identifier7: 'All',
+          identifier15: 'All'
+        },
         settings: {
           ...data.settings,
           uploadedFile: file.name,
@@ -387,15 +395,15 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
           
           {/* Filter Items */}
           <div className="space-y-2">
-            {Object.entries(data.identifiers).map(([key, value]) => {
+            {Object.entries(data.identifiers || {}).map(([key, value]) => {
               const displayName = key.replace('identifier', 'Identifier ');
               return (
                 <div key={key} className="flex items-center gap-2">
                   <span className="text-xs text-muted-foreground min-w-[70px]">{displayName}</span>
                   <div className="flex items-center gap-1 px-2 py-1 bg-muted rounded text-xs">
-                    <span>{value}</span>
+                    <span>{value || 'All'}</span>
                     <X className="h-3 w-3 text-muted-foreground cursor-pointer" 
-                       onClick={() => handleIdentifierChange(key, '')} />
+                       onClick={() => handleIdentifierChange(key, 'All')} />
                   </div>
                 </div>
               );

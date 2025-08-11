@@ -155,7 +155,7 @@ export function calculateCorrelationMatrix(
   numericColumns: string[], 
   method: 'pearson' | 'spearman' = 'pearson'
 ): number[][] {
-  if (numericColumns.length === 0) {
+  if (numericColumns.length === 0 || data.length === 0) {
     return [];
   }
 
@@ -167,15 +167,14 @@ export function calculateCorrelationMatrix(
       if (i === j) {
         matrix[i][j] = 1.0;
       } else {
-        const col1Data = data.map(row => parseFloat(row[numericColumns[i]])).filter(val => !isNaN(val));
-        const col2Data = data.map(row => parseFloat(row[numericColumns[j]])).filter(val => !isNaN(val));
-        
-        // Only use rows where both columns have valid data
+        // Get valid data pairs (where both columns have numeric values)
         const validPairs: { x: number; y: number }[] = [];
+        
         data.forEach(row => {
           const val1 = parseFloat(row[numericColumns[i]]);
           const val2 = parseFloat(row[numericColumns[j]]);
-          if (!isNaN(val1) && !isNaN(val2)) {
+          
+          if (!isNaN(val1) && !isNaN(val2) && isFinite(val1) && isFinite(val2)) {
             validPairs.push({ x: val1, y: val2 });
           }
         });
@@ -186,9 +185,16 @@ export function calculateCorrelationMatrix(
           const x = validPairs.map(p => p.x);
           const y = validPairs.map(p => p.y);
           
-          matrix[i][j] = method === 'spearman' 
+          let correlation = method === 'spearman' 
             ? calculateSpearmanCorrelation(x, y)
             : calculatePearsonCorrelation(x, y);
+          
+          // Ensure correlation is a valid number
+          if (isNaN(correlation) || !isFinite(correlation)) {
+            correlation = 0;
+          }
+          
+          matrix[i][j] = correlation;
         }
       }
     }
@@ -206,31 +212,77 @@ export function generateTimeSeriesData(
   var1Column: string,
   var2Column: string
 ): Array<{ date: Date; var1Value: number; var2Value: number }> {
-  if (!dateColumn) {
-    // If no date column, create artificial dates
-    return data.slice(0, 50).map((row, index) => ({
-      date: new Date(2022, Math.floor(index / 4), (index % 4) * 7), // Roughly monthly
-      var1Value: parseFloat(row[var1Column]) || 0,
-      var2Value: parseFloat(row[var2Column]) || 0
-    }));
+  if (data.length === 0) {
+    return [];
   }
 
-  // Use actual date column
-  return data
-    .map(row => {
-      const date = new Date(row[dateColumn]);
+  if (!dateColumn) {
+    // If no date column, create artificial dates
+    return data.slice(0, 50).map((row, index) => {
       const var1Value = parseFloat(row[var1Column]);
       const var2Value = parseFloat(row[var2Column]);
       
       return {
-        date,
+        date: new Date(2022, Math.floor(index / 4), (index % 4) * 7), // Roughly monthly
         var1Value: isNaN(var1Value) ? 0 : var1Value,
         var2Value: isNaN(var2Value) ? 0 : var2Value
       };
+    });
+  }
+
+  // Use actual date column
+  const timeSeriesData = data
+    .map(row => {
+      const dateValue = row[dateColumn];
+      const var1Value = parseFloat(row[var1Column]);
+      const var2Value = parseFloat(row[var2Column]);
+      
+      // Try different date parsing approaches
+      let date: Date;
+      if (typeof dateValue === 'string') {
+        // Try parsing as string
+        date = new Date(dateValue);
+      } else if (typeof dateValue === 'number') {
+        // Could be a timestamp or year
+        if (dateValue > 1900 && dateValue < 2100) {
+          // Likely a year
+          date = new Date(dateValue, 0, 1);
+        } else {
+          // Likely a timestamp
+          date = new Date(dateValue);
+        }
+      } else {
+        // Fallback to current date
+        date = new Date();
+      }
+      
+      return {
+        date,
+        var1Value: isNaN(var1Value) ? 0 : var1Value,
+        var2Value: isNaN(var2Value) ? 0 : var2Value,
+        isValidDate: !isNaN(date.getTime())
+      };
     })
-    .filter(item => !isNaN(item.date.getTime()))
-    .sort((a, b) => a.date.getTime() - b.date.getTime())
-    .slice(0, 100); // Limit to 100 points for performance
+    .filter(item => item.isValidDate) // Only keep items with valid dates
+    .sort((a, b) => a.date.getTime() - b.date.getTime()) // Sort by date
+    .slice(0, 100) // Limit to 100 points for performance
+    .map(({ date, var1Value, var2Value }) => ({ date, var1Value, var2Value })); // Remove isValidDate property
+
+  // If we don't have any valid dates, fallback to artificial dates
+  if (timeSeriesData.length === 0) {
+    return data.slice(0, 50).map((row, index) => {
+      const var1Value = parseFloat(row[var1Column]);
+      const var2Value = parseFloat(row[var2Column]);
+      
+      return {
+        date: new Date(2022, Math.floor(index / 4), (index % 4) * 7),
+        var1Value: isNaN(var1Value) ? 0 : var1Value,
+        var2Value: isNaN(var2Value) ? 0 : var2Value
+      };
+    });
+  }
+
+  return timeSeriesData;
 }
 
 /**
@@ -280,14 +332,46 @@ export function calculateCorrelationFromData(
     throw new Error('Need at least 2 numeric columns for correlation analysis');
   }
 
-  const correlationMatrix = calculateCorrelationMatrix(rawData, numericColumns, method);
-  
-  // Generate time series data using first numeric columns as variables
+  if (rawData.length === 0) {
+    throw new Error('No data rows found in the file');
+  }
+
+  // Calculate correlation matrix with proper error handling
+  let correlationMatrix: number[][];
+  try {
+    correlationMatrix = calculateCorrelationMatrix(rawData, numericColumns, method);
+  } catch (error) {
+    console.error('Error calculating correlation matrix:', error);
+    // Fallback to identity matrix
+    correlationMatrix = numericColumns.map((_, i) => 
+      numericColumns.map((_, j) => i === j ? 1.0 : 0.0)
+    );
+  }
+
+  // Ensure we have a valid matrix
+  if (!correlationMatrix || correlationMatrix.length === 0) {
+    correlationMatrix = numericColumns.map((_, i) => 
+      numericColumns.map((_, j) => i === j ? 1.0 : 0.0)
+    );
+  }
+
+  // Generate time series data using first two numeric columns as variables
   const var1Column = numericColumns[0];
   const var2Column = numericColumns[1];
   const dateColumn = dateColumns.length > 0 ? dateColumns[0] : null;
   
-  const timeSeriesData = generateTimeSeriesData(rawData, dateColumn, var1Column, var2Column);
+  let timeSeriesData: Array<{ date: Date; var1Value: number; var2Value: number }>;
+  try {
+    timeSeriesData = generateTimeSeriesData(rawData, dateColumn, var1Column, var2Column);
+  } catch (error) {
+    console.error('Error generating time series data:', error);
+    // Fallback to basic time series
+    timeSeriesData = rawData.slice(0, 20).map((row, index) => ({
+      date: new Date(2024, Math.floor(index / 4), (index % 4) * 7),
+      var1Value: parseFloat(row[var1Column]) || 0,
+      var2Value: parseFloat(row[var2Column]) || 0
+    }));
+  }
 
   return {
     variables: numericColumns,

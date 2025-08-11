@@ -6,14 +6,14 @@ expert can tweak behaviour without touching the FastAPI code.
 
 ## Endpoints
 
-- `POST http://10.2.2.37:8002/merge` – generate merge settings from a prompt.
-- `GET http://10.2.2.37:8002/history/{session_id}` – view conversation history.
-- `GET http://10.2.2.37:8002/debug/{session_id}` – debug a merge session.
-- `DELETE http://10.2.2.37:8002/session/{session_id}` – clear a session.
-- `GET http://10.2.2.37:8002/sessions` – list active sessions.
-- `GET http://10.2.2.37:8002/files` – list available files.
-- `POST http://10.2.2.37:8002/reload-files` – reload file metadata from MinIO.
-- `GET http://10.2.2.37:8002/health` – health information.
+- `POST http://192.168.1.98:8002/merge` – generate merge settings from a prompt.
+- `GET http://192.168.1.98:8002/history/{session_id}` – view conversation history.
+- `GET http://192.168.1.98:8002/debug/{session_id}` – debug a merge session.
+- `DELETE http://192.168.1.98:8002/session/{session_id}` – clear a session.
+- `GET http://192.168.1.98:8002/sessions` – list active sessions.
+- `GET http://192.168.1.98:8002/files` – list available files.
+- `POST http://192.168.1.98:8002/reload-files` – reload file metadata from MinIO.
+- `GET http://192.168.1.98:8002/health` – health information.
 
 ## Usage
 

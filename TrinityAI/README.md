@@ -1,6 +1,6 @@
 # Trinity AI Services
 
-This directory houses the language model driven services used by the Trinity platform. The Dockerfile builds a container exposing these APIs on port **8002**. The examples below assume the host machine is reachable at **10.2.2.37**.
+This directory houses the language model driven services used by the Trinity platform. The Dockerfile builds a container exposing these APIs on port **8002**. The examples below assume the host machine is reachable at **192.168.1.98**.
 
 The frontend references these URLs directly so the host and port must match your deployment. Each subfolder contains the implementation for a specific agent.
 

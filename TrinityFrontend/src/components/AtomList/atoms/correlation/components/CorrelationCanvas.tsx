@@ -57,7 +57,9 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
     // Add cells
     variables.forEach((yVar, i) => {
       variables.forEach((xVar, j) => {
-        const correlation = data.correlationMatrix[i] && data.correlationMatrix[i][j] !== undefined 
+        const correlation = data.correlationMatrix && 
+                           data.correlationMatrix[i] && 
+                           data.correlationMatrix[i][j] !== undefined 
           ? data.correlationMatrix[i][j] 
           : (i === j ? 1.0 : 0.0);
         
@@ -244,10 +246,18 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
       ? data.fileData.numericColumns 
       : data.variables;
     
+    if (!variables || !data.correlationMatrix) {
+      return 0;
+    }
+    
     const var1Index = variables.indexOf(data.selectedVar1);
     const var2Index = variables.indexOf(data.selectedVar2);
-    if (var1Index !== -1 && var2Index !== -1 && data.correlationMatrix[var1Index] && data.correlationMatrix[var1Index][var2Index] !== undefined) {
-      return data.correlationMatrix[var1Index][var2Index];
+    
+    if (var1Index !== -1 && var2Index !== -1 && 
+        data.correlationMatrix[var1Index] && 
+        data.correlationMatrix[var1Index][var2Index] !== undefined) {
+      const value = data.correlationMatrix[var1Index][var2Index];
+      return isNaN(value) ? 0 : value;
     }
     return 0;
   };
@@ -284,7 +294,7 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
             Filter Dimensions
           </h3>
           <div className="grid grid-cols-5 gap-3">
-            {Object.entries(data.identifiers).map(([key, value]) => {
+            {Object.entries(data.identifiers || {}).map(([key, value]) => {
               const labels: Record<string, string> = {
                 identifier3: 'Market',
                 identifier4: 'Product', 
@@ -297,11 +307,11 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
                 <div key={key} className="flex flex-col gap-1">
                   <label className="text-xs font-medium text-muted-foreground">{label}</label>
                   <Select
-                    value={value}
+                    value={value || 'All'}
                     onValueChange={(newValue) => {
                       onDataChange({
                         identifiers: {
-                          ...data.identifiers,
+                          ...(data.identifiers || {}),
                           [key]: newValue
                         }
                       });
