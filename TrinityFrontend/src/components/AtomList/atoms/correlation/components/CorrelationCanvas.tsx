@@ -10,6 +10,7 @@ import {
 } from '@/components/ui/select';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Switch } from '@/components/ui/switch';
 import { CorrelationSettings } from '@/components/LaboratoryMode/store/laboratoryStore';
 
 interface CorrelationCanvasProps {
@@ -20,6 +21,25 @@ interface CorrelationCanvasProps {
 const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChange }) => {
   const heatmapRef = useRef<SVGSVGElement>(null);
   const timeSeriesRef = useRef<SVGSVGElement>(null);
+
+  // Helper function to check if a column only correlates with itself
+  const getFilteredVariables = (variables: string[], correlationMatrix: number[][]) => {
+    if (data.showAllColumns) {
+      return variables;
+    }
+
+    return variables.filter((variable, index) => {
+      if (!correlationMatrix || !correlationMatrix[index]) return true;
+      
+      // Check if this variable has any meaningful correlation with other variables
+      // (excluding perfect correlation with itself at index === index)
+      const hasOtherCorrelations = correlationMatrix[index].some((correlation, corrIndex) => {
+        return corrIndex !== index && Math.abs(correlation) > 0.1; // threshold for meaningful correlation
+      });
+      
+      return hasOtherCorrelations;
+    });
+  };
 
   // Draw correlation heatmap
   useEffect(() => {
@@ -36,9 +56,12 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
       .attr("transform", `translate(${margin.left},${margin.top})`);
 
     // Get variables from file data or default
-    const variables = data.isUsingFileData && data.fileData?.numericColumns 
+    const allVariables = data.isUsingFileData && data.fileData?.numericColumns 
       ? data.fileData.numericColumns 
       : data.variables;
+
+    // Filter variables based on showAllColumns setting
+    const variables = getFilteredVariables(allVariables, data.correlationMatrix);
 
     // Create scales
     const xScale = d3.scaleBand()
@@ -57,11 +80,15 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
     // Add cells
     variables.forEach((yVar, i) => {
       variables.forEach((xVar, j) => {
+        // Get the original indices for correlation matrix lookup
+        const originalYIndex = allVariables.indexOf(yVar);
+        const originalXIndex = allVariables.indexOf(xVar);
+        
         const correlation = data.correlationMatrix && 
-                           data.correlationMatrix[i] && 
-                           data.correlationMatrix[i][j] !== undefined 
-          ? data.correlationMatrix[i][j] 
-          : (i === j ? 1.0 : 0.0);
+                           data.correlationMatrix[originalYIndex] && 
+                           data.correlationMatrix[originalYIndex][originalXIndex] !== undefined 
+          ? data.correlationMatrix[originalYIndex][originalXIndex] 
+          : (originalYIndex === originalXIndex ? 1.0 : 0.0);
         
         g.append("rect")
           .attr("x", xScale(xVar))
@@ -144,7 +171,7 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
       .style("fill", "#666")
       .text(d => d);
 
-  }, [data.correlationMatrix, data.variables, data.isUsingFileData, data.fileData]);
+  }, [data.correlationMatrix, data.variables, data.isUsingFileData, data.fileData, data.showAllColumns]);
 
   // Draw time series chart
   useEffect(() => {
@@ -262,10 +289,12 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
     return 0;
   };
 
-  // Get current variables for display
-  const currentVariables = data.isUsingFileData && data.fileData?.numericColumns 
+  // Get current variables for display (filtered or all)
+  const allCurrentVariables = data.isUsingFileData && data.fileData?.numericColumns 
     ? data.fileData.numericColumns 
     : data.variables;
+  
+  const currentVariables = getFilteredVariables(allCurrentVariables, data.correlationMatrix);
 
   return (
     <div className="w-full h-full bg-background p-6 overflow-y-auto">
@@ -285,6 +314,16 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
             <div className={`w-2 h-2 rounded-full ${data.isUsingFileData ? 'bg-blue-500' : 'bg-green-500'} animate-pulse`}></div>
             {data.isUsingFileData ? 'File Data' : 'Mock Data'}
           </Badge>
+        </div>
+
+        {/* Show All Columns Toggle */}
+        <div className="flex items-center space-x-2 mb-4">
+          <span className="text-xs text-gray-500">Show all columns</span>
+          <Switch
+            checked={data.showAllColumns || false}
+            onCheckedChange={(checked) => onDataChange({ showAllColumns: checked })}
+            className="data-[state=checked]:bg-[#458EE2]"
+          />
         </div>
 
         {/* Filter Dimensions */}
@@ -382,7 +421,7 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {currentVariables.map(variable => (
+                    {allCurrentVariables.map(variable => (
                       <SelectItem key={variable} value={variable}>{variable}</SelectItem>
                     ))}
                   </SelectContent>
@@ -399,7 +438,7 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {currentVariables.map(variable => (
+                    {allCurrentVariables.map(variable => (
                       <SelectItem key={variable} value={variable}>{variable}</SelectItem>
                     ))}
                   </SelectContent>

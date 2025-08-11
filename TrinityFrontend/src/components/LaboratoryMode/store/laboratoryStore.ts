@@ -169,6 +169,7 @@ export interface CorrelationSettings {
     isProcessed: boolean;
   };
   isUsingFileData?: boolean;
+  showAllColumns?: boolean;
 }
 
 export const DEFAULT_CORRELATION_SETTINGS: CorrelationSettings = {
@@ -209,7 +210,8 @@ export const DEFAULT_CORRELATION_SETTINGS: CorrelationSettings = {
     uploadedFile: 'sales_data.csv'
   },
   fileData: undefined,
-  isUsingFileData: false
+  isUsingFileData: false,
+  showAllColumns: false
 };
 
 export interface ColumnClassifierColumn {
