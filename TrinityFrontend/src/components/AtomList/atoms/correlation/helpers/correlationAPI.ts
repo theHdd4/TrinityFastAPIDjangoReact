@@ -179,6 +179,28 @@ export class CorrelationAPI {
     }
     return response.json();
   }
+
+  async loadDataframe(filePath: string): Promise<{
+    numericColumns: string[];
+    categoricalColumns: string[];
+    sampleData: any[];
+    totalRows: number;
+    totalColumns: number;
+  }> {
+    const response = await fetch(`${this.baseUrl}/load-dataframe/${encodeURIComponent(filePath)}`);
+    if (!response.ok) {
+      throw new Error(`Failed to load dataframe: ${response.statusText}`);
+    }
+    return response.json();
+  }
+  
+  async getDataframeValidator(filePath: string): Promise<{ validatorId: string }> {
+    const response = await fetch(`${this.baseUrl}/dataframe-validator/${encodeURIComponent(filePath)}`);
+    if (!response.ok) {
+      throw new Error(`Failed to get validator: ${response.statusText}`);
+    }
+    return response.json();
+  }
 }
 
 // Export a singleton instance

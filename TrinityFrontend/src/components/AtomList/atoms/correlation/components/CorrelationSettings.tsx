@@ -24,6 +24,7 @@ interface CorrelationSettingsProps {
 interface Frame { 
   object_name: string; 
   csv_name: string; 
+  arrow_name?: string;
 }
 
 const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataChange }) => {
@@ -64,10 +65,10 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
 
   // Load columns when a file is selected
   useEffect(() => {
-    if (data.selectedFile && data.validatorAtomId) {
+    if (data?.selectedFile && data?.validatorAtomId) {
       loadColumns(data.validatorAtomId);
     }
-  }, [data.selectedFile, data.validatorAtomId]);
+  }, [data?.selectedFile, data?.validatorAtomId]);
 
   const loadColumns = async (validatorAtomId: string) => {
     try {
@@ -79,17 +80,46 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
     }
   };
 
-  const handleFileSelection = (objectName: string) => {
+  const handleFileSelection = async (objectName: string) => {
     onDataChange({
       selectedFile: objectName,
       fileData: null,
       correlationMatrix: null,
       timeSeriesData: null
     });
+    
+    // Try to get validator atom ID and load columns
+    try {
+      const validatorInfo = await correlationAPI.getDataframeValidator(objectName);
+      if (validatorInfo.validatorId) {
+        onDataChange({
+          validatorAtomId: validatorInfo.validatorId
+        });
+        loadColumns(validatorInfo.validatorId);
+      }
+    } catch (error) {
+      console.warn('Could not get validator ID, using direct dataframe loading');
+      // Fallback to direct dataframe loading
+      try {
+        const dataframeInfo = await correlationAPI.loadDataframe(objectName);
+        onDataChange({
+          fileData: {
+            fileName: objectName,
+            rawData: dataframeInfo.sampleData || [],
+            numericColumns: dataframeInfo.numericColumns || [],
+            dateColumns: [], // Will be detected from sample data
+            categoricalColumns: dataframeInfo.categoricalColumns || [],
+            isProcessed: true
+          }
+        });
+      } catch (loadError) {
+        setProcessingError('Failed to load dataframe for correlation analysis');
+      }
+    }
   };
 
   const handleRunCorrelation = async () => {
-    if (!data.selectedFile) {
+    if (!data?.selectedFile) {
       setProcessingError('Please select a file first');
       return;
     }
@@ -266,12 +296,12 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
           {/* Saved Dataframes Selection */}
           <div className="space-y-2">
             <Label className="text-sm font-medium">Select Saved Dataframe</Label>
-            <Select value={data.selectedFile || ''} onValueChange={handleFileSelection}>
+            <Select value={data?.selectedFile || ''} onValueChange={handleFileSelection}>
               <SelectTrigger className="w-full">
                 <SelectValue placeholder="Choose a saved dataframe..." />
               </SelectTrigger>
               <SelectContent>
-                {frames.map((frame) => (
+                {(frames || []).map((frame) => (
                   <SelectItem key={frame.object_name} value={frame.object_name}>
                     {frame.csv_name.split('/').pop()}
                   </SelectItem>
@@ -281,7 +311,7 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
           </div>
 
           {/* Run Correlation Button */}
-          {data.selectedFile && (
+          {data?.selectedFile && (
             <Button 
               onClick={handleRunCorrelation} 
               disabled={isProcessing}
@@ -333,17 +363,17 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
               <div className="flex items-center gap-2 p-2 bg-green-50 border border-green-200 rounded-lg">
                 <CheckCircle className="w-4 h-4 text-green-600" />
                 <div className="flex-1">
-                  <span className="text-sm font-medium text-green-900">{data.fileData.fileName}</span>
+                  <span className="text-sm font-medium text-green-900">{data.fileData?.fileName}</span>
                   <div className="text-xs text-green-700">
-                    {data.fileData.rawData.length} rows, {data.fileData.numericColumns.length} numeric columns
+                    {data.fileData?.rawData?.length || 0} rows, {data.fileData?.numericColumns?.length || 0} numeric columns
                   </div>
                 </div>
                 <Badge variant="secondary" className="bg-green-100 text-green-800">Active</Badge>
               </div>
-            ) : data.settings.uploadedFile ? (
+            ) : data?.settings?.uploadedFile ? (
               <div className="flex items-center gap-2 p-2 bg-muted/50 rounded-lg">
                 <FileText className="w-4 h-4 text-muted-foreground" />
-                <span className="text-sm text-muted-foreground">{data.settings.uploadedFile}</span>
+                <span className="text-sm text-muted-foreground">{data?.settings?.uploadedFile}</span>
                 <Badge variant="secondary" className="ml-auto">Mock Data</Badge>
               </div>
             ) : null}
@@ -376,25 +406,25 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
                 <h4 className="text-sm font-medium text-blue-900 mb-2">Available Columns</h4>
                 <div className="space-y-1">
                   <div>
-                    <span className="text-xs font-medium text-blue-800">Numeric ({data.fileData.numericColumns.length}): </span>
+                    <span className="text-xs font-medium text-blue-800">Numeric ({data.fileData?.numericColumns?.length || 0}): </span>
                     <span className="text-xs text-blue-700">
-                      {data.fileData.numericColumns.join(', ')}
+                      {data.fileData?.numericColumns?.join(', ') || ''}
                     </span>
                   </div>
-                  {data.fileData.dateColumns.length > 0 && (
+                  {(data.fileData?.dateColumns?.length || 0) > 0 && (
                     <div>
-                      <span className="text-xs font-medium text-blue-800">Date ({data.fileData.dateColumns.length}): </span>
+                      <span className="text-xs font-medium text-blue-800">Date ({data.fileData?.dateColumns?.length || 0}): </span>
                       <span className="text-xs text-blue-700">
-                        {data.fileData.dateColumns.join(', ')}
+                        {data.fileData?.dateColumns?.join(', ') || ''}
                       </span>
                     </div>
                   )}
-                  {data.fileData.categoricalColumns.length > 0 && (
+                  {(data.fileData?.categoricalColumns?.length || 0) > 0 && (
                     <div>
-                      <span className="text-xs font-medium text-blue-800">Categorical ({data.fileData.categoricalColumns.length}): </span>
+                      <span className="text-xs font-medium text-blue-800">Categorical ({data.fileData?.categoricalColumns?.length || 0}): </span>
                       <span className="text-xs text-blue-700">
-                        {data.fileData.categoricalColumns.slice(0, 3).join(', ')}
-                        {data.fileData.categoricalColumns.length > 3 ? ` +${data.fileData.categoricalColumns.length - 3} more` : ''}
+                        {data.fileData?.categoricalColumns?.slice(0, 3).join(', ') || ''}
+                        {(data.fileData?.categoricalColumns?.length || 0) > 3 ? ` +${(data.fileData?.categoricalColumns?.length || 0) - 3} more` : ''}
                       </span>
                     </div>
                   )}

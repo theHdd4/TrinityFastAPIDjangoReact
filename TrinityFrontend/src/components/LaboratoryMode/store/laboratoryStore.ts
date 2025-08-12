@@ -159,6 +159,9 @@ export interface CorrelationSettings {
     selectFilter: string;
     uploadedFile?: string;
   };
+  // Add missing properties for saved dataframes
+  selectedFile?: string;  // Selected dataframe object_name
+  validatorAtomId?: string;  // Validator atom ID for column extraction
   // File processing related data
   fileData?: {
     fileName: string;
@@ -209,6 +212,8 @@ export const DEFAULT_CORRELATION_SETTINGS: CorrelationSettings = {
     selectFilter: 'Multi Selection',
     uploadedFile: 'sales_data.csv'
   },
+  selectedFile: undefined,
+  validatorAtomId: undefined,
   fileData: undefined,
   isUsingFileData: false,
   showAllColumns: false

@@ -1,7 +1,11 @@
 from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import Response
 from typing import List, Optional
 import datetime
 import time
+import numpy as np
+import pandas as pd
+from urllib.parse import unquote
 from .database import column_coll, correlation_coll
 from .schema import (
     FilterPayload, 
@@ -22,6 +26,18 @@ from .service import (
     get_unique_values
 )
 
+# Add flight and data retrieval imports
+from app.DataStorageRetrieval.arrow_client import (
+    download_dataframe,
+    download_table_bytes,
+)
+from app.DataStorageRetrieval.flight_registry import (
+    get_flight_path_for_csv,
+    set_ticket,
+)
+from app.DataStorageRetrieval.db import get_dataset_info
+from app.features.data_upload_validate.app.routes import get_object_prefix
+
 router = APIRouter()
 
 @router.get("/")
@@ -37,7 +53,9 @@ async def root():
             "/filter-and-correlate",
             "/buckets",
             "/column-values",
-            "/data-preview"
+            "/data-preview",
+            "/dataframe-validator",
+            "/load-dataframe"
         ]
     }
 
@@ -288,6 +306,179 @@ async def filter_and_correlate(request: FilterAndCorrelateRequest):
         raise
     except Exception as e:
         raise HTTPException(500, f"Correlation analysis failed: {str(e)}")
+
+# ── 7. Map dataframe to validator atom ID ──────────────────────────────────
+@router.get("/dataframe-validator/{file_path:path}")
+async def get_dataframe_validator(file_path: str) -> dict:
+    """
+    Map a dataframe file path to its corresponding validator atom ID
+    This enables column extraction for correlation analysis
+    """
+    try:
+        # Extract client/app/project from file path
+        path_parts = file_path.strip('/').split('/')
+        if len(path_parts) >= 3:
+            client_name = path_parts[0]
+            app_name = path_parts[1] 
+            project_name = path_parts[2]
+            
+            # Query MongoDB for validator atom ID based on file context
+            # This is a simplified approach - may need adjustment based on actual data structure
+            validator_query = {
+                "client_name": client_name,
+                "app_name": app_name,
+                "project_name": project_name,
+                "file_path": file_path
+            }
+            
+            # Search in column collection for existing validator
+            validator_doc = await column_coll.find_one(validator_query)
+            
+            if validator_doc and "validator_atom_id" in validator_doc:
+                return {"validatorId": validator_doc["validator_atom_id"]}
+            else:
+                # Generate a new validator ID if none exists
+                import uuid
+                new_validator_id = str(uuid.uuid4())
+                return {"validatorId": new_validator_id}
+                
+    except Exception as e:
+        raise HTTPException(500, f"Failed to get validator ID: {str(e)}")
+    
+    raise HTTPException(404, "Could not determine validator ID for dataframe")
+
+# ── 8. Load dataframe directly for correlation ──────────────────────────────
+@router.get("/load-dataframe/{file_path:path}")
+async def load_dataframe_for_correlation(file_path: str) -> dict:
+    """
+    Load dataframe directly for correlation analysis using Arrow Flight
+    Returns numeric columns and sample data
+    """
+    try:
+        file_path = unquote(file_path)
+        print(f"➡️ correlation load_dataframe request: {file_path}")
+        
+        # Extract client/app/project for prefix validation
+        parts = file_path.split("/", 3)
+        client = parts[0] if len(parts) > 0 else ""
+        app = parts[1] if len(parts) > 1 else ""
+        project = parts[2] if len(parts) > 2 else ""
+        
+        # Validate prefix
+        prefix = await get_object_prefix(
+            client_name=client, app_name=app, project_name=project
+        )
+        
+        try:
+            # Try to load via Arrow Flight first
+            df = download_dataframe(file_path)
+            print(f"✅ correlation loaded via flight: {file_path} rows={len(df)}")
+        except Exception as flight_exc:
+            print(f"⚠️ correlation flight error for {file_path}: {flight_exc}")
+            # Fallback to MinIO if flight fails
+            df = await load_csv_from_minio(file_path)
+            print(f"✅ correlation loaded via minio: {file_path} rows={len(df)}")
+        
+        # Analyze columns
+        numeric_columns = df.select_dtypes(include=[np.number]).columns.tolist()
+        categorical_columns = df.select_dtypes(include=['object', 'category']).columns.tolist()
+        
+        # Get sample data (first 100 rows)
+        sample_data = df.head(100).to_dict(orient='records')
+        
+        return {
+            "numericColumns": numeric_columns,
+            "categoricalColumns": categorical_columns,
+            "sampleData": sample_data,
+            "totalRows": len(df),
+            "totalColumns": len(df.columns)
+        }
+        
+    except Exception as e:
+        print(f"⚠️ correlation load_dataframe error for {file_path}: {e}")
+        raise HTTPException(500, f"Failed to load dataframe: {str(e)}")
+
+# ── 9. Get dataframe as CSV for correlation analysis ─────────────────────────
+@router.get("/cached_dataframe")
+async def cached_dataframe(object_name: str):
+    """Return the saved dataframe as CSV text for correlation analysis.
+    Prefers Arrow Flight for the latest data, then falls back to Redis/MinIO."""
+    object_name = unquote(object_name)
+    print(f"➡️ correlation cached_dataframe request: {object_name}")
+    
+    parts = object_name.split("/", 3)
+    client = parts[0] if len(parts) > 0 else ""
+    app = parts[1] if len(parts) > 1 else ""
+    project = parts[2] if len(parts) > 2 else ""
+    
+    prefix = await get_object_prefix(
+        client_name=client, app_name=app, project_name=project
+    )
+    
+    if not object_name.startswith(prefix):
+        print(f"⚠️ correlation cached_dataframe prefix mismatch: {object_name} (expected {prefix})")
+    
+    try:
+        try:
+            df = download_dataframe(object_name)
+            csv_text = df.to_csv(index=False)
+            return Response(csv_text, media_type="text/csv")
+        except Exception as exc:
+            print(f"⚠️ correlation flight dataframe error for {object_name}: {exc}")
+            # Fallback to MinIO
+            df = await load_csv_from_minio(object_name)
+            csv_text = df.to_csv(index=False)
+            return Response(csv_text, media_type="text/csv")
+            
+    except Exception as e:
+        print(f"⚠️ correlation cached_dataframe error for {object_name}: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+
+# ── 10. Flight table endpoint for Arrow Flight integration ──────────────────
+@router.get("/flight_table")
+async def flight_table(
+    app_name: str,
+    object_name: str,
+    client_name: str = None,
+    project_name: str = None,
+    download_id: str = None
+):
+    """
+    Flight table endpoint for correlation analysis - mirrors feature overview pattern
+    Returns raw CSV bytes via Arrow Flight for consistent data transport
+    """
+    object_name = unquote(object_name)
+    print(f"➡️ correlation flight_table: app={app_name}, object={object_name}, client={client_name}, project={project_name}")
+    
+    try:
+        prefix = await get_object_prefix(
+            client_name=client_name, app_name=app_name, project_name=project_name
+        )
+        
+        # Get flight path for the CSV
+        flight_path = get_flight_path_for_csv(
+            app_name=app_name,
+            filename=object_name,
+            client_name=client_name,
+            project_name=project_name
+        )
+        print(f"🛫 correlation flight path: {flight_path}")
+        
+        # Download table bytes via Arrow Flight
+        table_bytes = download_table_bytes(flight_path)
+        
+        return Response(
+            content=table_bytes,
+            media_type="text/csv",
+            headers={
+                "Content-Disposition": f"attachment; filename={object_name}",
+                "Access-Control-Expose-Headers": "Content-Disposition"
+            }
+        )
+        
+    except Exception as e:
+        print(f"⚠️ correlation flight_table error: {e}")
+        raise HTTPException(status_code=500, detail=f"Flight table error: {str(e)}")
 
 # ── 7. Helper endpoint to get column values ──────────────────────────────
 @router.get("/column-values/{file_path:path}")

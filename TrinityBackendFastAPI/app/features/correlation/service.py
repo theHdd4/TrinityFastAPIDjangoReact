@@ -226,3 +226,45 @@ async def save_filtered_data_to_minio(df: pd.DataFrame, original_path: str, filt
     minio_client.put_object(bucket_name, filtered_path, io.BytesIO(csv_bytes), len(csv_bytes))
     
     return f"{bucket_name}/{filtered_path}"
+
+
+async def load_dataframe_from_flight(file_path: str) -> pd.DataFrame:
+    """
+    Load dataframe using Arrow Flight for better performance
+    with large datasets common in correlation analysis
+    """
+    try:
+        # For now, fallback to MinIO - Arrow Flight integration can be added later
+        # This provides a clean interface for future enhancement
+        return await load_csv_from_minio(file_path)
+    except Exception as e:
+        raise HTTPException(500, f"Failed to load dataframe via flight: {str(e)}")
+
+
+def analyze_dataframe_for_correlation(df: pd.DataFrame) -> dict:
+    """
+    Analyze dataframe to extract correlation-relevant information
+    """
+    numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+    categorical_cols = df.select_dtypes(include=['object', 'category']).columns.tolist()
+    date_cols = df.select_dtypes(include=['datetime64']).columns.tolist()
+    
+    # Basic statistics for numeric columns
+    numeric_stats = {}
+    for col in numeric_cols:
+        numeric_stats[col] = {
+            "mean": float(df[col].mean()),
+            "std": float(df[col].std()),
+            "min": float(df[col].min()),
+            "max": float(df[col].max()),
+            "null_count": int(df[col].isnull().sum())
+        }
+    
+    return {
+        "numeric_columns": numeric_cols,
+        "categorical_columns": categorical_cols, 
+        "date_columns": date_cols,
+        "numeric_stats": numeric_stats,
+        "total_rows": len(df),
+        "total_columns": len(df.columns)
+    }
