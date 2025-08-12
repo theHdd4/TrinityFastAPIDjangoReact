@@ -162,6 +162,7 @@ export interface CorrelationSettings {
   // Add missing properties for saved dataframes
   selectedFile?: string;  // Selected dataframe object_name
   validatorAtomId?: string;  // Validator atom ID for column extraction
+  selectedColumns?: string[];  // Selected columns for correlation analysis
   // File processing related data
   fileData?: {
     fileName: string;
@@ -214,6 +215,7 @@ export const DEFAULT_CORRELATION_SETTINGS: CorrelationSettings = {
   },
   selectedFile: undefined,
   validatorAtomId: undefined,
+  selectedColumns: [],
   fileData: undefined,
   isUsingFileData: false,
   showAllColumns: false

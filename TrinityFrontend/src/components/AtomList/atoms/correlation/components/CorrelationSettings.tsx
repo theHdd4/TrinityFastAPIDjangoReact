@@ -130,20 +130,20 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
     try {
       const request: FilterAndCorrelateRequest = {
         file_path: data.selectedFile,
-        method: data.settings.correlationMethod as any,
+        method: (data.settings?.correlationMethod || 'Pearson') as any,
         include_preview: true,
         preview_limit: 10,
         save_filtered: true
       };
 
       // Add column selections if specified
-      if (data.selectedColumns && data.selectedColumns.length > 0) {
+      if (data.selectedColumns && Array.isArray(data.selectedColumns) && data.selectedColumns.length > 0) {
         // Separate columns by type based on available columns
-        const selectedIdentifiers = data.selectedColumns.filter(col => 
-          availableColumns.identifiers.includes(col)
+        const selectedIdentifiers = (data.selectedColumns || []).filter(col => 
+          availableColumns?.identifiers && availableColumns.identifiers.includes(col)
         );
-        const selectedMeasures = data.selectedColumns.filter(col => 
-          availableColumns.measures.includes(col)
+        const selectedMeasures = (data.selectedColumns || []).filter(col => 
+          availableColumns?.measures && availableColumns.measures.includes(col)
         );
         
         if (selectedIdentifiers.length > 0) {
@@ -170,11 +170,11 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
         fileData: {
           fileName: data.selectedFile,
           rawData: result.preview_data || [],
-          numericColumns: result.columns_used.filter(col => 
+          numericColumns: (result.columns_used || []).filter(col => 
             availableColumns.measures.includes(col)
           ),
           dateColumns: [],
-          categoricalColumns: result.columns_used.filter(col => 
+          categoricalColumns: (result.columns_used || []).filter(col => 
             availableColumns.identifiers.includes(col)
           ),
           isProcessed: true
@@ -191,7 +191,7 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
   const handleSettingsChange = (key: string, value: any) => {
     onDataChange({
       settings: {
-        ...data.settings,
+        ...(data.settings || {}),
         [key]: value
       }
     });
@@ -200,7 +200,7 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
   const handleIdentifierChange = (key: string, value: string) => {
     onDataChange({
       identifiers: {
-        ...data.identifiers,
+        ...(data.identifiers || {}),
         [key]: value
       }
     });
@@ -243,7 +243,7 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
         
         onDataChange({
           settings: {
-            ...data.settings,
+            ...(data.settings || {}),
             correlationMethod: method
           }
         });
@@ -439,7 +439,7 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
         <h3 className="text-sm font-medium text-muted-foreground">Select Data</h3>
         <div className="space-y-2">
           <Select 
-            value={data.settings.selectData} 
+            value={data.settings?.selectData || 'Single Selection'} 
             onValueChange={(value) => handleSettingsChange('selectData', value)}
           >
             <SelectTrigger className="w-full bg-background border-border">
@@ -452,7 +452,7 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
           </Select>
           
           <Select 
-            value={data.settings.dataset} 
+            value={data.settings?.dataset || 'Sales_Data'} 
             onValueChange={(value) => handleSettingsChange('dataset', value)}
           >
             <SelectTrigger className="w-full bg-background border-border">
@@ -476,7 +476,7 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
             <div className="relative">
               <Input
                 id="fromDate"
-                value={data.settings.dateFrom}
+                value={data.settings?.dateFrom || '01 JUL 2020'}
                 onChange={(e) => handleSettingsChange('dateFrom', e.target.value)}
                 className="pr-8 text-xs bg-background border-border"
                 placeholder="01 JUL 2020"
@@ -490,7 +490,7 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
             <div className="relative">
               <Input
                 id="toDate"
-                value={data.settings.dateTo}
+                value={data.settings?.dateTo || '30 MAR 2025'}
                 onChange={(e) => handleSettingsChange('dateTo', e.target.value)}
                 className="pr-8 text-xs bg-background border-border"
                 placeholder="30 MAR 2025"
@@ -514,7 +514,7 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
             {['Yearly', 'Quarterly', 'Monthly', 'Weekly'].map((period) => (
               <Button
                 key={period}
-                variant={data.settings.aggregationLevel === period ? "default" : "outline"}
+                variant={(data.settings?.aggregationLevel || 'Monthly') === period ? "default" : "outline"}
                 size="sm"
                 className="text-xs h-6 px-2"
                 onClick={() => handleSettingsChange('aggregationLevel', period)}
@@ -531,7 +531,7 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
         <h3 className="text-sm font-medium text-muted-foreground">Select Filter</h3>
         <div className="space-y-2">
           <Select 
-            value={data.settings.selectFilter} 
+            value={data.settings?.selectFilter || 'Multi Selection'} 
             onValueChange={(value) => handleSettingsChange('selectFilter', value)}
           >
             <SelectTrigger className="w-full bg-background border-border">
@@ -566,7 +566,7 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
       <div className="space-y-3">
         <h3 className="text-sm font-medium text-muted-foreground">Correlation Method</h3>
         <Select 
-          value={data.settings.correlationMethod} 
+          value={data.settings?.correlationMethod || 'Pearson'} 
           onValueChange={handleCorrelationMethodChange}
         >
           <SelectTrigger className="w-full bg-background border-border">

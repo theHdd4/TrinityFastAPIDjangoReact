@@ -24,11 +24,14 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
 
   // Helper function to check if a column only correlates with itself
   const getFilteredVariables = (variables: string[], correlationMatrix: number[][]) => {
+    // Ensure variables is an array
+    const safeVariables = variables || [];
+    
     if (data.showAllColumns) {
-      return variables;
+      return safeVariables;
     }
 
-    return variables.filter((variable, index) => {
+    return safeVariables.filter((variable, index) => {
       if (!correlationMatrix || !correlationMatrix[index]) return true;
       
       // Check if this variable has any meaningful correlation with other variables
@@ -58,7 +61,7 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
     // Get variables from file data or default
     const allVariables = data.isUsingFileData && data.fileData?.numericColumns 
       ? data.fileData.numericColumns 
-      : data.variables;
+      : (data.variables || []);
 
     // Filter variables based on showAllColumns setting
     const variables = getFilteredVariables(allVariables, data.correlationMatrix);
@@ -175,7 +178,7 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
 
   // Draw time series chart
   useEffect(() => {
-    if (!timeSeriesRef.current || !data.timeSeriesData.length) return;
+    if (!timeSeriesRef.current || !data.timeSeriesData?.length) return;
 
     const svg = d3.select(timeSeriesRef.current);
     svg.selectAll("*").remove();
@@ -271,7 +274,7 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
   const getCorrelationValue = () => {
     const variables = data.isUsingFileData && data.fileData?.numericColumns 
       ? data.fileData.numericColumns 
-      : data.variables;
+      : (data.variables || []);
     
     if (!variables || !data.correlationMatrix) {
       return 0;
@@ -292,7 +295,7 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
   // Get current variables for display (filtered or all)
   const allCurrentVariables = data.isUsingFileData && data.fileData?.numericColumns 
     ? data.fileData.numericColumns 
-    : data.variables;
+    : (data.variables || []);
   
   const currentVariables = getFilteredVariables(allCurrentVariables, data.correlationMatrix);
 
@@ -305,7 +308,7 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
             <h1 className="text-2xl font-bold text-foreground">Correlation Analysis</h1>
             <p className="text-muted-foreground text-sm">
               {data.isUsingFileData && data.fileData 
-                ? `Analyzing ${data.fileData.fileName} (${data.fileData.rawData.length} rows, ${data.fileData.numericColumns.length} numeric columns)`
+                ? `Analyzing ${data.fileData.fileName} (${data.fileData.rawData?.length || 0} rows, ${data.fileData.numericColumns?.length || 0} numeric columns)`
                 : 'Discover relationships between your variables'
               }
             </p>
@@ -414,7 +417,7 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
               <div>
                 <label className="text-sm font-medium text-foreground mb-2 block">Primary Variable</label>
                 <Select
-                  value={data.selectedVar1}
+                  value={data.selectedVar1 || ''}
                   onValueChange={(value) => onDataChange({ selectedVar1: value })}
                 >
                   <SelectTrigger className="w-full">
@@ -431,7 +434,7 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
               <div>
                 <label className="text-sm font-medium text-foreground mb-2 block">Secondary Variable</label>
                 <Select
-                  value={data.selectedVar2}
+                  value={data.selectedVar2 || ''}
                   onValueChange={(value) => onDataChange({ selectedVar2: value })}
                 >
                   <SelectTrigger className="w-full">

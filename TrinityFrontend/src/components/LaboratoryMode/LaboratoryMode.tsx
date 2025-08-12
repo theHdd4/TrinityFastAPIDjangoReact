@@ -50,7 +50,7 @@ const LaboratoryMode = () => {
           try {
             const labConfig = {
               cards: last.state,
-              exhibitedCards: last.state.filter((c: any) => c.isExhibited),
+              exhibitedCards: (last.state || []).filter((c: any) => c.isExhibited),
               timestamp: new Date().toISOString(),
             };
             await fetch(`${REGISTRY_API}/projects/${proj.id}/`, {
@@ -95,7 +95,7 @@ const LaboratoryMode = () => {
 
   const handleSave = async () => {
     try {
-      const exhibitedCards = cards.filter(card => card.isExhibited);
+      const exhibitedCards = (cards || []).filter(card => card.isExhibited);
 
       setCards(cards);
       
