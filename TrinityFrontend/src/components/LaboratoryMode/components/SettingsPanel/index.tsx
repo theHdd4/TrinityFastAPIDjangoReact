@@ -14,6 +14,8 @@ import {
   DEFAULT_DATAUPLOAD_SETTINGS,
   FeatureOverviewSettings,
   DEFAULT_FEATURE_OVERVIEW_SETTINGS,
+  DataFrameOperationsSettings,
+  DEFAULT_DATAFRAME_OPERATIONS_SETTINGS,
 } from '../../store/laboratoryStore';
 import DataUploadValidateProperties from '@/components/AtomList/atoms/data-upload-validate/components/properties/DataUploadValidateProperties';
 import FeatureOverviewProperties from '@/components/AtomList/atoms/feature-overview/components/properties/FeatureOverviewProperties';
@@ -24,6 +26,7 @@ import CreateColumnProperties from '@/components/AtomList/atoms/createcolumn/com
 import BuildModelFeatureBasedPropertiesPanel from '@/components/AtomList/atoms/build-model-feature-based/components/properties/BuildModelFeatureBasedProperties';
 import MergeProperties from '@/components/AtomList/atoms/merge/components/properties/MergeProperties';
 import ColumnClassifierProperties from '@/components/AtomList/atoms/column-classifier/components/properties/ColumnClassifierProperties';
+import DataFrameOperationsProperties from '@/components/AtomList/atoms/dataframe-operations/components/properties/DataFrameOperationsProperties';
 import AtomSettingsTabs from "./AtomSettingsTabs";
 
 interface SettingsPanelProps {
@@ -46,12 +49,14 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
     selectedAtomId ? state.getAtom(selectedAtomId) : undefined
   );
   const updateSettings = useLaboratoryStore(state => state.updateAtomSettings);
-  const settings: TextBoxSettings | DataUploadSettings | FeatureOverviewSettings =
+  const settings: TextBoxSettings | DataUploadSettings | FeatureOverviewSettings | DataFrameOperationsSettings =
     atom?.settings ||
     (atom?.atomId === 'data-upload-validate'
       ? { ...DEFAULT_DATAUPLOAD_SETTINGS }
       : atom?.atomId === 'feature-overview'
       ? { ...DEFAULT_FEATURE_OVERVIEW_SETTINGS }
+      : atom?.atomId === 'dataframe-operations'
+      ? { ...DEFAULT_DATAFRAME_OPERATIONS_SETTINGS }
       : { ...DEFAULT_TEXTBOX_SETTINGS });
 
   useEffect(() => {
@@ -109,6 +114,8 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
             <MergeProperties atomId={selectedAtomId} />
           ) : selectedAtomId && atom?.atomId === 'column-classifier' ? (
             <ColumnClassifierProperties atomId={selectedAtomId} />
+          ) : selectedAtomId && atom?.atomId === 'dataframe-operations' ? (
+            <DataFrameOperationsProperties atomId={selectedAtomId} />
           ) : (
             <AtomSettingsTabs tab={tab} setTab={setTab} selectedAtomId={selectedAtomId!} cardExhibited={cardExhibited} settings={settings as TextBoxSettings} updateSettings={updateSettings} />
           )}

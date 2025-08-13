@@ -1,7 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 import BuildModelFeatureBasedCanvas from './components/BuildModelFeatureBasedCanvas';
-import BuildModelFeatureBasedProperties from './components/properties/BuildModelFeatureBasedProperties';
 
 export interface ModelConfig {
   id: string;
@@ -20,14 +19,18 @@ export interface BuildModelFeatureBasedData {
   uploadedFile: File | null;
   selectedDataset: string;
   selectedScope: string;
+  selectedCombinations: string[];
   selectedModels: string[];
   modelConfigs: ModelConfig[];
   yVariable: string;
-  xVariables: string[];
+  xVariables: (string | string[])[];
   transformations: VariableTransformation[];
+  availableFiles?: string[];
   availableColumns: string[];
   scopes: string[];
   outputFileName: string;
+  kFolds?: number;
+  testSize?: number;
 }
 
 export interface BuildModelFeatureBasedSettings {
@@ -37,101 +40,111 @@ export interface BuildModelFeatureBasedSettings {
   dateTo: string;
 }
 
-interface BuildModelFeatureBasedAtomProps {
-  atomId?: string; // provided when rendered inside Laboratory Mode
-  onClose?: () => void;
-  onPropertiesChange?: (data: any, component: React.ReactNode) => void;
+interface Props {
+  atomId: string;
 }
 
-const BuildModelFeatureBasedAtom: React.FC<BuildModelFeatureBasedAtomProps> = ({ 
-  atomId,
-  onClose, 
-  onPropertiesChange 
-}) => {
-  // If atomId is supplied, pull data & settings from Zustand store; otherwise fall back to local state for standalone use.
-  const storeAtom = useLaboratoryStore(state => (atomId ? state.getAtom(atomId) : undefined));
-  const updateSettings = useLaboratoryStore(state => state.updateAtomSettings);
+const BuildModelFeatureBasedAtom: React.FC<Props> = ({ atomId }) => {
+  console.log('🔧 BuildModelFeatureBasedAtom: Component rendered with atomId:', atomId);
+  
+  try {
+    const atom = useLaboratoryStore(state => state.getAtom(atomId));
+    const defaultData = {
+      uploadedFile: null,
+      selectedDataset: '',
+      selectedScope: '',
+      selectedCombinations: [],
+      selectedModels: ['Linear Regression', 'Ridge Regression', 'Lasso Regression', 'ElasticNet Regression', 'Bayesian Ridge Regression', 'Custom Constrained Ridge', 'Constrained Linear Regression'],
+      modelConfigs: [
+        { id: 'Linear Regression', name: 'Linear Regression', parameters: {} },
+        { id: 'Ridge Regression', name: 'Ridge Regression', parameters: { 'Alpha': '1.0' } },
+        { id: 'Lasso Regression', name: 'Lasso Regression', parameters: { 'Alpha': '1.0' } },
+        { id: 'ElasticNet Regression', name: 'ElasticNet Regression', parameters: { 'Alpha': '1.0', 'L1 Ratio': '0.5' } },
+        { id: 'Bayesian Ridge Regression', name: 'Bayesian Ridge Regression', parameters: {} },
+        { id: 'Custom Constrained Ridge', name: 'Custom Constrained Ridge', parameters: { 'L2 Penalty': '0.1', 'Learning Rate': '0.001', 'Iterations': '10000', 'Adam': 'false' } },
+        { id: 'Constrained Linear Regression', name: 'Constrained Linear Regression', parameters: { 'Learning Rate': '0.001', 'Iterations': '10000', 'Adam': 'false' } }
+      ],
+      yVariable: '',
+      xVariables: [],
+      transformations: [],
+      availableFiles: [],
+      availableColumns: ['Feature 1', 'Feature 2', 'Feature 3', 'Feature 4', 'Feature 5', 'Feature 6', 'Feature 7', 'Feature 8'],
+      scopes: ['Scope 1', 'Scope 2', 'Scope 3', 'Scope 4', 'Scope 5'],
+      outputFileName: '',
+      kFolds: 5,
+      testSize: 0.2
+    };
 
-  const initialData: BuildModelFeatureBasedData = (storeAtom?.settings as any)?.data || {
-    uploadedFile: null,
-    selectedDataset: '',
-    selectedScope: '',
-    selectedModels: [],
-    modelConfigs: [],
-    yVariable: '',
-    xVariables: [],
-    transformations: [],
-    availableColumns: ['Feature 1', 'Feature 2', 'Feature 3', 'Feature 4', 'Feature 5', 'Feature 6', 'Feature 7', 'Feature 8'],
-    scopes: ['Scope 1', 'Scope 2', 'Scope 3', 'Scope 4', 'Scope 5'],
-    outputFileName: ''
-  };
+    const defaultSettings = {
+      dataType: '',
+      aggregationLevel: '',
+      dateFrom: '',
+      dateTo: ''
+    };
 
-  const [data, setData] = useState<BuildModelFeatureBasedData>(initialData);
+    const settings = (atom?.settings as any) || {
+      data: defaultData,
+      settings: defaultSettings
+    };
 
-  const [settings, setSettings] = useState<BuildModelFeatureBasedSettings>({
-    dataType: '',
-    aggregationLevel: '',
-    dateFrom: '',
-    dateTo: ''
-  });
+    // Ensure data structure is complete
+    const completeData = {
+      ...defaultData,
+      ...settings.data
+    };
 
-  const handleDataChange = (newData: Partial<BuildModelFeatureBasedData>) => {
-    const updatedData = { ...data, ...newData };
-    setData(updatedData);
-    
-    if (onPropertiesChange) {
-      onPropertiesChange(
-        updatedData,
-        <BuildModelFeatureBasedProperties
-          data={updatedData}
-          settings={settings}
-          onDataChange={handleDataChange}
-          onSettingsChange={handleSettingsChange}
-          onDataUpload={handleDataUpload}
+    console.log('🔧 BuildModelFeatureBasedAtom: Settings for atomId', atomId, ':', settings);
+    console.log('🔧 BuildModelFeatureBasedAtom: Selected scope:', completeData?.selectedScope);
+    console.log('🔧 BuildModelFeatureBasedAtom: Selected combinations:', completeData?.selectedCombinations);
+
+    return (
+      <div className="w-full h-full bg-white rounded-lg overflow-hidden flex flex-col">
+        <BuildModelFeatureBasedCanvas
+          atomId={atomId}
+          data={completeData}
+          onClose={() => {}}
         />
-      );
-    }
-  };
-
-  const handleSettingsChange = (newSettings: Partial<BuildModelFeatureBasedSettings>) => {
-    const updatedSettings = { ...settings, ...newSettings };
-    setSettings(updatedSettings);
-  };
-
-  const handleDataUpload = (file: File, fileId: string) => {
-    handleDataChange({ 
-      uploadedFile: file,
-      selectedDataset: fileId,
-      availableColumns: ['Feature 1', 'Feature 2', 'Feature 3', 'Feature 4', 'Feature 5', 'Feature 6', 'Feature 7', 'Feature 8']
-    });
-  };
-
-  // write default settings to store once when mounted
-  useEffect(() => {
-    if (atomId && updateSettings) {
-      updateSettings(atomId, { data: initialData, settings });
-    }
-    if (onPropertiesChange) {
-      onPropertiesChange(
-        data,
-        <BuildModelFeatureBasedProperties
-          data={data}
-          settings={settings}
-          onDataChange={handleDataChange}
-          onSettingsChange={handleSettingsChange}
-          onDataUpload={handleDataUpload}
-        />
-      );
-    }
-  }, []);
-
-  return (
-    <BuildModelFeatureBasedCanvas
-      data={data}
-      onDataChange={handleDataChange}
-      onClose={onClose}
-    />
-  );
+      </div>
+    );
+  } catch (err) {
+    console.error('🔧 BuildModelFeatureBasedAtom: Component error:', err);
+    return (
+      <div className="w-full h-full bg-white rounded-lg overflow-hidden flex flex-col p-4">
+        <div className="bg-yellow-50 border border-yellow-200 rounded-md p-4">
+          <h3 className="text-yellow-800 font-medium mb-2">Build Model Feature Based Atom Unavailable</h3>
+          <p className="text-yellow-700 text-sm mb-2">
+            The build model feature based atom is currently unavailable. This might be due to:
+          </p>
+          <ul className="text-yellow-700 text-sm list-disc list-inside space-y-1 mb-3">
+            <li>Browser storage quota exceeded</li>
+            <li>Network connectivity issues</li>
+            <li>API permission problems</li>
+          </ul>
+          <div className="space-x-2">
+            <button 
+              onClick={() => window.location.reload()}
+              className="px-3 py-1 bg-yellow-600 text-white rounded hover:bg-yellow-700 text-sm"
+            >
+              Reload Page
+            </button>
+            <button 
+              onClick={() => {
+                try {
+                  sessionStorage.clear();
+                  window.location.reload();
+                } catch (e) {
+                  console.error('Failed to clear storage:', e);
+                }
+              }}
+              className="px-3 py-1 bg-red-600 text-white rounded hover:bg-red-700 text-sm"
+            >
+              Clear Storage & Reload
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 };
 
 export default BuildModelFeatureBasedAtom;

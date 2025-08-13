@@ -186,9 +186,9 @@ async def fetch_identifiers_and_measures(
             identifiers = document["final_classification"].get("identifiers", [])
             measures = document["final_classification"].get("measures", [])
 
-    # Strip common time keywords
-    time_keywords = {"date", "time", "month", "months", "week", "weeks", "year"}
-    identifiers = [i for i in identifiers if i and i.lower() not in time_keywords]
+    # # Strip common time keywords
+    # time_keywords = {"date", "time", "month", "months", "week", "weeks", "year"}
+    # identifiers = [i for i in identifiers if i and i.lower() not in time_keywords]
 
     return identifiers, measures
 

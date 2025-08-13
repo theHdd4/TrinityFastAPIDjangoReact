@@ -3,6 +3,7 @@ import io
 from minio import Minio
 from minio.error import S3Error
 from minio.commonconfig import CopySource
+from typing import Optional
 
 # Default to the development MinIO service if not explicitly configured
 MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "minio:9000")
@@ -23,34 +24,55 @@ def get_client() -> Minio:
     return _client
 
 
-def ensure_bucket() -> None:
-    """Create the configured bucket if missing."""
-    if not _client.bucket_exists(MINIO_BUCKET):
-        _client.make_bucket(MINIO_BUCKET)
+def ensure_bucket() -> bool:
+    """Create the configured bucket if missing.
+
+    Returns True if the bucket exists or was created, False if the connection
+    failed (e.g. invalid credentials). Any other MinIO errors are re-raised.
+    """
+    try:
+        if not _client.bucket_exists(MINIO_BUCKET):
+            _client.make_bucket(MINIO_BUCKET)
+        return True
+    except S3Error as exc:
+        # If credentials are invalid or the server is unreachable just log a
+        # warning instead of failing hard. This allows management commands to
+        # run without MinIO configured.
+        print(f"MinIO connection error: {exc}")
+        return False
 
 
 def create_prefix(prefix: str) -> None:
     """Create an empty folder-like object for the given prefix."""
-    ensure_bucket()
+    if not ensure_bucket():
+        return
     if not prefix.endswith("/"):
         prefix += "/"
     try:
         _client.stat_object(MINIO_BUCKET, prefix)
-    except S3Error as exc:  # object missing
+    except S3Error as exc:  # object missing or connection issue
         if getattr(exc, "code", "") == "NoSuchKey":
-            _client.put_object(MINIO_BUCKET, prefix, io.BytesIO(b""), 0)
+            try:
+                _client.put_object(MINIO_BUCKET, prefix, io.BytesIO(b""), 0)
+            except S3Error as exc2:
+                print(f"MinIO connection error: {exc2}")
         else:
-            raise
+            print(f"MinIO connection error: {exc}")
 
 
 def rename_prefix(old_prefix: str, new_prefix: str) -> None:
     """Rename all objects under one prefix to another."""
-    ensure_bucket()
+    if not ensure_bucket():
+        return
     if not old_prefix.endswith("/"):
         old_prefix += "/"
     if not new_prefix.endswith("/"):
         new_prefix += "/"
-    objects = list(_client.list_objects(MINIO_BUCKET, prefix=old_prefix, recursive=True))
+    try:
+        objects = list(_client.list_objects(MINIO_BUCKET, prefix=old_prefix, recursive=True))
+    except S3Error as exc:
+        print(f"MinIO connection error: {exc}")
+        return
     if not objects:
         # just create the new prefix and remove old placeholder
         create_prefix(new_prefix)
@@ -67,18 +89,70 @@ def rename_prefix(old_prefix: str, new_prefix: str) -> None:
     print(f"✅ Prefix renamed to {new_prefix}")
 
 
+def _list_objects(prefix: str):
+    """Return a list of objects for a given prefix."""
+    if not ensure_bucket():
+        return []
+    if not prefix.endswith("/"):
+        prefix += "/"
+    try:
+        return list(
+            _client.list_objects(MINIO_BUCKET, prefix=prefix, recursive=True)
+        )
+    except S3Error as exc:
+        print(f"MinIO connection error: {exc}")
+        return []
+
+
+def remove_prefix(prefix: str) -> None:
+    """Remove all objects under the given prefix."""
+    objects = _list_objects(prefix)
+    for obj in objects:
+        try:
+            _client.remove_object(MINIO_BUCKET, obj.object_name)
+        except S3Error as exc:
+            print(f"MinIO connection error: {exc}")
+
+
+def rename_existing_prefix(old_prefix: str, new_prefix: str) -> bool:
+    """Rename the prefix only if it currently exists.
+
+    Returns True if a rename was performed.
+    """
+    if _list_objects(old_prefix):
+        rename_prefix(old_prefix, new_prefix)
+        return True
+    return False
+
+
 def rename_project_folder(
     client_slug: str,
     app_slug: str,
-    old_project_slug: str,
-    new_project_slug: str,
+    old_project_name: str,
+    new_project_name: str,
+    old_project_slug: Optional[str] = None,
 ) -> None:
-    """Rename a project's folder prefix when the project is renamed."""
-    old_prefix = f"{client_slug}/{app_slug}/{old_project_slug}"
-    new_prefix = f"{client_slug}/{app_slug}/{new_project_slug}"
-    print(
-        f"📁 Renaming project folder in MinIO: {old_prefix} -> {new_prefix}"
+    """Rename a project's folder prefix when the project is renamed.
+
+    The folder name mirrors the project's display name exactly. If a legacy
+    slug-based folder exists, it will also be cleaned up.
+    """
+    old_name_prefix = f"{client_slug}/{app_slug}/{old_project_name}"
+    new_prefix = f"{client_slug}/{app_slug}/{new_project_name}"
+    slug_prefix = (
+        f"{client_slug}/{app_slug}/{old_project_slug}"
+        if old_project_slug
+        else None
     )
-    rename_prefix(old_prefix, new_prefix)
-    print(f"📁 MinIO project folder updated: {new_prefix}")
+
+    renamed = rename_existing_prefix(old_name_prefix, new_prefix)
+    if not renamed and slug_prefix:
+        renamed = rename_existing_prefix(slug_prefix, new_prefix)
+    if not renamed:
+        create_prefix(new_prefix)
+    else:
+        print(f"📁 MinIO project folder updated: {new_prefix}")
+
+    if slug_prefix and slug_prefix != new_prefix:
+        remove_prefix(slug_prefix)
 

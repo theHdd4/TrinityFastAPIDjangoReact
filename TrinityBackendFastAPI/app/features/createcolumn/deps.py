@@ -166,3 +166,81 @@ def redis_classifier_config() -> dict | None:
     except Exception as err:
         print(f"⚠️ redis_classifier_config error: {err}")
         return None
+
+async def fetch_measures_list_with_context(
+    validator_atom_id: str,
+    file_key: str,
+    collection: AsyncIOMotorCollection,
+    client_name: str,
+    app_name: str,
+    project_name: str,
+) -> list:
+    """Return identifiers and measures for the given file using client/app/project context.
+
+    Resolution order:
+    1. Redis cached column-classifier config using the `<client>/<app>/<project>` key.
+    2. MongoDB `classifier_configs` collection via ``get_classifier_config_from_mongo``.
+       Result is cached back into Redis (TTL 3600) to speed up subsequent reads.
+    3. Legacy lookup in the ``column_classifications`` collection (per-file) to
+       preserve backward compatibility.
+    """
+
+    # 1️⃣  Fast path – Redis with correct context
+    cfg = redis_classifier_config_with_context(client_name, app_name, project_name)
+    if cfg and isinstance(cfg.get("identifiers"), list) and isinstance(cfg.get("measures"), list):
+        return cfg["identifiers"], cfg["measures"]
+
+    # 2️⃣  Persistent source of truth – MongoDB classifier_configs with correct context
+    try:
+        # Local import to avoid heavy dependency chain at module import time
+        from app.features.column_classifier.database import get_classifier_config_from_mongo
+
+        mongo_cfg: dict | None = get_classifier_config_from_mongo(
+            client_name,
+            app_name,
+            project_name,
+        )
+        if mongo_cfg and isinstance(mongo_cfg.get("identifiers"), list) and isinstance(mongo_cfg.get("measures"), list):
+            # Cache back to Redis for 1h TTL (3600s) with correct context
+            try:
+                import json
+                key = f"{client_name}/{app_name}/{project_name}/column_classifier_config"
+                redis_client.setex(key, 3600, json.dumps(mongo_cfg, default=str))
+            except Exception as exc:
+                print(f"⚠️ Redis setex error in fetch_measures_list_with_context: {exc}")
+            return mongo_cfg["identifiers"], mongo_cfg["measures"]
+    except Exception as exc:
+        # Log but continue to legacy fallback
+        print(f"⚠️ Mongo classifier config lookup failed: {exc}")
+
+    # 3️⃣  Legacy fallback – per-file final classification collection
+    document = await collection.find_one(
+        {
+            "validator_atom_id": validator_atom_id,
+            "file_key": file_key,
+        }
+    )
+    if not document or "final_classification" not in document:
+        raise HTTPException(status_code=404, detail="Final classification not found in MongoDB or Redis")
+
+    measures: list = document["final_classification"].get("measures", [])
+    identifiers: list = document["final_classification"].get("identifiers", [])
+    return identifiers, measures
+
+
+def redis_classifier_config_with_context(client_name: str, app_name: str, project_name: str) -> dict | None:
+    """Retrieve and decode the column-classifier-config JSON from Redis using client/app/project context.
+
+    Returns parsed dict or None if key missing/invalid.
+    """
+    key = f"{client_name}/{app_name}/{project_name}/column_classifier_config"
+    try:
+        data_str = redis_client.get(key)
+        if not data_str:
+            return None
+        import json
+        cfg = json.loads(data_str)
+        return cfg if isinstance(cfg, dict) else None
+    except Exception as err:
+        print(f"⚠️ redis_classifier_config_with_context error: {err}")
+        return None

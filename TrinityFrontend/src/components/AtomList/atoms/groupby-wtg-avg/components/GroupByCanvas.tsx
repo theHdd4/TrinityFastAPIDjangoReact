@@ -140,14 +140,8 @@ const GroupByCanvas: React.FC<GroupByCanvasProps> = ({ atomId }) => {
                 ? settings.selectedMeasures as string[]
                 : settings.selectedMeasures.map((m: any) => m.field).filter(Boolean)
             )
-          // else fallback to full measures list loaded with file
-          : (
-              Array.isArray(measures) && measures.length > 0
-                ? (typeof measures[0] === 'string'
-                    ? measures as string[]
-                    : measures.map((m: any) => m.field).filter(Boolean))
-                : []
-            )
+          // else return empty array - no automatic measure selection
+          : []
       );
   // Build numeric columns list directly from allColumns for comprehensive options
   const numericColumns = (settings.allColumns || []).filter(
@@ -159,7 +153,7 @@ const GroupByCanvas: React.FC<GroupByCanvasProps> = ({ atomId }) => {
   ).map((c: any) => c.column);
 
   // ------------------------------------------------------------
-  // Initialise measures & selectedMeasureNames once columns arrive
+  // Initialize measures only (no automatic selectedMeasureNames)
   React.useEffect(() => {
     if (Array.isArray(settings.allColumns) && settings.allColumns.length > 0) {
       const numericCols = settings.allColumns
@@ -170,17 +164,18 @@ const GroupByCanvas: React.FC<GroupByCanvasProps> = ({ atomId }) => {
         ))
         .map((c: any) => c.column);
 
-      // Initialise only if not already set
+      // Initialize measures only if not already set
       if ((measures.length === 0) && numericCols.length > 0) {
         updateSettings(atomId, {
           measures: numericCols,
-          selectedMeasureNames: numericCols,
         });
       }
     }
   }, [settings.allColumns]);
-  // Field dropdown options: prefer measures selected in settings, else full numeric list
-  const fieldOptions = selectedMeasureNames.length > 0 ? selectedMeasureNames : fallbackMeasures;
+  // Field dropdown options: use measures selected in settings tab
+  const fieldOptions = Array.isArray(settings.selectedMeasureNames) && settings.selectedMeasureNames.length > 0 
+    ? settings.selectedMeasureNames 
+    : fallbackMeasures;
 
   const [results, setResults] = useState<any[]>([]);
   const [resultsHeaders, setResultsHeaders] = useState<string[]>([]);

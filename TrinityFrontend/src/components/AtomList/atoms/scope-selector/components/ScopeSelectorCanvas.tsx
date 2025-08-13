@@ -6,7 +6,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Plus, Settings, Calendar, X, Loader2, Target, Check } from 'lucide-react';
+import { Plus, Settings, Calendar, X, Loader2, Target, Check, BarChart3 } from 'lucide-react';
 import { SCOPE_SELECTOR_API } from '@/lib/api';
 import { ScopeSelectorData, ScopeData } from '../ScopeSelectorAtom';
 
@@ -37,6 +37,10 @@ const ScopeSelectorCanvas: React.FC<ScopeSelectorCanvasProps> = ({ data, onDataC
   // Date range fetched from backend
   const [dateRange, setDateRange] = useState<{min: string|null; max: string|null; available: boolean}>({ min: null, max: null, available: false });
   
+  // Drag and drop state
+  const [draggedIdentifier, setDraggedIdentifier] = useState<string | null>(null);
+  const [dragOverIdentifier, setDragOverIdentifier] = useState<string | null>(null);
+  
   // Debug log
   useEffect(() => {
     console.log('ScopeSelectorCanvas data updated', {
@@ -50,13 +54,56 @@ const ScopeSelectorCanvas: React.FC<ScopeSelectorCanvasProps> = ({ data, onDataC
     });
   }, [data, uniqueValues, loadingValues]);
 
+  // Drag and drop handlers
+  const handleDragStart = (e: React.DragEvent, identifier: string) => {
+    setDraggedIdentifier(identifier);
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', identifier);
+  };
+
+  const handleDragOver = (e: React.DragEvent, identifier: string) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    setDragOverIdentifier(identifier);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOverIdentifier(null);
+  };
+
+  const handleDrop = (e: React.DragEvent, targetIdentifier: string) => {
+    e.preventDefault();
+    setDragOverIdentifier(null);
+    
+    if (draggedIdentifier && draggedIdentifier !== targetIdentifier) {
+      const currentIndex = data.selectedIdentifiers.indexOf(draggedIdentifier);
+      const targetIndex = data.selectedIdentifiers.indexOf(targetIdentifier);
+      
+      if (currentIndex !== -1 && targetIndex !== -1) {
+        const newIdentifiers = [...data.selectedIdentifiers];
+        newIdentifiers.splice(currentIndex, 1);
+        newIdentifiers.splice(targetIndex, 0, draggedIdentifier);
+        
+        onDataChange({ selectedIdentifiers: newIdentifiers });
+      }
+    }
+    
+    setDraggedIdentifier(null);
+  };
+
+  const handleDragEnd = () => {
+    setDraggedIdentifier(null);
+    setDragOverIdentifier(null);
+  };
+
   // Remove identifier selections that are no longer in the global selectedIdentifiers list
   useEffect(() => {
     const cleanedScopes = data.scopes.map(scope => {
       const cleanedIdentifiers: Record<string, string | string[]> = {};
       Object.entries(scope.identifiers).forEach(([k, v]) => {
         if (data.selectedIdentifiers.includes(k)) {
-          cleanedIdentifiers[k] = v;
+          cleanedIdentifiers[k] = v as string | string[];
         }
       });
       return { ...scope, identifiers: cleanedIdentifiers };
@@ -130,7 +177,8 @@ const ScopeSelectorCanvas: React.FC<ScopeSelectorCanvasProps> = ({ data, onDataC
       };
 
       for (const scope of data.scopes) {
-        const keys = Object.keys(scope.identifiers);
+        // Use selectedIdentifiers to maintain the correct order from canvas
+        const keys = data.selectedIdentifiers.filter(key => scope.identifiers[key]);
         const valueArrays: string[][] = keys.map(k => {
           const v = scope.identifiers[k];
           return Array.isArray(v) ? v : v ? [v] : [];
@@ -250,51 +298,23 @@ const ScopeSelectorCanvas: React.FC<ScopeSelectorCanvasProps> = ({ data, onDataC
     return () => controller.abort();
   }, [data.dataSource]);
 
-  // Effect to reset state when data source or selected identifiers change
+  // Combined effect to handle data source and identifier changes
   useEffect(() => {
     console.log('Data source or selected identifiers changed:', {
       dataSource: data.dataSource,
       selectedIdentifiers: data.selectedIdentifiers
     });
     
-    // Reset state to trigger new fetches
-    setUniqueValues({});
-    setLoadingValues({});
-    
-    // Force a re-render to ensure the effect runs again with the new state
-    setLoadingValues(prev => ({ ...prev, _forceUpdate: !prev._forceUpdate }));
-  }, [data.dataSource, data.selectedIdentifiers?.join(',')]);
-
-  // Auto-select default value if only one unique option is available for an identifier
-  useEffect(() => {
-    if (!data?.scopes?.length) return;
-
-    let hasUpdates = false;
-    const updatedScopes = data.scopes.map(scope => {
-      const updatedIdentifiers = { ...scope.identifiers };
-
-      data.selectedIdentifiers.forEach(identifier => {
-        const values = uniqueValues[identifier];
-        if (values && values.length === 1 && (updatedIdentifiers[identifier] === '' || updatedIdentifiers[identifier] === undefined)) {
-          updatedIdentifiers[identifier] = values[0];
-          hasUpdates = true;
-        }
-      });
-
-      return hasUpdates ? { ...scope, identifiers: updatedIdentifiers } : scope;
-    });
-
-    if (hasUpdates) {
-      onDataChange({ scopes: updatedScopes });
-    }
-  }, [uniqueValues, data.scopes, data.selectedIdentifiers]);
-
-  // Fetch unique values for each identifier when selected identifiers change
-  useEffect(() => {
     let isMounted = true;
     const abortController = new AbortController();
     
-    const fetchData = async () => {
+    const handleIdentifierChanges = async () => {
+      // Reset state first
+      setUniqueValues({});
+      setLoadingValues({});
+      setFilteredValues({});
+      setFilteredLoading({});
+      
       // Skip if no data source or no selected identifiers
       if (!data.dataSource || !data.selectedIdentifiers || !Array.isArray(data.selectedIdentifiers)) {
         console.log('Missing required data, skipping fetch:', {
@@ -311,35 +331,20 @@ const ScopeSelectorCanvas: React.FC<ScopeSelectorCanvasProps> = ({ data, onDataC
         return;
       }
       
-      // Create a set of identifiers we already have values for or are currently loading
-      const existingIdentifiers = new Set([
-        ...Object.keys(uniqueValues),
-        ...Object.entries(loadingValues).filter(([_, loading]) => loading).map(([id]) => id)
-      ]);
-      
-      // Only fetch for identifiers that are selected but not yet loaded
-      const identifiersToFetch = data.selectedIdentifiers.filter(id => !existingIdentifiers.has(id));
-      
       console.log('\n=== Starting to fetch unique values ===');
       console.log('Data source:', data.dataSource);
       console.log('Selected identifiers:', data.selectedIdentifiers);
-      console.log('Existing identifiers:', Array.from(existingIdentifiers));
       
-      if (identifiersToFetch.length === 0) {
-        console.log('No new identifiers to fetch, all values already loaded');
-        return;
-      }
-      
-      // Set loading state for all identifiers we're about to fetch
-      const newLoadingValues = { ...loadingValues };
-      identifiersToFetch.forEach(id => {
+      // Set loading state for all selected identifiers
+      const newLoadingValues: Record<string, boolean> = {};
+      data.selectedIdentifiers.forEach(id => {
         newLoadingValues[id] = true;
       });
       setLoadingValues(newLoadingValues);
       
       try {
         // Fetch all unique values in parallel
-        const fetchPromises = identifiersToFetch.map(async (identifier) => {
+        const fetchPromises = data.selectedIdentifiers.map(async (identifier) => {
           try {
             console.log(`\n=== Fetching unique values for ${identifier} ===`);
             console.log(`URL: ${SCOPE_SELECTOR_API}/unique_values?object_name=${encodeURIComponent(data.dataSource || '')}&column_name=${encodeURIComponent(identifier)}`);
@@ -401,15 +406,39 @@ const ScopeSelectorCanvas: React.FC<ScopeSelectorCanvasProps> = ({ data, onDataC
       }
     };
     
-    // Execute the fetch
-    fetchData();
+    // Execute the combined logic
+    handleIdentifierChanges();
     
     // Cleanup function
     return () => {
       isMounted = false;
       abortController.abort();
     };
-  }, [data.dataSource, JSON.stringify(data.selectedIdentifiers)]); // Use JSON.stringify to properly compare arrays
+  }, [data.dataSource, data.selectedIdentifiers ? JSON.stringify([...data.selectedIdentifiers].sort()) : null]);
+
+  // Auto-select default value if only one unique option is available for an identifier
+  useEffect(() => {
+    if (!data?.scopes?.length) return;
+
+    let hasUpdates = false;
+    const updatedScopes = data.scopes.map(scope => {
+      const updatedIdentifiers = { ...scope.identifiers };
+
+      data.selectedIdentifiers.forEach(identifier => {
+        const values = uniqueValues[identifier];
+        if (values && values.length === 1 && (updatedIdentifiers[identifier] === '' || updatedIdentifiers[identifier] === undefined)) {
+          updatedIdentifiers[identifier] = values[0];
+          hasUpdates = true;
+        }
+      });
+
+      return hasUpdates ? { ...scope, identifiers: updatedIdentifiers } : scope;
+    });
+
+    if (hasUpdates) {
+      onDataChange({ scopes: updatedScopes });
+    }
+  }, [uniqueValues, data.scopes, data.selectedIdentifiers]);
 
   const addScope = () => {
     // Initialize identifiers with empty strings for all selected identifiers
@@ -553,6 +582,11 @@ const ScopeSelectorCanvas: React.FC<ScopeSelectorCanvasProps> = ({ data, onDataC
   };
 
   const getIdentifierOptions = (scopeId: string, identifier: string, currentValue: string) => {
+    // Only return values for identifiers that are currently selected
+    if (!data.selectedIdentifiers.includes(identifier)) {
+      return [];
+    }
+    
     // Prefer scope-specific filtered values first
     if (filteredLoading[scopeId]?.[identifier]) {
       return [];
@@ -564,16 +598,18 @@ const ScopeSelectorCanvas: React.FC<ScopeSelectorCanvasProps> = ({ data, onDataC
 
     // fall back to globally fetched (unfiltered) values
     if (loadingValues[identifier]) {
-      return [];
+      return currentValue ? [currentValue] : [];
     }
     if (uniqueValues[identifier]?.length > 0) {
       return uniqueValues[identifier];
     }
 
-    if (currentValue) {
+    // If we have a current value but no other options, return it
+    if (currentValue && currentValue !== '') {
       return [currentValue];
     }
-    return ['No values available'];
+    
+    return [];
   };
 
   // Check if we have the required data - add debug logging
@@ -679,28 +715,59 @@ const ScopeSelectorCanvas: React.FC<ScopeSelectorCanvasProps> = ({ data, onDataC
               {/* Identifiers Grid */}
               <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-3">
                 {data.selectedIdentifiers.map((identifier) => (
-                  <div key={identifier} className="space-y-2">
+                  <div
+                    key={identifier}
+                    className={`space-y-2 relative ${draggedIdentifier === identifier ? 'opacity-50' : ''} ${dragOverIdentifier === identifier ? 'ring-2 ring-blue-400 ring-opacity-50' : ''}`}
+                    onDragStart={(e) => handleDragStart(e, identifier)}
+                    onDragOver={(e) => handleDragOver(e, identifier)}
+                    onDragLeave={handleDragLeave}
+                    onDrop={(e) => handleDrop(e, identifier)}
+                    onDragEnd={handleDragEnd}
+                    draggable={true}
+                  >
                     
                     <div className="relative">
                       <Popover>
                         <PopoverTrigger asChild>
                           <Button
                             variant="outline"
-                            className="w-full max-w-[180px] justify-between truncate"
+                            className="w-full max-w-[180px] justify-between truncate group"
                             disabled={loadingValues[identifier] || filteredLoading[scope.id]?.[identifier]}
                           >
-                            <span>
-                              {(loadingValues[identifier] || filteredLoading[scope.id]?.[identifier])
-                                ? 'Loading...'
-                                : `${identifier}${Array.isArray(scope.identifiers[identifier]) ? (scope.identifiers[identifier] as string[]).length ? ` (${(scope.identifiers[identifier] as string[]).length})` : '' : scope.identifiers[identifier] ? ' (1)' : ''}`}
-                            </span>
+                            <div className="flex items-center gap-2">
+                              <div 
+                                className="w-4 h-4 text-gray-400 hover:text-gray-600 cursor-grab active:cursor-grabbing opacity-0 group-hover:opacity-100 transition-opacity"
+                                onMouseDown={(e) => {
+                                  e.stopPropagation();
+                                  e.preventDefault();
+                                }}
+                              >
+                                ⋮⋮
+                              </div>
+                              <span>
+                                {(loadingValues[identifier] || filteredLoading[scope.id]?.[identifier])
+                                  ? 'Loading...'
+                                  : `${identifier}${scope.identifiers[identifier] ? (Array.isArray(scope.identifiers[identifier]) ? (scope.identifiers[identifier] as string[]).length ? ` (${(scope.identifiers[identifier] as string[]).length})` : '' : ' (1)') : ''}`}
+                              </span>
+                            </div>
                             <span className="ml-2 text-gray-400">▼</span>
                           </Button>
                         </PopoverTrigger>
                         <PopoverContent className="bg-white border-blue-200 max-h-60 overflow-y-auto w-56 p-2">
                           {(() => {
                               const options = getIdentifierOptions(scope.id, identifier, scope.identifiers[identifier]);
-                              const allChecked = Array.isArray(scope.identifiers[identifier]) && options.length > 0 && (scope.identifiers[identifier] as string[]).length === options.length;
+                              const allChecked = scope.identifiers[identifier] && Array.isArray(scope.identifiers[identifier]) && options.length > 0 && (scope.identifiers[identifier] as string[]).length === options.length;
+                              
+                              if (options.length === 0) {
+                                return (
+                                  <div className="text-sm text-gray-500 py-2 text-center">
+                                    {loadingValues[identifier] || filteredLoading[scope.id]?.[identifier] 
+                                      ? 'Loading values...' 
+                                      : 'No values available'}
+                                  </div>
+                                );
+                              }
+                              
                               return (
                                 <>
                                   <div key="select-all" className="flex items-center gap-2 py-1">
@@ -716,7 +783,7 @@ const ScopeSelectorCanvas: React.FC<ScopeSelectorCanvasProps> = ({ data, onDataC
                                     </label>
                                   </div>
                                   {options.map((option) => {
-                            const checked = scope.identifiers[identifier]?.includes(option);
+                            const checked = scope.identifiers[identifier] ? scope.identifiers[identifier]?.includes(option) : false;
                                                                     return (
                                           <div key={option} className="flex items-center gap-2 py-1">
                                 <Checkbox
@@ -814,7 +881,7 @@ const ScopeSelectorCanvas: React.FC<ScopeSelectorCanvasProps> = ({ data, onDataC
             size="lg"
             onClick={handleSave}
             disabled={saving}
-            className={`bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white shadow-lg hover:shadow-xl transition-all duration-200 px-8 ${saving ? 'opacity-60 cursor-not-allowed' : ''}`}
+            className={`bg-gradient-to-r from-emerald-500 to-teal-400 hover:from-emerald-500 hover:to-teal-500 text-white shadow-lg hover:shadow-xl transition-all duration-200 px-8 ${saving ? 'opacity-60 cursor-not-allowed' : ''}`}
           >
             {saving && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
             {saving ? 'Saving...' : 'Save'}
@@ -824,79 +891,141 @@ const ScopeSelectorCanvas: React.FC<ScopeSelectorCanvasProps> = ({ data, onDataC
         {/* Preview Section */}
         
         {previewRows.length > 0 && (
-          <div className="mt-8 p-4 bg-white rounded-lg shadow-sm border border-gray-100">
-            <h3 className="text-lg font-semibold text-gray-800 mb-4 pb-2 border-b border-gray-100">Preview</h3>
-            <div className="max-h-64 overflow-auto rounded-lg border border-gray-200 shadow-sm">
-              <table className="min-w-full divide-y divide-gray-200 text-sm">
-                <thead className="bg-gradient-to-r from-blue-50 to-blue-100">
-                  <tr>
-                    <th className="sticky left-0 top-0 z-20 px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider bg-gray-50">Scope</th>
-                    {Array.from(new Set(data.scopes.flatMap(s => Object.keys(s.identifiers)))).map(id => (
-                      <th key={id} className="sticky top-0 z-10 px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider bg-gray-50">
-                        {id}
+          <div className="mt-8 bg-gradient-to-br from-white via-blue-50/30 to-indigo-50/30 rounded-xl shadow-lg border border-blue-200/50 overflow-hidden">
+            <div className="bg-gradient-to-r from-blue-600 to-indigo-600 px-6 py-4">
+              <div className="flex items-center gap-3">
+                {/* <div className="w-8 h-8 bg-white/20 rounded-lg flex items-center justify-center">
+                  <BarChart3 className="w-4 h-4 text-white" />
+                </div> */}
+                <div>
+                  <h3 className="text-lg font-bold text-white">Data Preview</h3>
+                  {/* <p className="text-blue-100 text-sm">Preview of generated scope combinations and their row counts</p> */}
+                </div>
+              </div>
+            </div>
+            
+            <div className="p-6">
+              <div className="max-h-80 overflow-auto rounded-xl border border-blue-200/50 shadow-inner bg-white/50 backdrop-blur-sm">
+                <table className="min-w-full divide-y divide-blue-200/50 text-sm">
+                  <thead className="bg-gradient-to-r from-blue-50 via-indigo-50 to-purple-50 sticky top-0 z-20">
+                    <tr>
+                                             <th className="sticky left-0 top-0 z-30 px-6 py-4 text-left text-xs font-bold text-blue-700 uppercase tracking-wider bg-gradient-to-r from-blue-50 to-indigo-50 border-r border-blue-200/50">
+                        <div className="flex items-center gap-2">
+                          Scope
+                        </div>
                       </th>
-                    ))}
-                    {data.criteria?.minDatapointsEnabled && (
-                      <th className="sticky top-0 z-10 px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider bg-gray-50">Min&nbsp;Pts&nbsp;✓/✕</th>
-                    )}
-                    {data.criteria?.pct90Enabled && (
-                      <th className="sticky top-0 z-10 px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider bg-gray-50">Pct&nbsp;✓/✕</th>
-                    )}
-                    <th className="sticky top-0 z-10 px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider bg-gray-50">Rows</th>
-                  </tr>
-                </thead>
-                <tbody className="bg-white divide-y divide-gray-200">
-                  {previewRows.map((row, index) => (
-                    <tr 
-                      key={index} 
-                      className={
-                        row.count === 0
-                          ? 'bg-red-50'
-                          : (data.criteria?.minDatapointsEnabled && row.count < (data.criteria?.minDatapoints || 0))
-                            ? 'bg-yellow-50'
-                            : (data.criteria?.pct90Enabled && !row.pctPass)
-                              ? 'bg-red-50'
-                              : 'bg-white hover:bg-blue-50'
-                      }
-                    >
-                      <td className="sticky left-0 z-10 px-4 py-3 whitespace-nowrap text-sm font-medium text-gray-900 bg-white">
-                        {`Scope ${data.scopes.findIndex(s=>s.id===row.scopeId)+1}`}
-                      </td>
-                      {Array.from(new Set(data.scopes.flatMap(s => Object.keys(s.identifiers)))).map(id => (
-                        <td key={`${row.scopeId}-${id}`} className="px-4 py-3 whitespace-nowrap text-sm text-gray-500">
-                          <span className="inline-block px-2 py-1 bg-blue-50 text-blue-700 rounded-full text-xs">
-                            {row.values[id] || '—'}
-                          </span>
-                        </td>
+                      {data.selectedIdentifiers.map(id => (
+                        <th key={id} className="sticky top-0 z-25 px-6 py-4 text-left text-xs font-bold text-blue-700 uppercase tracking-wider bg-gradient-to-r from-blue-50 to-indigo-50">
+                          <div className="flex items-center gap-2">
+                            {id}
+                          </div>
+                        </th>
                       ))}
-
                       {data.criteria?.minDatapointsEnabled && (
-                        <td className="px-4 py-3 whitespace-nowrap text-center text-sm">
-                          {row.count >= (data.criteria?.minDatapoints || 0) ? (
-                            <Check className="w-4 h-4 text-green-600 inline" />
-                          ) : (
-                            <X className="w-4 h-4 text-red-500 inline" />
-                          )}
-                        </td>
+                        <th className="sticky top-0 z-25 px-6 py-4 text-center text-xs font-bold text-blue-700 uppercase tracking-wider bg-gradient-to-r from-blue-50 to-indigo-50">
+                          <div className="flex items-center justify-center gap-2">
+                            {/* <div className="w-2 h-2 bg-amber-500 rounded-full"></div> */}
+                            Min Pts
+                          </div>
+                        </th>
                       )}
                       {data.criteria?.pct90Enabled && (
-                        <td className="px-4 py-3 whitespace-nowrap text-center text-sm">
-                          {row.pctPass ? (
-                            <Check className="w-4 h-4 text-green-600 inline" />
-                          ) : (
-                            <X className="w-4 h-4 text-red-500 inline" />
-                          )}
-                        </td>
+                        <th className="sticky top-0 z-25 px-6 py-4 text-center text-xs font-bold text-blue-700 uppercase tracking-wider bg-gradient-to-r from-blue-50 to-indigo-50">
+                          <div className="flex items-center justify-center gap-2">
+                            Pct Check
+                          </div>
+                        </th>
                       )}
-                      <td className="px-4 py-3 whitespace-nowrap text-right text-sm font-semibold text-gray-900">
-                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                          {row.count}
-                        </span>
-                      </td>
+                      <th className="sticky top-0 z-25 px-6 py-4 text-right text-xs font-bold text-blue-700 uppercase tracking-wider bg-gradient-to-r from-blue-50 to-indigo-50">
+                        <div className="flex items-center justify-end gap-2">
+                          {/* <div className="w-2 h-2 bg-emerald-500 rounded-full"></div> */}
+                          Row Count
+                        </div>
+                      </th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody className="bg-white/70 divide-y divide-blue-100/50">
+                    {previewRows.map((row, index) => (
+                      <tr 
+                        key={index} 
+                        className={
+                          row.count === 0
+                            ? 'bg-gradient-to-r from-red-50 to-red-100/50 hover:from-red-100 hover:to-red-200/50'
+                            : (data.criteria?.minDatapointsEnabled && row.count < (data.criteria?.minDatapoints || 0))
+                              ? 'bg-gradient-to-r from-amber-50 to-yellow-100/50 hover:from-amber-100 hover:to-yellow-200/50'
+                              : (data.criteria?.pct90Enabled && !row.pctPass)
+                                ? 'bg-gradient-to-r from-red-50 to-red-100/50 hover:from-red-100 hover:to-red-200/50'
+                                : 'bg-gradient-to-r from-white to-blue-50/30 hover:from-blue-50 hover:to-indigo-50/30'
+                        }
+                      >
+                        <td className="sticky left-0 z-10 px-6 py-4 whitespace-nowrap text-sm font-bold text-gray-900 bg-gradient-to-r from-blue-50 to-indigo-50 border-r border-blue-200/50">
+                          <div className="flex items-center gap-3">
+                            <div className={`w-3 h-3 rounded-full ${row.count === 0 ? 'bg-red-500' : 'bg-blue-500'}`}></div>
+                            <span className="bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">
+                              {`Scope ${data.scopes.findIndex(s=>s.id===row.scopeId)+1}`}
+                            </span>
+                          </div>
+                        </td>
+                        {data.selectedIdentifiers.map(id => (
+                          <td key={`${row.scopeId}-${id}`} className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
+                            <span className="inline-flex items-center px-3 py-1.5 bg-gradient-to-r from-blue-100 to-indigo-100 text-blue-800 rounded-full text-xs font-medium shadow-sm border border-blue-200/50">
+                              {row.values[id as string] || '—'}
+                            </span>
+                          </td>
+                        ))}
+
+                        {data.criteria?.minDatapointsEnabled && (
+                          <td className="px-6 py-4 whitespace-nowrap text-center text-sm">
+                            {row.count >= (data.criteria?.minDatapoints || 0) ? (
+                              <div className="inline-flex items-center justify-center w-8 h-8 bg-gradient-to-r from-green-100 to-emerald-100 rounded-full border border-green-200">
+                                <Check className="w-4 h-4 text-green-600" />
+                              </div>
+                            ) : (
+                              <div className="inline-flex items-center justify-center w-8 h-8 bg-gradient-to-r from-red-100 to-pink-100 rounded-full border border-red-200">
+                                <X className="w-4 h-4 text-red-600" />
+                              </div>
+                            )}
+                          </td>
+                        )}
+                        {data.criteria?.pct90Enabled && (
+                          <td className="px-6 py-4 whitespace-nowrap text-center text-sm">
+                            {row.pctPass ? (
+                              <div className="inline-flex items-center justify-center w-8 h-8 bg-gradient-to-r from-green-100 to-emerald-100 rounded-full border border-green-200">
+                                <Check className="w-4 h-4 text-green-600" />
+                              </div>
+                            ) : (
+                              <div className="inline-flex items-center justify-center w-8 h-8 bg-gradient-to-r from-red-100 to-pink-100 rounded-full border border-red-200">
+                                <X className="w-4 h-4 text-red-600" />
+                              </div>
+                            )}
+                          </td>
+                        )}
+                        <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-bold text-gray-900">
+                          <span className={`inline-flex items-center px-3 py-1.5 rounded-full text-xs font-bold shadow-sm border ${
+                            row.count === 0 
+                              ? 'bg-gradient-to-r from-red-100 to-pink-100 text-red-800 border-red-200' 
+                              : (() => {
+                                  // Check if all criteria are met
+                                  const minDatapointsMet = !data.criteria?.minDatapointsEnabled || row.count >= (data.criteria?.minDatapoints || 0);
+                                  const pctCheckMet = !data.criteria?.pct90Enabled || row.pctPass;
+                                  
+                                  if (minDatapointsMet && pctCheckMet) {
+                                    return 'bg-gradient-to-r from-green-100 to-emerald-100 text-green-800 border-green-200';
+                                  } else if (row.count < 100) {
+                                    return 'bg-gradient-to-r from-amber-100 to-yellow-100 text-amber-800 border-amber-200';
+                                  } else {
+                                    return 'bg-gradient-to-r from-blue-100 to-indigo-100 text-blue-800 border-blue-200';
+                                  }
+                                })()
+                          }`}>
+                            {row.count.toLocaleString()}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
         )}

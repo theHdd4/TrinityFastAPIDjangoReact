@@ -30,13 +30,20 @@ interface FeatureOverviewCanvasProps {
   onUpdateSettings: (s: any) => void;
 }
 
+const filterUnattributed = (mapping: Record<string, string[]>) =>
+  Object.fromEntries(
+    Object.entries(mapping || {}).filter(
+      ([key]) => key.toLowerCase() !== "unattributed",
+    ),
+  );
+
 const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
   settings,
   onUpdateSettings,
 }) => {
   const { user } = useAuth();
   const [dimensionMap, setDimensionMap] = useState<Record<string, string[]>>(
-    settings.dimensionMap || {},
+    filterUnattributed(settings.dimensionMap || {}),
   );
   const hasMappedIdentifiers = Object.values(dimensionMap).some(
     (ids) => ids.length > 0,
@@ -72,12 +79,13 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
   }, [settings.yAxes]);
 
   useEffect(() => {
-    setDimensionMap(settings.dimensionMap || {});
+    setDimensionMap(filterUnattributed(settings.dimensionMap || {}));
   }, [settings.dimensionMap]);
 
   useEffect(() => {
     const loadMapping = async () => {
-      const mapping = await fetchDimensionMapping();
+      const raw = await fetchDimensionMapping();
+      const mapping = filterUnattributed(raw);
       setDimensionMap(mapping);
       onUpdateSettings({ dimensionMap: mapping });
     };
@@ -284,7 +292,7 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
           </div>
 
           <Card className="border-0 shadow-xl bg-white/80 backdrop-blur-sm mb-6 overflow-hidden">
-            <div className="bg-gradient-to-r from-blue-500 to-blue-600 p-1">
+            <div className="bg-gradient-to-r from-blue-500 to-blue-600 p-0.5">
               <div className="bg-white rounded-sm">
                 <Table>
                   <TableHeader>
@@ -369,41 +377,31 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
         <div className="space-y-4">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
             {Object.keys(dimensionMap).length > 0 ? (
-              Object.entries(dimensionMap).map(([dim, ids], idx) => {
-                const colorPairs = [
-                  ["from-blue-500", "to-blue-600"],
-                  ["from-green-500", "to-green-600"],
-                  ["from-orange-500", "to-orange-600"],
-                  ["from-purple-500", "to-purple-600"],
-                ];
-                const [from, to] = colorPairs[idx % colorPairs.length];
-                const Icon = idx === 1 ? TrendingUp : BarChart3;
-                return (
-                  <Card
-                    key={dim}
-                    className="border-0 shadow-xl bg-white/90 backdrop-blur-sm overflow-hidden transform hover:scale-105 transition-all duration-300"
-                  >
-                    <div className={`bg-gradient-to-r ${from} ${to} p-4`}>
-                      <h4 className="font-bold text-white text-lg flex items-center">
-                        <Icon className="w-5 h-5 mr-2" />
-                        {dim}
-                      </h4>
+              Object.entries(dimensionMap).map(([dim, ids]) => (
+                <Card
+                  key={dim}
+                  className="relative overflow-hidden bg-white border-2 border-blue-200 rounded-xl shadow-sm transition-all duration-300 hover:shadow-lg"
+                >
+                  <div className="relative px-4 py-3 border-b border-blue-200 bg-white">
+                    <h4 className="text-sm font-bold text-foreground capitalize flex items-center gap-2">
+                      <div className="w-2 h-2 rounded-full bg-blue-500" />
+                      {dim}
+                    </h4>
+                  </div>
+                  <div className="p-4">
+                    <div className="flex flex-wrap gap-2">
+                      {ids.map((id) => (
+                        <span
+                          key={id}
+                          className="px-3 py-1.5 bg-white rounded-full text-sm shadow-sm border border-blue-200"
+                        >
+                          {id}
+                        </span>
+                      ))}
                     </div>
-                    <div className="p-6">
-                      <div className="flex flex-wrap gap-3">
-                        {ids.map((id) => (
-                          <Badge
-                            key={id}
-                            className={`bg-gradient-to-r ${from} ${to} text-white px-4 py-2 font-medium`}
-                          >
-                            {id}
-                          </Badge>
-                        ))}
-                      </div>
-                    </div>
-                  </Card>
-                );
-              })
+                  </div>
+                </Card>
+              ))
             ) : (
               <div className="col-span-1 text-sm text-gray-500">
                 Please configure dimensions using Column Classifier
@@ -411,17 +409,9 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
             )}
           </div>
 
-          <Button
-            onClick={displaySkus}
-            disabled={!hasMappedIdentifiers}
-            className="mt-4"
-          >
-            Display SKUs
-          </Button>
-
           {skuRows.length > 0 && (
             <Card className="border-0 shadow-xl bg-white/80 backdrop-blur-sm overflow-hidden">
-              <div className="bg-gradient-to-r from-purple-500 to-purple-600 p-1">
+              <div className="bg-gradient-to-r from-purple-500 to-purple-600 p-0.5">
                 <div className="bg-white rounded-sm overflow-auto">
                   <Table>
                     <TableHeader>

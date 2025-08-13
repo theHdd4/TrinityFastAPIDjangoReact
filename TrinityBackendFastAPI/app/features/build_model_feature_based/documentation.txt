@@ -1,0 +1,666 @@
+📘 Build Atom API Documentation (v1)
+This API provides comprehensive functionality for scope-based data analysis, model training, and marketing mix modeling. It integrates MongoDB for metadata storage and MinIO for file storage. All routes are prefixed with /api/v1.
+
+🏥 Health & System Endpoints
+1. ✅ Health Check
+GET /api/v1/health
+
+Checks the health status of the Build Atom API and its dependencies.
+
+Purpose
+
+Verify API availability
+
+Check MongoDB connectivity
+
+Check MinIO connectivity
+
+Monitor service status
+
+Response
+
+json
+{
+  "status": "healthy",
+  "timestamp": "2025-08-01T10:00:00.000Z",
+  "services": {
+    "mongodb": {"status": "connected"},
+    "minio": {"status": "connected"}
+  },
+  "version": "1.0.0",
+  "api": "Build Atom API"
+}
+Example Request
+
+bash
+curl -X GET "http://localhost:8000/api/v1/health"
+
+
+2. 📋 API Info
+GET /api/v1/
+
+Root endpoint providing API information and available endpoints.
+
+Response
+
+json
+{
+  "message": "Welcome to Build Atom API",
+  "version": "1.0.0",
+  "documentation": "/docs",
+  "endpoints": {
+    "health": "/api/v1/health",
+    "get_scope": "/api/v1/scopes/{scope_id}",
+    "list_scopes": "/api/v1/scopes",
+    "get_scope_set": "/api/v1/scopes/{scope_id}/sets/{set_name}",
+    "list_scope_sets": "/api/v1/scopes/{scope_id}/sets"
+  }
+}
+
+
+🔍 Scope Management Endpoints
+3. 📊 Get Scope by ID
+GET /api/v1/scopes/{scope_id}
+
+Retrieves scope details and combinations by scope ID.
+
+Purpose
+
+Fetch scope metadata
+
+Get associated combinations
+
+View scope configuration
+
+Parameters
+
+Name	Type	Location	Required	Description
+scope_id	string	path	✅ Yes	Scope ID from MongoDB (_id or scope_id field)
+Response
+
+json
+{
+  "scope_id": "scope_123",
+  "scope_name": "Sales Analysis Scope",
+  "description": "Q4 2024 sales data scope",
+  "created_at": "2025-01-15T10:00:00.000Z",
+  "combinations": [
+    {
+      "combination_id": "channel_brand_ppg_001",
+      "channel": "walmart",
+      "brand": "heinz",
+      "ppg": "large",
+      "file_key": "dataformodel/sales/walmart_heinz_large.csv",
+      "record_count": 1500
+    }
+  ]
+}
+Example Request
+
+bash
+curl -X GET "http://localhost:8000/api/v1/scopes/scope_123"
+
+
+4. 📑 List All Scopes
+GET /api/v1/scopes
+
+Lists all available scopes with their combinations.
+
+Parameters
+
+Name	Type	Location	Required	Default	Description
+limit	integer	query	❌ No	10	Maximum number of scopes (1-100)
+skip	integer	query	❌ No	0	Number of scopes to skip
+Response
+
+json
+[
+  {
+    "scope_id": "scope_123",
+    "scope_name": "Sales Analysis Scope",
+    "combinations": [...]
+  },
+  {
+    "scope_id": "scope_456",
+    "scope_name": "Marketing Scope",
+    "combinations": [...]
+  }
+]
+Example Request
+
+bash
+curl -X GET "http://localhost:8000/api/v1/scopes?limit=20&skip=0"
+
+
+5. 🗂️ Get Scope Set Details
+GET /api/v1/scopes/{scope_id}/sets/{set_name}
+
+Gets combinations for a specific scope and set_name with column information.
+
+Purpose
+
+Filter combinations by set name
+
+Extract column structure from CSV files
+
+Prepare for model training
+
+Parameters
+
+Name	Type	Location	Required	Description
+scope_id	string	path	✅ Yes	Scope ID from MongoDB
+set_name	string	path	✅ Yes	Set name (e.g., Scope_1, Scope_2)
+Response
+
+json
+{
+  "scope_id": "scope_123",
+  "scope_name": "Sales Analysis Scope",
+  "set_name": "Scope_1",
+  "columns": ["Channel", "Brand", "PPG", "Volume", "Revenue", "Price"],
+  "total_combinations": 12,
+  "combinations": [
+    {
+      "combination_id": "channel_brand_ppg_001",
+      "channel": "walmart",
+      "brand": "heinz",
+      "ppg": "large",
+      "file_key": "dataformodel/sales/walmart_heinz_large.csv",
+      "record_count": 1500
+    }
+  ]
+}
+
+
+6. 📝 List Scope Sets
+GET /api/v1/scopes/{scope_id}/sets
+
+Lists all available set names for a given scope.
+
+Parameters
+
+Name	Type	Location	Required	Description
+scope_id	string	path	✅ Yes	Scope ID from MongoDB
+Response
+
+json
+["Scope_1", "Scope_2", "Scope_3"]
+
+
+
+🤖 Model Training Endpoints
+
+
+7. 🚀 Train Models
+
+
+POST /api/v1/train-models
+
+Trains multiple models with enhanced result tracking and storage.
+
+Purpose
+
+Train regression models on scope data
+
+Support multiple algorithms
+
+Track performance metrics
+
+Store results in MongoDB
+
+Request Body
+
+json
+{
+  "scope_id": "scope_123",
+  "set_name": "Scope_1",
+  "x_variables": ["Channel", "Brand", "PPG", "Price"],
+  "y_variable": "Volume",
+  "price_column": "Price",
+  "standardization": "minmax",
+  "k_folds": 5,
+  "models_to_run": ["ridge", "lasso", "linear", "elastic_net"],
+  "custom_model_configs": {
+    "ridge": {"alpha": 0.1},
+    "lasso": {"alpha": 0.01}
+  }
+}
+Model Options
+
+Model	Description	Key Parameters
+ridge	Ridge Regression	alpha (regularization)
+lasso	Lasso Regression	alpha (regularization)
+linear	Linear Regression	None
+elastic_net	Elastic Net	alpha, l1_ratio
+custom_constrained_ridge	Constrained Ridge	bounds, constraints
+Response
+
+json
+{
+  "scope_id": "scope_123",
+  "set_name": "Scope_1",
+  "x_variables": ["Channel", "Brand", "PPG", "Price"],
+  "y_variable": "Volume",
+  "total_combinations": 12,
+  "combination_results": [
+    {
+      "combination_id": "channel_brand_ppg_001",
+      "channel": "walmart",
+      "brand": "heinz",
+      "ppg": "large",
+      "model_results": [
+        {
+          "model_name": "ridge",
+          "mape_test": 0.123,
+          "r2_test": 0.876,
+          "price_elasticity": -1.23
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "run_id": "uuid-123-456",
+    "total_models_saved": 48,
+    "best_model_by_mape": {
+      "channel_brand_ppg_001": {
+        "model": "ridge",
+        "mape_test": 0.123
+      }
+    }
+  }
+}
+Example Request
+
+bash
+curl -X POST "http://localhost:8000/api/v1/train-models" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "scope_id": "scope_123",
+    "set_name": "Scope_1",
+    "x_variables": ["Channel", "Brand", "PPG", "Price"],
+    "y_variable": "Volume",
+    "price_column": "Price",
+    "standardization": "minmax",
+    "k_folds": 5,
+    "models_to_run": ["ridge", "lasso"]
+  }'
+
+
+
+📊 Model Results Endpoints
+8. 📈 Get Detailed Model Results
+GET /api/v1/model-results/detailed/{run_id}
+
+Retrieves detailed model results with variable statistics.
+
+Parameters
+
+Name	Type	Location	Required	Default	Description
+run_id	string	path	✅ Yes	-	Run ID from training session
+include_folds	boolean	query	❌ No	false	Include fold-wise details
+Response
+
+json
+{
+  "run_id": "uuid-123-456",
+  "total_models": 48,
+  "variable_averages": {
+    "Price": 5.23,
+    "Volume": 10000.5
+  },
+  "results": [
+    {
+      "_id": "model_001",
+      "model_name": "ridge",
+      "combination_id": "channel_brand_ppg_001",
+      "mape_test": 0.123,
+      "r2_test": 0.876,
+      "coefficients": {
+        "intercept": 1000,
+        "Price": -1.23,
+        "Channel": 0.45
+      }
+    }
+  ]
+}
+9. 📊 Get Variable Statistics
+GET /api/v1/model-results/variable-stats/{run_id}
+
+Gets variable statistics for all combinations in a training run.
+
+Parameters
+
+Name	Type	Location	Required	Description
+run_id	string	path	✅ Yes	Run ID from training session
+Response
+
+json
+{
+  "run_id": "uuid-123-456",
+  "combinations": [
+    {
+      "combination_id": "channel_brand_ppg_001",
+      "channel": "walmart",
+      "brand": "heinz",
+      "ppg": "large",
+      "variable_statistics": {
+        "Price": {"mean": 5.23, "std": 1.2, "min": 2.5, "max": 8.9}
+      },
+      "variable_averages": {"Price": 5.23, "Volume": 10000.5}
+    }
+  ]
+}
+10. 💾 Export Model Results
+GET /api/v1/model-results/export/{run_id}
+
+Exports model results to CSV format with MinIO storage.
+
+Parameters
+
+Name	Type	Location	Required	Default	Description
+run_id	string	path	✅ Yes	-	Run ID from training session
+include_folds	boolean	query	❌ No	false	Include fold-wise details
+save_only	boolean	query	❌ No	false	Only save to MinIO without downloading
+Response (save_only=true)
+
+json
+{
+  "status": "success",
+  "message": "CSV saved to MinIO",
+  "minio_bucket": "results",
+  "file_key": "csv-exports/uuid-123-456/model_results_20250801_100000.csv",
+  "download_url": "/api/v1/model-results/download/csv-exports/uuid-123-456/model_results_20250801_100000.csv"
+}
+11. 📥 Download CSV from MinIO
+GET /api/v1/model-results/download/{file_path:path}
+
+Downloads a previously saved CSV file from MinIO.
+
+Parameters
+
+Name	Type	Location	Required	Description
+file_path	string	path	✅ Yes	MinIO file path
+Example Request
+
+bash
+curl -X GET "http://localhost:8000/api/v1/model-results/download/csv-exports/uuid-123/results.csv" \
+  -o model_results.csv
+12. 📋 List CSV Exports
+GET /api/v1/model-results/list-exports
+
+Lists all CSV exports stored in MinIO.
+
+Parameters
+
+Name	Type	Location	Required	Default	Description
+run_id	string	query	❌ No	-	Filter by run ID
+limit	integer	query	❌ No	50	Maximum results (1-200)
+Response
+
+json
+{
+  "total": 15,
+  "exports": [
+    {
+      "file_key": "csv-exports/uuid-123/model_results.csv",
+      "size": 524288,
+      "last_modified": "2025-08-01T10:00:00.000Z",
+      "download_url": "/api/v1/model-results/download/csv-exports/uuid-123/model_results.csv",
+      "metadata": {}
+    }
+  ]
+}
+
+
+
+
+📈 Marketing Mix Modeling Endpoints
+13. 🔧 Prepare Marketing Data
+POST /api/v1/marketing/prepare-data
+
+Prepares data for marketing mix modeling using the scope system.
+
+Purpose
+
+Filter data by fiscal years
+
+Remove zero columns
+
+Prepare for transformation
+
+Request Body
+
+json
+{
+  "scope_id": "marketing_scope_123",
+  "set_name": "MMM_Set_1",
+  "fiscal_years": [2023, 2024],
+  "remove_zero_columns": true
+}
+Response
+
+json
+{
+  "run_id": "uuid-mmm-123",
+  "status": "success",
+  "rows": 50000,
+  "columns": 25,
+  "prepared_data_key": "marketing-prepared/uuid-mmm-123/",
+  "fiscal_years_included": [2023, 2024],
+  "columns_removed": null
+}
+14. 🔄 Transform Marketing Variables
+POST /api/v1/marketing/transform-variables
+
+Applies transformations to marketing variables for all combinations.
+
+Purpose
+
+Apply adstock transformations
+
+Standardize variables
+
+Prepare for modeling
+
+Request Body
+
+json
+{
+  "run_id": "uuid-mmm-123",
+  "media_variables": ["TV_Spend", "Digital_Spend", "Print_Spend"],
+  "other_variables": ["Price", "Distribution"],
+  "non_scaled_variables": ["Holiday_Flag"],
+  "transformation_type": "logistic",
+  "standardization_method": "minmax",
+  "transformation_params": {
+    "TV_Spend": [0.8, 0.3, 0.5],
+    "Digital_Spend": [0.9, 0.2, 0.4]
+  }
+}
+Transformation Types
+
+Type	Description	Parameters
+logistic	S-curve transformation	growth_rate, carryover, midpoint
+power	Power transformation	exponent, carryover
+adstock	Simple adstock	decay_rate
+Response
+
+json
+{
+  "transform_id": "uuid-transform-456",
+  "status": "success",
+  "transformed_data_key": "marketing-transformed/uuid-transform-456/",
+  "variable_statistics": {
+    "combo_001": {
+      "TV_Spend_transformed": {
+        "Region_A": {"mean": 0.5, "std": 0.2, "min": 0.1, "max": 0.9}
+      }
+    }
+  },
+  "regions_processed": ["Region_A", "Region_B"],
+  "media_variables_transformed": ["TV_Spend", "Digital_Spend", "Print_Spend"]
+}
+15. 🎯 Train Marketing Models
+POST /api/v1/marketing/train-models
+
+Trains marketing mix models with optional constraints.
+
+Purpose
+
+Train multiple model types
+
+Apply business constraints
+
+Calculate contributions
+
+Request Body
+
+json
+{
+  "run_id": "uuid-transform-456",
+  "model_types": ["RIDGE", "LASSO", "LINEAR"],
+  "y_variables": ["Revenue", "Volume"],
+  "train_test_split": 0.8,
+  "use_constraints": true,
+  "variable_constraints": [
+    {
+      "variable_name": "TV_Spend_transformed",
+      "constraint_type": "positive"
+    },
+    {
+      "variable_name": "Price",
+      "constraint_type": "negative"
+    }
+  ],
+  "constraint_learning_rate": 0.01,
+  "constraint_iterations": 1000
+}
+Model Types
+
+Type	Description
+RIDGE	Ridge Regression
+LASSO	Lasso Regression
+LINEAR	Linear Regression
+ELASTIC_NET	Elastic Net
+Response
+
+json
+{
+  "training_id": "uuid-training-789",
+  "status": "success",
+  "models_trained": 24,
+  "summary": {
+    "combinations_processed": 4,
+    "model_types": ["RIDGE", "LASSO", "LINEAR"],
+    "y_variables": ["Revenue", "Volume"],
+    "constraints_applied": true,
+    "total_constraints": 2
+  },
+  "best_models": {
+    "by_mape": 5,
+    "by_r2": 3,
+    "by_aic": 5
+  },
+  "execution_time_seconds": 45.2
+}
+16. 📐 Calculate Marketing Elasticity
+POST /api/v1/marketing/calculate-elasticity
+
+Calculates elasticities for marketing models.
+
+Purpose
+
+Calculate media elasticities
+
+Compute variable contributions
+
+Update model results
+
+Request Body
+
+json
+{
+  "run_id": "uuid-training-789",
+  "model_ids": [1, 2, 3],
+  "include_contributions": true
+}
+Response
+
+json
+{
+  "status": "success",
+  "models_updated": 3,
+  "elasticity_summary": {
+    "1": {
+      "TV_Spend": 0.25,
+      "Digital_Spend": 0.35,
+      "Print_Spend": 0.15
+    }
+  },
+  "contribution_summary": {
+    "1": {
+      "TV_Spend_transformed": 0.30,
+      "Digital_Spend_transformed": 0.45,
+      "Price": -0.20
+    }
+  }
+}
+17. 📊 Get Marketing Model Results
+GET /api/v1/marketing/results/{run_id}
+
+Retrieves marketing model results with optional filters.
+
+Parameters
+
+Name	Type	Location	Required	Description
+run_id	string	path	✅ Yes	Training run ID
+model_ids	array	query	❌ No	Filter by specific model IDs
+brand	string	query	❌ No	Filter by brand
+region	string	query	❌ No	Filter by region
+Response
+
+json
+[
+  {
+    "model_id": 1,
+    "model_type": "RIDGE",
+    "brand": "heinz",
+    "market": ["US"],
+    "region": ["Northeast"],
+    "y_variable": "Revenue",
+    "mape": 0.082,
+    "r_squared": 0.923,
+    "adjusted_r_squared": 0.918,
+    "aic": 1523.4,
+    "bic": 1578.9,
+    "coefficients": {
+      "intercept": 10000,
+      "TV_Spend_transformed": 0.25,
+      "Price": -1.5
+    },
+    "contributions": {
+      "TV_Spend_transformed": 0.30,
+      "Digital_Spend_transformed": 0.45
+    },
+    "elasticities": {
+      "TV_Spend": 0.25,
+      "Digital_Spend": 0.35
+    },
+    "created_at": "2025-08-01T10:00:00.000Z",
+    "training_id": "uuid-training-789"
+  }
+]
+18. 📥 Download Marketing Export
+GET /api/v1/marketing/download/{file_path:path}
+
+Downloads exported marketing results file (Excel or CSV).
+
+Parameters
+
+Name	Type	Location	Required	Description
+file_path	string	path	✅ Yes	Export file path
+Example Request
+
+bash
+curl -X GET "http://localhost:8000/api/v1/marketing/download/marketing-results/uuid-123/results.xlsx" \
+  -o marketing_results.xlsx

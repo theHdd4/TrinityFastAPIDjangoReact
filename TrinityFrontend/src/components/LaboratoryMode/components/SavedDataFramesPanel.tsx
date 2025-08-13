@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { Database, ChevronRight, Trash2, Pencil } from 'lucide-react';
+import { Database, ChevronRight, ChevronDown, Trash2, Pencil } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { VALIDATE_API } from '@/lib/api';
+import { VALIDATE_API, SESSION_API } from '@/lib/api';
+import { useAuth } from '@/contexts/AuthContext';
 
 interface Props {
   isOpen: boolean;
@@ -11,17 +12,127 @@ interface Props {
 
 const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle }) => {
   interface Frame { object_name: string; csv_name: string; arrow_name?: string }
+  interface TreeNode {
+    name: string;
+    path: string;
+    children?: TreeNode[];
+    frame?: Frame;
+  }
+
   const [files, setFiles] = useState<Frame[]>([]);
+  const [prefix, setPrefix] = useState('');
+  const [openDirs, setOpenDirs] = useState<Record<string, boolean>>({});
   const [renameTarget, setRenameTarget] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
 
+  const { user } = useAuth();
+
   useEffect(() => {
     if (!isOpen) return;
-    fetch(`${VALIDATE_API}/list_saved_dataframes`)
-      .then(res => res.json())
-      .then(data => setFiles(Array.isArray(data.files) ? data.files : []))
-      .catch(() => setFiles([]));
-  }, [isOpen]);
+    const load = async () => {
+      try {
+        let env: any = {};
+        const envStr = localStorage.getItem('env');
+        if (envStr) {
+          try {
+            env = JSON.parse(envStr);
+          } catch {
+            env = {};
+          }
+        }
+
+        if (user) {
+          try {
+            const payload: any = { user_id: user.id };
+            if (env.CLIENT_ID) payload.client_id = env.CLIENT_ID;
+            if (env.APP_ID) payload.app_id = env.APP_ID;
+            if (env.PROJECT_ID) payload.project_id = env.PROJECT_ID;
+            const redisRes = await fetch(`${SESSION_API}/init`, {
+              method: 'POST',
+              credentials: 'include',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload)
+            });
+            if (redisRes.ok) {
+              const redisData = await redisRes.json();
+              const redisEnv = redisData.state?.envvars;
+              if (redisEnv) {
+                env = { ...env, ...redisEnv };
+                localStorage.setItem('env', JSON.stringify(env));
+              }
+            }
+          } catch (err) {
+            console.warn('Redis env fetch failed', err);
+          }
+        }
+
+        console.log('📦 env', {
+          CLIENT_NAME: env.CLIENT_NAME,
+          APP_NAME: env.APP_NAME,
+          PROJECT_NAME: env.PROJECT_NAME
+        });
+
+        try {
+          const buildQuery = () =>
+            new URLSearchParams({
+              client_name: env.CLIENT_NAME || '',
+              app_name: env.APP_NAME || '',
+              project_name: env.PROJECT_NAME || ''
+            }).toString();
+          let query = buildQuery();
+          const prefRes = await fetch(
+            `${VALIDATE_API}/get_object_prefix?${query}`,
+            { credentials: 'include' }
+          );
+          if (prefRes.ok) {
+            const prefData = await prefRes.json();
+            setPrefix(prefData.prefix || '');
+            if (prefData.environment) {
+              env = { ...env, ...prefData.environment };
+              localStorage.setItem('env', JSON.stringify(env));
+            }
+            // Rebuild query using any refreshed environment variables so the
+            // subsequent listing request targets the current namespace.
+            query = buildQuery();
+          }
+
+          const listRes = await fetch(
+            `${VALIDATE_API}/list_saved_dataframes?${query}`,
+            { credentials: 'include' }
+          );
+          let data: any = null;
+          if (listRes.ok) {
+            try {
+              data = await listRes.json();
+            } catch (e) {
+              console.warn('Failed to parse list_saved_dataframes response', e);
+            }
+          } else {
+            console.warn('list_saved_dataframes failed', listRes.status);
+          }
+          if (data) {
+            setPrefix(data.prefix || '');
+            if (data.environment) {
+              localStorage.setItem('env', JSON.stringify({ ...env, ...data.environment }));
+            }
+            console.log(
+              `📁 SavedDataFramesPanel looking in MinIO bucket "${data.bucket}" folder "${data.prefix}" via ${data.env_source} (CLIENT_NAME=${data.environment?.CLIENT_NAME} APP_NAME=${data.environment?.APP_NAME} PROJECT_NAME=${data.environment?.PROJECT_NAME})`
+            );
+            setFiles(Array.isArray(data.files) ? data.files : []);
+          } else {
+            setFiles([]);
+          }
+        } catch (err) {
+          console.warn('get_object_prefix or list_saved_dataframes failed', err);
+          setFiles([]);
+        }
+      } catch (err) {
+        console.error('Failed to load saved dataframes', err);
+        setFiles([]);
+      }
+    };
+    load();
+  }, [isOpen, user]);
 
   const handleOpen = (obj: string) => {
     window.open(`/dataframe?name=${encodeURIComponent(obj)}`, '_blank');
@@ -69,6 +180,100 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle }) => {
     setRenameTarget(null);
   };
 
+  const buildTree = (frames: Frame[], pref: string): TreeNode[] => {
+    const root: any = { children: {} };
+    frames.forEach(f => {
+      const rel = f.object_name.startsWith(pref)
+        ? f.object_name.slice(pref.length)
+        : f.object_name;
+      const parts = rel.split('/').filter(Boolean);
+      let node = root;
+      let currentPath = pref;
+      parts.forEach((part, idx) => {
+        currentPath += part + (idx < parts.length - 1 ? '/' : '');
+        if (!node.children[part]) {
+          node.children[part] = { name: part, path: currentPath, children: {} };
+        }
+        node = node.children[part];
+        if (idx === parts.length - 1) {
+          node.frame = f;
+        }
+      });
+    });
+    const toArr = (n: any): TreeNode[] =>
+      Object.values(n.children || {}).map((c: any) => ({
+        name: c.name,
+        path: c.path,
+        frame: c.frame,
+        children: toArr(c)
+      }));
+    return toArr(root);
+  };
+
+  const tree = buildTree(files, prefix);
+
+  const toggleDir = (path: string) => {
+    setOpenDirs(prev => ({ ...prev, [path]: !prev[path] }));
+  };
+
+  const renderNode = (node: TreeNode, level = 0): React.ReactNode => {
+    if (node.frame) {
+      const f = node.frame;
+      return (
+        <div
+          key={node.path}
+          style={{ marginLeft: level * 12 }}
+          className="flex items-center justify-between border p-2 rounded hover:bg-gray-50 mt-1"
+        >
+          {renameTarget === f.object_name ? (
+            <Input
+              value={renameValue}
+              onChange={e => setRenameValue(e.target.value)}
+              onBlur={() => commitRename(f.object_name)}
+              onKeyDown={e => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  commitRename(f.object_name);
+                }
+              }}
+              className="h-6 text-xs flex-1 mr-2"
+            />
+          ) : (
+            <button
+              onClick={() => handleOpen(f.object_name)}
+              className="text-sm text-blue-600 hover:underline flex-1 text-left"
+            >
+              {f.arrow_name ? f.arrow_name.split('/').pop() : f.csv_name.split('/').pop()}
+            </button>
+          )}
+          <div className="flex items-center space-x-2 ml-2">
+            <Pencil
+              className="w-4 h-4 text-gray-400 cursor-pointer"
+              onClick={() => startRename(f.object_name, f.arrow_name || f.csv_name)}
+            />
+            <Trash2
+              className="w-4 h-4 text-gray-400 cursor-pointer"
+              onClick={() => deleteOne(f.object_name)}
+            />
+          </div>
+        </div>
+      );
+    }
+    const isOpen = openDirs[node.path];
+    return (
+      <div key={node.path} style={{ marginLeft: level * 12 }} className="mt-1">
+        <button
+          onClick={() => toggleDir(node.path)}
+          className="flex items-center text-sm text-gray-700"
+        >
+          {isOpen ? <ChevronDown className="w-4 h-4 mr-1" /> : <ChevronRight className="w-4 h-4 mr-1" />}
+          {node.name}
+        </button>
+        {isOpen && node.children?.map(child => renderNode(child, level + 1))}
+      </div>
+    );
+  };
+
   if (!isOpen) {
     return (
       <div className="w-12 bg-white border-l border-gray-200 flex flex-col h-full">
@@ -97,34 +302,9 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle }) => {
           </Button>
         </div>
       </div>
-      <div className="flex-1 overflow-y-auto p-4 space-y-2">
-        {files.length === 0 && <p className="text-sm text-gray-600">No saved dataframes</p>}
-        {files.map(f => (
-          <div key={f.object_name} className="flex items-center justify-between border p-2 rounded hover:bg-gray-50">
-            {renameTarget === f.object_name ? (
-              <Input
-                value={renameValue}
-                onChange={e => setRenameValue(e.target.value)}
-                onBlur={() => commitRename(f.object_name)}
-                onKeyDown={e => {
-                  if (e.key === 'Enter') {
-                    e.preventDefault();
-                    commitRename(f.object_name);
-                  }
-                }}
-                className="h-6 text-xs flex-1 mr-2"
-              />
-            ) : (
-              <button onClick={() => handleOpen(f.object_name)} className="text-sm text-blue-600 hover:underline flex-1 text-left">
-                {f.arrow_name ? f.arrow_name.split('/').pop() : f.csv_name.split('/').pop()}
-              </button>
-            )}
-            <div className="flex items-center space-x-2 ml-2">
-              <Pencil className="w-4 h-4 text-gray-400 cursor-pointer" onClick={() => startRename(f.object_name, f.arrow_name || f.csv_name)} />
-              <Trash2 className="w-4 h-4 text-gray-400 cursor-pointer" onClick={() => deleteOne(f.object_name)} />
-            </div>
-          </div>
-        ))}
+      <div className="flex-1 overflow-y-auto p-4">
+        {tree.length === 0 && <p className="text-sm text-gray-600">No saved dataframes</p>}
+        {tree.map(node => renderNode(node))}
       </div>
     </div>
   );

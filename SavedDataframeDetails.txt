@@ -1,0 +1,34 @@
+Saved DataFrame Panel – detailed operation guide
+
+1. Opening and closing the panel
+   - The auxiliary menu in `TrinityFrontend/src/components/LaboratoryMode/components/AuxiliaryMenu.tsx` renders icons for settings and saved frames.
+   - Clicking the database icon runs `openFrames()` which toggles `active` state to `'frames'`.
+   - When `active` is `'frames'`, the menu renders the `<SavedDataFramesPanel isOpen={true} onToggle={...} />` component.
+   - The panel itself also supports collapsing: when `isOpen` is false it shows only a narrow bar with a database button that invokes `onToggle` to reopen it.
+
+2. Fetching environment variables
+   - Inside `SavedDataFramesPanel` (`TrinityFrontend/src/components/LaboratoryMode/components/SavedDataFramesPanel.tsx`), a `useEffect` hook runs whenever `isOpen` becomes true.
+   - Step 1: It reads cached values from `localStorage` under the key `"env"`.
+   - Step 2: If a user is authenticated it POSTs to `${SESSION_API}/init` handled by `SessionInitView` in `TrinityBackendDjango/apps/session_state/views.py`, which pulls session data from Redis and MongoDB and returns `envvars`.
+   - Step 3: Any variables returned are merged into `localStorage` for reuse.
+
+3. Resolving the MinIO prefix
+   - With `CLIENT_NAME`, `APP_NAME` and `PROJECT_NAME` from the environment, the hook constructs a query string and calls `${VALIDATE_API}/get_object_prefix`.
+   - This endpoint maps to `get_object_prefix_endpoint` in `TrinityBackendFastAPI/app/features/data_upload_validate/app/routes.py`, which calls `get_object_prefix`.
+   - `get_object_prefix` relies on `get_env_vars` (`TrinityBackendFastAPI/app/core/utils.py`) to consult Redis or Postgres for canonical names and returns the prefix `client/app/project/`.
+
+4. Listing saved frames from MinIO
+   - After the prefix is known the hook requests `${VALIDATE_API}/list_saved_dataframes`.
+   - This FastAPI endpoint uses the MinIO client to list every object in bucket `MINIO_BUCKET` beneath the prefix and responds with `bucket`, `prefix` and a list of file descriptors (`object_name`, `arrow_name`, `csv_name`).
+
+5. Rendering the tree and handling expand/collapse
+   - `SavedDataFramesPanel` converts the flat file array into a nested tree via `buildTree()`.
+   - Directory open states are tracked in `openDirs`; clicking a folder calls `toggleDir(path)` which toggles that entry.
+   - `renderNode()` recursively draws directories with `ChevronRight`/`ChevronDown` icons depending on `openDirs` and renders files with rename/delete actions.
+   - Clicking the ChevronRight button in the panel header triggers `onToggle` to collapse the entire panel.
+
+Storage accessed
+   - Browser `localStorage` for caching environment variables.
+   - Redis (with MongoDB fallback) via Django's `/session/init` endpoint for session state.
+   - Redis/Postgres inside `get_env_vars` for authoritative environment data.
+   - MinIO object storage bucket `MINIO_BUCKET` for the actual saved data frames.

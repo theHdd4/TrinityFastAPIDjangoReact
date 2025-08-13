@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Form, HTTPException, Query, Response
-from typing import Dict, List
+from typing import Dict, List, Any
 from .deps import get_minio_df, get_validator_atoms_collection, fetch_dimensions_dict, get_column_classifications_collection, fetch_measures_list, fetch_identifiers_and_measures, minio_client, MINIO_BUCKET
 from app.features.data_upload_validate.app.routes import get_object_prefix
 from .mongodb_saver import save_groupby_result
@@ -11,6 +11,53 @@ import datetime
 from urllib.parse import unquote
 
 router = APIRouter()
+
+@router.get("/identifier_options")
+async def identifier_options(
+    client_name: str = Query(..., description="Client name"),
+    app_name: str = Query(..., description="App name"),
+    project_name: str = Query(..., description="Project name"),
+):
+    """Return identifier column names using Redis ▶ Mongo ▶ fallback logic.
+
+    1. Attempt to read JSON config from Redis key
+       `<client>/<app>/<project>/column_classifier_config`.
+    2. If missing, fetch from Mongo (`classifier_configs` collection).
+       Cache the document back into Redis.
+    3. If still unavailable, return empty list – the frontend will
+       fall back to its existing column_summary extraction flow.
+    """
+    key = f"{client_name}/{app_name}/{project_name}/column_classifier_config"
+    cfg: dict[str, Any] | None = None
+
+    # --- Redis lookup -------------------------------------------------------
+    try:
+        from .deps import redis_client
+        cached = redis_client.get(key)
+        if cached:
+            cfg = json.loads(cached)
+    except Exception as exc:
+        print(f"⚠️ Redis read error for {key}: {exc}")
+
+    # --- Mongo fallback ------------------------------------------------------
+    if cfg is None:
+        try:
+            from app.features.column_classifier.database import get_classifier_config_from_mongo
+            cfg = get_classifier_config_from_mongo(client_name, app_name, project_name)
+            if cfg and redis_client:
+                try:
+                    redis_client.setex(key, 3600, json.dumps(cfg, default=str))
+                except Exception as exc:
+                    print(f"⚠️ Redis write error for {key}: {exc}")
+        except Exception as exc:
+            print(f"⚠️ Mongo classifier config lookup failed: {exc}")
+
+    identifiers: list[str] = []
+    if cfg and isinstance(cfg.get("identifiers"), list):
+        identifiers = cfg["identifiers"]
+
+    return {"identifiers": identifiers}
+
 
 # ----------- Export Endpoints (CSV / Excel) -----------
 @router.get("/export_csv")
@@ -126,16 +173,55 @@ def clean_columns(df):
 async def get_dimensions_and_measures(
     bucket_name: str = Form(...),
     object_names: str = Form(...),
-    validator_atom_id: str = Form(...),
+    client_name: str = Form(..., description="Client name"),
+    app_name: str = Form(..., description="App name"),
+    project_name: str = Form(..., description="Project name"),
     file_key: str = Form(...)
 ) -> Dict:
     try:
         df = get_minio_df(bucket_name, object_names)
         df = clean_columns(df)
-        dimensions_collection = await get_validator_atoms_collection()
-        dimensions = await fetch_dimensions_dict(validator_atom_id, file_key, dimensions_collection)
-        measures_collection = await get_column_classifications_collection()
-        identifiers, measures = await fetch_identifiers_and_measures(validator_atom_id, file_key, measures_collection)
+        
+        # Get identifiers using the new approach (like scope_selector)
+        key = f"{client_name}/{app_name}/{project_name}/column_classifier_config"
+        cfg: dict[str, Any] | None = None
+        
+        # Try Redis first
+        try:
+            from .deps import redis_client
+            cached = redis_client.get(key)
+            if cached:
+                cfg = json.loads(cached)
+        except Exception as exc:
+            print(f"⚠️ Redis read error for {key}: {exc}")
+        
+        # Try MongoDB if Redis failed
+        if cfg is None:
+            try:
+                from app.features.column_classifier.database import get_classifier_config_from_mongo
+                cfg = get_classifier_config_from_mongo(client_name, app_name, project_name)
+                if cfg and redis_client:
+                    try:
+                        redis_client.setex(key, 3600, json.dumps(cfg, default=str))
+                    except Exception as exc:
+                        print(f"⚠️ Redis write error for {key}: {exc}")
+            except Exception as exc:
+                print(f"⚠️ Mongo classifier config lookup failed: {exc}")
+        
+        identifiers: list[str] = []
+        measures: list[str] = []
+        if cfg:
+            identifiers = cfg.get("identifiers", [])
+            measures = cfg.get("measures", [])
+        
+        # Filter out time-related identifiers
+        # time_keywords = {"date", "time", "month", "months", "week", "weeks", "year"}
+        # identifiers = [i for i in identifiers if i and i.lower() not in time_keywords]
+        
+        # For now, skip dimensions since they require validator_atom_id
+        # We can add a separate endpoint for dimensions if needed
+        dimensions = {}
+        
         numeric_measures = df.select_dtypes(include='number').columns.tolist()
         time_col_found = 'date' if 'date' in df.columns else None
         return {

@@ -154,19 +154,43 @@ async def get_object_prefix(
     client_name: str = "",
     app_name: str = "",
     project_name: str = "",
-) -> str:
-    """Return the MinIO prefix for the current client/app/project."""
+    include_env: bool = False,
+) -> str | tuple[str, dict[str, str], str]:
+    """Return the MinIO prefix for the current client/app/project.
+
+    When ``include_env`` is True a tuple of ``(prefix, env, source)`` is
+    returned where ``source`` describes where the environment variables were
+    loaded from.
+    """
     USER_ID = _parse_numeric_id(os.getenv("USER_ID"))
     PROJECT_ID = _parse_numeric_id(project_id or os.getenv("PROJECT_ID", "0"))
-    env = await get_env_vars(
-        client_id or os.getenv("CLIENT_ID", ""),
-        app_id or os.getenv("APP_ID", ""),
-        project_id or os.getenv("PROJECT_ID", ""),
+    client_id_env = client_id or os.getenv("CLIENT_ID", "")
+    app_id_env = app_id or os.getenv("APP_ID", "")
+    project_id_env = project_id or os.getenv("PROJECT_ID", "")
+
+    # Resolve environment variables using ``get_env_vars`` which consults the
+    # Redis cache keyed by ``<client>/<app>/<project>`` and falls back to
+    # Postgres when missing.  This ensures we always load the latest names for
+    # the currently selected namespace instead of defaulting to
+    # ``default_client/default_app/default_project``.
+    env: dict[str, str] = {}
+    env_source = "unknown"
+    fresh = await get_env_vars(
+        client_id_env,
+        app_id_env,
+        project_id_env,
         client_name=client_name or os.getenv("CLIENT_NAME", ""),
         app_name=app_name or os.getenv("APP_NAME", ""),
         project_name=project_name or os.getenv("PROJECT_NAME", ""),
+        use_cache=True,
+        return_source=True,
     )
-    print("🔧 fetched env", env)
+    if isinstance(fresh, tuple):
+        env, env_source = fresh
+    else:
+        env, env_source = fresh, "unknown"
+
+    print(f"🔧 fetched env {env} (source={env_source})")
     client = env.get("CLIENT_NAME", os.getenv("CLIENT_NAME", "default_client"))
     app = env.get("APP_NAME", os.getenv("APP_NAME", "default_app"))
     project = env.get("PROJECT_NAME", os.getenv("PROJECT_NAME", "default_project"))
@@ -189,7 +213,31 @@ async def get_object_prefix(
     print(
         f"📦 prefix {prefix} (CLIENT_ID={client_id or os.getenv('CLIENT_ID','')} APP_ID={app_id or os.getenv('APP_ID','')} PROJECT_ID={PROJECT_ID})"
     )
+    if include_env:
+        return prefix, env, env_source
     return prefix
+
+
+@router.get("/get_object_prefix")
+async def get_object_prefix_endpoint(
+    client_name: str = "",
+    app_name: str = "",
+    project_name: str = "",
+) -> dict:
+    """Expose ``get_object_prefix`` as an API endpoint.
+
+    The endpoint resolves the MinIO prefix for the provided client/app/project
+    combination. Environment variables are sourced from Redis when available
+    and otherwise retrieved from Postgres' ``registry_environment`` table.
+    """
+
+    prefix, env, env_source = await get_object_prefix(
+        client_name=client_name,
+        app_name=app_name,
+        project_name=project_name,
+        include_env=True,
+    )
+    return {"prefix": prefix, "environment": env, "source": env_source}
 
 # Initialize MinIO client
 minio_client = get_client()
@@ -2638,46 +2686,77 @@ async def save_dataframes(
 
 
 @router.get("/list_saved_dataframes")
-async def list_saved_dataframes() -> dict:
-    """List saved Arrow dataframes sorted by newest first.
+async def list_saved_dataframes(
+    client_name: str = "",
+    app_name: str = "",
+    project_name: str = "",
+) -> dict:
+    """List all objects stored under the client/app/project prefix.
 
-    The client, app and project names are loaded from environment
-    variables via :func:`get_object_prefix`.
+    Previously this endpoint returned only the latest ``.arrow`` file for each
+    dataset which meant any additional files or nested directories inside the
+    user's namespace were ignored by the UI. The Saved DataFrames panel now
+    expects a complete listing so it can render a tree view of folders and
+    files. To support this we simply return every object MinIO reports for the
+    resolved prefix.
     """
-    prefix = await get_object_prefix()
+
+    prefix, env, env_source = await get_object_prefix(
+        client_name=client_name,
+        app_name=app_name,
+        project_name=project_name,
+        include_env=True,
+    )
+
     try:
-        objects = minio_client.list_objects(MINIO_BUCKET, prefix=prefix, recursive=True)
-        latest: dict[str, tuple[datetime, str]] = {}
-        for obj in objects:
-            if not obj.object_name.endswith(".arrow"):
-                continue
-            try:
-                stat = minio_client.stat_object(MINIO_BUCKET, obj.object_name)
-                base = Path(obj.object_name).stem.split("_", 2)
-                key = base[2] if len(base) >= 3 else base[-1]
-                if key not in latest or stat.last_modified > latest[key][0]:
-                    latest[key] = (stat.last_modified, obj.object_name)
-            except S3Error as e:
-                if getattr(e, "code", "") in {"NoSuchKey", "NoSuchBucket"}:
-                    redis_client.delete(obj.object_name)
-                    continue
-                raise
-        entries = sorted(latest.values(), key=lambda x: x[0], reverse=True)
+        print(
+            f"🪣 listing from bucket '{MINIO_BUCKET}' prefix '{prefix}' (source={env_source})"
+        )
+        objects = list(
+            minio_client.list_objects(
+                MINIO_BUCKET, prefix=prefix, recursive=True
+            )
+        )
         files = [
             {
-                "object_name": name,
-                "arrow_name": Path(name).name,
-                "csv_name": Path(name).stem.split("_", 2)[-1],
+                "object_name": obj.object_name,
+                "arrow_name": Path(obj.object_name).name
+                if obj.object_name.endswith(".arrow")
+                else None,
+                "csv_name": Path(obj.object_name).name,
             }
-            for _, name in entries
+            for obj in sorted(objects, key=lambda o: o.object_name)
         ]
-        return {"files": files}
+        return {
+            "bucket": MINIO_BUCKET,
+            "prefix": prefix,
+            "files": files,
+            "environment": env,
+            "env_source": env_source,
+        }
     except S3Error as e:
         if getattr(e, "code", "") == "NoSuchBucket":
-            return {"files": []}
-        return {"files": [], "error": str(e)}
+            return {
+                "bucket": MINIO_BUCKET,
+                "prefix": prefix,
+                "files": [],
+                "environment": env,
+            }
+        return {
+            "bucket": MINIO_BUCKET,
+            "prefix": prefix,
+            "files": [],
+            "error": str(e),
+            "environment": env,
+        }
     except Exception as e:  # pragma: no cover - unexpected error
-        return {"files": [], "error": str(e)}
+        return {
+            "bucket": MINIO_BUCKET,
+            "prefix": prefix,
+            "files": [],
+            "error": str(e),
+            "environment": env,
+        }
 
 
 @router.get("/latest_ticket/{file_key}")

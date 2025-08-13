@@ -42,7 +42,7 @@ const AppIdentity: React.FC<AppIdentityProps> = ({ projectName, onGoBack, onRena
             if (envRes.ok) {
               const envData = await envRes.json();
               if (envData.environment) {
-                console.log('Environment after project rename', envData.environment);
+                console.log('Environment after project rename', envData.environment, 'source', envData.env_source);
                 localStorage.setItem('env', JSON.stringify(envData.environment));
               }
             }

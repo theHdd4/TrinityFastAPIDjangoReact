@@ -5,7 +5,7 @@ This guide walks through creating an additional AI agent and hooking it up acros
 ## 1. Create the agent service
 
 1. **Create a folder** `TrinityAI/Agent_<name>`.
-2. Inside it implement `main_app.py` that defines `app = FastAPI()` with the required endpoints. Look at `Agent_concat/main_app.py` for structure. The code usually reads environment variables like `MINIO_ENDPOINT` and connects to the Ollama server using `OLLAMA_IP`.
+2. Inside it implement `main_app.py` that defines `app = FastAPI()` with the required endpoints. Look at `Agent_concat/main_app.py` for structure. Place the language model prompt and parsing logic in `ai_logic.py` so it can be tweaked independently of the API layer.
 3. Add any extra files or utilities the agent needs.
 4. Update `TrinityAI/requirements.txt` if new dependencies are required so the Docker image installs them.
 

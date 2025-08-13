@@ -1,6 +1,8 @@
 # Agent_Merge
 
 LLM-powered assistant that prepares merge configurations for the Merge atom.
+The language model prompt and JSON extraction live in `ai_logic.py` so an AI
+expert can tweak behaviour without touching the FastAPI code.
 
 ## Endpoints
 

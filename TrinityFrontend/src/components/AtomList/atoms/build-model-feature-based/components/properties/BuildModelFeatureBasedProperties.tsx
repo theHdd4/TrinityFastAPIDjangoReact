@@ -14,6 +14,7 @@ interface StandaloneProps {
   onDataChange: (data: Partial<BuildModelFeatureBasedData>) => void;
   onSettingsChange: (settings: Partial<SettingsType>) => void;
   onDataUpload: (file: File, fileId: string) => void;
+  atomId?: string; // Optional atomId for Laboratory Mode
 }
 
 const InternalBuildModelFeatureBasedProperties: React.FC<StandaloneProps> = ({
@@ -55,27 +56,75 @@ interface StoreProps { atomId: string; }
 type Props = StoreProps | StandaloneProps;
 
 const BuildModelFeatureBasedProperties: React.FC<Props> = (props) => {
-  if ('atomId' in props) {
-    const { atomId } = props;
+  // Check if we have atomId (either from StoreProps or StandaloneProps)
+  const atomId = 'atomId' in props ? props.atomId : (props as StandaloneProps).atomId;
+  
+  if (atomId) {
     const atom = useLaboratoryStore(state => state.getAtom(atomId));
     const updateSettings = useLaboratoryStore(state => state.updateAtomSettings);
     const { data = {}, settings = {} } = (atom?.settings || {}) as any;
 
+    // Provide complete default data structure
+    const defaultData = {
+      uploadedFile: null,
+      selectedDataset: '',
+      selectedScope: '',
+      selectedCombinations: [],
+      selectedModels: [],
+      modelConfigs: [],
+      yVariable: '',
+      xVariables: [],
+      transformations: [],
+      availableFiles: [],
+      availableColumns: ['Feature 1', 'Feature 2', 'Feature 3', 'Feature 4', 'Feature 5', 'Feature 6', 'Feature 7', 'Feature 8'],
+      scopes: ['Scope 1', 'Scope 2', 'Scope 3', 'Scope 4', 'Scope 5'],
+      outputFileName: ''
+    };
+
+    const defaultSettings = {
+      dataType: '',
+      aggregationLevel: '',
+      dateFrom: '',
+      dateTo: ''
+    };
+
+    // Ensure complete data structure
+    const completeData = {
+      ...defaultData,
+      ...data
+    };
+
+    const completeSettings = {
+      ...defaultSettings,
+      ...settings
+    };
+
+    console.log('Properties - atomId:', atomId);
+    console.log('Properties - store data:', data);
+    console.log('Properties - complete data:', completeData);
+    console.log('Properties - store settings:', settings);
+
     return (
       <InternalBuildModelFeatureBasedProperties
-        data={data as any}
-        settings={settings as any}
-        onDataChange={d => updateSettings(atomId, { data: { ...data, ...d } })}
-        onSettingsChange={s => updateSettings(atomId, { settings: { ...settings, ...s } })}
+        data={completeData as any}
+        settings={completeSettings as any}
+        onDataChange={d => {
+          console.log('Properties - onDataChange called with:', d);
+          console.log('Properties - current store data:', data);
+          const updatedData = { ...completeData, ...d };
+          console.log('Properties - updated data:', updatedData);
+          updateSettings(atomId, { data: updatedData });
+        }}
+        onSettingsChange={s => updateSettings(atomId, { settings: { ...completeSettings, ...s } })}
         onDataUpload={(file, fileId) =>
           updateSettings(atomId, {
-            data: { ...data, uploadedFile: file, selectedDataset: fileId },
+            data: { ...completeData, uploadedFile: file, selectedDataset: fileId },
           })
         }
       />
     );
   }
-  // Stand-alone usage
+  // Stand-alone usage without atomId
   return <InternalBuildModelFeatureBasedProperties {...(props as StandaloneProps)} />;
 };
 

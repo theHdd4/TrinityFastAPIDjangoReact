@@ -1240,7 +1240,7 @@ async def create_multi_filtered_scope(
                 combination_name_parts = []
                 for col_name, value in combination_filter.items():
                     clean_value = str(value).replace(" ", "_").replace("/", "_").replace("\\", "_")
-                    combination_name_parts.append(f"{col_name}_{clean_value}")
+                    combination_name_parts.append(clean_value)
 
                 combination_filename = f"{set_name}_{'_'.join(combination_name_parts)}"
 

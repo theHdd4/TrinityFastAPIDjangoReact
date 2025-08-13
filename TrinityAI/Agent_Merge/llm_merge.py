@@ -1,6 +1,4 @@
-import requests
 import json
-import re
 from minio import Minio
 from minio.error import S3Error
 from datetime import datetime
@@ -9,7 +7,7 @@ import pandas as pd
 from io import BytesIO
 import logging
 from typing import Dict, List, Optional, Any
-import time
+from ai_logic import build_prompt, call_llm, extract_json
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -82,135 +80,12 @@ class JSONHistoryAgent:
             self.files_with_columns = {}
     
     def _extract_json(self, response: str) -> Optional[Dict]:
-        """Improved JSON extraction with multiple strategies"""
-        if not response:
-            logger.warning("Empty response from LLM")
-            return None
-        
-        # Strategy 1: Remove think tags and other common LLM artifacts
-        cleaned = re.sub(r'<think>.*?</think>', '', response, flags=re.DOTALL)
-        cleaned = re.sub(r'```json\s*', '', cleaned)
-        cleaned = re.sub(r'```\s*', '', cleaned)
-        
-        # Strategy 2: Find JSON blocks with multiple patterns
-        json_patterns = [
-            r'\{[^{}]*\{[^{}]*\}[^{}]*\}',  # Nested JSON
-            r'\{[^{}]+\}',  # Simple JSON
-            r'\{.*?\}(?=\s*$)',  # JSON at end
-            r'\{.*\}',  # Greedy JSON (last resort)
-        ]
-        
-        for pattern in json_patterns:
-            matches = re.findall(pattern, cleaned, re.DOTALL)
-            
-            for match in matches:
-                try:
-                    # Try to parse the JSON
-                    parsed = json.loads(match)
-                    
-                    # Validate that it has expected structure
-                    if isinstance(parsed, dict) and ('success' in parsed or 'suggestions' in parsed):
-                        logger.info("Successfully extracted JSON from response")
-                        return parsed
-                except json.JSONDecodeError:
-                    continue
-        
-        # Strategy 3: Try to find JSON anywhere in the response
-        try:
-            # Look for the start of JSON
-            start_idx = cleaned.find('{')
-            if start_idx != -1:
-                # Try to balance braces
-                brace_count = 0
-                end_idx = start_idx
-                
-                for i in range(start_idx, len(cleaned)):
-                    if cleaned[i] == '{':
-                        brace_count += 1
-                    elif cleaned[i] == '}':
-                        brace_count -= 1
-                        if brace_count == 0:
-                            end_idx = i + 1
-                            break
-                
-                if end_idx > start_idx:
-                    potential_json = cleaned[start_idx:end_idx]
-                    try:
-                        parsed = json.loads(potential_json)
-                        if isinstance(parsed, dict):
-                            logger.info("Extracted JSON using brace balancing")
-                            return parsed
-                    except json.JSONDecodeError:
-                        pass
-        except Exception as e:
-            logger.error(f"Error in JSON extraction strategy 3: {e}")
-        
-        # Strategy 4: Try to fix common JSON issues
-        try:
-            # Remove trailing commas
-            fixed = re.sub(r',\s*}', '}', cleaned)
-            fixed = re.sub(r',\s*]', ']', fixed)
-            
-            # Try to find JSON in fixed string
-            match = re.search(r'\{.*\}', fixed, re.DOTALL)
-            if match:
-                try:
-                    parsed = json.loads(match.group())
-                    if isinstance(parsed, dict):
-                        logger.info("Extracted JSON after fixing common issues")
-                        return parsed
-                except json.JSONDecodeError:
-                    pass
-        except Exception as e:
-            logger.error(f"Error in JSON extraction strategy 4: {e}")
-        
-        logger.warning(f"Failed to extract JSON from response: {response[:200]}...")
-        return None
+        """Delegate JSON extraction to the shared logic module."""
+        return extract_json(response)
     
     def _call_llm(self, prompt: str, retry_count: int = 3) -> str:
-        """Call LLM with retry logic and timeout handling"""
-        payload = {
-            "model": self.model_name,
-            "messages": [{"role": "user", "content": prompt}],
-            "stream": False,
-            "options": {
-                "temperature": 0.1,
-                "num_predict": 1500,
-                "top_p": 0.9,
-                "repeat_penalty": 1.1
-            }
-        }
-        
-        headers = {
-            "Authorization": f"Bearer {self.bearer_token}",
-            "Content-Type": "application/json"
-        }
-        
-        for attempt in range(retry_count):
-            try:
-                response = requests.post(
-                    self.api_url, 
-                    json=payload, 
-                    headers=headers, 
-                    timeout=120
-                )
-                response.raise_for_status()
-                
-                content = response.json().get('message', {}).get('content', '')
-                if content:
-                    return content
-                    
-            except requests.Timeout:
-                logger.warning(f"LLM request timeout (attempt {attempt + 1}/{retry_count})")
-                time.sleep(2 ** attempt)  # Exponential backoff
-            except requests.RequestException as e:
-                logger.error(f"LLM request failed (attempt {attempt + 1}/{retry_count}): {e}")
-                if attempt < retry_count - 1:
-                    time.sleep(2 ** attempt)
-                else:
-                    raise
-        
-        return ""
+        """Delegate LLM calling to the shared logic module."""
+        return call_llm(self.api_url, self.model_name, self.bearer_token, prompt)
     
     def _build_json_history(self, history: List[Dict]) -> str:
         """Build complete JSON history for LLM"""
@@ -251,55 +126,9 @@ class JSONHistoryAgent:
         
         # Build complete JSON history for LLM
         complete_json_history = self._build_json_history(history)
-        
-        # Create the merge_json template as a string to avoid f-string issues
-        merge_json_template = """{{
-  "bucket_name": "trinity",
-  "file1": ["exact_filename.csv"],
-  "file2": ["exact_filename.csv"],
-  "join_columns": ["column_name"],
-  "join_type": "inner"
-}}"""
-        
-        # Create improved prompt using string concatenation instead of f-string for the template
-        prompt = f"""You are a JSON-only merge assistant. You MUST respond with ONLY valid JSON, no other text.
 
-CURRENT USER INPUT: "{user_prompt}"
-
-AVAILABLE FILES WITH COLUMNS:
-{json.dumps(self.files_with_columns, indent=2)}
-
-{complete_json_history}
-
-CRITICAL RULES:
-1. Respond with ONLY JSON - no explanations, no text before or after
-2. Read the JSON HISTORY to understand context
-3. If user says "yes" or agrees → Use information from the LAST system response
-4. Build complete configuration from ALL available information
-5. Only single files we are able to take so if multiple files in json return success false and ask to select the files 
-
-REQUIRED RESPONSE FORMAT (choose one):
-
-For SUCCESS (when you have all required information):
-{{
-  "success": true,
-  "merge_json": {merge_json_template},
-  "source": "Brief explanation"
-}}
-
-For PARTIAL (when missing information):
-{{
-  "success": false,
-  "suggestions": [
-    "What you understand so far",
-    "What is still needed",
-    "Specific next step"
-  ],
-  "context_from_history": "Information from previous interactions",
-  "still_needed": "Specific missing information"
-}}
-
-RESPOND WITH ONLY THE JSON:"""
+        # Create prompt using shared AI logic
+        prompt = build_prompt(user_prompt, self.files_with_columns, complete_json_history)
 
         try:
             # Call LLM

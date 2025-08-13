@@ -8,6 +8,7 @@ from .arrow_dataset import (
     get_dataset_info,
 )
 from .project_state import upsert_project_state, fetch_project_state
+from .registry import fetch_allowed_apps, register_project_session
 
 __all__ = [
     "asyncpg", "POSTGRES_HOST", "POSTGRES_USER", "POSTGRES_PASSWORD", "POSTGRES_DB",
@@ -19,4 +20,6 @@ __all__ = [
     "get_dataset_info",
     "upsert_project_state",
     "fetch_project_state",
+    "fetch_allowed_apps",
+    "register_project_session",
 ]

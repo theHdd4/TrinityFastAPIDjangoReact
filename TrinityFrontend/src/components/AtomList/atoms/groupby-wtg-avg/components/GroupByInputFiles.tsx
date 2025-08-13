@@ -78,16 +78,21 @@ const GroupByInputFiles: React.FC<Props> = ({ atomId }) => {
     let fetchedMeasures: string[] = [];
     try {
       const atom = useLaboratoryStore.getState().getAtom(atomId);
-      const validator_atom_id = atom?.settings?.validator_atom_id || '';
       const file_key = val;
 
-      // Always request identifiers/measures so Redis / Mongo logic can populate them even
-      // if validator_atom_id is not yet known. Legacy fallback will use validator_atom_id
-      // but the new Redis-first branch does not depend on it.
+      // Extract client/app/project from file path like scope_selector does
+      const pathParts = val.split('/')
+      const clientName = pathParts[0] ?? ''
+      const appName = pathParts[1] ?? ''
+      const projectName = pathParts[2] ?? ''
+
+      // Always request identifiers/measures using client/app/project context
       const formData = new FormData();
       formData.append('bucket_name', 'trinity');
       formData.append('object_names', file_key);
-      formData.append('validator_atom_id', validator_atom_id);
+      formData.append('client_name', clientName);
+      formData.append('app_name', appName);
+      formData.append('project_name', projectName);
       formData.append('file_key', file_key);
       try {
         const resp = await fetch(`${GROUPBY_API}/init`, { method: 'POST', body: formData });
@@ -114,14 +119,15 @@ const GroupByInputFiles: React.FC<Props> = ({ atomId }) => {
     const finalIdentifiers = fetchedIdentifiers.length ? fetchedIdentifiers : identifiers;
     const finalMeasures = fetchedMeasures.length ? fetchedMeasures : measures;
 
-    // Set selectedMeasures to a single measure config object by default
+    // Add exactly one measure configuration by default
     let defaultSelectedMeasures = [];
     const allMeasures = finalMeasures.length > 0 ? finalMeasures : summary.filter(c => c.data_type && (c.data_type.toLowerCase().includes('int') || c.data_type.toLowerCase().includes('float') || c.data_type.toLowerCase().includes('number'))).map(c => c.column);
 
     if (allMeasures.length > 0) {
       // Use the first available measure and default aggregator
-      defaultSelectedMeasures = [{ field: allMeasures[0], aggregator: 'Sum' }];
+      defaultSelectedMeasures = [{ field: allMeasures[0], aggregator: 'Sum', weight_by: '', rename_to: '' }];
     }
+
     updateSettings(atomId, {
       dataSource: val,
       allColumns: summary,
