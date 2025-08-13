@@ -22,11 +22,18 @@ minio_client = Minio(
 
 
 def parse_minio_path(file_path: str) -> tuple[str, str]:
-    """Parse MinIO path into bucket and object path"""
-    parts = file_path.strip('/').split('/', 1)
-    if len(parts) < 2:
-        raise ValueError("Invalid MinIO path. Expected format: bucket/path/to/file")
-    return parts[0], parts[1]
+    """Parse MinIO path into bucket and object path
+    For correlation service, the bucket is always 'trinity' and 
+    the entire file_path is the object path within that bucket
+    """
+    # The bucket is always 'trinity' for correlation service
+    bucket_name = "trinity"
+    object_path = file_path.strip('/')
+    
+    if not object_path:
+        raise ValueError("Invalid MinIO path. Object path cannot be empty")
+    
+    return bucket_name, object_path
 
 
 async def check_bucket_and_file(file_path: str) -> dict:

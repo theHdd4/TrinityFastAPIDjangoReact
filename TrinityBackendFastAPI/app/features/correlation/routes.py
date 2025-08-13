@@ -212,6 +212,8 @@ async def filter_and_correlate(request: FilterAndCorrelateRequest):
     5. Saves both filtered and correlation results
     6. Returns comprehensive results with optional preview
     """
+    print(f"🚀 correlation filter-and-correlate started")
+    print(f"📥 request received: {request.model_dump_json()}")
     start_time = time.time()
     
     try:
@@ -223,6 +225,12 @@ async def filter_and_correlate(request: FilterAndCorrelateRequest):
         # Load data
         df = await load_csv_from_minio(request.file_path)
         original_rows = len(df)
+        
+        # Debug: Log dataframe info
+        print(f"🔍 correlation loaded dataframe: {request.file_path}")
+        print(f"📊 shape: {df.shape}")
+        print(f"📋 columns: {list(df.columns)}")
+        print(f"🔢 column dtypes: {df.dtypes.to_dict()}")
         
         # Build filter summary for response
         filters_applied = {
@@ -268,11 +276,15 @@ async def filter_and_correlate(request: FilterAndCorrelateRequest):
         # Check if we have appropriate columns for the correlation method
         if request.method in ["pearson", "spearman"]:
             numeric_cols = df.select_dtypes(include=['number']).columns.tolist()
+            print(f"🔢 numeric columns found: {numeric_cols}")
+            print(f"📊 numeric column count: {len(numeric_cols)}")
             if len(numeric_cols) < 2:
+                all_cols_info = [(col, str(dtype)) for col, dtype in zip(df.columns, df.dtypes)]
                 raise HTTPException(
                     400, 
                     f"Need at least 2 numeric columns for {request.method} correlation. "
-                    f"Found only {len(numeric_cols)} numeric columns."
+                    f"Found only {len(numeric_cols)} numeric columns: {numeric_cols}. "
+                    f"All columns: {all_cols_info}"
                 )
         elif request.method in ["phi_coefficient", "cramers_v"]:
             if not request.columns or len(request.columns) != 2:
@@ -344,9 +356,13 @@ async def filter_and_correlate(request: FilterAndCorrelateRequest):
             processing_time_ms=processing_time_ms
         )
         
-    except HTTPException:
+    except HTTPException as he:
+        print(f"❌ correlation HTTPException: {he.status_code} - {he.detail}")
         raise
     except Exception as e:
+        print(f"💥 correlation unexpected error: {type(e).__name__}: {str(e)}")
+        import traceback
+        print(f"🔍 correlation traceback: {traceback.format_exc()}")
         raise HTTPException(500, f"Correlation analysis failed: {str(e)}")
 
 # ── 7. Map dataframe to validator atom ID ──────────────────────────────────
