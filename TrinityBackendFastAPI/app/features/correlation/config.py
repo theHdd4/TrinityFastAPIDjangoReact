@@ -1,3 +1,4 @@
+import os
 from dotenv import load_dotenv
 load_dotenv(override=True)
 
@@ -8,10 +9,10 @@ class Settings(BaseSettings):
     MONGO_URI: str
     MONGO_DB: Optional[str] = None
     
-    # MinIO settings
-    minio_url: str = "localhost:9003"
-    minio_access_key: str = "minio"
-    minio_secret_key: str = "minio123"
+    # MinIO settings - use environment variables like feature_overview
+    minio_url: str = os.getenv("MINIO_ENDPOINT", "minio:9000")
+    minio_access_key: str = os.getenv("MINIO_ACCESS_KEY", "admin_dev")
+    minio_secret_key: str = os.getenv("MINIO_SECRET_KEY", "pass_dev")
     minio_secure: bool = False
 
     class Config:

@@ -2,6 +2,8 @@ import io
 import json
 import pandas as pd
 import numpy as np
+import pyarrow as pa
+from pyarrow import ipc
 from scipy.stats import pearsonr, spearmanr, chi2_contingency
 from minio import Minio
 from minio.error import S3Error
@@ -66,8 +68,8 @@ async def check_bucket_and_file(file_path: str) -> dict:
 
 async def load_csv_from_minio(file_path: str) -> pd.DataFrame:
     """
-    Load CSV from MinIO using full path
-    Example: "dataformodel/rpi.csv"
+    Load Arrow or CSV file from MinIO using full path
+    Example: "dataformodel/rpi.csv" or "default_client/default_app/default_project/file.arrow"
     """
     bucket_name, object_path = parse_minio_path(file_path)
     
@@ -76,22 +78,49 @@ async def load_csv_from_minio(file_path: str) -> pd.DataFrame:
         raise HTTPException(404, f"Bucket '{bucket_name}' not found")
     
     try:
-        # Get object from MinIO
-        response = minio_client.get_object(bucket_name, object_path)
-        
-        # Read the data into pandas DataFrame
-        csv_data = response.read()
-        response.close()
-        response.release_conn()
-        
-        # Convert bytes to DataFrame
-        df = pd.read_csv(io.BytesIO(csv_data))
-        return df
+        # Check if it's an Arrow file
+        if object_path.endswith('.arrow'):
+            # Use same pattern as feature-overview cached_dataframe (which works)
+            try:
+                from app.DataStorageRetrieval.arrow_client import download_dataframe
+                print(f"🛫 correlation download_dataframe for: {file_path}")
+                df = download_dataframe(file_path)
+                print(f"✅ correlation flight success for: {file_path} rows={len(df)}")
+                return df
+            except Exception as exc:
+                print(f"⚠️ correlation flight failed for {file_path}: {exc}")
+                # Direct MinIO fallback (same as cached_dataframe endpoint)
+                print(f"� correlation falling back to direct MinIO for: {file_path}")
+                response = minio_client.get_object(bucket_name, object_path)
+                arrow_data = response.read()
+                response.close()
+                response.release_conn()
+                
+                # Parse Arrow file to DataFrame using pyarrow
+                table = ipc.RecordBatchFileReader(pa.BufferReader(arrow_data)).read_all()
+                df = table.to_pandas()
+                print(f"✅ correlation MinIO fallback success for: {file_path} rows={len(df)}")
+                return df
+        else:
+            # For CSV files, use the existing CSV loading logic
+            response = minio_client.get_object(bucket_name, object_path)
+            
+            # Read the data into pandas DataFrame
+            csv_data = response.read()
+            response.close()
+            response.release_conn()
+            
+            # Convert bytes to DataFrame
+            df = pd.read_csv(io.BytesIO(csv_data))
+            return df
         
     except S3Error as e:
         if e.code == "NoSuchKey":
             raise HTTPException(404, f"File '{object_path}' not found in bucket '{bucket_name}'")
         raise HTTPException(500, f"MinIO error: {str(e)}")
+    except Exception as e:
+        # Handle Arrow parsing errors or other issues
+        raise HTTPException(400, f"Failed to load file '{file_path}': {str(e)}")
 
 
 def calculate_correlations(df: pd.DataFrame, req) -> Dict[str, Any]:
