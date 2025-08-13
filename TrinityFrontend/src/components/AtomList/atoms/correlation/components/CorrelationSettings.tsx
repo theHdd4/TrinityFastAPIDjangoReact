@@ -57,13 +57,18 @@ const transformCorrelationMatrix = (correlationDict: any, variables: string[]): 
       const rowData = correlationDict[rowVar];
       
       return validVariables.map(colVar => {
+        // ALWAYS ensure diagonal values are 1.0
+        if (rowVar === colVar) {
+          return 1.0;
+        }
+        
         const value = rowData[colVar];
-        // Validate the correlation value
+        // Validate the correlation value for off-diagonal elements
         if (typeof value === 'number' && !isNaN(value) && isFinite(value)) {
           return value;
         } else {
           console.warn(`Invalid correlation value for ${rowVar} vs ${colVar}:`, value);
-          return rowVar === colVar ? 1.0 : 0.0;
+          return 0.0; // Off-diagonal invalid values become 0.0
         }
       });
     });
