@@ -133,25 +133,56 @@ async def load_csv_from_minio(file_path: str) -> pd.DataFrame:
 def calculate_correlations(df: pd.DataFrame, req) -> Dict[str, Any]:
     """Calculate correlations based on the specified method"""
     
+    # Get all column info for debugging
+    all_columns = list(df.columns)
+    all_dtypes = df.dtypes.to_dict()
+    
+    print(f"🔍 All columns before filtering: {len(all_columns)}")
+    print(f"📊 Column types: {all_dtypes}")
+    
     if req.method == "pearson":
-        # Pearson correlation for numeric columns
+        # Pearson correlation for numeric columns only
         numeric_df = df.select_dtypes(include=[np.number])
+        numeric_columns = list(numeric_df.columns)
+        
+        print(f"🔢 Numeric columns after filtering: {len(numeric_columns)}")
+        print(f"📋 Numeric columns: {numeric_columns}")
+        
         if numeric_df.shape[1] < 2:
-            raise ValueError("Need at least 2 numeric columns for Pearson correlation")
+            non_numeric = [col for col in all_columns if col not in numeric_columns]
+            print(f"❌ Non-numeric columns filtered out: {non_numeric}")
+            raise ValueError(f"Need at least 2 numeric columns for Pearson correlation. Found {len(numeric_columns)} numeric columns: {numeric_columns}")
+        
         corr_matrix = numeric_df.corr(method='pearson')
         # Replace NaN with 0
         corr_matrix = corr_matrix.fillna(0)
-        return {"correlation_matrix": corr_matrix.to_dict(), "method": "pearson"}
+        
+        print(f"✅ Correlation matrix shape: {corr_matrix.shape}")
+        print(f"🎯 Correlation matrix columns: {list(corr_matrix.columns)}")
+        
+        return {"correlation_matrix": corr_matrix.to_dict(), "method": "pearson", "numeric_columns": numeric_columns}
     
     elif req.method == "spearman":
-        # Spearman correlation for numeric columns
+        # Spearman correlation for numeric columns only
         numeric_df = df.select_dtypes(include=[np.number])
+        numeric_columns = list(numeric_df.columns)
+        
+        print(f"🔢 Numeric columns after filtering: {len(numeric_columns)}")
+        print(f"📋 Numeric columns: {numeric_columns}")
+        
         if numeric_df.shape[1] < 2:
-            raise ValueError("Need at least 2 numeric columns for Spearman correlation")
+            non_numeric = [col for col in all_columns if col not in numeric_columns]
+            print(f"❌ Non-numeric columns filtered out: {non_numeric}")
+            raise ValueError(f"Need at least 2 numeric columns for Spearman correlation. Found {len(numeric_columns)} numeric columns: {numeric_columns}")
+        
         corr_matrix = numeric_df.corr(method='spearman')
         # Replace NaN with 0
         corr_matrix = corr_matrix.fillna(0)
-        return {"correlation_matrix": corr_matrix.to_dict(), "method": "spearman"}
+        
+        print(f"✅ Correlation matrix shape: {corr_matrix.shape}")
+        print(f"🎯 Correlation matrix columns: {list(corr_matrix.columns)}")
+        
+        return {"correlation_matrix": corr_matrix.to_dict(), "method": "spearman", "numeric_columns": numeric_columns}
     
     elif req.method == "phi_coefficient":
         # Phi coefficient for binary categorical variables

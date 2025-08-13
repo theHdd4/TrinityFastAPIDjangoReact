@@ -276,15 +276,20 @@ async def filter_and_correlate(request: FilterAndCorrelateRequest):
         # Check if we have appropriate columns for the correlation method
         if request.method in ["pearson", "spearman"]:
             numeric_cols = df.select_dtypes(include=['number']).columns.tolist()
+            non_numeric_cols = [col for col in df.columns if col not in numeric_cols]
+            
             print(f"🔢 numeric columns found: {numeric_cols}")
             print(f"📊 numeric column count: {len(numeric_cols)}")
+            print(f"❌ non-numeric columns filtered out: {non_numeric_cols}")
+            
             if len(numeric_cols) < 2:
                 all_cols_info = [(col, str(dtype)) for col, dtype in zip(df.columns, df.dtypes)]
                 raise HTTPException(
                     400, 
                     f"Need at least 2 numeric columns for {request.method} correlation. "
                     f"Found only {len(numeric_cols)} numeric columns: {numeric_cols}. "
-                    f"All columns: {all_cols_info}"
+                    f"Non-numeric columns (filtered out): {non_numeric_cols}. "
+                    f"All columns with types: {all_cols_info}"
                 )
         elif request.method in ["phi_coefficient", "cramers_v"]:
             if not request.columns or len(request.columns) != 2:
@@ -308,6 +313,11 @@ async def filter_and_correlate(request: FilterAndCorrelateRequest):
         print(f"🔍 correlation_results type: {type(correlation_results)}")
         print(f"🔍 correlation_results keys: {correlation_results.keys() if isinstance(correlation_results, dict) else 'not dict'}")
         correlation_matrix = correlation_results.get('correlation_matrix', []) if correlation_results else None
+        
+        # Get the actual numeric columns used in correlation
+        numeric_columns_used = correlation_results.get('numeric_columns', []) if correlation_results else []
+        print(f"🎯 Numeric columns actually used in correlation: {numeric_columns_used}")
+        
         # Print shape if possible
         if isinstance(correlation_matrix, np.ndarray):
             print(f"🔍 correlation_matrix shape: {correlation_matrix.shape}")
@@ -359,11 +369,11 @@ async def filter_and_correlate(request: FilterAndCorrelateRequest):
         except Exception as mongo_error:
             print(f"⚠️ correlation MongoDB save failed (continuing anyway): {mongo_error}")
         
-        # Prepare response
+        # Prepare response - use numeric columns instead of all columns
         return FilterAndCorrelateResponse(
             original_rows=original_rows,
             filtered_rows=filtered_rows,
-            columns_used=list(df.columns),
+            columns_used=numeric_columns_used,  # Only return numeric columns actually used
             filters_applied=filters_applied,
             filtered_file_path=filtered_file_path,
             correlation_method=request.method,

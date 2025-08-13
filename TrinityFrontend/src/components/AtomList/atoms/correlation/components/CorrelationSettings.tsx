@@ -21,23 +21,42 @@ interface CorrelationSettingsProps {
   onDataChange: (newData: Partial<CorrelationSettings>) => void;
 }
 
-// Transform dictionary correlation matrix to 2D array
-const transformCorrelationMatrix = (correlationDict: any, variables: string[]): number[][] => {
+// Transform dictionary correlation matrix to 2D array, filtering out non-numeric columns
+const transformCorrelationMatrix = (correlationDict: any, variables: string[]): { matrix: number[][], filteredVariables: string[] } => {
   if (!correlationDict || typeof correlationDict !== 'object') {
     console.warn('Invalid correlation matrix data:', correlationDict);
-    return variables.map((_, i) => variables.map((_, j) => i === j ? 1.0 : 0.0));
+    return { 
+      matrix: variables.map((_, i) => variables.map((_, j) => i === j ? 1.0 : 0.0)),
+      filteredVariables: variables
+    };
   }
 
-  console.log(correlationDict);
+  console.log('Original correlation dict:', correlationDict);
 
-  var toRet = variables.map(rowVar => {
+  // Filter out variables that don't exist in the correlation matrix (non-numeric columns)
+  const validVariables = variables.filter(variable => {
+    const hasValidData = correlationDict[variable] && typeof correlationDict[variable] === 'object';
+    if (!hasValidData) {
+      console.log(`Filtering out non-numeric variable: ${variable}`);
+    }
+    return hasValidData;
+  });
+
+  console.log(`Filtered variables from ${variables.length} to ${validVariables.length}:`, validVariables);
+
+  if (validVariables.length === 0) {
+    console.warn('No valid numeric variables found in correlation matrix');
+    return { 
+      matrix: [[1.0]], 
+      filteredVariables: variables.length > 0 ? [variables[0]] : ['Unknown']
+    };
+  }
+
+  try {
+    const matrix = validVariables.map(rowVar => {
       const rowData = correlationDict[rowVar];
-      if (!rowData || typeof rowData !== 'object') {
-        console.warn(`Missing or invalid row data for variable: ${rowVar}`);
-        return variables.map((_, j) => variables.indexOf(rowVar) === j ? 1.0 : 0.0);
-      }
       
-      return variables.map(colVar => {
+      return validVariables.map(colVar => {
         const value = rowData[colVar];
         // Validate the correlation value
         if (typeof value === 'number' && !isNaN(value) && isFinite(value)) {
@@ -48,13 +67,15 @@ const transformCorrelationMatrix = (correlationDict: any, variables: string[]): 
         }
       });
     });
-  
-    console.log(toRet);
-  try {
-    return toRet;
+    
+    console.log('Transformed correlation matrix:', matrix);
+    return { matrix, filteredVariables: validVariables };
   } catch (error) {
     console.error('Error transforming correlation matrix:', error);
-    return variables.map((_, i) => variables.map((_, j) => i === j ? 1.0 : 0.0));
+    return { 
+      matrix: validVariables.map((_, i) => validVariables.map((_, j) => i === j ? 1.0 : 0.0)),
+      filteredVariables: validVariables
+    };
   }
 };
 
@@ -246,8 +267,8 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
       // Get variables (column names) from the result
       const resultVariables = result.columns_used || [];
       
-      // Transform backend correlation matrix dictionary to 2D array
-      const transformedMatrix = transformCorrelationMatrix(
+      // Transform backend correlation matrix dictionary to 2D array and filter out non-numeric columns
+      const { matrix: transformedMatrix, filteredVariables } = transformCorrelationMatrix(
         result.correlation_results.correlation_matrix, 
         resultVariables
       );
@@ -257,7 +278,7 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
       
       // Transform backend result to match existing interface
       const transformedResult = {
-        variables: resultVariables,
+        variables: filteredVariables, // Use filtered variables instead of all variables
         correlationMatrix: transformedMatrix,
         timeSeriesData: validatedTimeSeriesData
       };
@@ -269,12 +290,10 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
         fileData: {
           fileName: filePath,
           rawData: result.preview_data || [],
-          numericColumns: (result.columns_used || []).filter(col => 
-            availableColumns?.measures && availableColumns.measures.includes(col)
-          ),
+          numericColumns: filteredVariables, // Use filtered variables for numeric columns
           dateColumns: [],
           categoricalColumns: (result.columns_used || []).filter(col => 
-            availableColumns?.identifiers && availableColumns.identifiers.includes(col)
+            !filteredVariables.includes(col) // Non-numeric columns are the ones filtered out
           ),
           isProcessed: true
         }
