@@ -21,6 +21,90 @@ interface CorrelationSettingsProps {
   onDataChange: (newData: Partial<CorrelationSettings>) => void;
 }
 
+// Transform dictionary correlation matrix to 2D array
+const transformCorrelationMatrix = (correlationDict: any, variables: string[]): number[][] => {
+  if (!correlationDict || typeof correlationDict !== 'object') {
+    console.warn('Invalid correlation matrix data:', correlationDict);
+    return variables.map((_, i) => variables.map((_, j) => i === j ? 1.0 : 0.0));
+  }
+
+  console.log(correlationDict);
+
+  var toRet = variables.map(rowVar => {
+      const rowData = correlationDict[rowVar];
+      if (!rowData || typeof rowData !== 'object') {
+        console.warn(`Missing or invalid row data for variable: ${rowVar}`);
+        return variables.map((_, j) => variables.indexOf(rowVar) === j ? 1.0 : 0.0);
+      }
+      
+      return variables.map(colVar => {
+        const value = rowData[colVar];
+        // Validate the correlation value
+        if (typeof value === 'number' && !isNaN(value) && isFinite(value)) {
+          return value;
+        } else {
+          console.warn(`Invalid correlation value for ${rowVar} vs ${colVar}:`, value);
+          return rowVar === colVar ? 1.0 : 0.0;
+        }
+      });
+    });
+  
+    console.log(toRet);
+  try {
+    return toRet;
+  } catch (error) {
+    console.error('Error transforming correlation matrix:', error);
+    return variables.map((_, i) => variables.map((_, j) => i === j ? 1.0 : 0.0));
+  }
+};
+
+// Validate and transform time series data
+const validateTimeSeriesData = (previewData: any[]): Array<{date: Date; var1Value: number; var2Value: number}> => {
+  if (!Array.isArray(previewData) || previewData.length === 0) {
+    return [];
+  }
+
+  try {
+    return previewData.map((item, index) => {
+      // Try to extract date from various possible fields
+      let date = new Date();
+      if (item.Date) {
+        date = new Date(item.Date);
+      } else if (item.date) {
+        date = new Date(item.date);
+      } else if (item.Year && item.Month) {
+        date = new Date(item.Year, item.Month - 1, 1);
+      } else {
+        // Fallback: use index-based date
+        date = new Date(2022, index % 12, 1);
+      }
+
+      // Validate date
+      if (isNaN(date.getTime())) {
+        date = new Date(2022, index % 12, 1);
+      }
+
+      // Extract numeric values (use first two numeric columns found)
+      const numericKeys = Object.keys(item).filter(key => 
+        typeof item[key] === 'number' && !isNaN(item[key]) && isFinite(item[key])
+      );
+
+      const var1Value = numericKeys[0] ? item[numericKeys[0]] : Math.random() * 100;
+      const var2Value = numericKeys[1] ? item[numericKeys[1]] : Math.random() * 100;
+
+      
+      return {
+        date,
+        var1Value: typeof var1Value === 'number' && !isNaN(var1Value) ? var1Value : 0,
+        var2Value: typeof var2Value === 'number' && !isNaN(var2Value) ? var2Value : 0
+      };
+    });
+  } catch (error) {
+    console.error('Error validating time series data:', error);
+    return [];
+  }
+};
+
 interface Frame { 
   object_name: string; 
   csv_name: string; 
@@ -159,11 +243,23 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
 
       const result = await correlationAPI.filterAndCorrelate(request);
       
+      // Get variables (column names) from the result
+      const resultVariables = result.columns_used || [];
+      
+      // Transform backend correlation matrix dictionary to 2D array
+      const transformedMatrix = transformCorrelationMatrix(
+        result.correlation_results.correlation_matrix, 
+        resultVariables
+      );
+      
+      // Validate and transform time series data
+      const validatedTimeSeriesData = validateTimeSeriesData(result.preview_data || []);
+      
       // Transform backend result to match existing interface
       const transformedResult = {
-        variables: result.columns_used,
-        correlationMatrix: result.correlation_results.correlation_matrix || [],
-        timeSeriesData: result.preview_data || []
+        variables: resultVariables,
+        correlationMatrix: transformedMatrix,
+        timeSeriesData: validatedTimeSeriesData
       };
 
       onDataChange({
@@ -287,36 +383,6 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
       <div className="p-4 space-y-6 bg-background text-foreground">
         {/* File Upload Section */}
         <div className="space-y-3">
-          <h3 className="text-sm font-medium text-muted-foreground">Data Input</h3>
-          
-          {/* Error Alert */}
-          {processingError && (
-            <Alert variant="destructive">
-              <AlertCircle className="h-4 w-4" />
-              <AlertDescription>{processingError}</AlertDescription>
-            </Alert>
-          )}
-
-          {/* Processing Status */}
-          {isProcessing && (
-            <Alert>
-              <Loader2 className="h-4 w-4 animate-spin" />
-              <AlertDescription>
-                Running correlation analysis automatically...
-              </AlertDescription>
-            </Alert>
-          )}
-
-          {/* Success Status */}
-          {data?.correlationMatrix && !isProcessing && (
-            <Alert>
-              <CheckCircle className="h-4 w-4 text-green-600" />
-              <AlertDescription>
-                Correlation analysis complete! Matrix rendered above.
-              </AlertDescription>
-            </Alert>
-          )}
-
           {/* Saved Dataframes Selection */}
           <div className="space-y-2">
             <Label className="text-sm font-medium">Select Saved Dataframe</Label>

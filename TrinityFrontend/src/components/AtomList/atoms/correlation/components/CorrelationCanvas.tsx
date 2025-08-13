@@ -87,11 +87,22 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
         const originalYIndex = allVariables.indexOf(yVar);
         const originalXIndex = allVariables.indexOf(xVar);
         
-        const correlation = data.correlationMatrix && 
-                           data.correlationMatrix[originalYIndex] && 
-                           data.correlationMatrix[originalYIndex][originalXIndex] !== undefined 
-          ? data.correlationMatrix[originalYIndex][originalXIndex] 
-          : (originalYIndex === originalXIndex ? 1.0 : 0.0);
+        // Validate correlation matrix access with proper 2D array handling
+        let correlation = 0.0;
+        if (data.correlationMatrix && 
+            Array.isArray(data.correlationMatrix) && 
+            originalYIndex >= 0 && originalYIndex < data.correlationMatrix.length &&
+            Array.isArray(data.correlationMatrix[originalYIndex]) &&
+            originalXIndex >= 0 && originalXIndex < data.correlationMatrix[originalYIndex].length) {
+          const value = data.correlationMatrix[originalYIndex][originalXIndex];
+          if (typeof value === 'number' && !isNaN(value) && isFinite(value)) {
+            correlation = value;
+          } else {
+            correlation = originalYIndex === originalXIndex ? 1.0 : 0.0;
+          }
+        } else {
+          correlation = originalYIndex === originalXIndex ? 1.0 : 0.0;
+        }
         
         g.append("rect")
           .attr("x", xScale(xVar))
@@ -190,84 +201,137 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
     const g = svg.append("g")
       .attr("transform", `translate(${margin.left},${margin.top})`);
 
-    // Create scales
+    // Validate and clean time series data
+    const validData = data.timeSeriesData.filter(d => 
+      d.date instanceof Date && !isNaN(d.date.getTime()) &&
+      typeof d.var1Value === 'number' && !isNaN(d.var1Value) && isFinite(d.var1Value) &&
+      typeof d.var2Value === 'number' && !isNaN(d.var2Value) && isFinite(d.var2Value)
+    );
+
+    if (validData.length === 0) {
+      // Display message when no valid data
+      g.append("text")
+        .attr("x", width / 2)
+        .attr("y", height / 2)
+        .attr("text-anchor", "middle")
+        .style("font-size", "14px")
+        .style("fill", "#666")
+        .text("No valid time series data available");
+      return;
+    }
+
+    // Create scales with validated domains
+    const dateExtent = d3.extent(validData, d => d.date) as [Date, Date];
+    const var1Extent = d3.extent(validData, d => d.var1Value) as [number, number];
+    const var2Extent = d3.extent(validData, d => d.var2Value) as [number, number];
+
+    // Ensure valid scale domains
     const xScale = d3.scaleTime()
-      .domain(d3.extent(data.timeSeriesData, d => d.date) as [Date, Date])
+      .domain(dateExtent[0] && dateExtent[1] ? dateExtent : [new Date(2022, 0, 1), new Date(2023, 0, 1)])
       .range([0, width]);
 
     const yScale1 = d3.scaleLinear()
-      .domain(d3.extent(data.timeSeriesData, d => d.var1Value) as [number, number])
+      .domain(var1Extent[0] !== undefined && var1Extent[1] !== undefined && var1Extent[0] !== var1Extent[1] 
+        ? var1Extent 
+        : [0, Math.max(...validData.map(d => d.var1Value)) || 100])
       .range([height, 0]);
 
     const yScale2 = d3.scaleLinear()
-      .domain(d3.extent(data.timeSeriesData, d => d.var2Value) as [number, number])
+      .domain(var2Extent[0] !== undefined && var2Extent[1] !== undefined && var2Extent[0] !== var2Extent[1] 
+        ? var2Extent 
+        : [0, Math.max(...validData.map(d => d.var2Value)) || 100])
       .range([height, 0]);
 
-    // Create line generators
-    const line1 = d3.line<typeof data.timeSeriesData[0]>()
-      .x(d => xScale(d.date))
-      .y(d => yScale1(d.var1Value))
+    // Create line generators with validation
+    const line1 = d3.line<typeof validData[0]>()
+      .x(d => {
+        const x = xScale(d.date);
+        return isNaN(x) ? 0 : x;
+      })
+      .y(d => {
+        const y = yScale1(d.var1Value);
+        return isNaN(y) ? height : y;
+      })
       .curve(d3.curveMonotoneX);
 
-    const line2 = d3.line<typeof data.timeSeriesData[0]>()
-      .x(d => xScale(d.date))
-      .y(d => yScale2(d.var2Value))
+    const line2 = d3.line<typeof validData[0]>()
+      .x(d => {
+        const x = xScale(d.date);
+        return isNaN(x) ? 0 : x;
+      })
+      .y(d => {
+        const y = yScale2(d.var2Value);
+        return isNaN(y) ? height : y;
+      })
       .curve(d3.curveMonotoneX);
 
-    // Add lines
-    g.append("path")
-      .datum(data.timeSeriesData)
-      .attr("fill", "none")
-      .attr("stroke", "#ef4444")
-      .attr("stroke-width", 2)
-      .attr("d", line1);
+    // Add lines with error handling
+    try {
+      g.append("path")
+        .datum(validData)
+        .attr("fill", "none")
+        .attr("stroke", "#ef4444")
+        .attr("stroke-width", 2)
+        .attr("d", line1);
 
-    g.append("path")
-      .datum(data.timeSeriesData)
-      .attr("fill", "none")
-      .attr("stroke", "#3b82f6")
-      .attr("stroke-width", 2)
-      .attr("d", line2);
+      g.append("path")
+        .datum(validData)
+        .attr("fill", "none")
+        .attr("stroke", "#3b82f6")
+        .attr("stroke-width", 2)
+        .attr("d", line2);
 
-    // Add axes
-    g.append("g")
-      .attr("transform", `translate(0,${height})`)
-      .call(d3.axisBottom(xScale).tickFormat(d3.timeFormat("%b")));
+      // Add axes
+      g.append("g")
+        .attr("transform", `translate(0,${height})`)
+        .call(d3.axisBottom(xScale).tickFormat(d3.timeFormat("%b")));
 
-    g.append("g")
-      .call(d3.axisLeft(yScale1));
+      g.append("g")
+        .call(d3.axisLeft(yScale1));
 
-    // Add legend
-    const legend = g.append("g")
-      .attr("transform", `translate(${width + 20}, 20)`);
+      // Add legend
+      const legend = g.append("g")
+        .attr("transform", `translate(${width + 20}, 20)`);
 
-    legend.append("line")
-      .attr("x1", 0).attr("x2", 20)
-      .attr("y1", 0).attr("y2", 0)
-      .attr("stroke", "#ef4444")
-      .attr("stroke-width", 2);
+      legend.append("line")
+        .attr("x1", 0).attr("x2", 20)
+        .attr("y1", 0).attr("y2", 0)
+        .attr("stroke", "#ef4444")
+        .attr("stroke-width", 2);
 
-    legend.append("text")
-      .attr("x", 25)
-      .attr("y", 0)
-      .attr("dy", "0.35em")
-      .style("font-size", "12px")
-      .style("fill", "#666")
-      .text(data.selectedVar1);
+      legend.append("text")
+        .attr("x", 25)
+        .attr("y", 0)
+        .attr("dy", "0.35em")
+        .style("font-size", "12px")
+        .style("fill", "#666")
+        .text(data.selectedVar1);
 
-    legend.append("line")
-      .attr("x1", 0).attr("x2", 20)
-      .attr("y1", 20).attr("y2", 20)
-      .attr("stroke", "#3b82f6")
-      .attr("stroke-width", 2);
+      legend.append("line")
+        .attr("x1", 0).attr("x2", 20)
+        .attr("y1", 20).attr("y2", 20)
+        .attr("stroke", "#3b82f6")
+        .attr("stroke-width", 2);
 
-    legend.append("text")
-      .attr("x", 25)
-      .attr("y", 20)
-      .attr("dy", "0.35em")
-      .style("font-size", "12px")
-      .style("fill", "#666")
-      .text(data.selectedVar2);
+      legend.append("text")
+        .attr("x", 25)
+        .attr("y", 20)
+        .attr("dy", "0.35em")
+        .style("font-size", "12px")
+        .style("fill", "#666")
+        .text(data.selectedVar2);
+
+    } catch (error) {
+      console.error('Error rendering time series chart:', error);
+      // Display error message
+      g.append("text")
+        .attr("x", width / 2)
+        .attr("y", height / 2)
+        .attr("text-anchor", "middle")
+        .style("font-size", "14px")
+        .style("fill", "#ef4444")
+        .text("Error rendering time series chart");
+    }
 
   }, [data.timeSeriesData, data.selectedVar1, data.selectedVar2]);
 

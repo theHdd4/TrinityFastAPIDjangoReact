@@ -304,7 +304,25 @@ async def filter_and_correlate(request: FilterAndCorrelateRequest):
         
         # Run correlation analysis
         correlation_results = calculate_correlations(df, request)
-        
+
+        print(f"🔍 correlation_results type: {type(correlation_results)}")
+        print(f"🔍 correlation_results keys: {correlation_results.keys() if isinstance(correlation_results, dict) else 'not dict'}")
+        correlation_matrix = correlation_results.get('correlation_matrix', []) if correlation_results else None
+        # Print shape if possible
+        if isinstance(correlation_matrix, np.ndarray):
+            print(f"🔍 correlation_matrix shape: {correlation_matrix.shape}")
+            sample = correlation_matrix[:2]
+        elif isinstance(correlation_matrix, list):
+            print(f"🔍 correlation_matrix shape: ({len(correlation_matrix)},)" if correlation_matrix else "(0,)")
+            sample = correlation_matrix[:2]
+        elif isinstance(correlation_matrix, dict):
+            print(f"🔍 correlation_matrix shape: dict with {len(correlation_matrix)} keys")
+            sample = list(correlation_matrix.items())[:2]
+        else:
+            print(f"🔍 correlation_matrix shape: unknown")
+            sample = str(correlation_matrix)[:100]
+        print(f"🔍 correlation_matrix sample: {sample if correlation_matrix is not None else 'no matrix'}")
+                
         # Save correlation results
         correlation_file_path = save_correlation_results_to_minio(df, correlation_results, request.file_path)
         

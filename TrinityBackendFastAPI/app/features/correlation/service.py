@@ -139,6 +139,8 @@ def calculate_correlations(df: pd.DataFrame, req) -> Dict[str, Any]:
         if numeric_df.shape[1] < 2:
             raise ValueError("Need at least 2 numeric columns for Pearson correlation")
         corr_matrix = numeric_df.corr(method='pearson')
+        # Replace NaN with 0
+        corr_matrix = corr_matrix.fillna(0)
         return {"correlation_matrix": corr_matrix.to_dict(), "method": "pearson"}
     
     elif req.method == "spearman":
@@ -147,6 +149,8 @@ def calculate_correlations(df: pd.DataFrame, req) -> Dict[str, Any]:
         if numeric_df.shape[1] < 2:
             raise ValueError("Need at least 2 numeric columns for Spearman correlation")
         corr_matrix = numeric_df.corr(method='spearman')
+        # Replace NaN with 0
+        corr_matrix = corr_matrix.fillna(0)
         return {"correlation_matrix": corr_matrix.to_dict(), "method": "spearman"}
     
     elif req.method == "phi_coefficient":
