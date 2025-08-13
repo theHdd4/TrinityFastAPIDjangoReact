@@ -610,7 +610,7 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
             {['Yearly', 'Quarterly', 'Monthly', 'Weekly'].map((period) => (
               <Button
                 key={period}
-                variant={(data.settings?.aggregationLevel || 'Monthly') === period ? "default" : "outline"}
+                variant={(data.settings?.aggregationLevel || 'Yearly') === period ? "default" : "outline"}
                 size="sm"
                 className="text-xs h-6 px-2"
                 onClick={() => handleSettingsChange('aggregationLevel', period)}

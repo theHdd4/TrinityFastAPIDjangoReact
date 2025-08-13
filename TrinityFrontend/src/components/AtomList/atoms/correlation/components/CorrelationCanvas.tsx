@@ -373,55 +373,70 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
             <p className="text-muted-foreground text-sm">
               {data.isUsingFileData && data.fileData 
                 ? `Analyzing ${data.fileData.fileName} (${data.fileData.rawData?.length || 0} rows, ${data.fileData.numericColumns?.length || 0} numeric columns)`
-                : 'Discover relationships between your variables'
+                : 'Upload a dataset to discover relationships between variables'
               }
             </p>
           </div>
           <Badge variant="outline" className="flex items-center gap-2">
-            <div className={`w-2 h-2 rounded-full ${data.isUsingFileData ? 'bg-blue-500' : 'bg-green-500'} animate-pulse`}></div>
-            {data.isUsingFileData ? 'File Data' : 'Mock Data'}
+            <div className={`w-2 h-2 rounded-full ${data.isUsingFileData ? 'bg-blue-500' : 'bg-gray-400'}`}></div>
+            {data.isUsingFileData ? 'File Data' : 'No Data'}
           </Badge>
         </div>
 
-        {/* Show All Columns Toggle */}
-        <div className="flex items-center space-x-2 mb-4">
-          <span className="text-xs text-gray-500">Show all columns</span>
-          <Switch
-            checked={data.showAllColumns || false}
-            onCheckedChange={(checked) => onDataChange({ showAllColumns: checked })}
-            className="data-[state=checked]:bg-[#458EE2]"
-          />
-        </div>
+        {/* Show default message when no data is loaded */}
+        {!data.isUsingFileData || !data.fileData ? (
+          <div className="flex flex-col items-center justify-center py-12 space-y-4 bg-muted/20 rounded-lg border-2 border-dashed border-muted-foreground/25">
+            <div className="p-4 bg-muted/50 rounded-full">
+              <BarChart3 className="w-8 h-8 text-muted-foreground" />
+            </div>
+            <div className="text-center space-y-2">
+              <h3 className="text-lg font-semibold text-foreground">No Dataset Loaded</h3>
+              <p className="text-muted-foreground max-w-md">
+                Upload a CSV file through the Settings tab to start analyzing correlations between your variables.
+              </p>
+            </div>
+          </div>
+        ) : (
+          <>
+            {/* Show All Columns Toggle */}
+            <div className="flex items-center space-x-2 mb-4">
+              <span className="text-xs text-gray-500">Show all columns</span>
+              <Switch
+                checked={data.showAllColumns || false}
+                onCheckedChange={(checked) => onDataChange({ showAllColumns: checked })}
+                className="data-[state=checked]:bg-[#458EE2]"
+              />
+            </div>
 
-        {/* Filter Dimensions */}
-        <Card className="p-4">
-          <h3 className="text-sm font-semibold text-foreground mb-3 flex items-center gap-2">
-            <Target className="w-4 h-4 text-primary" />
-            Filter Dimensions
-          </h3>
-          <div className="grid grid-cols-5 gap-3">
-            {Object.entries(data.identifiers || {}).map(([key, value]) => {
-              const labels: Record<string, string> = {
-                identifier3: 'Market',
-                identifier4: 'Product', 
-                identifier6: 'Region',
-                identifier7: 'Channel',
-                identifier15: 'Period'
-              };
-              const label = labels[key] || key;
-              return (
-                <div key={key} className="flex flex-col gap-1">
-                  <label className="text-xs font-medium text-muted-foreground">{label}</label>
-                  <Select
-                    value={value || 'All'}
-                    onValueChange={(newValue) => {
-                      onDataChange({
-                        identifiers: {
-                          ...(data.identifiers || {}),
-                          [key]: newValue
-                        }
-                      });
-                    }}
+            {/* Filter Dimensions */}
+            <Card className="p-4">
+              <h3 className="text-sm font-semibold text-foreground mb-3 flex items-center gap-2">
+                <Target className="w-4 h-4 text-primary" />
+                Filter Dimensions
+              </h3>
+              <div className="grid grid-cols-5 gap-3">
+                {Object.entries(data.identifiers || {}).map(([key, value]) => {
+                  const labels: Record<string, string> = {
+                    identifier3: 'Market',
+                    identifier4: 'Product', 
+                    identifier6: 'Region',
+                    identifier7: 'Channel',
+                    identifier15: 'Period'
+                  };
+                  const label = labels[key] || key;
+                  return (
+                    <div key={key} className="flex flex-col gap-1">
+                      <label className="text-xs font-medium text-muted-foreground">{label}</label>
+                      <Select
+                        value={value || 'All'}
+                        onValueChange={(newValue) => {
+                          onDataChange({
+                            identifiers: {
+                              ...(data.identifiers || {}),
+                              [key]: newValue
+                            }
+                          });
+                        }}
                   >
                     <SelectTrigger className="h-8 text-xs">
                       <SelectValue />
@@ -437,7 +452,6 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
             })}
           </div>
         </Card>
-      </div>
 
       {/* Correlation Heatmap - Full Width */}
       <div className="mb-6">
@@ -534,6 +548,9 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
             </div>
           </Card>
         </div>
+      </div>
+          </>
+        )}
       </div>
     </div>
   );
