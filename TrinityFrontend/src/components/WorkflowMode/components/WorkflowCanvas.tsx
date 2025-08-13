@@ -22,6 +22,7 @@ import { REGISTRY_API } from '@/lib/api';
 interface WorkflowCanvasProps {
   onMoleculeSelect: (moleculeId: string) => void;
   onCanvasMoleculesUpdate?: (molecules: any[]) => void;
+  canEdit: boolean;
 }
 
 const nodeTypes = { molecule: MoleculeNode };
@@ -30,7 +31,8 @@ const STORAGE_KEY = 'workflow-canvas-molecules';
 
 const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
   onMoleculeSelect,
-  onCanvasMoleculesUpdate
+  onCanvasMoleculesUpdate,
+  canEdit
 }) => {
   const [nodes, setNodes] = useState<Node<MoleculeNodeData>[]>([]);
   const [edges, setEdges] = useState<Edge[]>([]);
@@ -223,13 +225,16 @@ const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
         <ReactFlow
           nodes={nodes}
           edges={edges}
-          onNodesChange={onNodesChange}
-          onEdgesChange={onEdgesChange}
-          onConnect={onConnect}
+          onNodesChange={canEdit ? onNodesChange : undefined}
+          onEdgesChange={canEdit ? onEdgesChange : undefined}
+          onConnect={canEdit ? onConnect : undefined}
           nodeTypes={nodeTypes}
           onInit={setReactFlowInstance}
-          onDrop={onDrop}
-          onDragOver={onDragOver}
+          onDrop={canEdit ? onDrop : undefined}
+          onDragOver={canEdit ? onDragOver : undefined}
+          nodesDraggable={canEdit}
+          nodesConnectable={canEdit}
+          elementsSelectable={canEdit}
           fitView
           proOptions={{ hideAttribution: true }}
         >

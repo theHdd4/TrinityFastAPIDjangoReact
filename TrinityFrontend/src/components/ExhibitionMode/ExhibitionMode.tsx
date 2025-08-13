@@ -62,7 +62,6 @@ const ExhibitionMode = () => {
                   canEdit ? '' : 'cursor-not-allowed'
                 }`}
               >
-                <div className={canEdit ? '' : 'pointer-events-none'}>
                 <h3 className="text-xl font-semibold text-gray-900 mb-4">
                   {card.moleculeTitle ? (
                     card.atoms.length > 0
@@ -88,7 +87,6 @@ const ExhibitionMode = () => {
                     ))}
                   </div>
                 )}
-                </div>
               </div>
             ))}
           </div>

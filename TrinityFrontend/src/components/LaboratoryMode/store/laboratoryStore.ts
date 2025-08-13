@@ -199,6 +199,87 @@ export const DEFAULT_DATAFRAME_OPERATIONS_SETTINGS: DataFrameOperationsSettings 
   data: undefined,
 };
 
+export interface ChartData {
+  columns: string[];
+  rows: Record<string, any>[];
+  numeric_columns?: string[];
+  categorical_columns?: string[];
+  unique_values?: Record<string, string[]>;
+  file_id?: string;
+  row_count?: number;
+  allColumns?: string[];
+  numericColumns?: string[];
+  categoricalColumns?: string[];
+  uniqueValuesByColumn?: Record<string, string[]>;
+}
+
+export interface ChartTraceConfig {
+  yAxis: string;
+  name?: string;
+  filters: Record<string, string[]>;
+  color?: string;
+  aggregation?: 'sum' | 'mean' | 'count' | 'min' | 'max';
+}
+
+export interface ChartMakerConfig {
+  id: string;
+  title: string;
+  type: 'line' | 'bar' | 'area' | 'pie' | 'scatter';
+  xAxis: string;
+  yAxis: string;
+  filters: Record<string, string[]>;
+  chartConfig?: any;
+  filteredData?: Record<string, any>[];
+  chartRendered?: boolean;
+  chartLoading?: boolean;
+  lastUpdateTime?: number;
+  isAdvancedMode?: boolean;
+  traces?: ChartTraceConfig[];
+}
+
+export interface ChartMakerSettings {
+  dataSource?: string;
+  fileId?: string;
+  uploadedData: ChartData | null;
+  numberOfCharts: number;
+  charts: ChartMakerConfig[];
+  loading: {
+    uploading: boolean;
+    fetchingColumns: boolean;
+    fetchingUniqueValues: boolean;
+    filtering: boolean;
+  };
+  error?: string;
+}
+
+export const DEFAULT_CHART_MAKER_SETTINGS: ChartMakerSettings = {
+  dataSource: '',
+  fileId: '',
+  uploadedData: null,
+  numberOfCharts: 1,
+  charts: [
+    {
+      id: '1',
+      title: 'Chart 1',
+      type: 'line',
+      xAxis: '',
+      yAxis: '',
+      filters: {},
+      chartRendered: false,
+      chartLoading: false,
+      isAdvancedMode: false,
+      traces: [],
+    },
+  ],
+  loading: {
+    uploading: false,
+    fetchingColumns: false,
+    fetchingUniqueValues: false,
+    filtering: false,
+  },
+  error: undefined,
+};
+
 export interface DroppedAtom {
   id: string;
   atomId: string;

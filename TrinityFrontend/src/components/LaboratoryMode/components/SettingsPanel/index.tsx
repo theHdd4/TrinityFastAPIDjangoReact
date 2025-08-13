@@ -16,6 +16,8 @@ import {
   DEFAULT_FEATURE_OVERVIEW_SETTINGS,
   DataFrameOperationsSettings,
   DEFAULT_DATAFRAME_OPERATIONS_SETTINGS,
+  ChartMakerSettings,
+  DEFAULT_CHART_MAKER_SETTINGS,
 } from '../../store/laboratoryStore';
 import DataUploadValidateProperties from '@/components/AtomList/atoms/data-upload-validate/components/properties/DataUploadValidateProperties';
 import FeatureOverviewProperties from '@/components/AtomList/atoms/feature-overview/components/properties/FeatureOverviewProperties';
@@ -27,6 +29,7 @@ import BuildModelFeatureBasedPropertiesPanel from '@/components/AtomList/atoms/b
 import MergeProperties from '@/components/AtomList/atoms/merge/components/properties/MergeProperties';
 import ColumnClassifierProperties from '@/components/AtomList/atoms/column-classifier/components/properties/ColumnClassifierProperties';
 import DataFrameOperationsProperties from '@/components/AtomList/atoms/dataframe-operations/components/properties/DataFrameOperationsProperties';
+import ChartMakerProperties from '@/components/AtomList/atoms/chart-maker/components/properties/ChartMakerProperties';
 import AtomSettingsTabs from "./AtomSettingsTabs";
 
 interface SettingsPanelProps {
@@ -49,7 +52,12 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
     selectedAtomId ? state.getAtom(selectedAtomId) : undefined
   );
   const updateSettings = useLaboratoryStore(state => state.updateAtomSettings);
-  const settings: TextBoxSettings | DataUploadSettings | FeatureOverviewSettings | DataFrameOperationsSettings =
+  const settings:
+    | TextBoxSettings
+    | DataUploadSettings
+    | FeatureOverviewSettings
+    | DataFrameOperationsSettings
+    | ChartMakerSettings =
     atom?.settings ||
     (atom?.atomId === 'data-upload-validate'
       ? { ...DEFAULT_DATAUPLOAD_SETTINGS }
@@ -57,6 +65,8 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
       ? { ...DEFAULT_FEATURE_OVERVIEW_SETTINGS }
       : atom?.atomId === 'dataframe-operations'
       ? { ...DEFAULT_DATAFRAME_OPERATIONS_SETTINGS }
+      : atom?.atomId === 'chart-maker'
+      ? { ...DEFAULT_CHART_MAKER_SETTINGS }
       : { ...DEFAULT_TEXTBOX_SETTINGS });
 
   useEffect(() => {
@@ -104,6 +114,8 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
             <DataUploadValidateProperties atomId={selectedAtomId} />
           ) : selectedAtomId && atom?.atomId === 'feature-overview' ? (
             <FeatureOverviewProperties atomId={selectedAtomId} />
+          ) : selectedAtomId && atom?.atomId === 'chart-maker' ? (
+            <ChartMakerProperties atomId={selectedAtomId} />
           ) : selectedAtomId && atom?.atomId === 'build-model-feature-based' ? (
             <BuildModelFeatureBasedPropertiesPanel atomId={selectedAtomId} />
           ) : selectedAtomId && atom?.atomId === 'concat' ? (

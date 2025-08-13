@@ -603,6 +603,7 @@ async def save_config(req: SaveConfigRequest):
         app_name=req.app_name,
         project_name=req.project_name,
     )
+    env = env or {}
     print(f"🔧 save_config env {env}")
     data = {
         "project_id": req.project_id,
@@ -615,9 +616,23 @@ async def save_config(req: SaveConfigRequest):
         "env": env,
     }
     redis_client.setex(key, 3600, json.dumps(data, default=str))
+
+    # Keep the cached environment in sync so downstream features like
+    # Feature Overview pick up the latest dimension mapping after a
+    # configuration change.
+    env_key = f"env:{req.client_name}:{req.app_name}:{req.project_name}"
+    env["identifiers"] = req.identifiers
+    env["measures"] = req.measures
+    env["dimensions"] = req.dimensions
+    redis_client.setex(env_key, 3600, json.dumps(env, default=str))
+
     if req.project_id:
         map_key = f"project:{req.project_id}:dimensions"
         redis_client.setex(map_key, 3600, json.dumps(req.dimensions, default=str))
+        # Persist the project-level mapping so cache refreshes pick up the
+        # updated assignments.
+        save_project_dimension_mapping(req.project_id, req.dimensions)
+
     mongo_result = save_classifier_config_to_mongo(data)
     postgres_result = await save_classifier_config_to_postgres(data)
     print(f"📦 mongo save result {mongo_result}")

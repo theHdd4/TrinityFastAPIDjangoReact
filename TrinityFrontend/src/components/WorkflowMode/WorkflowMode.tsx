@@ -243,19 +243,16 @@ const WorkflowMode = () => {
       <div className="flex-1 flex">
         {/* Workflow Canvas */}
         <div className={`flex-1 p-8 ${canEdit ? '' : 'cursor-not-allowed'}`}>
-          <div className={canEdit ? '' : 'pointer-events-none'}>
-            <WorkflowCanvas
-              onMoleculeSelect={handleMoleculeSelect}
-              onCanvasMoleculesUpdate={handleCanvasMoleculesUpdate}
-            />
-          </div>
+          <WorkflowCanvas
+            onMoleculeSelect={handleMoleculeSelect}
+            onCanvasMoleculesUpdate={handleCanvasMoleculesUpdate}
+            canEdit={canEdit}
+          />
         </div>
 
         {/* Molecule List */}
         <div className={`w-80 bg-white border-l border-gray-200 ${canEdit ? '' : 'cursor-not-allowed'}`}>
-          <div className={canEdit ? '' : 'pointer-events-none'}>
-            <MoleculeList />
-          </div>
+          <MoleculeList canEdit={canEdit} />
         </div>
       </div>
     </div>
