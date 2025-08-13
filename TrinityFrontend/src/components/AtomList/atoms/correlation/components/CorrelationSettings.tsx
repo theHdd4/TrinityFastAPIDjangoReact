@@ -81,6 +81,9 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
   };
 
   const handleFileSelection = async (objectName: string) => {
+    setProcessingError(null);
+    setIsProcessing(true);
+
     onDataChange({
       selectedFile: objectName,
       fileData: null,
@@ -95,7 +98,10 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
         onDataChange({
           validatorAtomId: validatorInfo.validatorId
         });
-        loadColumns(validatorInfo.validatorId);
+        await loadColumns(validatorInfo.validatorId);
+        
+        // Auto-run correlation analysis after validation completes
+        await runCorrelationAnalysis(objectName);
       }
     } catch (error) {
       console.warn('Could not get validator ID, using direct dataframe loading');
@@ -112,24 +118,21 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
             isProcessed: true
           }
         });
+        
+        // Auto-run correlation analysis after dataframe loading
+        await runCorrelationAnalysis(objectName);
       } catch (loadError) {
         setProcessingError('Failed to load dataframe for correlation analysis');
       }
+    } finally {
+      setIsProcessing(false);
     }
   };
 
-  const handleRunCorrelation = async () => {
-    if (!data?.selectedFile) {
-      setProcessingError('Please select a file first');
-      return;
-    }
-
-    setIsProcessing(true);
-    setProcessingError(null);
-
+  const runCorrelationAnalysis = async (filePath: string) => {
     try {
       const request: FilterAndCorrelateRequest = {
-        file_path: data.selectedFile,
+        file_path: filePath,
         method: (data.settings?.correlationMethod || 'pearson').toLowerCase() as any,
         include_preview: true,
         preview_limit: 10,
@@ -168,14 +171,14 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
         timeSeriesData: transformedResult.timeSeriesData,
         variables: transformedResult.variables,
         fileData: {
-          fileName: data.selectedFile,
+          fileName: filePath,
           rawData: result.preview_data || [],
           numericColumns: (result.columns_used || []).filter(col => 
-            availableColumns.measures.includes(col)
+            availableColumns?.measures && availableColumns.measures.includes(col)
           ),
           dateColumns: [],
           categoricalColumns: (result.columns_used || []).filter(col => 
-            availableColumns.identifiers.includes(col)
+            availableColumns?.identifiers && availableColumns.identifiers.includes(col)
           ),
           isProcessed: true
         }
@@ -183,8 +186,6 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
 
     } catch (error) {
       setProcessingError(handleAPIError(error));
-    } finally {
-      setIsProcessing(false);
     }
   };
 
@@ -254,16 +255,19 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
     }
   };
 
-  const handleApplySettings = () => {
-    if (data.isUsingFileData && data.fileData?.isProcessed) {
+  const handleApplySettings = async () => {
+    if (data.selectedFile) {
       try {
-        // Run correlation analysis with current settings
-        handleRunCorrelation();
-        
+        setIsProcessing(true);
         setProcessingError(null);
+        
+        // Re-run correlation analysis with current settings
+        await runCorrelationAnalysis(data.selectedFile);
       } catch (error) {
         console.error('Error applying settings:', error);
         setProcessingError('Failed to apply settings');
+      } finally {
+        setIsProcessing(false);
       }
     }
   };
@@ -293,6 +297,26 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
             </Alert>
           )}
 
+          {/* Processing Status */}
+          {isProcessing && (
+            <Alert>
+              <Loader2 className="h-4 w-4 animate-spin" />
+              <AlertDescription>
+                Running correlation analysis automatically...
+              </AlertDescription>
+            </Alert>
+          )}
+
+          {/* Success Status */}
+          {data?.correlationMatrix && !isProcessing && (
+            <Alert>
+              <CheckCircle className="h-4 w-4 text-green-600" />
+              <AlertDescription>
+                Correlation analysis complete! Matrix rendered above.
+              </AlertDescription>
+            </Alert>
+          )}
+
           {/* Saved Dataframes Selection */}
           <div className="space-y-2">
             <Label className="text-sm font-medium">Select Saved Dataframe</Label>
@@ -309,24 +333,6 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
               </SelectContent>
             </Select>
           </div>
-
-          {/* Run Correlation Button */}
-          {data?.selectedFile && (
-            <Button 
-              onClick={handleRunCorrelation} 
-              disabled={isProcessing}
-              className="w-full"
-            >
-              {isProcessing ? (
-                <>
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                  Running Correlation Analysis...
-                </>
-              ) : (
-                'Run Correlation Analysis'
-              )}
-            </Button>
-          )}
           
           <div className="space-y-3">
             {/* Upload Area */}
