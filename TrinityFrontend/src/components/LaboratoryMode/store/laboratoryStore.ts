@@ -208,7 +208,7 @@ export const DEFAULT_CORRELATION_SETTINGS: CorrelationSettings = {
     dateFrom: '01 JUL 2020',
     dateTo: '30 MAR 2025',
     aggregationLevel: 'Monthly',
-    correlationMethod: 'Pearson',
+    correlationMethod: 'pearson',
     selectData: 'Single Selection',
     selectFilter: 'Multi Selection',
     uploadedFile: 'sales_data.csv'

@@ -130,7 +130,7 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
     try {
       const request: FilterAndCorrelateRequest = {
         file_path: data.selectedFile,
-        method: (data.settings?.correlationMethod || 'Pearson') as any,
+        method: (data.settings?.correlationMethod || 'pearson').toLowerCase() as any,
         include_preview: true,
         preview_limit: 10,
         save_filtered: true
@@ -566,16 +566,17 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
       <div className="space-y-3">
         <h3 className="text-sm font-medium text-muted-foreground">Correlation Method</h3>
         <Select 
-          value={data.settings?.correlationMethod || 'Pearson'} 
+          value={data.settings?.correlationMethod || 'pearson'} 
           onValueChange={handleCorrelationMethodChange}
         >
           <SelectTrigger className="w-full bg-background border-border">
             <SelectValue />
           </SelectTrigger>
           <SelectContent className="bg-background border-border z-50">
-            <SelectItem value="Pearson">Pearson</SelectItem>
-            <SelectItem value="Spearman">Spearman</SelectItem>
-            <SelectItem value="Kendall">Kendall</SelectItem>
+            <SelectItem value="pearson">Pearson</SelectItem>
+            <SelectItem value="spearman">Spearman</SelectItem>
+            <SelectItem value="phi_coefficient">Phi Coefficient</SelectItem>
+            <SelectItem value="cramers_v">Cramer's V</SelectItem>
           </SelectContent>
         </Select>
         {data.isUsingFileData && (

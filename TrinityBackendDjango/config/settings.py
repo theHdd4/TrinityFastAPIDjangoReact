@@ -36,7 +36,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # ------------------------------------------------------------------
 # Security
 # ------------------------------------------------------------------
-HOST_IP = os.getenv("HOST_IP", "192.168.1.98")
+HOST_IP = os.getenv("HOST_IP", "10.2.2.37")
 FRONTEND_PORT = os.getenv("FRONTEND_PORT", "8080")
 FRONTEND_URL = os.getenv("FRONTEND_URL", f"http://{HOST_IP}:{FRONTEND_PORT}")
 SECRET_KEY = os.getenv("SECRET_KEY", "change-me-in-production")
