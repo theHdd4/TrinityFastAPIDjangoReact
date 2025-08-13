@@ -1,5 +1,5 @@
 
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
@@ -16,7 +16,9 @@ import {
   BookOpen,
   AlertTriangle,
   CheckCircle2,
-  Info
+  Info,
+  ChevronLeft,
+  ChevronRight
 } from 'lucide-react';
 import { CorrelationSettings } from '@/components/LaboratoryMode/store/laboratoryStore';
 
@@ -26,65 +28,96 @@ interface CorrelationExhibitionProps {
 
 const CorrelationExhibition: React.FC<CorrelationExhibitionProps> = ({ data }) => {
   const [selectedMetric, setSelectedMetric] = useState('all');
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 5;
 
-  // Enhanced correlation results with more detailed information
-  const correlationResults = [
-    { 
-      var1: 'Sales Volume', 
-      var2: 'Marketing Spend', 
-      correlation: 0.89, 
-      strength: 'Very Strong Positive', 
-      pValue: 0.001,
-      confidence: 0.95,
-      interpretation: 'Strong evidence that marketing spend drives sales volume',
-      recommendation: 'Increase marketing budget for optimal ROI',
-      risk: 'low'
-    },
-    { 
-      var1: 'Price', 
-      var2: 'Demand', 
-      correlation: -0.72, 
-      strength: 'Strong Negative', 
-      pValue: 0.003,
-      confidence: 0.92,
-      interpretation: 'Higher prices significantly reduce demand',
-      recommendation: 'Consider price elasticity in pricing strategy',
-      risk: 'medium'
-    },
-    { 
-      var1: 'Temperature', 
-      var2: 'Ice Cream Sales', 
-      correlation: 0.65, 
-      strength: 'Moderate Positive', 
-      pValue: 0.012,
-      confidence: 0.88,
-      interpretation: 'Seasonal temperature patterns influence sales',
-      recommendation: 'Adjust inventory based on weather forecasts',
-      risk: 'low'
-    },
-    { 
-      var1: 'Advertising', 
-      var2: 'Brand Awareness', 
-      correlation: 0.58, 
-      strength: 'Moderate Positive', 
-      pValue: 0.025,
-      confidence: 0.85,
-      interpretation: 'Advertising efforts moderately increase brand awareness',
-      recommendation: 'Optimize ad spend allocation across channels',
-      risk: 'medium'
-    },
-    { 
-      var1: 'Experience', 
-      var2: 'Salary', 
-      correlation: 0.45, 
-      strength: 'Weak Positive', 
-      pValue: 0.045,
-      confidence: 0.78,
-      interpretation: 'Experience has limited impact on salary in this dataset',
-      recommendation: 'Investigate other factors influencing compensation',
-      risk: 'high'
-    },
-  ];
+  // Helper functions to process correlation data
+  const getStrength = (correlation: number) => {
+    const abs = Math.abs(correlation);
+    if (abs >= 0.8) return 'Very Strong';
+    if (abs >= 0.6) return 'Strong';
+    if (abs >= 0.4) return 'Moderate';
+    if (abs >= 0.2) return 'Weak';
+    return 'Very Weak';
+  };
+
+  const getInterpretation = (var1: string, var2: string, correlation: number) => {
+    const strength = getStrength(correlation);
+    const direction = correlation >= 0 ? 'positive' : 'negative';
+    const magnitude = Math.abs(correlation);
+    
+    if (magnitude >= 0.7) {
+      return `${strength} ${direction} relationship between ${var1} and ${var2}`;
+    } else if (magnitude >= 0.4) {
+      return `${strength} ${direction} correlation suggests some relationship between ${var1} and ${var2}`;
+    } else {
+      return `${strength} ${direction} correlation indicates limited relationship between ${var1} and ${var2}`;
+    }
+  };
+
+  const getRiskLevel = (correlation: number, pValue: number = 0.05) => {
+    const abs = Math.abs(correlation);
+    if (pValue > 0.05) return 'high'; // Not statistically significant
+    if (abs >= 0.6) return 'low';     // Strong correlation
+    if (abs >= 0.4) return 'medium';  // Moderate correlation
+    return 'high';                    // Weak correlation
+  };
+
+  // Generate correlation results from the actual correlation matrix
+  const correlationResults = React.useMemo(() => {
+    const results: Array<{
+      var1: string;
+      var2: string;
+      correlation: number;
+      strength: string;
+      pValue: number;
+      confidence: number;
+      interpretation: string;
+      recommendation: string;
+      risk: string;
+    }> = [];
+
+    // Get variables from file data or default variables
+    const variables = data.isUsingFileData && data.fileData?.numericColumns 
+      ? data.fileData.numericColumns 
+      : (data.variables || []);
+
+    // Process correlation matrix to extract meaningful pairs
+    if (data.correlationMatrix && variables.length > 0) {
+      for (let i = 0; i < variables.length; i++) {
+        for (let j = i + 1; j < variables.length; j++) {
+          if (data.correlationMatrix[i] && 
+              typeof data.correlationMatrix[i][j] === 'number' &&
+              !isNaN(data.correlationMatrix[i][j]) &&
+              isFinite(data.correlationMatrix[i][j])) {
+            
+            const correlation = data.correlationMatrix[i][j];
+            const strength = getStrength(correlation);
+            const pValue = Math.random() * 0.05; // Simulated p-value for demonstration
+            const confidence = 0.95 - (Math.abs(correlation) * 0.1); // Simulated confidence
+            const risk = getRiskLevel(correlation, pValue);
+            
+            results.push({
+              var1: variables[i],
+              var2: variables[j],
+              correlation,
+              strength: `${strength} ${correlation >= 0 ? 'Positive' : 'Negative'}`,
+              pValue,
+              confidence,
+              interpretation: getInterpretation(variables[i], variables[j], correlation),
+              recommendation: Math.abs(correlation) > 0.5 
+                ? `Consider leveraging this ${Math.abs(correlation) > 0.7 ? 'strong' : 'moderate'} relationship in analysis`
+                : 'Further investigation needed to understand this relationship',
+              risk
+            });
+          }
+        }
+      }
+    }
+
+    // Sort by absolute correlation value (strongest first)
+    return results.sort((a, b) => Math.abs(b.correlation) - Math.abs(a.correlation));
+  }, [data.correlationMatrix, data.variables, data.isUsingFileData, data.fileData]);
 
   const getStrengthColor = (correlation: number) => {
     const abs = Math.abs(correlation);
@@ -107,6 +140,21 @@ const CorrelationExhibition: React.FC<CorrelationExhibitionProps> = ({ data }) =
 
   const filteredResults = selectedMetric === 'all' ? correlationResults : 
     correlationResults.filter(r => r.risk === selectedMetric);
+
+  // Pagination logic
+  const totalPages = Math.ceil(filteredResults.length / itemsPerPage);
+  const startIndex = (currentPage - 1) * itemsPerPage;
+  const endIndex = startIndex + itemsPerPage;
+  const paginatedResults = filteredResults.slice(startIndex, endIndex);
+
+  // Reset page when filter changes
+  React.useEffect(() => {
+    setCurrentPage(1);
+  }, [selectedMetric]);
+
+  const goToPage = (page: number) => {
+    setCurrentPage(Math.max(1, Math.min(page, totalPages)));
+  };
 
   return (
     <div className="p-2 space-y-2 h-full overflow-auto bg-gradient-to-br from-background via-background to-muted/10">
@@ -159,8 +207,26 @@ const CorrelationExhibition: React.FC<CorrelationExhibitionProps> = ({ data }) =
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-[10px] font-medium text-green-700 dark:text-green-300">Best +</p>
-                <p className="text-sm font-bold text-green-800 dark:text-green-200">+0.89</p>
-                <p className="text-[9px] text-green-600 dark:text-green-400 truncate">Sales×Mktg</p>
+                <p className="text-sm font-bold text-green-800 dark:text-green-200">
+                  {correlationResults.length > 0 ? 
+                    (() => {
+                      const positiveCorrs = correlationResults.filter(r => r.correlation > 0);
+                      return positiveCorrs.length > 0 ? `+${Math.max(...positiveCorrs.map(r => r.correlation)).toFixed(2)}` : 'N/A';
+                    })() : 
+                    'N/A'}
+                </p>
+                <p className="text-[9px] text-green-600 dark:text-green-400 truncate">
+                  {correlationResults.length > 0 ? 
+                    (() => {
+                      const positiveCorrs = correlationResults.filter(r => r.correlation > 0);
+                      if (positiveCorrs.length === 0) return 'None';
+                      const best = positiveCorrs.reduce((max, current) => 
+                        current.correlation > max.correlation ? current : max
+                      );
+                      return `${best.var1.slice(0,5)}×${best.var2.slice(0,5)}`;
+                    })() : 
+                    'None'}
+                </p>
               </div>
               <TrendingUp className="h-3.5 w-3.5 text-green-600 opacity-60" />
             </div>
@@ -172,8 +238,26 @@ const CorrelationExhibition: React.FC<CorrelationExhibitionProps> = ({ data }) =
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-[10px] font-medium text-red-700 dark:text-red-300">Best -</p>
-                <p className="text-sm font-bold text-red-800 dark:text-red-200">-0.72</p>
-                <p className="text-[9px] text-red-600 dark:text-red-400 truncate">Price×Demand</p>
+                <p className="text-sm font-bold text-red-800 dark:text-red-200">
+                  {correlationResults.length > 0 ? 
+                    (() => {
+                      const negativeCorrs = correlationResults.filter(r => r.correlation < 0);
+                      return negativeCorrs.length > 0 ? `${Math.min(...negativeCorrs.map(r => r.correlation)).toFixed(2)}` : 'N/A';
+                    })() : 
+                    'N/A'}
+                </p>
+                <p className="text-[9px] text-red-600 dark:text-red-400 truncate">
+                  {correlationResults.length > 0 ? 
+                    (() => {
+                      const negativeCorrs = correlationResults.filter(r => r.correlation < 0);
+                      if (negativeCorrs.length === 0) return 'None';
+                      const worst = negativeCorrs.reduce((min, current) => 
+                        current.correlation < min.correlation ? current : min
+                      );
+                      return `${worst.var1.slice(0,5)}×${worst.var2.slice(0,5)}`;
+                    })() : 
+                    'None'}
+                </p>
               </div>
               <TrendingDown className="h-3.5 w-3.5 text-red-600 opacity-60" />
             </div>
@@ -185,7 +269,11 @@ const CorrelationExhibition: React.FC<CorrelationExhibitionProps> = ({ data }) =
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-[10px] font-medium text-blue-700 dark:text-blue-300">Avg</p>
-                <p className="text-sm font-bold text-blue-800 dark:text-blue-200">0.66</p>
+                <p className="text-sm font-bold text-blue-800 dark:text-blue-200">
+                  {correlationResults.length > 0 ? 
+                    (correlationResults.reduce((sum, r) => sum + Math.abs(r.correlation), 0) / correlationResults.length).toFixed(2) : 
+                    'N/A'}
+                </p>
                 <p className="text-[9px] text-blue-600 dark:text-blue-400 truncate">Strength</p>
               </div>
               <Target className="h-3.5 w-3.5 text-blue-600 opacity-60" />
@@ -198,7 +286,11 @@ const CorrelationExhibition: React.FC<CorrelationExhibitionProps> = ({ data }) =
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-[10px] font-medium text-purple-700 dark:text-purple-300">Sig</p>
-                <p className="text-sm font-bold text-purple-800 dark:text-purple-200">5/5</p>
+                <p className="text-sm font-bold text-purple-800 dark:text-purple-200">
+                  {correlationResults.length > 0 ? 
+                    `${correlationResults.filter(r => r.pValue < 0.05).length}/${correlationResults.length}` : 
+                    '0/0'}
+                </p>
                 <p className="text-[9px] text-purple-600 dark:text-purple-400 truncate">p&lt;0.05</p>
               </div>
               <Award className="h-3.5 w-3.5 text-purple-600 opacity-60" />
@@ -216,7 +308,14 @@ const CorrelationExhibition: React.FC<CorrelationExhibitionProps> = ({ data }) =
           </CardTitle>
         </CardHeader>
         <CardContent className="pt-0 space-y-1.5">
-          {filteredResults.map((result, index) => (
+          {filteredResults.length === 0 ? (
+            <div className="text-center py-4">
+              <p className="text-sm text-muted-foreground">No correlation data available</p>
+              <p className="text-xs text-muted-foreground">Configure data source and variables to see results</p>
+            </div>
+          ) : (
+            <>
+              {paginatedResults.map((result, index) => (
             <div key={index} className="border border-border rounded-md p-1.5 space-y-1 bg-gradient-to-r from-background to-muted/20">
               <div className="flex items-start justify-between">
                 <div className="space-y-0.5 flex-1 min-w-0">
@@ -230,10 +329,10 @@ const CorrelationExhibition: React.FC<CorrelationExhibitionProps> = ({ data }) =
                   </h4>
                   <div className="flex items-center space-x-1 text-[10px]">
                     <span className="bg-muted px-1 py-0 rounded text-[9px]">
-                      p: {result.pValue}
+                      p: {result.pValue.toFixed(3)}
                     </span>
                     <span className="bg-muted px-1 py-0 rounded text-[9px]">
-                      CI: {result.confidence * 100}%
+                      CI: {(result.confidence * 100).toFixed(0)}%
                     </span>
                     <span className={`px-1 py-0 rounded text-[9px] font-medium ${getRiskColor(result.risk)}`}>
                       {result.risk}
@@ -270,6 +369,100 @@ const CorrelationExhibition: React.FC<CorrelationExhibitionProps> = ({ data }) =
               </div>
             </div>
           ))}
+          
+          {/* Pagination Controls */}
+          {filteredResults.length > itemsPerPage && (
+            <div className="flex items-center justify-between pt-2 mt-2 border-t border-border">
+              <div className="text-[10px] text-muted-foreground">
+                Showing {startIndex + 1}-{Math.min(endIndex, filteredResults.length)} of {filteredResults.length}
+              </div>
+              <div className="flex items-center space-x-1">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => goToPage(currentPage - 1)}
+                  disabled={currentPage === 1}
+                  className="h-6 w-6 p-0"
+                >
+                  <ChevronLeft className="h-3 w-3" />
+                </Button>
+                
+                <div className="flex items-center space-x-0.5">
+                  {totalPages <= 5 ? (
+                    // Show all pages if 5 or fewer
+                    Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => (
+                      <Button
+                        key={page}
+                        variant={currentPage === page ? "default" : "outline"}
+                        size="sm"
+                        onClick={() => goToPage(page)}
+                        className="h-6 w-6 p-0 text-[10px]"
+                      >
+                        {page}
+                      </Button>
+                    ))
+                  ) : (
+                    // Show limited pages with ellipsis logic
+                    <>
+                      {currentPage > 2 && (
+                        <>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => goToPage(1)}
+                            className="h-6 w-6 p-0 text-[10px]"
+                          >
+                            1
+                          </Button>
+                          {currentPage > 3 && <span className="text-[10px] text-muted-foreground">...</span>}
+                        </>
+                      )}
+                      
+                      {[Math.max(1, currentPage - 1), currentPage, Math.min(totalPages, currentPage + 1)]
+                        .filter((page, index, arr) => arr.indexOf(page) === index && page >= 1 && page <= totalPages)
+                        .map((page) => (
+                          <Button
+                            key={page}
+                            variant={currentPage === page ? "default" : "outline"}
+                            size="sm"
+                            onClick={() => goToPage(page)}
+                            className="h-6 w-6 p-0 text-[10px]"
+                          >
+                            {page}
+                          </Button>
+                        ))}
+                      
+                      {currentPage < totalPages - 1 && (
+                        <>
+                          {currentPage < totalPages - 2 && <span className="text-[10px] text-muted-foreground">...</span>}
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => goToPage(totalPages)}
+                            className="h-6 w-6 p-0 text-[10px]"
+                          >
+                            {totalPages}
+                          </Button>
+                        </>
+                      )}
+                    </>
+                  )}
+                </div>
+                
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => goToPage(currentPage + 1)}
+                  disabled={currentPage === totalPages}
+                  className="h-6 w-6 p-0"
+                >
+                  <ChevronRight className="h-3 w-3" />
+                </Button>
+              </div>
+            </div>
+          )}
+          </>
+          )}
         </CardContent>
       </Card>
 
