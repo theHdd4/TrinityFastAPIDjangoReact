@@ -316,7 +316,9 @@ export interface LayoutCard {
 
 interface LaboratoryStore {
   cards: LayoutCard[];
+  auxPanelActive: 'settings' | 'frames' | null;
   setCards: (cards: LayoutCard[]) => void;
+  setAuxPanelActive: (panel: 'settings' | 'frames' | null) => void;
   updateAtomSettings: (atomId: string, settings: any) => void;
   getAtom: (atomId: string) => DroppedAtom | undefined;
   reset: () => void;
@@ -324,8 +326,13 @@ interface LaboratoryStore {
 
 export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
   cards: [],
+  auxPanelActive: null,
   setCards: (cards: LayoutCard[]) => {
     set({ cards });
+  },
+  
+  setAuxPanelActive: (panel: 'settings' | 'frames' | null) => {
+    set({ auxPanelActive: panel });
   },
 
   updateAtomSettings: (atomId: string, settings: any) => {

@@ -19,12 +19,11 @@ const LaboratoryMode = () => {
   const [selectedAtomId, setSelectedAtomId] = useState<string>();
   const [selectedCardId, setSelectedCardId] = useState<string>();
   const [cardExhibited, setCardExhibited] = useState<boolean>(false);
-  const [auxActive, setAuxActive] = useState<'settings' | 'frames' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showFloatingNavigationList, setShowFloatingNavigationList] = useState(true);
   const { toast } = useToast();
   const { cards, setCards } = useExhibitionStore();
-  const setLabCards = useLaboratoryStore(state => state.setCards);
+  const { setCards: setLabCards, auxPanelActive, setAuxPanelActive } = useLaboratoryStore();
   const { user } = useAuth();
   const isViewer = user?.role === 'viewer';
 
@@ -90,7 +89,7 @@ const LaboratoryMode = () => {
   };
 
   const toggleSettingsPanel = () => {
-    setAuxActive(prev => (prev === 'settings' ? null : 'settings'));
+    setAuxPanelActive(auxPanelActive === 'settings' ? null : 'settings');
   };
 
   const handleSave = async () => {
@@ -273,8 +272,8 @@ const LaboratoryMode = () => {
           selectedAtomId={selectedAtomId}
           selectedCardId={selectedCardId}
           cardExhibited={cardExhibited}
-          active={auxActive}
-          onActiveChange={setAuxActive}
+          active={auxPanelActive}
+          onActiveChange={setAuxPanelActive}
         />
         <FloatingNavigationList
           isVisible={showFloatingNavigationList}

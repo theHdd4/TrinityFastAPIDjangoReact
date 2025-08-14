@@ -12,6 +12,7 @@ import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import { CorrelationSettings } from '@/components/LaboratoryMode/store/laboratoryStore';
+import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 
 interface CorrelationCanvasProps {
   data: CorrelationSettings;
@@ -21,6 +22,10 @@ interface CorrelationCanvasProps {
 const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChange }) => {
   const heatmapRef = useRef<SVGSVGElement>(null);
   const timeSeriesRef = useRef<SVGSVGElement>(null);
+  const auxPanelActive = useLaboratoryStore(state => state.auxPanelActive);
+  
+  // Determine if we're in compact mode (when auxiliary panels are open)
+  const isCompactMode = auxPanelActive !== null;
 
   // Helper function to check if a column only correlates with itself
   const getFilteredVariables = (variables: string[], correlationMatrix: number[][]) => {
@@ -51,9 +56,16 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
     const svg = d3.select(heatmapRef.current);
     svg.selectAll("*").remove();
 
-    const margin = { top: 40, right: 20, bottom: 60, left: 80 };
-    const width = 600 - margin.left - margin.right;
-    const height = 300 - margin.top - margin.bottom;
+    // Adjust dimensions based on compact mode
+    const margin = isCompactMode 
+      ? { top: 30, right: 15, bottom: 45, left: 60 } 
+      : { top: 40, right: 20, bottom: 60, left: 80 };
+    
+    const baseWidth = isCompactMode ? 450 : 600;
+    const baseHeight = isCompactMode ? 220 : 300;
+    
+    const width = baseWidth - margin.left - margin.right;
+    const height = baseHeight - margin.top - margin.bottom;
 
     const g = svg.append("g")
       .attr("transform", `translate(${margin.left},${margin.top})`);
@@ -185,7 +197,7 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
       .style("fill", "#666")
       .text(d => d);
 
-  }, [data.correlationMatrix, data.variables, data.isUsingFileData, data.fileData, data.showAllColumns]);
+  }, [data.correlationMatrix, data.variables, data.isUsingFileData, data.fileData, data.showAllColumns, isCompactMode]);
 
   // Draw time series chart
   useEffect(() => {
@@ -194,9 +206,16 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
     const svg = d3.select(timeSeriesRef.current);
     svg.selectAll("*").remove();
 
-    const margin = { top: 20, right: 120, bottom: 40, left: 60 };
-    const width = 600 - margin.left - margin.right;
-    const height = 200 - margin.top - margin.bottom;
+    // Adjust dimensions based on compact mode
+    const margin = isCompactMode 
+      ? { top: 15, right: 80, bottom: 30, left: 45 } 
+      : { top: 20, right: 120, bottom: 40, left: 60 };
+    
+    const baseWidth = isCompactMode ? 450 : 600;
+    const baseHeight = isCompactMode ? 150 : 200;
+    
+    const width = baseWidth - margin.left - margin.right;
+    const height = baseHeight - margin.top - margin.bottom;
 
     const g = svg.append("g")
       .attr("transform", `translate(${margin.left},${margin.top})`);
@@ -333,7 +352,7 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
         .text("Error rendering time series chart");
     }
 
-  }, [data.timeSeriesData, data.selectedVar1, data.selectedVar2]);
+  }, [data.timeSeriesData, data.selectedVar1, data.selectedVar2, isCompactMode]);
 
   const getCorrelationValue = () => {
     const variables = data.isUsingFileData && data.fileData?.numericColumns 
@@ -364,10 +383,10 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
   const currentVariables = getFilteredVariables(allCurrentVariables, data.correlationMatrix);
 
   return (
-    <div className="w-full h-full bg-background p-6 overflow-y-auto">
+    <div className={`w-full h-full bg-background ${isCompactMode ? 'p-4' : 'p-6'} overflow-y-auto`}>
       {/* Header */}
-      <div className="mb-6">
-        <div className="flex items-center justify-between mb-4">
+      <div className={isCompactMode ? 'mb-4' : 'mb-6'}>
+        <div className={`flex items-center justify-between ${isCompactMode ? 'mb-3' : 'mb-4'}`}>
           <div>
             <h1 className="text-2xl font-bold text-foreground">Correlation Analysis</h1>
             <p className="text-muted-foreground text-sm">
@@ -454,40 +473,42 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
         </Card>
 
       {/* Correlation Heatmap - Full Width */}
-      <div className="mb-6">
+      <div className={isCompactMode ? 'mb-4' : 'mb-6'}>
         <Card className="overflow-hidden">
-          <div className="p-6">
-            <svg ref={heatmapRef} width="100%" height="400" className="w-full"></svg>
+          <div className={isCompactMode ? 'p-4' : 'p-6'}>
+            <svg ref={heatmapRef} width="100%" height={isCompactMode ? "280" : "400"} className="w-full"></svg>
           </div>
         </Card>
       </div>
 
       {/* Time Series + Analysis Setup */}
-      <div className="grid grid-cols-12 gap-6">
+      <div className={`grid ${isCompactMode ? 'grid-cols-1 gap-4' : 'grid-cols-12 gap-6'}`}>
         {/* Time Series Chart */}
-        <div className="col-span-8">
+        <div className={isCompactMode ? '' : 'col-span-8'}>
           <Card className="overflow-hidden">
-            <div className="p-4 border-b bg-muted/30">
-              <h3 className="font-semibold text-foreground flex items-center gap-2">
-                <TrendingUp className="w-4 h-4 text-primary" />
+            <div className={`${isCompactMode ? 'p-3' : 'p-4'} border-b bg-muted/30`}>
+              <h3 className={`font-semibold text-foreground flex items-center gap-2 ${isCompactMode ? 'text-sm' : ''}`}>
+                <TrendingUp className={`${isCompactMode ? 'w-3 h-3' : 'w-4 h-4'} text-primary`} />
                 Time Series Comparison
               </h3>
-              <p className="text-sm text-muted-foreground mt-1">
-                Visualize how {data.selectedVar1} and {data.selectedVar2} change over time
-              </p>
+              {!isCompactMode && (
+                <p className="text-sm text-muted-foreground mt-1">
+                  Visualize how {data.selectedVar1} and {data.selectedVar2} change over time
+                </p>
+              )}
             </div>
-            <div className="p-6">
-              <svg ref={timeSeriesRef} width="100%" height="300" className="w-full"></svg>
+            <div className={isCompactMode ? 'p-4' : 'p-6'}>
+              <svg ref={timeSeriesRef} width="100%" height={isCompactMode ? "200" : "300"} className="w-full"></svg>
             </div>
           </Card>
         </div>
 
         {/* Analysis Setup */}
-        <div className="col-span-4">
+        <div className={isCompactMode ? '' : 'col-span-4'}>
           <Card className="overflow-hidden">
-            <div className="p-4 border-b bg-muted/30">
-              <h3 className="font-semibold text-foreground flex items-center gap-2">
-                <BarChart3 className="w-4 h-4 text-primary" />
+            <div className={`${isCompactMode ? 'p-3' : 'p-4'} border-b bg-muted/30`}>
+              <h3 className={`font-semibold text-foreground flex items-center gap-2 ${isCompactMode ? 'text-sm' : ''}`}>
+                <BarChart3 className={`${isCompactMode ? 'w-3 h-3' : 'w-4 h-4'} text-primary`} />
                 Analysis Setup
               </h3>
             </div>
