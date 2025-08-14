@@ -560,6 +560,14 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
                   <CalendarComponent
                     mode="single"
                     selected={data.settings?.dateFrom ? parseDateString(data.settings.dateFrom, data.dateAnalysis.date_format_detected) || undefined : undefined}
+                    defaultMonth={(() => {
+                      if (data.settings?.dateFrom) {
+                        return parseDateString(data.settings.dateFrom, data.dateAnalysis.date_format_detected) || undefined;
+                      }
+                      // Fallback to dataset start date if no date selected
+                      const { fromDate } = getDateRangeForCalendar(data.dateAnalysis);
+                      return fromDate || undefined;
+                    })()}
                     onSelect={(date) => {
                       if (date) {
                         const formattedDate = formatDateForDisplay(formatDateForCalendar(date), formatToShow);
@@ -571,6 +579,15 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
                       if (!fromDate || !toDate) return false;
                       return date < fromDate || date > toDate;
                     }}
+                    captionLayout="dropdown-buttons"
+                    fromYear={(() => {
+                      const { fromDate } = getDateRangeForCalendar(data.dateAnalysis);
+                      return fromDate ? fromDate.getFullYear() : 1900;
+                    })()}
+                    toYear={(() => {
+                      const { toDate } = getDateRangeForCalendar(data.dateAnalysis);
+                      return toDate ? toDate.getFullYear() : new Date().getFullYear();
+                    })()}
                     initialFocus
                   />
                 </PopoverContent>
@@ -598,6 +615,14 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
                   <CalendarComponent
                     mode="single"
                     selected={data.settings?.dateTo ? parseDateString(data.settings.dateTo, data.dateAnalysis.date_format_detected) || undefined : undefined}
+                    defaultMonth={(() => {
+                      if (data.settings?.dateTo) {
+                        return parseDateString(data.settings.dateTo, data.dateAnalysis.date_format_detected) || undefined;
+                      }
+                      // Fallback to dataset end date if no date selected
+                      const { toDate } = getDateRangeForCalendar(data.dateAnalysis);
+                      return toDate || undefined;
+                    })()}
                     onSelect={(date) => {
                       if (date) {
                         const formattedDate = formatDateForDisplay(formatDateForCalendar(date), formatToShow);
@@ -609,6 +634,15 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
                       if (!fromDate || !toDate) return false;
                       return date < fromDate || date > toDate;
                     }}
+                    captionLayout="dropdown-buttons"
+                    fromYear={(() => {
+                      const { fromDate } = getDateRangeForCalendar(data.dateAnalysis);
+                      return fromDate ? fromDate.getFullYear() : 1900;
+                    })()}
+                    toYear={(() => {
+                      const { toDate } = getDateRangeForCalendar(data.dateAnalysis);
+                      return toDate ? toDate.getFullYear() : new Date().getFullYear();
+                    })()}
                     initialFocus
                   />
                 </PopoverContent>
