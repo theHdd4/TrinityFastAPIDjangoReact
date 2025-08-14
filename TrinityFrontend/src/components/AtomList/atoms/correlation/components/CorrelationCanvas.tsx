@@ -392,7 +392,7 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
             <div className="text-center space-y-2">
               <h3 className="text-lg font-semibold text-foreground">No Dataset Loaded</h3>
               <p className="text-muted-foreground max-w-md">
-                Upload a CSV file through the Settings tab to start analyzing correlations between your variables.
+                Select a dataset through the Settings tab to start analyzing correlations between your variables.
               </p>
             </div>
           </div>
