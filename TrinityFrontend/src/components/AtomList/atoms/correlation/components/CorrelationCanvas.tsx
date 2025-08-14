@@ -58,11 +58,11 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
 
     // Adjust dimensions based on compact mode
     const margin = isCompactMode 
-      ? { top: 30, right: 15, bottom: 45, left: 60 } 
+      ? { top: 20, right: 10, bottom: 35, left: 45 } 
       : { top: 40, right: 20, bottom: 60, left: 80 };
     
-    const baseWidth = isCompactMode ? 450 : 600;
-    const baseHeight = isCompactMode ? 220 : 300;
+    const baseWidth = isCompactMode ? 350 : 600;
+    const baseHeight = isCompactMode ? 180 : 300;
     
     const width = baseWidth - margin.left - margin.right;
     const height = baseHeight - margin.top - margin.bottom;
@@ -136,7 +136,7 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
               .style("color", "white")
               .style("padding", "8px")
               .style("border-radius", "4px")
-              .style("font-size", "12px")
+              .style("font-size", isCompactMode ? "10px" : "12px")
               .style("pointer-events", "none")
               .style("z-index", "1000");
             
@@ -179,7 +179,7 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
       .attr("x", d => xScale(d)! + xScale.bandwidth() / 2)
       .attr("y", height + 20)
       .attr("text-anchor", "middle")
-      .style("font-size", "12px")
+      .style("font-size", isCompactMode ? "10px" : "12px")
       .style("font-weight", "500")
       .style("fill", "#666")
       .text(d => d);
@@ -192,7 +192,7 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
       .attr("y", d => yScale(d)! + yScale.bandwidth() / 2)
       .attr("text-anchor", "end")
       .attr("dy", "0.35em")
-      .style("font-size", "12px")
+      .style("font-size", isCompactMode ? "10px" : "12px")
       .style("font-weight", "500")
       .style("fill", "#666")
       .text(d => d);
@@ -208,11 +208,11 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
 
     // Adjust dimensions based on compact mode
     const margin = isCompactMode 
-      ? { top: 15, right: 80, bottom: 30, left: 45 } 
+      ? { top: 10, right: 60, bottom: 25, left: 35 } 
       : { top: 20, right: 120, bottom: 40, left: 60 };
     
-    const baseWidth = isCompactMode ? 450 : 600;
-    const baseHeight = isCompactMode ? 150 : 200;
+    const baseWidth = isCompactMode ? 350 : 600;
+    const baseHeight = isCompactMode ? 120 : 200;
     
     const width = baseWidth - margin.left - margin.right;
     const height = baseHeight - margin.top - margin.bottom;
@@ -233,7 +233,7 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
         .attr("x", width / 2)
         .attr("y", height / 2)
         .attr("text-anchor", "middle")
-        .style("font-size", "14px")
+        .style("font-size", isCompactMode ? "12px" : "14px")
         .style("fill", "#666")
         .text("No valid time series data available");
       return;
@@ -476,7 +476,7 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
       <div className={isCompactMode ? 'mb-4' : 'mb-6'}>
         <Card className="overflow-hidden">
           <div className={isCompactMode ? 'p-4' : 'p-6'}>
-            <svg ref={heatmapRef} width="100%" height={isCompactMode ? "280" : "400"} className="w-full"></svg>
+            <svg ref={heatmapRef} width="100%" height={isCompactMode ? "220" : "400"} className="w-full"></svg>
           </div>
         </Card>
       </div>
@@ -498,7 +498,7 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
               )}
             </div>
             <div className={isCompactMode ? 'p-4' : 'p-6'}>
-              <svg ref={timeSeriesRef} width="100%" height={isCompactMode ? "200" : "300"} className="w-full"></svg>
+              <svg ref={timeSeriesRef} width="100%" height={isCompactMode ? "150" : "300"} className="w-full"></svg>
             </div>
           </Card>
         </div>
@@ -506,21 +506,21 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
         {/* Analysis Setup */}
         <div className={isCompactMode ? '' : 'col-span-4'}>
           <Card className="overflow-hidden">
-            <div className={`${isCompactMode ? 'p-3' : 'p-4'} border-b bg-muted/30`}>
+            <div className={`${isCompactMode ? 'p-2' : 'p-4'} border-b bg-muted/30`}>
               <h3 className={`font-semibold text-foreground flex items-center gap-2 ${isCompactMode ? 'text-sm' : ''}`}>
                 <BarChart3 className={`${isCompactMode ? 'w-3 h-3' : 'w-4 h-4'} text-primary`} />
                 Analysis Setup
               </h3>
             </div>
-            <div className="p-4 space-y-4">
+            <div className={`${isCompactMode ? 'p-3 space-y-2' : 'p-4 space-y-4'}`}>
 
               {/* Correlation Result */}
-              <div className="bg-muted/50 rounded-lg p-4 border">
+              <div className={`bg-muted/50 rounded-lg ${isCompactMode ? 'p-3' : 'p-4'} border`}>
                 <div className="text-center">
-                  <div className="text-2xl font-bold text-foreground mb-1">
+                  <div className={`font-bold text-foreground mb-1 ${isCompactMode ? 'text-lg' : 'text-2xl'}`}>
                     {getCorrelationValue().toFixed(3)}
                   </div>
-                  <div className="text-sm text-muted-foreground">Correlation Coefficient</div>
+                  <div className={`text-muted-foreground ${isCompactMode ? 'text-xs' : 'text-sm'}`}>Correlation Coefficient</div>
                   <Badge 
                     variant={
                       Math.abs(getCorrelationValue()) > 0.7 ? "destructive" :
