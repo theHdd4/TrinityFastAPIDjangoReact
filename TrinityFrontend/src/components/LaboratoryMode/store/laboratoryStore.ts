@@ -204,7 +204,7 @@ export const DEFAULT_CORRELATION_SETTINGS: CorrelationSettings = {
   validatorAtomId: undefined,
   selectedColumns: [],
   fileData: undefined,
-  isUsingFileData: false,
+  isUsingFileData: true,  // Default to always using file data
   showAllColumns: false
 };
 

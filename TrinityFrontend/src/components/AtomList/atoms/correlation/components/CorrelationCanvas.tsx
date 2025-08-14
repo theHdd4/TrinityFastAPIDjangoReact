@@ -372,7 +372,7 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
             <h1 className="text-2xl font-bold text-foreground">Correlation Analysis</h1>
             <p className="text-muted-foreground text-sm">
               {data.isUsingFileData && data.fileData 
-                ? `Analyzing ${data.fileData.fileName} (${data.fileData.rawData?.length || 0} rows, ${data.fileData.numericColumns?.length || 0} numeric columns)`
+                ? ``
                 : 'Upload a dataset to discover relationships between variables'
               }
             </p>

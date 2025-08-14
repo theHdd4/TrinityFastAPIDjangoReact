@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Calendar, X, Upload, FileText, AlertCircle, CheckCircle, Loader2 } from 'lucide-react';
+import { Calendar, X, FileText, AlertCircle, CheckCircle, Loader2 } from 'lucide-react';
 import {
   Select,
   SelectContent,
@@ -198,7 +198,8 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
       selectedFile: objectName,
       fileData: null,
       correlationMatrix: null,
-      timeSeriesData: null
+      timeSeriesData: null,
+      isUsingFileData: true  // Always default to using uploaded data
     });
     
     // Try to get validator atom ID and load columns
@@ -327,52 +328,16 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
     });
   };
 
-  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-
-    // Validate file type
-    if (!file.name.toLowerCase().endsWith('.csv')) {
-      setProcessingError('Please upload a CSV file');
-      return;
-    }
-
-    setIsProcessing(true);
-    setProcessingError(null);
-
-    try {
-      // For now, we'll just store the file name and prompt user to use saved dataframes
-      // In the future, we could implement file upload to backend
-      setProcessingError('Please use saved dataframes from the dropdown below instead of uploading files directly.');
-    } catch (error) {
-      setProcessingError('Failed to process file. Please try again.');
-    } finally {
-      setIsProcessing(false);
-      event.target.value = '';
-    }
-  };
-
   const handleCorrelationMethodChange = (method: string) => {
     handleSettingsChange('correlationMethod', method);
     
-    // If we have file data, recalculate correlations with new method
-    if (data.isUsingFileData && data.fileData?.isProcessed) {
-      try {
-        const correlationMethod = method.toLowerCase() as 'pearson' | 'spearman';
-        // Recalculation will be done when user clicks "Run Correlation"
-        // This keeps the UI simpler and more predictable
-        
-        onDataChange({
-          settings: {
-            ...(data.settings || {}),
-            correlationMethod: method
-          }
-        });
-      } catch (error) {
-        console.error('Error recalculating correlations:', error);
-        setProcessingError('Failed to recalculate correlations with new method');
+    // If we have file data, settings will be applied when user clicks "Recalculate"
+    onDataChange({
+      settings: {
+        ...(data.settings || {}),
+        correlationMethod: method
       }
-    }
+    });
   };
 
   const handleApplySettings = async () => {
@@ -393,12 +358,12 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
   };
 
   const handleReset = () => {
-    if (data.isUsingFileData) {
-      onDataChange({
-        isUsingFileData: false,
-        fileData: undefined
-      });
-    }
+    // Reset correlation data but keep using file data if available
+    onDataChange({
+      correlationMatrix: [],
+      timeSeriesData: [],
+      variables: []
+    });
     setProcessingError(null);
   };
 
@@ -424,80 +389,9 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
             </Select>
           </div>
           
-          <div className="space-y-3">
-            {/* Upload Area */}
-            <div className="border-2 border-dashed border-border rounded-lg p-4 text-center hover:border-primary/50 transition-colors">
-              <Upload className="w-8 h-8 mx-auto mb-2 text-muted-foreground" />
-              <p className="text-sm font-medium mb-1">Upload your CSV data file</p>
-              <p className="text-xs text-muted-foreground mb-3">Upload a CSV file with numeric columns for correlation analysis</p>
-              <input
-                type="file"
-                accept=".csv"
-                onChange={handleFileUpload}
-                className="hidden"
-                id="correlation-file-upload"
-                disabled={isProcessing}
-              />
-              <label htmlFor="correlation-file-upload">
-                <Button asChild variant="outline" size="sm" className="cursor-pointer" disabled={isProcessing}>
-                  <span>
-                    {isProcessing ? (
-                      <>
-                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                        Processing...
-                      </>
-                    ) : (
-                      'Choose CSV File'
-                    )}
-                  </span>
-                </Button>
-              </label>
-            </div>
-            
-            {/* Current File Status */}
-            {data.fileData?.isProcessed ? (
-              <div className="flex items-center gap-2 p-2 bg-green-50 border border-green-200 rounded-lg">
-                <CheckCircle className="w-4 h-4 text-green-600" />
-                <div className="flex-1">
-                  <span className="text-sm font-medium text-green-900">{data.fileData?.fileName}</span>
-                  <div className="text-xs text-green-700">
-                    {data.fileData?.rawData?.length || 0} rows, {data.fileData?.numericColumns?.length || 0} numeric columns
-                  </div>
-                </div>
-                <Badge variant="secondary" className="bg-green-100 text-green-800">Active</Badge>
-              </div>
-            ) : data?.settings?.uploadedFile ? (
-              <div className="flex items-center gap-2 p-2 bg-muted/50 rounded-lg">
-                <FileText className="w-4 h-4 text-muted-foreground" />
-                <span className="text-sm text-muted-foreground">{data?.settings?.uploadedFile}</span>
-                <Badge variant="secondary" className="ml-auto">Mock Data</Badge>
-              </div>
-            ) : null}
-
-            {/* Switch between file and mock data */}
-            {data.fileData?.isProcessed && (
-              <div className="flex gap-2">
-                <Button
-                  variant={data.isUsingFileData ? "default" : "outline"}
-                  size="sm"
-                  className="flex-1"
-                  onClick={() => onDataChange({ isUsingFileData: true })}
-                >
-                  Use Uploaded Data
-                </Button>
-                <Button
-                  variant={!data.isUsingFileData ? "default" : "outline"}
-                  size="sm"
-                  className="flex-1"
-                  onClick={() => onDataChange({ isUsingFileData: false, fileData: undefined })}
-                >
-                  Use Mock Data
-                </Button>
-              </div>
-            )}
 
             {/* Show column information for uploaded file */}
-            {data.fileData?.isProcessed && data.isUsingFileData && (
+            {data.fileData?.isProcessed && (
               <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
                 <h4 className="text-sm font-medium text-blue-900 mb-2">Available Columns</h4>
                 <div className="space-y-1">
@@ -675,11 +569,6 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
             <SelectItem value="cramers_v">Cramer's V</SelectItem>
           </SelectContent>
         </Select>
-        {data.isUsingFileData && (
-          <p className="text-xs text-muted-foreground">
-            Correlation matrix will be recalculated when method changes
-          </p>
-        )}
       </div>
 
       {/* Action Buttons */}
@@ -691,7 +580,7 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
           onClick={handleApplySettings}
           disabled={isProcessing || !data.fileData?.isProcessed}
         >
-          {data.isUsingFileData ? 'Recalculate' : 'Apply Settings'}
+          Recalculate
         </Button>
         <Button 
           variant="outline" 
@@ -703,7 +592,6 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
         </Button>
         </div>
       </div>
-    </div>
   );
 };
 
