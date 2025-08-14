@@ -1,101 +1,118 @@
 # main_concat.py
-
 import os
-import sys
-from pathlib import Path
-from fastapi import FastAPI
+import time
+import logging
+from fastapi import APIRouter
 from pydantic import BaseModel
 from typing import Optional
-import time
-import requests
-from llm_concat import SmartConcatAgent
-import logging
 
-# Allow importing helpers from the parent folder
-PARENT_DIR = Path(__file__).resolve().parent.parent
-sys.path.append(str(PARENT_DIR))
-from main_api import get_llm_config, get_minio_config
+from .llm_concat import SmartConcatAgent
 
+# Set up logging
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("trinity.concat.app")
 
-cfg_llm = get_llm_config()
-cfg_minio = get_minio_config()
-logger.debug("cfg_minio resolved: %s", cfg_minio)
+# Standalone configuration functions (no circular imports)
+def get_llm_config():
+    """Return LLM configuration from environment variables."""
+    ollama_ip = os.getenv("OLLAMA_IP", os.getenv("HOST_IP", "127.0.0.1"))
+    llm_port = os.getenv("OLLAMA_PORT", "11434")
+    api_url = os.getenv("LLM_API_URL", f"http://{ollama_ip}:{llm_port}/api/chat")
+    return {
+        "api_url": api_url,
+        "model_name": os.getenv("LLM_MODEL_NAME", "deepseek-r1:32b"),
+        "bearer_token": os.getenv("LLM_BEARER_TOKEN", "aakash_api_key"),
+    }
 
-# Initialize app and agent
-app = FastAPI(title="Smart Concatenation Agent", version="1.0.0")
+# Initialize router and agent
+router = APIRouter()
+
+cfg_llm = get_llm_config()
+
+logger.info(f"CONCAT AGENT INITIALIZATION:")
+logger.info(f"LLM Config: {cfg_llm}")
+
 agent = SmartConcatAgent(
     cfg_llm["api_url"],
     cfg_llm["model_name"],
     cfg_llm["bearer_token"],
-    cfg_minio["endpoint"],
-    cfg_minio["access_key"],
-    cfg_minio["secret_key"],
-    cfg_minio["bucket"],
-    cfg_minio["prefix"],
+    "minio:9000",  # Default values for compatibility
+    "minio",
+    "minio123",
+    "trinity",
+    "",
 )
 
-# Backend concat API for performing the actual concatenation
-PERFORM_URL = os.getenv(
-    "CONCAT_PERFORM_URL",
-    f"http://{os.getenv('HOST_IP', 'localhost')}:{os.getenv('FASTAPI_PORT', '8004')}/api/concat/perform",
-)
+# Trinity AI only generates JSON configuration
+# Frontend handles all backend API calls and path resolution
+
+# Trinity AI only generates JSON configuration
+# Frontend handles all backend API calls and path resolution
 
 class ConcatRequest(BaseModel):
     prompt: str
     session_id: Optional[str] = None
 
-@app.post("/concat")
+@router.post("/concat")
 def concatenate_files(request: ConcatRequest):
     """Smart concatenation endpoint with complete memory"""
     start_time = time.time()
     
-    logger.info("Prompt: %s", request.prompt)
-    logger.info("Session: %s", request.session_id)
+    logger.info(f"CONCAT REQUEST RECEIVED:")
+    logger.info(f"Prompt: {request.prompt}")
+    logger.info(f"Session ID: {request.session_id}")
     
-    # Process with complete memory context
-    result = agent.process_request(request.prompt, request.session_id)
+    try:
+        # Process with complete memory context
+        result = agent.process_request(request.prompt, request.session_id)
 
-    # Add timing
-    processing_time = round(time.time() - start_time, 2)
-    result["processing_time"] = processing_time
+        # Add timing
+        processing_time = round(time.time() - start_time, 2)
+        result["processing_time"] = processing_time
 
-    logger.info("Result Success: %s", result.get("success", False))
-    logger.info("Used Memory: %s", result.get("used_memory", False))
-    logger.info("Processing Time: %ss", processing_time)
+        logger.info(f"CONCAT REQUEST COMPLETED:")
+        logger.info(f"Success: {result.get('success', False)}")
+        logger.info(f"Used Memory: {result.get('used_memory', False)}")
+        logger.info(f"Processing Time: {processing_time}s")
 
-    if result.get("success") and result.get("concat_json"):
-        cfg = result["concat_json"]
-        file1 = cfg.get("file1")
-        if isinstance(file1, list):
-            file1 = file1[0] if file1 else ""
-        file2 = cfg.get("file2")
-        if isinstance(file2, list):
-            file2 = file2[0] if file2 else ""
-        payload = {
-            "file1": file1,
-            "file2": file2,
-            "concat_direction": cfg.get("concat_direction", "vertical"),
+        if result.get("success") and result.get("concat_json"):
+            cfg = result["concat_json"]
+            file1 = cfg.get("file1")
+            if isinstance(file1, list):
+                file1 = file1[0] if file1 else ""
+            file2 = cfg.get("file2")
+            if isinstance(file2, list):
+                file2 = file2[0] if file2 else ""
+            
+            # Return the configuration for frontend to call backend API directly
+            result["concat_config"] = {
+                "file1": file1,  # Just filename, backend will resolve path
+                "file2": file2,  # Just filename, backend will resolve path
+                "concat_direction": cfg.get("concat_direction", "vertical"),
+            }
+            
+            # Add session ID for consistency with merge
+            if request.session_id:
+                result["session_id"] = request.session_id
+            
+            # Update message to indicate configuration is ready
+            result["message"] = f"Concat configuration ready: {file1} + {file2} with {cfg.get('concat_direction', 'vertical')} direction"
+
+        return result
+        
+    except Exception as e:
+        logger.error(f"CONCAT REQUEST FAILED: {e}")
+        error_result = {
+            "success": False,
+            "error": str(e),
+            "processing_time": round(time.time() - start_time, 2)
         }
-        try:
-            resp = requests.post(PERFORM_URL, json=payload, timeout=60)
-            resp.raise_for_status()
-            result["concat_result"] = resp.json()
-            # Override message with backend result on success so the
-            # frontend only displays the successful message
-            if isinstance(result["concat_result"], dict):
-                result["message"] = result["concat_result"].get(
-                    "message", "Concatenation completed successfully"
-                )
-        except Exception as exc:
-            result["concat_result"] = None
-            logger.error("concat perform failed: %s", exc)
+        return error_result
 
-    return result
-
-@app.get("/history/{session_id}")
+@router.get("/history/{session_id}")
 def get_complete_history(session_id: str):
     """Get complete session history with all JSON details"""
+    logger.info(f"Getting history for session: {session_id}")
     history = agent.get_session_history(session_id)
     stats = agent.get_session_stats(session_id)
     
@@ -107,9 +124,10 @@ def get_complete_history(session_id: str):
         "total_interactions": len(history)
     }
 
-@app.get("/session_details/{session_id}")
+@router.get("/session_details/{session_id}")
 def get_session_details(session_id: str):
     """Get detailed session information for debugging"""
+    logger.info(f"Getting session details for: {session_id}")
     details = agent.get_detailed_session_info(session_id)
     
     return {
@@ -118,9 +136,10 @@ def get_session_details(session_id: str):
         "details": details
     }
 
-@app.get("/files")
+@router.get("/files")
 def list_available_files():
     """List all available files"""
+    logger.info("Listing available files")
     files = agent.get_available_files()
     return {
         "success": True,
@@ -128,13 +147,15 @@ def list_available_files():
         "files": files
     }
 
-@app.get("/health")
+@router.get("/health")
 def health_check():
     """Health check endpoint"""
-    return {
+    status = {
         "status": "healthy",
         "service": "smart_concatenation_agent",
         "version": "1.0.0",
+        "active_sessions": len(agent.sessions),
+        "loaded_files": len(agent.available_files),
         "features": [
             "complete_memory_context",
             "intelligent_suggestions",
@@ -142,7 +163,7 @@ def health_check():
             "user_preference_learning"
         ]
     }
+    logger.info(f"Health check: {status}")
+    return status
 
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("AI_PORT", 8002)))
+# Export the router for mounting in main_api.py

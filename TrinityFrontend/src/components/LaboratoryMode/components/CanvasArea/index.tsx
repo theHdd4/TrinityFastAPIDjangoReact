@@ -60,6 +60,8 @@ const LLM_MAP: Record<string, string> = {
   concat: 'Agent Concat',
   'chart-maker': 'Agent Chart Maker',
   merge: 'Agent Merge',
+  'create-column': 'Agent Create Transform',
+  'groupby-wtg-avg': 'Agent GroupBy',
 };
 
 const CanvasArea: React.FC<CanvasAreaProps> = ({

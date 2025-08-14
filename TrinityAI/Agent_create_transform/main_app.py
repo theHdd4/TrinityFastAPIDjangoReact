@@ -1,0 +1,160 @@
+# main_create_transform.py
+import os
+import time
+import logging
+from fastapi import APIRouter
+from pydantic import BaseModel
+from typing import Optional
+
+from .llm_create import SmartCreateTransformAgent
+
+# Set up logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("trinity.create_transform.app")
+
+# Standalone configuration functions (no circular imports)
+def get_llm_config():
+    """Return LLM configuration from environment variables."""
+    ollama_ip = os.getenv("OLLAMA_IP", os.getenv("HOST_IP", "127.0.0.1"))
+    llm_port = os.getenv("OLLAMA_PORT", "11434")
+    api_url = os.getenv("LLM_API_URL", f"http://{ollama_ip}:{llm_port}/api/chat")
+    return {
+        "api_url": api_url,
+        "model_name": os.getenv("LLM_MODEL_NAME", "deepseek-r1:32b"),
+        "bearer_token": os.getenv("LLM_BEARER_TOKEN", "aakash_api_key"),
+    }
+
+# Initialize router and agent
+router = APIRouter()
+
+cfg_llm = get_llm_config()
+
+logger.info(f"CREATE TRANSFORM AGENT INITIALIZATION:")
+logger.info(f"LLM Config: {cfg_llm}")
+
+agent = SmartCreateTransformAgent(
+    cfg_llm["api_url"],
+    cfg_llm["model_name"],
+    cfg_llm["bearer_token"],
+    "minio:9000",  # Default values for compatibility
+    "minio",
+    "minio123",
+    "trinity",
+    "",
+    {},  # supported_operations
+    """
+{
+  "bucket_name": "trinity",
+  "object_names": "your_file.csv",
+  "identifiers": ["col1", "col2"],
+  "operations": [
+    {
+      "type": "add",
+      "source_columns": ["col1", "col2"],
+      "rename_to": "new_column_name"
+    }
+  ]
+}
+"""
+)
+
+# Trinity AI only generates JSON configuration
+# Frontend handles all backend API calls and path resolution
+
+class CreateTransformRequest(BaseModel):
+    prompt: str
+    session_id: Optional[str] = None
+
+@router.post("/create-transform")
+def create_transform_files(request: CreateTransformRequest):
+    """Smart create/transform endpoint with complete memory"""
+    start_time = time.time()
+    
+    logger.info(f"CREATE TRANSFORM REQUEST RECEIVED:")
+    logger.info(f"Prompt: {request.prompt}")
+    logger.info(f"Session ID: {request.session_id}")
+    
+    try:
+        # Process with complete memory context
+        result = agent.process_request(request.prompt, request.session_id)
+
+        # Add timing
+        processing_time = round(time.time() - start_time, 2)
+        result["processing_time"] = processing_time
+
+        logger.info(f"CREATE TRANSFORM REQUEST COMPLETED:")
+        logger.info(f"Success: {result.get('success', False)}")
+        logger.info(f"Processing Time: {processing_time}s")
+
+        if result.get("success") and result.get("create_transform_json"):
+            cfg = result["create_transform_json"]
+            
+            # Return the configuration for frontend to handle
+            result["create_transform_config"] = cfg
+            # Also keep the original key for frontend compatibility
+            result["create_transform_json"] = cfg
+            
+            # Add session ID for consistency
+            if request.session_id:
+                result["session_id"] = request.session_id
+            
+            # Update message to indicate configuration is ready
+            result["message"] = f"Create/Transform configuration ready"
+
+        return result
+
+    except Exception as e:
+        logger.error(f"CREATE TRANSFORM REQUEST FAILED: {e}")
+        error_result = {
+            "success": False,
+            "error": str(e),
+            "processing_time": round(time.time() - start_time, 2)
+        }
+        return error_result
+
+@router.get("/history/{session_id}")
+def get_complete_history(session_id: str):
+    """Get complete session history with all JSON details"""
+    logger.info(f"Getting history for session: {session_id}")
+    history = agent.get_session_history(session_id)
+    
+    return {
+        "success": True,
+        "session_id": session_id,
+        "complete_history": history,
+        "total_interactions": len(history)
+    }
+
+@router.get("/files")
+def list_available_files():
+    """List all available files"""
+    logger.info("Listing available files")
+    files = agent.files_with_columns
+    return {
+        "success": True,
+        "total_files": len(files),
+        "files": files
+    }
+
+@router.get("/health")
+def health_check():
+    """Health check endpoint"""
+    status = {
+        "status": "healthy",
+        "service": "smart_create_transform_agent",
+        "version": "1.0.0",
+        "active_sessions": len(agent.sessions),
+        "loaded_files": len(agent.files_with_columns),
+        "features": [
+            "complete_memory_context",
+            "intelligent_suggestions",
+            "conversational_responses",
+            "user_preference_learning",
+            "enhanced_column_printing",
+            "llm_driven_file_selection"
+        ]
+    }
+    logger.info(f"Health check: {status}")
+    return status
+
+# Export the router for mounting in main_api.py

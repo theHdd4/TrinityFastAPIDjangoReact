@@ -1,340 +1,9 @@
-# # llm_concat_agent.py
-
-# import requests
-# import json
-# import re
-# from minio import Minio
-# from minio.error import S3Error
-# from datetime import datetime
-# import uuid
-
-# class SmartConcatAgent:
-#     """Complete LLM-driven concatenation agent with memory and conversation"""
-    
-#     def __init__(self, api_url, model_name, bearer_token, minio_endpoint, access_key, secret_key, bucket, prefix):
-#         self.api_url = api_url
-#         self.model_name = model_name
-#         self.bearer_token = bearer_token
-        
-#         # MinIO connection
-#         self.minio_client = Minio(minio_endpoint, access_key=access_key, secret_key=secret_key, secure=False)
-#         self.bucket = bucket
-#         self.prefix = prefix
-        
-#         # Memory system
-#         self.sessions = {}
-#         self.available_files = []
-        
-#         # Load files once
-#         self._load_files()
-    
-#     def _load_files(self):
-#         """Load all files from MinIO"""
-#         try:
-#             objects = self.minio_client.list_objects(self.bucket, prefix=self.prefix, recursive=True)
-#             self.available_files = [obj.object_name.split('/')[-1] for obj in objects 
-#                                   if obj.object_name.endswith(('.xlsx', '.xls', '.csv'))]
-#             print(f"[SYSTEM] Loaded {len(self.available_files)} files from MinIO")
-#         except S3Error as e:
-#             print(f"[ERROR] MinIO connection failed: {e}")
-#             self.available_files = []
-    
-#     def create_session(self, session_id=None):
-#         """Create new session"""
-#         if session_id is None:
-#             session_id = str(uuid.uuid4())
-        
-#         self.sessions[session_id] = {
-#             "session_id": session_id,
-#             "created_at": datetime.now().isoformat(),
-#             "conversation_history": [],
-#             "successful_configs": []
-#         }
-#         return session_id
-    
-#     def get_session(self, session_id):
-#         """Get or create session"""
-#         if session_id not in self.sessions:
-#             self.create_session(session_id)
-#         return self.sessions[session_id]
-    
-#     def process_request(self, user_prompt, session_id=None):
-#         """Main processing method - everything handled by LLM"""
-        
-#         if session_id is None:
-#             session_id = self.create_session()
-        
-#         session = self.get_session(session_id)
-        
-#         # Build conversation context
-#         context = self._build_context(session_id)
-        
-#         # Create comprehensive LLM prompt
-#         prompt = f"""You are an intelligent concatenation assistant with perfect memory. Your goal is to help users create concatenation configurations.
-
-# USER INPUT: "{user_prompt}"
-
-# AVAILABLE FILES:
-# {json.dumps(self.available_files, indent=2)}
-
-# CONVERSATION CONTEXT:
-# {context}
-
-# TASK: Analyze the user input and provide the appropriate response. You have two main outcomes:
-
-# SUCCESS RESPONSE (when you have all required info):
-# {{
-#   "success": true,
-#   "concat_json": {{
-#     "bucket_name": "trinity",
-#     "file1": ["exact_filename1.csv"],
-#     "file2": ["exact_filename2.csv"],
-#     "concat_direction": "vertical"
-#   }},
-#   "message": "Concatenation configuration completed successfully",
-#   "reasoning": "Found all required components"
-# }}
-
-# FAILURE RESPONSE (when information is missing or unclear):
-# {{
-#   "success": false,
-#   "suggestions": [
-#     "I need more information to help you",
-#     "Please specify two files to concatenate",
-#     "Available files: file1.csv, file2.csv, file3.csv",
-#     "Example: 'concatenate beans.csv with mayo.csv vertically'"
-#   ],
-#   "message": "More information needed for concatenation",
-#   "reasoning": "Missing file specifications"
-# }}
-
-# RULES FOR SUCCESS:
-# 1. Must have TWO distinct files identified
-# 2. Must have concat_direction (vertical/horizontal)
-# 3. Files must exist in the available files list
-# 4. Use fuzzy matching for file names (e.g., "beans" matches "D0_KHC_UK_Beans.csv")
-
-# RULES FOR FAILURE:
-# 1. If files are unclear, suggest specific available files
-# 2. If direction is missing, ask for vertical or horizontal
-# 3. If user says "yes" or "no", interpret based on conversation context
-# 4. Always provide helpful, specific suggestions
-
-# INTELLIGENCE GUIDELINES:
-# - Use fuzzy matching: "beans" should match "D0_KHC_UK_Beans.csv"
-# - Handle conversational responses like "yes", "use those files", "combine them"
-# - Use conversation history to understand context and references
-# - Provide specific file suggestions from available files
-# - Default to "vertical" if direction is not specified but files are clear
-
-# EXAMPLES:
-# - "concatenate beans with mayo" → SUCCESS (if files exist)
-# - "combine some files" → FAILURE (too vague, need specific files)
-# - "yes" (after suggestions) → SUCCESS (if context provides files)
-# - "do it vertically" → depends on context for files
-
-# USE MEMORY:
-# - Reference previous successful configurations
-# - Remember user preferences for files and directions
-# - Use conversation context to interpret ambiguous requests
-
-# Return ONLY the JSON response:"""
-
-#         try:
-#             # Call LLM
-#             response = self._call_llm(prompt)
-#             result = self._extract_json(response)
-            
-#             if not result:
-#                 return self._create_fallback_response(session_id)
-            
-#             # Process result
-#             processed_result = self._process_llm_result(result, session_id, user_prompt)
-            
-#             # Update memory
-#             self._update_memory(session_id, user_prompt, processed_result)
-            
-#             return processed_result
-            
-#         except Exception as e:
-#             print(f"[ERROR] Processing failed: {e}")
-#             return self._create_error_response(session_id, str(e))
-    
-#     def _call_llm(self, prompt):
-#         """Call LLM with optimized settings"""
-#         payload = {
-#             "model": self.model_name,
-#             "messages": [{"role": "user", "content": prompt}],
-#             "stream": False,
-#             "options": {
-#                 "temperature": 0.2,
-#                 "top_p": 0.9,
-#                 "num_predict": 800
-#             }
-#         }
-        
-#         headers = {
-#             "Authorization": f"Bearer {self.bearer_token}",
-#             "Content-Type": "application/json"
-#         }
-        
-#         response = requests.post(self.api_url, json=payload, headers=headers, timeout=90)
-#         response.raise_for_status()
-        
-#         return response.json().get('message', {}).get('content', '')
-    
-#     def _extract_json(self, response):
-#         """Extract JSON from LLM response"""
-#         # Clean response
-#         cleaned = re.sub(r'<think>.*?</think>', '', response, flags=re.DOTALL)
-#         cleaned = re.sub(r'<reasoning>.*?</reasoning>', '', cleaned, flags=re.DOTALL)
-        
-#         # Find JSON
-#         json_match = re.search(r'\{.*\}', cleaned, re.DOTALL)
-#         if json_match:
-#             try:
-#                 return json.loads(json_match.group())
-#             except json.JSONDecodeError:
-#                 pass
-        
-#         return None
-    
-#     def _process_llm_result(self, result, session_id, user_prompt):
-#         """Process LLM result and format response"""
-#         session = self.get_session(session_id)
-        
-#         if result.get("success"):
-#             # Store successful configuration
-#             concat_json = result.get("concat_json", {})
-#             session["successful_configs"].append({
-#                 "timestamp": datetime.now().isoformat(),
-#                 "user_prompt": user_prompt,
-#                 "config": concat_json
-#             })
-            
-#             return {
-#                 "success": True,
-#                 "bucket_name": concat_json.get("bucket_name", "trinity"),
-#                 "file1": concat_json.get("file1", []),
-#                 "file2": concat_json.get("file2", []),
-#                 "concat_direction": concat_json.get("concat_direction", "vertical"),
-#                 "session_id": session_id
-#             }
-#         else:
-#             # Return failure with suggestions
-#             return {
-#                 "success": False,
-#                 "suggestions": result.get("suggestions", [
-#                     "Please specify two files to concatenate",
-#                     "Example: 'concatenate file1.csv with file2.csv'"
-#                 ]),
-#                 "session_id": session_id
-#             }
-    
-#     def _build_context(self, session_id):
-#         """Build conversation context from memory"""
-#         session = self.get_session(session_id)
-        
-#         context_parts = []
-        
-#         # Recent conversation history
-#         history = session.get("conversation_history", [])
-#         if history:
-#             context_parts.append("RECENT CONVERSATION:")
-#             for conv in history[-15:]:  # Last 5 interactions
-#                 context_parts.append(f"- User: '{conv['user_prompt']}'")
-#                 context_parts.append(f"  Result: {conv['result_type']}")
-        
-#         # Successful configurations
-#         successful = session.get("successful_configs", [])
-#         if successful:
-#             context_parts.append("SUCCESSFUL CONFIGURATIONS:")
-#             for config in successful[-3:]:  # Last 3 successful configs
-#                 context_parts.append(f"- Files: {config['config']['file1']} + {config['config']['file2']}")
-#                 context_parts.append(f"  Direction: {config['config']['concat_direction']}")
-        
-#         return "\n".join(context_parts) if context_parts else "No previous conversation"
-    
-#     def _update_memory(self, session_id, user_prompt, result):
-#         """Update session memory"""
-#         session = self.get_session(session_id)
-        
-#         # Add to conversation history
-#         session["conversation_history"].append({
-#             "timestamp": datetime.now().isoformat(),
-#             "user_prompt": user_prompt,
-#             "result_type": "success" if result.get("success") else "failure",
-#             "has_suggestions": bool(result.get("suggestions"))
-#         })
-        
-#         # Keep history manageable
-#         if len(session["conversation_history"]) > 1000:
-#             session["conversation_history"] = session["conversation_history"][-1000:]
-        
-#         # Keep successful configs manageable
-#         if len(session.get("successful_configs", [])) > 50:
-#             session["successful_configs"] = session["successful_configs"][-50:]
-    
-#     def _create_fallback_response(self, session_id):
-#         """Create fallback response when LLM fails"""
-#         return {
-#             "success": False,
-#             "suggestions": [
-#                 "I had trouble understanding your request",
-#                 "Please try again with specific file names",
-#                 f"Available files: {', '.join(self.available_files[:5])}",
-#                 "Example: 'concatenate beans.csv with mayo.csv vertically'"
-#             ],
-#             "session_id": session_id
-#         }
-    
-#     def _create_error_response(self, session_id, error_msg):
-#         """Create error response"""
-#         return {
-#             "success": False,
-#             "suggestions": [
-#                 f"System error: {error_msg}",
-#                 "Please try again",
-#                 "Contact support if the problem persists"
-#             ],
-#             "session_id": session_id
-#         }
-    
-#     def get_session_history(self, session_id):
-#         """Get session history"""
-#         session = self.get_session(session_id)
-#         return session.get("conversation_history", [])
-    
-#     def get_available_files(self):
-#         """Get available files"""
-#         return self.available_files
-    
-#     def get_session_stats(self, session_id):
-#         """Get session statistics"""
-#         session = self.get_session(session_id)
-        
-#         history = session.get("conversation_history", [])
-#         successful = len([h for h in history if h.get("result_type") == "success"])
-        
-#         return {
-#             "session_id": session_id,
-#             "total_interactions": len(history),
-#             "successful_configs": len(session.get("successful_configs", [])),
-#             "success_rate": successful / len(history) if history else 0,
-#             "created_at": session.get("created_at"),
-#             "available_files": len(self.available_files)
-#         }
-
-
-
-
-
 # llm_concat_agent.py
 
 import requests
 import json
 import re
-from ai_logic import build_prompt, call_llm, extract_json
+from .ai_logic import build_prompt, call_llm, extract_json
 from pathlib import Path
 from minio import Minio
 from minio.error import S3Error
@@ -384,23 +53,49 @@ class SmartConcatAgent:
         self._load_files()
 
     def _maybe_update_prefix(self) -> None:
-        """Rebuild ``self.prefix`` from env vars and update ``MINIO_PREFIX``."""
-        client = os.getenv("CLIENT_NAME", "").strip()
-        app = os.getenv("APP_NAME", "").strip()
-        project = os.getenv("PROJECT_NAME", "").strip()
+        """Dynamically updates the MinIO prefix using the same system as data_upload_validate."""
+        try:
+            # Import the dynamic path function from data_upload_validate
+            import sys
+            import os
+            sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..', 'TrinityBackendFastAPI', 'app', 'features'))
+            
+            from data_upload_validate.app.routes import get_object_prefix
+            import asyncio
+            
+            # Get the current dynamic path (this is what data_upload_validate uses)
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                current = loop.run_until_complete(get_object_prefix())
+            finally:
+                loop.close()
+            
+            if os.getenv("MINIO_PREFIX") != current:
+                os.environ["MINIO_PREFIX"] = current
 
-        current = f"{client}/{app}/{project}/" if any([client, app, project]) else ""
+            if current != self.prefix:
+                logger.info("minio prefix updated from %s to %s", self.prefix, current)
+                self.prefix = current
+                
+        except Exception as e:
+            logger.warning(f"Failed to get dynamic path, using fallback: {e}")
+            # Fallback to environment variables
+            client = os.getenv("CLIENT_NAME", "").strip()
+            app = os.getenv("APP_NAME", "").strip()
+            project = os.getenv("PROJECT_NAME", "").strip()
 
-        current = current.lstrip("/")
-        if current and not current.endswith("/"):
-            current += "/"
+            current = f"{client}/{app}/{project}/" if any([client, app, project]) else ""
+            current = current.lstrip("/")
+            if current and not current.endswith("/"):
+                current += "/"
 
-        if os.getenv("MINIO_PREFIX") != current:
-            os.environ["MINIO_PREFIX"] = current
+            if os.getenv("MINIO_PREFIX") != current:
+                os.environ["MINIO_PREFIX"] = current
 
-        if current != self.prefix:
-            logger.info("minio prefix updated from %s to %s", self.prefix, current)
-            self.prefix = current
+            if current != self.prefix:
+                logger.info("minio prefix updated from %s to %s", self.prefix, current)
+                self.prefix = current
     
     def _load_files(self):
         """Load available Arrow files from registry or MinIO."""
@@ -444,9 +139,10 @@ class SmartConcatAgent:
                 if obj.object_name.endswith(".arrow")
             ]
             logger.info("loaded %d arrow files from MinIO under prefix %s", len(self.available_files), self.prefix)
-        except S3Error as e:
-            logger.error("MinIO connection failed: %s", e)
+        except Exception as e:
+            logger.warning("MinIO connection failed, using empty file list: %s", e)
             self.available_files = []
+            # Don't fail the entire agent initialization
     
     def create_session(self, session_id=None):
         """Create new session"""
