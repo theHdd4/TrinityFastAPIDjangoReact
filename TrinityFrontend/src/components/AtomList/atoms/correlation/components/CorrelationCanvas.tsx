@@ -492,39 +492,6 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
               </h3>
             </div>
             <div className="p-4 space-y-4">
-              <div>
-                <label className="text-sm font-medium text-foreground mb-2 block">Primary Variable</label>
-                <Select
-                  value={data.selectedVar1 || ''}
-                  onValueChange={(value) => onDataChange({ selectedVar1: value })}
-                >
-                  <SelectTrigger className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {allCurrentVariables.map(variable => (
-                      <SelectItem key={variable} value={variable}>{variable}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div>
-                <label className="text-sm font-medium text-foreground mb-2 block">Secondary Variable</label>
-                <Select
-                  value={data.selectedVar2 || ''}
-                  onValueChange={(value) => onDataChange({ selectedVar2: value })}
-                >
-                  <SelectTrigger className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {allCurrentVariables.map(variable => (
-                      <SelectItem key={variable} value={variable}>{variable}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
 
               {/* Correlation Result */}
               <div className="bg-muted/50 rounded-lg p-4 border">
