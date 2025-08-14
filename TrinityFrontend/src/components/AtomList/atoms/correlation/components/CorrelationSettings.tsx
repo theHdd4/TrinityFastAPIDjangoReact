@@ -12,6 +12,9 @@ import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Calendar as CalendarComponent } from '@/components/ui/calendar';
+import { format, parse, isValid } from 'date-fns';
 import { VALIDATE_API } from '@/lib/api';
 import type { CorrelationSettings } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { correlationAPI, handleAPIError, type FilterAndCorrelateRequest, type DateAnalysisResponse } from '../helpers/correlationAPI';
@@ -162,11 +165,60 @@ const formatDateForDisplay = (dateStr: string, format: string): string => {
 
 const getAvailableAggregationLevels = (granularity: string): string[] => {
   switch (granularity) {
-    case 'daily': return ['Daily', 'Weekly', 'Monthly', 'Quarterly', 'Yearly'];
-    case 'monthly': return ['Monthly', 'Quarterly', 'Yearly'];
-    case 'yearly': return ['Yearly'];
-    default: return ['Monthly', 'Quarterly', 'Yearly'];
+    case 'daily': return ['None', 'Daily', 'Weekly', 'Monthly', 'Quarterly', 'Yearly'];
+    case 'monthly': return ['None', 'Monthly', 'Quarterly', 'Yearly'];
+    case 'yearly': return ['None', 'Yearly'];
+    default: return ['None', 'Monthly', 'Quarterly', 'Yearly'];
   }
+};
+
+// Helper functions for date parsing and formatting
+const parseDateString = (dateStr: string, formatStr: string): Date | null => {
+  try {
+    if (!dateStr || !formatStr) return null;
+    
+    // For the calendar component, try to parse the date string with the detected format
+    let parseFormat = formatStr;
+    
+    // Common format mappings
+    const formatMap: Record<string, string> = {
+      'YYYY-MM-DD': 'yyyy-MM-dd',
+      'MM/DD/YYYY': 'MM/dd/yyyy',
+      'DD/MM/YYYY': 'dd/MM/yyyy',
+      'YYYY/MM/DD': 'yyyy/MM/dd',
+      'DD-MM-YYYY': 'dd-MM-yyyy',
+      'MM-DD-YYYY': 'MM-dd-yyyy'
+    };
+    
+    if (formatMap[formatStr]) {
+      parseFormat = formatMap[formatStr];
+    }
+    
+    const parsed = parse(dateStr, parseFormat, new Date());
+    return isValid(parsed) ? parsed : null;
+  } catch (error) {
+    console.error('Date parsing error:', error);
+    return null;
+  }
+};
+
+const formatDateForCalendar = (date: Date): string => {
+  try {
+    return format(date, 'yyyy-MM-dd');
+  } catch (error) {
+    console.error('Date formatting error:', error);
+    return '';
+  }
+};
+
+const getDateRangeForCalendar = (dateAnalysis: DateAnalysisResponse | undefined) => {
+  if (!dateAnalysis?.overall_date_range) return { fromDate: undefined, toDate: undefined };
+  
+  const formatStr = dateAnalysis.date_format_detected;
+  const fromDate = parseDateString(dateAnalysis.overall_date_range.min_date, formatStr);
+  const toDate = parseDateString(dateAnalysis.overall_date_range.max_date, formatStr);
+  
+  return { fromDate, toDate };
 };
 
 interface Frame { 
@@ -251,8 +303,8 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
             dateTo: formatDateForDisplay(analysis.overall_date_range.max_date, optimalFormat),
             detectedDateFormat: analysis.date_format_detected,
             recommendedGranularity: analysis.recommended_granularity,
-            // Auto-adjust aggregation level
-            aggregationLevel: analysis.recommended_granularity.charAt(0).toUpperCase() + analysis.recommended_granularity.slice(1)
+            // Auto-adjust aggregation level - default to None
+            aggregationLevel: 'None'
           }
         });
       }
@@ -486,7 +538,7 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
       <div className="space-y-3">
         <h3 className="text-sm font-medium text-muted-foreground">Date Filter</h3>
         
-        {/* Date range inputs with smart formatting */}
+        {/* Date range inputs with calendar pickers */}
         <div className="grid grid-cols-2 gap-2">
           <div className="space-y-1">
             <Label htmlFor="fromDate" className="text-xs text-muted-foreground">From</Label>
@@ -498,7 +550,31 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
                 className="pr-8 text-xs bg-background border-border"
                 placeholder={data.dateAnalysis.overall_date_range?.min_date ? formatDateForDisplay(data.dateAnalysis.overall_date_range.min_date, formatToShow) : 'Start date'}
               />
-              <Calendar className="absolute right-2 top-1/2 transform -translate-y-1/2 h-3 w-3 text-muted-foreground" />
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button variant="ghost" size="sm" className="absolute right-0 top-0 h-full w-8 px-0 hover:bg-transparent">
+                    <Calendar className="h-3 w-3 text-muted-foreground" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto p-0" align="start">
+                  <CalendarComponent
+                    mode="single"
+                    selected={data.settings?.dateFrom ? parseDateString(data.settings.dateFrom, data.dateAnalysis.date_format_detected) || undefined : undefined}
+                    onSelect={(date) => {
+                      if (date) {
+                        const formattedDate = formatDateForDisplay(formatDateForCalendar(date), formatToShow);
+                        handleSettingsChange('dateFrom', formattedDate);
+                      }
+                    }}
+                    disabled={(date) => {
+                      const { fromDate, toDate } = getDateRangeForCalendar(data.dateAnalysis);
+                      if (!fromDate || !toDate) return false;
+                      return date < fromDate || date > toDate;
+                    }}
+                    initialFocus
+                  />
+                </PopoverContent>
+              </Popover>
             </div>
           </div>
           
@@ -512,7 +588,31 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
                 className="pr-8 text-xs bg-background border-border"
                 placeholder={data.dateAnalysis.overall_date_range?.max_date ? formatDateForDisplay(data.dateAnalysis.overall_date_range.max_date, formatToShow) : 'End date'}
               />
-              <Calendar className="absolute right-2 top-1/2 transform -translate-y-1/2 h-3 w-3 text-muted-foreground" />
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button variant="ghost" size="sm" className="absolute right-0 top-0 h-full w-8 px-0 hover:bg-transparent">
+                    <Calendar className="h-3 w-3 text-muted-foreground" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto p-0" align="start">
+                  <CalendarComponent
+                    mode="single"
+                    selected={data.settings?.dateTo ? parseDateString(data.settings.dateTo, data.dateAnalysis.date_format_detected) || undefined : undefined}
+                    onSelect={(date) => {
+                      if (date) {
+                        const formattedDate = formatDateForDisplay(formatDateForCalendar(date), formatToShow);
+                        handleSettingsChange('dateTo', formattedDate);
+                      }
+                    }}
+                    disabled={(date) => {
+                      const { fromDate, toDate } = getDateRangeForCalendar(data.dateAnalysis);
+                      if (!fromDate || !toDate) return false;
+                      return date < fromDate || date > toDate;
+                    }}
+                    initialFocus
+                  />
+                </PopoverContent>
+              </Popover>
             </div>
           </div>
         </div>
@@ -619,7 +719,7 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
               {getAvailableAggregationLevels(data.dateAnalysis?.recommended_granularity || 'monthly').map((period) => (
                 <Button
                   key={period}
-                  variant={(data.settings?.aggregationLevel || 'Yearly') === period ? "default" : "outline"}
+                  variant={(data.settings?.aggregationLevel || 'None') === period ? "default" : "outline"}
                   size="sm"
                   className="text-xs h-6 px-2"
                   onClick={() => handleSettingsChange('aggregationLevel', period)}
