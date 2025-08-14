@@ -50,6 +50,11 @@ class FilterAndCorrelateRequest(BaseModel):
     save_filtered: bool = Field(True, description="Save filtered data separately")
     include_preview: bool = Field(True, description="Include data preview in response")
     preview_limit: int = Field(10, description="Number of rows to preview")
+    
+    # Date analysis options
+    include_date_analysis: bool = Field(False, description="Include date column analysis")
+    date_column: Optional[str] = Field(None, description="Specific date column to use for filtering")
+    date_range_filter: Optional[dict] = Field(None, description="Date range filter {'start': 'YYYY-MM-DD', 'end': 'YYYY-MM-DD'}")
 
 
 # ─── Response Schemas ────────────────────────────────────────────────────
@@ -79,6 +84,10 @@ class FilterAndCorrelateResponse(BaseModel):
     
     # Preview (optional)
     preview_data: Optional[List[dict]] = None
+    
+    # Date analysis (optional)
+    date_analysis: Optional["DateAnalysisResponse"] = None
+    date_filtered_rows: Optional[int] = None
     
     # Metadata
     timestamp: datetime
@@ -122,3 +131,24 @@ class ObjectListResponse(BaseModel):
     prefix: str
     count: int
     objects: List[dict]
+
+
+# ─── Date Analysis Schemas ───────────────────────────────────────────────
+class DateColumnInfo(BaseModel):
+    """Information about a single date column"""
+    column_name: str
+    min_date: Optional[str] = None
+    max_date: Optional[str] = None
+    format_detected: str
+    granularity: str  # "daily", "monthly", "yearly", "irregular"
+    sample_values: List[str]
+    is_valid_date: bool
+
+
+class DateAnalysisResponse(BaseModel):
+    """Response from date analysis endpoint"""
+    has_date_data: bool
+    date_columns: List[DateColumnInfo]
+    overall_date_range: Optional[dict] = None  # {"min_date": str, "max_date": str}
+    recommended_granularity: str
+    date_format_detected: str

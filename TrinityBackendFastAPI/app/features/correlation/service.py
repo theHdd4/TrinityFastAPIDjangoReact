@@ -339,3 +339,535 @@ def analyze_dataframe_for_correlation(df: pd.DataFrame) -> dict:
         "total_rows": len(df),
         "total_columns": len(df.columns)
     }
+
+
+# ─── Date Analysis Functions ─────────────────────────────────────────────
+def analyze_date_columns(df: pd.DataFrame) -> Dict[str, Any]:
+    """Analyze date columns and ranges in a dataframe"""
+    from .schema import DateColumnInfo
+    
+    date_info = {
+        "has_date_data": False,
+        "date_columns": [],
+        "overall_date_range": None,
+        "recommended_granularity": "monthly",
+        "date_format_detected": "YYYY-MM-DD"
+    }
+    
+    potential_date_cols = []
+    
+    # 1. PRIORITY: Check for explicit datetime columns first
+    datetime_cols = []
+    for col in df.columns:
+        if df[col].dtype.name.startswith('datetime'):
+            datetime_cols.append(col)
+            print(f"🗓️ Found explicit datetime column: {col}")
+    
+    # 2. PRIORITY: Look for exact "Date" column name (case-insensitive but exact match)
+    exact_date_cols = []
+    for col in df.columns:
+        if col.lower() == 'date':
+            exact_date_cols.append(col)
+            print(f"🎯 Found exact 'Date' column: {col}")
+    
+    # 3. Look for other common exact date column names
+    common_date_names = ['datetime', 'timestamp', 'created_at', 'updated_at', 'date_time']
+    common_date_cols = []
+    for col in df.columns:
+        if col.lower() in common_date_names:
+            common_date_cols.append(col)
+            print(f"📅 Found common date column: {col}")
+    
+    # 4. Look for columns that START with date-related keywords (not just contain them)
+    prefix_date_cols = []
+    date_prefixes = ['date_', 'time_', 'timestamp_']
+    for col in df.columns:
+        col_lower = col.lower()
+        if any(col_lower.startswith(prefix) for prefix in date_prefixes):
+            prefix_date_cols.append(col)
+            print(f"🏷️ Found prefixed date column: {col}")
+    
+    # 5. LAST RESORT: Check for year/month/day numeric columns for reconstruction
+    numeric_date_cols = []
+    year_month_day_patterns = [
+        ('year', 'month', 'day'),
+        ('yyyy', 'mm', 'dd'),
+        ('yr', 'mon', 'day')
+    ]
+    
+    for year_pattern, month_pattern, day_pattern in year_month_day_patterns:
+        year_cols = [col for col in df.columns if year_pattern in col.lower()]
+        month_cols = [col for col in df.columns if month_pattern in col.lower()]
+        day_cols = [col for col in df.columns if day_pattern in col.lower()]
+        
+        if year_cols and month_cols:  # Day is optional
+            print(f"📊 Found date component columns: Year={year_cols}, Month={month_cols}, Day={day_cols}")
+            # We'll create a synthetic date column from these components
+            numeric_date_cols.extend([f"SYNTHETIC_DATE_FROM_{year_cols[0]}_{month_cols[0]}"])
+    
+    # Prioritize columns in order of preference
+    potential_date_cols = (
+        datetime_cols +           # Highest priority: already datetime
+        exact_date_cols +         # High priority: exact "Date" match
+        common_date_cols +        # Medium priority: common date names
+        prefix_date_cols +        # Lower priority: prefixed names
+        numeric_date_cols         # Lowest priority: reconstructed from components
+    )
+    
+    # Remove duplicates while preserving order
+    seen = set()
+    unique_potential_cols = []
+    for col in potential_date_cols:
+        if col not in seen:
+            seen.add(col)
+            unique_potential_cols.append(col)
+    
+    potential_date_cols = unique_potential_cols
+    
+    # 6. Only check object columns for date-like content if we haven't found obvious date columns
+    if not potential_date_cols:
+        print("⚠️ No obvious date columns found, checking object columns for date-like content...")
+        for col in df.select_dtypes(include=['object']).columns:
+            if _is_likely_date_column(df[col]):
+                potential_date_cols.append(col)
+                print(f"🔍 Object column appears to contain dates: {col}")
+    
+    print(f"🔍 Final potential date columns (in priority order): {potential_date_cols}")
+    
+    # Analyze each potential date column
+    for col in potential_date_cols:
+        if col.startswith("SYNTHETIC_DATE_FROM_"):
+            # Handle synthetic date column reconstruction
+            col_analysis = _create_synthetic_date_column(df, col)
+        else:
+            col_analysis = _analyze_single_date_column(df[col])
+        
+        if col_analysis["is_valid_date"]:
+            date_info["date_columns"].append(col_analysis)
+    
+    if date_info["date_columns"]:
+        date_info["has_date_data"] = True
+        date_info = _calculate_overall_date_metrics(date_info)
+    
+    print(f"✅ Date analysis complete: {len(date_info['date_columns'])} valid date columns found")
+    return date_info
+    
+    if date_info["date_columns"]:
+        date_info["has_date_data"] = True
+        date_info = _calculate_overall_date_metrics(date_info)
+    
+    print(f"✅ Date analysis complete: {len(date_info['date_columns'])} valid date columns found")
+    return date_info
+
+
+def _is_likely_date_column(series: pd.Series) -> bool:
+    """Check if a series looks like it contains dates - more strict validation"""
+    if len(series) == 0:
+        return False
+    
+    # Sample up to 20 non-null values
+    sample_values = series.dropna().head(20)
+    if len(sample_values) == 0:
+        return False
+    
+    successful_parses = 0
+    date_like_patterns = 0
+    
+    # Check for common date patterns
+    date_patterns = [
+        # DateTime patterns (with time component)
+        r'\d{1,2}\/\d{1,2}\/\d{4}\s+\d{1,2}:\d{2}:\d{2}',  # DD/MM/YYYY HH:MM:SS
+        r'\d{4}-\d{1,2}-\d{1,2}\s+\d{1,2}:\d{2}:\d{2}',     # YYYY-MM-DD HH:MM:SS
+        r'\d{1,2}-\d{1,2}-\d{4}\s+\d{1,2}:\d{2}:\d{2}',     # DD-MM-YYYY HH:MM:SS
+        r'\d{4}\/\d{1,2}\/\d{1,2}\s+\d{1,2}:\d{2}:\d{2}',   # YYYY/MM/DD HH:MM:SS
+        r'\d{1,2}\/\d{1,2}\/\d{4}\s+\d{1,2}:\d{2}',         # DD/MM/YYYY HH:MM
+        
+        # Date-only patterns
+        r'\d{1,2}\/\d{1,2}\/\d{4}',      # DD/MM/YYYY or MM/DD/YYYY
+        r'\d{4}-\d{1,2}-\d{1,2}',        # YYYY-MM-DD
+        r'\d{1,2}-\d{1,2}-\d{4}',        # DD-MM-YYYY or MM-DD-YYYY
+        r'\d{4}\/\d{1,2}\/\d{1,2}',      # YYYY/MM/DD
+        r'\d{1,2}\s\w{3}\s\d{4}',        # DD MMM YYYY
+        r'\w{3}\s\d{1,2},?\s\d{4}',      # MMM DD, YYYY
+    ]
+    
+    import re
+    
+    for value in sample_values:
+        str_value = str(value).strip()
+        
+        # Skip if it's just a number (likely not a date)
+        if str_value.replace('.', '').replace('-', '').isdigit() and len(str_value) < 8:
+            continue
+            
+        # Check if it matches common date patterns
+        pattern_matched = any(re.match(pattern, str_value) for pattern in date_patterns)
+        if pattern_matched:
+            date_like_patterns += 1
+        
+        # Try parsing as date
+        try:
+            parsed_date = pd.to_datetime(str_value, errors='raise')
+            # Additional validation: check if the parsed date is reasonable
+            if parsed_date.year >= 1900 and parsed_date.year <= 2100:
+                successful_parses += 1
+        except (ValueError, TypeError):
+            continue
+    
+    # Require both pattern matching and successful parsing
+    pattern_success_rate = date_like_patterns / len(sample_values)
+    parse_success_rate = successful_parses / len(sample_values)
+    
+    print(f"🔍 Date validation - Pattern matches: {pattern_success_rate:.2%}, Parse success: {parse_success_rate:.2%}")
+    
+    # More strict: require high success rate for both criteria
+    return pattern_success_rate > 0.8 and parse_success_rate > 0.8
+
+
+def _create_synthetic_date_column(df: pd.DataFrame, synthetic_col_name: str) -> Dict[str, Any]:
+    """Create a synthetic date column from year/month/day components"""
+    result = {
+        "column_name": synthetic_col_name,
+        "min_date": None,
+        "max_date": None,
+        "format_detected": "YYYY-MM-DD",
+        "granularity": "daily",
+        "sample_values": [],
+        "is_valid_date": False
+    }
+    
+    try:
+        # Extract component column names from synthetic name
+        parts = synthetic_col_name.replace("SYNTHETIC_DATE_FROM_", "").split("_")
+        if len(parts) < 2:
+            return result
+            
+        year_col = parts[0]
+        month_col = parts[1]
+        day_col = parts[2] if len(parts) > 2 else None
+        
+        # Check if these columns exist
+        if year_col not in df.columns or month_col not in df.columns:
+            return result
+        
+        # Create synthetic dates
+        year_data = df[year_col]
+        month_data = df[month_col]
+        day_data = df[day_col] if day_col and day_col in df.columns else 1  # Default to 1st day
+        
+        # Build date strings
+        synthetic_dates = []
+        for i in range(len(df)):
+            try:
+                year = int(year_data.iloc[i]) if pd.notna(year_data.iloc[i]) else 2000
+                month = int(month_data.iloc[i]) if pd.notna(month_data.iloc[i]) else 1
+                day = int(day_data.iloc[i] if hasattr(day_data, 'iloc') else day_data) if pd.notna(day_data) else 1
+                
+                # Validate ranges
+                if 1900 <= year <= 2100 and 1 <= month <= 12 and 1 <= day <= 31:
+                    date_obj = pd.Timestamp(year=year, month=month, day=day)
+                    synthetic_dates.append(date_obj)
+                else:
+                    synthetic_dates.append(pd.NaT)
+            except (ValueError, TypeError):
+                synthetic_dates.append(pd.NaT)
+        
+        # Convert to series for analysis
+        synthetic_series = pd.Series(synthetic_dates)
+        valid_dates = synthetic_series.dropna()
+        
+        if len(valid_dates) > 0:
+            result.update({
+                "min_date": valid_dates.min().strftime("%Y-%m-%d"),
+                "max_date": valid_dates.max().strftime("%Y-%m-%d"),
+                "is_valid_date": True,
+                "sample_values": [d.strftime("%Y-%m-%d") for d in valid_dates.head(5)],
+                "granularity": _detect_granularity(valid_dates)
+            })
+            
+            print(f"✅ Successfully created synthetic date column from {year_col}, {month_col}, {day_col}")
+        
+    except Exception as e:
+        print(f"⚠️ Failed to create synthetic date column: {e}")
+    
+    return result
+
+
+def _analyze_single_date_column(series: pd.Series) -> Dict[str, Any]:
+    """Analyze a single date column for format, range, granularity"""
+    result = {
+        "column_name": series.name,
+        "min_date": None,
+        "max_date": None,
+        "format_detected": "YYYY-MM-DD",
+        "granularity": "irregular",
+        "sample_values": [],
+        "is_valid_date": False
+    }
+    
+    try:
+        # Convert to datetime with improved handling
+        if series.dtype.name.startswith('datetime'):
+            date_series = series
+            print(f"📅 Column {series.name} is already datetime type")
+        else:
+            print(f"🔄 Converting column {series.name} to datetime...")
+            # Try multiple datetime conversion strategies
+            date_series = None
+            
+            # Strategy 1: Direct pandas conversion with inference
+            try:
+                date_series = pd.to_datetime(series, errors='coerce', infer_datetime_format=True)
+                successful_conversions = date_series.notna().sum()
+                print(f"✅ Strategy 1 success: {successful_conversions}/{len(series)} conversions")
+            except Exception as e:
+                print(f"⚠️ Strategy 1 failed: {e}")
+            
+            # Strategy 2: Handle specific datetime formats if strategy 1 didn't work well
+            if date_series is None or date_series.notna().sum() < len(series) * 0.8:
+                print("🔄 Trying specific format parsing...")
+                
+                # Common datetime formats to try
+                datetime_formats = [
+                    '%d/%m/%Y %H:%M:%S',     # 23/12/2021 00:00:00
+                    '%d/%m/%Y',              # 23/12/2021
+                    '%m/%d/%Y %H:%M:%S',     # 12/23/2021 00:00:00
+                    '%m/%d/%Y',              # 12/23/2021
+                    '%Y-%m-%d %H:%M:%S',     # 2021-12-23 00:00:00
+                    '%Y-%m-%d',              # 2021-12-23
+                    '%d-%m-%Y %H:%M:%S',     # 23-12-2021 00:00:00
+                    '%d-%m-%Y',              # 23-12-2021
+                    '%Y/%m/%d %H:%M:%S',     # 2021/12/23 00:00:00
+                    '%Y/%m/%d',              # 2021/12/23
+                ]
+                
+                best_format = None
+                best_series = None
+                best_success_rate = 0
+                
+                for fmt in datetime_formats:
+                    try:
+                        test_series = pd.to_datetime(series, format=fmt, errors='coerce')
+                        success_rate = test_series.notna().sum() / len(series)
+                        print(f"📊 Format {fmt}: {success_rate:.2%} success rate")
+                        
+                        if success_rate > best_success_rate:
+                            best_success_rate = success_rate
+                            best_series = test_series
+                            best_format = fmt
+                    except Exception:
+                        continue
+                
+                if best_series is not None and best_success_rate > 0.7:
+                    date_series = best_series
+                    result["format_detected"] = best_format
+                    print(f"✅ Best format found: {best_format} with {best_success_rate:.2%} success")
+                else:
+                    # Fall back to coerce method
+                    date_series = pd.to_datetime(series, errors='coerce')
+                    print(f"⚠️ Falling back to coerce method")
+        
+        # Remove NaT values
+        valid_dates = date_series.dropna()
+        
+        if len(valid_dates) == 0:
+            print(f"❌ No valid dates found in column {series.name}")
+            return result
+        
+        conversion_rate = len(valid_dates) / len(series)
+        print(f"📊 Date conversion success: {len(valid_dates)}/{len(series)} ({conversion_rate:.2%})")
+        
+        # Require at least 70% successful conversion for a valid date column
+        if conversion_rate < 0.7:
+            print(f"⚠️ Low conversion rate ({conversion_rate:.2%}) - not considering as date column")
+            return result
+        
+        # Get date range
+        min_date = valid_dates.min()
+        max_date = valid_dates.max()
+        
+        # Validate date range is reasonable
+        if min_date.year < 1900 or max_date.year > 2100:
+            print(f"⚠️ Date range seems unrealistic: {min_date} to {max_date}")
+            return result
+        
+        result.update({
+            "min_date": min_date.strftime("%Y-%m-%d"),
+            "max_date": max_date.strftime("%Y-%m-%d"),
+            "is_valid_date": True
+        })
+        
+        # Detect format from original values (if not already detected)
+        if result["format_detected"] == "YYYY-MM-DD" and not series.dtype.name.startswith('datetime'):
+            detected_format = _detect_date_format(series.dropna().head(10))
+            result["format_detected"] = detected_format
+        
+        # Detect granularity
+        result["granularity"] = _detect_granularity(valid_dates)
+        
+        # Get sample values - show both original and converted
+        sample_size = min(5, len(valid_dates))
+        sample_dates = valid_dates.head(sample_size)
+        result["sample_values"] = [d.strftime("%Y-%m-%d") for d in sample_dates]
+        
+        print(f"✅ Successfully analyzed date column {series.name}: {min_date.strftime('%Y-%m-%d')} to {max_date.strftime('%Y-%m-%d')}")
+        
+    except Exception as e:
+        print(f"💥 Error analyzing date column {series.name}: {e}")
+        import traceback
+        print(f"🔍 Traceback: {traceback.format_exc()}")
+    
+    return result
+
+
+def _detect_date_format(sample_values) -> str:
+    """Detect the most common date format in sample values"""
+    formats_to_try = [
+        # DateTime formats (with time component)
+        "%d/%m/%Y %H:%M:%S",    # 23/12/2021 00:00:00
+        "%m/%d/%Y %H:%M:%S",    # 12/23/2021 00:00:00
+        "%Y-%m-%d %H:%M:%S",    # 2021-12-23 00:00:00
+        "%d-%m-%Y %H:%M:%S",    # 23-12-2021 00:00:00
+        "%Y/%m/%d %H:%M:%S",    # 2021/12/23 00:00:00
+        "%d/%m/%Y %H:%M",       # 23/12/2021 00:00
+        "%m/%d/%Y %H:%M",       # 12/23/2021 00:00
+        "%Y-%m-%d %H:%M",       # 2021-12-23 00:00
+        
+        # Date-only formats
+        "%d/%m/%Y",             # 23/12/2021
+        "%m/%d/%Y",             # 12/23/2021
+        "%Y-%m-%d",             # 2021-12-23
+        "%d-%m-%Y",             # 23-12-2021
+        "%Y/%m/%d",             # 2021/12/23
+        "%b %d, %Y",            # Dec 23, 2021
+        "%d %b %Y",             # 23 Dec 2021
+        "%B %d, %Y",            # December 23, 2021
+        
+        # Partial date formats
+        "%Y-%m",                # 2021-12 (year-month)
+        "%Y",                   # 2021 (year only)
+        "%m/%Y",                # 12/2021 (month/year)
+    ]
+    
+    format_scores = {}
+    total_samples = len(sample_values)
+    
+    print(f"🔍 Analyzing {total_samples} sample values for date format detection...")
+    
+    for fmt in formats_to_try:
+        score = 0
+        for value in sample_values:
+            try:
+                parsed = pd.to_datetime(str(value), format=fmt, errors='raise')
+                # Additional validation: check if year is reasonable
+                if 1900 <= parsed.year <= 2100:
+                    score += 1
+            except (ValueError, TypeError):
+                continue
+        
+        if score > 0:
+            success_rate = score / total_samples
+            format_scores[fmt] = score
+            print(f"📊 Format {fmt}: {score}/{total_samples} matches ({success_rate:.2%})")
+    
+    if not format_scores:
+        print("⚠️ No format matched the sample values, using default")
+        return "%Y-%m-%d"
+    
+    # Return format with highest score
+    best_format = max(format_scores, key=format_scores.get)
+    best_score = format_scores[best_format]
+    success_rate = best_score / total_samples
+    
+    print(f"✅ Best format detected: {best_format} with {success_rate:.2%} success rate")
+    return best_format
+
+
+def _detect_granularity(date_series: pd.Series) -> str:
+    """Detect if data is daily, monthly, yearly based on patterns"""
+    if len(date_series) < 2:
+        return "irregular"
+    
+    # Sort dates and calculate differences
+    sorted_dates = date_series.sort_values()
+    differences = sorted_dates.diff().dropna()
+    
+    if len(differences) == 0:
+        return "irregular"
+    
+    # Analyze the differences
+    avg_diff_days = differences.dt.days.mean()
+    
+    if 0.8 <= avg_diff_days <= 1.2:
+        return "daily"
+    elif 28 <= avg_diff_days <= 31:
+        return "monthly"
+    elif 88 <= avg_diff_days <= 95:  # ~3 months
+        return "quarterly"
+    elif 360 <= avg_diff_days <= 370:
+        return "yearly"
+    else:
+        return "irregular"
+
+
+def _calculate_overall_date_metrics(date_info: Dict[str, Any]) -> Dict[str, Any]:
+    """Calculate overall date range and recommended granularity"""
+    if not date_info["date_columns"]:
+        return date_info
+    
+    # Find overall date range across all date columns
+    all_min_dates = []
+    all_max_dates = []
+    granularities = []
+    
+    for col_info in date_info["date_columns"]:
+        if col_info["min_date"]:
+            all_min_dates.append(pd.to_datetime(col_info["min_date"]))
+        if col_info["max_date"]:
+            all_max_dates.append(pd.to_datetime(col_info["max_date"]))
+        granularities.append(col_info["granularity"])
+    
+    if all_min_dates and all_max_dates:
+        overall_min = min(all_min_dates)
+        overall_max = max(all_max_dates)
+        
+        date_info["overall_date_range"] = {
+            "min_date": overall_min.strftime("%Y-%m-%d"),
+            "max_date": overall_max.strftime("%Y-%m-%d")
+        }
+    
+    # Determine recommended granularity (most common or finest available)
+    if granularities:
+        granularity_priority = {"daily": 4, "monthly": 3, "quarterly": 2, "yearly": 1, "irregular": 0}
+        best_granularity = max(granularities, key=lambda g: granularity_priority.get(g, 0))
+        date_info["recommended_granularity"] = best_granularity
+    
+    return date_info
+
+
+def apply_date_range_filter(df: pd.DataFrame, date_column: str, date_range: Dict[str, str]) -> pd.DataFrame:
+    """Apply date range filter to dataframe"""
+    if date_column not in df.columns:
+        raise ValueError(f"Date column '{date_column}' not found in dataframe")
+    
+    try:
+        # Convert column to datetime if not already
+        if not df[date_column].dtype.name.startswith('datetime'):
+            date_col = pd.to_datetime(df[date_column], errors='coerce')
+        else:
+            date_col = df[date_column]
+        
+        # Parse filter dates
+        start_date = pd.to_datetime(date_range.get("start"))
+        end_date = pd.to_datetime(date_range.get("end"))
+        
+        # Apply filter
+        mask = (date_col >= start_date) & (date_col <= end_date)
+        filtered_df = df[mask].copy()
+        
+        print(f"🗓️ Date filter applied: {len(df)} → {len(filtered_df)} rows")
+        return filtered_df
+        
+    except Exception as e:
+        print(f"⚠️ Date filtering failed: {e}")
+        return df

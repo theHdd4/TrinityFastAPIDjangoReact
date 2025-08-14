@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Calendar, X, FileText, AlertCircle, CheckCircle, Loader2 } from 'lucide-react';
+import { Calendar, X, FileText, AlertCircle, CheckCircle, Loader2, Clock } from 'lucide-react';
 import {
   Select,
   SelectContent,
@@ -14,7 +14,7 @@ import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { VALIDATE_API } from '@/lib/api';
 import type { CorrelationSettings } from '@/components/LaboratoryMode/store/laboratoryStore';
-import { correlationAPI, handleAPIError, type FilterAndCorrelateRequest } from '../helpers/correlationAPI';
+import { correlationAPI, handleAPIError, type FilterAndCorrelateRequest, type DateAnalysisResponse } from '../helpers/correlationAPI';
 
 interface CorrelationSettingsProps {
   data: CorrelationSettings;
@@ -131,6 +131,44 @@ const validateTimeSeriesData = (previewData: any[]): Array<{date: Date; var1Valu
   }
 };
 
+// Helper functions for date formatting
+const getOptimalDateFormat = (analysis: DateAnalysisResponse): string => {
+  switch (analysis.recommended_granularity) {
+    case 'daily': return 'YYYY-MM-DD';
+    case 'monthly': return 'MMM YYYY';
+    case 'yearly': return 'YYYY';
+    default: return 'YYYY-MM-DD';
+  }
+};
+
+const formatDateForDisplay = (dateStr: string, format: string): string => {
+  try {
+    const date = new Date(dateStr);
+    if (isNaN(date.getTime())) return dateStr;
+    
+    switch (format) {
+      case 'MMM YYYY':
+        return date.toLocaleDateString('en-US', { year: 'numeric', month: 'short' });
+      case 'YYYY':
+        return date.getFullYear().toString();
+      case 'YYYY-MM-DD':
+      default:
+        return date.toISOString().split('T')[0];
+    }
+  } catch {
+    return dateStr;
+  }
+};
+
+const getAvailableAggregationLevels = (granularity: string): string[] => {
+  switch (granularity) {
+    case 'daily': return ['Daily', 'Weekly', 'Monthly', 'Quarterly', 'Yearly'];
+    case 'monthly': return ['Monthly', 'Quarterly', 'Yearly'];
+    case 'yearly': return ['Yearly'];
+    default: return ['Monthly', 'Quarterly', 'Yearly'];
+  }
+};
+
 interface Frame { 
   object_name: string; 
   csv_name: string; 
@@ -145,6 +183,7 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
     identifiers: [],
     measures: []
   });
+  const [isAnalyzingDates, setIsAnalyzingDates] = useState(false);
 
   // Load available dataframes on component mount
   useEffect(() => {
@@ -190,6 +229,48 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
     }
   };
 
+  const analyzeDates = async (filePath: string) => {
+    setIsAnalyzingDates(true);
+    try {
+      console.log('🗓️ Starting date analysis for:', filePath);
+      const analysis = await correlationAPI.analyzeDates(filePath);
+      console.log('📅 Date analysis result:', analysis);
+      
+      // Store date analysis in component state
+      onDataChange({
+        dateAnalysis: analysis
+      });
+      
+      // Auto-populate date fields if analysis successful
+      if (analysis.has_date_data && analysis.overall_date_range) {
+        const optimalFormat = getOptimalDateFormat(analysis);
+        onDataChange({
+          settings: {
+            ...data.settings,
+            dateFrom: formatDateForDisplay(analysis.overall_date_range.min_date, optimalFormat),
+            dateTo: formatDateForDisplay(analysis.overall_date_range.max_date, optimalFormat),
+            detectedDateFormat: analysis.date_format_detected,
+            recommendedGranularity: analysis.recommended_granularity,
+            // Auto-adjust aggregation level
+            aggregationLevel: analysis.recommended_granularity.charAt(0).toUpperCase() + analysis.recommended_granularity.slice(1)
+          }
+        });
+      }
+    } catch (error) {
+      console.error('Date analysis failed:', error);
+      onDataChange({
+        dateAnalysis: {
+          has_date_data: false,
+          date_columns: [],
+          recommended_granularity: 'monthly',
+          date_format_detected: 'YYYY-MM-DD'
+        }
+      });
+    } finally {
+      setIsAnalyzingDates(false);
+    }
+  };
+
   const handleFileSelection = async (objectName: string) => {
     setProcessingError(null);
     setIsProcessing(true);
@@ -199,8 +280,12 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
       fileData: null,
       correlationMatrix: null,
       timeSeriesData: null,
+      dateAnalysis: null,
       isUsingFileData: true  // Always default to using uploaded data
     });
+    
+    // Analyze dates first
+    await analyzeDates(objectName);
     
     // Try to get validator atom ID and load columns
     try {
@@ -247,7 +332,8 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
         method: (data.settings?.correlationMethod || 'pearson').toLowerCase() as any,
         include_preview: true,
         preview_limit: 10,
-        save_filtered: true
+        save_filtered: true,
+        include_date_analysis: true // Always include date analysis
       };
 
       // Add column selections if specified
@@ -268,7 +354,26 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
         }
       }
 
+      // Add date filtering if we have date analysis and settings
+      if (data.dateAnalysis?.has_date_data && data.settings?.dateFrom && data.settings?.dateTo) {
+        const primaryDateColumn = data.dateAnalysis.date_columns[0]?.column_name;
+        if (primaryDateColumn) {
+          request.date_column = primaryDateColumn;
+          request.date_range_filter = {
+            start: data.settings.dateFrom,
+            end: data.settings.dateTo
+          };
+        }
+      }
+
       const result = await correlationAPI.filterAndCorrelate(request);
+      
+      // Update date analysis if included in response
+      if (result.date_analysis) {
+        onDataChange({
+          dateAnalysis: result.date_analysis
+        });
+      }
       
       // Get variables (column names) from the result
       const resultVariables = result.columns_used || [];
@@ -297,7 +402,7 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
           fileName: filePath,
           rawData: result.preview_data || [],
           numericColumns: filteredVariables, // Use filtered variables for numeric columns
-          dateColumns: [],
+          dateColumns: result.date_analysis?.date_columns.map(col => col.column_name) || [],
           categoricalColumns: (result.columns_used || []).filter(col => 
             !filteredVariables.includes(col) // Non-numeric columns are the ones filtered out
           ),
@@ -362,9 +467,64 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
     onDataChange({
       correlationMatrix: [],
       timeSeriesData: [],
-      variables: []
+      variables: [],
+      dateAnalysis: null
     });
     setProcessingError(null);
+  };
+
+  // Smart date field rendering
+  const renderDateFilterSection = () => {
+    // Don't render if no date analysis or no date data
+    if (!data.dateAnalysis || !data.dateAnalysis.has_date_data) {
+      return null;
+    }
+
+    const formatToShow = getOptimalDateFormat(data.dateAnalysis);
+    
+    return (
+      <div className="space-y-3">
+        <h3 className="text-sm font-medium text-muted-foreground">Date Filter</h3>
+        
+        {/* Date range inputs with smart formatting */}
+        <div className="grid grid-cols-2 gap-2">
+          <div className="space-y-1">
+            <Label htmlFor="fromDate" className="text-xs text-muted-foreground">From</Label>
+            <div className="relative">
+              <Input
+                id="fromDate"
+                value={data.settings?.dateFrom || ''}
+                onChange={(e) => handleSettingsChange('dateFrom', e.target.value)}
+                className="pr-8 text-xs bg-background border-border"
+                placeholder={data.dateAnalysis.overall_date_range?.min_date ? formatDateForDisplay(data.dateAnalysis.overall_date_range.min_date, formatToShow) : 'Start date'}
+              />
+              <Calendar className="absolute right-2 top-1/2 transform -translate-y-1/2 h-3 w-3 text-muted-foreground" />
+            </div>
+          </div>
+          
+          <div className="space-y-1">
+            <Label htmlFor="toDate" className="text-xs text-muted-foreground">To</Label>
+            <div className="relative">
+              <Input
+                id="toDate"
+                value={data.settings?.dateTo || ''}
+                onChange={(e) => handleSettingsChange('dateTo', e.target.value)}
+                className="pr-8 text-xs bg-background border-border"
+                placeholder={data.dateAnalysis.overall_date_range?.max_date ? formatDateForDisplay(data.dateAnalysis.overall_date_range.max_date, formatToShow) : 'End date'}
+              />
+              <Calendar className="absolute right-2 top-1/2 transform -translate-y-1/2 h-3 w-3 text-muted-foreground" />
+            </div>
+          </div>
+        </div>
+        
+        {/* Show available date columns */}
+        {data.dateAnalysis.date_columns.length > 1 && (
+          <div className="text-xs text-muted-foreground">
+            <strong>Available date columns:</strong> {data.dateAnalysis.date_columns.map(col => col.column_name).join(', ')}
+          </div>
+        )}
+      </div>
+    );
   };
 
   return (
@@ -387,6 +547,14 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
                 ))}
               </SelectContent>
             </Select>
+            
+            {/* Show processing status */}
+            {(isProcessing || isAnalyzingDates) && (
+              <div className="flex items-center gap-2 text-xs text-blue-600">
+                <Loader2 className="h-3 w-3 animate-spin" />
+                {isAnalyzingDates ? 'Analyzing date columns...' : 'Processing dataframe...'}
+              </div>
+            )}
           </div>
           
 
@@ -396,28 +564,11 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
                 <h4 className="text-sm font-medium text-blue-900 mb-2">Available Columns</h4>
                 <div className="space-y-1">
                   <div>
-                    <span className="text-xs font-medium text-blue-800">Numeric ({data.fileData?.numericColumns?.length || 0}): </span>
+                    <span className="text-xs font-medium text-blue-800">({data.fileData?.numericColumns?.length || 0}): </span>
                     <span className="text-xs text-blue-700">
                       {data.fileData?.numericColumns?.join(', ') || ''}
                     </span>
                   </div>
-                  {(data.fileData?.dateColumns?.length || 0) > 0 && (
-                    <div>
-                      <span className="text-xs font-medium text-blue-800">Date ({data.fileData?.dateColumns?.length || 0}): </span>
-                      <span className="text-xs text-blue-700">
-                        {data.fileData?.dateColumns?.join(', ') || ''}
-                      </span>
-                    </div>
-                  )}
-                  {(data.fileData?.categoricalColumns?.length || 0) > 0 && (
-                    <div>
-                      <span className="text-xs font-medium text-blue-800">Categorical ({data.fileData?.categoricalColumns?.length || 0}): </span>
-                      <span className="text-xs text-blue-700">
-                        {data.fileData?.categoricalColumns?.slice(0, 3).join(', ') || ''}
-                        {(data.fileData?.categoricalColumns?.length || 0) > 3 ? ` +${(data.fileData?.categoricalColumns?.length || 0) - 3} more` : ''}
-                      </span>
-                    </div>
-                  )}
                 </div>
               </div>
             )}
@@ -457,64 +608,28 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
         </div>
       </div>
 
-      {/* Date Filter Section */}
-      <div className="space-y-3">
-        <h3 className="text-sm font-medium text-muted-foreground">Date Filter</h3>
-        <div className="grid grid-cols-2 gap-2">
-          <div className="space-y-1">
-            <Label htmlFor="fromDate" className="text-xs text-muted-foreground">From</Label>
-            <div className="relative">
-              <Input
-                id="fromDate"
-                value={data.settings?.dateFrom || '01 JUL 2020'}
-                onChange={(e) => handleSettingsChange('dateFrom', e.target.value)}
-                className="pr-8 text-xs bg-background border-border"
-                placeholder="01 JUL 2020"
-              />
-              <Calendar className="absolute right-2 top-1/2 transform -translate-y-1/2 h-3 w-3 text-muted-foreground" />
-            </div>
-          </div>
-          
-          <div className="space-y-1">
-            <Label htmlFor="toDate" className="text-xs text-muted-foreground">To</Label>
-            <div className="relative">
-              <Input
-                id="toDate"
-                value={data.settings?.dateTo || '30 MAR 2025'}
-                onChange={(e) => handleSettingsChange('dateTo', e.target.value)}
-                className="pr-8 text-xs bg-background border-border"
-                placeholder="30 MAR 2025"
-              />
-              <Calendar className="absolute right-2 top-1/2 transform -translate-y-1/2 h-3 w-3 text-muted-foreground" />
-            </div>
-          </div>
-        </div>
-        
-        <div className="text-xs text-muted-foreground">
-          Data available<br />
-          <span className="font-medium">From:</span> 01-Jan-2018 to: 30-Mar-2025
-        </div>
-      </div>
+        {/* Smart Date Filter Section - Only render if date data exists */}
+        {renderDateFilterSection()}
 
-      {/* Date and Time Aggregation */}
-      <div className="space-y-3">
-        <h3 className="text-sm font-medium text-muted-foreground">Date and Time Aggregation</h3>
-        <div className="space-y-2">
-          <div className="flex gap-1">
-            {['Yearly', 'Quarterly', 'Monthly', 'Weekly'].map((period) => (
-              <Button
-                key={period}
-                variant={(data.settings?.aggregationLevel || 'Yearly') === period ? "default" : "outline"}
-                size="sm"
-                className="text-xs h-6 px-2"
-                onClick={() => handleSettingsChange('aggregationLevel', period)}
-              >
-                {period}
-              </Button>
-            ))}
+        {/* Date and Time Aggregation - Smart options based on detected granularity */}
+        <div className="space-y-3">
+          <h3 className="text-sm font-medium text-muted-foreground">Date and Time Aggregation</h3>
+          <div className="space-y-2">
+            <div className="flex gap-1 flex-wrap">
+              {getAvailableAggregationLevels(data.dateAnalysis?.recommended_granularity || 'monthly').map((period) => (
+                <Button
+                  key={period}
+                  variant={(data.settings?.aggregationLevel || 'Yearly') === period ? "default" : "outline"}
+                  size="sm"
+                  className="text-xs h-6 px-2"
+                  onClick={() => handleSettingsChange('aggregationLevel', period)}
+                >
+                  {period}
+                </Button>
+              ))}
+            </div>
           </div>
         </div>
-      </div>
 
       {/* Select Filter */}
       <div className="space-y-3">
@@ -571,25 +686,32 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
         </Select>
       </div>
 
-      {/* Action Buttons */}
-      <div className="flex gap-2 pt-4">
-        <Button 
-          variant="default" 
-          size="sm" 
-          className="flex-1"
-          onClick={handleApplySettings}
-          disabled={isProcessing || !data.fileData?.isProcessed}
-        >
-          Recalculate
-        </Button>
-        <Button 
-          variant="outline" 
-          size="sm" 
-          className="flex-1"
-          onClick={handleReset}
-        >
-          Reset
-        </Button>
+        {/* Action Buttons */}
+        <div className="flex gap-2 pt-4">
+          <Button 
+            variant="default" 
+            size="sm" 
+            className="flex-1"
+            onClick={handleApplySettings}
+            disabled={isProcessing || isAnalyzingDates || !data.fileData?.isProcessed}
+          >
+            {isProcessing ? (
+              <>
+                <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                Processing...
+              </>
+            ) : (
+              'Recalculate'
+            )}
+          </Button>
+          <Button 
+            variant="outline" 
+            size="sm" 
+            className="flex-1"
+            onClick={handleReset}
+          >
+            Reset
+          </Button>
         </div>
       </div>
   );

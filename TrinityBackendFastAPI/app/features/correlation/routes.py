@@ -60,6 +60,7 @@ async def root():
             "/buckets",
             "/column-values",
             "/data-preview",
+            "/analyze-dates",
             "/dataframe-validator",
             "/load-dataframe"
         ]
@@ -298,6 +299,28 @@ async def filter_and_correlate(request: FilterAndCorrelateRequest):
                     f"{request.method} requires exactly 2 columns to be specified."
                 )
         
+        # Apply date range filter if requested
+        date_filtered_rows = None
+        if request.date_range_filter and request.date_column:
+            from .service import apply_date_range_filter
+            try:
+                df = apply_date_range_filter(df, request.date_column, request.date_range_filter)
+                date_filtered_rows = len(df)
+                filtered_rows = date_filtered_rows  # Update filtered rows count
+                print(f"🗓️ Date filter applied: {date_filtered_rows} rows remaining")
+            except Exception as e:
+                print(f"⚠️ Date filtering failed: {e}")
+        
+        # Perform date analysis if requested
+        date_analysis = None
+        if request.include_date_analysis:
+            from .service import analyze_date_columns
+            try:
+                date_analysis = analyze_date_columns(df)
+                print(f"📅 Date analysis completed: {date_analysis['has_date_data']}")
+            except Exception as e:
+                print(f"⚠️ Date analysis failed: {e}")
+        
         # Save filtered data if requested
         filtered_file_path = None
         if request.save_filtered:
@@ -380,6 +403,8 @@ async def filter_and_correlate(request: FilterAndCorrelateRequest):
             correlation_results=correlation_results,
             correlation_file_path=correlation_file_path,
             preview_data=preview_data,
+            date_analysis=date_analysis,
+            date_filtered_rows=date_filtered_rows,
             timestamp=datetime.datetime.utcnow(),
             processing_time_ms=processing_time_ms
         )
@@ -604,3 +629,26 @@ async def get_data_preview(file_path: str):
         "columns": column_info,
         "preview": df.head(10).to_dict(orient="records")
     }
+
+
+# ── 11. Date Analysis Endpoint ───────────────────────────────────────────
+@router.get("/analyze-dates/{file_path:path}")
+async def analyze_file_dates(file_path: str):
+    """Analyze date columns and ranges in a dataframe"""
+    try:
+        print(f"🗓️ Date analysis starting for: {file_path}")
+        
+        # Load dataframe
+        df = await load_csv_from_minio(file_path)
+        print(f"📊 Loaded dataframe: {df.shape}")
+        
+        # Analyze date columns
+        from .service import analyze_date_columns
+        date_analysis = analyze_date_columns(df)
+        
+        print(f"✅ Date analysis complete: {date_analysis['has_date_data']}")
+        return date_analysis
+        
+    except Exception as e:
+        print(f"💥 Date analysis error: {type(e).__name__}: {str(e)}")
+        raise HTTPException(500, f"Date analysis failed: {str(e)}")

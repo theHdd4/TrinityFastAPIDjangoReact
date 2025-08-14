@@ -33,6 +33,33 @@ export interface FilterAndCorrelateRequest {
   save_filtered?: boolean;
   include_preview?: boolean;
   preview_limit?: number;
+  include_date_analysis?: boolean;
+  date_column?: string;
+  date_range_filter?: {
+    start: string;
+    end: string;
+  };
+}
+
+export interface DateColumnInfo {
+  column_name: string;
+  min_date?: string;
+  max_date?: string;
+  format_detected: string;
+  granularity: string;
+  sample_values: string[];
+  is_valid_date: boolean;
+}
+
+export interface DateAnalysisResponse {
+  has_date_data: boolean;
+  date_columns: DateColumnInfo[];
+  overall_date_range?: {
+    min_date: string;
+    max_date: string;
+  };
+  recommended_granularity: string;
+  date_format_detected: string;
 }
 
 export interface CorrelationResults {
@@ -45,6 +72,8 @@ export interface CorrelationResults {
   correlation_results: any;
   correlation_file_path: string;
   preview_data?: any[];
+  date_analysis?: DateAnalysisResponse;
+  date_filtered_rows?: number;
   timestamp: string;
   processing_time_ms: number;
 }
@@ -198,6 +227,14 @@ export class CorrelationAPI {
     const response = await fetch(`${this.baseUrl}/dataframe-validator/${encodeURIComponent(filePath)}`);
     if (!response.ok) {
       throw new Error(`Failed to get validator: ${response.statusText}`);
+    }
+    return response.json();
+  }
+
+  async analyzeDates(filePath: string): Promise<DateAnalysisResponse> {
+    const response = await fetch(`${this.baseUrl}/analyze-dates/${encodeURIComponent(filePath)}`);
+    if (!response.ok) {
+      throw new Error(`Failed to analyze dates: ${response.statusText}`);
     }
     return response.json();
   }

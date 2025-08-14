@@ -174,6 +174,25 @@ export interface CorrelationSettings {
   };
   isUsingFileData?: boolean;
   showAllColumns?: boolean;
+  // Date analysis data
+  dateAnalysis?: {
+    has_date_data: boolean;
+    date_columns: Array<{
+      column_name: string;
+      min_date?: string;
+      max_date?: string;
+      format_detected: string;
+      granularity: string;
+      sample_values: string[];
+      is_valid_date: boolean;
+    }>;
+    overall_date_range?: {
+      min_date: string;
+      max_date: string;
+    };
+    recommended_granularity: string;
+    date_format_detected: string;
+  };
 }
 
 export const DEFAULT_CORRELATION_SETTINGS: CorrelationSettings = {
