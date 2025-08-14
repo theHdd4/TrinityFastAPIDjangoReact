@@ -871,3 +871,234 @@ def apply_date_range_filter(df: pd.DataFrame, date_column: str, date_range: Dict
     except Exception as e:
         print(f"⚠️ Date filtering failed: {e}")
         return df
+
+
+# ─── Time Series Functions ──────────────────────────────────────────────
+def get_time_series_axis_data(df: pd.DataFrame, start_date: str = None, end_date: str = None) -> Dict[str, Any]:
+    """Get X-axis data for time series - datetime values or indices"""
+    try:
+        print(f"📊 Analyzing axis data for dataframe: {df.shape}")
+        
+        # Analyze date columns
+        date_analysis = analyze_date_columns(df)
+        
+        if date_analysis['has_date_data'] and date_analysis['date_columns']:
+            # Use first valid date column
+            date_col_info = date_analysis['date_columns'][0]
+            datetime_column = date_col_info['column']
+            
+            print(f"🗓️ Using datetime column: {datetime_column}")
+            
+            # Convert to datetime
+            date_col = pd.to_datetime(df[datetime_column], errors='coerce')
+            valid_dates = date_col.dropna()
+            
+            # Apply date filtering if provided
+            if start_date and end_date:
+                try:
+                    start_dt = pd.to_datetime(start_date)
+                    end_dt = pd.to_datetime(end_date)
+                    valid_dates = valid_dates[(valid_dates >= start_dt) & (valid_dates <= end_dt)]
+                    print(f"🗓️ Date filtering applied: {len(valid_dates)} rows")
+                except Exception as e:
+                    print(f"⚠️ Date filtering failed: {e}")
+            
+            # Convert to ISO strings for JSON serialization
+            x_values = [dt.isoformat() for dt in valid_dates.sort_values()]
+            
+            return {
+                "x_values": x_values,
+                "has_datetime": True,
+                "datetime_column": datetime_column,
+                "total_rows": len(x_values),
+                "date_range": {
+                    "min_date": valid_dates.min().isoformat() if len(valid_dates) > 0 else None,
+                    "max_date": valid_dates.max().isoformat() if len(valid_dates) > 0 else None
+                }
+            }
+        else:
+            # No datetime columns - use indices
+            print(f"📊 No datetime columns found, using indices")
+            
+            # Apply row filtering if dates are provided (fallback behavior)
+            total_rows = len(df)
+            start_idx = 0
+            end_idx = total_rows
+            
+            if start_date and end_date:
+                try:
+                    # Try to interpret as row indices
+                    start_idx = max(0, int(start_date) if start_date.isdigit() else 0)
+                    end_idx = min(total_rows, int(end_date) if end_date.isdigit() else total_rows)
+                except:
+                    pass
+            
+            x_values = list(range(start_idx, end_idx))
+            
+            return {
+                "x_values": x_values,
+                "has_datetime": False,
+                "datetime_column": None,
+                "total_rows": len(x_values),
+                "date_range": None
+            }
+            
+    except Exception as e:
+        print(f"💥 Axis data error: {e}")
+        # Fallback to indices
+        return {
+            "x_values": list(range(len(df))),
+            "has_datetime": False,
+            "datetime_column": None,
+            "total_rows": len(df),
+            "date_range": None
+        }
+
+
+def find_highest_correlation_pair(df: pd.DataFrame, method: str = 'pearson') -> Dict[str, Any]:
+    """Find the two columns with the highest correlation coefficient"""
+    try:
+        print(f"🔍 Finding highest correlation pair using {method}")
+        
+        # Get numeric columns only
+        numeric_df = df.select_dtypes(include=[np.number])
+        numeric_columns = list(numeric_df.columns)
+        
+        print(f"🔢 Found {len(numeric_columns)} numeric columns")
+        
+        if len(numeric_columns) < 2:
+            raise ValueError(f"Need at least 2 numeric columns for correlation. Found {len(numeric_columns)}")
+        
+        # Calculate correlation matrix
+        corr_matrix = numeric_df.corr(method=method)
+        
+        # Find highest correlation (excluding diagonal)
+        # Set diagonal to NaN to exclude self-correlations
+        np.fill_diagonal(corr_matrix.values, np.nan)
+        
+        # Find the maximum absolute correlation
+        max_corr = 0
+        max_pair = (numeric_columns[0], numeric_columns[1])
+        
+        for i, col1 in enumerate(numeric_columns):
+            for j, col2 in enumerate(numeric_columns):
+                if i < j:  # Only check upper triangle
+                    corr_val = corr_matrix.loc[col1, col2]
+                    if not pd.isna(corr_val) and abs(corr_val) > abs(max_corr):
+                        max_corr = corr_val
+                        max_pair = (col1, col2)
+        
+        print(f"🎯 Highest correlation: {max_pair[0]} - {max_pair[1]} = {max_corr:.3f}")
+        
+        return {
+            "column1": max_pair[0],
+            "column2": max_pair[1],
+            "correlation_value": float(max_corr),
+            "method": method
+        }
+        
+    except Exception as e:
+        print(f"💥 Correlation pair error: {e}")
+        # Fallback to first two numeric columns
+        numeric_columns = df.select_dtypes(include=[np.number]).columns.tolist()
+        if len(numeric_columns) >= 2:
+            return {
+                "column1": numeric_columns[0],
+                "column2": numeric_columns[1],
+                "correlation_value": 0.0,
+                "method": method
+            }
+        else:
+            raise ValueError("No numeric columns available for correlation")
+
+
+def get_filtered_time_series_values(
+    df: pd.DataFrame, 
+    column1: str, 
+    column2: str, 
+    datetime_column: str = None,
+    start_date: str = None, 
+    end_date: str = None
+) -> Dict[str, Any]:
+    """Get Y-axis values for time series with date averaging for duplicates"""
+    try:
+        print(f"📈 Getting time series values: {column1} vs {column2}")
+        
+        # Validate columns exist
+        if column1 not in df.columns:
+            raise ValueError(f"Column '{column1}' not found in dataframe")
+        if column2 not in df.columns:
+            raise ValueError(f"Column '{column2}' not found in dataframe")
+        
+        # Start with full dataframe
+        working_df = df.copy()
+        has_duplicates_averaged = False
+        
+        # Apply date filtering if datetime column and dates provided
+        if datetime_column and datetime_column in df.columns and start_date and end_date:
+            try:
+                print(f"🗓️ Applying date filter using column: {datetime_column}")
+                date_col = pd.to_datetime(working_df[datetime_column], errors='coerce')
+                start_dt = pd.to_datetime(start_date)
+                end_dt = pd.to_datetime(end_date)
+                
+                mask = (date_col >= start_dt) & (date_col <= end_dt)
+                working_df = working_df[mask].copy()
+                print(f"🗓️ Date filter applied: {len(df)} → {len(working_df)} rows")
+            except Exception as e:
+                print(f"⚠️ Date filtering failed: {e}")
+        
+        # Handle duplicate dates by averaging if datetime column exists
+        if datetime_column and datetime_column in working_df.columns:
+            try:
+                print(f"📊 Checking for duplicate dates in {datetime_column}")
+                
+                # Convert datetime column
+                working_df[datetime_column] = pd.to_datetime(working_df[datetime_column], errors='coerce')
+                
+                # Check for duplicates
+                date_counts = working_df[datetime_column].value_counts()
+                duplicates = date_counts[date_counts > 1]
+                
+                if len(duplicates) > 0:
+                    print(f"📊 Found {len(duplicates)} dates with duplicates, averaging values")
+                    has_duplicates_averaged = True
+                    
+                    # Group by date and average the numeric columns
+                    averaged_df = working_df.groupby(datetime_column).agg({
+                        column1: 'mean',
+                        column2: 'mean'
+                    }).reset_index()
+                    
+                    # Sort by date
+                    averaged_df = averaged_df.sort_values(datetime_column)
+                    working_df = averaged_df
+                    
+                    print(f"📊 After averaging: {len(working_df)} unique dates")
+                
+            except Exception as e:
+                print(f"⚠️ Date averaging failed: {e}")
+        
+        # Extract values for the specified columns
+        col1_values = working_df[column1].fillna(0).tolist()
+        col2_values = working_df[column2].fillna(0).tolist()
+        
+        # Ensure both lists have same length
+        min_length = min(len(col1_values), len(col2_values))
+        col1_values = col1_values[:min_length]
+        col2_values = col2_values[:min_length]
+        
+        print(f"✅ Extracted {len(col1_values)} value pairs")
+        
+        return {
+            "column1_values": col1_values,
+            "column2_values": col2_values,
+            "column1_name": column1,
+            "column2_name": column2,
+            "filtered_rows": len(col1_values),
+            "has_duplicates_averaged": has_duplicates_averaged
+        }
+        
+    except Exception as e:
+        print(f"💥 Time series values error: {e}")
+        raise ValueError(f"Failed to get time series values: {str(e)}")

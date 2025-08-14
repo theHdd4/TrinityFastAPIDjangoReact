@@ -222,7 +222,7 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
 
     // Validate and clean time series data
     const validData = data.timeSeriesData.filter(d => 
-      d.date instanceof Date && !isNaN(d.date.getTime()) &&
+      (d.date instanceof Date || typeof d.date === 'number') &&
       typeof d.var1Value === 'number' && !isNaN(d.var1Value) && isFinite(d.var1Value) &&
       typeof d.var2Value === 'number' && !isNaN(d.var2Value) && isFinite(d.var2Value)
     );
@@ -239,15 +239,51 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
       return;
     }
 
-    // Create scales with validated domains
-    const dateExtent = d3.extent(validData, d => d.date) as [Date, Date];
+    // Determine if we're using dates or indices
+    const hasDatetime = validData.length > 0 && validData[0].date instanceof Date;
+    console.log('📊 Time series chart mode:', hasDatetime ? 'datetime' : 'index');
+
+    // Create appropriate scales based on data type
+    let xScale: any;
+    
+    if (hasDatetime) {
+      // Use time scale for datetime data
+      const dateExtent = d3.extent(validData, d => d.date as Date) as [Date, Date];
+      if (!dateExtent[0] || !dateExtent[1]) {
+        // No valid date extent, show empty chart message
+        g.append("text")
+          .attr("x", width / 2)
+          .attr("y", height / 2)
+          .attr("text-anchor", "middle")
+          .style("font-size", isCompactMode ? "12px" : "14px")
+          .style("fill", "#666")
+          .text("Invalid date range in time series data");
+        return;
+      }
+      xScale = d3.scaleTime()
+        .domain(dateExtent)
+        .range([0, width]);
+    } else {
+      // Use linear scale for index data
+      const indexExtent = d3.extent(validData, d => d.date as number) as [number, number];
+      if (indexExtent[0] === undefined || indexExtent[1] === undefined) {
+        // No valid index extent, show empty chart message
+        g.append("text")
+          .attr("x", width / 2)
+          .attr("y", height / 2)
+          .attr("text-anchor", "middle")
+          .style("font-size", isCompactMode ? "12px" : "14px")
+          .style("fill", "#666")
+          .text("Invalid index range in time series data");
+        return;
+      }
+      xScale = d3.scaleLinear()
+        .domain(indexExtent)
+        .range([0, width]);
+    }
+
     const var1Extent = d3.extent(validData, d => d.var1Value) as [number, number];
     const var2Extent = d3.extent(validData, d => d.var2Value) as [number, number];
-
-    // Ensure valid scale domains
-    const xScale = d3.scaleTime()
-      .domain(dateExtent[0] && dateExtent[1] ? dateExtent : [new Date(2022, 0, 1), new Date(2023, 0, 1)])
-      .range([0, width]);
 
     const yScale1 = d3.scaleLinear()
       .domain(var1Extent[0] !== undefined && var1Extent[1] !== undefined && var1Extent[0] !== var1Extent[1] 
@@ -300,10 +336,14 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
         .attr("stroke-width", 2)
         .attr("d", line2);
 
-      // Add axes
+      // Add axes with appropriate formatting
+      const xAxis = hasDatetime 
+        ? d3.axisBottom(xScale).tickFormat(d3.timeFormat("%b %d"))
+        : d3.axisBottom(xScale).tickFormat(d3.format("d"));
+
       g.append("g")
         .attr("transform", `translate(0,${height})`)
-        .call(d3.axisBottom(xScale).tickFormat(d3.timeFormat("%b")));
+        .call(xAxis);
 
       g.append("g")
         .call(d3.axisLeft(yScale1));

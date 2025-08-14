@@ -137,7 +137,7 @@ export interface CorrelationSettings {
   selectedVar2: string;
   correlationMatrix: number[][];
   timeSeriesData: Array<{
-    date: Date;
+    date: Date | number;
     var1Value: number;
     var2Value: number;
   }>;

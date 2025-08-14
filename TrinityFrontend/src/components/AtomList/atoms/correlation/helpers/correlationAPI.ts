@@ -105,6 +105,7 @@ export class CorrelationAPI {
 
   constructor() {
     this.baseUrl = CORRELATION_API;
+    console.log('🔗 CorrelationAPI initialized with base URL:', this.baseUrl);
   }
 
   async ping(): Promise<{ msg: string }> {
@@ -235,6 +236,51 @@ export class CorrelationAPI {
     const response = await fetch(`${this.baseUrl}/analyze-dates/${encodeURIComponent(filePath)}`);
     if (!response.ok) {
       throw new Error(`Failed to analyze dates: ${response.statusText}`);
+    }
+    return response.json();
+  }
+
+  async getTimeSeriesAxis(filePath: string, startDate?: string, endDate?: string): Promise<any> {
+    const params = new URLSearchParams();
+    if (startDate) params.append('start_date', startDate);
+    if (endDate) params.append('end_date', endDate);
+    
+    const url = `${this.baseUrl}/time-series-axis/${encodeURIComponent(filePath)}${params.toString() ? '?' + params.toString() : ''}`;
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`Failed to fetch time series axis: ${response.statusText}`);
+    }
+    return response.json();
+  }
+
+  async getHighestCorrelationPair(filePath: string): Promise<any> {
+    const url = `${this.baseUrl}/highest-correlation-pair/${encodeURIComponent(filePath)}`;
+    console.log('🔗 Fetching highest correlation pair from URL:', url);
+    console.log('🔗 Encoded file path:', encodeURIComponent(filePath));
+    console.log('🔗 Original file path:', filePath);
+    const response = await fetch(url);
+    if (!response.ok) {
+      console.error('💥 HTTP Error:', response.status, response.statusText);
+      console.error('💥 Full URL that failed:', url);
+      throw new Error(`Failed to fetch highest correlation pair: ${response.statusText}`);
+    }
+    return response.json();
+  }
+
+  async getTimeSeriesData(filePath: string, request: {
+    column1: string;
+    column2: string;
+    start_date?: string;
+    end_date?: string;
+    datetime_column?: string;
+  }): Promise<any> {
+    const response = await fetch(`${this.baseUrl}/time-series-data/${encodeURIComponent(filePath)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(request)
+    });
+    if (!response.ok) {
+      throw new Error(`Failed to fetch time series data: ${response.statusText}`);
     }
     return response.json();
   }

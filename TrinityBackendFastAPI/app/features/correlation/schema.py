@@ -152,3 +152,40 @@ class DateAnalysisResponse(BaseModel):
     overall_date_range: Optional[dict] = None  # {"min_date": str, "max_date": str}
     recommended_granularity: str
     date_format_detected: str
+
+
+# ─── Time Series Schemas ─────────────────────────────────────────────────
+class TimeSeriesRequest(BaseModel):
+    """Request for time series data with specific columns"""
+    column1: str
+    column2: str
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+    datetime_column: Optional[str] = None
+
+
+class TimeSeriesAxisResponse(BaseModel):
+    """Response for time series axis data"""
+    x_values: List[Union[str, int]]
+    has_datetime: bool
+    datetime_column: Optional[str] = None
+    total_rows: int
+    date_range: Optional[dict] = None
+
+
+class HighestCorrelationResponse(BaseModel):
+    """Response for highest correlation pair"""
+    column1: str
+    column2: str
+    correlation_value: float
+    method: str
+
+
+class TimeSeriesDataResponse(BaseModel):
+    """Response for time series Y-axis data"""
+    column1_values: List[float]
+    column2_values: List[float]
+    column1_name: str
+    column2_name: str
+    filtered_rows: int
+    has_duplicates_averaged: bool

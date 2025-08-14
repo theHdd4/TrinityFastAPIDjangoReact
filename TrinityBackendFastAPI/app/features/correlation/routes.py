@@ -18,6 +18,10 @@ from .schema import (
     BucketCheckResponse,
     FilterAndCorrelateRequest,
     FilterAndCorrelateResponse,
+    TimeSeriesRequest,
+    TimeSeriesAxisResponse,
+    HighestCorrelationResponse,
+    TimeSeriesDataResponse,
 )
 from .service import (
     minio_client,
@@ -29,7 +33,10 @@ from .service import (
     apply_identifier_filters,
     apply_measure_filters,
     save_filtered_data_to_minio,
-    get_unique_values
+    get_unique_values,
+    get_time_series_axis_data,
+    find_highest_correlation_pair,
+    get_filtered_time_series_values
 )
 
 # Add flight and data retrieval imports
@@ -62,7 +69,10 @@ async def root():
             "/data-preview",
             "/analyze-dates",
             "/dataframe-validator",
-            "/load-dataframe"
+            "/load-dataframe",
+            "/time-series-axis",
+            "/highest-correlation-pair",
+            "/time-series-data"
         ]
     }
 
@@ -652,3 +662,86 @@ async def analyze_file_dates(file_path: str):
     except Exception as e:
         print(f"💥 Date analysis error: {type(e).__name__}: {str(e)}")
         raise HTTPException(500, f"Date analysis failed: {str(e)}")
+
+
+# ── 12. Time Series Axis Endpoint ────────────────────────────────────────
+@router.get("/time-series-axis/{file_path:path}", response_model=TimeSeriesAxisResponse)
+async def get_time_series_axis(
+    file_path: str,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None
+):
+    """Get X-axis values for time series chart (datetime or indices)"""
+    try:
+        print(f"📊 Getting time series axis for: {file_path}")
+        
+        # Load dataframe
+        df = await load_csv_from_minio(file_path)
+        print(f"📋 Loaded dataframe: {df.shape}")
+        
+        # Get axis data
+        from .service import get_time_series_axis_data
+        axis_data = get_time_series_axis_data(df, start_date, end_date)
+        
+        print(f"✅ Axis data generated: {axis_data['has_datetime']}")
+        return axis_data
+        
+    except Exception as e:
+        print(f"💥 Time series axis error: {type(e).__name__}: {str(e)}")
+        raise HTTPException(500, f"Time series axis failed: {str(e)}")
+
+
+# ── 13. Highest Correlation Pair Endpoint ────────────────────────────────
+@router.get("/highest-correlation-pair/{file_path:path}", response_model=HighestCorrelationResponse)
+async def get_highest_correlation_pair(file_path: str):
+    """Find the two columns with highest correlation coefficient"""
+    try:
+        print(f"🔍 Finding highest correlation pair for: {file_path}")
+        
+        # Load dataframe
+        df = await load_csv_from_minio(file_path)
+        print(f"📋 Loaded dataframe: {df.shape}")
+        
+        # Find highest correlation pair
+        from .service import find_highest_correlation_pair
+        pair_data = find_highest_correlation_pair(df)
+        
+        print(f"✅ Highest correlation pair: {pair_data['column1']} - {pair_data['column2']} ({pair_data['correlation_value']:.3f})")
+        return pair_data
+        
+    except Exception as e:
+        print(f"💥 Highest correlation error: {type(e).__name__}: {str(e)}")
+        raise HTTPException(500, f"Highest correlation failed: {str(e)}")
+
+
+# ── 14. Time Series Data Endpoint ────────────────────────────────────────
+@router.post("/time-series-data/{file_path:path}", response_model=TimeSeriesDataResponse)
+async def get_time_series_data(file_path: str, request: TimeSeriesRequest):
+    """Get Y-axis values for time series chart with date averaging"""
+    try:
+        print(f"📈 Getting time series data for: {file_path}")
+        print(f"📊 Columns: {request.column1} vs {request.column2}")
+        
+        # Load dataframe
+        df = await load_csv_from_minio(file_path)
+        print(f"📋 Loaded dataframe: {df.shape}")
+        
+        # Get time series values with averaging
+        from .service import get_filtered_time_series_values
+        series_data = get_filtered_time_series_values(
+            df, 
+            request.column1, 
+            request.column2, 
+            request.datetime_column,
+            request.start_date, 
+            request.end_date
+        )
+        
+        print(f"✅ Time series data generated: {series_data['filtered_rows']} rows")
+        if series_data['has_duplicates_averaged']:
+            print(f"📊 Duplicates averaged for consistent datetime values")
+        return series_data
+        
+    except Exception as e:
+        print(f"💥 Time series data error: {type(e).__name__}: {str(e)}")
+        raise HTTPException(500, f"Time series data failed: {str(e)}")
