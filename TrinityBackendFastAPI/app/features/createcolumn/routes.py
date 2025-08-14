@@ -1,6 +1,6 @@
 # app/routes.py
 
-from fastapi import APIRouter, Form, HTTPException
+from fastapi import APIRouter, Form, HTTPException, Body
 from fastapi.responses import Response
 from datetime import datetime
 
@@ -22,6 +22,7 @@ from statsmodels.tsa.seasonal import STL
 router = APIRouter()
 
 import pandas as pd
+import datetime
 
 
 
@@ -37,8 +38,15 @@ CREATE_OPTIONS = {
     "rpi"
 }
 
+@router.get("/")
+async def root():
+    """Root endpoint for createcolumn backend."""
+    return {"message": "CreateColumn backend is running", "endpoints": ["/ping", "/options", "/init", "/perform", "/settings", "/export_csv", "/export_excel", "/classification", "/cached_dataframe", "/column_summary", "/save"]}
 
-
+@router.get("/ping")
+async def ping():
+    """Health check endpoint for createcolumn backend."""
+    return {"msg": "CreateColumn backend is alive"}
 
 @router.get("/options")
 async def get_create_options():
@@ -83,12 +91,30 @@ async def perform_create(
     identifiers: str = Form(None),
 ):
     try:
-        df = get_minio_df(bucket_name, object_names)
+        # 🔧 CRITICAL FIX: Resolve the full MinIO object path
+        from app.features.data_upload_validate.app.routes import get_object_prefix
+        
+        # Get the current object prefix
+        prefix = await get_object_prefix()
+        
+        # Construct the full object path
+        full_object_path = f"{prefix}{object_names}" if not object_names.startswith(prefix) else object_names
+        
+        print(f"🔍 CreateColumn file path resolution:")
+        print(f"  Original object_names: {object_names}")
+        print(f"  Current prefix: {prefix}")
+        print(f"  Full object path: {full_object_path}")
+        
+        # Use the full path to load the dataframe
+        df = get_minio_df(bucket_name, full_object_path)
         df.columns = df.columns.str.strip().str.lower()
         # Only clean string columns, not all columns
         for col in df.select_dtypes(include='object').columns:
             df[col] = df[col].astype(str).str.strip().str.lower()
         form_data = await request.form()
+
+        print(f"✅ Successfully loaded dataframe with shape: {df.shape}")
+        print(f"  Columns: {list(df.columns)}")
 
         # Parse identifiers from form data
         identifiers_list = []
@@ -202,214 +228,161 @@ async def perform_create(
                     new_col = rename_val if rename_val else f"{col}_dummy"
                     df[new_col] = pd.Categorical(df[col]).codes
                     new_cols_total.append(new_col)
-            elif op == "rpi":
-                try:
-                    df, rpi_cols = compute_rpi(df, columns)
-                    new_cols_total.extend(rpi_cols)
-                except Exception as e:
-                    raise ValueError(f"RPI operation failed: {str(e)}")
-
-            # --- Power ---
-            elif op == 'power':
-                param = form_data.get(f"{op}_{op_idx}_param", None)
-                if param is None:
-                    raise HTTPException(status_code=400, detail="Missing `param` for power operation")
-                try:
-                    exponent = float(param)
-                except ValueError:
-                    raise HTTPException(status_code=400, detail=f"Invalid exponent: {param}")
+            elif op == "sqrt":
                 for col in columns:
-                    new_col = rename_val if rename_val else f"{col}_power{param}"
-                    df[new_col] = df[col] ** exponent
-                    new_cols_total.append(new_col)
-
-            # --- Log ---
-            elif op == 'log':
-                for col in columns:
-                    new_col = rename_val if rename_val else f"{col}_log"
-                    df[new_col] = np.log(df[col])
-                    new_cols_total.append(new_col)
-
-            # --- Sqrt ---
-            elif op == 'sqrt':
-                for col in columns:
+                    if col not in df.columns:
+                        raise ValueError(
+                            f"Column '{col}' not found in data for sqrt operation. Please check your file and column selection. Available columns: {list(df.columns)}"
+                        )
                     new_col = rename_val if rename_val else f"{col}_sqrt"
                     df[new_col] = np.sqrt(df[col])
                     new_cols_total.append(new_col)
-
-            # --- Exp ---
-            elif op == 'exp':
-                def exp_func(subdf):
-                    for col in columns:
-                        new_col = rename_val if rename_val else f"{col}_exp"
-                        subdf[new_col] = np.exp(subdf[col])
-                    return subdf
-                df = group_apply(df, exp_func)
-                if rename_val:
-                    new_cols_total.append(rename_val)
-                else:
-                    for col in columns:
-                        new_col = f"{col}_exp"
-                        new_cols_total.append(new_col)
-
-            # --- Logistic ---
-            elif op == 'logistic':
-                import json
-                param = form_data.get(f"{op}_{op_idx}_param", None)
-                def adstock_function(series, carryover):
-                    result, prev = [], 0
-                    for val in series:
-                        curr = val + carryover * prev
-                        result.append(curr)
-                        prev = curr
-                    return np.array(result)
-                def logistic_function(x, gr, mp):
-                    return 1 / (1 + np.exp(-gr * (x - mp)))
-                logistic_params = json.loads(param)
-                gr = float(logistic_params.get("gr"))
-                co = float(logistic_params.get("co"))
-                mp = float(logistic_params.get("mp"))
-                if gr is None or co is None or mp is None:
-                    raise ValueError("Missing logistic parameters")
-                def logistic_func(subdf):
-                    for col in columns:
-                        adstocked = adstock_function(subdf[col].fillna(0), co)
-                        standardized = (adstocked - np.mean(adstocked)) / np.std(adstocked)
-                        new_col = rename_val if rename_val else f"{col}_logistic"
-                        subdf[new_col] = logistic_function(standardized, gr, mp)
-                    return subdf
-                df = group_apply(df, logistic_func)
-                if rename_val:
-                    new_cols_total.append(rename_val)
-                else:
-                    for col in columns:
-                        new_col = f"{col}_logistic"
-                        new_cols_total.append(new_col)
-
-
-            elif op in ["detrend", "deseasonalize", "detrend_deseasonalize"]:
-                # Helper to detect frequency
-                def detect_frequency(date_series):
-                    date_series = date_series.sort_values().drop_duplicates()
-                    diffs = date_series.diff().dropna()
-                    if diffs.empty:
-                        return "Unknown"
-                    mode_diff = diffs.mode()[0]
-                    mode_days = mode_diff.total_seconds() / (24 * 3600)
-                    if 0.9 <= mode_days <= 1.1:
-                        return "Daily"
-                    elif 6 <= mode_days <= 8:
-                        return "Weekly"
-                    elif 25 <= mode_days <= 35:
-                        return "Monthly"
-                    elif 85 <= mode_days <= 95:
-                        return "Quarterly"
-                    elif 350 <= mode_days <= 380:
-                        return "Yearly"
-                    else:
-                        return f"Custom ({mode_diff})"
-
-                # 1. Find date column
-                date_col = next((c for c in df.columns if c.strip().lower() == 'date'), None)
-                if not date_col:
-                    raise ValueError("No date column found. STL-based operations require a date column.")
-
-                # 2. Convert and sort
-                df[date_col] = pd.to_datetime(df[date_col], errors='coerce')
-                df = df.sort_values(by=date_col)
-
-                # 3. Check for user-supplied period
-                period_param = form_data.get(f"{op}_{op_idx}_period", None)
-                if period_param is not None:
-                    try:
-                        period = int(period_param)
-                        if period < 2:
-                            raise ValueError("Period must be at least 2.")
-                    except Exception:
-                        raise ValueError("Invalid period provided for STL decomposition.")
-                else:
-                    freq_label = detect_frequency(df[date_col])
-                    if freq_label == "Unknown":
-                        raise ValueError("Unable to detect frequency from the date column. Please ensure your data has a regular time interval, or specify the period manually.")
-                    freq_period_map = {
-                        'Daily': 7,         # 1 week
-                        'Weekly': 52,       # 1 year
-                        'Monthly': 12,      # 1 year
-                        'Quarterly': 4,     # 1 year
-                        'Yearly': 1
-                    }
-                    period = freq_period_map.get(freq_label, None)
-                    if period is None:
-                        raise ValueError(f"Unsupported or custom frequency '{freq_label}' for STL decomposition. Please use daily, weekly, monthly, quarterly, or yearly data, or specify the period manually.")
-
-                def stl_func(subdf):
-                    for col in columns:
-                        stl = STL(subdf[col], period=period, robust=True)
-                        res = stl.fit()
-                        if op == "detrend":
-                            new_col = rename_val if rename_val else f"{col}_detrended"
-                            subdf[new_col] = res.resid + res.seasonal
-                        elif op == "deseasonalize":
-                            new_col = rename_val if rename_val else f"{col}_deseasonalized"
-                            subdf[new_col] = res.resid + res.trend
-                        elif op == "detrend_deseasonalize":
-                            new_col = rename_val if rename_val else f"{col}_detrend_deseasonalized"
-                            subdf[new_col] = res.resid
-                    return subdf
-
-
-                # def stl_func(subdf):
-                #     for col in columns:
-                #         stl = STL(subdf[col], period=period, robust=True)
-                #         res = stl.fit()
-                #         original_mean = subdf[col].mean()
-                #         if op == "detrend":
-                #             new_col = rename_val if rename_val else f"{col}_detrended"
-                #             subdf[new_col] = res.resid + res.seasonal + (original_mean - (res.resid + res.seasonal).mean())
-                #         elif op == "deseasonalize":
-                #             new_col = rename_val if rename_val else f"{col}_deseasonalized"
-                #             subdf[new_col] = res.resid + res.trend + (original_mean - (res.resid + res.trend).mean())
-                #         elif op == "detrend_deseasonalize":
-                #             new_col = rename_val if rename_val else f"{col}_detrend_deseasonalized"
-                #             subdf[new_col] = res.resid + (original_mean - res.resid.mean())
-                #     return subdf
-                df = group_apply(df, stl_func)
+            elif op == "log":
                 for col in columns:
-                    if op == "detrend":
-                        new_col = rename_val if rename_val else f"{col}_detrended"
-                    elif op == "deseasonalize":
-                        new_col = rename_val if rename_val else f"{col}_deseasonalized"
-                    elif op == "detrend_deseasonalize":
-                        new_col = rename_val if rename_val else f"{col}_detrend_deseasonalized"
+                    if col not in df.columns:
+                        raise ValueError(
+                            f"Column '{col}' not found in data for log operation. Please check your file and column selection. Available columns: {list(df.columns)}"
+                        )
+                    new_col = rename_val if rename_val else f"{col}_log"
+                    df[new_col] = np.log(df[col])
+                    new_cols_total.append(new_col)
+            elif op == "abs":
+                for col in columns:
+                    if col not in df.columns:
+                        raise ValueError(
+                            f"Column '{col}' not found in data for abs operation. Please check your file and column selection. Available columns: {list(df.columns)}"
+                        )
+                    new_col = rename_val if rename_val else f"{col}_abs"
+                    df[new_col] = np.abs(df[col])
+                    new_cols_total.append(new_col)
+            elif op == "power":
+                for col in columns:
+                    if col not in df.columns:
+                        raise ValueError(
+                            f"Column '{col}' not found in data for power operation. Please check your file and column selection. Available columns: {list(df.columns)}"
+                        )
+                    new_col = rename_val if rename_val else f"{col}_power"
+                    # Extract power from rename_val if it's a number, otherwise use 2
+                    try:
+                        power = float(rename_val) if rename_val and rename_val.replace('.', '').replace('-', '').isdigit() else 2
+                    except ValueError:
+                        power = 2
+                    df[new_col] = np.power(df[col], power)
+                    new_cols_total.append(new_col)
+            elif op == "standardize_zscore":
+                for col in columns:
+                    if col not in df.columns:
+                        raise ValueError(
+                            f"Column '{col}' not found in data for standardize_zscore operation. Please check your file and column selection. Available columns: {list(df.columns)}"
+                        )
+                    new_col = rename_val if rename_val else f"{col}_zscore"
+                    df[new_col] = (df[col] - df[col].mean()) / df[col].std()
+                    new_cols_total.append(new_col)
+            elif op == "standardize_minmax":
+                for col in columns:
+                    if col not in df.columns:
+                        raise ValueError(
+                            f"Column '{col}' not found in data for standardize_minmax operation. Please check your file and column selection. Available columns: {list(df.columns)}"
+                        )
+                    new_col = rename_val if rename_val else f"{col}_minmax"
+                    df[new_col] = (df[col] - df[col].min()) / (df[col].max() - df[col].min())
+                    new_cols_total.append(new_col)
+            elif op == "detrend":
+                for col in columns:
+                    if col not in df.columns:
+                        raise ValueError(
+                            f"Column '{col}' not found in data for detrend operation. Please check your file and column selection. Available columns: {list(df.columns)}"
+                        )
+                    new_col = rename_val if rename_val else f"{col}_detrend"
+                    df[new_col] = df[col] - df[col].rolling(window=min(12, len(df)//4), center=True).mean()
+                    new_cols_total.append(new_col)
+            elif op == "deseasonalize":
+                for col in columns:
+                    if col not in df.columns:
+                        raise ValueError(
+                            f"Column '{col}' not found in data for deseasonalize operation. Please check your file and column selection. Available columns: {list(df.columns)}"
+                        )
+                    new_col = rename_val if rename_val else f"{col}_deseasonalize"
+                    # Simple seasonal adjustment using rolling mean
+                    seasonal_period = 12  # Assuming monthly data
+                    df[new_col] = df[col] - df[col].rolling(window=seasonal_period, center=True).mean()
+                    new_cols_total.append(new_col)
+            elif op == "detrend_deseasonalize":
+                for col in columns:
+                    if col not in df.columns:
+                        raise ValueError(
+                            f"Column '{col}' not found in data for detrend_deseasonalize operation. Please check your file and column selection. Available columns: {list(df.columns)}"
+                        )
+                    new_col = rename_val if rename_val else f"{col}_detrend_deseasonalize"
+                    # First detrend
+                    detrended = df[col] - df[col].rolling(window=min(12, len(df)//4), center=True).mean()
+                    # Then deseasonalize
+                    seasonal_period = 12  # Assuming monthly data
+                    df[new_col] = detrended - detrended.rolling(window=seasonal_period, center=True).mean()
+                    new_cols_total.append(new_col)
+            elif op == "exp":
+                for col in columns:
+                    if col not in df.columns:
+                        raise ValueError(
+                            f"Column '{col}' not found in data for exp operation. Please check your file and column selection. Available columns: {list(df.columns)}"
+                        )
+                    new_col = rename_val if rename_val else f"{col}_exp"
+                    df[new_col] = np.exp(df[col])
+                    new_cols_total.append(new_col)
+            elif op == "logistic":
+                for col in columns:
+                    if col not in df.columns:
+                        raise ValueError(
+                            f"Column '{col}' not found in data for logistic operation. Please check your file and column selection. Available columns: {list(df.columns)}"
+                        )
+                    new_col = rename_val if rename_val else f"{col}_logistic"
+                    df[new_col] = 1 / (1 + np.exp(-df[col]))
+                    new_cols_total.append(new_col)
+            elif op == "rpi":
+                for col in columns:
+                    if col not in df.columns:
+                        raise ValueError(
+                            f"Column '{col}' not found in data for rpi operation. Please check your file and column selection. Available columns: {list(df.columns)}"
+                        )
+                    new_col = rename_val if rename_val else f"{col}_rpi"
+                    df[new_col] = compute_rpi(df, col)
+                    new_cols_total.append(new_col)
+            elif op == "seasonality":
+                for col in columns:
+                    if col not in df.columns:
+                        raise ValueError(
+                            f"Column '{col}' not found in data for seasonality operation. Please check your file and column selection. Available columns: {list(df.columns)}"
+                        )
+                    new_col = rename_val if rename_val else f"{col}_seasonality"
+                    # Simple seasonal component using rolling mean
+                    seasonal_period = 12  # Assuming monthly data
+                    df[new_col] = df[col].rolling(window=seasonal_period, center=True).mean()
+                    new_cols_total.append(new_col)
+            elif op == "trend":
+                for col in columns:
+                    if col not in df.columns:
+                        raise ValueError(
+                            f"Column '{col}' not found in data for trend operation. Please check your file and column selection. Available columns: {list(df.columns)}"
+                        )
+                    new_col = rename_val if rename_val else f"{col}_trend"
+                    # Simple trend using rolling mean
+                    trend_window = min(12, len(df)//4)
+                    df[new_col] = df[col].rolling(window=trend_window, center=True).mean()
                     new_cols_total.append(new_col)
 
-            # --- Standardization ---
-            elif op.startswith('standardize'):
-                method = op.split("_")[1]  # zscore / minmax / none
-                def standardize_func(subdf):
-                    if method == 'zscore':
-                        scaler = StandardScaler()
-                    elif method == 'minmax':
-                        scaler = MinMaxScaler()
-                    else:
-                        raise ValueError("Unknown standardization method")
-                    if rename_val:
-                        col = columns[0]
-                        new_col = rename_val
-                        subdf[new_col] = scaler.fit_transform(subdf[[col]]) if scaler else subdf[col]
-                    else:
-                        for col in columns:
-                            new_col = f"{col}_{method}_scaled"
-                            subdf[new_col] = scaler.fit_transform(subdf[[col]]) if scaler else subdf[col]
-                    return subdf
-                df = group_apply(df, standardize_func)
-                # Always add all new columns to new_cols_total
-                if rename_val:
-                    new_cols_total.append(rename_val)
-                else:
-                    for col in columns:
-                        new_col = f"{col}_{method}_scaled"
-                        new_cols_total.append(new_col)
+        # Save the result to MinIO
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        result_filename = f"create_{timestamp}_{len(new_cols_total)}_cols.csv"
+        
+        # Save to MinIO
+        csv_bytes = df.to_csv(index=False).encode("utf-8")
+        minio_client.put_object(
+            bucket_name=bucket_name,
+            object_name=result_filename,
+            data=io.BytesIO(csv_bytes),
+            length=len(csv_bytes),
+            content_type="text/csv"
+        )
 
 
         if not new_cols_total:
@@ -434,8 +407,12 @@ async def perform_create(
         }
         
         return {
-            "status": "SUCCESS", 
+            "status": "SUCCESS",
+            "message": f"Created {len(new_cols_total)} new columns successfully",
             "new_columns": new_cols_total,
+            "result_file": result_filename,
+            "row_count": len(df),
+            "columns": list(df.columns)
             "createResults": {
                 "result_shape": [len(df), len(df.columns)],
                 "new_columns": new_cols_total
@@ -448,7 +425,10 @@ async def perform_create(
             "operation_details": operation_details
         }
     except Exception as e:
-        return {"status": "FAILURE", "error": str(e)}
+        print(f"❌ CreateColumn operation failed: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
 
 from fastapi import Query
 import numpy as np

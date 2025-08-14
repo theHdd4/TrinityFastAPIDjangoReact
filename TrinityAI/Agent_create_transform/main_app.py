@@ -1,18 +1,16 @@
-# main_merge.py
-import logging
+# main_create_transform.py
 import os
 import time
+import logging
 from fastapi import APIRouter
 from pydantic import BaseModel
 from typing import Optional
 
-from .ai_logic import build_merge_prompt, call_merge_llm, extract_json
-from .llm_merge import SmartMergeAgent
+from .llm_create import SmartCreateTransformAgent
 
-logger = logging.getLogger("smart.merge")
-
-# Initialize router
-router = APIRouter()
+# Set up logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("trinity.create_transform.app")
 
 # Standalone configuration functions (no circular imports)
 def get_llm_config():
@@ -26,13 +24,15 @@ def get_llm_config():
         "bearer_token": os.getenv("LLM_BEARER_TOKEN", "aakash_api_key"),
     }
 
-# Initialize agent
+# Initialize router and agent
+router = APIRouter()
+
 cfg_llm = get_llm_config()
 
-logger.info(f"MERGE AGENT INITIALIZATION:")
+logger.info(f"CREATE TRANSFORM AGENT INITIALIZATION:")
 logger.info(f"LLM Config: {cfg_llm}")
 
-agent = SmartMergeAgent(
+agent = SmartCreateTransformAgent(
     cfg_llm["api_url"],
     cfg_llm["model_name"],
     cfg_llm["bearer_token"],
@@ -41,21 +41,36 @@ agent = SmartMergeAgent(
     "minio123",
     "trinity",
     "",
+    {},  # supported_operations
+    """
+{
+  "bucket_name": "trinity",
+  "object_names": "your_file.csv",
+  "identifiers": ["col1", "col2"],
+  "operations": [
+    {
+      "type": "add",
+      "source_columns": ["col1", "col2"],
+      "rename_to": "new_column_name"
+    }
+  ]
+}
+"""
 )
 
 # Trinity AI only generates JSON configuration
 # Frontend handles all backend API calls and path resolution
 
-class MergeRequest(BaseModel):
+class CreateTransformRequest(BaseModel):
     prompt: str
     session_id: Optional[str] = None
 
-@router.post("/merge")
-def merge_files(request: MergeRequest):
-    """Smart merge endpoint with complete memory"""
+@router.post("/create-transform")
+def create_transform_files(request: CreateTransformRequest):
+    """Smart create/transform endpoint with complete memory"""
     start_time = time.time()
     
-    logger.info(f"MERGE REQUEST RECEIVED:")
+    logger.info(f"CREATE TRANSFORM REQUEST RECEIVED:")
     logger.info(f"Prompt: {request.prompt}")
     logger.info(f"Session ID: {request.session_id}")
     
@@ -67,43 +82,29 @@ def merge_files(request: MergeRequest):
         processing_time = round(time.time() - start_time, 2)
         result["processing_time"] = processing_time
 
-        logger.info(f"MERGE REQUEST COMPLETED:")
+        logger.info(f"CREATE TRANSFORM REQUEST COMPLETED:")
         logger.info(f"Success: {result.get('success', False)}")
         logger.info(f"Processing Time: {processing_time}s")
 
-        # If merge configuration was successful, return the configuration for frontend to handle
-        if result.get("success") and result.get("merge_json"):
-            cfg = result["merge_json"]
-            file1 = cfg.get("file1")
-            if isinstance(file1, list):
-                file1 = file1[0] if file1 else ""
-            file2 = cfg.get("file2")
-            if isinstance(file2, list):
-                file2 = file2[0] if file2 else ""
-            join_columns = cfg.get("join_columns", ["id"])  # Default to list format
-            join_type = cfg.get("join_type", "inner")
+        if result.get("success") and result.get("create_transform_json"):
+            cfg = result["create_transform_json"]
             
-            # Return clean filenames only - let backend handle path resolution
-            # This prevents duplicate path issues
-            result["merge_json"] = {
-                "file1": file1,  # Just filename, backend will resolve path
-                "file2": file2,  # Just filename, backend will resolve path
-                "join_columns": join_columns,
-                "join_type": join_type,
-                "bucket_name": "trinity",  # Add bucket name for compatibility
-            }
+            # Return the configuration for frontend to handle
+            result["create_transform_config"] = cfg
+            # Also keep the original key for frontend compatibility
+            result["create_transform_json"] = cfg
             
             # Add session ID for consistency
             if request.session_id:
                 result["session_id"] = request.session_id
             
             # Update message to indicate configuration is ready
-            result["message"] = f"Merge configuration ready: {file1} + {file2} using {join_columns} columns with {join_type} join"
+            result["message"] = f"Create/Transform configuration ready"
 
         return result
-        
+
     except Exception as e:
-        logger.error(f"MERGE REQUEST FAILED: {e}")
+        logger.error(f"CREATE TRANSFORM REQUEST FAILED: {e}")
         error_result = {
             "success": False,
             "error": str(e),
@@ -140,7 +141,7 @@ def health_check():
     """Health check endpoint"""
     status = {
         "status": "healthy",
-        "service": "smart_merge_agent",
+        "service": "smart_create_transform_agent",
         "version": "1.0.0",
         "active_sessions": len(agent.sessions),
         "loaded_files": len(agent.files_with_columns),

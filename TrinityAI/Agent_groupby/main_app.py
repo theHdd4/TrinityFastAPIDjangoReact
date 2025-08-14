@@ -1,18 +1,16 @@
-# main_merge.py
-import logging
+# main_group_by.py
 import os
 import time
+import logging
 from fastapi import APIRouter
 from pydantic import BaseModel
 from typing import Optional
 
-from .ai_logic import build_merge_prompt, call_merge_llm, extract_json
-from .llm_merge import SmartMergeAgent
+from .llm_groupby import SmartGroupByAgent
 
-logger = logging.getLogger("smart.merge")
-
-# Initialize router
-router = APIRouter()
+# Set up logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("trinity.groupby.app")
 
 # Standalone configuration functions (no circular imports)
 def get_llm_config():
@@ -26,13 +24,15 @@ def get_llm_config():
         "bearer_token": os.getenv("LLM_BEARER_TOKEN", "aakash_api_key"),
     }
 
-# Initialize agent
+# Initialize router and agent
+router = APIRouter()
+
 cfg_llm = get_llm_config()
 
-logger.info(f"MERGE AGENT INITIALIZATION:")
+logger.info(f"GROUPBY AGENT INITIALIZATION:")
 logger.info(f"LLM Config: {cfg_llm}")
 
-agent = SmartMergeAgent(
+agent = SmartGroupByAgent(
     cfg_llm["api_url"],
     cfg_llm["model_name"],
     cfg_llm["bearer_token"],
@@ -40,22 +40,22 @@ agent = SmartMergeAgent(
     "minio",
     "minio123",
     "trinity",
-    "",
+    ""
 )
 
 # Trinity AI only generates JSON configuration
 # Frontend handles all backend API calls and path resolution
 
-class MergeRequest(BaseModel):
+class GroupByRequest(BaseModel):
     prompt: str
     session_id: Optional[str] = None
 
-@router.post("/merge")
-def merge_files(request: MergeRequest):
-    """Smart merge endpoint with complete memory"""
+@router.post("/groupby")
+def groupby_files(request: GroupByRequest):
+    """Smart groupby endpoint with complete memory"""
     start_time = time.time()
     
-    logger.info(f"MERGE REQUEST RECEIVED:")
+    logger.info(f"GROUPBY REQUEST RECEIVED:")
     logger.info(f"Prompt: {request.prompt}")
     logger.info(f"Session ID: {request.session_id}")
     
@@ -67,43 +67,29 @@ def merge_files(request: MergeRequest):
         processing_time = round(time.time() - start_time, 2)
         result["processing_time"] = processing_time
 
-        logger.info(f"MERGE REQUEST COMPLETED:")
+        logger.info(f"GROUPBY REQUEST COMPLETED:")
         logger.info(f"Success: {result.get('success', False)}")
         logger.info(f"Processing Time: {processing_time}s")
 
-        # If merge configuration was successful, return the configuration for frontend to handle
-        if result.get("success") and result.get("merge_json"):
-            cfg = result["merge_json"]
-            file1 = cfg.get("file1")
-            if isinstance(file1, list):
-                file1 = file1[0] if file1 else ""
-            file2 = cfg.get("file2")
-            if isinstance(file2, list):
-                file2 = file2[0] if file2 else ""
-            join_columns = cfg.get("join_columns", ["id"])  # Default to list format
-            join_type = cfg.get("join_type", "inner")
+        if result.get("success") and result.get("groupby_json"):
+            cfg = result["groupby_json"]
             
-            # Return clean filenames only - let backend handle path resolution
-            # This prevents duplicate path issues
-            result["merge_json"] = {
-                "file1": file1,  # Just filename, backend will resolve path
-                "file2": file2,  # Just filename, backend will resolve path
-                "join_columns": join_columns,
-                "join_type": join_type,
-                "bucket_name": "trinity",  # Add bucket name for compatibility
-            }
+            # Return the configuration for frontend to handle
+            result["groupby_config"] = cfg
+            # Also keep the original key for frontend compatibility
+            result["groupby_json"] = cfg
             
             # Add session ID for consistency
             if request.session_id:
                 result["session_id"] = request.session_id
             
             # Update message to indicate configuration is ready
-            result["message"] = f"Merge configuration ready: {file1} + {file2} using {join_columns} columns with {join_type} join"
+            result["message"] = f"GroupBy configuration ready"
 
         return result
-        
+
     except Exception as e:
-        logger.error(f"MERGE REQUEST FAILED: {e}")
+        logger.error(f"GROUPBY REQUEST FAILED: {e}")
         error_result = {
             "success": False,
             "error": str(e),
@@ -140,7 +126,7 @@ def health_check():
     """Health check endpoint"""
     status = {
         "status": "healthy",
-        "service": "smart_merge_agent",
+        "service": "smart_groupby_agent",
         "version": "1.0.0",
         "active_sessions": len(agent.sessions),
         "loaded_files": len(agent.files_with_columns),

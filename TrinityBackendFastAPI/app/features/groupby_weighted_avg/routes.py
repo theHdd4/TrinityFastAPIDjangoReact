@@ -1,5 +1,5 @@
-from fastapi import APIRouter, Form, HTTPException, Query, Response
-from typing import Dict, List, Any
+from fastapi import APIRouter, Form, HTTPException, Query, Response, Body
+from typing import Dict, List
 from .deps import get_minio_df, get_validator_atoms_collection, fetch_dimensions_dict, get_column_classifications_collection, fetch_measures_list, fetch_identifiers_and_measures, minio_client, MINIO_BUCKET
 from app.features.data_upload_validate.app.routes import get_object_prefix
 from .mongodb_saver import save_groupby_result
@@ -12,52 +12,121 @@ from urllib.parse import unquote
 
 router = APIRouter()
 
-@router.get("/identifier_options")
-async def identifier_options(
-    client_name: str = Query(..., description="Client name"),
-    app_name: str = Query(..., description="App name"),
-    project_name: str = Query(..., description="Project name"),
-):
-    """Return identifier column names using Redis ▶ Mongo ▶ fallback logic.
+@router.get("/")
+async def root():
+    """Root endpoint for groupby backend."""
+    return {"message": "GroupBy backend is running", "endpoints": ["/ping", "/init", "/run", "/export_csv", "/export_excel", "/cached_dataframe", "/column_summary", "/save"]}
 
-    1. Attempt to read JSON config from Redis key
-       `<client>/<app>/<project>/column_classifier_config`.
-    2. If missing, fetch from Mongo (`classifier_configs` collection).
-       Cache the document back into Redis.
-    3. If still unavailable, return empty list – the frontend will
-       fall back to its existing column_summary extraction flow.
-    """
-    key = f"{client_name}/{app_name}/{project_name}/column_classifier_config"
-    cfg: dict[str, Any] | None = None
+@router.get("/ping")
+async def ping():
+    """Health check endpoint for groupby backend."""
+    return {"msg": "GroupBy backend is alive"}
 
-    # --- Redis lookup -------------------------------------------------------
+@router.get("/column_summary")
+async def column_summary(object_name: str):
+    """Return column summary statistics for a saved dataframe."""
+    object_name = unquote(object_name)
+    print(f"➡️ groupby column_summary request: {object_name}")
+    
     try:
-        from .deps import redis_client
-        cached = redis_client.get(key)
-        if cached:
-            cfg = json.loads(cached)
-    except Exception as exc:
-        print(f"⚠️ Redis read error for {key}: {exc}")
+        # Try to get from Redis first
+        content = redis_client.get(object_name)
+        if content is None:
+            # Get from MinIO
+            response = minio_client.get_object(MINIO_BUCKET, object_name)
+            content = response.read()
+            redis_client.setex(object_name, 3600, content)
 
-    # --- Mongo fallback ------------------------------------------------------
-    if cfg is None:
-        try:
-            from app.features.column_classifier.database import get_classifier_config_from_mongo
-            cfg = get_classifier_config_from_mongo(client_name, app_name, project_name)
-            if cfg and redis_client:
-                try:
-                    redis_client.setex(key, 3600, json.dumps(cfg, default=str))
-                except Exception as exc:
-                    print(f"⚠️ Redis write error for {key}: {exc}")
-        except Exception as exc:
-            print(f"⚠️ Mongo classifier config lookup failed: {exc}")
+        # Parse the content based on file type
+        if object_name.endswith(".arrow"):
+            import pyarrow as pa, pyarrow.ipc as ipc
+            reader = ipc.RecordBatchFileReader(pa.BufferReader(content))
+            df = reader.read_all().to_pandas()
+        else:
+            df = pd.read_csv(io.BytesIO(content))
 
-    identifiers: list[str] = []
-    if cfg and isinstance(cfg.get("identifiers"), list):
-        identifiers = cfg["identifiers"]
+        df.columns = df.columns.str.lower()
+        summary = []
+        for col in df.columns:
+            column_series = df[col].dropna()
+            try:
+                vals = column_series.unique()
+            except TypeError:
+                vals = column_series.astype(str).unique()
 
-    return {"identifiers": identifiers}
+            def _serialize(v):
+                if isinstance(v, (pd.Timestamp, pd.Timestamp)):
+                    return pd.to_datetime(v).isoformat()
+                return str(v)
 
+            safe_vals = [_serialize(v) for v in vals[:10]]
+            summary.append(
+                {
+                    "column": col,
+                    "data_type": str(df[col].dtype),
+                    "unique_count": int(len(vals)),
+                    "unique_values": safe_vals,
+                }
+            )
+        return {"summary": summary}
+    except Exception as e:
+        print(f"⚠️ groupby column_summary error for {object_name}: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+
+@router.get("/cached_dataframe")
+async def cached_dataframe(
+    object_name: str,
+    page: int = Query(1, ge=1, description="Page number (1-based)"),
+    page_size: int = Query(50, ge=1, le=1000, description="Number of rows per page")
+):
+    """Return the saved dataframe as CSV text from Redis or MinIO with pagination."""
+    object_name = unquote(object_name)
+    print(f"➡️ groupby cached_dataframe request: {object_name}, page={page}, page_size={page_size}")
+    
+    try:
+        # Try to get from Redis first
+        content = redis_client.get(object_name)
+        if content is None:
+            # Get from MinIO
+            response = minio_client.get_object(MINIO_BUCKET, object_name)
+            content = response.read()
+            redis_client.setex(object_name, 3600, content)
+
+        # Parse the content based on file type
+        if object_name.endswith(".arrow"):
+            import pyarrow as pa, pyarrow.ipc as ipc
+            reader = ipc.RecordBatchFileReader(pa.BufferReader(content))
+            df = reader.read_all().to_pandas()
+        else:
+            df = pd.read_csv(io.BytesIO(content))
+
+        # Calculate pagination
+        total_rows = len(df)
+        start_idx = (page - 1) * page_size
+        end_idx = start_idx + page_size
+        
+        # Slice the dataframe
+        df_page = df.iloc[start_idx:end_idx]
+        
+        # Convert to CSV
+        csv_data = df_page.to_csv(index=False)
+        
+        pagination = {
+            "current_page": page,
+            "page_size": page_size,
+            "total_rows": total_rows,
+            "total_pages": (total_rows + page_size - 1) // page_size,
+            "start_row": start_idx + 1,
+            "end_row": min(end_idx, total_rows)
+        }
+        
+        return {
+            "data": csv_data,
+            "pagination": pagination
+        }
+    except Exception as e:
+        print(f"⚠️ groupby cached_dataframe error for {object_name}: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
 
 # ----------- Export Endpoints (CSV / Excel) -----------
 @router.get("/export_csv")
@@ -247,8 +316,30 @@ async def perform_groupby_route(
     try:
         identifiers = json.loads(identifiers) if isinstance(identifiers, str) else identifiers
         aggregations = json.loads(aggregations) if isinstance(aggregations, str) else aggregations
-        df = get_minio_df(bucket=bucket_name, file_key=object_names)
+        
+        # 🔧 CRITICAL FIX: Resolve the full MinIO object path
+        from app.features.data_upload_validate.app.routes import get_object_prefix
+        
+        # Get the current object prefix
+        prefix = await get_object_prefix()
+        
+        # Construct the full object path
+        full_object_path = f"{prefix}{object_names}" if not object_names.startswith(prefix) else object_names
+        
+        print(f"🔍 GroupBy file path resolution:")
+        print(f"  Original object_names: {object_names}")
+        print(f"  Current prefix: {prefix}")
+        print(f"  Full object path: {full_object_path}")
+        
+        # Use the full path to load the dataframe
+        df = get_minio_df(bucket=bucket_name, file_key=full_object_path)
         df = clean_columns(df)
+        
+        print(f"✅ Successfully loaded dataframe with shape: {df.shape}")
+        print(f"  Columns: {list(df.columns)}")
+        print(f"  Identifiers: {identifiers}")
+        print(f"  Aggregations: {aggregations}")
+        
         grouped = groupby_base_func(df, identifiers, aggregations)
         await save_groupby_result(validator_atom_id, file_key, grouped)
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -261,18 +352,24 @@ async def perform_groupby_route(
             length=len(csv_bytes),
             content_type="text/csv"
         )
+        
+        # 🔧 CRITICAL FIX: Return the actual grouped data for immediate frontend display
+        # Convert grouped DataFrame to list of dictionaries for JSON serialization
+        grouped_data = grouped.reset_index().to_dict('records')
+        
         return {
             "status": "SUCCESS",
             "message": "GroupBy complete",
             "result_file": new_filename,
             "row_count": len(grouped),
-            "columns": list(grouped.columns)
+            "columns": list(grouped.columns),
+            "results": grouped_data  # 🔧 Add the actual grouped results
         }
     except Exception as e:
+        print(f"❌ GroupBy operation failed: {e}")
+        import traceback
+        traceback.print_exc()
         return {"status": "FAILURE", "error": str(e)}
-
-import uuid
-from fastapi import Body
 
 @router.post("/save")
 async def save_groupby_dataframe(
@@ -280,37 +377,33 @@ async def save_groupby_dataframe(
     filename: str = Body(..., embed=True)
 ):
     """Save grouped DataFrame CSV to MinIO bucket and return saved filename"""
+    import uuid
     try:
         if not filename:
             gid = str(uuid.uuid4())[:8]
             filename = f"groupby_{gid}.csv"
-        if not filename.endswith('.csv'):
-            filename += '.csv'
-        # Ensure no path traversal
-        filename = filename.replace('..', '')
-        import pyarrow as pa, pyarrow.ipc as ipc
-        import pandas as pd, io
-        df = pd.read_csv(io.StringIO(csv_data))
-        if not filename.endswith('.arrow'):
-            filename = filename.replace('.csv','') + '.arrow'
-        # Get consistent object prefix and construct full path
-        prefix = await get_object_prefix()
-        filename = f"{prefix}groupby-data/{filename}"
-        table = pa.Table.from_pandas(df)
-        sink = pa.BufferOutputStream()
-        with ipc.new_file(sink, table.schema) as writer:
-            writer.write_table(table)
-        arrow_bytes = sink.getvalue().to_pybytes()
+        
+        # Convert CSV string to bytes
+        csv_bytes = csv_data.encode("utf-8")
+        
+        # Save to MinIO
         minio_client.put_object(
-            MINIO_BUCKET,
-            filename,
-            data=io.BytesIO(arrow_bytes),
-            length=len(arrow_bytes),
-            content_type="application/octet-stream"
+            bucket_name=MINIO_BUCKET,
+            object_name=filename,
+            data=io.BytesIO(csv_bytes),
+            length=len(csv_bytes),
+            content_type="text/csv"
         )
-        return {"status": "SUCCESS", "result_file": filename}
+        
+        return {
+            "status": "SUCCESS",
+            "message": "DataFrame saved successfully",
+            "filename": filename,
+            "size_bytes": len(csv_bytes)
+        }
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Save failed: {str(e)}")
+        print(f"⚠️ groupby save error: {e}")
+        raise HTTPException(status_code=500, detail=f"Save failed: {str(e)}")
 
 @router.get("/results")
 async def get_latest_groupby_result_from_minio(
