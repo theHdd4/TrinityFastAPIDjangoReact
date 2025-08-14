@@ -501,12 +501,17 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
   }, [data.timeSeriesData, data.selectedVar1, data.selectedVar2, isCompactMode]);
 
   const getCorrelationValue = () => {
+    // Return null when no variables are selected
+    if (!data.selectedVar1 || !data.selectedVar2) {
+      return null;
+    }
+    
     const variables = data.isUsingFileData && data.fileData?.numericColumns 
       ? data.fileData.numericColumns 
       : (data.variables || []);
     
     if (!variables || !data.correlationMatrix) {
-      return 0;
+      return null;
     }
     
     const var1Index = variables.indexOf(data.selectedVar1);
@@ -516,9 +521,9 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
         data.correlationMatrix[var1Index] && 
         data.correlationMatrix[var1Index][var2Index] !== undefined) {
       const value = data.correlationMatrix[var1Index][var2Index];
-      return isNaN(value) ? 0 : value;
+      return isNaN(value) ? null : value;
     }
-    return 0;
+    return null;
   };
 
   // Get current variables for display (filtered or all)
@@ -639,7 +644,10 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
               </h3>
               {!isCompactMode && (
                 <p className="text-sm text-muted-foreground mt-1">
-                  Visualize how {data.selectedVar1} and {data.selectedVar2} change over time
+                  {data.selectedVar1 && data.selectedVar2 
+                    ? `Visualize how ${data.selectedVar1} and ${data.selectedVar2} change over time`
+                    : 'Click on a heatmap cell to compare variables over time'
+                  }
                 </p>
               )}
             </div>
@@ -664,20 +672,44 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
               <div className={`bg-muted/50 rounded-lg ${isCompactMode ? 'p-3' : 'p-4'} border`}>
                 <div className="text-center">
                   <div className={`font-bold text-foreground mb-1 ${isCompactMode ? 'text-lg' : 'text-2xl'}`}>
-                    {getCorrelationValue().toFixed(3)}
+                    {getCorrelationValue() !== null ? getCorrelationValue().toFixed(3) : '---'}
                   </div>
                   <div className={`text-muted-foreground ${isCompactMode ? 'text-xs' : 'text-sm'}`}>Correlation Coefficient</div>
-                  <Badge 
-                    variant={
-                      Math.abs(getCorrelationValue()) > 0.7 ? "destructive" :
-                      Math.abs(getCorrelationValue()) > 0.3 ? "default" : "secondary"
-                    }
-                    className="mt-2"
-                  >
-                    {Math.abs(getCorrelationValue()) > 0.7 ? 'Strong' :
-                     Math.abs(getCorrelationValue()) > 0.3 ? 'Moderate' : 'Weak'} Correlation
-                  </Badge>
+                  {getCorrelationValue() !== null ? (
+                    <Badge 
+                      variant={
+                        Math.abs(getCorrelationValue()) > 0.7 ? "destructive" :
+                        Math.abs(getCorrelationValue()) > 0.3 ? "default" : "secondary"
+                      }
+                      className="mt-2"
+                    >
+                      {Math.abs(getCorrelationValue()) > 0.7 ? 'Strong' :
+                       Math.abs(getCorrelationValue()) > 0.3 ? 'Moderate' : 'Weak'} Correlation
+                    </Badge>
+                  ) : (
+                    <Badge variant="outline" className="mt-2">
+                      No Variables Selected
+                    </Badge>
+                  )}
                 </div>
+              </div>
+
+              {/* Current Analysis */}
+              <div className="space-y-2">
+                <div className={`text-muted-foreground ${isCompactMode ? 'text-xs' : 'text-sm'}`}>
+                  Current Analysis:
+                </div>
+                {data.selectedVar1 && data.selectedVar2 ? (
+                  <div className={`text-foreground ${isCompactMode ? 'text-sm' : ''}`}>
+                    <span className="font-medium">{data.selectedVar1}</span>
+                    <span className="text-muted-foreground mx-2">vs</span>
+                    <span className="font-medium">{data.selectedVar2}</span>
+                  </div>
+                ) : (
+                  <div className={`text-muted-foreground italic ${isCompactMode ? 'text-sm' : ''}`}>
+                    No variables selected. Click a heatmap cell to analyze correlation.
+                  </div>
+                )}
               </div>
             </div>
           </Card>

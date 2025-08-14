@@ -133,8 +133,8 @@ export const DEFAULT_CONCAT_SETTINGS: ConcatSettings = {
 
 export interface CorrelationSettings {
   variables: string[];
-  selectedVar1: string;
-  selectedVar2: string;
+  selectedVar1: string | null;
+  selectedVar2: string | null;
   correlationMatrix: number[][];
   timeSeriesData: Array<{
     date: Date | number;
@@ -197,8 +197,8 @@ export interface CorrelationSettings {
 
 export const DEFAULT_CORRELATION_SETTINGS: CorrelationSettings = {
   variables: [],
-  selectedVar1: '',
-  selectedVar2: '',
+  selectedVar1: null,
+  selectedVar2: null,
   correlationMatrix: [],
   timeSeriesData: [],
   identifiers: {

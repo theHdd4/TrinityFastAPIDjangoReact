@@ -623,45 +623,23 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
         resultVariables
       );
       
-      // Fetch enhanced time series data with datetime axis and highest correlation
-      let enhancedTimeSeriesData: Array<{date: Date | number; var1Value: number; var2Value: number}> = [];
-      let selectedVar1 = data.selectedVar1;
-      let selectedVar2 = data.selectedVar2;
-      
-      try {
-        // Get highest correlation pair to set default selection
-        const pairData = await fetchHighestCorrelationPair(filePath);
-        selectedVar1 = pairData.column1;
-        selectedVar2 = pairData.column2;
-        console.log('🎯 Using highest correlation pair:', selectedVar1, 'vs', selectedVar2, '(', pairData.correlation_value.toFixed(3), ')');
-        
-        enhancedTimeSeriesData = await fetchEnhancedTimeSeriesData(
-          filePath,
-          data.settings?.dateFrom,
-          data.settings?.dateTo
-        );
-        console.log('✅ Enhanced time series data loaded:', enhancedTimeSeriesData.length, 'points');
-      } catch (timeSeriesError) {
-        console.error('💥 Enhanced time series failed, will render empty chart:', timeSeriesError);
-        // No fallback - leave enhancedTimeSeriesData as empty array
-        // Set selected variables to first available columns for UI display
-        selectedVar1 = selectedVar1 || filteredVariables[0] || 'N/A';
-        selectedVar2 = selectedVar2 || filteredVariables[1] || 'N/A';
-      }
+      // Start with no columns selected and no time series data
+      // User must explicitly select variables to see correlations
+      console.log('📊 Correlation matrix loaded with', filteredVariables.length, 'variables. No default selection.');
       
       // Transform backend result to match existing interface
       const transformedResult = {
         variables: filteredVariables, // Use filtered variables instead of all variables
         correlationMatrix: transformedMatrix,
-        timeSeriesData: enhancedTimeSeriesData
+        timeSeriesData: [] // No default time series data
       };
 
       onDataChange({
         correlationMatrix: transformedResult.correlationMatrix,
-        timeSeriesData: transformedResult.timeSeriesData,
+        timeSeriesData: [], // No default time series data
         variables: transformedResult.variables,
-        selectedVar1: selectedVar1,
-        selectedVar2: selectedVar2,
+        selectedVar1: null, // No default selection
+        selectedVar2: null, // No default selection
         fileData: {
           fileName: filePath,
           rawData: result.preview_data || [],
