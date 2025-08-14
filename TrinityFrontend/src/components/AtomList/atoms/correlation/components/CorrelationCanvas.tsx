@@ -13,6 +13,7 @@ import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import { CorrelationSettings } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
+import { correlationAPI } from '../helpers/correlationAPI';
 
 interface CorrelationCanvasProps {
   data: CorrelationSettings;
@@ -26,6 +27,113 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
   
   // Determine if we're in compact mode (when auxiliary panels are open)
   const isCompactMode = auxPanelActive !== null;
+
+  // Enhanced time series data fetching function
+  const fetchEnhancedTimeSeriesData = async (
+    filePath: string, 
+    startDate?: string, 
+    endDate?: string,
+    forceColumns?: { column1: string; column2: string }
+  ): Promise<Array<{date: Date | number; var1Value: number; var2Value: number}>> => {
+    try {
+      console.log('🚀 Fetching enhanced time series data for:', filePath);
+      
+      // 1. Get axis data (datetime or indices)
+      const axisData = await correlationAPI.getTimeSeriesAxis(filePath, startDate, endDate);
+      console.log('📊 Axis data:', axisData);
+      
+      // 2. Get highest correlation pair (unless forced columns provided)
+      let pairData;
+      if (forceColumns) {
+        pairData = {
+          column1: forceColumns.column1,
+          column2: forceColumns.column2,
+          correlation_value: 0
+        };
+      } else {
+        pairData = await correlationAPI.getHighestCorrelationPair(filePath);
+        console.log('🎯 Highest correlation pair:', pairData);
+      }
+      
+      // 3. Get Y-values for the selected columns
+      const seriesRequest = {
+        column1: pairData.column1,
+        column2: pairData.column2,
+        start_date: startDate,
+        end_date: endDate,
+        datetime_column: axisData.datetime_column
+      };
+      
+      const seriesData = await correlationAPI.getTimeSeriesData(filePath, seriesRequest);
+      console.log('📈 Series data:', seriesData);
+      
+      // 4. Transform to chart format
+      const chartData = axisData.x_values.map((x: any, index: number) => ({
+        date: axisData.has_datetime ? new Date(x) : index,
+        var1Value: seriesData.column1_values[index] || 0,
+        var2Value: seriesData.column2_values[index] || 0
+      }));
+      
+      console.log('✅ Enhanced time series data generated:', chartData.length, 'points');
+      return chartData;
+      
+    } catch (error) {
+      console.error('💥 Enhanced time series data error:', error);
+      // Fallback to empty array
+      return [];
+    }
+  };
+
+  // Handle variable selection change for time series
+  const handleVariableSelectionChange = async (var1: string, var2: string) => {
+    // Get file path from selectedFile or fileData as fallback
+    const filePath = data.selectedFile || data.fileData?.fileName;
+    
+    if (!filePath || !var1 || !var2) {
+      console.warn('⚠️ Cannot update time series: missing file path or variables', { filePath, var1, var2 });
+      // Still update the selected variables for UI feedback
+      onDataChange({
+        selectedVar1: var1,
+        selectedVar2: var2
+      });
+      return;
+    }
+    
+    try {
+      console.log('🔄 Updating time series data for heatmap click:', var1, 'vs', var2);
+      
+      // Update selected variables first
+      onDataChange({
+        selectedVar1: var1,
+        selectedVar2: var2
+      });
+      
+      // Fetch new time series data with specific columns
+      const enhancedTimeSeriesData = await fetchEnhancedTimeSeriesData(
+        filePath,
+        data.settings?.dateFrom,
+        data.settings?.dateTo,
+        { column1: var1, column2: var2 } // Force specific columns
+      );
+      
+      // Update time series data
+      onDataChange({
+        timeSeriesData: enhancedTimeSeriesData,
+        selectedVar1: var1,
+        selectedVar2: var2
+      });
+      
+      console.log('✅ Time series data updated for heatmap click');
+    } catch (error) {
+      console.error('💥 Failed to update time series for heatmap click:', error);
+      // Set empty data on error - no fallback
+      onDataChange({
+        timeSeriesData: [],
+        selectedVar1: var1,
+        selectedVar2: var2
+      });
+    }
+  };
 
   // Helper function to check if a column only correlates with itself
   const getFilteredVariables = (variables: string[], correlationMatrix: number[][]) => {
@@ -149,10 +257,8 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
             d3.selectAll(".tooltip").remove();
           })
           .on("click", () => {
-            onDataChange({
-              selectedVar1: xVar,
-              selectedVar2: yVar
-            });
+            // Update both selected variables and fetch new time series data
+            handleVariableSelectionChange(xVar, yVar);
           });
 
         // Add correlation text for visible cells
