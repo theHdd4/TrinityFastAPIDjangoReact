@@ -27,6 +27,28 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle }) => {
 
   const { user } = useAuth();
 
+  const syncEnv = (env: any) => {
+    try {
+      const projStr = localStorage.getItem('current-project');
+      if (projStr) {
+        const proj = JSON.parse(projStr);
+        if (proj?.id && env.PROJECT_ID === proj.id && proj?.name) {
+          env.PROJECT_NAME = proj.name;
+        }
+      }
+      const appStr = localStorage.getItem('current-app');
+      if (appStr) {
+        const app = JSON.parse(appStr);
+        if (app?.id && env.APP_ID === app.id && app?.slug) {
+          env.APP_NAME = app.slug;
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+    return env;
+  };
+
   useEffect(() => {
     if (!isOpen) return;
     const load = async () => {
@@ -40,6 +62,8 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle }) => {
             env = {};
           }
         }
+        env = syncEnv(env);
+        localStorage.setItem('env', JSON.stringify(env));
 
         if (user) {
           try {
@@ -57,7 +81,7 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle }) => {
               const redisData = await redisRes.json();
               const redisEnv = redisData.state?.envvars;
               if (redisEnv) {
-                env = { ...env, ...redisEnv };
+                env = syncEnv({ ...env, ...redisEnv });
                 localStorage.setItem('env', JSON.stringify(env));
               }
             }
@@ -88,7 +112,7 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle }) => {
             const prefData = await prefRes.json();
             setPrefix(prefData.prefix || '');
             if (prefData.environment) {
-              env = { ...env, ...prefData.environment };
+              env = syncEnv({ ...env, ...prefData.environment });
               localStorage.setItem('env', JSON.stringify(env));
             }
             // Rebuild query using any refreshed environment variables so the
@@ -113,7 +137,8 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle }) => {
           if (data) {
             setPrefix(data.prefix || '');
             if (data.environment) {
-              localStorage.setItem('env', JSON.stringify({ ...env, ...data.environment }));
+              env = syncEnv({ ...env, ...data.environment });
+              localStorage.setItem('env', JSON.stringify(env));
             }
             console.log(
               `📁 SavedDataFramesPanel looking in MinIO bucket "${data.bucket}" folder "${data.prefix}" via ${data.env_source} (CLIENT_NAME=${data.environment?.CLIENT_NAME} APP_NAME=${data.environment?.APP_NAME} PROJECT_NAME=${data.environment?.PROJECT_NAME})`
