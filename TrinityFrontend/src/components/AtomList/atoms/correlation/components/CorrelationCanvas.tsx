@@ -416,22 +416,32 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
       selectedVizType: 'heatmap'
     };
 
-    // Normalize data if option is selected
-    const normalizeData = (values: number[]): number[] => {
-      if (!vizOptions.normalizeValues) return values;
+    // MinMax normalization based on highest absolute value across both variables
+    const applyMinMaxNormalization = (var1Values: number[], var2Values: number[]): { var1: number[], var2: number[] } => {
+      if (!vizOptions.normalizeValues) {
+        return { var1: var1Values, var2: var2Values };
+      }
       
-      const min = Math.min(...values);
-      const max = Math.max(...values);
-      const range = max - min;
+      // Find the maximum absolute value across both variables
+      const allValues = [...var1Values, ...var2Values];
+      const maxAbsValue = Math.max(...allValues.map(v => Math.abs(v)));
       
-      if (range === 0) return values.map(() => 0);
+      // If maxAbsValue is 0, return original values to avoid division by zero
+      if (maxAbsValue === 0) {
+        return { var1: var1Values, var2: var2Values };
+      }
       
-      return values.map(value => -1 + 2 * ((value - min) / range));
+      // Normalize both variables by dividing by the max absolute value
+      const normalizedVar1 = var1Values.map(value => value / maxAbsValue);
+      const normalizedVar2 = var2Values.map(value => value / maxAbsValue);
+      
+      return { var1: normalizedVar1, var2: normalizedVar2 };
     };
 
-    // Normalize the data if required
-    const normalizedVar1Values = normalizeData(validData.map(d => d.var1Value));
-    const normalizedVar2Values = normalizeData(validData.map(d => d.var2Value));
+    // Apply MinMax normalization to both variables
+    const var1RawValues = validData.map(d => d.var1Value);
+    const var2RawValues = validData.map(d => d.var2Value);
+    const { var1: normalizedVar1Values, var2: normalizedVar2Values } = applyMinMaxNormalization(var1RawValues, var2RawValues);
 
     // Create normalized data array
     const normalizedData = validData.map((d, i) => ({
@@ -440,13 +450,9 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
       var2Value: normalizedVar2Values[i]
     }));
 
-    // Use normalized data for scale calculations
-    const var1Extent = vizOptions.normalizeValues 
-      ? [-1, 1] 
-      : d3.extent(normalizedData, d => d.var1Value) as [number, number];
-    const var2Extent = vizOptions.normalizeValues 
-      ? [-1, 1] 
-      : d3.extent(normalizedData, d => d.var2Value) as [number, number];
+    // Let D3 automatically calculate extents (no forced ranges)
+    const var1Extent = d3.extent(normalizedData, d => d.var1Value) as [number, number];
+    const var2Extent = d3.extent(normalizedData, d => d.var2Value) as [number, number];
 
     const yScale1 = d3.scaleLinear()
       .domain(var1Extent[0] !== undefined && var1Extent[1] !== undefined && var1Extent[0] !== var1Extent[1] 

@@ -166,7 +166,7 @@ const CorrelationVisualisation: React.FC<CorrelationVisualisationProps> = ({ dat
               className="data-[state=checked]:bg-primary"
             />
             <span className="text-sm text-muted-foreground">
-              Normalize Y values (-1 to 1)
+              MinMax normalize (divide by max absolute value)
             </span>
           </div>
         </CardContent>
