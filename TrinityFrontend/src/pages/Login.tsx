@@ -54,7 +54,7 @@ const Login = () => {
             <CardTitle className="text-4xl font-bold font-mono">
               Trinity
             </CardTitle>
-            <CardDescription className="w-40 text-sm text-white/70 tracking-widest text-center">
+            <CardDescription className="w-40 text-sm text-white/70 tracking-[0.4em] text-center">
               Enter The Matrix
             </CardDescription>
             <div className="h-1 w-40 bg-[#fec107] mt-2"></div>
@@ -64,7 +64,7 @@ const Login = () => {
           <CardContent className="space-y-6">
             <form onSubmit={handleLogin} className="space-y-6">
               <div className="space-y-2">
-                <Label htmlFor="username" className="text-xs font-mono uppercase text-white">
+                <Label htmlFor="username" className="text-xs font-mono font-bold text-white">
                   Username
                 </Label>
                 <div className="relative">
@@ -82,7 +82,7 @@ const Login = () => {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="password" className="text-xs font-mono uppercase text-white">
+                <Label htmlFor="password" className="text-xs font-mono font-bold text-white">
                   Password
                 </Label>
                 <div className="relative">
