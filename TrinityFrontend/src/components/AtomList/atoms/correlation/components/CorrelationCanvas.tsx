@@ -197,7 +197,26 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
       .range([0, height])
       .padding(0.05);
 
-    const colorScale = d3.scaleSequential(d3.interpolateRdBu)
+    // Get visualization options from data or use defaults
+    const vizOptions = data.visualizationOptions || {
+      heatmapColorScheme: 'RdBu',
+      var1Color: '#ef4444',
+      var2Color: '#3b82f6',
+      normalizeValues: false,
+      selectedVizType: 'heatmap'
+    };
+
+    // Color scheme mapping
+    const colorSchemeMap: Record<string, any> = {
+      'RdBu': d3.interpolateRdBu,
+      'RdYlBu': d3.interpolateRdYlBu,
+      'Spectral': d3.interpolateSpectral,
+      'Viridis': d3.interpolateViridis,
+      'Plasma': d3.interpolatePlasma
+    };
+
+    const selectedInterpolator = colorSchemeMap[vizOptions.heatmapColorScheme] || d3.interpolateRdBu;
+    const colorScale = d3.scaleSequential(selectedInterpolator)
       .domain([1, -1]);
 
     // Add cells
@@ -303,7 +322,7 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
       .style("fill", "#666")
       .text(d => d);
 
-  }, [data.correlationMatrix, data.variables, data.isUsingFileData, data.fileData, data.showAllColumns, isCompactMode]);
+  }, [data.correlationMatrix, data.variables, data.isUsingFileData, data.fileData, data.showAllColumns, data.visualizationOptions, isCompactMode]);
 
   // Draw time series chart
   useEffect(() => {
@@ -388,23 +407,61 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
         .range([0, width]);
     }
 
-    const var1Extent = d3.extent(validData, d => d.var1Value) as [number, number];
-    const var2Extent = d3.extent(validData, d => d.var2Value) as [number, number];
+    // Get visualization options from data or use defaults
+    const vizOptions = data.visualizationOptions || {
+      heatmapColorScheme: 'RdBu',
+      var1Color: '#ef4444',
+      var2Color: '#3b82f6',
+      normalizeValues: false,
+      selectedVizType: 'heatmap'
+    };
+
+    // Normalize data if option is selected
+    const normalizeData = (values: number[]): number[] => {
+      if (!vizOptions.normalizeValues) return values;
+      
+      const min = Math.min(...values);
+      const max = Math.max(...values);
+      const range = max - min;
+      
+      if (range === 0) return values.map(() => 0);
+      
+      return values.map(value => -1 + 2 * ((value - min) / range));
+    };
+
+    // Normalize the data if required
+    const normalizedVar1Values = normalizeData(validData.map(d => d.var1Value));
+    const normalizedVar2Values = normalizeData(validData.map(d => d.var2Value));
+
+    // Create normalized data array
+    const normalizedData = validData.map((d, i) => ({
+      ...d,
+      var1Value: normalizedVar1Values[i],
+      var2Value: normalizedVar2Values[i]
+    }));
+
+    // Use normalized data for scale calculations
+    const var1Extent = vizOptions.normalizeValues 
+      ? [-1, 1] 
+      : d3.extent(normalizedData, d => d.var1Value) as [number, number];
+    const var2Extent = vizOptions.normalizeValues 
+      ? [-1, 1] 
+      : d3.extent(normalizedData, d => d.var2Value) as [number, number];
 
     const yScale1 = d3.scaleLinear()
       .domain(var1Extent[0] !== undefined && var1Extent[1] !== undefined && var1Extent[0] !== var1Extent[1] 
         ? var1Extent 
-        : [0, Math.max(...validData.map(d => d.var1Value)) || 100])
+        : [0, Math.max(...normalizedData.map(d => d.var1Value)) || 100])
       .range([height, 0]);
 
     const yScale2 = d3.scaleLinear()
       .domain(var2Extent[0] !== undefined && var2Extent[1] !== undefined && var2Extent[0] !== var2Extent[1] 
         ? var2Extent 
-        : [0, Math.max(...validData.map(d => d.var2Value)) || 100])
+        : [0, Math.max(...normalizedData.map(d => d.var2Value)) || 100])
       .range([height, 0]);
 
-    // Create line generators with validation
-    const line1 = d3.line<typeof validData[0]>()
+    // Create line generators with validation using normalized data
+    const line1 = d3.line<typeof normalizedData[0]>()
       .x(d => {
         const x = xScale(d.date);
         return isNaN(x) ? 0 : x;
@@ -415,7 +472,7 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
       })
       .curve(d3.curveMonotoneX);
 
-    const line2 = d3.line<typeof validData[0]>()
+    const line2 = d3.line<typeof normalizedData[0]>()
       .x(d => {
         const x = xScale(d.date);
         return isNaN(x) ? 0 : x;
@@ -426,19 +483,19 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
       })
       .curve(d3.curveMonotoneX);
 
-    // Add lines with error handling
+    // Add lines with error handling using normalized data and selected colors
     try {
       g.append("path")
-        .datum(validData)
+        .datum(normalizedData)
         .attr("fill", "none")
-        .attr("stroke", "#ef4444")
+        .attr("stroke", vizOptions.var1Color)
         .attr("stroke-width", 2)
         .attr("d", line1);
 
       g.append("path")
-        .datum(validData)
+        .datum(normalizedData)
         .attr("fill", "none")
-        .attr("stroke", "#3b82f6")
+        .attr("stroke", vizOptions.var2Color)
         .attr("stroke-width", 2)
         .attr("d", line2);
 
@@ -461,7 +518,7 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
       legend.append("line")
         .attr("x1", 0).attr("x2", 20)
         .attr("y1", 0).attr("y2", 0)
-        .attr("stroke", "#ef4444")
+        .attr("stroke", vizOptions.var1Color)
         .attr("stroke-width", 2);
 
       legend.append("text")
@@ -475,7 +532,7 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
       legend.append("line")
         .attr("x1", 0).attr("x2", 20)
         .attr("y1", 20).attr("y2", 20)
-        .attr("stroke", "#3b82f6")
+        .attr("stroke", vizOptions.var2Color)
         .attr("stroke-width", 2);
 
       legend.append("text")
@@ -498,7 +555,7 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
         .text("Error rendering time series chart");
     }
 
-  }, [data.timeSeriesData, data.selectedVar1, data.selectedVar2, isCompactMode]);
+  }, [data.timeSeriesData, data.selectedVar1, data.selectedVar2, data.visualizationOptions, isCompactMode]);
 
   const getCorrelationValue = () => {
     // Return null when no variables are selected

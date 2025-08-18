@@ -159,6 +159,14 @@ export interface CorrelationSettings {
     selectFilter: string;
     uploadedFile?: string;
   };
+  // Enhanced visualization options
+  visualizationOptions?: {
+    heatmapColorScheme: string;
+    var1Color: string;
+    var2Color: string;
+    normalizeValues: boolean;
+    selectedVizType: string;
+  };
   // Add missing properties for saved dataframes
   selectedFile?: string;  // Selected dataframe object_name
   validatorAtomId?: string;  // Validator atom ID for column extraction
@@ -218,6 +226,13 @@ export const DEFAULT_CORRELATION_SETTINGS: CorrelationSettings = {
     selectData: 'Single Selection',
     selectFilter: 'Single Selection',
     uploadedFile: undefined
+  },
+  visualizationOptions: {
+    heatmapColorScheme: 'RdBu',
+    var1Color: '#ef4444',
+    var2Color: '#3b82f6',
+    normalizeValues: false,
+    selectedVizType: 'heatmap'
   },
   selectedFile: undefined,
   validatorAtomId: undefined,

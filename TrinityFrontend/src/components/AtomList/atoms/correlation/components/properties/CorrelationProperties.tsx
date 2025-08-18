@@ -3,7 +3,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Database, Settings, Eye, BarChart3 } from 'lucide-react';
 import CorrelationSettings from '../CorrelationSettings';
 import CorrelationExhibition from '../CorrelationExhibition';
-import CorrelationVisualisation from '../CorrelationVisualisation';
+import CorrelationVisualisation from '../CorrelationVisualisationRewrite';
 import { useLaboratoryStore, DEFAULT_CORRELATION_SETTINGS, CorrelationSettings as SettingsType } from '@/components/LaboratoryMode/store/laboratoryStore';
 
 interface Props {
@@ -43,7 +43,7 @@ const CorrelationProperties: React.FC<Props> = ({ atomId }) => {
             <CorrelationSettings data={settings} onDataChange={handleChange} />
           </TabsContent>
           <TabsContent value="visualisation" className="space-y-4" forceMount>
-            <CorrelationVisualisation data={settings} />
+            <CorrelationVisualisation data={settings} onDataChange={handleChange} />
           </TabsContent>
           <TabsContent value="exhibition" className="space-y-4" forceMount>
             <CorrelationExhibition data={settings} />
