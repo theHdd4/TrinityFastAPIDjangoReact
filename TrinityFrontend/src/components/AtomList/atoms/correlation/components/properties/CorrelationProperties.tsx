@@ -3,7 +3,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Database, Settings, Eye, BarChart3 } from 'lucide-react';
 import CorrelationSettings from '../CorrelationSettings';
 import CorrelationExhibition from '../CorrelationExhibition';
-import CorrelationVisualisation from '../CorrelationVisualisationRewrite';
+import CorrelationVisualisation from '../CorrelationVisualisation';
 import { useLaboratoryStore, DEFAULT_CORRELATION_SETTINGS, CorrelationSettings as SettingsType } from '@/components/LaboratoryMode/store/laboratoryStore';
 
 interface Props {
