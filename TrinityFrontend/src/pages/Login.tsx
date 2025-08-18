@@ -118,11 +118,11 @@ const Login = () => {
               <Button
                 type="submit"
                 disabled={isLoading}
-                className="w-full bg-gradient-to-r from-trinity-green to-trinity-blue text-white font-mono font-medium transition-all duration-300 hover:from-trinity-green/90 hover:to-trinity-blue/90 disabled:opacity-50 disabled:cursor-not-allowed"
+                className="w-full bg-[#fec107] text-black font-mono font-medium transition-all duration-300 hover:bg-[#e0ad06] disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {isLoading ? (
                   <div className="flex items-center space-x-2">
-                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                    <div className="w-4 h-4 border-2 border-black/30 border-t-black rounded-full animate-spin"></div>
                     <span>Accessing...</span>
                   </div>
                 ) : (
