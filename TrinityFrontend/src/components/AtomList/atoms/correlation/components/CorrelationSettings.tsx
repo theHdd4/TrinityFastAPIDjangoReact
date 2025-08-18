@@ -1082,7 +1082,12 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
               } />
             </SelectTrigger>
             <SelectContent className="bg-background border-border z-50">
-              {(data.fileData?.categoricalColumns || []).map((column) => (
+              {(data.fileData?.categoricalColumns || [])
+                .filter((column) => {
+                  const columnValues = data.fileData?.columnValues?.[column];
+                  return columnValues && columnValues.length > 1;
+                })
+                .map((column) => (
                 <SelectItem 
                   key={column} 
                   value={column}
@@ -1096,9 +1101,12 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
                   )}
                 </SelectItem>
               ))}
-              {!(data.fileData?.categoricalColumns?.length) && (
+              {!(data.fileData?.categoricalColumns?.filter((column) => {
+                const columnValues = data.fileData?.columnValues?.[column];
+                return columnValues && columnValues.length > 1;
+              }).length) && (
                 <SelectItem value="none" disabled>
-                  No categorical columns available
+                  No categorical columns available for filtering
                 </SelectItem>
               )}
             </SelectContent>
