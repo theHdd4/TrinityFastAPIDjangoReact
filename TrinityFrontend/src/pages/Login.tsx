@@ -54,7 +54,7 @@ const Login = () => {
             <CardTitle className="text-4xl font-bold font-mono">
               Trinity
             </CardTitle>
-            <CardDescription className="tracking-wider text-sm text-white/70">
+            <CardDescription className="w-40 text-sm text-white/70 tracking-widest text-center">
               Enter The Matrix
             </CardDescription>
             <div className="h-1 w-40 bg-[#fec107] mt-2"></div>
