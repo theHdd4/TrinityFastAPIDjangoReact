@@ -73,7 +73,7 @@ const Login = () => {
                     type="text"
                     value={username}
                     onChange={(e) => setUsername(e.target.value)}
-                    className="pl-10 bg-white/5 border-white/20 text-white placeholder-white focus:border-trinity-green focus:ring-trinity-green/20 font-mono"
+                    className="pl-10 bg-white/5 border-white/20 text-white placeholder:text-white focus:border-trinity-green focus:ring-trinity-green/20 font-mono"
                     placeholder="Enter Username"
                     required
                   />
@@ -91,7 +91,7 @@ const Login = () => {
                     type={showPassword ? 'text' : 'password'}
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    className="pl-10 pr-10 bg-white/5 border-white/20 text-white placeholder-white focus:border-trinity-green focus:ring-trinity-green/20 font-mono"
+                    className="pl-10 pr-10 bg-white/5 border-white/20 text-white placeholder:text-white focus:border-trinity-green focus:ring-trinity-green/20 font-mono"
                     placeholder="Enter Password"
                     required
                   />
@@ -116,8 +116,7 @@ const Login = () => {
               <Button
                 type="submit"
                 disabled={isLoading}
-                className="w-full bg-[#fec107] text-white font-mono font-light transition-all duration-300 hover:bg-[#e0ad06] disabled:opacity-50 disabled:cursor-not-allowed"
-                style={{ textShadow: '0 0 1px black' }}
+                className="w-full bg-[#fec107] text-black font-mono font-light transition-all duration-300 hover:bg-[#e0ad06] disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {isLoading ? (
                   <div className="flex items-center space-x-2">
