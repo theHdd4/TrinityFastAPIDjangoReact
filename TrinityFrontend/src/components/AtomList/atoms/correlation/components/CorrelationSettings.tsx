@@ -679,15 +679,6 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
     });
   };
 
-  const handleIdentifierChange = (key: string, value: string) => {
-    onDataChange({
-      identifiers: {
-        ...(data.identifiers || {}),
-        [key]: value
-      }
-    });
-  };
-
   const handleCorrelationMethodChange = (method: string) => {
     handleSettingsChange('correlationMethod', method);
     
@@ -949,38 +940,7 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
           </div>
         </div>
 
-        {/* Select Data Section */}
-      <div className="space-y-3">
-        <h3 className="text-sm font-medium text-muted-foreground">Select Data</h3>
-        <div className="space-y-2">
-          <Select 
-            value={data.settings?.selectData || 'Single Selection'} 
-            onValueChange={(value) => handleSettingsChange('selectData', value)}
-          >
-            <SelectTrigger className="w-full bg-background border-border">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent className="bg-background border-border z-50">
-              <SelectItem value="Single Selection">Single Selection</SelectItem>
-              <SelectItem value="Multi Selection">Multi Selection</SelectItem>
-            </SelectContent>
-          </Select>
-          
-          <Select 
-            value={data.settings?.dataset || 'Sales_Data'} 
-            onValueChange={(value) => handleSettingsChange('dataset', value)}
-          >
-            <SelectTrigger className="w-full bg-background border-border">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent className="bg-background border-border z-50">
-              <SelectItem value="Sales_Data">Sales_Data</SelectItem>
-              <SelectItem value="Marketing_Data">Marketing_Data</SelectItem>
-              <SelectItem value="Customer_Data">Customer_Data</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-      </div>
+
 
         {/* Smart Date Filter Section - Only render if date data exists */}
         {renderDateFilterSection()}
@@ -1012,9 +972,10 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
           <Select 
             value="" 
             onValueChange={handleAddFilter}
+            disabled={!data.fileData?.fileName}
           >
             <SelectTrigger className="w-full bg-background border-border">
-              <SelectValue placeholder="Add Filter by Column" />
+              <SelectValue placeholder={!data.fileData?.fileName ? "Select a file first" : "Add Filter by Column"} />
             </SelectTrigger>
             <SelectContent className="bg-background border-border z-50">
               {(data.fileData?.categoricalColumns || []).map((column) => (
@@ -1045,20 +1006,6 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
                     <span>{typedValues.length > 0 ? `${typedValues.length} selected` : 'All'}</span>
                     <X className="h-3 w-3 text-muted-foreground cursor-pointer" 
                        onClick={() => handleRemoveFilter(columnName)} />
-                  </div>
-                </div>
-              );
-            })}
-            {/* Keep existing identifiers for backward compatibility */}
-            {Object.entries(data.identifiers || {}).map(([key, value]) => {
-              const displayName = key.replace('identifier', 'Identifier ');
-              return (
-                <div key={key} className="flex items-center gap-2">
-                  <span className="text-xs text-muted-foreground min-w-[70px]">{displayName}</span>
-                  <div className="flex items-center gap-1 px-2 py-1 bg-muted rounded text-xs">
-                    <span>{value || 'All'}</span>
-                    <X className="h-3 w-3 text-muted-foreground cursor-pointer" 
-                       onClick={() => handleIdentifierChange(key, 'All')} />
                   </div>
                 </div>
               );
