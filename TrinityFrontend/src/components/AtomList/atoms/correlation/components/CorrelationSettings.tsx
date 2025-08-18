@@ -423,6 +423,9 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
     measures: []
   });
   const [isAnalyzingDates, setIsAnalyzingDates] = useState(false);
+  
+  // Filter state
+  const [loadingColumnValues, setLoadingColumnValues] = useState<string | null>(null);
 
   // Load available dataframes on component mount
   useEffect(() => {
@@ -575,6 +578,16 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
         include_date_analysis: true // Always include date analysis
       };
 
+      // Add filter dimensions as identifier filters
+      const filterDimensions = data.settings?.filterDimensions || {};
+      const identifierFilters = Object.entries(filterDimensions)
+        .filter(([_, values]) => Array.isArray(values) && values.length > 0)
+        .map(([column, values]) => ({ column, values: values as string[] }));
+      
+      if (identifierFilters.length > 0) {
+        request.identifier_filters = identifierFilters;
+      }
+
       // Add column selections if specified
       if (data.selectedColumns && Array.isArray(data.selectedColumns) && data.selectedColumns.length > 0) {
         // Separate columns by type based on available columns
@@ -685,6 +698,35 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
         correlationMethod: method
       }
     });
+  };
+
+  // Simple filter functions
+  const handleAddFilter = async (columnName: string) => {
+    if (!data.fileData?.fileName) return;
+    
+    setLoadingColumnValues(columnName);
+    try {
+      const response = await correlationAPI.getColumnValues(data.fileData.fileName, columnName, 100);
+      
+      // Add empty filter for this column
+      const currentFilters = data.settings?.filterDimensions || {};
+      handleSettingsChange('filterDimensions', {
+        ...currentFilters,
+        [columnName]: []
+      });
+    } catch (error) {
+      console.error('Error adding filter:', error);
+    } finally {
+      setLoadingColumnValues(null);
+    }
+  };
+
+  const handleRemoveFilter = (columnName: string) => {
+    const currentFilters = data.settings?.filterDimensions || {};
+    const newFilters = { ...currentFilters };
+    delete newFilters[columnName];
+    
+    handleSettingsChange('filterDimensions', newFilters);
   };
 
   const handleApplySettings = async () => {
@@ -968,20 +1010,46 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
         <h3 className="text-sm font-medium text-muted-foreground">Select Filter</h3>
         <div className="space-y-2">
           <Select 
-            value={data.settings?.selectFilter || 'Multi Selection'} 
-            onValueChange={(value) => handleSettingsChange('selectFilter', value)}
+            value="" 
+            onValueChange={handleAddFilter}
           >
             <SelectTrigger className="w-full bg-background border-border">
-              <SelectValue />
+              <SelectValue placeholder="Add Filter by Column" />
             </SelectTrigger>
             <SelectContent className="bg-background border-border z-50">
-              <SelectItem value="Multi Selection">Multi Selection</SelectItem>
-              <SelectItem value="Single Selection">Single Selection</SelectItem>
+              {(data.fileData?.categoricalColumns || []).map((column) => (
+                <SelectItem 
+                  key={column} 
+                  value={column}
+                  disabled={data.settings?.filterDimensions && column in data.settings.filterDimensions}
+                >
+                  {loadingColumnValues === column ? 'Loading...' : column}
+                </SelectItem>
+              ))}
+              {!(data.fileData?.categoricalColumns?.length) && (
+                <SelectItem value="none" disabled>
+                  No categorical columns available
+                </SelectItem>
+              )}
             </SelectContent>
           </Select>
           
-          {/* Filter Items */}
+          {/* Filter Items - Show active filter dimensions */}
           <div className="space-y-2">
+            {Object.entries(data.settings?.filterDimensions || {}).map(([columnName, values]) => {
+              const typedValues = Array.isArray(values) ? values : [];
+              return (
+                <div key={columnName} className="flex items-center gap-2">
+                  <span className="text-xs text-muted-foreground min-w-[70px]">{columnName}</span>
+                  <div className="flex items-center gap-1 px-2 py-1 bg-muted rounded text-xs">
+                    <span>{typedValues.length > 0 ? `${typedValues.length} selected` : 'All'}</span>
+                    <X className="h-3 w-3 text-muted-foreground cursor-pointer" 
+                       onClick={() => handleRemoveFilter(columnName)} />
+                  </div>
+                </div>
+              );
+            })}
+            {/* Keep existing identifiers for backward compatibility */}
             {Object.entries(data.identifiers || {}).map(([key, value]) => {
               const displayName = key.replace('identifier', 'Identifier ');
               return (

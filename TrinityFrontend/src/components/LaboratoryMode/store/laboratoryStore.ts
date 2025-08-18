@@ -158,6 +158,7 @@ export interface CorrelationSettings {
     selectData: string;
     selectFilter: string;
     uploadedFile?: string;
+    filterDimensions?: Record<string, string[]>;
   };
   // Enhanced visualization options
   visualizationOptions?: {
@@ -225,7 +226,8 @@ export const DEFAULT_CORRELATION_SETTINGS: CorrelationSettings = {
     correlationMethod: 'pearson',
     selectData: 'Single Selection',
     selectFilter: 'Single Selection',
-    uploadedFile: undefined
+    uploadedFile: undefined,
+    filterDimensions: {}
   },
   visualizationOptions: {
     heatmapColorScheme: 'RdBu',
