@@ -26,6 +26,7 @@ import CreateColumnProperties from '@/components/AtomList/atoms/createcolumn/com
 import GroupByProperties from '@/components/AtomList/atoms/groupby-wtg-avg/components/properties/GroupByProperties';
 import ScopeSelectorProperties from '@/components/AtomList/atoms/scope-selector/components/properties/ScopeSelectorProperties';
 import DataFrameOperationsProperties from '@/components/AtomList/atoms/dataframe-operations/components/properties/DataFrameOperationsProperties';
+import ClusteringProperties from '@/components/AtomList/atoms/clustering/components/properties/ClusteringProperties';
 
 interface SettingsPanelProps {
   isCollapsed: boolean;
@@ -116,6 +117,8 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
             <DataFrameOperationsProperties atomId={selectedAtomId} />
           ) : selectedAtomId && atom?.atomId === 'scope-selector' ? (
             <ScopeSelectorProperties atomId={selectedAtomId} />
+          ) : selectedAtomId && atom?.atomId === 'clustering' ? (
+            <ClusteringProperties atomId={selectedAtomId} />
           ) : (
           <>
           <Tabs value={tab} onValueChange={setTab} className="w-full">

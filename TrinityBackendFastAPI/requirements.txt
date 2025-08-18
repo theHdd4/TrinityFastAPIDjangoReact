@@ -4,6 +4,7 @@ pymongo
 redis
 boto3
 pandas
+numpy
 minio
 motor
 python-multipart
@@ -13,4 +14,5 @@ openpyxl
 xlsxwriter
 pydantic-settings==2.10.1
 statsmodels
+scikit-learn
 python-dotenv

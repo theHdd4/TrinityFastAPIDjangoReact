@@ -266,9 +266,7 @@ const LaboratoryMode = () => {
         <div className="flex-1 flex overflow-hidden">
           {/* Atoms Sidebar */}
           <div className={`${canEdit ? '' : 'cursor-not-allowed'} h-full`}>
-            <div className={`${canEdit ? '' : 'pointer-events-none'} h-full`}>
-              <AuxiliaryMenuLeft onAtomDragStart={handleAtomDragStart} />
-            </div>
+            <AuxiliaryMenuLeft onAtomDragStart={handleAtomDragStart} />
           </div>
 
           {/* Main Canvas Area */}
@@ -283,31 +281,28 @@ const LaboratoryMode = () => {
                 : undefined
             }
           >
-            <div className={`${canEdit ? '' : 'pointer-events-none'} h-full`}>
-              <CanvasArea
-                onAtomSelect={handleAtomSelect}
-                onCardSelect={handleCardSelect}
-                selectedCardId={selectedCardId}
-                onToggleSettingsPanel={toggleSettingsPanel}
-              />
-            </div>
+            <CanvasArea
+              onAtomSelect={handleAtomSelect}
+              onCardSelect={handleCardSelect}
+              selectedCardId={selectedCardId}
+              onToggleSettingsPanel={toggleSettingsPanel}
+              canEdit={canEdit}
+            />
           </div>
 
           {/* Auxiliary menu */}
           <div className={`${canEdit ? '' : 'cursor-not-allowed'} h-full`}>
-            <div className={`${canEdit ? '' : 'pointer-events-none'} h-full`}>
-              <AuxiliaryMenu
-                selectedAtomId={selectedAtomId}
-                selectedCardId={selectedCardId}
-                cardExhibited={cardExhibited}
-                active={auxActive}
-                onActiveChange={setAuxActive}
-              />
-              <FloatingNavigationList
-                isVisible={showFloatingNavigationList}
-                onClose={() => setShowFloatingNavigationList(false)}
-              />
-            </div>
+            <AuxiliaryMenu
+              selectedAtomId={selectedAtomId}
+              selectedCardId={selectedCardId}
+              cardExhibited={cardExhibited}
+              active={auxActive}
+              onActiveChange={setAuxActive}
+            />
+            <FloatingNavigationList
+              isVisible={showFloatingNavigationList}
+              onClose={() => setShowFloatingNavigationList(false)}
+            />
           </div>
         </div>
     </div>

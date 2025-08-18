@@ -48,11 +48,11 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const settings: TextBoxSettings | DataUploadSettings | FeatureOverviewSettings | DataFrameOperationsSettings =
     atom?.settings ||
     (atom?.atomId === 'data-upload-validate'
-      ? { ...DEFAULT_DATAUPLOAD_SETTINGS }
+            ? { ...DEFAULT_DATAUPLOAD_SETTINGS }
       : atom?.atomId === 'feature-overview'
-      ? { ...DEFAULT_FEATURE_OVERVIEW_SETTINGS }
+            ? { ...DEFAULT_FEATURE_OVERVIEW_SETTINGS }
       : atom?.atomId === 'dataframe-operations'
-      ? { ...DEFAULT_DATAFRAME_OPERATIONS_SETTINGS }
+          ? { ...DEFAULT_DATAFRAME_OPERATIONS_SETTINGS }
       : { ...DEFAULT_TEXTBOX_SETTINGS });
 
   useEffect(() => {
@@ -64,7 +64,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
   useEffect(() => {
     setTab('settings');
   }, [selectedAtomId, selectedCardId]);
-  return (
+                        return (
     <div
       className={`bg-white border-l border-gray-200 transition-all duration-300 flex flex-col h-full ${
         isCollapsed ? 'w-12' : 'w-80'
@@ -90,7 +90,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
             <ChevronRight className="w-4 h-4" />
           )}
         </Button>
-      </div>
+            </div>
 
       {!isCollapsed && (
         <div className="flex-1 overflow-y-auto scrollbar-thin scrollbar-thumb-gray-300">
@@ -111,10 +111,10 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
           ) : (
           <AtomSettingsTabs tab={tab} setTab={setTab} selectedAtomId={selectedAtomId!} cardExhibited={cardExhibited} settings={settings as TextBoxSettings} updateSettings={updateSettings} />
         )}
-        </div>
-      )}
+                </div>
+              )}
     </div>
   );
-  };
+};
 
 export default SettingsPanel;

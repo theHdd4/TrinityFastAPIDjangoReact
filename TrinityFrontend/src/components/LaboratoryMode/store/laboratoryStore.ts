@@ -199,6 +199,276 @@ export const DEFAULT_DATAFRAME_OPERATIONS_SETTINGS: DataFrameOperationsSettings 
   data: undefined,
 };
 
+export interface ChartData {
+  columns: string[];
+  rows: Record<string, any>[];
+  numeric_columns?: string[];
+  categorical_columns?: string[];
+  unique_values?: Record<string, string[]>;
+  file_id?: string;
+  row_count?: number;
+  allColumns?: string[];
+  numericColumns?: string[];
+  categoricalColumns?: string[];
+  uniqueValuesByColumn?: Record<string, string[]>;
+}
+
+export interface ChartTraceConfig {
+  yAxis: string;
+  name?: string;
+  filters: Record<string, string[]>;
+  color?: string;
+  aggregation?: 'sum' | 'mean' | 'count' | 'min' | 'max';
+}
+
+export interface ChartMakerConfig {
+  id: string;
+  title: string;
+  type: 'line' | 'bar' | 'area' | 'pie' | 'scatter';
+  xAxis: string;
+  yAxis: string;
+  filters: Record<string, string[]>;
+  chartConfig?: any;
+  filteredData?: Record<string, any>[];
+  chartRendered?: boolean;
+  chartLoading?: boolean;
+  lastUpdateTime?: number;
+  isAdvancedMode?: boolean;
+  traces?: ChartTraceConfig[];
+}
+
+export interface ChartMakerSettings {
+  dataSource?: string;
+  fileId?: string;
+  uploadedData: ChartData | null;
+  numberOfCharts: number;
+  charts: ChartMakerConfig[];
+  loading: {
+    uploading: boolean;
+    fetchingColumns: boolean;
+    fetchingUniqueValues: boolean;
+    filtering: boolean;
+  };
+  error?: string;
+}
+
+export const DEFAULT_CHART_MAKER_SETTINGS: ChartMakerSettings = {
+  dataSource: '',
+  fileId: '',
+  uploadedData: null,
+  numberOfCharts: 1,
+  charts: [
+    {
+      id: '1',
+      title: 'Chart 1',
+      type: 'line',
+      xAxis: '',
+      yAxis: '',
+      filters: {},
+      chartRendered: false,
+      chartLoading: false,
+      isAdvancedMode: false,
+      traces: [],
+    },
+  ],
+  loading: {
+    uploading: false,
+    fetchingColumns: false,
+    fetchingUniqueValues: false,
+    filtering: false,
+  },
+  error: undefined,
+};
+
+export interface ClusteringData {
+  selectedIdentifiers: string[];
+  availableIdentifiers: string[]; // <-- Added to store all available identifier columns
+  availableMeasures: string[];
+  selectedMeasures: string[];
+  selectedDataFile: string;
+  objectName: string; // <-- Added default value
+  allColumns: string[]; // <-- Added to store all columns
+  
+  // Date range filtering
+  dateRange?: {
+    column: string;
+    fromDate: string;
+    toDate: string;
+  };
+  
+  // Output path management
+  outputPath?: string; // Full path to saved clustering results
+  outputFilename?: string; // Custom filename for the output
+  
+  // Algorithm configuration
+  algorithm?: string;
+  
+  // K-selection method
+  k_selection?: 'manual' | 'elbow' | 'silhouette' | 'gap';
+  
+  // Manual K selection
+  n_clusters?: number;
+  
+  // Auto-K selection parameters
+  k_min?: number;
+  k_max?: number;
+  gap_b?: number;
+  
+  // Legacy support
+  use_elbow?: boolean;
+  
+  // Algorithm-specific parameters
+  eps?: number;
+  min_samples?: number;
+  linkage?: 'ward' | 'complete' | 'average' | 'single';
+  threshold?: number;
+  covariance_type?: 'full' | 'tied' | 'diag' | 'spherical';
+  
+  // Performance parameters
+  random_state?: number;
+  n_init?: number;
+  
+  // Legacy support - keeping for backward compatibility
+  clusteringConfig?: ClusteringConfig;
+  clusterResults: ClusterResults | null;
+  isRunning: boolean;
+}
+
+export interface ClusteringConfig {
+  clusteringMethod: string;
+  numberOfClusters: number;
+  identifiers: Record<string, string>;
+  selectedMeasure: string;
+  // New algorithm-specific parameters
+  algorithmParams: {
+    // K-means parameters
+    n_clusters?: number;
+    // HAC parameters
+    linkage?: 'ward' | 'complete' | 'average' | 'single';
+    // BIRCH parameters
+    threshold?: number;
+    // DBSCAN parameters
+    eps?: number;
+    min_samples?: number;
+    // GMM parameters
+    covariance_type?: 'full' | 'tied' | 'diag' | 'spherical';
+    // Performance parameters
+    random_state?: number;
+    n_init?: number;
+  };
+}
+
+export interface ClusterResults {
+  // Data info
+  original_rows?: number;
+  filtered_rows?: number;
+  columns_used?: string[];
+  
+  // Filter info
+  filters_applied?: any;
+  filtered_file_path?: string;
+  
+  // Clustering results
+  algorithm_used?: string;
+  n_clusters_found?: number;
+  cluster_sizes?: Record<string, number>; // cluster_id -> count
+  cluster_stats?: Array<{
+    cluster_id: number | string;
+    size: number;
+    centroid: Record<string, number>; // column -> centroid value
+    min_values: Record<string, number>; // column -> min value
+    max_values: Record<string, number>; // column -> max value
+    column_names?: string[]; // List of column names
+  }>;
+  clustered_file_path?: string;
+  
+  // Output data with cluster IDs
+  output_data?: any[];  // Full dataframe with cluster_id column
+  
+  // Preview (optional)
+  preview_data?: any[];
+  
+  // Metadata
+  timestamp?: string;
+  processing_time_ms?: number;
+  
+  // Legacy support
+  message?: string;
+  clusters_path?: string;
+  filtered_path?: string;
+  duration_ms?: number;
+}
+
+export interface ClusteringSettings {
+  clusteringData: ClusteringData;
+}
+
+export const DEFAULT_CLUSTERING_SETTINGS: ClusteringSettings = {
+  clusteringData: {
+    selectedIdentifiers: [],
+    availableIdentifiers: [], // <-- Added to store all available identifier columns
+    availableMeasures: [],
+    selectedMeasures: [],
+    selectedDataFile: '',
+    objectName: '', // <-- Added default value
+    allColumns: [], // <-- Added to store all columns
+    
+    // Date range filtering
+    dateRange: undefined,
+    
+    // Output path management
+    outputPath: '',
+    outputFilename: '',
+    
+    // Algorithm configuration
+    algorithm: 'kmeans',
+    
+    // K-selection method
+    k_selection: 'elbow',
+    
+    // Manual K selection
+    n_clusters: 3,
+    
+    // Auto-K selection parameters
+    k_min: 2,
+    k_max: 10,
+    gap_b: 10,
+    
+    // Legacy support
+    use_elbow: false,
+    
+    // Algorithm-specific parameters
+    eps: 0.5,
+    min_samples: 5,
+    linkage: 'ward',
+    threshold: 0.5,
+    covariance_type: 'full',
+    
+    // Performance parameters
+    random_state: 0,
+    n_init: 10,
+    // Legacy support - keeping for backward compatibility
+    clusteringConfig: {
+      clusteringMethod: 'K-Means',
+      numberOfClusters: 3,
+      identifiers: {},
+      selectedMeasure: '',
+      algorithmParams: {
+        n_clusters: 3,
+        linkage: 'ward',
+        threshold: 0.5,
+        eps: 0.5,
+        min_samples: 5,
+        covariance_type: 'full',
+        random_state: 0,
+        n_init: 10
+      }
+    },
+    clusterResults: null,
+    isRunning: false
+  }
+};
+
 export interface DroppedAtom {
   id: string;
   atomId: string;
@@ -256,3 +526,9 @@ export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
     set({ cards: [] });
   },
 }));
+
+
+
+
+
+
