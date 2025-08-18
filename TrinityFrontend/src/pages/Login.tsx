@@ -54,9 +54,10 @@ const Login = () => {
             <CardTitle className="text-4xl font-bold font-mono">
               Trinity
             </CardTitle>
-            <CardDescription className="tracking-wider text-sm text-white/70 underline decoration-[#fec107]">
+            <CardDescription className="tracking-wider text-sm text-white/70">
               Enter The Matrix
             </CardDescription>
+            <div className="h-1 w-40 bg-[#fec107] mt-2"></div>
             <p className="text-xs text-white/60">A Quant Matrix AI Experience</p>
           </CardHeader>
 
