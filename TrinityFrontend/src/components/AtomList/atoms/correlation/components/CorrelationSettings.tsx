@@ -465,6 +465,49 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
     try {
       const columns = await correlationAPI.getColumns(validatorAtomId);
       setAvailableColumns(columns);
+      
+      // Also try to get categorical columns directly from the file using loadDataframe
+      if (data.selectedFile) {
+        try {
+          console.log('🔍 Loading categorical columns from file for validator path:', data.selectedFile);
+          const dataframeInfo = await correlationAPI.loadDataframe(data.selectedFile);
+          console.log('📊 Dataframe info:', dataframeInfo);
+          
+          // Fetch column values for categorical columns
+          let columnValues: { [columnName: string]: string[] } = {};
+          if (dataframeInfo.categoricalColumns && dataframeInfo.categoricalColumns.length > 0) {
+            onDataChange({ columnValuesLoading: true, columnValuesError: undefined });
+            try {
+              console.log('🔍 Fetching unique values for categorical columns:', dataframeInfo.categoricalColumns);
+              columnValues = await correlationAPI.fetchAllColumnValues(data.selectedFile, dataframeInfo.categoricalColumns);
+              console.log('✅ Successfully fetched column values:', columnValues);
+              onDataChange({ columnValuesLoading: false });
+            } catch (columnValuesError) {
+              console.error('❌ Failed to fetch column values:', columnValuesError);
+              onDataChange({ 
+                columnValuesLoading: false, 
+                columnValuesError: 'Failed to load column filter values' 
+              });
+            }
+          }
+          
+          // Update fileData with categorical columns and column values
+          onDataChange({
+            fileData: {
+              fileName: data.selectedFile,
+              rawData: dataframeInfo.sampleData || [],
+              numericColumns: dataframeInfo.numericColumns || [],
+              dateColumns: [], // Will be detected from sample data
+              categoricalColumns: dataframeInfo.categoricalColumns || [],
+              columnValues,
+              isProcessed: true
+            }
+          });
+          
+        } catch (fileError) {
+          console.warn('⚠️ Could not load categorical columns from file in validator path:', fileError);
+        }
+      }
     } catch (error) {
       console.error('Failed to load columns:', error);
       setProcessingError(handleAPIError(error));
@@ -517,6 +560,8 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
     setProcessingError(null);
     setIsProcessing(true);
 
+    console.log('🚀 File selection started for:', objectName);
+    
     onDataChange({
       selectedFile: objectName,
       fileData: null,
@@ -531,8 +576,10 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
     
     // Try to get validator atom ID and load columns
     try {
+      console.log('🔍 Trying validator path for:', objectName);
       const validatorInfo = await correlationAPI.getDataframeValidator(objectName);
       if (validatorInfo.validatorId) {
+        console.log('✅ Validator found, using validator path');
         onDataChange({
           validatorAtomId: validatorInfo.validatorId
         });
@@ -542,10 +589,31 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
         await runCorrelationAnalysis(objectName);
       }
     } catch (error) {
-      console.warn('Could not get validator ID, using direct dataframe loading');
+      console.warn('⚠️ Could not get validator ID, using direct dataframe loading');
       // Fallback to direct dataframe loading
       try {
+        console.log('🔄 Using fallback dataframe loading path for:', objectName);
         const dataframeInfo = await correlationAPI.loadDataframe(objectName);
+        console.log('📊 Dataframe info (fallback path):', dataframeInfo);
+        
+        // Fetch column values for all categorical columns
+        let columnValues: { [columnName: string]: string[] } = {};
+        if (dataframeInfo.categoricalColumns && dataframeInfo.categoricalColumns.length > 0) {
+          onDataChange({ columnValuesLoading: true, columnValuesError: undefined });
+          try {
+            console.log('Fetching unique values for categorical columns:', dataframeInfo.categoricalColumns);
+            columnValues = await correlationAPI.fetchAllColumnValues(objectName, dataframeInfo.categoricalColumns);
+            console.log('Successfully fetched column values:', columnValues);
+            onDataChange({ columnValuesLoading: false });
+          } catch (columnValuesError) {
+            console.error('Failed to fetch column values:', columnValuesError);
+            onDataChange({ 
+              columnValuesLoading: false, 
+              columnValuesError: 'Failed to load column filter values' 
+            });
+          }
+        }
+        
         onDataChange({
           fileData: {
             fileName: objectName,
@@ -553,6 +621,7 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
             numericColumns: dataframeInfo.numericColumns || [],
             dateColumns: [], // Will be detected from sample data
             categoricalColumns: dataframeInfo.categoricalColumns || [],
+            columnValues,
             isProcessed: true
           }
         });
@@ -695,20 +764,35 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
   const handleAddFilter = async (columnName: string) => {
     if (!data.fileData?.fileName) return;
     
-    setLoadingColumnValues(columnName);
-    try {
-      const response = await correlationAPI.getColumnValues(data.fileData.fileName, columnName, 100);
-      
-      // Add empty filter for this column
+    // Check if we have cached column values
+    const cachedValues = data.fileData?.columnValues?.[columnName];
+    
+    if (cachedValues) {
+      // Use cached values - no API call needed
+      console.log(`Using cached values for ${columnName}:`, cachedValues);
       const currentFilters = data.settings?.filterDimensions || {};
       handleSettingsChange('filterDimensions', {
         ...currentFilters,
         [columnName]: []
       });
-    } catch (error) {
-      console.error('Error adding filter:', error);
-    } finally {
-      setLoadingColumnValues(null);
+    } else {
+      // Fallback to API call if no cached values
+      setLoadingColumnValues(columnName);
+      try {
+        console.log(`Fetching values for ${columnName} (cache miss)`);
+        const response = await correlationAPI.getColumnValues(data.fileData.fileName, columnName, 100);
+        
+        // Add empty filter for this column
+        const currentFilters = data.settings?.filterDimensions || {};
+        handleSettingsChange('filterDimensions', {
+          ...currentFilters,
+          [columnName]: []
+        });
+      } catch (error) {
+        console.error('Error adding filter:', error);
+      } finally {
+        setLoadingColumnValues(null);
+      }
     }
   };
 
@@ -969,13 +1053,41 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
       <div className="space-y-3">
         <h3 className="text-sm font-medium text-muted-foreground">Select Filter</h3>
         <div className="space-y-2">
+          {/* Show loading state for column values */}
+          {data.columnValuesLoading && (
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <Loader2 className="h-3 w-3 animate-spin" />
+              <span>Loading column filter values...</span>
+            </div>
+          )}
+          
+          {/* Show error state for column values */}
+          {data.columnValuesError && (
+            <div className="flex items-center gap-2 text-xs text-destructive">
+              <AlertCircle className="h-3 w-3" />
+              <span>{data.columnValuesError}</span>
+            </div>
+          )}
+          
+          {/* Debug info - temporary for troubleshooting */}
+          <div className="text-xs text-muted-foreground bg-muted p-2 rounded">
+            <div>🐛 Debug Info:</div>
+            <div>File Name: {data.fileData?.fileName || 'None'}</div>
+            <div>Categorical Columns: {JSON.stringify(data.fileData?.categoricalColumns || [])}</div>
+            <div>Column Values: {Object.keys(data.fileData?.columnValues || {}).join(', ') || 'None'}</div>
+          </div>
+          
           <Select 
             value="" 
             onValueChange={handleAddFilter}
-            disabled={!data.fileData?.fileName}
+            disabled={!data.fileData?.fileName || data.columnValuesLoading}
           >
             <SelectTrigger className="w-full bg-background border-border">
-              <SelectValue placeholder={!data.fileData?.fileName ? "Select a file first" : "Add Filter by Column"} />
+              <SelectValue placeholder={
+                !data.fileData?.fileName ? "Select a file first" : 
+                data.columnValuesLoading ? "Loading column values..." :
+                "Add Filter by Column"
+              } />
             </SelectTrigger>
             <SelectContent className="bg-background border-border z-50">
               {(data.fileData?.categoricalColumns || []).map((column) => (
@@ -985,6 +1097,11 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
                   disabled={data.settings?.filterDimensions && column in data.settings.filterDimensions}
                 >
                   {loadingColumnValues === column ? 'Loading...' : column}
+                  {data.fileData?.columnValues?.[column] && (
+                    <span className="text-muted-foreground ml-1">
+                      ({data.fileData.columnValues[column].length} values)
+                    </span>
+                  )}
                 </SelectItem>
               ))}
               {!(data.fileData?.categoricalColumns?.length) && (

@@ -179,10 +179,14 @@ export interface CorrelationSettings {
     numericColumns: string[];
     dateColumns: string[];
     categoricalColumns: string[];
+    columnValues?: { [columnName: string]: string[] }; // Cached unique values for categorical columns
     isProcessed: boolean;
   };
   isUsingFileData?: boolean;
   showAllColumns?: boolean;
+  // Column values loading state
+  columnValuesLoading?: boolean;
+  columnValuesError?: string;
   // Date analysis data
   dateAnalysis?: {
     has_date_data: boolean;
@@ -222,7 +226,7 @@ export const DEFAULT_CORRELATION_SETTINGS: CorrelationSettings = {
     dataset: '',
     dateFrom: '01 JAN 2023',
     dateTo: '31 DEC 2024',
-    aggregationLevel: 'Yearly',
+    aggregationLevel: 'None',
     correlationMethod: 'pearson',
     selectData: 'Single Selection',
     selectFilter: 'Single Selection',
@@ -241,7 +245,9 @@ export const DEFAULT_CORRELATION_SETTINGS: CorrelationSettings = {
   selectedColumns: [],
   fileData: undefined,
   isUsingFileData: true,  // Default to always using file data
-  showAllColumns: false
+  showAllColumns: false,
+  columnValuesLoading: false,
+  columnValuesError: undefined
 };
 
 export interface ColumnClassifierColumn {

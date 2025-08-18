@@ -202,6 +202,38 @@ export class CorrelationAPI {
     return response.json();
   }
 
+  async fetchAllColumnValues(
+    filePath: string, 
+    columns: string[], 
+    limit = 100
+  ): Promise<{ [columnName: string]: string[] }> {
+    try {
+      // Fetch unique values for all categorical columns in parallel
+      const promises = columns.map(async (column) => {
+        try {
+          const response = await this.getColumnValues(filePath, column, limit);
+          return { column, values: response.unique_values };
+        } catch (error) {
+          console.warn(`Failed to fetch values for column ${column}:`, error);
+          return { column, values: [] };
+        }
+      });
+
+      const results = await Promise.all(promises);
+      
+      // Convert to object with column names as keys
+      const columnValues: { [columnName: string]: string[] } = {};
+      results.forEach(({ column, values }) => {
+        columnValues[column] = values;
+      });
+
+      return columnValues;
+    } catch (error) {
+      console.error('Error fetching all column values:', error);
+      throw error;
+    }
+  }
+
   async getDataPreview(filePath: string): Promise<DataPreview> {
     const response = await fetch(`${this.baseUrl}/data-preview/${encodeURIComponent(filePath)}`);
     if (!response.ok) {
