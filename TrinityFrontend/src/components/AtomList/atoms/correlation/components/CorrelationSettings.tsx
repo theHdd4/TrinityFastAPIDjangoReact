@@ -1069,14 +1069,6 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
             </div>
           )}
           
-          {/* Debug info - temporary for troubleshooting */}
-          <div className="text-xs text-muted-foreground bg-muted p-2 rounded">
-            <div>🐛 Debug Info:</div>
-            <div>File Name: {data.fileData?.fileName || 'None'}</div>
-            <div>Categorical Columns: {JSON.stringify(data.fileData?.categoricalColumns || [])}</div>
-            <div>Column Values: {Object.keys(data.fileData?.columnValues || {}).join(', ') || 'None'}</div>
-          </div>
-          
           <Select 
             value="" 
             onValueChange={handleAddFilter}
