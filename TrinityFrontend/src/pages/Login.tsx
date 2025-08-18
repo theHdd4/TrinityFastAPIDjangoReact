@@ -65,7 +65,7 @@ const Login = () => {
           <CardContent className="space-y-6">
             <form onSubmit={handleLogin} className="space-y-6">
               <div className="space-y-2">
-                <Label htmlFor="username" className="text-xs font-mono uppercase text-white/70">
+                <Label htmlFor="username" className="text-xs font-mono uppercase text-white">
                   Username
                 </Label>
                 <div className="relative">
@@ -75,15 +75,15 @@ const Login = () => {
                     type="text"
                     value={username}
                     onChange={(e) => setUsername(e.target.value)}
-                    className="pl-10 bg-white/5 border-white/20 text-white placeholder-white/40 focus:border-trinity-green focus:ring-trinity-green/20 font-mono"
-                    placeholder="Enter username"
+                    className="pl-10 bg-white/5 border-white/20 text-white placeholder-white focus:border-trinity-green focus:ring-trinity-green/20 font-mono"
+                    placeholder="Enter Username"
                     required
                   />
                 </div>
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="password" className="text-xs font-mono uppercase text-white/70">
+                <Label htmlFor="password" className="text-xs font-mono uppercase text-white">
                   Password
                 </Label>
                 <div className="relative">
@@ -93,8 +93,8 @@ const Login = () => {
                     type={showPassword ? 'text' : 'password'}
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    className="pl-10 pr-10 bg-white/5 border-white/20 text-white placeholder-white/40 focus:border-trinity-green focus:ring-trinity-green/20 font-mono"
-                    placeholder="Enter password"
+                    className="pl-10 pr-10 bg-white/5 border-white/20 text-white placeholder-white focus:border-trinity-green focus:ring-trinity-green/20 font-mono"
+                    placeholder="Enter Password"
                     required
                   />
                   <Button
@@ -132,7 +132,7 @@ const Login = () => {
             </form>
 
             <div className="text-center">
-              <p className="text-xs text-white/70 font-mono">Demo: neo / neo_theo_one</p>
+              <p className="text-xs text-white/70 font-mono">Credentials: Your Official Email / Your Employee ID</p>
             </div>
           </CardContent>
         </Card>
