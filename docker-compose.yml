@@ -26,18 +26,6 @@ services:
     networks:
       - trinity-net
 
-  mongo_admin:
-    image: mongo-express
-    environment:
-      ME_CONFIG_MONGODB_ADMINUSERNAME: root
-      ME_CONFIG_MONGODB_ADMINPASSWORD: rootpass
-      ME_CONFIG_MONGODB_SERVER: mongo
-    ports:
-      - "8081:8081"
-    depends_on:
-      - mongo
-    networks:
-      - trinity-net
 
   redis:
     image: redis:7
