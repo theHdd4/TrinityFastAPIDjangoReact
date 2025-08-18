@@ -50,9 +50,7 @@ const Login = () => {
       <div className="w-full max-w-md space-y-6 relative z-10">
         <Card className="bg-white/5 backdrop-blur-lg border border-white/10 text-white shadow-2xl">
           <CardHeader className="flex flex-col items-center space-y-2 text-center">
-            <div className="p-2 bg-black/40 rounded-lg border border-white/10">
-              <AnimatedLogo className="w-12 h-12" />
-            </div>
+            <AnimatedLogo className="w-20 h-20 drop-shadow-[0_0_10px_rgba(255,255,255,0.8)]" />
             <CardTitle className="text-4xl font-light font-mono">
               Trinity
             </CardTitle>
@@ -118,7 +116,8 @@ const Login = () => {
               <Button
                 type="submit"
                 disabled={isLoading}
-                className="w-full bg-[#fec107] text-black font-mono font-medium transition-all duration-300 hover:bg-[#e0ad06] disabled:opacity-50 disabled:cursor-not-allowed"
+                className="w-full bg-[#fec107] text-white font-mono font-light transition-all duration-300 hover:bg-[#e0ad06] disabled:opacity-50 disabled:cursor-not-allowed"
+                style={{ textShadow: '0 0 1px black' }}
               >
                 {isLoading ? (
                   <div className="flex items-center space-x-2">
