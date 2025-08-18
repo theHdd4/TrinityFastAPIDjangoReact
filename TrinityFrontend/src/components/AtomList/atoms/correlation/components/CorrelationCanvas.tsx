@@ -1,6 +1,6 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import * as d3 from 'd3';
-import { ChevronDown, TrendingUp, BarChart3, Target, Zap } from 'lucide-react';
+import { ChevronDown, TrendingUp, BarChart3, Target, Zap, X } from 'lucide-react';
 import {
   Select,
   SelectContent,
@@ -11,6 +11,9 @@ import {
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
+import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { CorrelationSettings } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { correlationAPI } from '../helpers/correlationAPI';
@@ -20,6 +23,124 @@ interface CorrelationCanvasProps {
   onDataChange: (newData: Partial<CorrelationSettings>) => void;
 }
 
+// MultiSelectValues component for filter value selection
+const MultiSelectValues: React.FC<{
+  columnName: string;
+  selectedValues: string[];
+  availableValues: string[];
+  onValuesChange: (newValues: string[]) => void;
+}> = ({ columnName, selectedValues, availableValues, onValuesChange }) => {
+  const handleValueToggle = (value: string, checked: boolean) => {
+    let newValues;
+    if (checked) {
+      newValues = [...selectedValues, value];
+    } else {
+      newValues = selectedValues.filter(v => v !== value);
+    }
+    onValuesChange(newValues);
+  };
+  
+  const handleSelectAll = () => {
+    onValuesChange([...availableValues]);
+  };
+  
+  const handleClearAll = () => {
+    onValuesChange([]);
+  };
+  
+  return (
+    <div className="max-h-60 overflow-y-auto">
+      {/* Header with controls */}
+      <div className="p-2 border-b flex gap-2">
+        <Button variant="ghost" size="sm" className="h-6 text-xs" onClick={handleSelectAll}>
+          All
+        </Button>
+        <Button variant="ghost" size="sm" className="h-6 text-xs" onClick={handleClearAll}>
+          None
+        </Button>
+        <span className="text-xs text-muted-foreground ml-auto">
+          {selectedValues.length}/{availableValues.length}
+        </span>
+      </div>
+      
+      {/* Value checkboxes */}
+      <div className="p-2 space-y-1">
+        {availableValues.map((value) => (
+          <div key={value} className="flex items-center space-x-2">
+            <Checkbox 
+              id={`${columnName}-${value}`}
+              checked={selectedValues.includes(value)}
+              onCheckedChange={(checked) => handleValueToggle(value, !!checked)}
+            />
+            <label 
+              htmlFor={`${columnName}-${value}`} 
+              className="text-xs cursor-pointer truncate flex-1"
+            >
+              {value}
+            </label>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+// FilterDimensionButton component for individual filter controls
+const FilterDimensionButton: React.FC<{
+  columnName: string;
+  selectedValues: string[];
+  availableValues: string[];
+  onValuesChange: (newValues: string[]) => void;
+  onRemove: () => void;
+}> = ({ columnName, selectedValues, availableValues, onValuesChange, onRemove }) => {
+  const [isOpen, setIsOpen] = useState(false);
+  
+  const getButtonText = () => {
+    if (selectedValues.length === 0) return 'All';
+    if (selectedValues.length === 1) return selectedValues[0];
+    return `${selectedValues.length} selected`;
+  };
+  
+  return (
+    <div className="flex flex-col gap-1">
+      <label className="text-xs font-medium text-muted-foreground truncate">
+        {columnName}
+      </label>
+      
+      <Popover open={isOpen} onOpenChange={setIsOpen}>
+        <PopoverTrigger asChild>
+          <Button 
+            variant="outline" 
+            size="sm" 
+            className="h-8 text-xs justify-between w-full"
+          >
+            <span className="truncate">{getButtonText()}</span>
+            <div className="flex items-center gap-1 ml-1">
+              <ChevronDown className="h-3 w-3" />
+              <X 
+                className="h-3 w-3 hover:bg-destructive hover:text-destructive-foreground rounded" 
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onRemove();
+                }}
+              />
+            </div>
+          </Button>
+        </PopoverTrigger>
+        
+        <PopoverContent className="w-60 p-0" align="start">
+          <MultiSelectValues 
+            columnName={columnName}
+            selectedValues={selectedValues}
+            availableValues={availableValues}
+            onValuesChange={onValuesChange}
+          />
+        </PopoverContent>
+      </Popover>
+    </div>
+  );
+};
+
 const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChange }) => {
   const heatmapRef = useRef<SVGSVGElement>(null);
   const timeSeriesRef = useRef<SVGSVGElement>(null);
@@ -27,6 +148,33 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
   
   // Determine if we're in compact mode (when auxiliary panels are open)
   const isCompactMode = auxPanelActive !== null;
+
+  // Filter management functions
+  const handleFilterValuesChange = (columnName: string, newValues: string[]) => {
+    const currentFilters = data.settings?.filterDimensions || {};
+    onDataChange({
+      settings: {
+        ...data.settings,
+        filterDimensions: {
+          ...currentFilters,
+          [columnName]: newValues
+        }
+      }
+    });
+  };
+
+  const handleRemoveFilterFromCanvas = (columnName: string) => {
+    const currentFilters = data.settings?.filterDimensions || {};
+    const newFilters = { ...currentFilters };
+    delete newFilters[columnName];
+    
+    onDataChange({
+      settings: {
+        ...data.settings,
+        filterDimensions: newFilters
+      }
+    });
+  };
 
   // Enhanced time series data fetching function
   const fetchEnhancedTimeSeriesData = async (
@@ -641,50 +789,34 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
               />
             </div>
 
-            {/* Filter Dimensions */}
+            {/* Filter Dimensions - Dynamic from actual data */}
             <Card className="p-4">
               <h3 className="text-sm font-semibold text-foreground mb-3 flex items-center gap-2">
                 <Target className="w-4 h-4 text-primary" />
                 Filter Dimensions
               </h3>
-              <div className="grid grid-cols-5 gap-3">
-                {Object.entries(data.identifiers || {}).map(([key, value]) => {
-                  const labels: Record<string, string> = {
-                    identifier3: 'Market',
-                    identifier4: 'Product', 
-                    identifier6: 'Region',
-                    identifier7: 'Channel',
-                    identifier15: 'Period'
-                  };
-                  const label = labels[key] || key;
-                  return (
-                    <div key={key} className="flex flex-col gap-1">
-                      <label className="text-xs font-medium text-muted-foreground">{label}</label>
-                      <Select
-                        value={value || 'All'}
-                        onValueChange={(newValue) => {
-                          onDataChange({
-                            identifiers: {
-                              ...(data.identifiers || {}),
-                              [key]: newValue
-                            }
-                          });
-                        }}
-                  >
-                    <SelectTrigger className="h-8 text-xs">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="All">All</SelectItem>
-                      <SelectItem value="Option 1">Option 1</SelectItem>
-                      <SelectItem value="Option 2">Option 2</SelectItem>
-                    </SelectContent>
-                  </Select>
+              
+              {/* Show active filter dimensions */}
+              {Object.keys(data.settings?.filterDimensions || {}).length > 0 ? (
+                <div className="flex gap-3 overflow-x-auto pb-2 max-w-full scroll-smooth scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-gray-100">
+                  {Object.entries(data.settings?.filterDimensions || {}).map(([columnName, selectedValues]) => (
+                    <div key={columnName} className="flex-shrink-0 min-w-[200px] max-w-[220px]">
+                      <FilterDimensionButton 
+                        columnName={columnName}
+                        selectedValues={Array.isArray(selectedValues) ? selectedValues : []}
+                        availableValues={data.fileData?.columnValues?.[columnName] || []}
+                        onValuesChange={(newValues) => handleFilterValuesChange(columnName, newValues)}
+                        onRemove={() => handleRemoveFilterFromCanvas(columnName)}
+                      />
+                    </div>
+                  ))}
                 </div>
-              );
-            })}
-          </div>
-        </Card>
+              ) : (
+                <div className="text-xs text-muted-foreground text-center py-4 border border-dashed rounded">
+                  No filters applied. Add filters in the settings panel to see them here.
+                </div>
+              )}
+            </Card>
 
       {/* Correlation Heatmap - Full Width */}
       <div className={isCompactMode ? 'mb-4' : 'mb-6'}>
