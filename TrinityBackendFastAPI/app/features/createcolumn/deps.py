@@ -14,6 +14,38 @@ MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY", "admin_dev")
 MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY", "pass_dev")
 MINIO_BUCKET = os.getenv("MINIO_BUCKET", "trinity")
 
+# Common prefix for stored objects (client/app/project)
+CLIENT_NAME = os.getenv("CLIENT_NAME", "default_client")
+APP_NAME = os.getenv("APP_NAME", "default_app")
+PROJECT_NAME = os.getenv("PROJECT_NAME", "default_project")
+OBJECT_PREFIX = f"{CLIENT_NAME}/{APP_NAME}/{PROJECT_NAME}/"
+
+# ------------------------
+# Redis configuration
+# ------------------------
+REDIS_HOST = os.getenv("REDIS_HOST", "redis")
+# decode_responses=True to get str directly
+redis_client = redis.Redis(host=REDIS_HOST, port=6379, decode_responses=True)
+
+# Helper: fetch column-classifier-config JSON from Redis
+def redis_classifier_config() -> dict | None:
+    """Retrieve and decode the column-classifier-config JSON from Redis.
+
+    Returns a parsed dict or None if key missing/invalid.
+    """
+    key = f"{OBJECT_PREFIX}column_classifier_config"
+    try:
+        data_str = redis_client.get(key)
+        print(f"🔍 redis_classifier_config GET {key} => {'hit' if data_str else 'miss'}")
+        if not data_str:
+            return None
+        import json
+        cfg = json.loads(data_str)
+        return cfg if isinstance(cfg, dict) else None
+    except Exception as err:
+        print(f"⚠️ redis_classifier_config error: {err}")
+        return None
+
 minio_client = Minio(
     MINIO_ENDPOINT,
     access_key=MINIO_ACCESS_KEY,
@@ -99,36 +131,3 @@ async def fetch_measures_list(
 # In mongodb_saver.py or a shared db file
 async def get_create_settings_collection():
     return client["column_operations_db"]["create_settings"]
-
-# Redis configuration from environment variables
-REDIS_HOST = os.getenv("REDIS_HOST", "redis")
-# decode_responses=True to get str directly
-redis_client = redis.Redis(host=REDIS_HOST, port=6379, decode_responses=True)
-
-
-import os
-CLIENT_NAME = os.getenv("CLIENT_NAME", "default_client")
-APP_NAME = os.getenv("APP_NAME", "default_app")
-PROJECT_NAME = os.getenv("PROJECT_NAME", "default_project")
-OBJECT_PREFIX = f"{CLIENT_NAME}/{APP_NAME}/{PROJECT_NAME}/"
-
-# -------------------------------------------------
-# Helper: fetch identifiers/measures from Redis first
-# -------------------------------------------------
-
-def redis_classifier_config() -> dict | None:
-    """Retrieve and decode the column-classifier-config JSON from Redis.
-
-    Returns parsed dict or None if key missing/invalid.
-    """
-    key = f"{OBJECT_PREFIX}column_classifier_config"
-    try:
-        data_str = redis_client.get(key)
-        if not data_str:
-            return None
-        import json
-        cfg = json.loads(data_str)
-        return cfg if isinstance(cfg, dict) else None
-    except Exception as err:
-        print(f"⚠️ redis_classifier_config error: {err}")
-        return None

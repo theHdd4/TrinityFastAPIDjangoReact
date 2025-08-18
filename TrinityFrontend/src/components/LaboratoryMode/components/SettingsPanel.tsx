@@ -16,14 +16,18 @@ import {
   DEFAULT_FEATURE_OVERVIEW_SETTINGS,
   DataFrameOperationsSettings,
   DEFAULT_DATAFRAME_OPERATIONS_SETTINGS,
+  ChartMakerSettings,
+  DEFAULT_CHART_MAKER_SETTINGS,
 } from '../store/laboratoryStore';
 import DataUploadValidateProperties from '@/components/AtomList/atoms/data-upload-validate/components/properties/DataUploadValidateProperties';
 import FeatureOverviewProperties from '@/components/AtomList/atoms/feature-overview/components/properties/FeatureOverviewProperties';
+import ChartMakerProperties from '@/components/AtomList/atoms/chart-maker/components/properties/ChartMakerProperties';
 import ConcatProperties from '@/components/AtomList/atoms/concat/components/properties/ConcatProperties';
 import MergeProperties from '@/components/AtomList/atoms/merge/components/properties/MergeProperties';
 import ColumnClassifierProperties from '@/components/AtomList/atoms/column-classifier/components/properties/ColumnClassifierProperties';
 import CreateColumnProperties from '@/components/AtomList/atoms/createcolumn/components/properties/CreateColumnProperties';
 import GroupByProperties from '@/components/AtomList/atoms/groupby-wtg-avg/components/properties/GroupByProperties';
+import BuildModelFeatureBasedProperties from '@/components/AtomList/atoms/build-model-feature-based/components/properties/BuildModelFeatureBasedProperties';
 import ScopeSelectorProperties from '@/components/AtomList/atoms/scope-selector/components/properties/ScopeSelectorProperties';
 import DataFrameOperationsProperties from '@/components/AtomList/atoms/dataframe-operations/components/properties/DataFrameOperationsProperties';
 
@@ -47,7 +51,12 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
     selectedAtomId ? state.getAtom(selectedAtomId) : undefined
   );
   const updateSettings = useLaboratoryStore(state => state.updateAtomSettings);
-  const settings: TextBoxSettings | DataUploadSettings | FeatureOverviewSettings | DataFrameOperationsSettings =
+  const settings:
+    | TextBoxSettings
+    | DataUploadSettings
+    | FeatureOverviewSettings
+    | DataFrameOperationsSettings
+    | ChartMakerSettings =
     atom?.settings ||
     (atom?.atomId === 'data-upload-validate'
       ? { ...DEFAULT_DATAUPLOAD_SETTINGS }
@@ -55,6 +64,8 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
       ? { ...DEFAULT_FEATURE_OVERVIEW_SETTINGS }
       : atom?.atomId === 'dataframe-operations'
       ? { ...DEFAULT_DATAFRAME_OPERATIONS_SETTINGS }
+      : atom?.atomId === 'chart-maker'
+      ? { ...DEFAULT_CHART_MAKER_SETTINGS }
       : { ...DEFAULT_TEXTBOX_SETTINGS });
 
   useEffect(() => {
@@ -102,6 +113,8 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
             <DataUploadValidateProperties atomId={selectedAtomId} />
           ) : selectedAtomId && atom?.atomId === 'feature-overview' ? (
             <FeatureOverviewProperties atomId={selectedAtomId} />
+          ) : selectedAtomId && atom?.atomId === 'chart-maker' ? (
+            <ChartMakerProperties atomId={selectedAtomId} />
           ) : selectedAtomId && atom?.atomId === 'concat' ? (
             <ConcatProperties atomId={selectedAtomId} />
           ) : selectedAtomId && atom?.atomId === 'merge' ? (
@@ -116,6 +129,8 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
             <DataFrameOperationsProperties atomId={selectedAtomId} />
           ) : selectedAtomId && atom?.atomId === 'scope-selector' ? (
             <ScopeSelectorProperties atomId={selectedAtomId} />
+          ) : selectedAtomId && atom?.atomId === 'build-model-feature-based' ? (
+            <BuildModelFeatureBasedProperties atomId={selectedAtomId} />
           ) : (
           <>
           <Tabs value={tab} onValueChange={setTab} className="w-full">

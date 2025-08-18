@@ -176,10 +176,17 @@ const GroupByProperties: React.FC<GroupByPropertiesProps> = ({ atomId }) => {
     { name: 'Group 5', value: 350 },
   ];
 
-  // Default select all identifiers, measures, and aggregation methods
+  // Default select identifiers with unique_count > 1, and all measures and aggregation methods
   useEffect(() => {
     if (fallbackIdentifiers.length > 0 && selectedIdentifiers.length === 0) {
-      updateSettings(atomId, { selectedIdentifiers: fallbackIdentifiers });
+      // Get identifiers with unique_count > 1
+      const uniqueIdentifiers = fallbackIdentifiers.filter(identifier => {
+        const colInfo = (settings.allColumns || []).find((col: any) => col.column === identifier);
+        return colInfo && colInfo.unique_count > 1;
+      });
+      // If we found identifiers with unique_count > 1, use them, otherwise fallback to all identifiers
+      const defaultIdentifiers = uniqueIdentifiers.length > 0 ? uniqueIdentifiers : fallbackIdentifiers;
+      updateSettings(atomId, { selectedIdentifiers: defaultIdentifiers });
     }
     if (fallbackMeasures.length > 0 && (!Array.isArray(settings.selectedMeasures) || settings.selectedMeasures.length === 0)) {
       updateSettings(atomId, { selectedMeasures: fallbackMeasures });
@@ -219,8 +226,24 @@ const GroupByProperties: React.FC<GroupByPropertiesProps> = ({ atomId }) => {
           <Card className="border-l-4 border-l-blue-500"
                 onDragOver={handleDragOver}
                 onDrop={(e) => handleDrop(e, 'identifiers')}>
-            <CardHeader>
+            <CardHeader className="flex flex-row justify-between items-center">
               <CardTitle className="text-lg">Identifiers Selection</CardTitle>
+              <Button 
+                variant="outline" 
+                size="sm" 
+                className="text-xs h-7"
+                onClick={() => {
+                  // Get identifiers with unique_count > 1
+                  const uniqueIdentifiers = identifierList.filter(identifier => {
+                    const colInfo = (settings.allColumns || []).find((col: any) => col.column === identifier);
+                    return colInfo && colInfo.unique_count > 1;
+                  });
+                  // Select these identifiers
+                  updateSettings(atomId, { selectedIdentifiers: [...new Set([...selectedIdentifiers, ...uniqueIdentifiers])] });
+                }}
+              >
+                Unique &gt; 1
+              </Button>
             </CardHeader>
             <CardContent>
               <div className="grid grid-cols-2 gap-2 max-h-48 overflow-y-auto pr-2">

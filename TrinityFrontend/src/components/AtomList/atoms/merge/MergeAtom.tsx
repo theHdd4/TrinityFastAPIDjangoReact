@@ -42,6 +42,8 @@ const MergeAtom: React.FC<Props> = ({ atomId }) => {
     return (
       <div className="w-full h-full bg-white rounded-lg overflow-hidden flex flex-col">
         <MergeCanvas
+          atomId={atomId}
+          availableColumns={settings.availableColumns}
           key={settingsKey} // Force re-render when settings change
           mergeId={settings.mergeId}
           resultFilePath={settings.mergeResults?.result_file}

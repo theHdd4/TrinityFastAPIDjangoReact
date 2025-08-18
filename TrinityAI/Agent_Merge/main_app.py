@@ -1,279 +1,159 @@
-import os
-import sys
-from pathlib import Path
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
-from typing import Optional, Dict, Any
-import time
-import json
-from llm_merge import JSONHistoryAgent
+# main_merge.py
 import logging
-import uvicorn
+import os
+import time
+from fastapi import APIRouter
+from pydantic import BaseModel
+from typing import Optional
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+from .ai_logic import build_merge_prompt, call_merge_llm, extract_json
+from .llm_merge import SmartMergeAgent
 
-# Configuration shared via main_api
-PARENT_DIR = Path(__file__).resolve().parent.parent
-sys.path.append(str(PARENT_DIR))
-from main_api import get_llm_config, get_minio_config
+logger = logging.getLogger("smart.merge")
 
-cfg_llm = get_llm_config()
-cfg_minio = get_minio_config()
+# Initialize router
+router = APIRouter()
 
-# Initialize FastAPI app
-app = FastAPI(
-    title="JSON History Agent API",
-    description="AI-powered file merge assistant with conversation history",
-    version="2.0"
-)
+# Standalone configuration functions (no circular imports)
+def get_llm_config():
+    """Return LLM configuration from environment variables."""
+    ollama_ip = os.getenv("OLLAMA_IP", os.getenv("HOST_IP", "127.0.0.1"))
+    llm_port = os.getenv("OLLAMA_PORT", "11434")
+    api_url = os.getenv("LLM_API_URL", f"http://{ollama_ip}:{llm_port}/api/chat")
+    return {
+        "api_url": api_url,
+        "model_name": os.getenv("LLM_MODEL_NAME", "deepseek-r1:32b"),
+        "bearer_token": os.getenv("LLM_BEARER_TOKEN", "aakash_api_key"),
+    }
 
 # Initialize agent
-try:
-    agent = JSONHistoryAgent(
-        cfg_llm["api_url"],
-        cfg_llm["model_name"],
-        cfg_llm["bearer_token"],
-        cfg_minio["endpoint"],
-        cfg_minio["access_key"],
-        cfg_minio["secret_key"],
-        cfg_minio["bucket"],
-        cfg_minio["prefix"],
-    )
-    logger.info("JSONHistoryAgent initialized successfully")
-except Exception as e:
-    logger.error(f"Failed to initialize JSONHistoryAgent: {e}")
-    raise
+cfg_llm = get_llm_config()
 
-# Request/Response models
+logger.info(f"MERGE AGENT INITIALIZATION:")
+logger.info(f"LLM Config: {cfg_llm}")
+
+agent = SmartMergeAgent(
+    cfg_llm["api_url"],
+    cfg_llm["model_name"],
+    cfg_llm["bearer_token"],
+    "minio:9000",  # Default values for compatibility
+    "minio",
+    "minio123",
+    "trinity",
+    "",
+)
+
+# Trinity AI only generates JSON configuration
+# Frontend handles all backend API calls and path resolution
+
 class MergeRequest(BaseModel):
     prompt: str
     session_id: Optional[str] = None
 
-class SessionResponse(BaseModel):
-    session_id: str
-    message: str
-
-# API Endpoints
-
-@app.post("/merge", response_model=Dict[str, Any])
-async def merge_files(request: MergeRequest):
-    """
-    Process merge request with conversation history
-    
-    - **prompt**: User input text
-    - **session_id**: Optional session ID for continuing conversations
-    """
+@router.post("/merge")
+def merge_files(request: MergeRequest):
+    """Smart merge endpoint with complete memory"""
     start_time = time.time()
     
+    logger.info(f"MERGE REQUEST RECEIVED:")
+    logger.info(f"Prompt: {request.prompt}")
+    logger.info(f"Session ID: {request.session_id}")
+    
     try:
-        logger.info(f"[REQUEST] Prompt: {request.prompt}")
-        logger.info(f"[REQUEST] Session: {request.session_id}")
-        
-        # Process with complete JSON history
+        # Process with complete memory context
         result = agent.process_request(request.prompt, request.session_id)
-        
-        # Always ensure result is a dict
-        if result is None:
-            result = {
-                "success": False, 
-                "suggestions": ["Processing failed - no response from agent"]
+
+        # Add timing
+        processing_time = round(time.time() - start_time, 2)
+        result["processing_time"] = processing_time
+
+        logger.info(f"MERGE REQUEST COMPLETED:")
+        logger.info(f"Success: {result.get('success', False)}")
+        logger.info(f"Processing Time: {processing_time}s")
+
+        # If merge configuration was successful, return the configuration for frontend to handle
+        if result.get("success") and result.get("merge_json"):
+            cfg = result["merge_json"]
+            file1 = cfg.get("file1")
+            if isinstance(file1, list):
+                file1 = file1[0] if file1 else ""
+            file2 = cfg.get("file2")
+            if isinstance(file2, list):
+                file2 = file2[0] if file2 else ""
+            join_columns = cfg.get("join_columns", ["id"])  # Default to list format
+            join_type = cfg.get("join_type", "inner")
+            
+            # Return clean filenames only - let backend handle path resolution
+            # This prevents duplicate path issues
+            result["merge_json"] = {
+                "file1": file1,  # Just filename, backend will resolve path
+                "file2": file2,  # Just filename, backend will resolve path
+                "join_columns": join_columns,
+                "join_type": join_type,
+                "bucket_name": "trinity",  # Add bucket name for compatibility
             }
-        
-        # Add processing time
-        result["processing_time"] = round(time.time() - start_time, 2)
-        
-        # Log results
-        logger.info(f"[RESULT] Success: {result.get('success', False)}")
-        logger.info(f"[RESULT] Session: {result.get('session_id', 'None')}")
-        logger.debug(f"[DEBUG] Full Response: {json.dumps(result, indent=2)}")
-        
+            
+            # Add session ID for consistency
+            if request.session_id:
+                result["session_id"] = request.session_id
+            
+            # Update message to indicate configuration is ready
+            result["message"] = f"Merge configuration ready: {file1} + {file2} using {join_columns} columns with {join_type} join"
+
         return result
         
     except Exception as e:
-        logger.error(f"Error in merge_files: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/history/{session_id}")
-async def get_history(session_id: str):
-    """
-    Get conversation history for a session
-    
-    - **session_id**: Session ID to retrieve history for
-    """
-    try:
-        history = agent.get_session_history(session_id)
-        
-        if not history:
-            raise HTTPException(
-                status_code=404, 
-                detail=f"No history found for session {session_id}"
-            )
-        
-        return {
-            "session_id": session_id,
-            "history": history, 
-            "total_interactions": len(history)
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error getting history: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/debug/{session_id}")
-async def debug_session(session_id: str):
-    """
-    Debug session - see complete session data including what LLM receives
-    
-    - **session_id**: Session ID to debug
-    """
-    try:
-        debug_info = agent.debug_session(session_id)
-        
-        if debug_info["total_interactions"] == 0:
-            raise HTTPException(
-                status_code=404,
-                detail=f"No session found with ID {session_id}"
-            )
-        
-        return debug_info
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error debugging session: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.delete("/session/{session_id}")
-async def clear_session(session_id: str):
-    """
-    Clear a specific session
-    
-    - **session_id**: Session ID to clear
-    """
-    try:
-        success = agent.clear_session(session_id)
-        
-        if not success:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Session {session_id} not found"
-            )
-        
-        return {
-            "message": f"Session {session_id} cleared successfully",
-            "session_id": session_id
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error clearing session: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/sessions")
-async def list_sessions():
-    """Get all active session IDs"""
-    try:
-        sessions = agent.get_all_sessions()
-        return {
-            "sessions": sessions,
-            "total": len(sessions)
-        }
-    except Exception as e:
-        logger.error(f"Error listing sessions: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/files")
-async def list_files():
-    """Get all available files with their columns"""
-    try:
-        return {
-            "files": agent.files_with_columns,
-            "total_files": len(agent.files_with_columns)
-        }
-    except Exception as e:
-        logger.error(f"Error listing files: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/reload-files")
-async def reload_files():
-    """Reload files from MinIO"""
-    try:
-        start_time = time.time()
-        agent._load_files()
-        
-        return {
-            "message": "Files reloaded successfully",
-            "total_files": len(agent.files_with_columns),
+        logger.error(f"MERGE REQUEST FAILED: {e}")
+        error_result = {
+            "success": False,
+            "error": str(e),
             "processing_time": round(time.time() - start_time, 2)
         }
-    except Exception as e:
-        logger.error(f"Error reloading files: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        return error_result
 
-@app.get("/health")
-async def health_check():
+@router.get("/history/{session_id}")
+def get_complete_history(session_id: str):
+    """Get complete session history with all JSON details"""
+    logger.info(f"Getting history for session: {session_id}")
+    history = agent.get_session_history(session_id)
+    
+    return {
+        "success": True,
+        "session_id": session_id,
+        "complete_history": history,
+        "total_interactions": len(history)
+    }
+
+@router.get("/files")
+def list_available_files():
+    """List all available files"""
+    logger.info("Listing available files")
+    files = agent.files_with_columns
+    return {
+        "success": True,
+        "total_files": len(files),
+        "files": files
+    }
+
+@router.get("/health")
+def health_check():
     """Health check endpoint"""
-    try:
-        return {
-            "status": "healthy",
-            "approach": "complete_json_history",
-            "active_sessions": len(agent.sessions),
-            "loaded_files": len(agent.files_with_columns),
-            "api_version": "2.0"
-        }
-    except Exception as e:
-        logger.error(f"Health check failed: {e}", exc_info=True)
-        return {
-            "status": "unhealthy",
-            "error": str(e)
-        }
-
-@app.get("/")
-async def root():
-    """Root endpoint with API information"""
-    return {
-        "message": "JSON History Agent API",
-        "version": "2.0",
-        "endpoints": {
-            "POST /merge": "Process merge request",
-            "GET /history/{session_id}": "Get session history",
-            "GET /debug/{session_id}": "Debug session",
-            "DELETE /session/{session_id}": "Clear session",
-            "GET /sessions": "List all sessions",
-            "GET /files": "List available files",
-            "POST /reload-files": "Reload files from MinIO",
-            "GET /health": "Health check"
-        }
+    status = {
+        "status": "healthy",
+        "service": "smart_merge_agent",
+        "version": "1.0.0",
+        "active_sessions": len(agent.sessions),
+        "loaded_files": len(agent.files_with_columns),
+        "features": [
+            "complete_memory_context",
+            "intelligent_suggestions",
+            "conversational_responses",
+            "user_preference_learning",
+            "enhanced_column_printing",
+            "llm_driven_file_selection"
+        ]
     }
+    logger.info(f"Health check: {status}")
+    return status
 
-# Exception handlers
-@app.exception_handler(404)
-async def not_found_handler(request, exc):
-    return {
-        "error": "Not found",
-        "message": str(exc.detail) if hasattr(exc, 'detail') else "Resource not found",
-        "status_code": 404
-    }
-
-@app.exception_handler(500)
-async def internal_error_handler(request, exc):
-    return {
-        "error": "Internal server error",
-        "message": "An unexpected error occurred",
-        "status_code": 500
-    }
-
-if __name__ == "__main__":
-    # Run the application
-    uvicorn.run(
-        app,
-        host="0.0.0.0",
-        port=int(os.getenv("AI_PORT", 8002)),
-        log_level="info",
-        reload=False
-    )
+# Export the router for mounting in main_api.py

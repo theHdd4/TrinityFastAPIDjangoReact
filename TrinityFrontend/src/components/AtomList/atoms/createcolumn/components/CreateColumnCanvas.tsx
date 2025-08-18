@@ -173,17 +173,25 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
       setCatColumns([]);
       setSelectedIdentifiers([]);
       const dataSource = atom?.settings?.dataSource;
-      const validator_atom_id = atom?.settings?.validator_atom_id || '';
       if (!dataSource) return;
+      
+      // Extract client/app/project from file path like scope_selector does
+      const pathParts = dataSource.split('/')
+      const clientName = pathParts[0] ?? ''
+      const appName = pathParts[1] ?? ''
+      const projectName = pathParts[2] ?? ''
+      
       try {
-        if (validator_atom_id && dataSource) {
-          const resp = await fetch(`${CREATECOLUMN_API}/classification?validator_atom_id=${encodeURIComponent(validator_atom_id)}&file_key=${encodeURIComponent(dataSource)}`);
+        if (clientName && appName && projectName) {
+          const resp = await fetch(`${CREATECOLUMN_API}/identifier_options?client_name=${encodeURIComponent(clientName)}&app_name=${encodeURIComponent(appName)}&project_name=${encodeURIComponent(projectName)}`);
           if (resp.ok) {
             const data = await resp.json();
-            setMongoIdentifiers(data.identifiers || []);
-            setSelectedIdentifiers(data.identifiers || []);
-            setShowCatSelector(false);
-            return;
+            if (Array.isArray(data.identifiers) && data.identifiers.length > 0) {
+              setMongoIdentifiers(data.identifiers || []);
+              setSelectedIdentifiers(data.identifiers || []);
+              setShowCatSelector(false);
+              return;
+            }
           }
         }
       } catch {}
@@ -378,17 +386,25 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
         });
       }
       
-      // Fetch preview
-      const previewRes = await fetch(`${CREATECOLUMN_API}/results?object_names=${atom.settings.dataSource}&bucket_name=trinity`);
-      const previewText = await previewRes.text();
-      console.log('Preview backend response:', previewText);
-      let previewData;
-      try {
-        previewData = JSON.parse(previewText);
-      } catch {
-        throw new Error('Preview backend did not return valid JSON. Response: ' + previewText.slice(0, 200));
+      // Use preview data from the response
+      if (data.preview_data && data.preview_data.data) {
+        // Parse CSV data to get preview rows
+        const csvLines = data.preview_data.data.split('\n');
+        const headers = csvLines[0].split(',');
+        const previewRows = csvLines.slice(1).map(line => { // Show all rows
+          const values = line.split(',');
+          const row: any = {};
+          headers.forEach((header, index) => {
+            row[header] = values[index] || '';
+          });
+          return row;
+        }).filter(row => Object.keys(row).length > 1); // Filter out empty rows
+        
+        setPreview(previewRows);
+      } else {
+        setPreview([]);
       }
-      setPreview(Array.isArray(previewData.create_data) ? previewData.create_data : []);
+      
       toast({ title: 'Success', description: 'Columns created and preview loaded.' });
       // In handleCreate, after a successful perform, set the last used identifiers
       console.log('DEBUG: selectedIdentifiers at perform', selectedIdentifiers);
@@ -474,10 +490,67 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
     try {
       const csv_data = previewToCSV(preview);
       const filename = `createcolumn_${atom?.settings?.dataSource?.split('/')?.pop() || 'data'}_${Date.now()}`;
+      
+      // Get environment variables for MongoDB saving
+      const envStr = localStorage.getItem('env');
+      const env = envStr ? JSON.parse(envStr) : {};
+      const stored = localStorage.getItem('current-project');
+      const project = stored ? JSON.parse(stored) : {};
+      
+      // Prepare operation details for MongoDB
+      const operation_details = {
+        operations: operations.map(op => {
+          // Get the actual column name created (either rename or default)
+          let created_column_name = '';
+          if (op.rename && op.rename.trim()) {
+            created_column_name = op.rename.trim();
+          } else {
+            // Use default naming based on operation type
+            const columns = op.columns || [];
+            switch (op.type) {
+              case 'add': created_column_name = columns.join('_plus_'); break;
+              case 'subtract': created_column_name = columns.join('_minus_'); break;
+              case 'multiply': created_column_name = columns.join('_times_'); break;
+              case 'divide': created_column_name = columns.join('_dividedby_'); break;
+              case 'residual': created_column_name = `Res_${columns[0] || ''}`; break;
+              case 'dummy': created_column_name = columns.length > 0 ? `${columns[0]}_dummy` : 'dummy'; break;
+              case 'log': created_column_name = columns.length > 0 ? `${columns[0]}_log` : 'log'; break;
+              case 'sqrt': created_column_name = columns.length > 0 ? `${columns[0]}_sqrt` : 'sqrt'; break;
+              case 'exp': created_column_name = columns.length > 0 ? `${columns[0]}_exp` : 'exp'; break;
+              case 'power': created_column_name = columns.length > 0 && op.param ? `${columns[0]}_power${op.param}` : 'power'; break;
+              case 'standardize_zscore': created_column_name = columns.length > 0 ? `${columns[0]}_zscore_scaled` : 'zscore_scaled'; break;
+              case 'standardize_minmax': created_column_name = columns.length > 0 ? `${columns[0]}_minmax_scaled` : 'minmax_scaled'; break;
+              case 'logistic': created_column_name = columns.length > 0 ? `${columns[0]}_logistic` : 'logistic'; break;
+              case 'detrend': created_column_name = columns.length > 0 ? `${columns[0]}_detrended` : 'detrended'; break;
+              case 'deseasonalize': created_column_name = columns.length > 0 ? `${columns[0]}_deseasonalized` : 'deseasonalized'; break;
+              case 'detrend_deseasonalize': created_column_name = columns.length > 0 ? `${columns[0]}_detrend_deseasonalized` : 'detrend_deseasonalized'; break;
+              default: created_column_name = `${op.type}_${columns.join('_')}`; break;
+            }
+          }
+          
+          return {
+            operation_type: op.type,
+            columns: op.columns || [],
+            rename: op.rename || null,
+            param: op.param || null,
+            created_column_name: created_column_name
+          };
+        })
+      };
+      
       const response = await fetch(`${CREATECOLUMN_API}/save`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ csv_data, filename }),
+        body: JSON.stringify({ 
+          csv_data, 
+          filename,
+          client_name: env.CLIENT_NAME || '',
+          app_name: env.APP_NAME || '',
+          project_name: env.PROJECT_NAME || '',
+          user_id: env.USER_ID || '',
+          project_id: project.id || null,
+          operation_details: JSON.stringify(operation_details)
+        }),
       });
       if (!response.ok) {
         throw new Error(`Save failed: ${response.statusText}`);

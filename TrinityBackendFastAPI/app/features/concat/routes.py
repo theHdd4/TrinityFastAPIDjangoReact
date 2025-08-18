@@ -1,6 +1,6 @@
 # app/routes.py
 
-from fastapi import APIRouter, Form, HTTPException, Query, File, UploadFile, Body, Depends
+from fastapi import APIRouter, Form, HTTPException, Query, File, UploadFile, Body
 from fastapi.responses import Response, JSONResponse, StreamingResponse
 from urllib.parse import unquote
 from typing import List
@@ -11,15 +11,10 @@ import pyarrow.ipc as ipc
 from minio.error import S3Error
 import uuid
 import datetime
-from ..data_upload_validate.app.routes import get_object_prefix
 from .deps import (
-    minio_client,
-    load_dataframe,
-    save_concat_result_to_minio,
-    get_concat_results_collection,
-    save_concat_metadata_to_mongo,
-    MINIO_BUCKET,
-    redis_client,
+    minio_client, load_dataframe,
+    save_concat_result_to_minio, get_concat_results_collection, save_concat_metadata_to_mongo,
+    OBJECT_PREFIX, MINIO_BUCKET, redis_client
 )
 
 router = APIRouter()
@@ -39,6 +34,8 @@ async def column_summary(object_name: str):
     """Return column summary statistics for a saved dataframe."""
     object_name = unquote(object_name)
     print(f"➡️ column_summary request: {object_name}")
+    if not object_name.startswith(OBJECT_PREFIX):
+        print(f"⚠️ column_summary prefix mismatch: {object_name} (expected {OBJECT_PREFIX})")
     try:
         df = load_dataframe(object_name)
         df.columns = df.columns.str.lower()
@@ -84,10 +81,17 @@ async def cached_dataframe(
     """Return the saved dataframe as CSV text from Redis or MinIO with pagination."""
     object_name = unquote(object_name)
     print(f"➡️ cached_dataframe request: {object_name}, page={page}, page_size={page_size}")
+    if not object_name.startswith(OBJECT_PREFIX):
+        print(f"⚠️ cached_dataframe prefix mismatch: {object_name} (expected {OBJECT_PREFIX})")
     try:
         content = redis_client.get(object_name)
         if content is None:
-            response = minio_client.get_object(MINIO_BUCKET, object_name)
+            # Construct the full object path using the prefix if object_name doesn't already include it
+            if not object_name.startswith(OBJECT_PREFIX):
+                full_object_path = f"{OBJECT_PREFIX}{object_name}"
+            else:
+                full_object_path = object_name
+            response = minio_client.get_object(MINIO_BUCKET, full_object_path)
             content = response.read()
             redis_client.setex(object_name, 3600, content)
 
@@ -216,27 +220,31 @@ async def perform_concat(
             result = pd.concat([df1, df2], axis=0, ignore_index=True)
         elif concat_direction == "horizontal":
             # Handle duplicate column names for horizontal concatenation
+            # Add suffixes to distinguish columns from different files
             df1_suffix = df1.copy()
             df2_suffix = df2.copy()
+            
+            # Get common columns
             common_cols = set(df1.columns) & set(df2.columns)
+            
+            # Add suffixes to common columns
             if common_cols:
+                # Rename columns in df1 with "_file1" suffix
                 df1_suffix.columns = [f"{col}_file1" if col in common_cols else col for col in df1.columns]
+                # Rename columns in df2 with "_file2" suffix  
                 df2_suffix.columns = [f"{col}_file2" if col in common_cols else col for col in df2.columns]
+            
             result = pd.concat([df1_suffix, df2_suffix], axis=1)
         else:
             raise ValueError("Invalid concat direction")
 
-        # Prepare full CSV for response (used later by /save to persist full data)
-        csv_text_full = result.to_csv(index=False)
-
-        # Generate auto concat ID and get standard prefix
+        # Generate auto concat ID
         concat_id = str(uuid.uuid4())[:8]  # Shorten UUID for readability
-        prefix = await get_object_prefix()
-        concat_key = f"{prefix}concat-data/{concat_id}_concat.arrow"
+        concat_key = f"{concat_id}_concat.arrow"
 
         print('Received:', file1, file2, concat_direction)
 
-        # Save as Arrow file for efficient storage
+        # Save as Arrow file instead of CSV
         import pyarrow as pa
         table = pa.Table.from_pandas(result)
         arrow_buffer = pa.BufferOutputStream()
@@ -244,14 +252,9 @@ async def perform_concat(
             writer.write_table(table)
         arrow_bytes = arrow_buffer.getvalue().to_pybytes()
         
-        # Save to MinIO
-        minio_client.put_object(
-            MINIO_BUCKET,
-            concat_key,
-            data=io.BytesIO(arrow_bytes),
-            length=len(arrow_bytes),
-            content_type="application/octet-stream",
-        )
+        # NOTE: Do not persist result to MinIO during `/perform`.
+        # The dataframe is cached in Redis for quick retrieval by `/results`.
+        # Actual persistence is handled by the dedicated `/save` endpoint.
         # Cache in Redis
         redis_client.setex(concat_key, 3600, arrow_bytes)
 
@@ -273,7 +276,6 @@ async def perform_concat(
             "result_shape": result.shape,
             "columns": list(result.columns),
             "result_file": concat_key,
-            "data": csv_text_full,
             "message": "Concatenation completed successfully"
         }
 
@@ -283,35 +285,35 @@ async def perform_concat(
 @router.post("/save")
 async def save_concat_dataframe(
     csv_data: str = Body(..., embed=True),
-    filename: str = Body("", embed=True)
+    filename: str = Body(..., embed=True)
 ):
-    """Save full concatenated dataframe to MinIO as Arrow (mirrors merge save)."""
-    import pandas as pd, io, uuid
-    import pyarrow as pa, pyarrow.ipc as ipc
+    """Save a concatenated dataframe (CSV) to MinIO as Arrow file and return file info."""
+    import pandas as pd
+    import pyarrow as pa
+    import pyarrow.ipc as ipc
+    import io
+    import datetime
+    import uuid
 
     try:
-        # 1. Load dataframe from CSV payload (expected full data, not a preview)
+        # Parse CSV to DataFrame
         df = pd.read_csv(io.StringIO(csv_data))
-
-        # 2. Determine output filename with standard prefix
+        # Generate unique file key if not provided
         if not filename:
             concat_id = str(uuid.uuid4())[:8]
             filename = f"{concat_id}_concat.arrow"
-        if not filename.endswith(".arrow"):
-            filename += ".arrow"
-            
-        # Get standard prefix and create full path
-        prefix = await get_object_prefix()
-        filename = f"{prefix}concat-data/{filename}"
-
-        # 3. Convert to Arrow bytes
+        if not filename.endswith('.arrow'):
+            filename += '.arrow'
+        # Prepend OBJECT_PREFIX if not already present
+        if not filename.startswith(OBJECT_PREFIX):
+            filename = OBJECT_PREFIX + filename
+        # Convert to Arrow
         table = pa.Table.from_pandas(df)
-        buf = pa.BufferOutputStream()
-        with ipc.new_file(buf, table.schema) as writer:
+        arrow_buffer = pa.BufferOutputStream()
+        with ipc.new_file(arrow_buffer, table.schema) as writer:
             writer.write_table(table)
-        arrow_bytes = buf.getvalue().to_pybytes()
-
-        # 4. Upload to MinIO & cache in Redis
+        arrow_bytes = arrow_buffer.getvalue().to_pybytes()
+        # Save to MinIO
         minio_client.put_object(
             MINIO_BUCKET,
             filename,
@@ -319,8 +321,9 @@ async def save_concat_dataframe(
             length=len(arrow_bytes),
             content_type="application/octet-stream",
         )
+        # Optionally, cache in Redis
         redis_client.setex(filename, 3600, arrow_bytes)
-
+        # Return file info
         return {
             "result_file": filename,
             "shape": df.shape,
@@ -335,56 +338,32 @@ async def save_concat_dataframe(
 async def get_concat_data(
     concat_id: str = Query(...)
 ):
-    """Retrieve concatenated data by concat_id.
-
-    Priority order:
-    1. Try to fetch the Arrow file (preferred new format) from Redis, then MinIO.
-    2. Fall back to the legacy CSV file name if the Arrow object is not found. This
-       maintains backward-compatibility with previously saved results.
-    """
+    """Retrieve concatenated data by concat_id."""
     try:
-        # Get the standard prefix
-        prefix = await get_object_prefix()
-        arrow_key = f"{prefix}concat-data/{concat_id}_concat.arrow"
-        csv_key = f"{prefix}concat-data/{concat_id}_concat.csv"  # legacy
+        concat_key = f"{concat_id}_concat.arrow"
 
-        # Helper to load DataFrame from raw bytes depending on extension
-        def _bytes_to_df(key: str, raw: bytes) -> pd.DataFrame:
-            if key.endswith(".arrow"):
-                import pyarrow as pa, pyarrow.ipc as ipc
-                reader = ipc.RecordBatchFileReader(pa.BufferReader(raw))
-                return reader.read_all().to_pandas()
-            else:
-                return pd.read_csv(io.BytesIO(raw))
+        # Try Redis cache first
+        content = redis_client.get(concat_key)
+        if content is not None:
+            reader = ipc.RecordBatchFileReader(pa.BufferReader(content))
+            concat_df = reader.read_all().to_pandas()
+            concat_df.columns = concat_df.columns.str.lower()
+            return {
+                "row_count": len(concat_df),
+                "concat_data": concat_df.to_dict(orient="records")
+            }
 
-        # 1️⃣ Attempt Redis cache (Arrow first)
-        for key in (arrow_key, csv_key):
-            raw = redis_client.get(key)
-            if raw is not None:
-                df = _bytes_to_df(key, raw if isinstance(raw, bytes) else raw.encode("utf-8"))
-                df.columns = df.columns.str.lower()
-                return {
-                    "row_count": len(df),
-                    "concat_data": df.to_dict(orient="records")
-                }
+        # Fallback to MinIO
+        concat_obj = minio_client.get_object(MINIO_BUCKET, concat_key)
+        data = concat_obj.read()
+        reader = ipc.RecordBatchFileReader(pa.BufferReader(data))
+        concat_df = reader.read_all().to_pandas()
+        concat_df.columns = concat_df.columns.str.lower()
 
-        # 2️⃣ Attempt MinIO storage
-        for key in (arrow_key, csv_key):
-            try:
-                obj = minio_client.get_object(MINIO_BUCKET, key)
-                raw = obj.read()
-                # Cache for future use
-                redis_client.setex(key, 3600, raw)
-                df = _bytes_to_df(key, raw)
-                df.columns = df.columns.str.lower()
-                return {
-                    "row_count": len(df),
-                    "concat_data": df.to_dict(orient="records")
-                }
-            except Exception:
-                continue  # try next key
-
-        raise HTTPException(status_code=404, detail="Concat result not found")
+        return {
+            "row_count": len(concat_df),
+            "concat_data": concat_df.to_dict(orient="records")
+        }
 
     except Exception as e:
         raise HTTPException(status_code=404, detail=f"Unable to fetch concat data: {str(e)}")
@@ -400,7 +379,12 @@ async def export_csv(object_name: str):
         content = redis_client.get(object_name)
         if content is None:
             # Fallback to MinIO
-            response = minio_client.get_object(MINIO_BUCKET, object_name)
+            # Construct the full object path using the prefix if object_name doesn't already include it
+            if not object_name.startswith(OBJECT_PREFIX):
+                full_object_path = f"{OBJECT_PREFIX}{object_name}"
+            else:
+                full_object_path = object_name
+            response = minio_client.get_object(MINIO_BUCKET, full_object_path)
             content = response.read()
             redis_client.setex(object_name, 3600, content)
 
@@ -447,7 +431,12 @@ async def export_excel(object_name: str):
         content = redis_client.get(object_name)
         if content is None:
             # Fallback to MinIO
-            response = minio_client.get_object(MINIO_BUCKET, object_name)
+            # Construct the full object path using the prefix if object_name doesn't already include it
+            if not object_name.startswith(OBJECT_PREFIX):
+                full_object_path = f"{OBJECT_PREFIX}{object_name}"
+            else:
+                full_object_path = object_name
+            response = minio_client.get_object(MINIO_BUCKET, full_object_path)
             content = response.read()
             redis_client.setex(object_name, 3600, content)
 
