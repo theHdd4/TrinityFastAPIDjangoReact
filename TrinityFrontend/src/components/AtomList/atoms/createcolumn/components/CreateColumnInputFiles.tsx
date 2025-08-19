@@ -136,35 +136,49 @@ const CreateColumnInputFiles: React.FC<Props> = ({ atomId, selectedIdentifiers, 
       setSelectedIdentifiers([]);
     }
     try {
-      const atom = useLaboratoryStore.getState().getAtom(atomId);
-      const validator_atom_id = atom?.settings?.validator_atom_id || '';
-      const file_key = val;
-      console.log('DEBUG: validator_atom_id', validator_atom_id, 'file_key', file_key);
-      if (validator_atom_id && file_key) {
-        const resp = await fetch(`${CREATECOLUMN_API}/classification?validator_atom_id=${encodeURIComponent(validator_atom_id)}&file_key=${encodeURIComponent(file_key)}`);
-        console.log('DEBUG: /classification response status', resp.status);
+      // Extract client/app/project from file path like scope_selector does
+      const pathParts = val.split('/')
+      const clientName = pathParts[0] ?? ''
+      const appName = pathParts[1] ?? ''
+      const projectName = pathParts[2] ?? ''
+      
+      console.log('DEBUG: clientName', clientName, 'appName', appName, 'projectName', projectName);
+      
+      let identifiersFromRedis = false;
+      if (clientName && appName && projectName) {
+        const resp = await fetch(`${CREATECOLUMN_API}/identifier_options?client_name=${encodeURIComponent(clientName)}&app_name=${encodeURIComponent(appName)}&project_name=${encodeURIComponent(projectName)}`);
+        console.log('DEBUG: /identifier_options response status', resp.status);
         if (resp.ok) {
           const data = await resp.json();
-          console.log('DEBUG: /classification identifiers', data.identifiers);
-          setIdentifiers(data.identifiers || []);
-          setSelectedIdentifiers(data.identifiers || []);
-        } else {
-          // fallback to categorical columns
-          const cats = summary.filter(c =>
-            c.data_type && (
-              c.data_type.toLowerCase().includes('object') ||
-              c.data_type.toLowerCase().includes('string') ||
-              c.data_type.toLowerCase().includes('category')
-            )
-          ).map(c => c.column)
-      .filter(id => !['date','time','month','months','week','weeks','year'].includes(id.toLowerCase()));
-          console.log('DEBUG: fallback categorical columns', cats);
-          setCatColumns(cats);
-          setShowCatSelector(true);
-          setSelectedIdentifiers(cats);
+          console.log('DEBUG: /identifier_options identifiers from Redis', data.identifiers);
+          if (Array.isArray(data.identifiers) && data.identifiers.length > 0) {
+            console.log('DEBUG: ✅ Using identifiers from Redis/MongoDB');
+            setIdentifiers(data.identifiers);
+            setSelectedIdentifiers(data.identifiers);
+            setIdentifiersLoaded(true);
+            identifiersFromRedis = true;
+          }
         }
       }
+      
+      // fallback to categorical columns ONLY if Redis fetch failed
+      if (!identifiersFromRedis) {
+        console.log('DEBUG: ❌ Redis fetch failed - using fallback categorical columns from feature overview');
+        const cats = summary.filter(c =>
+          c.data_type && (
+            c.data_type.toLowerCase().includes('object') ||
+            c.data_type.toLowerCase().includes('string') ||
+            c.data_type.toLowerCase().includes('category')
+          )
+        ).map(c => c.column)
+        .filter(id => !['date','time','month','months','week','weeks','year'].includes(id.toLowerCase()));
+        console.log('DEBUG: fallback categorical columns', cats);
+        setCatColumns(cats);
+        setShowCatSelector(true);
+        setSelectedIdentifiers(cats);
+      }
     } catch (err) {
+      console.log('DEBUG: ❌ Error occurred - using fallback categorical columns from feature overview');
       // fallback to categorical columns
       const cats = summary.filter(c =>
         c.data_type && (
