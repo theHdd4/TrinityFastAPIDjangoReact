@@ -1,6 +1,7 @@
 # app/config.py
 
 from pydantic_settings import BaseSettings
+from pydantic import ValidationError
 from functools import lru_cache
 from typing import Optional
 
@@ -38,7 +39,11 @@ class Settings(BaseSettings):
 @lru_cache()
 def get_settings() -> Settings:
     """Get cached settings instance."""
-    return Settings()
+    try:
+        return Settings()
+    except ValidationError:
+        # Fall back to defaults when environment variables are invalid
+        return Settings.model_validate({})
 
 # Global settings instance
 settings = get_settings()
