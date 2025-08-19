@@ -14,7 +14,7 @@ from app.features.scope_selector.endpoint import router as scope_selector_router
 from app.features.user_apps.endpoint import router as user_apps_router
 from app.features.chart_maker.endpoint import router as chart_maker_router
 from app.features.build_model_feature_based.endpoint import router as build_model_router
-# from app.features.build_autoregressive.endpoint import router as autoregressive_router
+from app.features.build_autoregressive.endpoint import router as autoregressive_router
 
 api_router = APIRouter()
 text_router  = APIRouter()
@@ -38,4 +38,4 @@ api_router.include_router(user_apps_router)
 api_router.include_router(chart_maker_router)
 
 api_router.include_router(build_model_router)
-# api_router.include_router(autoregressive_router)api_router.include_router(chart_maker_router)
+api_router.include_router(autoregressive_router)

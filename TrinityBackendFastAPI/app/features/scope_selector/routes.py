@@ -28,7 +28,8 @@ from .schemas import (
     ColumnClassification,
     ClassificationSummary,
     ScopeFilterResponse,
-    ScopeFilterRequest
+    ScopeFilterRequest,
+    CriteriaSettings
 )
 from ..data_upload_validate.app.routes import get_object_prefix
 from .deps import (
@@ -1236,6 +1237,18 @@ async def create_multi_filtered_scope(
                 if len(combination_df) == 0:
                     continue
                 
+                logger.info(f"Processing combination: {combination_filter} with {len(combination_df)} records")
+                
+                # Check criteria before saving
+                criteria_result = check_combination_criteria(combination_df, request.criteria, df)
+                logger.info(f"Criteria check result for {combination_filter}: {criteria_result}")
+                
+                if not criteria_result:
+                    logger.info(f"Skipping combination {combination_filter} - does not meet criteria")
+                    continue
+                
+                logger.info(f"Saving combination {combination_filter} - meets all criteria")
+                
                 # Generate filename for this combination
                 combination_name_parts = []
                 for col_name, value in combination_filter.items():
@@ -1327,3 +1340,76 @@ async def create_multi_filtered_scope(
     finally:
         if client:
             client.close()
+
+def check_combination_criteria(
+    combination_df: pd.DataFrame,
+    criteria: Optional[CriteriaSettings],
+    original_df: pd.DataFrame
+) -> bool:
+    """
+    Check if a combination meets all the specified criteria.
+    Returns True if the combination should be saved, False otherwise.
+    """
+    logger.info(f"Checking criteria for combination with {len(combination_df)} records")
+    logger.info(f"Criteria object: {criteria}")
+    
+    if not criteria:
+        logger.info("No criteria specified, saving all combinations")
+        return True  # No criteria specified, save all combinations
+    
+    # Check minimum datapoints criteria
+    if criteria.min_datapoints_enabled:
+        logger.info(f"Checking min datapoints: {len(combination_df)} >= {criteria.min_datapoints}")
+        if len(combination_df) < criteria.min_datapoints:
+            logger.info(f"Combination rejected: {len(combination_df)} datapoints < {criteria.min_datapoints} minimum")
+            return False
+        else:
+            logger.info(f"Min datapoints criteria passed: {len(combination_df)} >= {criteria.min_datapoints}")
+    
+    # Check percentile criteria
+    if criteria.pct90_enabled and criteria.pct_column:
+        logger.info(f"Checking percentile criteria: {criteria.pct_percentile}th percentile of {criteria.pct_column} > {criteria.pct_threshold}% of {criteria.pct_base}")
+        try:
+            # Get the column for percentile calculation
+            if criteria.pct_column not in combination_df.columns:
+                logger.warning(f"Percentile column '{criteria.pct_column}' not found in combination data")
+                return True  # Skip this criteria if column not found
+            
+            # Calculate the percentile value
+            percentile_value = combination_df[criteria.pct_column].quantile(criteria.pct_percentile / 100)
+            logger.info(f"Percentile value: {percentile_value}")
+            
+            # Calculate the base value based on the specified base
+            if criteria.pct_base == "max":
+                base_value = original_df[criteria.pct_column].max()
+            elif criteria.pct_base == "min":
+                base_value = original_df[criteria.pct_column].min()
+            elif criteria.pct_base == "mean":
+                base_value = original_df[criteria.pct_column].mean()
+            elif criteria.pct_base == "dist":
+                # Use the distribution (total sum) of the column
+                base_value = original_df[criteria.pct_column].sum()
+            else:
+                logger.warning(f"Unknown pct_base: {criteria.pct_base}, using max")
+                base_value = original_df[criteria.pct_column].max()
+            
+            logger.info(f"Base value ({criteria.pct_base}): {base_value}")
+            
+            # Calculate the percentage
+            if base_value != 0:
+                percentage = (percentile_value / base_value) * 100
+                logger.info(f"Calculated percentage: {percentage:.2f}%")
+                if percentage <= criteria.pct_threshold:
+                    logger.info(f"Combination rejected: {percentage:.2f}% <= {criteria.pct_threshold}% threshold")
+                    return False
+                else:
+                    logger.info(f"Percentile criteria passed: {percentage:.2f}% > {criteria.pct_threshold}%")
+            else:
+                logger.warning(f"Base value is 0 for column {criteria.pct_column}, skipping percentile check")
+                
+        except Exception as e:
+            logger.error(f"Error checking percentile criteria: {str(e)}")
+            return True  # Skip this criteria if there's an error
+    
+    logger.info("All criteria passed, combination will be saved")
+    return True

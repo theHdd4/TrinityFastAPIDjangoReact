@@ -13,13 +13,13 @@ from .database import (
     scopes_collection, 
     minio_client,
     build_collection,
-    file_exists, 
-    presign,
-    get_scope_combinations,
-    fetch_scope_by_id,
-    get_scope_set_with_columns,
+    # file_exists, 
+    # presign,
+    # get_scope_combinations,
+    # fetch_scope_by_id,
+    # get_scope_set_with_columns,
     train_models_for_combination_enhanced,  # Use enhanced version
-    save_model_results_enhanced, export_results_to_csv_and_minio, get_csv_from_minio ,save_marketing_model_results,
+    save_model_results_enhanced, # export_results_to_csv_and_minio, get_csv_from_minio ,save_marketing_model_results,
 )
 
 # Import get_minio_client from scope_selector deps
@@ -34,16 +34,16 @@ from ..data_upload_validate.app.routes import get_object_prefix
 
 # Schema imports
 from .schemas import (
-    CombinationList, 
-    Health,
-    ModelResultDocument,
-    ScopeDetail,
-    ScopeSetColumns,
-    ScopeSetRequest,
+    # CombinationList, 
+    # Health,
+    # ModelResultDocument,
+    # ScopeDetail,
+    # ScopeSetColumns,
+    # ScopeSetRequest,
     ModelTrainingResponse,
     ModelTrainingRequest,
-    CombinationModelResults,
-    ModelResult
+    # CombinationModelResults,
+    # ModelResult
 )
 
 
@@ -64,46 +64,48 @@ from sklearn.metrics import mean_absolute_percentage_error, r2_score
 
 # Your existing imports
 from .config import settings
-from .database import (
-    minio_client,
-    marketing_collection,
-    metadata_collection,
-    save_marketing_model_results,
-    get_marketing_results
-)
+# from .database import (
+#     minio_client,
+#     marketing_collection,
+#     metadata_collection,
+#     save_marketing_model_results,
+#     get_marketing_results
+# )
 
 # Marketing-specific imports
-from .schemas import (
-    # Marketing Mix schemas
-    MarketingDataPreparationRequest,
-    MarketingDataPreparationResponse,
-    MarketingTransformationRequest,
-    MarketingTransformationResponse,
-    MarketingModelTrainingRequest,
-    MarketingModelTrainingResponse,
-    MarketingElasticityRequest,
-    MarketingElasticityResponse,
-    MarketingExportResponse,
-    MarketingModelResult,
-    MarketingModelType,
-    TransformationType,
-    StandardizationMethod
-)
+# from .schemas import (
+#     # Marketing Mix schemas
+#     MarketingDataPreparationRequest,
+#     MarketingDataPreparationResponse,
+#     MarketingTransformationRequest,
+#     MarketingTransformationResponse,
+#     MarketingModelTrainingRequest,
+#     MarketingModelTrainingResponse,
+#     MarketingElasticityRequest,
+#     MarketingElasticityResponse,
+#     MarketingExportResponse,
+#     MarketingModelResult,
+#     MarketingModelType,
+#     TransformationType,
+#     StandardizationMethod
+# )
 
 # Marketing helper functions
-from .marketing_helpers import (
-    apply_transformations_by_region,
-    calculate_media_elasticity,
-    calculate_contributions,
-    save_dataframe_to_minio,
-    save_transformation_metadata,
-    get_transformation_metadata,
-    get_file_from_source,
-    calculate_model_metrics,
-    adstock_function,
-    logistic_function,
-    power_function
-)
+# from .marketing_helpers import (
+#     apply_transformations_by_region,
+#     calculate_media_elasticity,
+#     calculate_contributions,
+#     save_dataframe_to_minio,
+#     save_transformation_metadata,
+#     get_transformation_metadata,
+#     get_file_from_source,
+#     calculate_model_metrics,
+#     adstock_function,
+#     logistic_function,
+#     power_function
+# )
+
+# Elasticity and contribution imports - removed unused imports since we're using direct calculation
 
 # Global progress tracking
 training_progress = {}
@@ -119,112 +121,112 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
-@router.get("/health", response_model=Health, tags=["Health"])
-async def health():
-    """Check health status of Build Atom API."""
-    mongo_ok = scopes_collection is not None
-    
-    # Test MinIO
-    minio_ok = False
-    try:
-        if minio_client is not None:
-            minio_client.bucket_exists(settings.minio_bucket_name)
-            minio_ok = True
-    except Exception as e:
-        logger.error(f"MinIO health check failed: {e}")
-        minio_ok = False
-    
-    return Health(
-        status="healthy" if (mongo_ok and minio_ok) else "unhealthy",
-        timestamp=datetime.now(),
-        services={
-            "mongodb": {"status": "connected" if mongo_ok else "disconnected"},
-            "minio": {"status": "connected" if minio_ok else "disconnected"},
-        },
-        version=settings.app_version,
-        api=settings.app_name,
-    )
+# @router.get("/health", response_model=Health, tags=["Health"])
+# async def health():
+#     """Check health status of Build Atom API."""
+#     mongo_ok = scopes_collection is not None
+#     
+#     # Test MinIO
+#     minio_ok = False
+#     try:
+#         if minio_client is not None:
+#             minio_client.bucket_exists(settings.minio_bucket_name)
+#             minio_ok = True
+#     except Exception as e:
+#         logger.error(f"MinIO health check failed: {e}")
+#         minio_ok = False
+#     
+#     return Health(
+#         status="healthy" if (mongo_ok and minio_ok) else "unhealthy",
+#         timestamp=datetime.now(),
+#         services={
+#             "mongodb": {"status": "connected" if mongo_ok else "disconnected"},
+#             "minio": {"status": "connected" if minio_ok else "disconnected"},
+#         },
+#         version=settings.app_version,
+#         api=settings.app_name,
+#     )
 
-@router.get("/scopes/{scope_id}", response_model=ScopeDetail, tags=["Scopes"])
-async def get_scope_by_id(
-    scope_id: str = Path(..., description="Scope ID from MongoDB")
-):
-    """
-    Get scope details and combinations by scope ID.
-    The scope_id can be either the MongoDB _id or the scope_id field.
-    """
-    if scopes_collection is None:
-        raise HTTPException(
-            status_code=503,
-            detail="MongoDB connection not available"
-        )
-    
-    try:
-        scope_data = await get_scope_combinations(scope_id)
-        
-        if scope_data is None:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Scope with ID '{scope_id}' not found"
-            )
-        
-        return scope_data
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error fetching scope {scope_id}: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Error fetching scope: {str(e)}"
-        )
+# @router.get("/scopes/{scope_id}", response_model=ScopeDetail, tags=["Scopes"])
+# async def get_scope_by_id(
+#     scope_id: str = Path(..., description="Scope ID from MongoDB")
+# ):
+#     """
+#     Get scope details and combinations by scope ID.
+#     The scope_id can be either the MongoDB _id or the scope_id field.
+#     """
+#     if scopes_collection is None:
+#         raise HTTPException(
+#             status_code=503,
+#             detail="MongoDB connection not available"
+#         )
+#     
+#     try:
+#         scope_data = await get_scope_combinations(scope_id)
+#         
+#         if scope_data is None:
+#             raise HTTPException(
+#                 status_code=404,
+#                 detail=f"Scope with ID '{scope_id}' not found"
+#             )
+#         
+#         return scope_data
+#         
+#     except HTTPException:
+#         raise
+#     except Exception as e:
+#         logger.error(f"Error fetching scope {scope_id}: {e}")
+#         raise HTTPException(
+#             status_code=500,
+#             detail=f"Error fetching scope: {str(e)}"
+#         )
 
-@router.get("/scopes", response_model=List[ScopeDetail], tags=["Scopes"])
-async def list_all_scopes(
-    limit: int = Query(10, ge=1, le=100, description="Maximum number of scopes"),
-    skip: int = Query(0, ge=0, description="Number of scopes to skip")
-):
-    """List all available scopes with their combinations."""
-    if scopes_collection is None:
-        raise HTTPException(
-            status_code=503,
-            detail="MongoDB connection not available"
-        )
-    
-    try:
-        scopes = []
-        cursor = scopes_collection.find({}).skip(skip).limit(limit)
-        
-        async for scope_doc in cursor:
-            scope_id = str(scope_doc.get("_id", scope_doc.get("scope_id", "")))
-            scope_data = await get_scope_combinations(scope_id)
-            if scope_data:
-                scopes.append(scope_data)
-        
-        return scopes
-        
-    except Exception as e:
-        logger.error(f"Error listing scopes: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Error listing scopes: {str(e)}"
-        )
+# @router.get("/scopes", response_model=List[ScopeDetail], tags=["Scopes"])
+# async def list_all_scopes(
+#     limit: int = Query(10, ge=1, le=100, description="Maximum number of scopes"),
+#     skip: int = Query(0, ge=0, description="Number of scopes to skip")
+# ):
+#     """List all available scopes with their combinations."""
+#     if scopes_collection is None:
+#         raise HTTPException(
+#             status_code=503,
+#             detail="MongoDB connection not available"
+#         )
+#     
+#     try:
+#         scopes = []
+#         cursor = scopes_collection.find({}).skip(skip).limit(limit)
+#         
+#         async for scope_doc in cursor:
+#             scope_id = str(scope_doc.get("_id", scope_doc.get("scope_id", "")))
+#             scope_data = await get_scope_combinations(scope_id)
+#             if scope_data:
+#                 scopes.append(scope_data)
+#         
+#         return scopes
+#         
+#     except Exception as e:
+#         logger.error(f"Error listing scopes: {e}")
+#         raise HTTPException(
+#             status_code=500,
+#             detail=f"Error listing scopes: {str(e)}"
+#         )
 
-@router.get("/", tags=["Info"])
-async def root():
-    """Root endpoint for Build Atom API."""
-    return {
-        "message": f"Welcome to {settings.app_name}",
-        "version": settings.app_version,
-        "documentation": "/docs",
-        "endpoints": {
-            "health": "/api/v1/health",
-            "get_scope": "/api/v1/scopes/{scope_id}",
-            "list_scopes": "/api/v1/scopes",
-            "get_scope_set": "/api/v1/scopes/{scope_id}/sets/{set_name}",
-            "list_scope_sets": "/api/v1/scopes/{scope_id}/sets"
-        }
-    }
+# @router.get("/", tags=["Info"])
+# async def root():
+#     """Root endpoint for Build Atom API."""
+#     return {
+#         "message": f"Welcome to {settings.app_name}",
+#         "version": settings.app_version,
+#         "documentation": "/docs",
+#         "endpoints": {
+#             "health": "/api/v1/health",
+#             "get_scope": "/api/v1/scopes/{scope_id}",
+#             "list_scopes": "/api/v1/scopes",
+#             "get_scope_set": "/api/v1/scopes/{scope_id}/sets/{set_name}",
+#             "list_scope_sets": "/api/v1/scopes/{scope_id}/sets"
+#         }
+#     }
 
 
 
@@ -232,84 +234,84 @@ async def root():
 
 # Add to routes.py
 
-@router.get("/scopes/{scope_id}/sets/{set_name}", response_model=ScopeSetColumns, tags=["Scopes"])
-async def get_scope_set_details(
-    scope_id: str = Path(..., description="Scope ID from MongoDB"),
-    set_name: str = Path(..., description="Set name (e.g., Scope_1, Scope_2, Scope_3)")
-):
-    """
-    Get combinations for a specific scope and set_name, along with column information.
-    
-    This endpoint:
-    1. Filters combinations by the specified set_name
-    2. Reads the first CSV file to extract column names
-    3. Returns filtered combinations with column structure
-    """
-    if scopes_collection is None:
-        raise HTTPException(
-            status_code=503,
-            detail="MongoDB connection not available"
-        )
-    
-    try:
-        scope_set_data = await get_scope_set_with_columns(scope_id, set_name)
-        
-        if scope_set_data is None:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Scope '{scope_id}' with set '{set_name}' not found or has no combinations"
-            )
-        
-        return scope_set_data
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error fetching scope set {scope_id}/{set_name}: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Error fetching scope set: {str(e)}"
-        )
+# @router.get("/scopes/{scope_id}/sets/{set_name}", response_model=ScopeSetColumns, tags=["Scopes"])
+# async def get_scope_set_details(
+#     scope_id: str = Path(..., description="Scope ID from MongoDB"),
+#     set_name: str = Path(..., description="Set name (e.g., Scope_1, Scope_2, Scope_3)")
+# ):
+#     """
+#     Get combinations for a specific scope and set_name, along with column information.
+#     
+#     This endpoint:
+#     1. Filters combinations by the specified set_name
+#     2. Reads the first CSV file to extract column names
+#     3. Returns filtered combinations with column structure
+#     """
+#     if scopes_collection is None:
+#         raise HTTPException(
+#             status_code=503,
+#             detail="MongoDB connection not available"
+#         )
+#     
+#     try:
+#         scope_set_data = await get_scope_set_with_columns(scope_id, set_name)
+#         
+#         if scope_set_data is None:
+#             raise HTTPException(
+#                 status_code=404,
+#                 detail=f"Scope '{scope_id}' with set '{set_name}' not found or has no combinations"
+#             )
+#         
+#         return scope_set_data
+#         
+#     except HTTPException:
+#         raise
+#     except Exception as e:
+#         logger.error(f"Error fetching scope set {scope_id}/{set_name}: {e}")
+#         raise HTTPException(
+#             status_code=500,
+#             detail=f"Error fetching scope set: {str(e)}"
+#         )
 
-@router.get("/scopes/{scope_id}/sets", response_model=List[str], tags=["Scopes"])
-async def list_scope_sets(
-    scope_id: str = Path(..., description="Scope ID from MongoDB")
-):
-    """
-    List all available set names for a given scope.
-    """
-    if scopes_collection is None:
-        raise HTTPException(
-            status_code=503,
-            detail="MongoDB connection not available"
-        )
-    
-    try:
-        scope_doc = await fetch_scope_by_id(scope_id)
-        
-        if scope_doc is None:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Scope '{scope_id}' not found"
-            )
-        
-        # Extract unique set names
-        set_names = set()
-        for fset in scope_doc.get("filter_set_results", []):
-            set_name = fset.get("set_name", "")
-            if set_name:
-                set_names.add(set_name)
-        
-        return sorted(list(set_names))
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error listing scope sets: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Error listing scope sets: {str(e)}"
-        )
+# @router.get("/scopes/{scope_id}/sets", response_model=List[str], tags=["Scopes"])
+# async def list_scope_sets(
+#     scope_id: str = Path(..., description="Scope ID from MongoDB")
+# ):
+#     """
+#     List all available set names for a given scope.
+#     """
+#     if scopes_collection is None:
+#         raise HTTPException(
+#             status_code=503,
+#             detail="MongoDB connection not available"
+#         )
+#     
+#     try:
+#         scope_doc = await fetch_scope_by_id(scope_id)
+#         
+#         if scope_doc is None:
+#             raise HTTPException(
+#                 status_code=404,
+#                 detail=f"Scope '{scope_id}' not found"
+#             )
+#         
+#         # Extract unique set names
+#         set_names = set()
+#         for fset in scope_doc.get("filter_set_results", []):
+#             set_name = fset.get("set_name", "")
+#             if set_name:
+#                 set_names.add(set_name)
+#         
+#         return sorted(list(set_names))
+#         
+#     except HTTPException:
+#         raise
+#     except Exception as e:
+#         logger.error(f"Error listing scope sets: {e}")
+#         raise HTTPException(
+#             status_code=500,
+#             detail=f"Error listing scope sets: {str(e)}"
+#         )
 
 
 
@@ -524,6 +526,102 @@ async def train_models_direct(request: dict):
                     # Store variable statistics
                     all_variable_stats[combination] = variable_data
                     
+                    # Calculate elasticities and contributions for each model
+                    logger.info(f"Starting elasticity calculation for combination {combination}")
+                    for model_result in model_results:
+                        try:
+                            # Get coefficients and means that are already available
+                            coefficients = model_result.get('coefficients', {})
+                            variable_averages = variable_data.get('variable_averages', {})
+                            
+                            # Try to get createcolumn transformation data from MongoDB
+                            transform_data = None
+                            try:
+                                # Try to get client/app/project info from the request or use defaults
+                                client_name = request.get('client_name', 'default_client')
+                                app_name = request.get('app_name', 'default_app')
+                                project_name = request.get('project_name', 'default_project')
+                                
+                                # Fetch createcolumn transformation data
+                                if 'createandtransform_configs_collection' in globals() and createandtransform_configs_collection is not None:
+                                    document_id = f"{client_name}/{app_name}/{project_name}"
+                                    transform_doc = await createandtransform_configs_collection.find_one({"_id": document_id})
+                                    if transform_doc:
+                                        transform_data = transform_doc
+                                        logger.info(f"Found createcolumn transformation data for {document_id}")
+                                    else:
+                                        logger.info(f"No createcolumn transformation data found for {document_id}, using direct calculation")
+                                else:
+                                    logger.info("createandtransform_configs_collection not available, using direct calculation")
+                            except Exception as e:
+                                logger.warning(f"Failed to fetch createcolumn transformation data: {e}, using direct calculation")
+                            
+                            # Calculate elasticities using the CORRECT formula since Y is NOT standardized
+                            elasticities = {}
+                            contributions = {}
+                            
+                            # Get unstandardized coefficients (these are the correct ones since Y is not standardized)
+                            unstandardized_coeffs = model_result.get('unstandardized_coefficients', {})
+                            
+                            # For each X variable, calculate elasticity and contribution
+                            for x_var in x_variables:
+                                beta_key = f"Beta_{x_var}"
+                                x_mean = variable_averages.get(x_var, 0)
+                                y_mean = variable_averages.get(y_variable, 0)
+                                
+                                # Use unstandardized coefficients for elasticity calculation
+                                # Since Y is NOT standardized, we need unstandardized coefficients
+                                if unstandardized_coeffs and beta_key in unstandardized_coeffs:
+                                    beta_val = unstandardized_coeffs[beta_key]
+                                else:
+                                    # Fallback to raw coefficients if unstandardized not available
+                                    beta_val = coefficients.get(beta_key, 0)
+                                
+                                # Calculate elasticity using the CORRECT formula: (β × X_mean) / Y_mean
+                                if y_mean != 0 and x_mean != 0:
+                                    elasticity = (beta_val * x_mean) / y_mean
+                                else:
+                                    elasticity = 0
+                                
+                                elasticities[x_var] = elasticity
+                                
+                                # Calculate contribution: (β × X_mean) / sum(all_β × X_mean)
+                                contributions[x_var] = abs(beta_val * x_mean)
+                            
+                            # Normalize contributions to sum to 1
+                            total_contribution = sum(contributions.values())
+                            if total_contribution > 0:
+                                for x_var in contributions:
+                                    contributions[x_var] = contributions[x_var] / total_contribution
+                            
+                            # Store results in model_result
+                            model_result['elasticities'] = elasticities
+                            model_result['contributions'] = contributions
+                            
+
+                            model_result['elasticity_details'] = {
+                                'calculation_method': 'direct_from_model_results',
+                                'variables_processed': list(elasticities.keys()),
+                                'transform_data_used': transform_data is not None
+                            }
+                            model_result['contribution_details'] = {
+                                'calculation_method': 'direct_from_model_results',
+                                'variables_processed': list(contributions.keys()),
+                                'total_contribution': total_contribution,
+                                'transform_data_used': transform_data is not None
+                            }
+                            
+
+                                
+                        except Exception as e:
+                            logger.warning(f"Failed to calculate elasticities/contributions for {combination} {model_result.get('model_name', 'unknown')}: {e}")
+                            logger.warning(f"Exception details: {type(e).__name__}: {str(e)}")
+                            # Don't fail the entire process if elasticity calculation fails
+                            model_result['elasticities'] = {}
+                            model_result['contributions'] = {}
+                            model_result['elasticity_details'] = {}
+                            model_result['contribution_details'] = {}
+                    
                     # Save results to MongoDB (if available)
                     try:
                         saved_ids = await save_model_results_enhanced(
@@ -554,6 +652,8 @@ async def train_models_direct(request: dict):
                         
                     except Exception as e:
                         logger.error(f"Failed to save results for {combination}: {e}")
+                    
+
                     
                     combination_results.append({
                         "combination_id": combination,
@@ -598,6 +698,10 @@ async def train_models_direct(request: dict):
             # Create a summary DataFrame with key results
             summary_data = []
             for combo_result in combination_results:
+                # Get variable averages for this combination
+                combination_id = combo_result['combination_id']
+                variable_averages = all_variable_stats.get(combination_id, {}).get('variable_averages', {})
+                
                 for model_result in combo_result.get('model_results', []):
                     # Create base summary row
                     summary_row = {
@@ -619,11 +723,32 @@ async def train_models_direct(request: dict):
                         'timestamp': timestamp
                     }
                     
+                    # Add average values for each variable (before any transformation)
+                    for x_var in x_variables:
+                        avg_key = f"{x_var}_avg"
+                        summary_row[avg_key] = variable_averages.get(x_var, 0)
+                    
+                    # Add Y variable average
+                    y_avg_key = f"{y_variable}_avg"
+                    summary_row[y_avg_key] = variable_averages.get(y_variable, 0)
+                    
                     # Add beta coefficients for each X-variable
                     coefficients = model_result.get('coefficients', {})
                     for x_var in x_variables:
                         beta_key = f"{x_var}_beta"
                         summary_row[beta_key] = coefficients.get(f"Beta_{x_var}", 0)
+                    
+                    # Add elasticity values for each X-variable
+                    elasticities = model_result.get('elasticities', {})
+                    for x_var in x_variables:
+                        elasticity_key = f"{x_var}_elasticity"
+                        summary_row[elasticity_key] = elasticities.get(x_var, 0)
+                    
+                    # Add contribution values for each X-variable
+                    contributions = model_result.get('contributions', {})
+                    for x_var in x_variables:
+                        contribution_key = f"{x_var}_contribution"
+                        summary_row[contribution_key] = contributions.get(x_var, 0)
                     
                     summary_data.append(summary_row)
             
@@ -688,8 +813,14 @@ async def train_models_direct(request: dict):
             
             return cleaned_results
         
+
+        
         # Clean the results before returning
         cleaned_combination_results = clean_model_results(combination_results)
+        
+
+        
+
         
         # Update final progress
         training_progress[run_id]["status"] = "completed"
@@ -1036,7 +1167,7 @@ async def train_models_direct(request: dict):
 #         )
 
 
-@router.get("/model-results/download/{file_path:path}", tags=["Model Results"])
+# @router.get("/model-results/download/{file_path:path}", tags=["Model Results"])
 async def download_csv_from_minio(
     file_path: str = Path(..., description="MinIO file path")
 ):
@@ -1068,7 +1199,7 @@ async def download_csv_from_minio(
         )
 
 
-@router.get("/model-results/list-exports", tags=["Model Results"])
+# @router.get("/model-results/list-exports", tags=["Model Results"])
 async def list_csv_exports(
     run_id: Optional[str] = Query(None, description="Filter by run ID"),
     limit: int = Query(50, ge=1, le=200)
@@ -1111,223 +1242,225 @@ async def list_csv_exports(
 
 ##########################################################################
 
-@router.post("/marketing/prepare-data", response_model=MarketingDataPreparationResponse, tags=["Marketing Mix Modeling"])
-async def prepare_marketing_data(request: MarketingDataPreparationRequest):
-    """Prepare data for marketing mix modeling using scope system."""
-    run_id = str(uuid.uuid4())
-    logger.info(f"Starting data preparation with run_id: {run_id}")
-    
-    try:
-        # Get scope combinations
-        scope_data = await get_scope_set_with_columns(request.scope_id, request.set_name)
-        if not scope_data:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Scope {request.scope_id} with set {request.set_name} not found"
-            )
-        
-        # Process each combination
-        all_prepared_files = []
-        total_rows = 0
-        columns_removed_summary = {}
-        last_df = None  # Keep track of last DataFrame for column count
-        
-        for combination in scope_data['combinations']:
-            logger.info(f"Processing combination: {combination['combination_id']}")
-            
-            # Load data from combination file
-            file_data = get_file_from_source(combination['file_key'])
-            
-            # Read file based on extension
-            if combination['file_key'].endswith(('.xlsx', '.xls')):
-                df = pd.read_excel(file_data)
-            else:
-                df = pd.read_csv(file_data)
-            
-            logger.info(f"Loaded {combination['combination_id']} with shape: {df.shape}")
-            
-            # Filter by fiscal years
-            if "Fiscal Year" in df.columns:
-                df = df[df["Fiscal Year"].isin(request.fiscal_years)]
-                logger.info(f"Filtered to fiscal years: {request.fiscal_years}")
-            
-            # Remove zero columns
-            columns_removed = []
-            if request.remove_zero_columns:
-                initial_cols = df.columns.tolist()
-                df = df.loc[:, (df != 0).any(axis=0)]
-                columns_removed = list(set(initial_cols) - set(df.columns.tolist()))
-                if columns_removed:
-                    columns_removed_summary[combination['combination_id']] = columns_removed
-            
-            # Save prepared data for this combination
-            combo_id = combination['combination_id']
-            prepared_key = f"marketing-prepared/{run_id}/{combo_id}/data.xlsx"
-            save_dataframe_to_minio(df, prepared_key, format="excel")
-            
-            all_prepared_files.append({
-                "combination_id": combo_id,
-                "file_key": prepared_key,
-                "rows": len(df),
-                "columns": len(df.columns)
-            })
-            
-            total_rows += len(df)
-            last_df = df  # Keep reference to last processed DataFrame
-        
-        # ⚡ CRITICAL FIX: Save metadata using marketing_helpers function
-        metadata = {
-            "run_id": run_id,
-            "scope_id": request.scope_id,
-            "set_name": request.set_name,
-            "combinations": all_prepared_files,
-            "fiscal_years": request.fiscal_years,
-            "columns_removed_summary": columns_removed_summary
-        }
-        
-        # Import the function if not already imported
-        from marketing_helpers import save_transformation_metadata
-        
-        # Save the metadata
-        await save_transformation_metadata(run_id, metadata)
-        logger.info(f"✅ Metadata saved for run_id: {run_id}")
-        
-        return MarketingDataPreparationResponse(
-            run_id=run_id,
-            status="success",
-            rows=total_rows,
-            columns=len(last_df.columns) if last_df is not None else 0,
-            prepared_data_key=f"marketing-prepared/{run_id}/",
-            fiscal_years_included=request.fiscal_years,
-            columns_removed=None
-        )
-        
-    except Exception as e:
-        logger.error(f"Error in data preparation: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+# @router.post("/marketing/prepare-data", response_model=MarketingDataPreparationResponse, tags=["Marketing Mix Modeling"])
+# async def prepare_marketing_data(request: MarketingDataPreparationRequest):
+#     """Prepare data for marketing mix modeling using scope system."""
+#     run_id = str(uuid.uuid4())
+#     logger.info(f"Starting data preparation with run_id: {run_id}")
+#     
+#     try:
+#         # Get scope combinations
+#         scope_data = await get_scope_set_with_columns(request.scope_id, request.set_name)
+#         if not scope_data:
+#             raise HTTPException(
+#                 status_code=404,
+#                 detail=f"Scope {request.scope_id} with set {request.set_name} not found"
+#             )
+#         
+#         # Process each combination
+#         all_prepared_files = []
+#         total_rows = 0
+#         columns_removed_summary = {}
+#         last_df = None  # Keep track of last DataFrame for column count
+#         
+#         for combination in scope_data['combinations']:
+#             logger.info(f"Processing combination: {combination['combination_id']}")
+#             
+#             # Load data from combination file
+#             file_data = get_file_from_source(combination['file_key'])
+#             
+#             # Read file based on extension
+#             if combination['file_key'].endswith(('.xlsx', '.xls')):
+#                 df = pd.read_excel(file_data)
+#             
+#             else:
+#                 df = pd.read_csv(file_data)
+#             
+#             logger.info(f"Loaded {combination['combination_id']} with shape: {df.shape}")
+#             
+#             # Filter by fiscal years
+#             if "Fiscal Year" in df.columns:
+#                 df = df[df["Fiscal Year"].isin(request.fiscal_years)]
+#                 logger.info(f"Filtered to fiscal years: {request.fiscal_years}")
+#             
+#             # Remove zero columns
+#             columns_removed = []
+#             if request.remove_zero_columns:
+#                 initial_cols = df.columns.tolist()
+#                 df = df.loc[:, (df != 0).any(axis=0)]
+#                 columns_removed = list(set(initial_cols) - set(df.columns.tolist()))
+#                 if columns_removed:
+#                     columns_removed_summary[combination['combination_id']] = columns_removed
+#             
+#             # Save prepared data for this combination
+#             combo_id = combination['combination_id']
+#             prepared_key = f"marketing-prepared/{run_id}/{combo_id}/data.xlsx"
+#             save_dataframe_to_minio(df, prepared_key, format="excel")
+#             
+#             all_prepared_files.append({
+#                 "combination_id": combo_id,
+#                 "file_key": prepared_key,
+#                 "rows": len(df),
+#                 "columns": len(df.columns)
+#             })
+#             
+#             total_rows += len(df)
+#             last_df = df  # Keep reference to last processed DataFrame
+#         
+#         # ⚡ CRITICAL FIX: Save metadata using marketing_helpers function
+#         metadata = {
+#             "run_id": run_id,
+#             "scope_id": request.scope_id,
+#             "set_name": request.set_name,
+#             "combinations": all_prepared_files,
+#             "fiscal_years": request.fiscal_years,
+#             "columns_removed_summary": columns_removed_summary
+#         }
+#         
+#         # Import the function if not already imported
+#         from marketing_helpers import save_transformation_metadata
+#         
+#         # Save the metadata
+#         await save_transformation_metadata(run_id, metadata)
+#         logger.info(f"✅ Metadata saved for run_id: {run_id}")
+#         
+#         return MarketingDataPreparationResponse(
+#             run_id=run_id,
+#             status="success",
+#             rows=total_rows,
+#             columns=len(last_df.columns) if last_df is not None else 0,
+#             prepared_data_key=f"marketing-prepared/{run_id}/",
+#             fiscal_years_included=request.fiscal_years,
+#             columns_removed=None
+#         )
+#         
+#     except Exception as e:
+#         logger.error(f"Error in data preparation: {e}")
+#         raise HTTPException(status_code=500, detail=str(e))
 
 
 
-@router.post("/marketing/transform-variables", response_model=MarketingTransformationResponse, tags=["Marketing Mix Modeling"])
-async def transform_marketing_variables(request: MarketingTransformationRequest):
-    """Apply transformations to marketing variables for all combinations."""
-    transform_id = str(uuid.uuid4())
-    logger.info(f"Starting variable transformation with transform_id: {transform_id}")
-    
-    try:
-        # Get preparation metadata
-        prep_metadata = await get_transformation_metadata(request.run_id)
-        combinations = prep_metadata.get("combinations", [])
-        
-        if not combinations:
-            raise HTTPException(status_code=404, detail="No prepared data found")
-        
-        all_transformed_files = []
-        all_variable_stats = {}
-        all_regions = set()
-        
-        # Process each combination
-        for combo_info in combinations:
-            combo_id = combo_info["combination_id"]
-            file_key = combo_info["file_key"]
-            
-            logger.info(f"Transforming variables for combination: {combo_id}")
-            
-            # Load prepared data
-            file_data = get_file_from_source(file_key)
-            df = pd.read_excel(file_data)
-            
-            # Get unique regions in this combination's data
-            regions = df["Region"].unique().tolist() if "Region" in df.columns else []
-            all_regions.update(regions)
-            
-            # Apply transformations
-            df_transformed = apply_transformations_by_region(
-                df=df,
-                media_variables=request.media_variables,
-                other_variables=request.other_variables,
-                non_scaled_variables=request.non_scaled_variables,
-                transformation_params=request.transformation_params,
-                standardization_method=request.standardization_method.value,
-                transformation_type=request.transformation_type.value
-            )
-            
-            # Calculate statistics for this combination
-            variable_stats = {}
-            for col in df_transformed.columns:
-                if col.endswith("_transformed") or col.endswith("_scaled"):
-                    stats_by_region = {}
-                    for region in regions:
-                        if region in df_transformed["Region"].unique():
-                            region_data = df_transformed[df_transformed["Region"] == region][col]
-                            stats_by_region[region] = {
-                                "mean": float(region_data.mean()),
-                                "std": float(region_data.std()),
-                                "min": float(region_data.min()),
-                                "max": float(region_data.max())
-                            }
-                    variable_stats[col] = stats_by_region
-            
-            # Save transformed data
-            transform_key = f"marketing-transformed/{transform_id}/{combo_id}/data.xlsx"
-            save_dataframe_to_minio(df_transformed, transform_key, format="excel")
-            
-            all_transformed_files.append({
-                "combination_id": combo_id,
-                "file_key": transform_key,
-                "regions": regions
-            })
-            
-            all_variable_stats[combo_id] = variable_stats
-        
-        # Save transformation metadata
-        metadata = {
-            "run_id": request.run_id,
-            "transform_id": transform_id,
-            "transformation_type": request.transformation_type.value,
-            "standardization_method": request.standardization_method.value,
-            "transformation_params": request.transformation_params,
-            "media_variables": request.media_variables,
-            "other_variables": request.other_variables,
-            "non_scaled_variables": request.non_scaled_variables,
-            "combinations": all_transformed_files,
-            "variable_stats": all_variable_stats
-        }
-        
-        await save_transformation_metadata(transform_id, metadata)
-        
-        return MarketingTransformationResponse(
-            transform_id=transform_id,
-            status="success",
-            transformed_data_key=f"marketing-transformed/{transform_id}/",
-            variable_statistics=all_variable_stats,
-            regions_processed=list(all_regions),
-            media_variables_transformed=request.media_variables
-        )
+# @router.post("/marketing/transform-variables", response_model=MarketingTransformationResponse, tags=["Marketing Mix Modeling"])
+# async def transform_marketing_variables(request: MarketingTransformationRequest):
+#     """Apply transformations to marketing variables for all combinations."""
+#     transform_id = str(uuid.uuid4())
+#     logger.info(f"Starting variable transformation with transform_id: {transform_id}")
+#     
+#     try:
+#         # Get preparation metadata
+#         prep_metadata = await get_transformation_metadata(request.run_id)
+#         combinations = prep_metadata.get("combinations", [])
+#         
+#         if not combinations:
+#             raise HTTPException(status_code=404, detail="No prepared data found")
+#         
+#         all_transformed_files = []
+#         all_variable_stats = {}
+#         all_regions = set()
+#         
+#         # Process each combination
+#         for combo_info in combinations:
+#             combo_id = combo_info["combination_id"]
+#             file_key = combo_info["file_key"]
+#             
+#             logger.info(f"Transforming variables for combination: {combo_id}")
+#             
+#             # Load prepared data
+#             file_data = get_file_from_source(file_key)
+#             df = pd.read_excel(file_data)
+#             
+#             # Get unique regions in this combination's data
+#             regions = df["Region"].unique().tolist() if "Region" in df.columns else []
+#             all_regions.update(regions)
+#             
+#             # Apply transformations
+#             df_transformed = apply_transformations_by_region(
+#                 df=df,
+#                 media_variables=request.media_variables,
+#                 other_variables=request.other_variables,
+#                 non_scaled_variables=request.non_scaled_variables,
+#                 transformation_params=request.transformation_params,
+#                 standardization_method=request.standardization_method.value,
+#                 transformation_type=request.transformation_type.value
+#             )
+#             
+#             # Calculate statistics for this combination
+#             variable_stats = {}
+#             for col in df_transformed.columns:
+#                 if col.endswith("_transformed") or col.endswith("_scaled"):
+#                     stats_by_region = {}
+#                     for region in regions:
+#                         if region in df_transformed["Region"].unique():
+#                             region_data = df_transformed[df_transformed["Region"] == region][col]
+#                             stats_by_region[region] = {
+#                                 "mean": float(region_data.mean()),
+#                                 "std": float(region_data.std()),
+#                                 "min": float(region_data.min()),
+#                                 "max": float(region_data.max())
+#                             }
+#                     variable_stats[col] = stats_by_region
+#             
+#             # Save transformed data
+#             transform_key = f"marketing-transformed/{transform_id}/{combo_id}/data.xlsx"
+#             save_dataframe_to_minio(df_transformed, transform_key, format="excel")
+#             
+#             all_transformed_files.append({
+#                 "combination_id": combo_id,
+#                 "file_key": transform_key,
+#                 "regions": regions
+#             })
+#             
+#             all_variable_stats[combo_id] = variable_stats
+#         
+#         # Save transformation metadata
+#         metadata = {
+#             "run_id": request.run_id,
+#             "transform_id": transform_id,
+#             "transformation_type": request.transformation_type.value,
+#             "standardization_method": request.standardization_method.value,
+#             "transformation_params": request.transformation_params,
+#             "media_variables": request.media_variables,
+#             "other_variables": request.other_variables,
+#             "non_scaled_variables": request.non_scaled_variables,
+#             "combinations": all_transformed_files,
+#             "variable_stats": all_variable_stats
+#         }
+#         
+#         await save_transformation_metadata(transform_id, metadata)
+#         
+#         return MarketingTransformationResponse(
+#             transform_id=transform_id,
+#             status="success",
+#             transformed_data_key=f"marketing-transformed/{transform_id}/",
+#             variable_statistics=all_variable_stats,
+#             regions_processed=list(all_regions),
+#             media_variables_transformed=request.media_variables
+#         )
         
     except Exception as e:
         logger.error(f"Error in variable transformation: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/marketing/train-models", response_model=MarketingModelTrainingResponse, tags=["Marketing Mix Modeling"])
-async def train_marketing_models(request: MarketingModelTrainingRequest):
-    """Train marketing mix models for all combinations with optional constraints."""
-    training_id = str(uuid.uuid4())
-    start_time = datetime.now()
-    logger.info(f"Starting model training with training_id: {training_id}")
+# @router.post("/marketing/train-models", response_model=MarketingModelTrainingResponse, tags=["Marketing Mix Modeling"])
+# async def train_marketing_models(request: MarketingModelTrainingRequest):
+#     """Train marketing mix models for all combinations with optional constraints."""
+#     training_id = str(uuid.uuid4())
+#     start_time = datetime.now()
+#     logger.info(f"Starting model training with training_id: {training_id}")
     
-    try:
-        # Get transformation metadata
-        transform_metadata = await get_transformation_metadata(request.run_id)
-        combinations = transform_metadata.get("combinations", [])
-        
-        if not combinations:
-            raise HTTPException(status_code=404, detail="No transformed data found")
-        
-        all_results = []
-        model_counter = 0
-        combinations_processed = 0
+#     try:
+#         # Get transformation metadata
+#         # transform_metadata = await get_transformation_metadata(request.run_id)
+#         transform_metadata = {}
+#         combinations = transform_metadata.get("combinations", [])
+#         
+#         if not combinations:
+#             raise HTTPException(status_code=404, detail="No transformed data found")
+#         
+#         all_results = []
+#         model_counter = 0
+#         combinations_processed = 0
         
         # Process each combination
         for combo_info in combinations:
@@ -1337,7 +1470,8 @@ async def train_marketing_models(request: MarketingModelTrainingRequest):
             logger.info(f"Training models for combination: {combo_id}")
             
             # Load transformed data
-            file_data = get_file_from_source(file_key)
+            # file_data = get_file_from_source(file_key)
+            file_data = None
             df = pd.read_excel(file_data)
             
             # Extract brand, market, region from combination ID or data
@@ -1463,8 +1597,10 @@ async def train_marketing_models(request: MarketingModelTrainingRequest):
                         y_train_pred = model.predict(X_train)
                         y_test_pred = model.predict(X_test)
                         
-                        metrics = calculate_model_metrics(y_train, y_train_pred, len(x_columns))
-                        test_metrics = calculate_model_metrics(y_test, y_test_pred, len(x_columns))
+                        # metrics = calculate_model_metrics(y_train, y_train_pred, len(x_columns))
+                        # test_metrics = calculate_model_metrics(y_test, y_test_pred, len(x_columns))
+                        metrics = {"mape": 0.0, "r2": 0.0, "aic": 0.0, "bic": 0.0, "adjusted_r2": 0.0}
+                        test_metrics = {"mape": 0.0, "r2": 0.0, "aic": 0.0, "bic": 0.0}
                         
                         # Extract coefficients
                         coefficients = {
@@ -1525,21 +1661,22 @@ async def train_marketing_models(request: MarketingModelTrainingRequest):
             combinations_processed += 1
         
         # Save results
-        if all_results:
-            saved_ids = await save_marketing_model_results(
-                training_id,
-                all_results,
-                {
-                    "transform_id": request.run_id,
-                    "training_params": request.dict(),
-                    "total_models": len(all_results),
-                    "scope_id": transform_metadata.get("scope_id"),
-                    "set_name": transform_metadata.get("set_name"),
-                    "constraints_used": request.use_constraints
-                }
-            )
-        else:
-            saved_ids = []
+        # if all_results:
+        #     saved_ids = await save_marketing_model_results(
+        #         training_id,
+        #         all_results,
+        #         {
+        #             "transform_id": request.run_id,
+        #             "training_params": request.dict(),
+        #             "total_models": len(all_results),
+        #             "scope_id": transform_metadata.get("scope_id"),
+        #             "set_name": transform_metadata.get("set_name"),
+        #             "constraints_used": request.use_constraints
+        #         }
+        #     )
+        # else:
+        #     saved_ids = []
+        saved_ids = []
         
         # Calculate best models
         best_models = {}
@@ -1572,12 +1709,13 @@ async def train_marketing_models(request: MarketingModelTrainingRequest):
 
 
 
-@router.post("/marketing/calculate-elasticity", response_model=MarketingElasticityResponse, tags=["Marketing Mix Modeling"])
-async def calculate_marketing_elasticity(request: MarketingElasticityRequest):
+# @router.post("/marketing/calculate-elasticity", response_model=MarketingElasticityResponse, tags=["Marketing Mix Modeling"])
+# async def calculate_marketing_elasticity(request: MarketingElasticityRequest):
     """Calculate elasticities for marketing models."""
     try:
         # Get model results
-        results = await get_marketing_results(request.run_id)
+        # results = await get_marketing_results(request.run_id)
+        results = []
         
         if not results:
             raise HTTPException(status_code=404, detail=f"No results found for run_id: {request.run_id}")
@@ -1591,7 +1729,8 @@ async def calculate_marketing_elasticity(request: MarketingElasticityRequest):
         if not transform_id:
             raise HTTPException(status_code=400, detail="No transform_id found in results")
             
-        transform_metadata = await get_transformation_metadata(transform_id)
+        # transform_metadata = await get_transformation_metadata(transform_id)
+        transform_metadata = {}
         
         updated_results = []
         elasticity_summary = {}
@@ -1622,9 +1761,10 @@ async def calculate_marketing_elasticity(request: MarketingElasticityRequest):
                         y_mean = result.get("y_mean", 1)
                         
                         # Calculate elasticity
-                        elasticity = calculate_media_elasticity(
-                            beta, growth_rate, sensitivity, carryover, y_mean
-                        )
+                        # elasticity = calculate_media_elasticity(
+                        #     beta, growth_rate, sensitivity, carryover, y_mean
+                        # )
+                        elasticity = 0.0
                         
                         elasticities[media_var] = float(elasticity) if not np.isnan(elasticity) else None
             
@@ -1639,10 +1779,11 @@ async def calculate_marketing_elasticity(request: MarketingElasticityRequest):
                         variable_means[var] = stats[region].get("mean", 0)
                 
                 # Calculate contributions
-                contributions = calculate_contributions(
-                    result.get("coefficients", {}),
-                    variable_means
-                )
+                # contributions = calculate_contributions(
+                #     result.get("coefficients", {}),
+                #     variable_means
+                # )
+                contributions = {}
             
             # Update result with elasticities
             result["elasticities"] = elasticities
@@ -1683,17 +1824,18 @@ async def calculate_marketing_elasticity(request: MarketingElasticityRequest):
     
     
 
-@router.get("/marketing/results/{run_id}", response_model=List[MarketingModelResult], tags=["Marketing Mix Modeling"])
-async def get_marketing_model_results(
-    run_id: str = Path(..., description="Training run ID"),
-    model_ids: Optional[List[int]] = Query(None, description="Filter by specific model IDs"),
-    brand: Optional[str] = Query(None, description="Filter by brand"),
-    region: Optional[str] = Query(None, description="Filter by region")
-):
+# @router.get("/marketing/results/{run_id}", response_model=List[MarketingModelResult], tags=["Marketing Mix Modeling"])
+# async def get_marketing_model_results(
+#     run_id: str = Path(..., description="Training run ID"),
+#     model_ids: Optional[List[int]] = Query(None, description="Filter by specific model IDs"),
+#     brand: Optional[str] = Query(None, description="Filter by brand"),
+#     region: Optional[str] = Query(None, description="Filter by region")
+# ):
     """Retrieve marketing model results by run_id with optional filters."""
     try:
         # Get all results for run_id
-        results = await get_marketing_results(run_id)
+        # results = await get_marketing_results(run_id)
+        results = []
         
         if not results:
             raise HTTPException(status_code=404, detail=f"No results found for run_id: {run_id}")
@@ -1752,46 +1894,12 @@ async def get_marketing_model_results(
 
 
 
-@router.get("/marketing/download/{file_path:path}", tags=["Marketing Mix Modeling"])
-async def download_marketing_export(
-    file_path: str = Path(..., description="Export file path")
-):
+# @router.get("/marketing/download/{file_path:path}", tags=["Marketing Mix Modeling"])
+# async def download_marketing_export(
+#     file_path: str = Path(..., description="Export file path")
+# ):
     """Download exported marketing results file (Excel or CSV)."""
-    try:
-        # Get file from MinIO - Use dataformodel bucket
-        if minio_client is None:
-            raise HTTPException(status_code=503, detail="MinIO not available")
-        
-        bucket = settings.minio_source_bucket  # dataformodel
-        
-        response = minio_client.get_object(bucket, file_path)
-        data = BytesIO(response.read())
-        response.close()
-        response.release_conn()
-        data.seek(0)
-        
-        # Extract filename and determine content type
-        filename = file_path.split('/')[-1]
-        
-        if filename.endswith('.xlsx'):
-            content_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        elif filename.endswith('.xls'):
-            content_type = "application/vnd.ms-excel"
-        else:
-            content_type = "text/csv"
-        
-        return StreamingResponse(
-            data,
-            media_type=content_type,
-            headers={
-                "Content-Disposition": f"attachment; filename={filename}"
-            }
-        )
-        
-    except Exception as e:
-        logger.error(f"Error downloading file from bucket '{bucket}': {e}")
-        error_msg = "File not found" if "NoSuchKey" in str(e) else str(e)
-        raise HTTPException(status_code=404, detail=error_msg)
+    pass  # Marketing functions disabled
 
 
 @router.post("/get_columns", tags=["Columns"])
@@ -1986,3 +2094,5 @@ async def get_file_path(
     except Exception as e:
         logger.error(f"Error in get_file_path: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+# Elasticity and contribution endpoints removed - using direct calculation in train-models-direct instead

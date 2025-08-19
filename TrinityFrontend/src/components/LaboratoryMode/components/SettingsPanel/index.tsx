@@ -18,6 +18,8 @@ import {
   DEFAULT_DATAFRAME_OPERATIONS_SETTINGS,
   ChartMakerSettings,
   DEFAULT_CHART_MAKER_SETTINGS,
+  SelectModelsFeatureSettings,
+  DEFAULT_SELECT_MODELS_FEATURE_SETTINGS,
 } from '../../store/laboratoryStore';
 import DataUploadValidateProperties from '@/components/AtomList/atoms/data-upload-validate/components/properties/DataUploadValidateProperties';
 import FeatureOverviewProperties from '@/components/AtomList/atoms/feature-overview/components/properties/FeatureOverviewProperties';
@@ -30,6 +32,7 @@ import MergeProperties from '@/components/AtomList/atoms/merge/components/proper
 import ColumnClassifierProperties from '@/components/AtomList/atoms/column-classifier/components/properties/ColumnClassifierProperties';
 import DataFrameOperationsProperties from '@/components/AtomList/atoms/dataframe-operations/components/properties/DataFrameOperationsProperties';
 import ChartMakerProperties from '@/components/AtomList/atoms/chart-maker/components/properties/ChartMakerProperties';
+import SelectModelsFeatureProperties from '@/components/AtomList/atoms/select-models-feature/components/properties/SelectModelsFeatureProperties';
 import AtomSettingsTabs from "./AtomSettingsTabs";
 
 interface SettingsPanelProps {
@@ -57,7 +60,8 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
     | DataUploadSettings
     | FeatureOverviewSettings
     | DataFrameOperationsSettings
-    | ChartMakerSettings =
+    | ChartMakerSettings
+    | SelectModelsFeatureSettings =
     atom?.settings ||
     (atom?.atomId === 'data-upload-validate'
       ? { ...DEFAULT_DATAUPLOAD_SETTINGS }
@@ -67,6 +71,8 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
       ? { ...DEFAULT_DATAFRAME_OPERATIONS_SETTINGS }
       : atom?.atomId === 'chart-maker'
       ? { ...DEFAULT_CHART_MAKER_SETTINGS }
+      : atom?.atomId === 'select-models-feature'
+      ? { ...DEFAULT_SELECT_MODELS_FEATURE_SETTINGS }
       : { ...DEFAULT_TEXTBOX_SETTINGS });
 
   useEffect(() => {
@@ -118,6 +124,8 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
             <ChartMakerProperties atomId={selectedAtomId} />
           ) : selectedAtomId && atom?.atomId === 'build-model-feature-based' ? (
             <BuildModelFeatureBasedPropertiesPanel atomId={selectedAtomId} />
+          ) : selectedAtomId && atom?.atomId === 'select-models-feature' ? (
+            <SelectModelsFeatureProperties atomId={selectedAtomId} />
           ) : selectedAtomId && atom?.atomId === 'concat' ? (
             <ConcatProperties atomId={selectedAtomId} />
           ) : selectedAtomId && atom?.atomId === 'scope-selector' ? (

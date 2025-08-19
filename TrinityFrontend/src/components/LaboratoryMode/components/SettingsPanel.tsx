@@ -30,6 +30,7 @@ import GroupByProperties from '@/components/AtomList/atoms/groupby-wtg-avg/compo
 import BuildModelFeatureBasedProperties from '@/components/AtomList/atoms/build-model-feature-based/components/properties/BuildModelFeatureBasedProperties';
 import ScopeSelectorProperties from '@/components/AtomList/atoms/scope-selector/components/properties/ScopeSelectorProperties';
 import DataFrameOperationsProperties from '@/components/AtomList/atoms/dataframe-operations/components/properties/DataFrameOperationsProperties';
+import SelectModelsFeatureProperties from '@/components/AtomList/atoms/select-models-feature/components/properties/SelectModelsFeatureProperties';
 
 interface SettingsPanelProps {
   isCollapsed: boolean;
@@ -131,6 +132,8 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
             <ScopeSelectorProperties atomId={selectedAtomId} />
           ) : selectedAtomId && atom?.atomId === 'build-model-feature-based' ? (
             <BuildModelFeatureBasedProperties atomId={selectedAtomId} />
+          ) : selectedAtomId && atom?.atomId === 'select-models-feature' ? (
+            <SelectModelsFeatureProperties atomId={selectedAtomId} />
           ) : (
           <>
           <Tabs value={tab} onValueChange={setTab} className="w-full">

@@ -23,6 +23,7 @@ import FeatureOverviewAtom from '@/components/AtomList/atoms/feature-overview/Fe
 import ConcatAtom from '@/components/AtomList/atoms/concat/ConcatAtom';
 import MergeAtom from '@/components/AtomList/atoms/merge/MergeAtom';
 import ColumnClassifierAtom from '@/components/AtomList/atoms/column-classifier/ColumnClassifierAtom';
+import SelectModelsFeatureAtom from '@/components/AtomList/atoms/select-models-feature/SelectModelsFeatureAtom';
 import DataFrameOperationsAtom from '@/components/AtomList/atoms/dataframe-operations/DataFrameOperationsAtom';
 import ScopeSelectorAtom from '@/components/AtomList/atoms/scope-selector/ScopeSelectorAtom';
 import CreateColumnAtom from '@/components/AtomList/atoms/createcolumn/CreateColumnAtom';
@@ -40,6 +41,7 @@ import {
   DEFAULT_FEATURE_OVERVIEW_SETTINGS,
   DEFAULT_DATAFRAME_OPERATIONS_SETTINGS,
   DEFAULT_CHART_MAKER_SETTINGS,
+  DEFAULT_SELECT_MODELS_FEATURE_SETTINGS,
   DataUploadSettings,
   ColumnClassifierColumn,
 } from '../../store/laboratoryStore';
@@ -550,6 +552,8 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
             ? { ...DEFAULT_FEATURE_OVERVIEW_SETTINGS }
             : atom.id === 'chart-maker'
             ? { ...DEFAULT_CHART_MAKER_SETTINGS }
+            : atom.id === 'select-models-feature'
+            ? { ...DEFAULT_SELECT_MODELS_FEATURE_SETTINGS }
             : undefined,
       };
       
@@ -615,6 +619,8 @@ const addNewCardWithAtom = (
         ? { ...DEFAULT_FEATURE_OVERVIEW_SETTINGS }
         : atomId === 'chart-maker'
         ? { ...DEFAULT_CHART_MAKER_SETTINGS }
+        : atomId === 'select-models-feature'
+        ? { ...DEFAULT_SELECT_MODELS_FEATURE_SETTINGS }
         : undefined,
   };
   const newCard: LayoutCard = {
@@ -1196,6 +1202,8 @@ const handleAddDragLeave = (e: React.DragEvent) => {
                         <GroupByAtom atomId={atom.id} />
                       ) : atom.atomId === 'build-model-feature-based' ? (
                           <BuildModelFeatureBasedAtom atomId={atom.id} />
+                       ) : atom.atomId === 'select-models-feature' ? (
+                        <SelectModelsFeatureAtom atomId={atom.id} />
                        ) : atom.atomId === 'scope-selector' ? (
                         <ScopeSelectorAtom atomId={atom.id} />
                       ) : (

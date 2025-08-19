@@ -57,11 +57,16 @@ try:
     metadata_collection = marketing_db["marketing_metadata"]
     marketing_collection = marketing_db["marketing_models"]
 
+    # ADD CREATEANDTRANSFORM COLLECTION HERE
+    trinity_prod_db = mongo_client["trinity_prod"]
+    createandtransform_configs_collection = trinity_prod_db["createandtransform_configs"]
+
     logger.info("✅ MongoDB connected - collections ready:")
     logger.info("    • Scope_selection.Scopes")
     logger.info("    • Builddatabase.simple")  # Assuming these are your settings
     logger.info("    • Marketing.marketing_metadata")
     logger.info("    • Marketing.marketing_models")
+    logger.info("    • trinity_prod.createandtransform_configs")
 
     logger.info(f"    • {settings.database_name}.{settings.collection_name}")
     
@@ -70,8 +75,10 @@ except Exception as e:
     mongo_client = None
     scope_db = None
     build_db = None
+    trinity_prod_db = None
     scopes_collection = None
     build_collection = None
+    createandtransform_configs_collection = None
 
 # MinIO Client Connection
 try:
@@ -935,10 +942,10 @@ async def get_csv_from_minio(file_key: str) -> BytesIO:
         raise
 
 
-async def export_results_to_csv_and_minio(
-    run_id: str,
-    include_fold_details: bool = False
-) -> tuple[StringIO, str]:
+# async def export_results_to_csv_and_minio(
+#     run_id: str,
+#     include_fold_details: bool = False
+# ) -> tuple[StringIO, str]:
     """
     Export model results to CSV format and save to MinIO.
     Returns: (csv_buffer, minio_file_key)
@@ -1113,9 +1120,9 @@ async def export_results_to_csv_and_minio(
             logger.error(f"Failed to save CSV to MinIO: {type(e).__name__}: {e}")
             raise
     
-    # Reset buffer for download
-    csv_buffer.seek(0)
-    return csv_buffer, file_key
+#     # Reset buffer for download
+#     csv_buffer.seek(0)
+#     return csv_buffer, file_key
 
 
 
@@ -1129,56 +1136,56 @@ async def export_results_to_csv_and_minio(
 
 # Add these marketing functions to your existing database.py
 
-async def save_marketing_model_results(
-    run_id: str,
-    model_results: List[Dict[str, Any]],
-    metadata: Dict[str, Any]
-) -> List[str]:
-    """Save marketing model results to existing build collection."""
-    if build_collection is None:
-        raise Exception("MongoDB build collection not available")
-    
-    inserted_ids = []
-    try:
-        documents = []
-        for idx, result in enumerate(model_results):
-            doc = {
-                "_id": f"marketing_{run_id}_{idx}",
-                "type": "marketing_model",
-                "run_id": run_id,
-                "model_id": idx,
-                "created_at": datetime.now(),
-                **result,
-                **metadata
-            }
-            documents.append(doc)
-        
-        if documents:
-            result = await build_collection.insert_many(documents)
-            inserted_ids = [str(id) for id in result.inserted_ids]
-            logger.info(f"Saved {len(inserted_ids)} marketing model results")
-        
-        return inserted_ids
-        
-    except Exception as e:
-        logger.error(f"Error saving marketing model results: {e}")
-        raise
+# async def save_marketing_model_results(
+#     run_id: str,
+#     model_results: List[Dict[str, Any]],
+#     metadata: Dict[str, Any]
+# ) -> List[str]:
+#     """Save marketing model results to existing build collection."""
+#     if build_collection is None:
+#         raise Exception("MongoDB build collection not available")
+#     
+#     inserted_ids = []
+#     try:
+#         documents = []
+#         for idx, result in enumerate(model_results):
+#             doc = {
+#                 "_id": f"marketing_{run_id}_{idx}",
+#                 "type": "marketing_model",
+#                 "run_id": run_id,
+#                 "model_id": idx,
+#                 "created_at": datetime.now(),
+#                 **result,
+#                 **metadata
+#             }
+#             documents.append(doc)
+#         
+#         if documents:
+#             result = await build_collection.insert_many(documents)
+#             inserted_ids = [str(id) for id in result.inserted_ids]
+#             logger.info(f"Saved {len(inserted_ids)} marketing model results")
+#         
+#         return inserted_ids
+#         
+#     except Exception as e:
+#         logger.error(f"Error saving marketing model results: {e}")
+#         raise
 
-async def get_marketing_results(run_id: str) -> List[Dict[str, Any]]:
-    """Retrieve marketing model results from existing build collection."""
-    if build_collection is None:
-        raise Exception("MongoDB build collection not available")
-    
-    try:
-        cursor = build_collection.find({
-            "type": "marketing_model",
-            "run_id": run_id
-        })
-        results = []
-        async for doc in cursor:
-            results.append(doc)
-        return results
-        
-    except Exception as e:
-        logger.error(f"Error retrieving marketing results: {e}")
-        raise
+# async def get_marketing_results(run_id: str) -> List[Dict[str, Any]]:
+#     """Retrieve marketing model results from existing build collection."""
+#     if build_collection is None:
+#         raise Exception("MongoDB build collection not available")
+#     
+#     try:
+#         cursor = build_collection.find({
+#             "type": "marketing_model",
+#             "run_id": run_id
+#         })
+#         results = []
+#         async for doc in cursor:
+#             results.append(doc)
+#         return results
+#         
+#     except Exception as e:
+#         logger.error(f"Error retrieving marketing results: {e}")
+#         raise
