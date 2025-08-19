@@ -28,6 +28,7 @@ import ScopeSelectorAtom from '@/components/AtomList/atoms/scope-selector/ScopeS
 import CreateColumnAtom from '@/components/AtomList/atoms/createcolumn/CreateColumnAtom';
 import GroupByAtom from '@/components/AtomList/atoms/groupby-wtg-avg/GroupByAtom';
 import ChartMakerAtom from '@/components/AtomList/atoms/chart-maker/ChartMakerAtom';
+import ExploreAtom from '@/components/AtomList/atoms/explore/ExploreAtom';
 import { fetchDimensionMapping } from '@/lib/dimensions';
 
 import {
@@ -39,6 +40,7 @@ import {
   DEFAULT_FEATURE_OVERVIEW_SETTINGS,
   DEFAULT_DATAFRAME_OPERATIONS_SETTINGS,
   DEFAULT_CHART_MAKER_SETTINGS,
+  DEFAULT_EXPLORE_SETTINGS,
   DataUploadSettings,
   ColumnClassifierColumn,
 } from '../../store/laboratoryStore';
@@ -1195,6 +1197,8 @@ const handleAddDragLeave = (e: React.DragEvent) => {
                         <GroupByAtom atomId={atom.id} />
                       ) : atom.atomId === 'scope-selector' ? (
                         <ScopeSelectorAtom atomId={atom.id} />
+                      ) : atom.atomId === 'explore' ? (
+                        <ExploreAtom atomId={atom.id} />
                       ) : (
                         <div>
                           <h4 className="font-semibold text-gray-900 mb-1 text-sm">{atom.title}</h4>

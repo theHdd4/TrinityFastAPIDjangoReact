@@ -112,7 +112,6 @@ export const atomCategories: AtomCategory[] = [
     color: 'bg-purple-500',
     atoms: [
       correlation,
-      explore,
       descriptiveStats,
       trendAnalysis
     ]
@@ -139,7 +138,8 @@ export const atomCategories: AtomCategory[] = [
       chartMaker,
       textBox,
       scatterPlot,
-      histogram
+      histogram,
+      explore
     ]
   },
   {

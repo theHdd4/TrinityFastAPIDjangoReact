@@ -18,6 +18,8 @@ import {
   DEFAULT_DATAFRAME_OPERATIONS_SETTINGS,
   ChartMakerSettings,
   DEFAULT_CHART_MAKER_SETTINGS,
+  ExploreSettings,
+  DEFAULT_EXPLORE_SETTINGS,
 } from '../store/laboratoryStore';
 import DataUploadValidateProperties from '@/components/AtomList/atoms/data-upload-validate/components/properties/DataUploadValidateProperties';
 import FeatureOverviewProperties from '@/components/AtomList/atoms/feature-overview/components/properties/FeatureOverviewProperties';
@@ -29,6 +31,7 @@ import CreateColumnProperties from '@/components/AtomList/atoms/createcolumn/com
 import GroupByProperties from '@/components/AtomList/atoms/groupby-wtg-avg/components/properties/GroupByProperties';
 import ScopeSelectorProperties from '@/components/AtomList/atoms/scope-selector/components/properties/ScopeSelectorProperties';
 import DataFrameOperationsProperties from '@/components/AtomList/atoms/dataframe-operations/components/properties/DataFrameOperationsProperties';
+import ExploreProperties from '@/components/AtomList/atoms/explore/components/ExploreProperties';
 
 interface SettingsPanelProps {
   isCollapsed: boolean;
@@ -55,7 +58,8 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
     | DataUploadSettings
     | FeatureOverviewSettings
     | DataFrameOperationsSettings
-    | ChartMakerSettings =
+    | ChartMakerSettings
+    | ExploreSettings =
     atom?.settings ||
     (atom?.atomId === 'data-upload-validate'
       ? { ...DEFAULT_DATAUPLOAD_SETTINGS }
@@ -65,6 +69,8 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
       ? { ...DEFAULT_DATAFRAME_OPERATIONS_SETTINGS }
       : atom?.atomId === 'chart-maker'
       ? { ...DEFAULT_CHART_MAKER_SETTINGS }
+      : atom?.atomId === 'explore'
+      ? { ...DEFAULT_EXPLORE_SETTINGS }
       : { ...DEFAULT_TEXTBOX_SETTINGS });
 
   useEffect(() => {
@@ -128,6 +134,37 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
             <DataFrameOperationsProperties atomId={selectedAtomId} />
           ) : selectedAtomId && atom?.atomId === 'scope-selector' ? (
             <ScopeSelectorProperties atomId={selectedAtomId} />
+          ) : selectedAtomId && atom?.atomId === 'explore' ? (
+            <ExploreProperties 
+              data={atom?.settings?.data || {}}
+              settings={atom?.settings || {}}
+              onDataChange={(newData) =>
+                updateSettings(selectedAtomId, {
+                  data: { ...(atom?.settings?.data || {}), ...newData },
+                })
+              }
+              onSettingsChange={(newSettings) =>
+                updateSettings(selectedAtomId, {
+                  ...(atom?.settings || {}),
+                  ...newSettings,
+                })
+              }
+              onDataUpload={(summary, fileId) => {
+                /*
+                 * Persist selected file id and the returned column summary
+                 * inside the atom's data object so it can be consumed by
+                 * ExploreCanvas for filters / dropdowns.
+                 */
+                updateSettings(selectedAtomId, {
+                  dataSource: fileId,
+                  data: {
+                    ...(atom?.settings?.data || {}),
+                    columnSummary: summary,
+                  },
+                });
+              }}
+              onApply={() => updateSettings(selectedAtomId, { applied: true })}
+            />
           ) : (
           <>
           <Tabs value={tab} onValueChange={setTab} className="w-full">
