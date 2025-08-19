@@ -28,7 +28,6 @@ from .database import (
 from .schemas import (
     CombinationSelectionOptions,
     UniqueCombination,
-    FilterCombinationsRequest,
     SelectedCombinationDetails,
     HealthCheck,
     FileDownloadResponse,
