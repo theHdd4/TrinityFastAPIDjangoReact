@@ -15,7 +15,7 @@ from app.features.user_apps.endpoint import router as user_apps_router
 from app.features.chart_maker.endpoint import router as chart_maker_router
 from app.features.build_model_feature_based.endpoint import router as build_model_router
 # from app.features.build_autoregressive.endpoint import router as autoregressive_router
-from TrinityFastAPIDjangoReact.TrinityBackendFastAPI.app.features.select_models_feature_based.endpoint import router as select_router
+from app.features.select_models_feature_based.endpoint import router as select_router
 
 from app.features.correlation.endpoint import router as correlation_router
 

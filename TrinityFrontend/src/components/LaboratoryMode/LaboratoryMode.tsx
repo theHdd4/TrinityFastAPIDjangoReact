@@ -21,6 +21,7 @@ const LaboratoryMode = () => {
   const [cardExhibited, setCardExhibited] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [showFloatingNavigationList, setShowFloatingNavigationList] = useState(true);
+  const [auxActive, setAuxActive] = useState<string | null>(null);
   const { toast } = useToast();
   const { cards, setCards } = useExhibitionStore();
   const setLabCards = useLaboratoryStore(state => state.setCards);

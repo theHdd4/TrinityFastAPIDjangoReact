@@ -4,18 +4,7 @@
 
 The Smart Merge Agent is an intelligent, LLM-driven system that automatically handles file merge operations with advanced column detection and smart JSON generation. It eliminates the need for manual configuration by leveraging AI to understand user intent and automatically determine the optimal merge parameters.
 
-<<<<<<< HEAD
-- `POST http://192.168.1.98:8002/merge` – generate merge settings from a prompt.
-- `GET http://192.168.1.98:8002/history/{session_id}` – view conversation history.
-- `GET http://192.168.1.98:8002/debug/{session_id}` – debug a merge session.
-- `DELETE http://192.168.1.98:8002/session/{session_id}` – clear a session.
-- `GET http://192.168.1.98:8002/sessions` – list active sessions.
-- `GET http://192.168.1.98:8002/files` – list available files.
-- `POST http://192.168.1.98:8002/reload-files` – reload file metadata from MinIO.
-- `GET http://192.168.1.98:8002/health` – health information.
-=======
 ## Key Features
->>>>>>> a59d29f1db03fba2026dfd5af31e85c15f2042a0
 
 ### 🧠 **LLM-Driven JSON Generation**
 - **No Manual Configuration**: The LLM automatically generates all merge configuration JSON

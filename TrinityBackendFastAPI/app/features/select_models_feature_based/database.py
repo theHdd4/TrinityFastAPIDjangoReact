@@ -3,7 +3,7 @@
 import motor.motor_asyncio
 from minio import Minio
 from minio.error import S3Error
-from config import settings
+from .config import settings
 from typing import Dict, Any, List
 import logging
 from datetime import datetime, timedelta
