@@ -1,0 +1,573 @@
+﻿📘 Select API Documentation (v1)
+Dataset‑agnostic endpoints for selecting combinations, inspecting model files, building weighted ensembles, computing contributions, generating demand/revenue curves, and saving generic models to be used in the evaluate and scenario planner.
+
+Base URL: http://localhost:8012
+Auth: (none by default, add via deployment if needed)
+Content-Type: application/json
+
+Dependencies
+- MongoDB: scopes metadata + saved models
+- MinIO: model/result/source files
+- CSV first; Arrow/Feather (IPC) also supported in several endpoints
+
+Conventions
+- Flexible column names are accepted for common fields (e.g., Model/model_name, MAPE Test/Weighted_MAPE_Test).
+- When an endpoint offers multiple row-selection methods, exactly one must resolve uniquely (row_index OR model_name OR filter criteria).
+
+----------------------------------------
+🏥 Health & System
+----------------------------------------
+
+1) ✅ Health Check
+GET /health
+
+Purpose
+- Verify API availability and dependency status (MongoDB, MinIO).
+
+Response 200 (example)
+{
+  "status": "healthy",
+  "timestamp": "2025-08-19T12:34:56.789",
+  "services": { "mongo": {"status": true}, "minio": {"status": true} },
+  "version": "x.y.z",
+  "database_details": { "endpoint": "...", "database": "...", "collection": "..." },
+  "minio_details": { "url": "...", "bucket": "...", "port": "9003" }
+}
+
+Errors
+- 503 if dependency unavailable
+- 500 unexpected
+
+Curl
+curl -X GET "http://localhost:8012/health"
+
+----------------------------------------
+🗂️ Scopes & Combinations
+----------------------------------------
+
+2) 📚 List Scopes
+GET /scopes
+
+Query Params
+- limit (int, default 100): Max scopes returned
+- offset (int, default 0): Rows to skip
+
+Response 200 (example)
+{
+  "total_scopes": 2,
+  "scopes": [
+    {
+      "id": "66d1…",
+      "scope_id": "scope_123",
+      "name": "Sales Analysis",
+      "scope_type": "prod",
+      "validator_id": "val_01",
+      "total_filter_sets": 3,
+      "overall_filtered_records": 128934,
+      "status": "ready",
+      "created_at": "2025-08-18T17:22:03"
+    }
+  ],
+  "pagination": { "offset": 0, "limit": 100 }
+}
+
+Errors
+- 503 DB not available
+- 500 unexpected
+
+Curl
+curl -G "http://localhost:8012/scopes" --data-urlencode "limit=50" --data-urlencode "offset=0"
+
+
+3) 🔎 Get All Unique Combinations
+GET /combinations
+
+Purpose
+- Aggregate unique combinations across scopes for UI selection.
+
+Response 200 (example)
+{
+  "total_combinations": 123,
+  "unique_combinations": [ /* [{...}] with totals */ ],
+  "filter_options": { "scope_types": ["dev","prod"], "validator_ids": ["val_01"] },
+  "summary": {
+    "total_scopes": 12,
+    "total_unique_combinations": 123,
+    "total_records_across_all": 995432,
+    "scope_types": ["dev","prod"],
+    "validator_ids": ["val_01"],
+    "mongodb_status": "connected",
+    "minio_status": "connected"
+  }
+}
+
+Errors
+- 503 DB not available
+- 404 no scope data
+- 500 unexpected
+
+Curl
+curl -X GET "http://localhost:8012/combinations"
+
+
+4) 🎯 Find Combination Files (Dataset‑agnostic)
+GET /combinations/{combination_id}
+
+Preferred usage: pass filters_json with arbitrary {column: value} pairs (no Channel/Brand/PPG requirement).
+Legacy fallback: if filters_json absent, the path combination_id is decoded using key_order.
+
+Path Params
+- combination_id (string): Legacy token like "A_B_C" (ignored when filters_json is provided)
+
+Query Params
+- scope_name (string, optional): Restrict to a specific set (e.g., "Scope_1")
+- filters_json (string, JSON, optional): JSON object mapping {column: value}, e.g. {"Market":"ALLINDIA","SKU":"COLA_330ML"}
+- key_order (string, optional, default "Channel,Brand,PPG"): Comma‑separated keys to decode legacy token
+
+Response 200 (example)
+{
+  "combination": {"Market":"ALLINDIA","SKU":"COLA_330ML"},
+  "related_scopes": [ { "scope_id":"scope_01","scope_name":"Scope_1","matching_sets":["Scope_1"] } ],
+  "total_records": 45678,
+  "file_details": [
+    {
+      "scope_name":"Scope_1",
+      "set_name":"Scope_1",
+      "file_key":"results/.../combo.csv",
+      "filename":"combo.csv",
+      "record_count":1234,
+      "start_date":"2024-01-01",
+      "end_date":"2024-12-31",
+      "combination":{"Market":"ALLINDIA","SKU":"COLA_330ML"}
+    }
+  ],
+  "minio_files":[ { "key":"results/.../combo.csv", "size":32145, "download_url":"https://…signed…" } ],
+  "data_availability":{ "total_files":2, "total_scopes":1, "files_in_minio":2, "date_range_coverage":1, "selected_scope":"all" }
+}
+
+Errors
+- 400 invalid filters_json/key_order mapping
+- 404 no combination match
+- 503 DB not available
+- 500 unexpected
+
+Examples
+# Preferred (filters_json)
+curl -G "http://localhost:8012/combinations/_" --data-urlencode 'filters_json={"Market":"ALLINDIA","SKU":"COLA_330ML"}'
+
+# Legacy (key_order)
+curl -G "http://localhost:8012/combinations/ALLINDIA_COLA_330ML" --data-urlencode "key_order=Market,SKU"
+
+
+----------------------------------------
+📂 Files
+----------------------------------------
+
+5) 🧾 List Files
+GET /files/list
+
+Query Params
+- prefix (string, default ""): Filter by path prefix
+- limit (int, default 100): Max results
+
+Response 200 (example)
+{ "total_files": 3, "files": ["results/a.csv","results/b.csv","models/m.feather"], "bucket":"main-bucket", "prefix":"results/" }
+
+Errors
+- 503 MinIO not available
+- 500 unexpected
+
+Curl
+curl -G "http://localhost:8012/files/list" --data-urlencode "prefix=models/" --data-urlencode "limit=50"
+
+
+6) ⬇️ Get Presigned Download URL
+GET /files/download/{file_key}
+
+Path Params
+- file_key (string, path): Exact object key in bucket (supports nested paths)
+
+Response 200 (example)
+{
+  "file_key": "results/a.csv",
+  "filename": "a.csv",
+  "download_url": "https://…signed…",
+  "file_size": 123456,
+  "last_modified": "2025-08-18T10:22:33Z"
+}
+
+Errors
+- 503 MinIO not available
+- 500 unexpected
+
+Curl
+curl -X GET "http://localhost:8012/files/download/results/a.csv"
+
+
+----------------------------------------
+📦 Models — Utilities
+----------------------------------------
+
+7) 🧠 Discover Variables with Betas
+GET /models/variables
+
+Purpose
+- Return columns that carry beta coefficients (supports Weighted_Beta_*, Beta_*, *_beta).
+- mode="columns": raw column names containing "beta"
+- mode="base": deduped predictor names extracted from patterns
+
+Query Params
+- file_key (string, required): MinIO key to CSV/Arrow/Feather
+- mode (enum: columns|base, default columns)
+- include_intercept (bool, default false)
+
+Response 200 (example)
+{ "file_key":"models/summary.csv","variables":["Beta_PPU","Weighted_Beta_Display"],"total_variables":2 }
+
+Errors
+- 404 no beta columns
+- 400 unsupported file format
+- 503 MinIO not available
+- 500 MinIO read error
+
+Curl
+curl -G "http://localhost:8012/models/variables" --data-urlencode "file_key=models/summary.csv" --data-urlencode "mode=base"
+
+
+8) 🎚️ Filter Models by Variable & Metrics
+POST /models/filter
+
+Purpose
+- Filter by a chosen variable (e.g., SelfElasticity) and metric ranges (MAPE/R²).
+
+Body (example)
+{
+  "file_key": "models/summary.csv",
+  "variable": "SelfElasticity",
+  "min_mape": 0,
+  "max_mape": 25,
+  "min_r2": 0.2,
+  "max_r2": 1.0,
+  "min_self_elasticity": -3,
+  "max_self_elasticity": 0
+}
+
+Response 200 (example)
+[ { "model_name": "LASSO_A", "self_elasticity": -1.23 }, { "model_name": "RIDGE_B", "self_elasticity": -0.88 } ]
+
+Errors
+- 400 unknown variable / missing model id column
+- 404 no models after filtering
+- 503 MinIO not available
+- 500 unexpected
+
+Curl
+curl -X POST "http://localhost:8012/models/filter" -H "Content-Type: application/json" -d '{"file_key":"models/summary.csv","variable":"SelfElasticity","max_mape":25,"min_r2":0.2}'
+
+
+9) ⚖️ MAPE‑Weighted Ensemble per Combo
+POST /models/weighted-ensemble
+
+Weighting
+- w_i = exp(-0.5 * (MAPE_test_i - best_mape_in_combo))
+
+Body (example)
+{
+  "file_key": "models/folds.csv",
+  "grouping_keys": ["Market","SKU"],
+  "filter_criteria": { "Fold": "Test" },
+  "include_numeric": ["Weighted_B0","MAPE Test","Mean_PPU"],
+  "exclude_numeric": []
+}
+
+Response 200 (excerpt)
+{
+  "grouping_keys": ["Market","SKU"],
+  "total_combos": 2,
+  "results": [
+    {
+      "combo": {"Market":"ALLINDIA","SKU":"COLA_330ML"},
+      "models_used": 5,
+      "best_model": "LASSO_3",
+      "best_mape": 12.34,
+      "weight_concentration": 0.61,
+      "model_composition": {"LASSO_3":0.61,"RF":0.22,"GBM":0.17},
+      "weighted": { "MAPE Test": 13.2, "Weighted_B0": 102.3, "Mean_PPU": 85.0 },
+      "aliases": { "elasticity": -1.12, "mape_test": 13.2, "r2_test": 0.62, "b0": 102.3 },
+      "y_pred_at_mean": 125.4
+    }
+  ]
+}
+
+Errors
+- 400 missing grouping_keys columns / no MAPE test column / unsupported format
+- 503 MinIO not available
+- 500 MinIO read error
+
+Curl
+curl -X POST "http://localhost:8012/models/weighted-ensemble" -H "Content-Type: application/json" -d '{"file_key":"models/folds.csv","grouping_keys":["Market","SKU"],"filter_criteria":{"Fold":"Test"}}'
+
+
+----------------------------------------
+📊 Models — Contributions (Generic)
+----------------------------------------
+
+10) 🧩 Variable Contributions
+POST /models/contributions-generic
+
+Definition
+- Select exactly one row from a results file and compute contributions:
+  Contribution_i = (beta_i * avg_i) / Σ(beta * avg).
+- Optional "Actual vs Predicted" if you also pass source data.
+
+Selection options (one must resolve uniquely)
+- row_index: int
+- model_name: string (matched against common model id columns)
+- filter_criteria: {column: value}
+
+Body (example)
+{
+  "file_key": "models/summary.csv",
+  "row_index": 3,
+  "source_data_file_key": "source/panel.csv",
+  "source_data_filters": { "Market":"ALLINDIA","SKU":"COLA_330ML" },
+  "y_column_hint": "Sales"
+}
+
+Response 200 (excerpt)
+{
+  "model_selector": { "row_index": 3, "model_name": null, "filter_criteria": null },
+  "file_key": "models/summary.csv",
+  "model_performance": { "mape_train": 10.8, "mape_test": 12.6, "r2_test": 0.64 },
+  "total_contribution": 2450.12,
+  "contributions": [
+    { "variable_name":"PPU","beta_coefficient":-0.85,"average_value":85,"contribution_value":-72.25,"relative_contribution":-0.03,"percentage_contribution":-3.0 }
+  ],
+  "actual_vs_predicted": { "rmse": 12.1, "mae": 9.7, "r_squared": 0.61, "sample_size": 420 }
+}
+
+Errors
+- 400 selection ambiguous / no (beta, avg) pairs found / zero Σ(beta*avg)
+- 404 source filter yielded no rows
+- 503 MinIO not available
+- 500 unexpected
+
+Curl
+curl -X POST "http://localhost:8012/models/contributions-generic" -H "Content-Type: application/json" -d '{"file_key":"models/summary.csv","model_name":"LASSO_1"}'
+
+
+----------------------------------------
+📈 Models — Demand & Revenue Curves (Generic MMM)
+----------------------------------------
+
+11) 📉📈 Demand & Revenue Curves
+GET /models/demand-revenue-curves
+
+Selection (one method)
+- row_index (int) OR model_name (string) OR filter_criteria_json (JSON string)
+
+Price grid
+- price_min_ratio (float, default 0.5), price_max_ratio (float, default 2.0), num_points (int, default 100)
+
+Overrides
+- fixed_predictors_json (JSON string): set scenario means for non‑RPI predictors
+- rpi_pc_overrides_json (JSON string): override competitor price Pc for RPI terms
+
+Query Params
+- file_key (string, required)
+- row_index (int, optional)
+- model_name (string, optional)
+- filter_criteria_json (string, JSON, optional)
+- price_min_ratio (float>0, default 0.5)
+- price_max_ratio (float>0, default 2.0)
+- num_points (int>=2, default 100)
+- fixed_predictors_json (string, default "{}")
+- rpi_pc_overrides_json (string, default "{}")
+
+Response 200 (excerpt)
+{
+  "price_variable": "PPU",
+  "intercept": 101.2,
+  "base_price": 85.0,
+  "base_volume": 120.5,
+  "base_revenue": 10242.5,
+  "elasticity_at_base": -1.12,
+  "rpi_competitor_prices": { "RPI_main": 87.5 },
+  "curve_data": [ { "price":..., "demand":..., "revenue":..., "elasticity":... }, ... ],
+  "optimal_revenue": { "price": ..., "demand": ..., "revenue": ..., "elasticity": ... }
+}
+
+Errors
+- 400 invalid selection / invalid JSON / price_min_ratio >= price_max_ratio / price variable not found
+- 503 MinIO not available
+- 500 unexpected
+
+Example
+curl -G "http://localhost:8012/models/demand-revenue-curves" --data-urlencode "file_key=models/summary.csv" --data-urlencode "model_name=LASSO_1" --data-urlencode "price_min_ratio=0.8" --data-urlencode "price_max_ratio=1.2"
+
+
+----------------------------------------
+💾 Models — Save & Retrieve (Generic)
+----------------------------------------
+
+12) 💽 Select & Save Model (Generic)
+POST /models/select-save-generic
+
+Purpose
+- Persist a single selected row from a results CSV to MongoDB (no strict schema).
+
+Selection (one)
+- row_index (int) OR filter_criteria (object)
+
+Body (example)
+{
+  "file_key": "models/summary.csv",
+  "row_index": 2,
+  "model_name": "optional-nickname",   // name to store; autogenerated if absent
+  "tags": ["prod","cola"],
+  "description": "Top model for COLA_330ML"
+}
+
+Response 200 (example)
+{
+  "model_id": "66e…",
+  "saved_at": "2025-08-19T13:00:22",
+  "status": "success",
+  "row_data": { "...": "..." }
+}
+
+Errors
+- 400 invalid/missing selection
+- 404 no rows matched criteria
+- 503 MinIO or Mongo unavailable
+- 500 unexpected
+
+Curl
+curl -X POST "http://localhost:8012/models/select-save-generic" -H "Content-Type: application/json" -d '{"file_key":"models/summary.csv","filter_criteria":{"Market":"ALLINDIA","SKU":"COLA_330ML"},"model_name":"COLA_330_best","tags":["prod"],"description":"winning row"}'
+
+
+13) 🗃️ List Saved Models (Generic)
+GET /models/saved-generic
+
+Query Params
+- tags (array, optional): Filter by any tag (OR)
+- model_name (string, optional): case-insensitive regex
+- limit (int, default 50), skip (int, default 0)
+
+Response 200 (example)
+{
+  "total": 12,
+  "models": [
+    {
+      "model_id": "66e…",
+      "model_name": "COLA_330_best",
+      "tags": ["prod"],
+      "description": "winning row",
+      "created_at": "2025-08-19T13:00:22",
+      "source_file": "models/summary.csv",
+      "selection_criteria": { "row_index": null, "filter_criteria": { "Market":"ALLINDIA","SKU":"COLA_330ML" } },
+      "data_preview": { "MAPE Test": 12.3, "R2": 0.64, "..." : "..." }
+    }
+  ],
+  "pagination": { "skip": 0, "limit": 50, "has_more": false }
+}
+
+Errors
+- 503 Mongo unavailable
+- 500 unexpected
+
+Curl
+curl -G "http://localhost:8012/models/saved-generic" --data-urlencode "model_name=COLA" --data-urlencode "limit=20"
+
+
+14) 🔍 Get Saved Model by ID (Generic)
+GET /models/saved-generic/{model_id}
+
+Path Params
+- model_id (string, MongoDB ObjectId)
+
+Response 200
+- Full stored document (model_data + metadata)
+
+Errors
+- 400 invalid ObjectId
+- 404 model not found
+- 503 Mongo unavailable
+- 500 unexpected
+
+Curl
+curl -X GET "http://localhost:8012/models/saved-generic/66e0123456789abcdef0123"
+
+
+----------------------------------------
+Standard Error Envelopes (illustrative)
+----------------------------------------
+400 Bad Request
+{ "detail": "reason..." }
+
+404 Not Found
+{ "detail": "reason..." }
+
+503 Service Unavailable
+{ "detail": "MongoDB connection is not available." }
+
+500 Internal Server Error
+{ "detail": "Error message..." }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+End-to-End Flow
+
+•  Pick a business combo
+• GET /combinations → list combos/scopes
+• GET /combinations/{combination_id} (or pass filters_json) → files + scope details
+•  (Optional) Blend models per combo
+• POST /models/weighted-ensemble → MAPE-weighted averages for all numeric fields
+•  Inspect predictors
+• GET /models/variables?file_key=…&mode=columns|base&include_intercept=false → variables with betas
+•  Contributions (+ optional Actual vs Predicted)
+• POST /models/contributions-generic
+o Body: { file_key, row_index | model_name | filter_criteria, source_data_file_key?, source_data_filters?, y_column_hint? }
+o Returns: contributions, metrics, optional A-vs-P table/stats
+•  Price sensitivity (demand & revenue curves)
+• GET /models/demand-revenue-curves
+o Params: file_key, selector (row_index | model_name | filter_criteria_json), plus curve options
+o Returns: curve_data, optimal_revenue, elasticity, quality
+•  Save chosen model
+• POST /models/select-save-generic
+o Body: { file_key, row_index | filter_criteria, model_name?, tags?, description? }
+o Persists selection; returns model_id
+•  (Optional) Retrieve saved models
+• GET /models/saved-generic → list with pagination
+• GET /models/saved-generic/{model_id} → full record
+
