@@ -33,18 +33,17 @@ const transformCorrelationMatrix = (correlationDict: any, variables: string[]): 
     };
   }
 
-  console.log('Original correlation dict:', correlationDict);
 
   // Filter out variables that don't exist in the correlation matrix (non-numeric columns)
   const validVariables = variables.filter(variable => {
     const hasValidData = correlationDict[variable] && typeof correlationDict[variable] === 'object';
     if (!hasValidData) {
-      console.log(`Filtering out non-numeric variable: ${variable}`);
+     
     }
     return hasValidData;
   });
 
-  console.log(`Filtered variables from ${variables.length} to ${validVariables.length}:`, validVariables);
+
 
   if (validVariables.length === 0) {
     console.warn('No valid numeric variables found in correlation matrix');
@@ -75,7 +74,7 @@ const transformCorrelationMatrix = (correlationDict: any, variables: string[]): 
       });
     });
     
-    console.log('Transformed correlation matrix:', matrix);
+   
     return { matrix, filteredVariables: validVariables };
   } catch (error) {
     console.error('Error transforming correlation matrix:', error);
@@ -114,11 +113,10 @@ const fetchEnhancedTimeSeriesData = async (
   forceColumns?: { column1: string; column2: string }
 ): Promise<Array<{date: Date | number; var1Value: number; var2Value: number}>> => {
   try {
-    console.log('🚀 Fetching enhanced time series data for:', filePath);
     
     // 1. Get axis data (datetime or indices)
     const axisData = await fetchTimeSeriesAxis(filePath, startDate, endDate);
-    console.log('📊 Axis data:', axisData);
+
     
     // 2. Get highest correlation pair (unless forced columns provided)
     let pairData;
@@ -130,7 +128,6 @@ const fetchEnhancedTimeSeriesData = async (
       };
     } else {
       pairData = await fetchHighestCorrelationPair(filePath);
-      console.log('🎯 Highest correlation pair:', pairData);
     }
     
     // 3. Get Y-values for the selected columns
@@ -143,7 +140,6 @@ const fetchEnhancedTimeSeriesData = async (
     };
     
     const seriesData = await fetchTimeSeriesData(filePath, seriesRequest);
-    console.log('📈 Series data:', seriesData);
     
     // 4. Transform to chart format
     const chartData = axisData.x_values.map((x: any, index: number) => ({
@@ -152,7 +148,6 @@ const fetchEnhancedTimeSeriesData = async (
       var2Value: seriesData.column2_values[index] || 0
     }));
     
-    console.log('✅ Enhanced time series data generated:', chartData.length, 'points');
     return chartData;
     
   } catch (error) {
@@ -469,18 +464,14 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
       // Also try to get categorical columns directly from the file using loadDataframe
       if (data.selectedFile) {
         try {
-          console.log('🔍 Loading categorical columns from file for validator path:', data.selectedFile);
           const dataframeInfo = await correlationAPI.loadDataframe(data.selectedFile);
-          console.log('📊 Dataframe info:', dataframeInfo);
           
           // Fetch column values for categorical columns
           let columnValues: { [columnName: string]: string[] } = {};
           if (dataframeInfo.categoricalColumns && dataframeInfo.categoricalColumns.length > 0) {
             onDataChange({ columnValuesLoading: true, columnValuesError: undefined });
             try {
-              console.log('🔍 Fetching unique values for categorical columns:', dataframeInfo.categoricalColumns);
               columnValues = await correlationAPI.fetchAllColumnValues(data.selectedFile, dataframeInfo.categoricalColumns);
-              console.log('✅ Successfully fetched column values:', columnValues);
               onDataChange({ columnValuesLoading: false });
             } catch (columnValuesError) {
               console.error('❌ Failed to fetch column values:', columnValuesError);
@@ -517,9 +508,7 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
   const analyzeDates = async (filePath: string) => {
     setIsAnalyzingDates(true);
     try {
-      console.log('🗓️ Starting date analysis for:', filePath);
       const analysis = await correlationAPI.analyzeDates(filePath);
-      console.log('📅 Date analysis result:', analysis);
       
       // Store date analysis in component state
       onDataChange({
@@ -560,8 +549,6 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
     setProcessingError(null);
     setIsProcessing(true);
 
-    console.log('🚀 File selection started for:', objectName);
-    
     onDataChange({
       selectedFile: objectName,
       fileData: null,
@@ -576,10 +563,8 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
     
     // Try to get validator atom ID and load columns
     try {
-      console.log('🔍 Trying validator path for:', objectName);
       const validatorInfo = await correlationAPI.getDataframeValidator(objectName);
       if (validatorInfo.validatorId) {
-        console.log('✅ Validator found, using validator path');
         onDataChange({
           validatorAtomId: validatorInfo.validatorId
         });
@@ -592,18 +577,17 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
       console.warn('⚠️ Could not get validator ID, using direct dataframe loading');
       // Fallback to direct dataframe loading
       try {
-        console.log('🔄 Using fallback dataframe loading path for:', objectName);
         const dataframeInfo = await correlationAPI.loadDataframe(objectName);
-        console.log('📊 Dataframe info (fallback path):', dataframeInfo);
+       
         
         // Fetch column values for all categorical columns
         let columnValues: { [columnName: string]: string[] } = {};
         if (dataframeInfo.categoricalColumns && dataframeInfo.categoricalColumns.length > 0) {
           onDataChange({ columnValuesLoading: true, columnValuesError: undefined });
           try {
-            console.log('Fetching unique values for categorical columns:', dataframeInfo.categoricalColumns);
+          
             columnValues = await correlationAPI.fetchAllColumnValues(objectName, dataframeInfo.categoricalColumns);
-            console.log('Successfully fetched column values:', columnValues);
+           
             onDataChange({ columnValuesLoading: false });
           } catch (columnValuesError) {
             console.error('Failed to fetch column values:', columnValuesError);
@@ -628,7 +612,7 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
         
         // Auto-run correlation analysis after dataframe loading
         await runCorrelationAnalysis(objectName);
-      } catch (loadError) {
+      } catch (loadError) { 
         setProcessingError('Failed to load dataframe for correlation analysis');
       }
     } finally {
@@ -707,8 +691,7 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
       
       // Start with no columns selected and no time series data
       // User must explicitly select variables to see correlations
-      console.log('📊 Correlation matrix loaded with', filteredVariables.length, 'variables. No default selection.');
-      
+     
       // Transform backend result to match existing interface
       const transformedResult = {
         variables: filteredVariables, // Use filtered variables instead of all variables
@@ -769,7 +752,7 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
     
     if (cachedValues) {
       // Use cached values - no API call needed
-      console.log(`Using cached values for ${columnName}:`, cachedValues);
+     
       const currentFilters = data.settings?.filterDimensions || {};
       handleSettingsChange('filterDimensions', {
         ...currentFilters,
@@ -779,7 +762,7 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
       // Fallback to API call if no cached values
       setLoadingColumnValues(columnName);
       try {
-        console.log(`Fetching values for ${columnName} (cache miss)`);
+       
         const response = await correlationAPI.getColumnValues(data.fileData.fileName, columnName, 100);
         
         // Add empty filter for this column
@@ -826,8 +809,7 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
     if (!data.selectedFile || !var1 || !var2) return;
     
     try {
-      console.log('🔄 Refetching time series data for:', var1, 'vs', var2);
-      
+
       // Update selected variables first
       onDataChange({
         selectedVar1: var1,
@@ -849,7 +831,7 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
         selectedVar2: var2
       });
       
-      console.log('✅ Time series data updated for variable selection');
+     
     } catch (error) {
       console.error('💥 Failed to update time series for variable selection:', error);
       // Set empty data on error - no fallback
@@ -866,8 +848,7 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
     if (!data.selectedFile) return;
     
     try {
-      console.log('🗓️ Refetching time series data with date filter');
-      
+     
       // Use current selected variables or let backend determine highest correlation
       const forceColumns = (data.selectedVar1 && data.selectedVar2) 
         ? { column1: data.selectedVar1, column2: data.selectedVar2 }
@@ -884,7 +865,7 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
         timeSeriesData: enhancedTimeSeriesData
       });
       
-      console.log('✅ Time series data updated with date filter');
+     
     } catch (error) {
       console.error('💥 Failed to update time series with date filter:', error);
       // Set empty data on error - no fallback

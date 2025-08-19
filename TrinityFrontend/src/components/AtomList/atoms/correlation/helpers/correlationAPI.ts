@@ -105,7 +105,6 @@ export class CorrelationAPI {
 
   constructor() {
     this.baseUrl = CORRELATION_API;
-    console.log('🔗 CorrelationAPI initialized with base URL:', this.baseUrl);
   }
 
   async ping(): Promise<{ msg: string }> {
@@ -214,7 +213,7 @@ export class CorrelationAPI {
           const response = await this.getColumnValues(filePath, column, limit);
           return { column, values: response.unique_values };
         } catch (error) {
-          console.warn(`Failed to fetch values for column ${column}:`, error);
+        
           return { column, values: [] };
         }
       });
@@ -229,7 +228,6 @@ export class CorrelationAPI {
 
       return columnValues;
     } catch (error) {
-      console.error('Error fetching all column values:', error);
       throw error;
     }
   }
@@ -287,13 +285,9 @@ export class CorrelationAPI {
 
   async getHighestCorrelationPair(filePath: string): Promise<any> {
     const url = `${this.baseUrl}/highest-correlation-pair/${encodeURIComponent(filePath)}`;
-    console.log('🔗 Fetching highest correlation pair from URL:', url);
-    console.log('🔗 Encoded file path:', encodeURIComponent(filePath));
-    console.log('🔗 Original file path:', filePath);
     const response = await fetch(url);
     if (!response.ok) {
-      console.error('💥 HTTP Error:', response.status, response.statusText);
-      console.error('💥 Full URL that failed:', url);
+     
       throw new Error(`Failed to fetch highest correlation pair: ${response.statusText}`);
     }
     return response.json();

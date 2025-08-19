@@ -341,7 +341,7 @@ export function calculateCorrelationFromData(
   try {
     correlationMatrix = calculateCorrelationMatrix(rawData, numericColumns, method);
   } catch (error) {
-    console.error('Error calculating correlation matrix:', error);
+    
     // Fallback to identity matrix
     correlationMatrix = numericColumns.map((_, i) => 
       numericColumns.map((_, j) => i === j ? 1.0 : 0.0)
@@ -364,7 +364,7 @@ export function calculateCorrelationFromData(
   try {
     timeSeriesData = generateTimeSeriesData(rawData, dateColumn, var1Column, var2Column);
   } catch (error) {
-    console.error('Error generating time series data:', error);
+   
     // Fallback to basic time series
     timeSeriesData = rawData.slice(0, 20).map((row, index) => ({
       date: new Date(2024, Math.floor(index / 4), (index % 4) * 7),

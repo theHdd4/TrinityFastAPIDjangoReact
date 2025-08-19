@@ -184,11 +184,9 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
     forceColumns?: { column1: string; column2: string }
   ): Promise<Array<{date: Date | number; var1Value: number; var2Value: number}>> => {
     try {
-      console.log('🚀 Fetching enhanced time series data for:', filePath);
-      
+     
       // 1. Get axis data (datetime or indices)
       const axisData = await correlationAPI.getTimeSeriesAxis(filePath, startDate, endDate);
-      console.log('📊 Axis data:', axisData);
       
       // 2. Get highest correlation pair (unless forced columns provided)
       let pairData;
@@ -200,7 +198,6 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
         };
       } else {
         pairData = await correlationAPI.getHighestCorrelationPair(filePath);
-        console.log('🎯 Highest correlation pair:', pairData);
       }
       
       // 3. Get Y-values for the selected columns
@@ -213,8 +210,7 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
       };
       
       const seriesData = await correlationAPI.getTimeSeriesData(filePath, seriesRequest);
-      console.log('📈 Series data:', seriesData);
-      
+    
       // 4. Transform to chart format
       const chartData = axisData.x_values.map((x: any, index: number) => ({
         date: axisData.has_datetime ? new Date(x) : index,
@@ -222,12 +218,9 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
         var2Value: seriesData.column2_values[index] || 0
       }));
       
-      console.log('✅ Enhanced time series data generated:', chartData.length, 'points');
       return chartData;
       
     } catch (error) {
-      console.error('💥 Enhanced time series data error:', error);
-      // Fallback to empty array
       return [];
     }
   };
@@ -238,8 +231,7 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
     const filePath = data.selectedFile || data.fileData?.fileName;
     
     if (!filePath || !var1 || !var2) {
-      console.warn('⚠️ Cannot update time series: missing file path or variables', { filePath, var1, var2 });
-      // Still update the selected variables for UI feedback
+      
       onDataChange({
         selectedVar1: var1,
         selectedVar2: var2
@@ -248,7 +240,6 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
     }
     
     try {
-      console.log('🔄 Updating time series data for heatmap click:', var1, 'vs', var2);
       
       // Update selected variables first
       onDataChange({
@@ -271,10 +262,9 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
         selectedVar2: var2
       });
       
-      console.log('✅ Time series data updated for heatmap click');
+      
     } catch (error) {
-      console.error('💥 Failed to update time series for heatmap click:', error);
-      // Set empty data on error - no fallback
+      
       onDataChange({
         timeSeriesData: [],
         selectedVar1: var1,
@@ -296,7 +286,7 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
       if (!correlationMatrix || !correlationMatrix[index]) return true;
       
       // Check if this variable has any meaningful correlation with other variables
-      // (excluding perfect correlation with itself at index === index)
+      // (excluding perfect correlat ion with itself at index === index)
       const hasOtherCorrelations = correlationMatrix[index].some((correlation, corrIndex) => {
         return corrIndex !== index && Math.abs(correlation) > 0.1; // threshold for meaningful correlation
       });
@@ -514,7 +504,6 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
 
     // Determine if we're using dates or indices
     const hasDatetime = validData.length > 0 && validData[0].date instanceof Date;
-    console.log('📊 Time series chart mode:', hasDatetime ? 'datetime' : 'index');
 
     // Create appropriate scales based on data type
     let xScale: any;
@@ -698,8 +687,7 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
         .text(data.selectedVar2);
 
     } catch (error) {
-      console.error('Error rendering time series chart:', error);
-      // Display error message
+     
       g.append("text")
         .attr("x", width / 2)
         .attr("y", height / 2)
