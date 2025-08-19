@@ -1105,16 +1105,8 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
         </svg>
       </div>
       
-      <div className="relative z-10 flex-shrink-0 p-6 pb-0">
-        <div className="flex items-center mb-4">
-          <div className="w-1 h-8 bg-gradient-to-b from-blue-500 to-blue-600 rounded-full mr-4 shadow-lg"></div>
-          <h2 className="text-2xl font-bold text-gray-900 drop-shadow-sm">Chart Maker</h2>
-        </div>
-        <p className="text-gray-600 font-medium">Interactive data visualization dashboard</p>
-      </div>
-      
-      <div className="relative z-10 flex-1 p-6 pt-4 overflow-hidden">
-        <div 
+      <div className="relative z-10 flex-1 p-6 overflow-hidden">
+        <div
           className={`grid gap-6 ${layoutConfig.containerClass} transition-all duration-300 ease-in-out h-full`}
           style={{
             gridTemplateRows: layoutConfig.rows > 1 ? `repeat(${layoutConfig.rows}, 1fr)` : '1fr'
@@ -1126,54 +1118,54 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
             return (
                    <Card 
                      key={chart.id} 
-                     className="chart-card border-0 shadow-xl bg-white/95 backdrop-blur-sm overflow-hidden transform hover:scale-[1.02] transition-all duration-300 relative flex flex-col h-full group hover:shadow-2xl"
+                    className="chart-card border-0 shadow-xl bg-white/95 backdrop-blur-sm overflow-hidden transform hover:scale-[1.02] transition-all duration-300 relative flex flex-col h-full group hover:shadow-2xl"
                      onContextMenu={e => {
                        e.preventDefault(); // Disable right-click context menu
                        e.stopPropagation();
                      }}
                    >
-                     <div className={`bg-gradient-to-r ${colors.gradient} p-4 relative flex-shrink-0 group-hover:shadow-lg transition-shadow duration-300`}>
-                       <CardTitle className={`font-bold text-white flex items-center justify-between ${isCompact ? 'text-base' : 'text-lg'} drop-shadow-sm`}>
-                         <div className="flex items-center">
-                           <BarChart3 className={`mr-2 ${isCompact ? 'w-4 h-4' : 'w-5 h-5'} drop-shadow-sm`} />
-                           {chart.title}
-                         </div>
-                         {/* Hints container - aligned in same row */}
-                         <div className="flex items-center gap-2">
-                           {/* Interaction hint for multi-trace charts */}
-                           {(chart.chartConfig?.traces && chart.chartConfig.traces.length > 1) && (
-                             <div className="flex items-center text-xs opacity-80 bg-white/20 rounded-full px-2 py-1">
-                               {chart.chartConfig.chart_type === 'bar' ? (
-                                 <>
-                                   <span className="hidden sm:inline">Click: trace, Ctrl+Click: dim x-axis</span>
-                                   <span className="sm:hidden">Click to emphasize</span>
-                                 </>
-                               ) : (
-                                 <>
-                                   <span className="hidden sm:inline">Click traces to emphasize</span>
-                                   <span className="sm:hidden">Click to emphasize</span>
-                                 </>
-                               )}
-                             </div>
-                           )}
-                           {/* Alt+Click expand hint */}
-                           <div className="flex items-center text-xs text-white/90 bg-white/20 rounded-full px-2 py-1 backdrop-blur-sm">
-                             <span>Alt+Click to expand</span>
-                           </div>
-                         </div>
-                       </CardTitle>
-                       {/* Transparent overlay for Alt+Click fullscreen and mouse hold for chart type switching */}
-                       <div
-                         className="absolute inset-0 cursor-pointer"
-                         style={{ background: 'transparent', zIndex: 10 }}
-                         onClick={e => {
-                           if (e.altKey) {
-                             setFullscreenChart(chart);
-                             setFullscreenIndex(index);
-                           }
-                         }}
-                         onMouseDown={e => handleMouseDown(e, chart.id)}
-                         onContextMenu={e => {
+                    <div className="bg-white border-b-2 border-yellow-400 p-4 relative flex-shrink-0 group-hover:shadow-lg transition-shadow duration-300">
+                      <CardTitle className={`font-bold text-gray-900 flex items-center justify-between ${isCompact ? 'text-base' : 'text-lg'}`}>
+                        <div className="flex items-center">
+                          <BarChart3 className={`mr-2 ${isCompact ? 'w-4 h-4' : 'w-5 h-5'} text-gray-900`} />
+                          {chart.title}
+                        </div>
+                        {/* Hints container - aligned in same row */}
+                        <div className="flex items-center gap-2">
+                          {/* Interaction hint for multi-trace charts */}
+                          {(chart.chartConfig?.traces && chart.chartConfig.traces.length > 1) && (
+                            <div className="flex items-center text-xs text-gray-700 bg-yellow-50 border border-yellow-200 rounded-full px-2 py-1">
+                              {chart.chartConfig.chart_type === 'bar' ? (
+                                <>
+                                  <span className="hidden sm:inline">Click: trace, Ctrl+Click: dim x-axis</span>
+                                  <span className="sm:hidden">Click to emphasize</span>
+                                </>
+                              ) : (
+                                <>
+                                  <span className="hidden sm:inline">Click traces to emphasize</span>
+                                  <span className="sm:hidden">Click to emphasize</span>
+                                </>
+                              )}
+                            </div>
+                          )}
+                          {/* Alt+Click expand hint */}
+                          <div className="flex items-center text-xs text-gray-700 bg-yellow-50 border border-yellow-200 rounded-full px-2 py-1">
+                            <span>Alt+Click to expand</span>
+                          </div>
+                        </div>
+                      </CardTitle>
+                      {/* Transparent overlay for Alt+Click fullscreen and mouse hold for chart type switching */}
+                      <div
+                        className="absolute inset-0 cursor-pointer"
+                        style={{ background: 'transparent', zIndex: 10 }}
+                        onClick={e => {
+                          if (e.altKey) {
+                            setFullscreenChart(chart);
+                            setFullscreenIndex(index);
+                          }
+                        }}
+                        onMouseDown={e => handleMouseDown(e, chart.id)}
+                        onContextMenu={e => {
                            e.preventDefault(); // Disable right-click context menu
                            e.stopPropagation();
                          }}
