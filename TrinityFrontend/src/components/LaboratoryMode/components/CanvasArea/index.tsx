@@ -27,12 +27,9 @@ import DataFrameOperationsAtom from '@/components/AtomList/atoms/dataframe-opera
 import ScopeSelectorAtom from '@/components/AtomList/atoms/scope-selector/ScopeSelectorAtom';
 import CreateColumnAtom from '@/components/AtomList/atoms/createcolumn/CreateColumnAtom';
 import GroupByAtom from '@/components/AtomList/atoms/groupby-wtg-avg/GroupByAtom';
-<<<<<<< HEAD
 import CorrelationAtom from '@/components/AtomList/atoms/correlation/CorrelationAtom';
-=======
 import ChartMakerAtom from '@/components/AtomList/atoms/chart-maker/ChartMakerAtom';
 import BuildModelFeatureBasedAtom from '@/components/AtomList/atoms/build-model-feature-based/BuildModelFeatureBasedAtom';
->>>>>>> a59d29f1db03fba2026dfd5af31e85c15f2042a0
 import { fetchDimensionMapping } from '@/lib/dimensions';
 
 import {

@@ -23,15 +23,9 @@ const LaboratoryMode = () => {
   const [showFloatingNavigationList, setShowFloatingNavigationList] = useState(true);
   const { toast } = useToast();
   const { cards, setCards } = useExhibitionStore();
-<<<<<<< HEAD
-  const { setCards: setLabCards, auxPanelActive, setAuxPanelActive } = useLaboratoryStore();
-  const { user } = useAuth();
-  const isViewer = user?.role === 'viewer';
-=======
   const setLabCards = useLaboratoryStore(state => state.setCards);
   const { hasPermission, user } = useAuth();
   const canEdit = hasPermission('laboratory:edit');
->>>>>>> a59d29f1db03fba2026dfd5af31e85c15f2042a0
 
   useEffect(() => {
     if (localStorage.getItem('laboratory-config')) {
@@ -99,12 +93,8 @@ const LaboratoryMode = () => {
   };
 
   const toggleSettingsPanel = () => {
-<<<<<<< HEAD
-    setAuxPanelActive(auxPanelActive === 'settings' ? null : 'settings');
-=======
     if (!canEdit) return;
     setAuxActive(prev => (prev === 'settings' ? null : 'settings'));
->>>>>>> a59d29f1db03fba2026dfd5af31e85c15f2042a0
   };
 
   const handleSave = async () => {
@@ -314,23 +304,6 @@ const LaboratoryMode = () => {
             />
           </div>
         </div>
-<<<<<<< HEAD
-
-        {/* Auxiliary menu */}
-        <AuxiliaryMenu
-          selectedAtomId={selectedAtomId}
-          selectedCardId={selectedCardId}
-          cardExhibited={cardExhibited}
-          active={auxPanelActive}
-          onActiveChange={setAuxPanelActive}
-        />
-        <FloatingNavigationList
-          isVisible={showFloatingNavigationList}
-          onClose={() => setShowFloatingNavigationList(false)}
-        />
-      </div>
-=======
->>>>>>> a59d29f1db03fba2026dfd5af31e85c15f2042a0
     </div>
   );
 };

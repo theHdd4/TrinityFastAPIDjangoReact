@@ -16,13 +16,10 @@ import {
   DEFAULT_FEATURE_OVERVIEW_SETTINGS,
   DataFrameOperationsSettings,
   DEFAULT_DATAFRAME_OPERATIONS_SETTINGS,
-<<<<<<< HEAD
   CorrelationSettings,
   DEFAULT_CORRELATION_SETTINGS,
-=======
   ChartMakerSettings,
   DEFAULT_CHART_MAKER_SETTINGS,
->>>>>>> a59d29f1db03fba2026dfd5af31e85c15f2042a0
 } from '../../store/laboratoryStore';
 import DataUploadValidateProperties from '@/components/AtomList/atoms/data-upload-validate/components/properties/DataUploadValidateProperties';
 import FeatureOverviewProperties from '@/components/AtomList/atoms/feature-overview/components/properties/FeatureOverviewProperties';
@@ -34,11 +31,8 @@ import BuildModelFeatureBasedPropertiesPanel from '@/components/AtomList/atoms/b
 import MergeProperties from '@/components/AtomList/atoms/merge/components/properties/MergeProperties';
 import ColumnClassifierProperties from '@/components/AtomList/atoms/column-classifier/components/properties/ColumnClassifierProperties';
 import DataFrameOperationsProperties from '@/components/AtomList/atoms/dataframe-operations/components/properties/DataFrameOperationsProperties';
-<<<<<<< HEAD
 import CorrelationProperties from '@/components/AtomList/atoms/correlation/components/properties/CorrelationProperties';
-=======
 import ChartMakerProperties from '@/components/AtomList/atoms/chart-maker/components/properties/ChartMakerProperties';
->>>>>>> a59d29f1db03fba2026dfd5af31e85c15f2042a0
 import AtomSettingsTabs from "./AtomSettingsTabs";
 
 interface SettingsPanelProps {
@@ -61,16 +55,13 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
     selectedAtomId ? state.getAtom(selectedAtomId) : undefined
   );
   const updateSettings = useLaboratoryStore(state => state.updateAtomSettings);
-<<<<<<< HEAD
-  const settings: TextBoxSettings | DataUploadSettings | FeatureOverviewSettings | DataFrameOperationsSettings | CorrelationSettings =
-=======
   const settings:
     | TextBoxSettings
     | DataUploadSettings
     | FeatureOverviewSettings
     | DataFrameOperationsSettings
-    | ChartMakerSettings =
->>>>>>> a59d29f1db03fba2026dfd5af31e85c15f2042a0
+    | ChartMakerSettings
+    | CorrelationSettings =
     atom?.settings ||
     (atom?.atomId === 'correlation'
       ? { ...DEFAULT_CORRELATION_SETTINGS }
