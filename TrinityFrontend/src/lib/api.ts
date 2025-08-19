@@ -122,6 +122,28 @@ export const CLASSIFIER_API =
   normalizeUrl(import.meta.env.VITE_CLASSIFIER_API) ||
   `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/classify`;
 
+export let EXPLORE_API =
+  normalizeUrl(import.meta.env.VITE_EXPLORE_API) ||
+  (() => {
+    let base = backendOrigin;
+    if (base.endsWith(':8080')) {
+      base = base.replace(':8080', ':8001');
+    }
+    return `${base.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/explore`;
+  })();
+
+// When served via Traefik/Nginx (port 8080 or default 80) the FastAPI
+// service is proxied behind the same origin. Hit the same origin so that
+// the reverse-proxy can route correctly.
+if (typeof window !== 'undefined') {
+  const port = window.location.port;
+  if (!port || port === '8080') {
+    // Use the correct backend URL instead of the same origin
+    const hostIp = import.meta.env.VITE_HOST_IP || window.location.hostname;
+    EXPLORE_API = `http://${hostIp}:8001/api/explore`;
+  }
+}
+
 export const DATAFRAME_OPERATIONS_API =
   import.meta.env.VITE_DATAFRAME_OPERATIONS_API || `${backendOrigin.replace(/:8000$/, ':8001')}/api/dataframe-operations`;
 

@@ -1,5 +1,20 @@
 import { create } from "zustand";
 import { safeStringify } from "@/utils/safeStringify";
+import {
+  useLaboratoryStore,
+  TextBoxSettings,
+  DEFAULT_TEXTBOX_SETTINGS,
+  DataUploadSettings,
+  DEFAULT_DATAUPLOAD_SETTINGS,
+  FeatureOverviewSettings,
+  DEFAULT_FEATURE_OVERVIEW_SETTINGS,
+  DataFrameOperationsSettings,
+  DEFAULT_DATAFRAME_OPERATIONS_SETTINGS,
+  ChartMakerSettings,
+  DEFAULT_CHART_MAKER_SETTINGS,
+  ExploreSettings,
+  DEFAULT_EXPLORE_SETTINGS,
+} from '../store/laboratoryStore';
 
 export interface TextBoxSettings {
   format: "quill-delta" | "markdown" | "html" | "plain";
@@ -197,6 +212,22 @@ export const DEFAULT_DATAFRAME_OPERATIONS_SETTINGS: DataFrameOperationsSettings 
   selectedFile: '',
   tableData: undefined,
   data: undefined,
+};
+
+export interface ExploreSettings {
+  dataSource: string;
+  enableFiltering?: boolean;
+  enableExport?: boolean;
+  autoRefresh?: boolean;
+  // Additional optional settings
+  [key: string]: any;
+}
+
+export const DEFAULT_EXPLORE_SETTINGS: ExploreSettings = {
+  dataSource: "",
+  enableFiltering: true,
+  enableExport: true,
+  autoRefresh: false,
 };
 
 export interface ChartData {
