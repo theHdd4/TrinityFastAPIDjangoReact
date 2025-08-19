@@ -8,15 +8,15 @@ class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
     
     # Database Configuration
-    mongo_details: str
-    database_name: str
-    collection_name: str
-    
+    mongo_details: Optional[str] = None
+    database_name: Optional[str] = None
+    collection_name: Optional[str] = None
+
     # MinIO Configuration
-    minio_url: str
-    minio_access_key: str
-    minio_secret_key: str
-    minio_bucket_name: str
+    minio_url: Optional[str] = None
+    minio_access_key: Optional[str] = None
+    minio_secret_key: Optional[str] = None
+    minio_bucket_name: Optional[str] = None
     minio_source_bucket_name: str = "dataformodel"  # Add this line - new bucket for source data
     minio_secure: bool = False
     

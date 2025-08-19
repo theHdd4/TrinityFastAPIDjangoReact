@@ -12,36 +12,39 @@ from datetime import datetime, timedelta
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+
 # MongoDB Connection with Authentication
 client = None
 db = None
 scopes_collection = None
 
-try:
-    # Create connection string without exposing credentials in logs
-    mongo_url_safe = settings.mongo_details.replace(
-        settings.mongo_details.split('@')[0].split('//')[1], 
-        "***:***"
-    )
-    logger.info(f"Connecting to MongoDB: {mongo_url_safe}")
-    
-    client = motor.motor_asyncio.AsyncIOMotorClient(
-        settings.mongo_details,
-        serverSelectionTimeoutMS=5000,
-        connectTimeoutMS=5000,
-        socketTimeoutMS=5000,
-        maxPoolSize=10,
-        minPoolSize=1
-    )
-    
-    db = client[settings.database_name]
-    scopes_collection = db.get_collection(settings.collection_name)
-    logger.info(f"✅ MongoDB connection established: {settings.database_name}.{settings.collection_name}")
-    
-except Exception as e:
-    logger.error(f"❌ MongoDB connection failed: {e}")
-    client, db, scopes_collection = None, None, None
+if all([settings.mongo_details, settings.database_name, settings.collection_name]):
+    try:
+        # Create connection string without exposing credentials in logs
+        mongo_url_safe = settings.mongo_details.replace(
+            settings.mongo_details.split('@')[0].split('//')[1],
+            "***:***",
+        )
+        logger.info(f"Connecting to MongoDB: {mongo_url_safe}")
 
+        client = motor.motor_asyncio.AsyncIOMotorClient(
+            settings.mongo_details,
+            serverSelectionTimeoutMS=5000,
+            connectTimeoutMS=5000,
+            socketTimeoutMS=5000,
+            maxPoolSize=10,
+            minPoolSize=1
+        )
+
+        db = client[settings.database_name]
+        scopes_collection = db.get_collection(settings.collection_name)
+        logger.info(f"✅ MongoDB connection established: {settings.database_name}.{settings.collection_name}")
+
+    except Exception as e:
+        logger.error(f"❌ MongoDB connection failed: {e}")
+        client, db, scopes_collection = None, None, None
+else:
+    logger.warning("⚠️  MongoDB configuration incomplete")
 # MinIO Client Connection - Port 9003
 minio_client = None
 
@@ -62,20 +65,22 @@ try:
         logger.info(f"✅ MinIO connection established on port 9003")
         logger.info(f"Available buckets: {bucket_names}")
         
+
         # Verify both buckets exist
         # Check primary bucket (model results)
-        if not minio_client.bucket_exists(settings.minio_bucket_name):
-            logger.warning(f"⚠️  Primary bucket '{settings.minio_bucket_name}' not found")
-            try:
-                minio_client.make_bucket(settings.minio_bucket_name)
-                logger.info(f"✅ Created primary bucket: {settings.minio_bucket_name}")
-            except S3Error as e:
-                logger.error(f"❌ Failed to create primary bucket: {e}")
-        else:
-            logger.info(f"✅ Primary bucket '{settings.minio_bucket_name}' verified")
-        
+        if settings.minio_bucket_name:
+            if not minio_client.bucket_exists(settings.minio_bucket_name):
+                logger.warning(f"⚠️  Primary bucket '{settings.minio_bucket_name}' not found")
+                try:
+                    minio_client.make_bucket(settings.minio_bucket_name)
+                    logger.info(f"✅ Created primary bucket: {settings.minio_bucket_name}")
+                except S3Error as e:
+                    logger.error(f"❌ Failed to create primary bucket: {e}")
+            else:
+                logger.info(f"✅ Primary bucket '{settings.minio_bucket_name}' verified")
+
         # Check source data bucket
-        if hasattr(settings, 'minio_source_bucket_name'):
+        if getattr(settings, 'minio_source_bucket_name', None):
             if not minio_client.bucket_exists(settings.minio_source_bucket_name):
                 logger.warning(f"⚠️  Source bucket '{settings.minio_source_bucket_name}' not found")
                 # Don't create it automatically - it should already exist with data
