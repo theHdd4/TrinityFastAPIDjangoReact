@@ -16,16 +16,29 @@ import {
   DEFAULT_FEATURE_OVERVIEW_SETTINGS,
   DataFrameOperationsSettings,
   DEFAULT_DATAFRAME_OPERATIONS_SETTINGS,
+<<<<<<< HEAD
   CorrelationSettings,
   DEFAULT_CORRELATION_SETTINGS,
+=======
+  ChartMakerSettings,
+  DEFAULT_CHART_MAKER_SETTINGS,
+>>>>>>> a59d29f1db03fba2026dfd5af31e85c15f2042a0
 } from '../../store/laboratoryStore';
 import DataUploadValidateProperties from '@/components/AtomList/atoms/data-upload-validate/components/properties/DataUploadValidateProperties';
 import FeatureOverviewProperties from '@/components/AtomList/atoms/feature-overview/components/properties/FeatureOverviewProperties';
+import GroupByProperties from '@/components/AtomList/atoms/groupby-wtg-avg/components/properties/GroupByProperties';
 import ConcatProperties from '@/components/AtomList/atoms/concat/components/properties/ConcatProperties';
+import ScopeSelectorProperties from '@/components/AtomList/atoms/scope-selector/components/properties/ScopeSelectorProperties';
+import CreateColumnProperties from '@/components/AtomList/atoms/createcolumn/components/properties/CreateColumnProperties';
+import BuildModelFeatureBasedPropertiesPanel from '@/components/AtomList/atoms/build-model-feature-based/components/properties/BuildModelFeatureBasedProperties';
 import MergeProperties from '@/components/AtomList/atoms/merge/components/properties/MergeProperties';
 import ColumnClassifierProperties from '@/components/AtomList/atoms/column-classifier/components/properties/ColumnClassifierProperties';
 import DataFrameOperationsProperties from '@/components/AtomList/atoms/dataframe-operations/components/properties/DataFrameOperationsProperties';
+<<<<<<< HEAD
 import CorrelationProperties from '@/components/AtomList/atoms/correlation/components/properties/CorrelationProperties';
+=======
+import ChartMakerProperties from '@/components/AtomList/atoms/chart-maker/components/properties/ChartMakerProperties';
+>>>>>>> a59d29f1db03fba2026dfd5af31e85c15f2042a0
 import AtomSettingsTabs from "./AtomSettingsTabs";
 
 interface SettingsPanelProps {
@@ -48,7 +61,16 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
     selectedAtomId ? state.getAtom(selectedAtomId) : undefined
   );
   const updateSettings = useLaboratoryStore(state => state.updateAtomSettings);
+<<<<<<< HEAD
   const settings: TextBoxSettings | DataUploadSettings | FeatureOverviewSettings | DataFrameOperationsSettings | CorrelationSettings =
+=======
+  const settings:
+    | TextBoxSettings
+    | DataUploadSettings
+    | FeatureOverviewSettings
+    | DataFrameOperationsSettings
+    | ChartMakerSettings =
+>>>>>>> a59d29f1db03fba2026dfd5af31e85c15f2042a0
     atom?.settings ||
     (atom?.atomId === 'correlation'
       ? { ...DEFAULT_CORRELATION_SETTINGS }
@@ -58,6 +80,8 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
       ? { ...DEFAULT_FEATURE_OVERVIEW_SETTINGS }
       : atom?.atomId === 'dataframe-operations'
       ? { ...DEFAULT_DATAFRAME_OPERATIONS_SETTINGS }
+      : atom?.atomId === 'chart-maker'
+      ? { ...DEFAULT_CHART_MAKER_SETTINGS }
       : { ...DEFAULT_TEXTBOX_SETTINGS });
 
   useEffect(() => {
@@ -105,8 +129,14 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
             <DataUploadValidateProperties atomId={selectedAtomId} />
           ) : selectedAtomId && atom?.atomId === 'feature-overview' ? (
             <FeatureOverviewProperties atomId={selectedAtomId} />
+          ) : selectedAtomId && atom?.atomId === 'chart-maker' ? (
+            <ChartMakerProperties atomId={selectedAtomId} />
+          ) : selectedAtomId && atom?.atomId === 'build-model-feature-based' ? (
+            <BuildModelFeatureBasedPropertiesPanel atomId={selectedAtomId} />
           ) : selectedAtomId && atom?.atomId === 'concat' ? (
             <ConcatProperties atomId={selectedAtomId} />
+          ) : selectedAtomId && atom?.atomId === 'scope-selector' ? (
+            <ScopeSelectorProperties atomId={selectedAtomId} />
           ) : selectedAtomId && atom?.atomId === 'merge' ? (
             <MergeProperties atomId={selectedAtomId} />
           ) : selectedAtomId && atom?.atomId === 'column-classifier' ? (
@@ -116,8 +146,8 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
           ) : selectedAtomId && atom?.atomId === 'correlation' ? (
             <CorrelationProperties atomId={selectedAtomId} />
           ) : (
-          <AtomSettingsTabs tab={tab} setTab={setTab} selectedAtomId={selectedAtomId!} cardExhibited={cardExhibited} settings={settings as TextBoxSettings} updateSettings={updateSettings} />
-        )}
+            <AtomSettingsTabs tab={tab} setTab={setTab} selectedAtomId={selectedAtomId!} cardExhibited={cardExhibited} settings={settings as TextBoxSettings} updateSettings={updateSettings} />
+          )}
         </div>
       )}
     </div>

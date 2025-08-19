@@ -14,6 +14,7 @@ const ConcatAtom: React.FC<Props> = ({ atomId }) => {
   return (
     <div className="w-full h-full bg-white rounded-lg overflow-hidden flex flex-col">
       <ConcatCanvas
+        atomId={atomId}
         concatId={settings.concatId}
         resultFilePath={settings.concatResults?.result_file}
         file1={settings.file1}

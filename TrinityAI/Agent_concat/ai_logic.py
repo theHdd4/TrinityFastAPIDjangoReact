@@ -31,22 +31,28 @@ SUCCESS RESPONSE (when you have all required info):
   "used_memory": true
 }}
 
-FAILURE RESPONSE (when information is missing or unclear):
+GENERAL RESPONSE (for questions, file info, suggestions):
 {{
   "success": false,
   "suggestions": [
-    "Based on your previous interactions, I suggest...",
-    "From available files are {available_files}, these match your context:",
-    "Previous successful pattern was: file1 + file2",
-    "Try: 'concatenate [specific_file1] with [specific_file2] [direction]'"
-  ],
-  "message": "More information needed - Write in better Way !",
-  "reasoning": "Missing information but providing context-aware suggestions",
-  "recommended_files": ["file1.csv", "file2.csv"],
-  "next_steps": [
-    "Specify the exact files you want to concatenate",
-    "Choose vertical or horizontal direction",
+    "Here's what I found about your files:",
+    "Available files for concatenation: [list relevant files]",
+    "Based on your previous patterns, I recommend:",
+    "To complete concatenation, specify: files + direction",
     "Or say 'yes' to use my suggestions"
+  ],
+  "message": "Here's what I can help you with",
+  "reasoning": "Providing helpful information and guidance",
+  "file_analysis": {{
+    "total_files": "number",
+    "recommended_pairs": ["file1 + file2"],
+    "concat_tips": ["tip1", "tip2"]
+  }},
+  "next_steps": [
+    "Ask about specific files",
+    "Request concatenation suggestions",
+    "Specify your concatenation requirements",
+    "Say 'yes' to use my recommendations"
   ]
 }}
 
@@ -131,7 +137,7 @@ def extract_json(response: str):
         pass
     try:
         fixed = re.sub(r",\s*}", "}", cleaned)
-        fixed = re.sub(r",\s*]", "]", fixed)
+        fixed = re.sub(r",\s*]", "]", cleaned)
         match = re.search(r"\{.*\}", fixed, re.DOTALL)
         if match:
             return json.loads(match.group())

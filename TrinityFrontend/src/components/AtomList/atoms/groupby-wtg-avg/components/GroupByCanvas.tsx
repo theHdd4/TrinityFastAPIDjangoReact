@@ -23,6 +23,18 @@ const GroupByCanvas: React.FC<GroupByCanvasProps> = ({ atomId }) => {
   const selectedMeasures = settings.selectedMeasures || [];
   const measures = settings.measures || [];
   const selectedIdentifiers = settings.selectedIdentifiers || [];
+  const identifiers = settings.identifiers || [];
+  const derivedIdentifiers = identifiers.length > 0 ? identifiers : (settings.allColumns || []).filter((c: any) => c.data_type && (
+    c.data_type.toLowerCase().includes('object') ||
+    c.data_type.toLowerCase().includes('string') ||
+    c.data_type.toLowerCase().includes('category')
+  )).map((c: any) => c.column);
+  const availableIdentifiers = derivedIdentifiers.filter((id: string) => !selectedIdentifiers.includes(id));
+  const [addingIdentifier, setAddingIdentifier] = useState(false);
+  const handleAddIdentifier = (id: string) => {
+    updateSettings(atomId, { selectedIdentifiers: [...selectedIdentifiers, id] });
+    setAddingIdentifier(false);
+  };
 
   // Helper: do any measures use Weighted Mean?
   const hasWeightedMean = selectedMeasures.some((m: any) => m.aggregator === 'Weighted Mean');
@@ -128,14 +140,8 @@ const GroupByCanvas: React.FC<GroupByCanvasProps> = ({ atomId }) => {
                 ? settings.selectedMeasures as string[]
                 : settings.selectedMeasures.map((m: any) => m.field).filter(Boolean)
             )
-          // else fallback to full measures list loaded with file
-          : (
-              Array.isArray(measures) && measures.length > 0
-                ? (typeof measures[0] === 'string'
-                    ? measures as string[]
-                    : measures.map((m: any) => m.field).filter(Boolean))
-                : []
-            )
+          // else return empty array - no automatic measure selection
+          : []
       );
   // Build numeric columns list directly from allColumns for comprehensive options
   const numericColumns = (settings.allColumns || []).filter(
@@ -147,7 +153,7 @@ const GroupByCanvas: React.FC<GroupByCanvasProps> = ({ atomId }) => {
   ).map((c: any) => c.column);
 
   // ------------------------------------------------------------
-  // Initialise measures & selectedMeasureNames once columns arrive
+  // Initialize measures only (no automatic selectedMeasureNames)
   React.useEffect(() => {
     if (Array.isArray(settings.allColumns) && settings.allColumns.length > 0) {
       const numericCols = settings.allColumns
@@ -158,17 +164,18 @@ const GroupByCanvas: React.FC<GroupByCanvasProps> = ({ atomId }) => {
         ))
         .map((c: any) => c.column);
 
-      // Initialise only if not already set
+      // Initialize measures only if not already set
       if ((measures.length === 0) && numericCols.length > 0) {
         updateSettings(atomId, {
           measures: numericCols,
-          selectedMeasureNames: numericCols,
         });
       }
     }
   }, [settings.allColumns]);
-  // Field dropdown options: prefer measures selected in settings, else full numeric list
-  const fieldOptions = selectedMeasureNames.length > 0 ? selectedMeasureNames : fallbackMeasures;
+  // Field dropdown options: use measures selected in settings tab
+  const fieldOptions = Array.isArray(settings.selectedMeasureNames) && settings.selectedMeasureNames.length > 0 
+    ? settings.selectedMeasureNames 
+    : fallbackMeasures;
 
   const [results, setResults] = useState<any[]>([]);
   const [resultsHeaders, setResultsHeaders] = useState<string[]>([]);
@@ -229,6 +236,14 @@ const GroupByCanvas: React.FC<GroupByCanvasProps> = ({ atomId }) => {
           aggregations[field] = { agg: (selectedAggregationMethods[0] || 'sum').toLowerCase() };
         });
       }
+      
+      console.log('🚀 GroupBy Perform - Sending data:', {
+        identifiers,
+        aggregations,
+        dataSource: settings.dataSource,
+        validator_atom_id: settings.validator_atom_id
+      });
+      
       // Prepare form data
       const formData = new FormData();
       formData.append('validator_atom_id', settings.validator_atom_id || '');
@@ -237,56 +252,144 @@ const GroupByCanvas: React.FC<GroupByCanvasProps> = ({ atomId }) => {
       formData.append('object_names', settings.dataSource || '');
       formData.append('identifiers', JSON.stringify(identifiers));
       formData.append('aggregations', JSON.stringify(aggregations));
+      
+      console.log('📤 Calling GroupBy backend:', `${GROUPBY_API}/run`);
+      
       const res = await fetch(`${GROUPBY_API}/run`, { method: 'POST', body: formData });
       const data = await res.json();
+      
+      console.log('📥 GroupBy backend response:', data);
+      
       if (data.status === 'SUCCESS' && data.result_file) {
-        // Fetch the results from the backend
-        const params = new URLSearchParams({
-          validator_atom_id: settings.validator_atom_id || '',
-          file_key: settings.dataSource || '',
-          bucket_name: 'trinity',
-        });
-        const resultsRes = await fetch(`${GROUPBY_API}/results?${params.toString()}`);
-        const resultsData = await resultsRes.json();
-        if (resultsData && resultsData.merged_data && resultsData.merged_data.length > 0) {
-          const allRows = resultsData.merged_data;
+        // 🔧 CRITICAL FIX: Use the data returned directly from /run endpoint
+        // The backend already returns the grouped results, no need to call /results
+        
+        // Check if we have results data directly
+        if (data.results && Array.isArray(data.results)) {
+          // Backend returned results directly
+          const allRows = data.results;
           setTotalRows(allRows.length);
           setAllResults(allRows);
           setResults(allRows.slice(0, 20));
+          
           // Determine identifiers that have >1 unique value
           const idWithVariety = selectedIdentifiers.filter((id: string) => {
             const uniq = new Set(allRows.map((r: any) => r[id])).size;
             return uniq > 1;
           });
+          
           const headers = Object.keys(allRows[0]).filter((h) => {
             if (selectedIdentifiers.includes(h)) {
               return idWithVariety.includes(h);
             }
             return true; // keep measure columns
           });
+          
           setResultsHeaders(headers);
-          // Persist result metadata so Exhibition tab can reflect latest results
+          
+          // Persist result metadata
           updateSettings(atomId, {
             groupbyResults: {
               result_file: data.result_file,
               result_shape: [allRows.length, headers.length],
+              row_count: data.row_count,
+              columns: data.columns
             },
           });
+          
+          toast({
+            title: 'Success',
+            description: `GroupBy completed! ${allRows.length} rows processed.`,
+          });
+          
         } else {
-          setResults([]);
-          setResultsHeaders([]);
+          // Fallback: try to fetch results from the saved file
+          console.log('🔄 No direct results, trying to fetch from saved file...');
+          
+          // Try to get results from the cached_dataframe endpoint
+          try {
+            const cachedRes = await fetch(`${GROUPBY_API}/cached_dataframe?object_name=${encodeURIComponent(data.result_file)}`);
+            if (cachedRes.ok) {
+              const csvText = await cachedRes.text();
+              // Parse CSV to get results
+              const lines = csvText.split('\n');
+              if (lines.length > 1) {
+                const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, ''));
+                const rows = lines.slice(1).filter(line => line.trim()).map(line => {
+                  const values = line.split(',').map(v => v.trim().replace(/"/g, ''));
+                  const row: any = {};
+                  headers.forEach((header, index) => {
+                    row[header] = values[index] || '';
+                  });
+                  return row;
+                });
+                
+                setTotalRows(rows.length);
+                setAllResults(rows);
+                setResults(rows.slice(0, 20));
+                setResultsHeaders(headers);
+                
+                updateSettings(atomId, {
+                  groupbyResults: {
+                    result_file: data.result_file,
+                    result_shape: [rows.length, headers.length],
+                    row_count: data.row_count,
+                    columns: data.columns
+                  },
+                });
+                
+                toast({
+                  title: 'Success',
+                  description: `GroupBy completed! ${rows.length} rows processed.`,
+                });
+              } else {
+                throw new Error('No data rows found in CSV');
+              }
+            } else {
+              throw new Error('Failed to fetch cached results');
+            }
+          } catch (fetchError) {
+            console.error('❌ Error fetching cached results:', fetchError);
+            // Still mark as successful since the operation completed
+            updateSettings(atomId, {
+              groupbyResults: {
+                result_file: data.result_file,
+                result_shape: [0, 0],
+                row_count: data.row_count,
+                columns: data.columns
+              },
+            });
+            
+            toast({
+              title: 'Partial Success',
+              description: 'GroupBy operation completed, but results display failed. Check the saved file.',
+            });
+          }
         }
       } else {
         setResultsError(data.error || 'GroupBy failed');
         setResults([]);
         setResultsHeaders([]);
+        
+        toast({
+          title: 'Error',
+          description: data.error || 'GroupBy operation failed',
+          variant: 'destructive',
+        });
       }
       setResultsLoading(false);
     } catch (e: any) {
+      console.error('❌ GroupBy Perform Error:', e);
       setResultsError(e.message || 'Error performing groupby');
       setResults([]);
       setResultsHeaders([]);
       setResultsLoading(false);
+      
+      toast({
+        title: 'Error',
+        description: e.message || 'Error performing groupby',
+        variant: 'destructive',
+      });
     }
   };
 
@@ -314,7 +417,7 @@ const GroupByCanvas: React.FC<GroupByCanvasProps> = ({ atomId }) => {
           <div className="bg-emerald-50 rounded-lg p-3 shadow-sm">
             <div className="flex flex-wrap gap-1 items-center">
               <div className="font-semibold text-green-600 mr-2 text-sm">Level:</div>
-              {selectedIdentifiers.map((identifier: string) => (
+               {selectedIdentifiers.map((identifier: string) => (
                 <div key={identifier} className="flex items-center gap-1 text-xs font-medium text-green-700 bg-gradient-to-r from-blue-50 to-indigo-50 px-2 py-1 rounded-full border border-blue-200 shadow-sm">
                 <span>{identifier}</span>
                 <button
@@ -325,9 +428,26 @@ const GroupByCanvas: React.FC<GroupByCanvasProps> = ({ atomId }) => {
                   <X className="h-3 w-3" />
                 </button>
               </div>
-              ))}
-            </div>
-          </div>
+               ))}
+               {/* Add Identifier Button / Selector */}
+               {addingIdentifier ? (
+                 <Select onValueChange={handleAddIdentifier} value="">
+                   <SelectTrigger className="w-40 bg-white text-xs">
+                     <SelectValue placeholder="Select identifier" />
+                   </SelectTrigger>
+                   <SelectContent className="max-h-48 overflow-auto">
+                     {availableIdentifiers.map(id => (
+                       <SelectItem key={id} value={id} className="text-xs">{id}</SelectItem>
+                     ))}
+                   </SelectContent>
+                 </Select>
+               ) : (
+                 <Button variant="ghost" size="sm" className="text-green-700 hover:bg-green-100" onClick={() => setAddingIdentifier(true)}>
+                   <Plus className="h-4 w-4" />
+                 </Button>
+               )}
+             </div>
+           </div>
           {/* Field and Aggregator Selectors */}
           <div className="space-y-4 pt-4 border-t border-slate-200">
             <h3 className="font-semibold text-slate-700 flex items-center gap-2">

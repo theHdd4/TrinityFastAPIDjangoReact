@@ -8,7 +8,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Eye, EyeOff, User, Lock } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import AnimatedLogo from '@/components/PrimaryMenu/TrinityAssets/AnimatedLogo';
-import { TrinityAssets } from '@/components/PrimaryMenu';
 
 const Login = () => {
   const [username, setUsername] = useState('');
@@ -48,71 +47,60 @@ const Login = () => {
       >
         <source src="/background.mp4" type="video/mp4" />
       </video>
-      <div className="w-full max-w-md space-y-8 shadow-lg relative z-10">
-        {/* Trinity Logo */}
-        <div className="flex flex-col items-center space-y-2 text-white">
-          <AnimatedLogo className="w-20 h-20 drop-shadow-[0_0_10px_rgba(255,255,255,0.8)]" />
-          <div className="flex flex-col items-center">
-            <h1 className="text-4xl font-bold tracking-tight leading-none font-mono">
+      <div className="w-full max-w-md space-y-6 relative z-10">
+        <Card className="bg-white/5 backdrop-blur-lg border border-white/10 text-white shadow-2xl">
+          <CardHeader className="flex flex-col items-center space-y-2 text-center">
+            <AnimatedLogo className="w-20 h-20 drop-shadow-[0_0_10px_rgba(255,255,255,0.8)]" />
+            <CardTitle className="text-4xl font-bold font-mono">
               Trinity
-            </h1>
-            <span className="text-xs font-light tracking-widest uppercase mt-0.5 font-mono">
-              A Quant Matrix AI Product
-            </span>
-          </div>
-        </div>
-
-
-        <Card className="bg-trinity-bg-secondary border-gray-300 shadow-lg">
-          <CardHeader className="text-center pb-4">
-            <CardTitle className="text-3xl font-light text-black font-mono">
-              Enter the Matrix
             </CardTitle>
-            <CardDescription className="text-black font-light text-sm">
-              Access Trinity • Quant Matrix AI
+            <CardDescription className="w-40 text-sm text-white/70 tracking-[0.2em] text-center whitespace-nowrap">
+              Enter The Matrix
             </CardDescription>
+            <div className="h-1 w-40 bg-[#fec107] mt-2"></div>
+            <p className="text-xs text-white/60">A Quant Matrix AI Experience</p>
           </CardHeader>
-          
+
           <CardContent className="space-y-6">
             <form onSubmit={handleLogin} className="space-y-6">
               <div className="space-y-2">
-                <Label htmlFor="username" className="text-black font-mono text-sm">
+                <Label htmlFor="username" className="text-xs font-mono font-bold text-white">
                   Username
                 </Label>
                 <div className="relative">
-                  <User className="absolute left-3 top-1/2 transform -translate-y-1/2 text-trinity-yellow w-4 h-4" />
+                  <User className="absolute left-3 top-1/2 -translate-y-1/2 text-trinity-green w-4 h-4" />
                   <Input
                     id="username"
                     type="text"
                     value={username}
                     onChange={(e) => setUsername(e.target.value)}
-                    className="pl-10 bg-white border-gray-300 text-black placeholder-gray-500 focus:border-trinity-yellow focus:ring-trinity-yellow/20 font-mono"
-                    placeholder="Enter username"
+                    className="pl-10 bg-white/5 border-white/20 text-white placeholder:text-white focus:border-trinity-green focus:ring-trinity-green/20 font-mono"
+                    placeholder="Enter Username"
                     required
                   />
                 </div>
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="password" className="text-black font-mono text-sm">
+                <Label htmlFor="password" className="text-xs font-mono font-bold text-white">
                   Password
                 </Label>
                 <div className="relative">
-                  <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 text-trinity-yellow w-4 h-4" />
+                  <Lock className="absolute left-3 top-1/2 -translate-y-1/2 text-trinity-green w-4 h-4" />
                   <Input
                     id="password"
                     type={showPassword ? 'text' : 'password'}
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    className="pl-10 pr-10 bg-white border-gray-300 text-black placeholder-gray-500 focus:border-trinity-yellow focus:ring-trinity-yellow/20 font-mono"
-                    placeholder="Enter password"
+                    className="pl-10 pr-10 bg-white/5 border-white/20 text-white placeholder:text-white focus:border-trinity-green focus:ring-trinity-green/20 font-mono"
+                    placeholder="Enter Password"
                     required
                   />
                   <Button
                     type="button"
                     variant="ghost"
                     size="sm"
-                    className="absolute right-1 top-1/2 transform -translate-y-1/2 h-8 w-8 p-0 text-trinity-yellow hover:text-trinity-green hover:bg-trinity-yellow/10"
+                    className="absolute right-1 top-1/2 -translate-y-1/2 h-8 w-8 p-0 text-trinity-green hover:text-trinity-blue hover:bg-white/10"
                     onClick={() => setShowPassword(!showPassword)}
                   >
                     {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
@@ -129,7 +117,7 @@ const Login = () => {
               <Button
                 type="submit"
                 disabled={isLoading}
-                className="w-full bg-trinity-yellow hover:bg-[#FFCF87] text-black font-mono font-medium transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
+                className="w-full bg-[#fec107] text-black font-mono font-light transition-all duration-300 hover:bg-[#e0ad06] disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {isLoading ? (
                   <div className="flex items-center space-x-2">
@@ -143,14 +131,12 @@ const Login = () => {
             </form>
 
             <div className="text-center">
-              <p className="text-black text-xs font-mono">
-                Demo Credentials: neo / neo_the_one
-              </p>
+              <p className="text-xs text-white/70 font-mono">Credentials: Your Official Email / Your Employee ID</p>
             </div>
           </CardContent>
         </Card>
 
-        <div className="text-center mt-8">
+        <div className="text-center mt-6">
           <p className="text-white text-xs">"No one can be told what the Trinity is. You have to see it for yourself"</p>
         </div>
       </div>

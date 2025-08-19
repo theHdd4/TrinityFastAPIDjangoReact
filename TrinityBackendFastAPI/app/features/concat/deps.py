@@ -69,6 +69,50 @@ load_names_from_db()
 
 OBJECT_PREFIX = f"{CLIENT_NAME}/{APP_NAME}/{PROJECT_NAME}/"
 
+def resolve_file_path(file_key: str) -> str:
+    """
+    Robustly resolve file path using the same system as data_upload_validate.
+    Always gets the current dynamic path for consistency.
+    """
+    if not file_key:
+        return ""
+    
+    try:
+        # Import the dynamic path function from data_upload_validate
+        from ..data_upload_validate.app.routes import get_object_prefix
+        import asyncio
+        
+        # Get the current dynamic path (this is what data_upload_validate uses)
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            current_prefix = loop.run_until_complete(get_object_prefix())
+        finally:
+            loop.close()
+        
+        # If it's already a full path, check if it matches current prefix
+        if "/" in file_key:
+            if file_key.startswith(current_prefix):
+                return file_key  # Already has correct prefix
+            else:
+                # Extract filename and use current prefix
+                filename = file_key.split("/")[-1]
+                return f"{current_prefix}{filename}"
+        
+        # If it's just a filename, add the current prefix
+        return f"{current_prefix}{file_key}"
+        
+    except Exception as e:
+        print(f"⚠️ Failed to get dynamic path, using fallback: {e}")
+        # Fallback to static prefix if dynamic path fails
+        if "/" in file_key:
+            if file_key.startswith(OBJECT_PREFIX):
+                return file_key
+            else:
+                filename = file_key.split("/")[-1]
+                return f"{OBJECT_PREFIX}{filename}"
+        return f"{OBJECT_PREFIX}{file_key}"
+
 # Initialize MinIO client
 minio_client = Minio(
     MINIO_ENDPOINT,
@@ -143,48 +187,67 @@ def get_concat_results_collection():
 def load_dataframe(object_name: str) -> pd.DataFrame:
     """
     Try to load a dataframe using Arrow Flight first, then fallback to Redis, then MinIO.
-    Expects object_name to include OBJECT_PREFIX.
+    Now handles both filenames and full paths robustly.
     """
-    # Try Redis cache first
-    content = redis_client.get(object_name)
+    # Resolve the file path robustly
+    resolved_path = resolve_file_path(object_name)
+    filename_only = object_name.split("/")[-1] if "/" in object_name else object_name
+    
+    # Try Redis cache first using the resolved path
+    content = redis_client.get(resolved_path)
     if content is not None:
-        print(f"✅ Loaded {object_name} from Redis cache.")
-        if object_name.endswith(".csv"):
+        print(f"✅ Loaded {filename_only} from Redis cache using path: {resolved_path}")
+        if filename_only.endswith(".csv"):
             df = pd.read_csv(io.BytesIO(content))
-        elif object_name.endswith((".xls", ".xlsx")):
+        elif filename_only.endswith((".xls", ".xlsx")):
             df = pd.read_excel(io.BytesIO(content))
-        elif object_name.endswith(".arrow"):
+        elif filename_only.endswith(".arrow"):
             import pyarrow as pa
             import pyarrow.ipc as ipc
             reader = ipc.RecordBatchFileReader(pa.BufferReader(content))
             df = reader.read_all().to_pandas()
         else:
-            raise ValueError(f"Unsupported file format: {object_name}")
+            raise ValueError(f"Unsupported file format: {filename_only}")
         df.columns = df.columns.str.lower()
         return df
+    
     # Try Arrow Flight
     try:
-        df = download_dataframe(object_name)
+        # For Arrow Flight, we need just the filename without extension
+        flight_path = filename_only.replace('.arrow', '').replace('.csv', '').replace('.xlsx', '')
+        df = download_dataframe(flight_path)
+        print(f"✅ Loaded {filename_only} from Arrow Flight")
         return df
     except Exception as e:
-        print(f"⚠️ Arrow Flight download failed for {object_name}: {e}, falling back to MinIO.")
-        response = minio_client.get_object(MINIO_BUCKET, object_name)
-        content = response.read()
-        # Cache in Redis for 1 hour
-        redis_client.setex(object_name, 3600, content)
-        if object_name.endswith(".csv"):
-            df = pd.read_csv(io.BytesIO(content))
-        elif object_name.endswith((".xls", ".xlsx")):
-            df = pd.read_excel(io.BytesIO(content))
-        elif object_name.endswith(".arrow"):
-            import pyarrow as pa
-            import pyarrow.ipc as ipc
-            reader = ipc.RecordBatchFileReader(pa.BufferReader(content))
-            df = reader.read_all().to_pandas()
-        else:
-            raise ValueError(f"Unsupported file format: {object_name}")
-        df.columns = df.columns.str.lower()
-        return df
+        print(f"⚠️ Arrow Flight download failed for {filename_only}: {e}, falling back to MinIO.")
+        
+        # Fallback to MinIO using the resolved path
+        try:
+            response = minio_client.get_object(MINIO_BUCKET, resolved_path)
+            content = response.read()
+            # Cache in Redis for 1 hour using the resolved path
+            redis_client.setex(resolved_path, 3600, content)
+            
+            if filename_only.endswith(".csv"):
+                df = pd.read_csv(io.BytesIO(content))
+            elif filename_only.endswith((".xls", ".xlsx")):
+                df = pd.read_excel(io.BytesIO(content))
+            elif filename_only.endswith(".arrow"):
+                import pyarrow as pa
+                import pyarrow.ipc as ipc
+                reader = ipc.RecordBatchFileReader(pa.BufferReader(content))
+                df = reader.read_all().to_pandas()
+            else:
+                raise ValueError(f"Unsupported file format: {filename_only}")
+            
+            df.columns = df.columns.str.lower()
+            print(f"✅ Loaded {filename_only} from MinIO fallback using path: {resolved_path}")
+            return df
+            
+        except Exception as minio_error:
+            print(f"❌ MinIO fallback also failed for {filename_only}: {minio_error}")
+            print(f"   Tried path: {resolved_path}")
+            raise minio_error
 
 def save_concat_result_to_minio(key: str, df: pd.DataFrame):
     csv_bytes = df.to_csv(index=False).encode("utf-8")
@@ -212,6 +275,7 @@ __all__ = [
     'save_concat_result_to_minio',
     'get_concat_results_collection',
     'save_concat_metadata_to_mongo',
+    'resolve_file_path',
     'OBJECT_PREFIX',
     'MINIO_BUCKET',
     'redis_client',

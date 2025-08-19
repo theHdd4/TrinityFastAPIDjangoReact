@@ -39,7 +39,7 @@ const ColumnClassifierSettings: React.FC<ColumnClassifierSettingsProps> = ({ ato
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [enableColumnView, setEnableColumnView] = useState<boolean>(
-    settings.enableColumnView || false
+    settings.enableColumnView ?? true
   );
 
   useEffect(() => {
@@ -69,7 +69,7 @@ const ColumnClassifierSettings: React.FC<ColumnClassifierSettingsProps> = ({ ato
   }, []);
 
   useEffect(() => {
-    setEnableColumnView(settings.enableColumnView || false);
+    setEnableColumnView(settings.enableColumnView ?? true);
   }, [settings.enableColumnView]);
 
   const classify = async () => {

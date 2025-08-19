@@ -39,11 +39,11 @@ def main():
     if not User.objects.filter(username=admin_username).exists():
         User.objects.create_superuser(
             username=admin_username,
-            password="neo_the_one",
+            password="neo_the_only_one",
             email=admin_email,
         )
         print(
-            "→ 1b) Created default super admin 'neo' with password 'neo_the_one'"
+            "→ 1b) Created default super admin 'neo' with password 'neo_the_only_one'"
         )
     else:
         user = User.objects.get(username=admin_username)
@@ -59,7 +59,7 @@ def main():
     # Username for staff members uses their Quant Matrix email address
     email_domain = "quantmatrix.ai"
     role_users = [
-        (admin_username, "neo_the_one", "admin", "", ""),
+        (admin_username, "neo_the_only_one", "admin", "", ""),
         ("editor_user", "editor", "editor", "", ""),
         ("viewer_user", "viewer", "viewer", "", ""),
         (f"gautami.sharma@{email_domain}", "QM250111", "editor", "Gautami", "Sharma"),

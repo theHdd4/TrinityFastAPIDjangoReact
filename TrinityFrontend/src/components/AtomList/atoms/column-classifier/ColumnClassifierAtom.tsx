@@ -77,6 +77,7 @@ const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
         data: { files: [updatedFile], activeFileIndex: 0 },
         dimensions: Object.keys(cfg.dimensions || {}),
         enableDimensionMapping: Object.keys(cfg.dimensions || {}).length > 0,
+        filterColumnViewUnique: true,
       });
     } catch (err) {
       console.warn('failed to apply stored config', err);
@@ -261,7 +262,7 @@ const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
               data={classifierData}
               onColumnMove={handleColumnMove}
               onActiveFileChange={setActiveFile}
-              showColumnView={settings.enableColumnView || false}
+              showColumnView={settings.enableColumnView ?? true}
               filterUnique={settings.filterColumnViewUnique || false}
               onFilterToggle={handleFilterToggle}
             />

@@ -108,65 +108,60 @@ const ColumnClassifierCanvas: React.FC<ColumnClassifierCanvasProps> = ({
     columns: string[];
   }> = ({ id, title, columns }) => {
     const { setNodeRef, isOver } = useDroppable({ id });
-
-    const styles = {
+    const sectionStyles = {
       unclassified: {
-        gradient: 'from-gray-400 to-gray-500',
-        bg: 'bg-white',
+        indicator: 'bg-gradient-to-r from-gray-400 to-gray-500',
         border: 'border-[#fec107]',
+        active: 'border-[#fec107]',
       },
       identifiers: {
-        gradient: 'from-blue-500 to-blue-600',
-        bg: 'bg-white',
+        indicator: 'bg-gradient-to-r from-blue-500 to-blue-600',
         border: 'border-blue-200',
+        active: 'border-blue-400',
       },
       measures: {
-        gradient: 'from-emerald-500 to-emerald-600',
-        bg: 'bg-white',
-        border: 'border-emerald-200',
+        indicator: 'bg-gradient-to-r from-emerald-500 to-emerald-600',
+        border: 'border-emerald-400',
+        active: 'border-emerald-500',
       },
     }[id];
 
     return (
       <Card
         ref={setNodeRef}
-        className={`h-full border-0 shadow-xl bg-white/80 backdrop-blur-sm overflow-hidden transform transition-all duration-300 ${
-          isOver ? 'scale-105 shadow-2xl' : 'hover:shadow-xl'
-        }`}
+        className={`h-full bg-white/80 backdrop-blur-sm overflow-hidden transform transition-all duration-300 border-2 rounded-xl ${
+          isOver ? `${sectionStyles.active} shadow-xl scale-105` : `${sectionStyles.border} hover:shadow-lg`
+        } flex flex-col`}
       >
-        <div className={`bg-gradient-to-r ${styles.gradient} p-1 h-full`}>
-          <div className="bg-white rounded-sm h-full flex flex-col">
-            <div className="p-6 flex flex-col h-full">
-              <div className="flex items-center mb-4">
-                <div className={`w-1 h-8 bg-gradient-to-b ${styles.gradient} rounded-full mr-3`} />
-                <h4 className="text-lg font-bold text-gray-900">{title}</h4>
-              </div>
-              <div
-                className={`relative flex-1 min-h-[450px] p-4 rounded-lg ${styles.bg} border ${styles.border} transition-all duration-300 ${
-                  isOver ? 'bg-primary/5' : ''
-                }`}
-              >
-                <div className="flex flex-wrap gap-3">
-                  {columns.map((column, index) => (
-                    <DraggableColumnPill
-                      key={`${id}-${column}-${index}`}
-                      name={column}
-                      section={id}
-                    />
-                  ))}
-                </div>
-                {columns.length === 0 && (
-                  <div className="flex items-center justify-center h-32 text-muted-foreground">
-                    <span className="text-sm italic">No columns assigned</span>
-                  </div>
-                )}
-                {isOver && (
-                  <div className="absolute inset-4 border-2 border-dashed border-primary/50 rounded-lg bg-primary/5 flex items-center justify-center animate-pulse">
-                    <span className="text-primary font-medium">Drop here</span>
-                  </div>
-                )}
-              </div>
+        <div className="p-6 flex flex-col h-full">
+          <div className="flex items-center mb-4">
+            <div className={`w-2 h-8 rounded-full mr-3 ${sectionStyles.indicator}`} />
+            <h4 className="text-lg font-bold text-gray-900">{title}</h4>
+          </div>
+          <div
+            className={`relative flex-1 min-h-[450px] p-4 rounded-lg bg-white transition-all duration-300 ${
+              isOver ? 'bg-blue-50' : ''
+            }`}
+          >
+            <div className="flex flex-wrap gap-3">
+              {columns.map((column, index) => (
+                <DraggableColumnPill
+                  key={`${id}-${column}-${index}`}
+                  name={column}
+                  section={id}
+                />
+              ))}
             </div>
+            {columns.length === 0 && (
+              <div className="flex items-center justify-center h-32 text-muted-foreground">
+                <span className="text-sm italic">No columns assigned</span>
+              </div>
+            )}
+            {isOver && (
+              <div className="absolute inset-4 border-2 border-dashed border-primary/50 rounded-lg bg-primary/5 flex items-center justify-center animate-pulse">
+                <span className="text-primary font-medium">Drop here</span>
+              </div>
+            )}
           </div>
         </div>
       </Card>
@@ -213,24 +208,27 @@ const ColumnClassifierCanvas: React.FC<ColumnClassifierCanvasProps> = ({
       <div className="w-full h-full p-4">
         <div className="border-b border-blue-200 bg-blue-50">
           <div className="flex items-center px-6 py-4 space-x-3">
-            {data.files.map((file, index) => (
-              <div key={index} className="relative">
-                <button
-                  onClick={() => onActiveFileChange(index)}
-                  className={`flex items-center space-x-2 px-5 py-3 rounded-t-xl text-sm font-medium border-t border-l border-r transition-all duration-200 hover:scale-105 ${
-                    index === data.activeFileIndex
-                      ? 'bg-gradient-to-b from-card to-card/90 text-foreground border-border/50 border-b-card -mb-px shadow-lg'
-                      : 'bg-gradient-to-b from-muted/50 to-muted/30 text-muted-foreground hover:from-muted/70 hover:to-muted/50 border-border/30'
-                  }`}
-                >
-                  <FileText className="w-4 h-4" />
-                  <span>{file.fileName}</span>
-                  {index === data.activeFileIndex && (
-                    <div className="w-2 h-2 rounded-full bg-primary animate-pulse" />
-                  )}
-                </button>
-              </div>
-            ))}
+            {data.files.map((file, index) => {
+              const displayName = file.fileName.split('/').pop();
+              return (
+                <div key={index} className="relative">
+                  <button
+                    onClick={() => onActiveFileChange(index)}
+                    className={`flex items-center space-x-2 px-5 py-3 rounded-t-xl text-sm font-medium border-t border-l border-r transition-all duration-200 hover:scale-105 ${
+                      index === data.activeFileIndex
+                        ? 'bg-gradient-to-b from-card to-card/90 text-foreground border-border/50 border-b-card -mb-px shadow-lg'
+                        : 'bg-gradient-to-b from-muted/50 to-muted/30 text-muted-foreground hover:from-muted/70 hover:to-muted/50 border-border/30'
+                    }`}
+                  >
+                    <FileText className="w-4 h-4" />
+                    <span>{displayName}</span>
+                    {index === data.activeFileIndex && (
+                      <div className="w-2 h-2 rounded-full bg-primary animate-pulse" />
+                    )}
+                  </button>
+                </div>
+              );
+            })}
           </div>
         </div>
         <div className="p-4 space-y-6">

@@ -23,9 +23,15 @@ const LaboratoryMode = () => {
   const [showFloatingNavigationList, setShowFloatingNavigationList] = useState(true);
   const { toast } = useToast();
   const { cards, setCards } = useExhibitionStore();
+<<<<<<< HEAD
   const { setCards: setLabCards, auxPanelActive, setAuxPanelActive } = useLaboratoryStore();
   const { user } = useAuth();
   const isViewer = user?.role === 'viewer';
+=======
+  const setLabCards = useLaboratoryStore(state => state.setCards);
+  const { hasPermission, user } = useAuth();
+  const canEdit = hasPermission('laboratory:edit');
+>>>>>>> a59d29f1db03fba2026dfd5af31e85c15f2042a0
 
   useEffect(() => {
     if (localStorage.getItem('laboratory-config')) {
@@ -35,6 +41,7 @@ const LaboratoryMode = () => {
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleUndo = async () => {
+    if (!canEdit) return;
     const current = localStorage.getItem('current-project');
     if (!current) return;
     try {
@@ -73,26 +80,35 @@ const LaboratoryMode = () => {
   };
 
   const handleAtomDragStart = (e: React.DragEvent, atomId: string) => {
+    if (!canEdit) return;
     const atomData = { id: atomId };
     e.dataTransfer.setData('application/json', JSON.stringify(atomData));
   };
 
   const handleAtomSelect = (atomId: string) => {
+    if (!canEdit) return;
     setSelectedAtomId(atomId);
     setSelectedCardId(undefined);
   };
 
   const handleCardSelect = (cardId: string, exhibited: boolean) => {
+    if (!canEdit) return;
     setSelectedAtomId(undefined);
     setSelectedCardId(cardId);
     setCardExhibited(exhibited);
   };
 
   const toggleSettingsPanel = () => {
+<<<<<<< HEAD
     setAuxPanelActive(auxPanelActive === 'settings' ? null : 'settings');
+=======
+    if (!canEdit) return;
+    setAuxActive(prev => (prev === 'settings' ? null : 'settings'));
+>>>>>>> a59d29f1db03fba2026dfd5af31e85c15f2042a0
   };
 
   const handleSave = async () => {
+    if (!canEdit) return;
     try {
       const exhibitedCards = (cards || []).filter(card => card.isExhibited);
 
@@ -206,66 +222,99 @@ const LaboratoryMode = () => {
           </div>
           
           <div className="flex items-center space-x-3">
-            {!isViewer && (
             <Button
               variant="outline"
               size="sm"
-              className="border-gray-200 hover:bg-gray-50 text-gray-700 font-medium"
+              className={`border-gray-200 text-gray-700 font-medium ${canEdit ? 'hover:bg-gray-50' : 'opacity-50 cursor-not-allowed'}`}
               onClick={handleUndo}
+              disabled={!canEdit}
             >
               <Undo2 className="w-4 h-4 mr-2" />
               Undo
             </Button>
-            )}
-            {!isViewer && (
             <Button
               variant="outline"
               size="sm"
-              className="border-gray-200 hover:bg-gray-50 text-gray-700 font-medium"
+              className={`border-gray-200 text-gray-700 font-medium ${canEdit ? 'hover:bg-gray-50' : 'opacity-50 cursor-not-allowed'}`}
               onClick={handleSave}
+              disabled={!canEdit}
             >
               <Save className="w-4 h-4 mr-2" />
               Save
             </Button>
-            )}
             <Button
               variant="outline"
               size="sm"
-              className="border-gray-200 hover:bg-gray-50 text-gray-700 font-medium"
-              onClick={() => setShowFloatingNavigationList(!showFloatingNavigationList)}
+              className={`border-gray-200 text-gray-700 font-medium ${canEdit ? 'hover:bg-gray-50' : 'opacity-50 cursor-not-allowed'}`}
+              onClick={() => canEdit && setShowFloatingNavigationList(!showFloatingNavigationList)}
+              disabled={!canEdit}
             >
               <List className="w-4 h-4 mr-2" />
               {showFloatingNavigationList ? 'Hide' : 'Show'} Navigation List
             </Button>
-            <Button variant="outline" size="sm" className="border-gray-200 hover:bg-gray-50 text-gray-700 font-medium">
+            <Button
+              variant="outline"
+              size="sm"
+              className={`border-gray-200 text-gray-700 font-medium ${canEdit ? 'hover:bg-gray-50' : 'opacity-50 cursor-not-allowed'}`}
+              disabled={!canEdit}
+            >
               <Share2 className="w-4 h-4 mr-2" />
               Share
             </Button>
-            {!isViewer && (
-            <Button className="bg-gradient-to-r from-[#41C185] to-[#3ba876] hover:from-[#3ba876] to-[#339966] text-white shadow-lg font-medium">
+            <Button
+              className={`bg-gradient-to-r from-[#41C185] to-[#3ba876] text-white shadow-lg font-medium ${canEdit ? 'hover:from-[#3ba876] to-[#339966]' : 'opacity-50 cursor-not-allowed'}`}
+              disabled={!canEdit}
+            >
               <Play className="w-4 h-4 mr-2" />
               Run Pipeline
             </Button>
-            )}
           </div>
         </div>
       </div>
 
-      <div className="flex-1 flex overflow-hidden">
-        {/* Atoms Sidebar */}
-        {!isViewer && (
-          <AuxiliaryMenuLeft onAtomDragStart={handleAtomDragStart} />
-        )}
+        <div className="flex-1 flex overflow-hidden">
+          {/* Atoms Sidebar */}
+          <div className={`${canEdit ? '' : 'cursor-not-allowed'} h-full`}>
+            <AuxiliaryMenuLeft onAtomDragStart={handleAtomDragStart} />
+          </div>
 
-        {/* Main Canvas Area */}
-        <div className="flex-1 p-6" onClick={() => {setSelectedAtomId(undefined); setSelectedCardId(undefined);}}>
-          <CanvasArea
-            onAtomSelect={handleAtomSelect}
-            onCardSelect={handleCardSelect}
-            selectedCardId={selectedCardId}
-            onToggleSettingsPanel={toggleSettingsPanel}
-          />
+          {/* Main Canvas Area */}
+          <div
+            className={`flex-1 p-6 ${canEdit ? '' : 'cursor-not-allowed'}`}
+            onClick={
+              canEdit
+                ? () => {
+                    setSelectedAtomId(undefined);
+                    setSelectedCardId(undefined);
+                  }
+                : undefined
+            }
+          >
+            <CanvasArea
+              onAtomSelect={handleAtomSelect}
+              onCardSelect={handleCardSelect}
+              selectedCardId={selectedCardId}
+              onToggleSettingsPanel={toggleSettingsPanel}
+              canEdit={canEdit}
+            />
+          </div>
+
+          {/* Auxiliary menu */}
+          <div className={`${canEdit ? '' : 'cursor-not-allowed'} h-full`}>
+            <AuxiliaryMenu
+              selectedAtomId={selectedAtomId}
+              selectedCardId={selectedCardId}
+              cardExhibited={cardExhibited}
+              active={auxActive}
+              onActiveChange={setAuxActive}
+            />
+            <FloatingNavigationList
+              isVisible={showFloatingNavigationList}
+              onClose={() => setShowFloatingNavigationList(false)}
+            />
+          </div>
         </div>
+<<<<<<< HEAD
 
         {/* Auxiliary menu */}
         <AuxiliaryMenu
@@ -280,6 +329,8 @@ const LaboratoryMode = () => {
           onClose={() => setShowFloatingNavigationList(false)}
         />
       </div>
+=======
+>>>>>>> a59d29f1db03fba2026dfd5af31e85c15f2042a0
     </div>
   );
 };

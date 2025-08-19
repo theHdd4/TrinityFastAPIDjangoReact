@@ -33,7 +33,7 @@ import featureOverview from '@/components/AtomList/atoms/feature-overview';
 import groupbyWtgAvg from '@/components/AtomList/atoms/groupby-wtg-avg';
 import merge from '@/components/AtomList/atoms/merge';
 import concat from '@/components/AtomList/atoms/concat';
-import featureCreateTransform from '@/components/AtomList/atoms/feature-create-transform';
+// import featureCreateTransform from '@/components/AtomList/atoms/feature-create-transform';
 import scopeSelector from '@/components/AtomList/atoms/scope-selector';
 import rowOperations from '@/components/AtomList/atoms/row-operations';
 import columnClassifier from '@/components/AtomList/atoms/column-classifier';
@@ -98,7 +98,7 @@ export const atomCategories: AtomCategory[] = [
       groupbyWtgAvg,
       merge,
       concat,
-      featureCreateTransform,
+      // featureCreateTransform,
       scopeSelector,
       rowOperations,
       columnClassifier,

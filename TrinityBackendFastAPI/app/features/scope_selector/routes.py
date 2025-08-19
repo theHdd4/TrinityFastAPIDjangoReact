@@ -44,8 +44,69 @@ from .database import ValidatorAtomRepository
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Helper to fetch Redis client (module-level)
+try:
+    _redis_client = get_redis_client()
+except Exception as exc:
+    logger.warning(f"Redis unavailable: {exc}")
+    _redis_client = None
+
+# TTL for caching classifier config in Redis (seconds)
+CLASSIFIER_CFG_TTL = 3600
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 # Create router instance
 router = APIRouter()
+
+# ============================================================================
+# IDENTIFIER OPTIONS ENDPOINT
+# ============================================================================
+
+from app.features.column_classifier.database import get_classifier_config_from_mongo  # import here to avoid circular deps
+
+@router.get("/identifier_options")
+async def identifier_options(
+    client_name: str = Query(..., description="Client name"),
+    app_name: str = Query(..., description="App name"),
+    project_name: str = Query(..., description="Project name"),
+):
+    """Return identifier column names using Redis ▶ Mongo ▶ fallback logic.
+
+    1. Attempt to read JSON config from Redis key
+       `<client>/<app>/<project>/column_classifier_config`.
+    2. If missing, fetch from Mongo (`column_classifier_configs` collection).
+       Cache the document back into Redis.
+    3. If still unavailable, return empty list – the frontend will
+       fall back to its existing column_summary extraction flow.
+    """
+    key = f"{client_name}/{app_name}/{project_name}/column_classifier_config"
+    cfg: dict[str, Any] | None = None
+
+    # --- Redis lookup -------------------------------------------------------
+    if _redis_client is not None:
+        try:
+            cached = _redis_client.get(key)
+            if cached:
+                cfg = json.loads(cached)
+        except Exception as exc:
+            logger.warning(f"Redis read error for {key}: {exc}")
+
+    # --- Mongo fallback ------------------------------------------------------
+    if cfg is None:
+        cfg = get_classifier_config_from_mongo(client_name, app_name, project_name)
+        if cfg and _redis_client is not None:
+            try:
+                _redis_client.setex(key, CLASSIFIER_CFG_TTL, json.dumps(cfg, default=str))
+            except Exception as exc:
+                logger.warning(f"Redis write error for {key}: {exc}")
+
+    identifiers: list[str] = []
+    if cfg and isinstance(cfg.get("identifiers"), list):
+        identifiers = cfg["identifiers"]
+
+    return {"identifiers": identifiers}
+
 
 # Initialize settings
 settings = get_settings()
@@ -245,6 +306,164 @@ async def get_date_range(
     except Exception as e:
         logger.error(f"Unexpected error computing date range: {e}")
         raise HTTPException(status_code=500, detail=f"Internal server error obtaining date range: {e}")
+
+# =============================================================================
+# PERCENTILE CHECK PREVIEW ENDPOINT
+# =============================================================================
+
+@router.post("/percentile_check")
+async def percentile_check(request: ScopeFilterRequest,
+                          percentile: int = Query(..., ge=0, le=100, description="Percentile to compute e.g. 90 for 90th"),
+                          threshold_pct: float = Query(..., ge=0, le=100, description="Threshold as percent of base value. e.g. 10 means 10%"),
+                          base: str = Query("max", regex="^(max|min|mean|dist)$", description="Base measure: max|min|mean|dist (max-min)"),
+                          column: str = Query(..., description="Numeric column to evaluate")):
+    """Return boolean indicating whether the given percentile of *column* in the filtered
+    dataset is >= *threshold_pct* percent of the chosen *base* (max/min/mean/dist).
+
+    Like /row_count, this is a lightweight, non-persisting preview.
+    """
+    try:
+        minio_client = get_minio_client()
+        # Load file
+        response = minio_client.get_object(settings.minio_bucket, request.file_key)
+        file_bytes = response.read()
+        df: pd.DataFrame | None = None
+        key_lower = request.file_key.lower()
+        try:
+            if key_lower.endswith('.parquet'):
+                df = pd.read_parquet(BytesIO(file_bytes))
+            elif key_lower.endswith(('.arrow', '.feather')):
+                import pyarrow as pa, pyarrow.ipc as ipc
+                df = ipc.RecordBatchFileReader(pa.BufferReader(file_bytes)).read_all().to_pandas()
+            else:
+                df = pd.read_csv(BytesIO(file_bytes))
+        except Exception as e:
+            logger.error(f"Failed to load dataset for percentile_check: {e}")
+            raise HTTPException(status_code=500, detail="Unable to read data file for preview")
+
+        if df is None:
+            raise HTTPException(status_code=500, detail="Preview failed: DataFrame not created")
+
+        # Column mapping (case-insensitive)
+        col_map = create_column_mapping(df.columns.tolist())
+        num_col = col_map.get(column.lower())
+        if not num_col:
+            raise HTTPException(status_code=404, detail=f"Column '{column}' not found in dataset")
+
+        # Apply identifier filters
+        for col, values in request.identifier_filters.items():
+            actual_col = col_map.get(col.lower())
+            if not actual_col:
+                raise HTTPException(status_code=404, detail=f"Column '{col}' not found in dataset")
+            df = df[df[actual_col].astype(str).isin([str(v) for v in values])]
+
+        # Date filtering like /row_count
+        if request.start_date or request.end_date:
+            date_cols = [c for c in df.columns if 'date' in c.lower()]
+            if date_cols:
+                date_col = date_cols[0]
+                df[date_col] = pd.to_datetime(df[date_col], errors='coerce')
+                if request.start_date:
+                    df = df[df[date_col] >= pd.to_datetime(request.start_date)]
+                if request.end_date:
+                    df = df[df[date_col] <= pd.to_datetime(request.end_date)]
+
+        if df.empty:
+            return {"pass": False, "detail": "No rows after filtering"}
+
+        series = pd.to_numeric(df[num_col], errors='coerce').dropna()
+        if series.empty:
+            return {"pass": False, "detail": "No numeric data in column after filtering"}
+
+        pct_val = series.quantile(percentile/100)
+        if base == 'max':
+            base_val = series.max()
+        elif base == 'min':
+            base_val = series.min()
+        elif base == 'mean':
+            base_val = series.mean()
+        else:  # dist
+            base_val = series.max() - series.min()
+
+        target_val = (threshold_pct/100) * base_val
+        passed = pct_val >= target_val
+        return {
+            "pass": bool(passed),
+            "pct_value": pct_val,
+            "base_value": base_val,
+            "target_value": target_val
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error in percentile_check: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# =============================================================================
+# ROW COUNT PREVIEW ENDPOINT
+# =============================================================================
+
+@router.post("/row_count")
+async def get_row_count(request: ScopeFilterRequest):
+    """Return number of rows in the dataset that match the given identifier filters.
+    Unlike the full scope creation, this is a lightweight preview and does **not**
+    save any files – it only loads the dataset, applies the filters, and
+    returns the resulting row count. This can be used by the frontend to show a
+    quick preview of how much data each scope would contain.
+    """
+    try:
+        minio_client = get_minio_client()
+        # Read the file from MinIO
+        response = minio_client.get_object(settings.minio_bucket, request.file_key)
+        file_bytes = response.read()
+
+        # Load into pandas DataFrame (reuse logic as in other endpoints)
+        df: pd.DataFrame | None = None
+        key_lower = request.file_key.lower()
+        try:
+            if key_lower.endswith('.parquet'):
+                df = pd.read_parquet(BytesIO(file_bytes))
+            elif key_lower.endswith(('.arrow', '.feather')):
+                import pyarrow as pa, pyarrow.ipc as ipc
+                df = ipc.RecordBatchFileReader(pa.BufferReader(file_bytes)).read_all().to_pandas()
+            else:
+                df = pd.read_csv(BytesIO(file_bytes))
+        except Exception as e:
+            logger.error(f"Failed to load dataset for row_count preview: {e}")
+            raise HTTPException(status_code=500, detail="Unable to read data file for preview")
+
+        if df is None:
+            raise HTTPException(status_code=500, detail="Preview failed: DataFrame not created")
+
+        # Create case-insensitive column mapping
+        col_map = create_column_mapping(df.columns.tolist())
+
+        # Apply identifier filters
+        for col, values in request.identifier_filters.items():
+            actual_col = col_map.get(col.lower())
+            if not actual_col:
+                raise HTTPException(status_code=404, detail=f"Column '{col}' not found in dataset")
+            df = df[df[actual_col].astype(str).isin([str(v) for v in values])]
+
+        # Optional date filtering if provided
+        if request.start_date or request.end_date:
+            # Attempt to detect date column
+            date_cols = [c for c in df.columns if 'date' in c.lower()]
+            if date_cols:
+                date_col = date_cols[0]
+                df[date_col] = pd.to_datetime(df[date_col], errors='coerce')
+                if request.start_date:
+                    df = df[df[date_col] >= pd.to_datetime(request.start_date)]
+                if request.end_date:
+                    df = df[df[date_col] <= pd.to_datetime(request.end_date)]
+
+        count = len(df)
+        return {"record_count": int(count)}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error in row_count preview: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 # =============================================================================
 # BASIC HEALTH CHECK ENDPOINTS
@@ -1021,7 +1240,7 @@ async def create_multi_filtered_scope(
                 combination_name_parts = []
                 for col_name, value in combination_filter.items():
                     clean_value = str(value).replace(" ", "_").replace("/", "_").replace("\\", "_")
-                    combination_name_parts.append(f"{col_name}_{clean_value}")
+                    combination_name_parts.append(clean_value)
 
                 combination_filename = f"{set_name}_{'_'.join(combination_name_parts)}"
 
