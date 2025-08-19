@@ -125,11 +125,9 @@ export const CLASSIFIER_API =
 export const DATAFRAME_OPERATIONS_API =
   import.meta.env.VITE_DATAFRAME_OPERATIONS_API || `${backendOrigin.replace(/:8000$/, ':8001')}/api/dataframe-operations`;
 
-<<<<<<< HEAD
 export const CORRELATION_API =
   normalizeUrl(import.meta.env.VITE_CORRELATION_API) ||
   `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/correlation`;
-=======
 export const CHART_MAKER_API =
   normalizeUrl(import.meta.env.VITE_CHART_MAKER_API) ||
   `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/chart-maker`;
@@ -137,4 +135,3 @@ export const CHART_MAKER_API =
 export const BUILD_MODEL_API =
   normalizeUrl(import.meta.env.VITE_BUILD_MODEL_API) ||
   `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/build-model-feature-based`;
->>>>>>> a59d29f1db03fba2026dfd5af31e85c15f2042a0
