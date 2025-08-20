@@ -328,19 +328,11 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
     const colors = getChartColors(index);
     const key = chartKey || chart.lastUpdateTime || chart.id;
 
-    // Dynamic height based on layout or use provided height class
-    // Give more height when sidebars are hidden (full width mode)
-    const chartHeight = heightClass || (() => {
-      if (isFullWidthMode) {
-        return isCompact ? 'h-64' : layoutConfig.layout === 'vertical' ? 'h-[28rem]' : 'h-[36rem]';
-      }
-      // Increased heights for better visibility when sidebars are open
-      return isCompact ? 'h-56' : layoutConfig.layout === 'vertical' ? 'h-[24rem]' : 'h-[28rem]';
-    })();
+    const chartHeight = heightClass || '';
 
     if (!chartData.length || !xAxisConfig.dataKey || (!yAxisConfig.dataKey && traces.length === 0)) {
       return (
-        <div className={`flex items-center justify-center ${chartHeight} text-muted-foreground`}>
+        <div className={`flex items-center justify-center ${chartHeight || 'h-64'} text-muted-foreground`}>
           <div className="text-center">
             <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-gradient-to-br from-slate-100 to-slate-200 flex items-center justify-center">
               <LineChart className="w-8 h-8 text-slate-400" />
@@ -1105,9 +1097,9 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
         </svg>
       </div>
       
-      <div className="relative z-10 flex-1 p-6 overflow-hidden">
+      <div className="relative z-10 p-6 overflow-hidden">
         <div
-          className={`grid gap-6 ${layoutConfig.containerClass} transition-all duration-300 ease-in-out h-full`}
+          className={`grid gap-6 ${layoutConfig.containerClass} transition-all duration-300 ease-in-out`}
           style={{
             gridTemplateRows: layoutConfig.rows > 1 ? `repeat(${layoutConfig.rows}, 1fr)` : '1fr'
           }}
@@ -1116,9 +1108,9 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
             const colors = getChartColors(index);
             
             return (
-                   <Card 
-                     key={chart.id} 
-                    className="chart-card border-0 shadow-xl bg-white/95 backdrop-blur-sm overflow-hidden transform hover:scale-[1.02] transition-all duration-300 relative flex flex-col h-full group hover:shadow-2xl"
+                   <Card
+                     key={chart.id}
+                    className="chart-card border border-black shadow-xl bg-white/95 backdrop-blur-sm overflow-hidden transform hover:scale-[1.02] transition-all duration-300 relative flex flex-col group hover:shadow-2xl"
                      onContextMenu={e => {
                        e.preventDefault(); // Disable right-click context menu
                        e.stopPropagation();
@@ -1574,8 +1566,8 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
                         }
                       })()}
                      
-                     <CardContent className={`flex-1 overflow-hidden ${isCompact ? 'p-2' : 'p-4'} flex flex-col`}>
-                       <div className="flex-1 overflow-hidden min-h-0">
+                     <CardContent className={`${isCompact ? 'p-2' : 'p-4'}`}>
+                       <div className="overflow-hidden">
                          {renderChart(chart, index)}
                        </div>
                      </CardContent>
