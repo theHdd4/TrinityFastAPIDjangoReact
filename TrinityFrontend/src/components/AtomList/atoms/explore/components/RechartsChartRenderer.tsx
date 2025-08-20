@@ -357,46 +357,27 @@ const RechartsChartRenderer: React.FC<Props> = ({
   const chartData = data;
 
     // State to store transformed data that preserves legend fields
-  const [transformedDataWithLegend, setTransformedDataWithLegend] = useState<any[]>([]);
-
   // CRITICAL FIX: Store the detected legend field to ensure consistency
   const [detectedLegendField, setDetectedLegendField] = useState<string | null>(null);
 
-  // Use data directly for rendering
+  // Use data directly for rendering.
+  // When pie charts return an object keyed by legend values, flatten the slices
+  // so that downstream logic expecting an array (e.g. key detection) continues
+  // to work.
   const chartDataForRendering = useMemo(() => {
-    if (!Array.isArray(data)) return [];
+    if (!data) return [];
+    if (Array.isArray(data)) return data;
 
-    // Helper function for case-insensitive legend field detection
-    const hasLegendField = (dataArray: any[], legendField: string) => {
-      if (!dataArray || dataArray.length === 0 || !legendField) return false;
-
-      const firstItem = dataArray[0];
-      // First try exact match
-      if (firstItem[legendField] !== undefined) return true;
-
-      // Then try case-insensitive match
-      const keys = Object.keys(firstItem);
-      return keys.some(key => key.toLowerCase() === legendField.toLowerCase());
-    };
-
-    // If we have a legend field, prioritize using data that contains it
-    if (legendField && data && data.length > 0 && hasLegendField(data, legendField)) {
-      console.log('🎨 Legend field detected in data prop - using it for chart rendering');
-      console.log('🎨 Legend field data sample:', data.slice(0, 3));
-      return data;
+    if (type === 'pie_chart' && legendField && typeof data === 'object') {
+      try {
+        return Object.values(data as Record<string, any[]>).flat();
+      } catch {
+        return [];
+      }
     }
 
-    // Check if we have transformed data that preserves the legend field
-    if (legendField && transformedDataWithLegend.length > 0 && hasLegendField(transformedDataWithLegend, legendField)) {
-      console.log('🎨 Legend field found in transformed data - using it for chart rendering');
-      console.log('🎨 Transformed data with legend field sample:', transformedDataWithLegend.slice(0, 3));
-      return transformedDataWithLegend;
-    }
-
-    // Otherwise, use the data prop
-    console.log('🎨 Using data prop for rendering');
-    return Array.isArray(data) ? data : [];
-  }, [legendField, data, transformedDataWithLegend]);
+    return [];
+  }, [data, type, legendField]);
 
   // CRITICAL FIX: Ensure detected legend field is used consistently
   useEffect(() => {
@@ -1081,8 +1062,6 @@ const RechartsChartRenderer: React.FC<Props> = ({
           return transformed;
         });
         
-        // Store the transformed data that preserves legend fields
-        setTransformedDataWithLegend(transformedData);
         yKey = yFields[0];
         yKeys = yFields;
       }
@@ -1616,7 +1595,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
           const measureKey = yKey || yFields?.[0] || 'value';
           const nameKey = xKey || 'name';
           return (
-            <div className="flex gap-8 overflow-x-auto">
+            <div className="flex gap-8 overflow-x-auto overflow-y-hidden w-full">
               {Object.entries(pieGroups).map(([legendValue, slices], idx) => (
                 <div key={legendValue} className="flex-shrink-0 w-1/2 min-w-[300px] flex flex-col items-center">
                   <p className="mb-2 font-semibold text-sm text-gray-700">{capitalizeWords(String(legendValue))}</p>
