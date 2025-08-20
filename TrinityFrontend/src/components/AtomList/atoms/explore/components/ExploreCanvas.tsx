@@ -1404,13 +1404,6 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
     const config = chartConfigs[index] || chartConfigs[0];
     const isSettingsVisible = chartSettingsVisible[index] || false;
     
-    // Debug logging for chart rendering
-      chartType: config.chartType,
-      yAxes: config.yAxes,
-      yAxisLabels: config.yAxisLabels,
-      dataLength: chartDataSets[index]?.length
-    });
-    
     return (
       <div key={index} className="relative h-full w-full min-w-0 explore-chart-card">
         <Card className="border-pink-200 h-full w-full explore-chart-card">
