@@ -2,67 +2,7 @@ import React, { useMemo } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { BarChart3, Grid, TrendingUp, Clock, Database } from 'lucide-react';
 import ExploreCanvas from './components/ExploreCanvas';
-
-export interface ExploreData {
-  dataframe?: string;
-  dimensions: string[];
-  measures: string[];
-  graphLayout: {
-    numberOfGraphsInRow: number;
-    rows: number;
-  };
-  allColumns?: string[];
-  numericalColumns?: string[];
-  columnSummary?: any[];
-  showDataSummary?: boolean;
-  filterUnique?: boolean;
-  // Chart configuration properties
-  chartType?: string;
-  xAxis?: string;
-  yAxis?: string;
-  xAxisLabel?: string;
-  yAxisLabel?: string;
-  title?: string;
-  legendField?: string; // Field to use for creating multiple lines/series
-  aggregation?: string;
-  weightColumn?: string;
-  // Date filtering properties
-  dateFilters?: Array<{
-    column: string;
-    values: string[];
-  }>;
-  // Column classifier integration properties
-  columnClassifierConfig?: {
-    identifiers: string[];
-    measures: string[];
-    dimensions: { [key: string]: string[] };
-    client_name?: string;
-    app_name?: string;
-    project_name?: string;
-  };
-  availableDimensions?: string[];
-  availableMeasures?: string[];
-  availableIdentifiers?: string[];
-  chartReadyData?: any;
-  // Fallback properties for when column classifier config is not available
-  fallbackDimensions?: string[];
-  fallbackMeasures?: string[];
-  // Applied flag to track if settings have been applied
-  applied?: boolean;
-  // Additional optional properties
-  [key: string]: any;
-}
-
-export interface ExploreSettings {
-  dataSource: string;
-  enableFiltering?: boolean;
-  enableExport?: boolean;
-  autoRefresh?: boolean;
-  // Additional optional settings
-  [key: string]: any;
-}
-
-import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
+import { useLaboratoryStore, ExploreData } from '@/components/LaboratoryMode/store/laboratoryStore';
 
 const chartTypes = [
   'Line', 'Bar', 'Pie', 'Scatter', 'Area', 'Column', 'Table', 'Custom'

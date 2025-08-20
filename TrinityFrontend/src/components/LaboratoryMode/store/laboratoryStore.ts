@@ -280,6 +280,72 @@ export const DEFAULT_CHART_MAKER_SETTINGS: ChartMakerSettings = {
   error: undefined,
 };
 
+export interface ExploreData {
+  dataframe?: string;
+  dimensions: string[];
+  measures: string[];
+  graphLayout: {
+    numberOfGraphsInRow: number;
+    rows: number;
+  };
+  allColumns?: string[];
+  numericalColumns?: string[];
+  columnSummary?: any[];
+  showDataSummary?: boolean;
+  filterUnique?: boolean;
+  chartType?: string;
+  xAxis?: string;
+  yAxis?: string;
+  xAxisLabel?: string;
+  yAxisLabel?: string;
+  title?: string;
+  legendField?: string;
+  aggregation?: string;
+  weightColumn?: string;
+  dateFilters?: Array<{
+    column: string;
+    values: string[];
+  }>;
+  columnClassifierConfig?: {
+    identifiers: string[];
+    measures: string[];
+    dimensions: { [key: string]: string[] };
+    client_name?: string;
+    app_name?: string;
+    project_name?: string;
+  };
+  availableDimensions?: string[];
+  availableMeasures?: string[];
+  availableIdentifiers?: string[];
+  chartReadyData?: any;
+  fallbackDimensions?: string[];
+  fallbackMeasures?: string[];
+  applied?: boolean;
+  [key: string]: any;
+}
+
+export interface ExploreSettings {
+  dataSource: string;
+  enableFiltering?: boolean;
+  enableExport?: boolean;
+  autoRefresh?: boolean;
+  [key: string]: any;
+}
+
+export const DEFAULT_EXPLORE_DATA: ExploreData = {
+  dimensions: [],
+  measures: [],
+  graphLayout: { numberOfGraphsInRow: 1, rows: 1 },
+  applied: false,
+};
+
+export const DEFAULT_EXPLORE_SETTINGS: ExploreSettings = {
+  dataSource: "",
+  enableFiltering: false,
+  enableExport: false,
+  autoRefresh: false,
+};
+
 export interface DroppedAtom {
   id: string;
   atomId: string;

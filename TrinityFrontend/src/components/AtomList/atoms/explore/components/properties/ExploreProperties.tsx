@@ -7,8 +7,13 @@ import ExploreInput from '../ExploreInput';
 import ExploreSettings from '../ExploreSettings';
 import ExploreExhibition from '../ExploreExhibition';
 import ErrorBoundary from '@/components/ErrorBoundary';
-import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
-import type { ExploreData, ExploreSettings as ExploreSettingsType } from '../ExploreAtom';
+import {
+  useLaboratoryStore,
+  DEFAULT_EXPLORE_SETTINGS,
+  DEFAULT_EXPLORE_DATA,
+  ExploreSettings as ExploreSettingsType,
+  ExploreData,
+} from '@/components/LaboratoryMode/store/laboratoryStore';
 
 interface Props {
   atomId: string;
@@ -18,8 +23,10 @@ const ExploreProperties: React.FC<Props> = ({ atomId }) => {
   const atom = useLaboratoryStore(state => state.getAtom(atomId));
   const updateSettings = useLaboratoryStore(state => state.updateAtomSettings);
 
-  const data = (atom?.settings?.data || {}) as ExploreData;
-  const settings = (atom?.settings?.settings || {}) as ExploreSettingsType;
+  const data = (atom?.settings?.data as ExploreData) || { ...DEFAULT_EXPLORE_DATA };
+  const settings = (atom?.settings?.settings as ExploreSettingsType) || {
+    ...DEFAULT_EXPLORE_SETTINGS,
+  };
   const chartData = atom?.settings?.chartData;
 
   const handleDataChange = (newData: Partial<ExploreData>) => {

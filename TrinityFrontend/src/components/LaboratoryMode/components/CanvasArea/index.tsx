@@ -43,6 +43,8 @@ import {
   DEFAULT_CHART_MAKER_SETTINGS,
   DataUploadSettings,
   ColumnClassifierColumn,
+  DEFAULT_EXPLORE_SETTINGS,
+  DEFAULT_EXPLORE_DATA,
 } from '../../store/laboratoryStore';
 import { deriveWorkflowMolecules, WorkflowMolecule } from './helpers';
 
@@ -721,7 +723,7 @@ const handleAddDragLeave = (e: React.DragEvent) => {
           : info.id === 'chart-maker'
           ? { ...DEFAULT_CHART_MAKER_SETTINGS }
           : info.id === 'explore'
-          ? { data: {}, settings: {} }
+          ? { data: { ...DEFAULT_EXPLORE_DATA }, settings: { ...DEFAULT_EXPLORE_SETTINGS } }
           : undefined,
     };
     setLayoutCards(
