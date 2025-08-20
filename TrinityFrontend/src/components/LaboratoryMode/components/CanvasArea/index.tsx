@@ -29,6 +29,7 @@ import CreateColumnAtom from '@/components/AtomList/atoms/createcolumn/CreateCol
 import GroupByAtom from '@/components/AtomList/atoms/groupby-wtg-avg/GroupByAtom';
 import ChartMakerAtom from '@/components/AtomList/atoms/chart-maker/ChartMakerAtom';
 import BuildModelFeatureBasedAtom from '@/components/AtomList/atoms/build-model-feature-based/BuildModelFeatureBasedAtom';
+import ExploreAtom from '@/components/AtomList/atoms/explore/ExploreAtom';
 import { fetchDimensionMapping } from '@/lib/dimensions';
 
 import {
@@ -1182,6 +1183,8 @@ const handleAddDragLeave = (e: React.DragEvent) => {
                         <DataUploadValidateAtom atomId={atom.id} />
                       ) : atom.atomId === 'feature-overview' ? (
                         <FeatureOverviewAtom atomId={atom.id} />
+                      ) : atom.atomId === 'explore' ? (
+                        <ExploreAtom atomId={atom.id} />
                       ) : atom.atomId === 'chart-maker' ? (
                         <ChartMakerAtom atomId={atom.id} />
                       ) : atom.atomId === 'concat' ? (

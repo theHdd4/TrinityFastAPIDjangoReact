@@ -30,6 +30,7 @@ import MergeProperties from '@/components/AtomList/atoms/merge/components/proper
 import ColumnClassifierProperties from '@/components/AtomList/atoms/column-classifier/components/properties/ColumnClassifierProperties';
 import DataFrameOperationsProperties from '@/components/AtomList/atoms/dataframe-operations/components/properties/DataFrameOperationsProperties';
 import ChartMakerProperties from '@/components/AtomList/atoms/chart-maker/components/properties/ChartMakerProperties';
+import ExploreProperties from '@/components/AtomList/atoms/explore/components/ExploreProperties';
 import AtomSettingsTabs from "./AtomSettingsTabs";
 
 interface SettingsPanelProps {
@@ -114,6 +115,36 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
             <DataUploadValidateProperties atomId={selectedAtomId} />
           ) : selectedAtomId && atom?.atomId === 'feature-overview' ? (
             <FeatureOverviewProperties atomId={selectedAtomId} />
+          ) : selectedAtomId && atom?.atomId === 'explore' ? (
+            <ExploreProperties
+              data={atom?.settings?.data || {}}
+              settings={atom?.settings?.settings || {}}
+              onDataChange={(data) =>
+                updateSettings(selectedAtomId, {
+                  data: { ...(atom?.settings?.data || {}), ...data },
+                })
+              }
+              onSettingsChange={(settings) =>
+                updateSettings(selectedAtomId, {
+                  settings: { ...(atom?.settings?.settings || {}), ...settings },
+                })
+              }
+              onDataUpload={(summary, fileId) =>
+                updateSettings(selectedAtomId, {
+                  data: {
+                    ...(atom?.settings?.data || {}),
+                    columnSummary: summary,
+                    dataframe: fileId,
+                  },
+                })
+              }
+              onApply={(config) =>
+                updateSettings(selectedAtomId, {
+                  data: { ...(atom?.settings?.data || {}), ...config, applied: true },
+                })
+              }
+              chartData={atom?.settings?.chartData}
+            />
           ) : selectedAtomId && atom?.atomId === 'chart-maker' ? (
             <ChartMakerProperties atomId={selectedAtomId} />
           ) : selectedAtomId && atom?.atomId === 'build-model-feature-based' ? (
