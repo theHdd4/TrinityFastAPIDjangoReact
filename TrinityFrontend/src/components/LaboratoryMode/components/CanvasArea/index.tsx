@@ -29,6 +29,7 @@ import CreateColumnAtom from '@/components/AtomList/atoms/createcolumn/CreateCol
 import GroupByAtom from '@/components/AtomList/atoms/groupby-wtg-avg/GroupByAtom';
 import ChartMakerAtom from '@/components/AtomList/atoms/chart-maker/ChartMakerAtom';
 import BuildModelFeatureBasedAtom from '@/components/AtomList/atoms/build-model-feature-based/BuildModelFeatureBasedAtom';
+import ClusteringAtom from '@/components/AtomList/atoms/clustering/ClusteringAtom';
 import { fetchDimensionMapping } from '@/lib/dimensions';
 
 import {
@@ -61,6 +62,7 @@ const LLM_MAP: Record<string, string> = {
   concat: 'Agent Concat',
   'chart-maker': 'Agent Chart Maker',
   merge: 'Agent Merge',
+  clustering: 'Agent Clustering',
   'create-column': 'Agent Create Transform',
   'groupby-wtg-avg': 'Agent GroupBy',
 };
@@ -986,6 +988,8 @@ const handleAddDragLeave = (e: React.DragEvent) => {
                                       <DataUploadValidateAtom atomId={atom.id} />
                                     ) : atom.atomId === 'feature-overview' ? (
                                       <FeatureOverviewAtom atomId={atom.id} />
+                                    ) : atom.atomId === 'clustering' ? (
+                                      <ClusteringAtom atomId={atom.id} />
                                     ) : atom.atomId === 'chart-maker' ? (
                                       <ChartMakerAtom atomId={atom.id} />
                                     ) : (
@@ -1182,6 +1186,8 @@ const handleAddDragLeave = (e: React.DragEvent) => {
                         <DataUploadValidateAtom atomId={atom.id} />
                       ) : atom.atomId === 'feature-overview' ? (
                         <FeatureOverviewAtom atomId={atom.id} />
+                      ) : atom.atomId === 'clustering' ? (
+                        <ClusteringAtom atomId={atom.id} />
                       ) : atom.atomId === 'chart-maker' ? (
                         <ChartMakerAtom atomId={atom.id} />
                       ) : atom.atomId === 'concat' ? (

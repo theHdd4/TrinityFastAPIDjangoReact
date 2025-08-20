@@ -1,11 +1,7 @@
-
-import React, { useState, useEffect } from 'react';
-import { Card } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
+import React, { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { ChevronRight, Sliders, Eye, BarChart2 } from 'lucide-react';
+import { ChevronRight, Sliders } from 'lucide-react';
+
 import {
   useLaboratoryStore,
   TextBoxSettings,
@@ -19,6 +15,7 @@ import {
   ChartMakerSettings,
   DEFAULT_CHART_MAKER_SETTINGS,
 } from '../../store/laboratoryStore';
+
 import DataUploadValidateProperties from '@/components/AtomList/atoms/data-upload-validate/components/properties/DataUploadValidateProperties';
 import FeatureOverviewProperties from '@/components/AtomList/atoms/feature-overview/components/properties/FeatureOverviewProperties';
 import GroupByProperties from '@/components/AtomList/atoms/groupby-wtg-avg/components/properties/GroupByProperties';
@@ -30,7 +27,8 @@ import MergeProperties from '@/components/AtomList/atoms/merge/components/proper
 import ColumnClassifierProperties from '@/components/AtomList/atoms/column-classifier/components/properties/ColumnClassifierProperties';
 import DataFrameOperationsProperties from '@/components/AtomList/atoms/dataframe-operations/components/properties/DataFrameOperationsProperties';
 import ChartMakerProperties from '@/components/AtomList/atoms/chart-maker/components/properties/ChartMakerProperties';
-import AtomSettingsTabs from "./AtomSettingsTabs";
+
+import AtomSettingsTabs from './AtomSettingsTabs';
 
 interface SettingsPanelProps {
   isCollapsed: boolean;
@@ -47,11 +45,13 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
   selectedCardId,
   cardExhibited,
 }) => {
-  const [tab, setTab] = useState('settings');
-  const atom = useLaboratoryStore(state =>
+  const [tab, setTab] = useState<'settings' | 'exhibition'>('settings');
+
+  const atom = useLaboratoryStore((state) =>
     selectedAtomId ? state.getAtom(selectedAtomId) : undefined
   );
-  const updateSettings = useLaboratoryStore(state => state.updateAtomSettings);
+  const updateSettings = useLaboratoryStore((state) => state.updateAtomSettings);
+
   const settings:
     | TextBoxSettings
     | DataUploadSettings
@@ -78,13 +78,14 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
   useEffect(() => {
     setTab('settings');
   }, [selectedAtomId, selectedCardId]);
+
   return (
     <div
       className={`bg-white border-l border-gray-200 transition-all duration-300 flex flex-col h-full ${
         isCollapsed ? 'w-12' : 'w-80'
       }`}
     >
-      {/* Toggle Button */}
+      {/* Toggle / Header */}
       <div className="p-3 border-b border-gray-200 flex items-center justify-between">
         {!isCollapsed && (
           <h3 className="font-semibold text-gray-900 flex items-center space-x-2">
@@ -92,17 +93,8 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
             <span>Properties</span>
           </h3>
         )}
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={onToggle}
-          className="p-1 h-8 w-8"
-        >
-          {isCollapsed ? (
-            <Sliders className="w-4 h-4" />
-          ) : (
-            <ChevronRight className="w-4 h-4" />
-          )}
+        <Button variant="ghost" size="sm" onClick={onToggle} className="p-1 h-8 w-8">
+          {isCollapsed ? <Sliders className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
         </Button>
       </div>
 
@@ -128,13 +120,24 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
             <ColumnClassifierProperties atomId={selectedAtomId} />
           ) : selectedAtomId && atom?.atomId === 'dataframe-operations' ? (
             <DataFrameOperationsProperties atomId={selectedAtomId} />
+          ) : selectedAtomId && atom?.atomId === 'groupby-wtg-avg' ? (
+            <GroupByProperties atomId={selectedAtomId} />
+          ) : selectedAtomId && atom?.atomId === 'createcolumn' ? (
+            <CreateColumnProperties atomId={selectedAtomId} />
           ) : (
-            <AtomSettingsTabs tab={tab} setTab={setTab} selectedAtomId={selectedAtomId!} cardExhibited={cardExhibited} settings={settings as TextBoxSettings} updateSettings={updateSettings} />
+            <AtomSettingsTabs
+              tab={tab}
+              setTab={setTab}
+              selectedAtomId={selectedAtomId!}
+              cardExhibited={cardExhibited}
+              settings={settings as TextBoxSettings}
+              updateSettings={updateSettings}
+            />
           )}
         </div>
       )}
     </div>
   );
-  };
+};
 
 export default SettingsPanel;

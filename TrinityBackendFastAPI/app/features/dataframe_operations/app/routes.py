@@ -31,7 +31,7 @@ minio_client = Minio(
     secret_key=MINIO_SECRET_KEY,
     secure=False
 )
-redis_client = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=REDIS_DB)
+redis_client = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=REDIS_DB, decode_responses=True)
 
 @router.get("/test_alive")
 async def test_alive():

@@ -103,8 +103,10 @@ export const SCOPE_SELECTOR_API =
 export const CREATECOLUMN_API =
   import.meta.env.VITE_CREATECOLUMN_API || `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/create`;
 
+
 export const GROUPBY_API =
   import.meta.env.VITE_GROUPBY_API || `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/groupby`;
+
 
 let aiBase = normalizeUrl(import.meta.env.VITE_TRINITY_AI_API);
 if (!aiBase) {
@@ -123,7 +125,11 @@ export const CLASSIFIER_API =
   `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/classify`;
 
 export const DATAFRAME_OPERATIONS_API =
-  import.meta.env.VITE_DATAFRAME_OPERATIONS_API || `${backendOrigin.replace(/:8000$/, ':8001')}/api/dataframe-operations`;
+  import.meta.env.VITE_DATAFRAME_OPERATIONS_API || `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/dataframe-operations`;
+
+export const CLUSTERING_API =
+  normalizeUrl(import.meta.env.VITE_CLUSTERING_API) ||
+  `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/clustering`;
 
 export const CHART_MAKER_API =
   normalizeUrl(import.meta.env.VITE_CHART_MAKER_API) ||
@@ -132,3 +138,13 @@ export const CHART_MAKER_API =
 export const BUILD_MODEL_API =
   normalizeUrl(import.meta.env.VITE_BUILD_MODEL_API) ||
   `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/build-model-feature-based`;
+
+// Debug logging for clustering API
+console.log('Clustering API Configuration:', {
+  isDevStack,
+  djangoPort,
+  fastapiPort,
+  backendOrigin,
+  clusteringApi: normalizeUrl(import.meta.env.VITE_CLUSTERING_API) ||
+    `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/clustering`
+});
