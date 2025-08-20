@@ -101,6 +101,9 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
   const [chartOptions, setChartOptions] = useState<{ [chartIndex: number]: { grid: boolean; legend: boolean; axisLabels: boolean; dataLabels: boolean } }>({});
   const [chartSortCounters, setChartSortCounters] = useState<{ [chartIndex: number]: number }>({});
   const [dateRanges, setDateRanges] = useState<{ [columnName: string]: { min_date: string; max_date: string } }>({});
+
+  // Toggle to display categorical breakdown selector per chart
+  const [showUniqueToggles, setShowUniqueToggles] = useState<{ [chartIndex: number]: boolean }>({});
   
   // Debouncing mechanism to prevent multiple chart generations
   const chartGenerationTimeouts = useRef<{ [chartIndex: number]: NodeJS.Timeout | null }>({});
@@ -152,9 +155,10 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
     // Initialize chart options for the first chart
     setChartOptions({ 0: { grid: true, legend: true, axisLabels: true, dataLabels: true } });
     setChartSortCounters({ 0: 0 });
-    
+
     // Initialize loading state for the first chart
     setIsLoading({ 0: false });
+    setShowUniqueToggles({ 0: false });
     
     // Cleanup function to clear any pending chart generation timeouts
     return () => {
@@ -209,6 +213,11 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
       
       // Initialize loading state for new chart
       setIsLoading(prev => ({
+        ...prev,
+        [newChartIndex]: false
+      }));
+
+      setShowUniqueToggles(prev => ({
         ...prev,
         [newChartIndex]: false
       }));
@@ -516,6 +525,12 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
         [newChartIndex]: false,
         [newChartIndex + 1]: false
       }));
+
+      setShowUniqueToggles(prev => ({
+        ...prev,
+        [newChartIndex]: false,
+        [newChartIndex + 1]: false
+      }));
     } else {
       // Add 1 chart card for 1 graph per row layout
       setChartConfigs((prev) => [
@@ -557,6 +572,11 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
       
       // Initialize loading state for new chart
       setIsLoading(prev => ({
+        ...prev,
+        [newChartIndex]: false
+      }));
+
+      setShowUniqueToggles(prev => ({
         ...prev,
         [newChartIndex]: false
       }));
@@ -780,6 +800,19 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
       const newState = { ...prev };
       delete newState[index];
       // Shift down the indices for charts after the deleted one
+      Object.keys(newState).forEach(key => {
+        const keyNum = parseInt(key);
+        if (keyNum > index) {
+          newState[keyNum - 1] = newState[keyNum];
+          delete newState[keyNum];
+        }
+      });
+      return newState;
+    });
+
+    setShowUniqueToggles(prev => {
+      const newState = { ...prev };
+      delete newState[index];
       Object.keys(newState).forEach(key => {
         const keyNum = parseInt(key);
         if (keyNum > index) {
@@ -1802,59 +1835,56 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                   )}
               </div>
               
-                {/* Legend Field Selection - Clean version without icons */}
-                <div className="flex items-center ml-4 border-l border-gray-200 pl-4">
-                  <Select 
-                    value={config.legendField || 'no_legend'}
-                    onValueChange={(value) => {
-                      console.log('🔍 ExploreCanvas: Legend field selected:', value);
+                <div className="flex items-center ml-4">
+                  <Switch
+                    id={`unique-toggle-${index}`}
+                    checked={showUniqueToggles[index] || false}
+                    onCheckedChange={(checked) => {
+                      setShowUniqueToggles(prev => ({ ...prev, [index]: checked }));
                       const newConfigs = [...chartConfigs];
-                      // Convert 'no_legend' back to empty string for storage
-                      const actualValue = value === 'no_legend' ? '' : value;
-                      newConfigs[index] = { ...newConfigs[index], legendField: actualValue };
-                      setChartConfigs(newConfigs);
-                      
-                      // Only trigger chart generation when legend field is selected and all axes are available
-                      if (actualValue && config.xAxis && hasValidYAxes(config.yAxes)) {
-                        console.log('🔍 ExploreCanvas: Legend field selected, checking if chart generation is needed...');
-                        console.log('🔍 ExploreCanvas: X-axis:', config.xAxis);
-                        console.log('🔍 ExploreCanvas: Y-axes:', config.yAxes);
-                        console.log('🔍 ExploreCanvas: Legend field:', actualValue);
-                        
-                        // Create the new config for chart generation
-                        const newConfig = { ...newConfigs[index], legendField: actualValue };
-                        
-                        // Only generate chart if we have valid data
-                        if (newConfig.xAxis && hasValidYAxes(newConfig.yAxes)) {
-                          console.log('🔍 ExploreCanvas: All conditions met, auto-generating chart with debouncing');
-                          safeTriggerChartGeneration(index, newConfig, 100);
+                      if (!checked) {
+                        newConfigs[index] = { ...newConfigs[index], legendField: '' };
+                        setChartConfigs(newConfigs);
+                        if (config.xAxis && hasValidYAxes(config.yAxes)) {
+                          safeTriggerChartGeneration(index, newConfigs[index], 100);
                         }
                       }
                     }}
-                  >
-                    <SelectTrigger className="w-28 h-8 text-xs" disabled={isLoadingColumns}>
-                      <SelectValue placeholder="Legend" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="no_legend">
-                        <div className="flex items-center space-x-2">
-                          <span className="text-gray-500">No Legend</span>
-                        </div>
-                      </SelectItem>
-                      {Array.isArray(availableIdentifiers) && availableIdentifiers.length > 0 ? (
-                        availableIdentifiers.map((column, idx) => (
-                          <SelectItem key={idx} value={column}>
-                            <div className="flex items-center space-x-2">
-                              <span>{column}</span>
-                              <span className="text-xs text-blue-600 bg-blue-50 px-1 rounded">ID</span>
-                            </div>
-                          </SelectItem>
-                        ))
-                      ) : (
-                        <div className="text-xs text-gray-500 p-2">No categorical columns</div>
-                      )}
-                    </SelectContent>
-                  </Select>
+                  />
+                  <Label htmlFor={`unique-toggle-${index}`} className="ml-2 text-xs">
+                    Show unique values for categorical columns
+                  </Label>
+                  {showUniqueToggles[index] && (
+                    <Select
+                      value={config.legendField || ''}
+                      onValueChange={(value) => {
+                        const newConfigs = [...chartConfigs];
+                        newConfigs[index] = { ...newConfigs[index], legendField: value };
+                        setChartConfigs(newConfigs);
+                        if (value && config.xAxis && hasValidYAxes(config.yAxes)) {
+                          safeTriggerChartGeneration(index, newConfigs[index], 100);
+                        }
+                      }}
+                    >
+                      <SelectTrigger className="w-28 h-8 text-xs ml-2" disabled={isLoadingColumns}>
+                        <SelectValue placeholder="Select column" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {Array.isArray(availableIdentifiers) && availableIdentifiers.length > 0 ? (
+                          availableIdentifiers.map((column, idx) => (
+                            <SelectItem key={idx} value={column}>
+                              <div className="flex items-center space-x-2">
+                                <span>{column}</span>
+                                <span className="text-xs text-blue-600 bg-blue-50 px-1 rounded">ID</span>
+                              </div>
+                            </SelectItem>
+                          ))
+                        ) : (
+                          <div className="text-xs text-gray-500 p-2">No categorical columns</div>
+                        )}
+                      </SelectContent>
+                    </Select>
+                  )}
                 </div>
               </div>
               
