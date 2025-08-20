@@ -1489,29 +1489,57 @@ async def chart_data_multidim(explore_atom_id: str):
             # Single measure bar chart (existing logic)
             # Sort by measure value (descending) for better bar chart visualization
             sorted_result = grouped_result.sort_values(actual_measure, ascending=False)
-            
-            for _, row in sorted_result.iterrows():
-                # Create bar chart data point
-                # Handle both numeric and categorical Y-axis values
-                y_value = row[actual_measure]
-                if pd.api.types.is_numeric_dtype(grouped_result[actual_measure]):
-                    y_value = float(y_value) if pd.notna(y_value) else 0
-                else:
-                    y_value = str(y_value) if pd.notna(y_value) else "Unknown"
-                
-                data_point = {
-                    actual_group_cols[0] if actual_group_cols else "category": str(row[actual_group_cols[0]]) if actual_group_cols else "Category",
-                    actual_measure: y_value,
-                    "category": str(row[actual_group_cols[0]]) if actual_group_cols else "Category"
+
+            if len(actual_group_cols) > 1:
+                # Legend field present - pivot so each unique legend value becomes its own bar series
+                legend_field = actual_group_cols[1]
+                pivot_data = {}
+                legend_values = []
+
+                for _, row in sorted_result.iterrows():
+                    x_val = str(row[actual_group_cols[0]]) if actual_group_cols else "Category"
+                    legend_val = str(row[legend_field])
+                    y_val = row[actual_measure]
+                    if pd.api.types.is_numeric_dtype(grouped_result[actual_measure]):
+                        y_val = float(y_val) if pd.notna(y_val) else 0
+                    else:
+                        y_val = str(y_val) if pd.notna(y_val) else "Unknown"
+
+                    if x_val not in pivot_data:
+                        pivot_data[x_val] = {actual_group_cols[0]: x_val, "category": x_val}
+                    pivot_data[x_val][legend_val] = y_val
+                    if legend_val not in legend_values:
+                        legend_values.append(legend_val)
+
+                chart_data = list(pivot_data.values())
+                chart_metadata = {
+                    "legend_field": legend_field,
+                    "legend_values": legend_values
                 }
-                
-                # Add additional grouping dimensions as labels if available
-                if len(actual_group_cols) > 1:
-                    data_point["label"] = " | ".join([str(row[col]) for col in actual_group_cols[1:]])
-                
-                chart_data.append(data_point)
-            
-            print(f"✅ Bar chart: {len(chart_data)} bars generated")
+                print(f"✅ Bar chart with legend field '{legend_field}': {len(chart_data)} bars generated")
+            else:
+                for _, row in sorted_result.iterrows():
+                    # Create bar chart data point
+                    # Handle both numeric and categorical Y-axis values
+                    y_value = row[actual_measure]
+                    if pd.api.types.is_numeric_dtype(grouped_result[actual_measure]):
+                        y_value = float(y_value) if pd.notna(y_value) else 0
+                    else:
+                        y_value = str(y_value) if pd.notna(y_value) else "Unknown"
+
+                    data_point = {
+                        actual_group_cols[0] if actual_group_cols else "category": str(row[actual_group_cols[0]]) if actual_group_cols else "Category",
+                        actual_measure: y_value,
+                        "category": str(row[actual_group_cols[0]]) if actual_group_cols else "Category"
+                    }
+
+                    # Add additional grouping dimensions as labels if available
+                    if len(actual_group_cols) > 1:
+                        data_point["label"] = " | ".join([str(row[col]) for col in actual_group_cols[1:]])
+
+                    chart_data.append(data_point)
+
+                print(f"✅ Bar chart: {len(chart_data)} bars generated")
 
     elif chart_type == "stacked_bar_chart":
         print(f"🔍 Backend: Processing STACKED BAR CHART branch")
@@ -1628,29 +1656,56 @@ async def chart_data_multidim(explore_atom_id: str):
             # Single measure pie chart (existing logic)
             # Sort by measure value (descending) for better pie chart visualization
             sorted_result = grouped_result.sort_values(actual_measure, ascending=False)
-            
-            for _, row in sorted_result.iterrows():
-                # Create pie chart data point
-                # Handle both numeric and categorical Y-axis values
-                value = row[actual_measure]
-                if pd.api.types.is_numeric_dtype(grouped_result[actual_measure]):
-                    value = float(value) if pd.notna(value) else 0
-                else:
-                    value = str(value) if pd.notna(value) else "Unknown"
-                
-                data_point = {
-                    "label": str(row[actual_group_cols[0]]) if actual_group_cols else "Category",
-                    "value": value,
-                    "category": str(row[actual_group_cols[0]]) if actual_group_cols else "Category"
+
+            if len(actual_group_cols) > 1:
+                # Legend field present - build separate pie data for each legend value
+                legend_field = actual_group_cols[1]
+                pie_data = {}
+                legend_values = []
+
+                for _, row in sorted_result.iterrows():
+                    x_val = str(row[actual_group_cols[0]]) if actual_group_cols else "Category"
+                    legend_val = str(row[legend_field])
+                    y_val = row[actual_measure]
+                    if pd.api.types.is_numeric_dtype(grouped_result[actual_measure]):
+                        y_val = float(y_val) if pd.notna(y_val) else 0
+                    else:
+                        y_val = str(y_val) if pd.notna(y_val) else "Unknown"
+
+                    if legend_val not in pie_data:
+                        pie_data[legend_val] = []
+                        legend_values.append(legend_val)
+                    pie_data[legend_val].append({actual_group_cols[0]: x_val, actual_measure: y_val})
+
+                chart_data = pie_data
+                chart_metadata = {
+                    "legend_field": legend_field,
+                    "legend_values": legend_values
                 }
-                
-                # Add additional grouping dimensions as labels if available
-                if len(actual_group_cols) > 1:
-                    data_point["full_label"] = " | ".join([str(row[col]) for col in actual_group_cols])
-                
-                chart_data.append(data_point)
-            
-            print(f"✅ Pie chart: {len(chart_data)} slices generated")
+                print(f"✅ Pie charts generated for legend field '{legend_field}' with {len(legend_values)} unique values")
+            else:
+                for _, row in sorted_result.iterrows():
+                    # Create pie chart data point
+                    # Handle both numeric and categorical Y-axis values
+                    value = row[actual_measure]
+                    if pd.api.types.is_numeric_dtype(grouped_result[actual_measure]):
+                        value = float(value) if pd.notna(value) else 0
+                    else:
+                        value = str(value) if pd.notna(value) else "Unknown"
+
+                    data_point = {
+                        "label": str(row[actual_group_cols[0]]) if actual_group_cols else "Category",
+                        "value": value,
+                        "category": str(row[actual_group_cols[0]]) if actual_group_cols else "Category"
+                    }
+
+                    # Add additional grouping dimensions as labels if available
+                    if len(actual_group_cols) > 1:
+                        data_point["full_label"] = " | ".join([str(row[col]) for col in actual_group_cols])
+
+                    chart_data.append(data_point)
+
+                print(f"✅ Pie chart: {len(chart_data)} slices generated")
 
     else:
         print(f"🔍 Backend: Processing DEFAULT/ELSE branch for chart_type: {chart_type}")
@@ -1803,20 +1858,24 @@ async def chart_data_multidim(explore_atom_id: str):
         
         print(f"🔍 Backend: Final recharts_data for stacked bar:", recharts_data[:2] if recharts_data else "No data")
     elif chart_type == "pie_chart":
-        # Pie chart data: Handle both single and dual Y-axes
-        recharts_data = []
-        for item in converted_chart_data:
-            if isinstance(item, dict):
-                # Check if this is dual Y-axes data (has actual measure names as fields)
-                if len(multiple_measures) > 1:
-                    # Dual Y-axes: Keep the original structure with actual field names
-                    recharts_data.append(item)
+        # Pie chart data: Handle both single and dual Y-axes and legend-based multiple pies
+        if isinstance(converted_chart_data, dict):
+            # Data already structured by legend value -> list of slices
+            recharts_data = converted_chart_data
+        else:
+            recharts_data = []
+            for item in converted_chart_data:
+                if isinstance(item, dict):
+                    # Check if this is dual Y-axes data (has actual measure names as fields)
+                    if len(multiple_measures) > 1:
+                        # Dual Y-axes: Keep the original structure with actual field names
+                        recharts_data.append(item)
+                    else:
+                        # Single Y-axis: Preserve original field names for pie charts
+                        # This fixes the issue where original field names were being converted to generic keys
+                        recharts_data.append(item)  # Keep the original structure with actual field names
                 else:
-                    # Single Y-axis: Preserve original field names for pie charts
-                    # This fixes the issue where original field names were being converted to generic keys
-                    recharts_data.append(item)  # Keep the original structure with actual field names
-            else:
-                recharts_data.append(item)
+                    recharts_data.append(item)
     else:
         # For other chart types, use the data as is
         recharts_data = converted_chart_data

@@ -225,11 +225,12 @@ const COLOR_THEMES = {
 };
 
 // Fallback flat palette (first scheme spread + legacy colors)
+// Default palette for explore charts - base colors with lighter shades
 const DEFAULT_COLORS = [
-  COLOR_THEMES.default.primary,
-  COLOR_THEMES.default.secondary,
-  COLOR_THEMES.default.tertiary,
-  '#FFBB28', '#FF8042', '#8884D8', '#82CA9D'
+  '#FFBD59', '#FFC878', '#FFD897',
+  '#41C185', '#5CD29A', '#78E3AF',
+  '#458EE2', '#6BA4E8', '#91BAEE',
+  '#F5F5F5', '#E0E0E0', '#C5C5C5'
 ];
 
 const FONT_FAMILY = `'Inter', 'Segoe UI', sans-serif`;
@@ -363,36 +364,38 @@ const RechartsChartRenderer: React.FC<Props> = ({
 
   // Use data directly for rendering
   const chartDataForRendering = useMemo(() => {
+    if (!Array.isArray(data)) return [];
+
     // Helper function for case-insensitive legend field detection
     const hasLegendField = (dataArray: any[], legendField: string) => {
       if (!dataArray || dataArray.length === 0 || !legendField) return false;
-      
+
       const firstItem = dataArray[0];
       // First try exact match
       if (firstItem[legendField] !== undefined) return true;
-      
+
       // Then try case-insensitive match
       const keys = Object.keys(firstItem);
       return keys.some(key => key.toLowerCase() === legendField.toLowerCase());
     };
-    
+
     // If we have a legend field, prioritize using data that contains it
     if (legendField && data && data.length > 0 && hasLegendField(data, legendField)) {
       console.log('🎨 Legend field detected in data prop - using it for chart rendering');
       console.log('🎨 Legend field data sample:', data.slice(0, 3));
       return data;
     }
-    
+
     // Check if we have transformed data that preserves the legend field
     if (legendField && transformedDataWithLegend.length > 0 && hasLegendField(transformedDataWithLegend, legendField)) {
       console.log('🎨 Legend field found in transformed data - using it for chart rendering');
       console.log('🎨 Transformed data with legend field sample:', transformedDataWithLegend.slice(0, 3));
       return transformedDataWithLegend;
     }
-    
+
     // Otherwise, use the data prop
     console.log('🎨 Using data prop for rendering');
-    return data;
+    return Array.isArray(data) ? data : [];
   }, [legendField, data, transformedDataWithLegend]);
 
   // CRITICAL FIX: Ensure detected legend field is used consistently
@@ -439,7 +442,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
 
   const palette = useMemo(() => {
     const themePalette = (colors && colors.length > 0) ? colors : theme.palette;
-    return themePalette;
+    return themePalette && themePalette.length > 0 ? themePalette : DEFAULT_COLORS;
   }, [colors, currentTheme, theme.palette]);
   
   // Helper function to capitalize first letter of each word
@@ -863,16 +866,18 @@ const RechartsChartRenderer: React.FC<Props> = ({
 
 
   const renderChart = () => {
-    // Check if data is empty or invalid
+    // Check if data is empty or invalid (skip check for multi-pie structure)
     if (!chartDataForRendering || chartDataForRendering.length === 0 || !Array.isArray(chartDataForRendering)) {
-      return (
-        <div className="flex items-center justify-center h-full text-gray-500">
-          <div className="text-center">
-            <div className="text-lg font-medium">No Data Available</div>
-            <div className="text-sm">No data matches the current filter criteria</div>
+      if (!(type === 'pie_chart' && legendField && data && !Array.isArray(data))) {
+        return (
+          <div className="flex items-center justify-center h-full text-gray-500">
+            <div className="text-center">
+              <div className="text-lg font-medium">No Data Available</div>
+              <div className="text-sm">No data matches the current filter criteria</div>
+            </div>
           </div>
-        </div>
-      );
+        );
+      }
     }
     
     // Debug: Show what data is being used for rendering
@@ -1604,11 +1609,54 @@ const RechartsChartRenderer: React.FC<Props> = ({
       case 'pie_chart':
         // For pie charts with dual Y-axes, we need to handle it differently
         const hasDualYAxesForPie = yKeys.length > 1 || (yFields && yFields.length > 1);
-        
+
+        // Special case: legend field with multiple pie charts
+        if (legendField && data && !Array.isArray(data)) {
+          const pieGroups = data as Record<string, any[]>;
+          const measureKey = yKey || yFields?.[0] || 'value';
+          const nameKey = xKey || 'name';
+          return (
+            <div className="flex flex-wrap gap-8 justify-center">
+              {Object.entries(pieGroups).map(([legendValue, slices], idx) => (
+                <div key={legendValue} className="flex flex-col items-center">
+                  <p className="mb-2 font-semibold text-sm text-gray-700">{capitalizeWords(String(legendValue))}</p>
+                  <PieChart width={300} height={300}>
+                    <Pie
+                      data={slices}
+                      cx="50%"
+                      cy="50%"
+                      outerRadius="80%"
+                      innerRadius="20%"
+                      dataKey={measureKey}
+                      nameKey={nameKey}
+                      label={showDataLabels ? <CustomPieLabel /> : null}
+                      labelLine={false}
+                    >
+                      {slices.map((entry: any, sliceIdx: number) => (
+                        <Cell
+                          key={`cell-${sliceIdx}`}
+                          fill={palette[sliceIdx % palette.length]}
+                          stroke="#fff"
+                          strokeWidth={2}
+                        />
+                      ))}
+                    </Pie>
+                    <Tooltip
+                      cursor={{ stroke: palette[0], strokeWidth: 1, strokeOpacity: 0.4 }}
+                      formatter={(value: any) => (typeof value === 'number' ? formatTooltipNumber(value) : value)}
+                    />
+                    {showLegend && <Legend />}
+                  </PieChart>
+                </div>
+              ))}
+            </div>
+          );
+        }
+
         if (hasDualYAxesForPie) {
           // For dual Y-axes pie chart, we'll create a combined view or use the first Y-axis
           const primaryYKey = yKeys[0] || yFields[0];
-          
+
           return (
             <PieChart margin={{ top: 20, right: 20, left: 20, bottom: 60 }}>
               <Pie
@@ -1627,15 +1675,15 @@ const RechartsChartRenderer: React.FC<Props> = ({
                 animationEasing="ease-out"
               >
                 {chartDataForRendering.map((entry, index) => (
-                  <Cell 
-                    key={`cell-${index}`} 
+                  <Cell
+                    key={`cell-${index}`}
                     fill={palette[index % palette.length]}
                     stroke="#fff"
                     strokeWidth={2}
                   />
                 ))}
               </Pie>
-              <Tooltip 
+              <Tooltip
                 content={({ active, payload, label }) => {
                   if (active && payload && payload.length) {
                     return (
@@ -1649,15 +1697,15 @@ const RechartsChartRenderer: React.FC<Props> = ({
                           } else if (entry.dataKey === yKeys[1] || entry.dataKey === yFields?.[1]) {
                             displayName = yAxisLabels?.[1] || yFields?.[1] || 'Value';
                           }
-                          
+
                           return (
                             <div key={index} className="flex items-center gap-2 mb-1">
-                              <div 
-                                className="w-3 h-3 rounded-full" 
+                              <div
+                                className="w-3 h-3 rounded-full"
                                 style={{ backgroundColor: entry.color }}
                               />
                               <span className="text-sm font-medium text-gray-700">
-                                {displayName}: 
+                                {displayName}:
                               </span>
                               <span className="text-sm font-semibold text-gray-700">
                                 {typeof entry.value === 'number' ? formatTooltipNumber(entry.value) : entry.value}
@@ -1673,11 +1721,11 @@ const RechartsChartRenderer: React.FC<Props> = ({
                 cursor={{ stroke: palette[0], strokeWidth: 1, strokeOpacity: 0.4 }}
               />
               {showLegend && (
-                <Legend 
+                <Legend
                   layout="horizontal"
                   verticalAlign="bottom"
                   align="center"
-                  wrapperStyle={{ 
+                  wrapperStyle={{
                     paddingTop: '10px',
                     fontSize: '11px'
                   }}
@@ -1718,15 +1766,15 @@ const RechartsChartRenderer: React.FC<Props> = ({
                 animationEasing="ease-out"
               >
                 {chartDataForRendering.map((entry, index) => (
-                  <Cell 
-                    key={`cell-${index}`} 
+                  <Cell
+                    key={`cell-${index}`}
                     fill={palette[index % palette.length]}
                     stroke="#fff"
                     strokeWidth={2}
                   />
                 ))}
               </Pie>
-              <Tooltip 
+              <Tooltip
                 content={({ active, payload, label }) => {
                   if (active && payload && payload.length) {
                     return (
@@ -1740,15 +1788,15 @@ const RechartsChartRenderer: React.FC<Props> = ({
                           } else if (entry.dataKey === yKeys[1] || entry.dataKey === yFields?.[1]) {
                             displayName = yAxisLabels?.[1] || yFields?.[1] || 'Value';
                           }
-                          
+
                           return (
                             <div key={index} className="flex items-center gap-2 mb-1">
-                              <div 
-                                className="w-3 h-3 rounded-full" 
+                              <div
+                                className="w-3 h-3 rounded-full"
                                 style={{ backgroundColor: entry.color }}
                               />
                               <span className="text-sm font-medium text-gray-700">
-                                {displayName}: 
+                                {displayName}:
                               </span>
                               <span className="text-sm font-semibold text-gray-700">
                                 {typeof entry.value === 'number' ? formatTooltipNumber(entry.value) : entry.value}
@@ -1764,11 +1812,11 @@ const RechartsChartRenderer: React.FC<Props> = ({
                 cursor={{ stroke: palette[0], strokeWidth: 1, strokeOpacity: 0.4 }}
               />
               {showLegend && (
-                <Legend 
+                <Legend
                   layout="horizontal"
                   verticalAlign="bottom"
                   align="center"
-                  wrapperStyle={{ 
+                  wrapperStyle={{
                     paddingTop: '10px',
                     fontSize: '11px'
                   }}

@@ -15,6 +15,14 @@ import { EXPLORE_API } from '@/lib/api';
 import { toast } from '@/components/ui/use-toast';
 import './ExploreCanvas.css';
 
+// Chart color palette using specified base colors and lighter shades
+const CHART_COLORS = [
+  '#FFBD59', '#FFC878', '#FFD897',
+  '#41C185', '#5CD29A', '#78E3AF',
+  '#458EE2', '#6BA4E8', '#91BAEE',
+  '#F5F5F5', '#E0E0E0', '#C5C5C5'
+];
+
 interface ExploreCanvasProps {
   data: ExploreData;
   isApplied: boolean;
@@ -25,7 +33,7 @@ interface ExploreCanvasProps {
 interface ChartData {
   status: string;
   chart_type: string;
-  data: any[];
+  data: any; // can be array or object depending on chart type
   metadata: any;
 }
 
@@ -36,7 +44,7 @@ const chartTypes = [
 ];
 
 const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataChange, onChartDataChange }) => {
-  const [chartDataSets, setChartDataSets] = useState<{ [idx: number]: any[] }>({});
+  const [chartDataSets, setChartDataSets] = useState<{ [idx: number]: any }>({});
   const svgRef = useRef<SVGSVGElement>(null);
   const [chartData, setChartData] = useState<ChartData | null>(null);
   const [isLoading, setIsLoading] = useState<{ [chartIndex: number]: boolean }>({});
@@ -95,7 +103,7 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
   const [loadingUniqueValues, setLoadingUniqueValues] = useState<{ [identifier: string]: boolean }>({});
   const [openDropdowns, setOpenDropdowns] = useState<{ [key: string]: boolean }>({});
   const [appliedFilters, setAppliedFilters] = useState<{ [chartIndex: number]: boolean }>({});
-  const [originalChartData, setOriginalChartData] = useState<{ [chartIndex: number]: any[] }>({});
+  const [originalChartData, setOriginalChartData] = useState<{ [chartIndex: number]: any }>({});
   const [chartGenerated, setChartGenerated] = useState<{ [chartIndex: number]: boolean }>({});
   const [chartThemes, setChartThemes] = useState<{ [chartIndex: number]: string }>({});
   const [chartOptions, setChartOptions] = useState<{ [chartIndex: number]: { grid: boolean; legend: boolean; axisLabels: boolean; dataLabels: boolean } }>({});
@@ -1230,15 +1238,15 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
       console.log('🔍 ExploreCanvas: Raw result.data keys:', result.data?.[0] ? Object.keys(result.data[0]) : 'No data');
       
       const chartData = result.data || [];
-      
+
       console.log('🔍 ExploreCanvas: Chart generation result:', result);
       console.log('🔍 ExploreCanvas: Chart data for index', index, ':', chartData);
-      console.log('🔍 ExploreCanvas: Chart data length:', chartData.length);
-      console.log('🔍 ExploreCanvas: Chart data type:', typeof chartData);
       console.log('🔍 ExploreCanvas: Chart data is array:', Array.isArray(chartData));
-      
+      console.log('🔍 ExploreCanvas: Chart data length:', Array.isArray(chartData) ? chartData.length : Object.keys(chartData).length);
+      console.log('🔍 ExploreCanvas: Chart data type:', typeof chartData);
+
       // Verify that chart data contains the expected Y-axes
-      if (chartData.length > 0) {
+      if (Array.isArray(chartData) && chartData.length > 0) {
         const firstItem = chartData[0];
         const availableKeys = Object.keys(firstItem);
         console.log('🔍 ExploreCanvas: Available keys in chart data:', availableKeys);
@@ -1248,25 +1256,24 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
           console.warn('🔍 ExploreCanvas: Missing Y-axes in chart data:', missingYAxes);
         }
       }
-      
+
       // Check if chart data has the expected structure
-      if (chartData.length > 0) {
+      if (Array.isArray(chartData) && chartData.length > 0) {
         console.log('🔍 ExploreCanvas: First chart data item:', chartData[0]);
         console.log('🔍 ExploreCanvas: Chart data keys:', Object.keys(chartData[0] || {}));
         console.log('🔍 ExploreCanvas: Chart data structure:', JSON.stringify(chartData[0], null, 2));
+      } else if (!Array.isArray(chartData)) {
+        console.log('🔍 ExploreCanvas: Chart data is object with keys:', Object.keys(chartData));
       } else {
         console.log('🔍 ExploreCanvas: No chart data returned - this might be due to filters or no matching data');
         console.log('🔍 ExploreCanvas: Full result object:', JSON.stringify(result, null, 2));
-        // If no data is returned, we should still update the chart data sets to trigger a re-render
-        // This will show the "No data available" message
       }
-      
-      console.log('🔍 ExploreCanvas: Raw chart data structure:', chartData);
-      console.log('🔍 ExploreCanvas: Chart data length:', chartData?.length);
-      console.log('🔍 ExploreCanvas: Chart data keys:', chartData?.[0] ? Object.keys(chartData[0]) : []);
+
       console.log('🔍 ExploreCanvas: Legend field in config:', config.legendField);
-      console.log('🔍 ExploreCanvas: Legend field values in data:', config.legendField ? [...new Set(chartData?.map(item => item[config.legendField]) || [])] : 'N/A');
-      
+      if (Array.isArray(chartData) && config.legendField) {
+        console.log('🔍 ExploreCanvas: Legend field values in data:', [...new Set(chartData.map(item => item[config.legendField]) || [])]);
+      }
+
       setChartDataSets(prev => {
         const newData = {
           ...prev,
@@ -1274,17 +1281,20 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
         };
 
         console.log('🔍 ExploreCanvas: Updated chart data sets:', newData);
-        console.log('🔍 ExploreCanvas: Chart data for index', index, 'after update:', newData[index]);
-        console.log('🔍 ExploreCanvas: Chart data length after update:', newData[index]?.length);
-        console.log('🔍 ExploreCanvas: Chart data keys after update:', newData[index] ? Object.keys(newData[index][0] || {}) : []);
+        if (Array.isArray(newData[index])) {
+          console.log('🔍 ExploreCanvas: Chart data for index', index, 'after update:', newData[index]);
+          console.log('🔍 ExploreCanvas: Chart data length after update:', newData[index]?.length);
+          console.log('🔍 ExploreCanvas: Chart data keys after update:', newData[index] ? Object.keys(newData[index][0] || {}) : []);
+        } else {
+          console.log('🔍 ExploreCanvas: Chart data for index', index, 'is object with keys:', Object.keys(newData[index] || {}));
+        }
         console.log('🔍 ExploreCanvas: Y-axes in config when updating data:', config.yAxes);
-        console.log('🔍 ExploreCanvas: Chart data structure check:', newData[index]?.[0]);
-        
+
         // Store original data if no filters are applied
-        const hasFilters = chartFilters[index] && Object.keys(chartFilters[index]).some(key => 
+        const hasFilters = chartFilters[index] && Object.keys(chartFilters[index]).some(key =>
           Array.isArray(chartFilters[index][key]) && chartFilters[index][key].length > 0
         );
-        
+
         if (!hasFilters) {
           setOriginalChartData(prev => ({
             ...prev,
@@ -1292,10 +1302,10 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
           }));
           console.log('🔍 ExploreCanvas: Stored original chart data for index:', index);
         }
-        
+
         // Force a re-render by updating the chart data state as well
         setChartData(result);
-        
+
         return newData;
       });
       
@@ -2373,10 +2383,11 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                             xAxisLabel={config.xAxisLabel || config.xAxis || ''}
                             yAxisLabel={config.yAxisLabels[0] || config.yAxes[0] || ''}
                             yFields={config.yAxes}
-                            yAxisLabels={config.yAxes.map((yAxis: string, idx: number) => 
+                            yAxisLabels={config.yAxes.map((yAxis: string, idx: number) =>
                               config.yAxisLabels[idx] || yAxis || ''
                             )}
                             legendField={config.legendField || undefined}
+                            colors={CHART_COLORS}
                             // Add debugging props to help troubleshoot
                             data-testid={`chart-${index}`}
                             data-yaxes={JSON.stringify(config.yAxes)}
