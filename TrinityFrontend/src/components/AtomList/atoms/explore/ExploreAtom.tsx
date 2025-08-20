@@ -90,12 +90,9 @@ const ExploreAtom: React.FC<ExploreAtomProps> = ({ atomId }) => {
   }), [atom?.settings?.data]);
 
   const isApplied = useMemo(() => {
-    // Check if settings have been explicitly applied (this is the primary indicator)
-    const hasAppliedSettings = atom?.settings?.applied === true;
-    
-    // Only consider it applied if settings have been explicitly applied
-    return hasAppliedSettings;
-  }, [atom?.settings?.applied]);
+    // Check if settings have been explicitly applied within the atom's data
+    return atom?.settings?.data?.applied === true;
+  }, [atom?.settings?.data?.applied]);
 
   const appliedConfig = data;
 

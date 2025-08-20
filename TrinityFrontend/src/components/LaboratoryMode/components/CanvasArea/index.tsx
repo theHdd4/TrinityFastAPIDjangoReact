@@ -551,6 +551,8 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
             ? { ...DEFAULT_DATAUPLOAD_SETTINGS }
             : atom.id === 'feature-overview'
             ? { ...DEFAULT_FEATURE_OVERVIEW_SETTINGS }
+            : atom.id === 'explore'
+            ? { data: {}, settings: {} }
             : atom.id === 'chart-maker'
             ? { ...DEFAULT_CHART_MAKER_SETTINGS }
             : undefined,
