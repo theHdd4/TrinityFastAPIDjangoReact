@@ -20,6 +20,7 @@ import { AIChatBot, AtomAIChatBot } from '@/components/TrinityAI';
 import TextBoxEditor from '@/components/AtomList/atoms/text-box/TextBoxEditor';
 import DataUploadValidateAtom from '@/components/AtomList/atoms/data-upload-validate/DataUploadValidateAtom';
 import FeatureOverviewAtom from '@/components/AtomList/atoms/feature-overview/FeatureOverviewAtom';
+import ExploreAtom from '@/components/AtomList/atoms/explore/ExploreAtom';
 import ConcatAtom from '@/components/AtomList/atoms/concat/ConcatAtom';
 import MergeAtom from '@/components/AtomList/atoms/merge/MergeAtom';
 import ColumnClassifierAtom from '@/components/AtomList/atoms/column-classifier/ColumnClassifierAtom';
@@ -281,6 +282,19 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
       numericColumns: Array.isArray(prev.numeric) ? prev.numeric : [],
       dimensionMap: mapping,
       xAxis: prev.xField || 'date',
+    });
+  };
+
+  const prefillExplore = async (atomId: string) => {
+    const prev = await findLatestDataSource();
+    if (!prev || !prev.csv) {
+      console.warn('⚠️ no data source found for explore');
+      return;
+    }
+    await prefetchDataframe(prev.csv);
+    updateAtomSettings(atomId, {
+      dataSource: prev.csv,
+      csvDisplay: prev.display || prev.csv,
     });
   };
 
@@ -565,6 +579,8 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
 
       if (atom.id === 'feature-overview') {
         prefillFeatureOverview(cardId, newAtom.id);
+      } else if (atom.id === 'explore') {
+        prefillExplore(newAtom.id);
       } else if (atom.id === 'column-classifier') {
         prefillColumnClassifier(newAtom.id);
       }
@@ -638,6 +654,8 @@ const addNewCardWithAtom = (
 
   if (atomId === 'feature-overview') {
     prefillFeatureOverview(newCard.id, newAtom.id);
+  } else if (atomId === 'explore') {
+    prefillExplore(newAtom.id);
   } else if (atomId === 'column-classifier') {
     prefillColumnClassifier(newAtom.id);
   }
@@ -725,6 +743,8 @@ const handleAddDragLeave = (e: React.DragEvent) => {
 
     if (info.id === 'feature-overview') {
       prefillFeatureOverview(cardId, newAtom.id);
+    } else if (info.id === 'explore') {
+      prefillExplore(newAtom.id);
     } else if (info.id === 'column-classifier') {
       prefillColumnClassifier(newAtom.id);
     }
@@ -834,6 +854,8 @@ const handleAddDragLeave = (e: React.DragEvent) => {
     for (const atom of card.atoms) {
       if (atom.atomId === 'feature-overview') {
         await prefillFeatureOverview(cardId, atom.id);
+      } else if (atom.atomId === 'explore') {
+        await prefillExplore(atom.id);
       } else if (atom.atomId === 'column-classifier') {
         await prefillColumnClassifier(atom.id);
       }
@@ -1182,6 +1204,8 @@ const handleAddDragLeave = (e: React.DragEvent) => {
                         <DataUploadValidateAtom atomId={atom.id} />
                       ) : atom.atomId === 'feature-overview' ? (
                         <FeatureOverviewAtom atomId={atom.id} />
+                      ) : atom.atomId === 'explore' ? (
+                        <ExploreAtom atomId={atom.id} />
                       ) : atom.atomId === 'chart-maker' ? (
                         <ChartMakerAtom atomId={atom.id} />
                       ) : atom.atomId === 'concat' ? (

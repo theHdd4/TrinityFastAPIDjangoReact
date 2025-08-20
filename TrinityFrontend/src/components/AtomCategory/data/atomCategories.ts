@@ -111,8 +111,8 @@ export const atomCategories: AtomCategory[] = [
     icon: BarChart3,
     color: 'bg-purple-500',
     atoms: [
-      correlation,
       explore,
+      correlation,
       descriptiveStats,
       trendAnalysis
     ]
