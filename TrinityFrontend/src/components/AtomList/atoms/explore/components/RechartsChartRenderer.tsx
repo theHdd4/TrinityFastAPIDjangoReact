@@ -462,6 +462,12 @@ const RechartsChartRenderer: React.FC<Props> = ({
   ): { pivoted: any[]; uniqueValues: string[] } => {
     if (!rows || rows.length === 0) return { pivoted: [], uniqueValues: [] };
 
+    // Case-insensitive matching of provided keys to actual row keys
+    const sampleRow = rows[0] || {};
+    const actualXKey = Object.keys(sampleRow).find(k => k.toLowerCase() === xKey.toLowerCase()) || xKey;
+    const actualYKey = Object.keys(sampleRow).find(k => k.toLowerCase() === yKey.toLowerCase()) || yKey;
+    const actualLegendKey = Object.keys(sampleRow).find(k => k.toLowerCase() === legendKey.toLowerCase()) || legendKey;
+
     // Collect unique legend values preserving insertion order
     const uniqueValues: string[] = [];
 
@@ -469,10 +475,10 @@ const RechartsChartRenderer: React.FC<Props> = ({
     const map = new Map<string | number, any>();
 
     rows.forEach((row) => {
-      const xVal = row[xKey];
-      const legendVal = row[legendKey];
-      const yVal = row[yKey];
-      if (!uniqueValues.includes(legendVal)) uniqueValues.push(legendVal);
+      const xVal = row[actualXKey];
+      const legendVal = row[actualLegendKey];
+      const yVal = row[actualYKey];
+      if (legendVal !== undefined && !uniqueValues.includes(legendVal)) uniqueValues.push(legendVal);
 
       const existing = map.get(xVal) || { [xKey]: xVal };
       existing[legendVal] = yVal;

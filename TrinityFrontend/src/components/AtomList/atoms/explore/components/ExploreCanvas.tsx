@@ -1841,20 +1841,17 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                           <span className="text-gray-500">No Legend</span>
                         </div>
                       </SelectItem>
-                      {Array.isArray(allAvailableColumns) ? allAvailableColumns.map((column, idx) => (
-                        <SelectItem key={idx} value={column}>
-                          <div className="flex items-center space-x-2">
-                            <span>{column}</span>
-                            {availableIdentifiers.includes(column) && (
+                      {Array.isArray(availableIdentifiers) && availableIdentifiers.length > 0 ? (
+                        availableIdentifiers.map((column, idx) => (
+                          <SelectItem key={idx} value={column}>
+                            <div className="flex items-center space-x-2">
+                              <span>{column}</span>
                               <span className="text-xs text-blue-600 bg-blue-50 px-1 rounded">ID</span>
-                            )}
-                            {availableMeasures.includes(column) && (
-                              <span className="text-xs text-green-600 bg-blue-50 px-1 rounded">M</span>
-                            )}
-                          </div>
-                        </SelectItem>
-                      )) : (
-                        <div className="text-xs text-gray-500 p-2">No column classifier config</div>
+                            </div>
+                          </SelectItem>
+                        ))
+                      ) : (
+                        <div className="text-xs text-gray-500 p-2">No categorical columns</div>
                       )}
                     </SelectContent>
                   </Select>
