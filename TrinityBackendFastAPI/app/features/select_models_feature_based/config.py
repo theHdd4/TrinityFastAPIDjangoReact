@@ -1,9 +1,9 @@
 # app/config.py
 
-from pydantic_settings import BaseSettings
-from pydantic import ValidationError
 from functools import lru_cache
 from typing import Optional
+
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
@@ -30,20 +30,19 @@ class Settings(BaseSettings):
     
     # API Configuration
     api_prefix: str = "/api/v1"
-    
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
-        case_sensitive = False
+
+    # Pydantic v2 settings configuration
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore",
+    )
 
 @lru_cache()
 def get_settings() -> Settings:
     """Get cached settings instance."""
-    try:
-        return Settings()
-    except ValidationError:
-        # Fall back to defaults when environment variables are invalid
-        return Settings.model_validate({})
+    return Settings()
 
 # Global settings instance
 settings = get_settings()
