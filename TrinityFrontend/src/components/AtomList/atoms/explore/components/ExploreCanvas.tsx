@@ -71,7 +71,6 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
     
     // Set new timeout
     chartGenerationTimeouts.current[chartIndex] = setTimeout(() => {
-      console.log('🔍 ExploreCanvas: Executing debounced chart generation for index:', chartIndex);
       generateChart(chartIndex, false, config);
       chartGenerationTimeouts.current[chartIndex] = null;
     }, delay);
@@ -434,10 +433,7 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
           return true;
         });
         const filteredCount = allIdentifiers.length;
-        if (originalCount !== filteredCount) {
-          console.log('🔍 ExploreCanvas: Filtered allIdentifiers:', originalCount, '->', filteredCount);
-        }
-      }
+              }
       
       // Fetch unique values for each identifier
       allIdentifiers.forEach(identifier => {
@@ -893,13 +889,11 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
       }
 
       const result = await response.json();
-      console.log('Explore atom created:', result);
       
       // Update the dataframe reference
       onDataChange({ dataframe: result.explore_atom_id });
       
     } catch (err) {
-      console.error('Error creating explore atom:', err);
       setError(err instanceof Error ? err.message : 'Unknown error occurred');
     } finally {
       setIsLoading(prev => ({ ...prev, 0: false }));
@@ -923,8 +917,6 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
   
   // Multi-selection filter handler
   const handleMultiSelectFilterChange = (chartIndex: number, identifier: string, values: string[]) => {
-    console.log(`🔍 ExploreCanvas: handleMultiSelectFilterChange called for chart ${chartIndex}, identifier ${identifier} with values:`, values);
-    console.log(`🔍 ExploreCanvas: Previous state for chart ${chartIndex}:`, chartFilters[chartIndex]);
     
     setChartFilters(prev => {
       const newState = {
@@ -934,22 +926,15 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
           [identifier]: values
         }
       };
-      console.log(`🔍 ExploreCanvas: New chartFilters state for chart ${chartIndex}:`, newState[chartIndex]);
       return newState;
     });
     
     // Don't regenerate chart immediately - let user apply multiple filters first
-    console.log('🔍 ExploreCanvas: Filter changed for', identifier, ':', values);
   };
   
   // Apply filters and regenerate chart
   const applyFilters = (chartIndex: number) => {
     if (chartConfigs[chartIndex]?.xAxis && hasValidYAxes(chartConfigs[chartIndex]?.yAxes)) {
-      console.log('🔍 ExploreCanvas: Applying filters and regenerating chart for index:', chartIndex);
-      console.log('🔍 ExploreCanvas: Chart type:', chartConfigs[chartIndex]?.chartType);
-      console.log('🔍 ExploreCanvas: Current filters for chart:', chartFilters[chartIndex]);
-      console.log('🔍 ExploreCanvas: X-axis:', chartConfigs[chartIndex]?.xAxis);
-      console.log('🔍 ExploreCanvas: Y-axes:', chartConfigs[chartIndex]?.yAxes);
       
       // Set applied filters state
       setAppliedFilters(prev => ({ ...prev, [chartIndex]: true }));
@@ -958,19 +943,12 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
       setChartDataSets(prev => {
         const newData = { ...prev };
         delete newData[chartIndex];
-        console.log('🔍 ExploreCanvas: Cleared chart data for index:', chartIndex);
         return newData;
       });
       
       // Generate chart with filters
-      console.log('🔍 ExploreCanvas: Calling generateChart with filters for index:', chartIndex);
       generateChart(chartIndex, false);
-    } else {
-      console.log('🔍 ExploreCanvas: Cannot apply filters - missing X or Y axis configuration');
-      console.log('🔍 ExploreCanvas: X-axis:', chartConfigs[chartIndex]?.xAxis);
-      console.log('🔍 ExploreCanvas: Y-axes:', chartConfigs[chartIndex]?.yAxes);
-    }
-  };
+    }   };
   
   const resetFilters = (chartIndex: number) => {
     // Clear all filters for this chart
@@ -1007,14 +985,12 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
     
     // Restore original chart data if available
     if (originalChartData[chartIndex]) {
-      console.log('🔍 ExploreCanvas: Restoring original chart data for index:', chartIndex);
       setChartDataSets(prev => ({
         ...prev,
         [chartIndex]: originalChartData[chartIndex]
       }));
     } else if (chartConfigs[chartIndex]?.xAxis && hasValidYAxes(chartConfigs[chartIndex]?.yAxes)) {
       // If no original data available, regenerate chart without filters
-      console.log('🔍 ExploreCanvas: No original data, regenerating chart for index:', chartIndex);
       generateChart(chartIndex, true); // Pass true to indicate reset mode
     }
   };
@@ -1042,11 +1018,9 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
             ...prev,
             [identifier]: columnSummary.unique_values
           }));
-          console.log(`🔍 ExploreCanvas: Fetched unique values for ${identifier}:`, columnSummary.unique_values);
         }
       }
     } catch (error) {
-      console.error(`Error fetching unique values for ${identifier}:`, error);
     } finally {
       // Clear loading state
       setLoadingUniqueValues(prev => ({ ...prev, [identifier]: false }));
@@ -1055,11 +1029,7 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
 
   // Generate chart data
   const generateChart = async (index: number, resetMode: boolean = false, customConfig?: any) => {
-    console.log('🔍 ExploreCanvas: generateChart function called with index:', index);
     const config = customConfig || chartConfigs[index];
-    console.log('🔍 ExploreCanvas: Chart config for index', index, ':', config);
-    console.log('🔍 ExploreCanvas: Using custom config:', !!customConfig);
-    console.log('🔍 ExploreCanvas: Custom config details:', customConfig);
     
     try {
       setIsLoading(prev => ({ ...prev, [index]: true }));
@@ -1078,8 +1048,6 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
       // Check if we have any available columns for chart generation
       const hasAvailableColumns = allAvailableColumns.length > 0;
 
-      console.log('🔍 ExploreCanvas: Chart generation - allAvailableColumns:', allAvailableColumns);
-      console.log('🔍 ExploreCanvas: Chart generation - hasAvailableColumns:', hasAvailableColumns);
 
       if (!hasAvailableColumns) {
         setError('No columns available for chart generation.');
@@ -1087,10 +1055,6 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
       }
 
       // Allow both identifiers and measures for X and Y axes
-      console.log('🔍 ExploreCanvas: Generating chart with config:', config);
-      console.log('🔍 ExploreCanvas: X-axis:', config.xAxis);
-      console.log('🔍 ExploreCanvas: Y-axes:', config.yAxes);
-      console.log('🔍 ExploreCanvas: Legend field:', config.legendField);
 
       const dimensions = safeData.columnClassifierConfig
         ? Object.keys(safeData.columnClassifierConfig.dimensions || {})
@@ -1098,11 +1062,8 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
       const measures = safeData.columnClassifierConfig
         ? safeData.columnClassifierConfig.measures || []
         : safeData.fallbackMeasures || [];
-      console.log('🔍 ExploreCanvas: Available dimensions:', dimensions);
-      console.log('🔍 ExploreCanvas: Available measures:', measures);
 
       const availableColumns = [...dimensions, ...measures];
-      console.log('🔍 ExploreCanvas: Available columns for chart generation:', availableColumns);
       
 
 
@@ -1122,8 +1083,6 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
 
 
       // Create explore atom
-      console.log('🔍 ExploreCanvas: Creating explore atom with dimensions:', selectedDimensions);
-      console.log('🔍 ExploreCanvas: Creating explore atom with measures:', selectedMeasures);
       
       const createResponse = await fetch(`${EXPLORE_API}/select-dimensions-and-measures`, {
         method: 'POST',
@@ -1138,17 +1097,14 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
         })
       });
 
-      console.log('🔍 ExploreCanvas: Create explore atom response status:', createResponse.status);
       
       if (!createResponse.ok) {
         const errorText = await createResponse.text();
-        console.error('🔍 ExploreCanvas: Failed to create explore atom:', errorText);
         throw new Error(`Failed to create explore atom: ${createResponse.status} - ${errorText}`);
       }
 
       const createResult = await createResponse.json();
       const exploreAtomId = createResult.explore_atom_id;
-      console.log('🔍 ExploreCanvas: Created explore atom with ID:', exploreAtomId);
       
 
 
@@ -1161,21 +1117,15 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
           values: values
         }));
       
-      console.log('🔍 ExploreCanvas: Chart filters for index', index, ':', chartFiltersData);
-      console.log('🔍 ExploreCanvas: Filters list:', filtersList);
-      console.log('🔍 ExploreCanvas: Reset mode:', resetMode);
       
       // Specify operations for the chart - flexible for both identifiers and measures
       // Handle multiple Y-axes
       const measuresConfig: { [key: string]: string } = {};
-      console.log('🔍 ExploreCanvas: Building measures config for Y-axes:', config.yAxes);
       config.yAxes.forEach((yAxis: string, index: number) => {
         if (yAxis && yAxis.trim()) {
           measuresConfig[yAxis] = config.aggregation || 'no_aggregation';
-          console.log('🔍 ExploreCanvas: Added measure config for Y-axis:', yAxis, 'with aggregation:', config.aggregation || 'no_aggregation');
         }
       });
-      console.log('🔍 ExploreCanvas: Final measures config:', measuresConfig);
       
       const operationsPayload = {
         file_key: safeData.dataframe,
@@ -1187,16 +1137,12 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
         weight_column: config.weightColumn || null
       };
       
-      console.log('🔍 ExploreCanvas: Operations payload:', operationsPayload);
-      console.log('🔍 ExploreCanvas: Chart type being sent to API:', config.chartType);
-      console.log('🔍 ExploreCanvas: Group by fields:', config.legendField ? [config.xAxis, config.legendField] : [config.xAxis]);
 
 
 
 
 
       // Specify operations
-      console.log('🔍 ExploreCanvas: Specifying operations for explore atom ID:', exploreAtomId);
       const operationsResponse = await fetch(`${EXPLORE_API}/specify-operations`, {
         method: 'POST',
         headers: {
@@ -1208,88 +1154,33 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
         })
       });
 
-      console.log('🔍 ExploreCanvas: Operations response status:', operationsResponse.status);
       
       if (!operationsResponse.ok) {
         const errorText = await operationsResponse.text();
-        console.error('🔍 ExploreCanvas: Operations specification failed:', errorText);
         throw new Error(`Operations specification failed: ${operationsResponse.status} - ${errorText}`);
       }
       
       const operationsResult = await operationsResponse.json();
-      console.log('🔍 ExploreCanvas: Operations result:', operationsResult);
 
       // Get the chart data
-      console.log('🔍 ExploreCanvas: Fetching chart data for explore atom ID:', exploreAtomId);
       const chartResponse = await fetch(`${EXPLORE_API}/chart-data-multidim/${exploreAtomId}`);
       
-      console.log('🔍 ExploreCanvas: Chart data response status:', chartResponse.status);
       
       if (!chartResponse.ok) {
         const errorText = await chartResponse.text();
-        console.error('🔍 ExploreCanvas: Chart data fetch failed:', errorText);
         throw new Error(`Chart data fetch failed: ${chartResponse.status} - ${errorText}`);
       }
 
       const result = await chartResponse.json();
-      console.log('🔍 ExploreCanvas: Chart data response:', result);
-      console.log('🔍 ExploreCanvas: Raw result.data:', result.data);
-      console.log('🔍 ExploreCanvas: Raw result.data[0]:', result.data?.[0]);
-      console.log('🔍 ExploreCanvas: Raw result.data keys:', result.data?.[0] ? Object.keys(result.data[0]) : 'No data');
       
       const chartData = result.data || [];
 
-      console.log('🔍 ExploreCanvas: Chart generation result:', result);
-      console.log('🔍 ExploreCanvas: Chart data for index', index, ':', chartData);
-      console.log('🔍 ExploreCanvas: Chart data is array:', Array.isArray(chartData));
-      console.log('🔍 ExploreCanvas: Chart data length:', Array.isArray(chartData) ? chartData.length : Object.keys(chartData).length);
-      console.log('🔍 ExploreCanvas: Chart data type:', typeof chartData);
-
-      // Verify that chart data contains the expected Y-axes
-      if (Array.isArray(chartData) && chartData.length > 0) {
-        const firstItem = chartData[0];
-        const availableKeys = Object.keys(firstItem);
-        console.log('🔍 ExploreCanvas: Available keys in chart data:', availableKeys);
-        console.log('🔍 ExploreCanvas: Expected Y-axes:', config.yAxes);
-        const missingYAxes = config.yAxes.filter(yAxis => yAxis && !availableKeys.includes(yAxis));
-        if (missingYAxes.length > 0) {
-          console.warn('🔍 ExploreCanvas: Missing Y-axes in chart data:', missingYAxes);
-        }
-      }
-
-      // Check if chart data has the expected structure
-      if (Array.isArray(chartData) && chartData.length > 0) {
-        console.log('🔍 ExploreCanvas: First chart data item:', chartData[0]);
-        console.log('🔍 ExploreCanvas: Chart data keys:', Object.keys(chartData[0] || {}));
-        console.log('🔍 ExploreCanvas: Chart data structure:', JSON.stringify(chartData[0], null, 2));
-      } else if (!Array.isArray(chartData)) {
-        console.log('🔍 ExploreCanvas: Chart data is object with keys:', Object.keys(chartData));
-      } else {
-        console.log('🔍 ExploreCanvas: No chart data returned - this might be due to filters or no matching data');
-        console.log('🔍 ExploreCanvas: Full result object:', JSON.stringify(result, null, 2));
-      }
-
-      console.log('🔍 ExploreCanvas: Legend field in config:', config.legendField);
-      if (Array.isArray(chartData) && config.legendField) {
-        console.log('🔍 ExploreCanvas: Legend field values in data:', [...new Set(chartData.map(item => item[config.legendField]) || [])]);
-      }
 
       setChartDataSets(prev => {
         const newData = {
           ...prev,
           [index]: chartData
         };
-
-        console.log('🔍 ExploreCanvas: Updated chart data sets:', newData);
-        if (Array.isArray(newData[index])) {
-          console.log('🔍 ExploreCanvas: Chart data for index', index, 'after update:', newData[index]);
-          console.log('🔍 ExploreCanvas: Chart data length after update:', newData[index]?.length);
-          console.log('🔍 ExploreCanvas: Chart data keys after update:', newData[index] ? Object.keys(newData[index][0] || {}) : []);
-        } else {
-          console.log('🔍 ExploreCanvas: Chart data for index', index, 'is object with keys:', Object.keys(newData[index] || {}));
-        }
-        console.log('🔍 ExploreCanvas: Y-axes in config when updating data:', config.yAxes);
-
         // Store original data if no filters are applied
         const hasFilters = chartFilters[index] && Object.keys(chartFilters[index]).some(key =>
           Array.isArray(chartFilters[index][key]) && chartFilters[index][key].length > 0
@@ -1300,7 +1191,6 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
             ...prev,
             [index]: chartData
           }));
-          console.log('🔍 ExploreCanvas: Stored original chart data for index:', index);
         }
 
         // Force a re-render by updating the chart data state as well
@@ -1366,7 +1256,6 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
       setAvailableIdentifiers(identifiers);
       setAvailableMeasures(measures);
     } catch (error) {
-      console.error('Error loading column classifier config:', error);
       // Fall back to all columns if something goes wrong
       setAvailableIdentifiers(safeData.allColumns || []);
       setAvailableMeasures(safeData.allColumns || []);
@@ -1383,28 +1272,15 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
 
   // Log available columns for debugging
   
-  console.log('🔍 ExploreCanvas: Selected dimensions:', selectedDimensions);
-  console.log('🔍 ExploreCanvas: Column classifier config dimensions:', dimensionsWithIdentifiers);
-  console.log('🔍 ExploreCanvas: Available identifiers:', availableIdentifiers);
-  console.log('🔍 ExploreCanvas: Available measures:', availableMeasures);
-  console.log('🔍 ExploreCanvas: All available columns for dropdowns:', allAvailableColumns);
-  console.log('🔍 ExploreCanvas: Column classifier config:', safeData.columnClassifierConfig);
-  console.log('🔍 ExploreCanvas: Column classifier dimensions:', safeData.columnClassifierConfig?.dimensions);
-  console.log('🔍 ExploreCanvas: Column classifier measures:', safeData.columnClassifierConfig?.measures);
 
   // Sample dimensions with identifiers for the filter UI - ONLY show selected dimensions
-  console.log('🔍 ExploreCanvas: selectedDimensions:', selectedDimensions);
-  console.log('🔍 ExploreCanvas: selectedDimensions type:', typeof selectedDimensions);
-  console.log('🔍 ExploreCanvas: selectedDimensions is array:', Array.isArray(selectedDimensions));
   
   // Only process dimensions that exist in the column classifier config
   const availableDimensionKeys = Object.keys(dimensionsWithIdentifiers);
-  console.log('🔍 ExploreCanvas: Available dimension keys from column classifier:', availableDimensionKeys);
   
   // Filter selectedDimensions to only include those that exist in column classifier config
   const validSelectedDimensions = Array.isArray(selectedDimensions) ? 
     selectedDimensions.filter(dimension => availableDimensionKeys.includes(dimension)) : [];
-  console.log('🔍 ExploreCanvas: Valid selected dimensions:', validSelectedDimensions);
   
   const sampleDimensions = validSelectedDimensions.length > 0 ? validSelectedDimensions.map(dimension => {
     // Since we've already filtered to valid dimensions, we can directly access them
@@ -1418,23 +1294,14 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
         if (colInfo && typeof colInfo.unique_count === 'number') {
           // Only include identifiers with more than 1 unique value
           const hasMultipleValues = colInfo.unique_count > 1;
-          if (!hasMultipleValues) {
-            console.log('🔍 ExploreCanvas: Filtering out identifier', identifier, 'with only', colInfo.unique_count, 'unique values');
-          }
-          return hasMultipleValues;
+                    return hasMultipleValues;
         }
         // If we can't determine unique count, include it (fallback behavior)
-        console.log('🔍 ExploreCanvas: Could not determine unique count for identifier', identifier, '- including it as fallback');
         return true;
       });
       const filteredCount = identifiers.length;
-      if (originalCount !== filteredCount) {
-        console.log('🔍 ExploreCanvas: Filtered identifiers for dimension', dimension, ':', originalCount, '->', filteredCount);
-      }
-    }
+          }
     
-    console.log('🔍 ExploreCanvas: Processing dimension:', dimension);
-    console.log('🔍 ExploreCanvas: Identifiers for dimension (after filtering):', identifiers);
     
     return {
       id: dimension,
@@ -1443,7 +1310,6 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
     };
   }).filter(dimension => dimension.identifiers.length > 0) : [];
   
-  console.log('🔍 ExploreCanvas: Final sample dimensions for filters:', sampleDimensions);
 
   // Render identifier chip for filter UI
   const renderIdentifierChip = (dimensionId: string, identifier: string) => {
@@ -1454,27 +1320,14 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
       if (Array.isArray(safeData.columnSummary)) {
         const colInfo: any = safeData.columnSummary.find((c: any) => c.column === ident);
         if (colInfo && Array.isArray(colInfo.unique_values)) {
-          console.log('🔍 ExploreCanvas: Found column info for', ident, ':', colInfo);
-          console.log('🔍 ExploreCanvas: Unique values count:', colInfo.unique_values.length);
-          console.log('🔍 ExploreCanvas: Is numerical:', colInfo.is_numerical);
-          console.log('🔍 ExploreCanvas: Data type:', colInfo.data_type);
           
           // For numerical columns, show all unique values (up to 1000)
           // For non-numerical columns, limit to 200 to avoid huge dropdowns
           const maxValues = colInfo.is_numerical ? 1000 : 200;
           const uniqueValues = colInfo.unique_values.slice(0, maxValues);
           
-          console.log('🔍 ExploreCanvas: Returning', uniqueValues.length, 'values for', ident);
-          console.log('🔍 ExploreCanvas: First few values:', uniqueValues.slice(0, 5));
           return uniqueValues;
-        } else {
-          console.log('🔍 ExploreCanvas: Column info not found or no unique values for', ident);
-          console.log('🔍 ExploreCanvas: Available columns:', safeData.columnSummary.map((c: any) => c.column));
-        }
-      } else {
-        console.log('🔍 ExploreCanvas: No column summary available');
-      }
-      return [];
+        }       }       return [];
     };
 
     const uniqueValues = getUniqueValues(dimensionId, identifier);
@@ -1512,7 +1365,6 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
               const isNumericalColumn = colInfo?.is_numerical || false;
               
               // Debug: Log the value to see if it contains "#"
-              console.log('🔍 ExploreCanvas: Filter dropdown value:', value, 'for column:', identifier);
               
               // Clean the value to remove any "#" symbols that might be part of the data
               const cleanValue = value.replace(/#/g, '');
@@ -1553,10 +1405,6 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
     const isSettingsVisible = chartSettingsVisible[index] || false;
     
     // Debug logging for chart rendering
-    console.log('🔍 ExploreCanvas: Rendering chart with data:', chartDataSets[index]);
-    console.log('🔍 ExploreCanvas: Chart type:', config.chartType);
-    console.log('🔍 ExploreCanvas: Data length:', chartDataSets[index]?.length);
-    console.log('🔍 ExploreCanvas: Chart config for renderer:', {
       chartType: config.chartType,
       yAxes: config.yAxes,
       yAxisLabels: config.yAxisLabels,
@@ -1616,7 +1464,6 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                             
                             // Regenerate chart when chart type changes to ensure proper rendering
                             if (config.xAxis && hasValidYAxes(config.yAxes)) {
-                              console.log('🔍 ExploreCanvas: Chart type changed to:', type.id, '- regenerating chart');
                               const newConfig = { ...newConfigs[index], chartType: type.id };
                               safeTriggerChartGeneration(index, newConfig, 100);
                             }
@@ -1667,23 +1514,18 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                 <Select 
                   value={config.xAxis}
                   onValueChange={(value) => {
-                    console.log('🔍 ExploreCanvas: X-axis selected:', value);
                     const newConfigs = [...chartConfigs];
                     newConfigs[index] = { ...newConfigs[index], xAxis: value };
                     setChartConfigs(newConfigs);
                     
                     // Only trigger chart generation when both X and Y axes are available
                     if (value && hasValidYAxes(config.yAxes)) {
-                      console.log('🔍 ExploreCanvas: X-axis updated, checking if chart generation is needed...');
-                      console.log('🔍 ExploreCanvas: X-axis:', value);
-                      console.log('🔍 ExploreCanvas: Y-axes:', config.yAxes);
                       
                       // Create the new config for chart generation
                       const newConfig = { ...newConfigs[index], xAxis: value };
                       
                       // Only generate chart if we have valid data
                       if (newConfig.xAxis && hasValidYAxes(newConfig.yAxes)) {
-                        console.log('🔍 ExploreCanvas: All axes selected, auto-generating chart with debouncing');
                         safeTriggerChartGeneration(index, newConfig, 100);
                       }
                     }
@@ -1721,7 +1563,6 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                       <Select 
                         value={yAxis}
                         onValueChange={(value) => {
-                          console.log('🔍 ExploreCanvas: Y-axis selected:', value);
                           const newConfigs = [...chartConfigs];
                           
                           // Update the Y-axis value
@@ -1738,9 +1579,6 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                           
                           // Only trigger chart generation once when both X and Y axes are available
                           if (value && config.xAxis) {
-                            console.log('🔍 ExploreCanvas: Y-axis updated, checking if chart generation is needed...');
-                            console.log('🔍 ExploreCanvas: X-axis:', config.xAxis);
-                            console.log('🔍 ExploreCanvas: Updated Y-axes:', updatedYAxes);
                             
                             // Create the new config for chart generation
                             const newConfig = { 
@@ -1751,8 +1589,6 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                             // Only generate chart if we have valid data and haven't already triggered generation
                             const validYAxes = newConfig.yAxes.filter(y => y && y.trim() !== '');
                             if (newConfig.xAxis && validYAxes.length > 0) {
-                              console.log('🔍 ExploreCanvas: All axes selected, auto-generating chart with debouncing');
-                              console.log('🔍 ExploreCanvas: Valid Y-axes:', validYAxes);
                               safeTriggerChartGeneration(index, newConfig, 100);
                             }
                           }
@@ -1802,22 +1638,13 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                             setChartDataSets(prev => {
                               const newData = { ...prev };
                               delete newData[index];
-                              console.log('🔍 ExploreCanvas: Cleared chart data for index', index, 'after Y-axis removal');
                               return newData;
                             });
                             
                             // Regenerate chart when Y-axis is removed to update display
                             if (newConfigs[index].xAxis && hasValidYAxes(newConfigs[index].yAxes)) {
-                              console.log('🔍 ExploreCanvas: Y-axis removed - regenerating chart automatically');
-                              console.log('🔍 ExploreCanvas: New config after Y-axis removal:', newConfigs[index]);
-                              console.log('🔍 ExploreCanvas: Y-axes after removal:', newConfigs[index].yAxes);
                               safeTriggerChartGeneration(index, newConfigs[index], 100);
-                            } else {
-                              console.log('🔍 ExploreCanvas: Cannot regenerate chart - missing X or Y axis after removal');
-                              console.log('🔍 ExploreCanvas: X-axis:', newConfigs[index].xAxis);
-                              console.log('🔍 ExploreCanvas: Y-axes:', newConfigs[index].yAxes);
-                            }
-                          }}
+                            }                           }}
                         >
                           <X className="w-3 h-3" />
                         </Button>
@@ -1916,7 +1743,6 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                         
                                                                          // Regenerate chart when title changes to update display
                         if (config.xAxis && hasValidYAxes(config.yAxes)) {
-                          console.log('🔍 ExploreCanvas: Chart title changed - regenerating chart automatically');
                           const newConfig = { ...newConfigs[index], title: e.target.value };
                           safeTriggerChartGeneration(index, newConfig, 100);
                         }
@@ -1936,7 +1762,6 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                             
                                                                                  // Regenerate chart when X-axis label changes to update display
                           if (config.xAxis && hasValidYAxes(config.yAxes)) {
-                            console.log('🔍 ExploreCanvas: X-axis label changed - regenerating chart automatically');
                             const newConfig = { ...newConfigs[index], xAxisLabel: e.target.value };
                             safeTriggerChartGeneration(index, newConfig, 100);
                           }
@@ -1962,7 +1787,6 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                             
                                                                                  // Regenerate chart when Y-axis label changes to update display
                           if (config.xAxis && hasValidYAxes(config.yAxes)) {
-                            console.log('🔍 ExploreCanvas: Y-axis label changed - regenerating chart automatically');
                             const newConfig = { 
                               ...newConfigs[index],
                               yAxisLabels: Array.isArray(newConfigs[index].yAxisLabels) ? 
@@ -1990,7 +1814,6 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                           
                           // Regenerate chart when aggregation changes
                           if (config.xAxis && hasValidYAxes(config.yAxes)) {
-                            console.log('🔍 ExploreCanvas: Aggregation changed to:', value, '- regenerating chart');
                             const newConfig = { ...newConfigs[index], aggregation: value };
                             safeTriggerChartGeneration(index, newConfig, 100);
                           }
@@ -2053,10 +1876,7 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                               return true;
                             });
                             const filteredCount = dimensionIdentifiers.length;
-                            if (originalCount !== filteredCount) {
-                              console.log('🔍 ExploreCanvas: Filtered chart filters for dimension', dimensionId, ':', originalCount, '->', filteredCount);
-                            }
-                          }
+                                                      }
                           
                           if (dimensionIdentifiers.length === 0) return null;
                           
@@ -2146,24 +1966,20 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                                       onClick={(e) => e.stopPropagation()}
                                     >
                                   <div className="p-0.5">
-                                    {/* Debug info - removed console.log from JSX */}
                                     <label className="flex items-center space-x-2 py-0.5 px-1 hover:bg-gray-50 cursor-pointer">
                                       <input
                                         type="checkbox"
                                         checked={chartFilters[index]?.[identifier] !== null && (chartFilters[index]?.[identifier]?.length || 0) === 0}
                                         onChange={() => {
-                                          console.log(`🔍 "All" checkbox clicked for ${identifier}. Current state:`, chartFilters[index]?.[identifier]);
                                           const currentValues = chartFilters[index]?.[identifier] || [];
                                           const allValues = identifierUniqueValues[identifier] || [];
                                           
                                           if (currentValues.length === 0) {
                                             // "All" is currently selected, deselect it by deselecting all individual options
-                                            console.log(`🔍 Deselecting "All" for ${identifier}, deselecting all individual options`);
                                             // Set to null to represent "no options selected"
                                             handleMultiSelectFilterChange(index, identifier, null);
                                           } else {
                                             // "All" is not selected (either null or specific values), select it
-                                            console.log(`🔍 Selecting "All" for ${identifier}, selecting all individual options`);
                                             handleMultiSelectFilterChange(index, identifier, []);
                                           }
                                         }}
@@ -2180,7 +1996,6 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                                             const currentValues = chartFilters[index]?.[identifier] || [];
                                             const allValues = identifierUniqueValues[identifier] || [];
                                             
-                                            console.log(`🔍 Individual checkbox clicked for ${identifier}: ${value}. Current values:`, currentValues, 'All values:', allValues);
                                             
                                             if (e.target.checked) {
                                                 // Adding a value
@@ -2195,12 +2010,10 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                                                 } else {
                                                   newValues = [...currentValues, value];
                                                 }
-                                                console.log(`🔍 Adding value ${value} to filter ${identifier}. New values:`, newValues);
                                                 
                                                 // Check if all values are now selected (including this new one)
                                                 if (newValues.length === allValues.length) {
                                                   // All values are selected, automatically select "All"
-                                                  console.log(`🔍 All values selected for ${identifier}, automatically selecting "All"`);
                                                   handleMultiSelectFilterChange(index, identifier, []);
                                                 } else {
                                                   // Keep the filter with the new values
@@ -2209,28 +2022,23 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                                               } else {
                                                 // Removing a value
                                                 const newValues = currentValues.filter(v => v !== value);
-                                                console.log(`🔍 Removing value ${value} from filter ${identifier}. Remaining values:`, newValues);
                                               
                                                 // If we're removing a value and currently showing "All" (empty array),
                                                 // we need to start with all values and then remove this one
                                                 if (currentValues.length === 0) {
                                                   // Currently showing "All", so start with all values and remove this one
                                                   const allValuesExceptThis = allValues.filter(v => v !== value);
-                                                  console.log(`🔍 Was showing "All", now filtering with:`, allValuesExceptThis);
                                                   handleMultiSelectFilterChange(index, identifier, allValuesExceptThis);
                                                 } else if (currentValues === null) {
                                                   // Currently in "none selected" state, stay in that state
-                                                  console.log(`🔍 Already in "none selected" state for ${identifier}`);
                                                   handleMultiSelectFilterChange(index, identifier, null);
                                                 } else {
                                                   // Already filtering, just remove this value
                                                   if (newValues.length === 0) {
                                                     // No values left, show "All"
-                                                    console.log(`🔍 No values left for ${identifier}, setting to "All"`);
                                                     handleMultiSelectFilterChange(index, identifier, []);
                                                   } else {
                                                     // Keep the filter with remaining values
-                                                    console.log(`🔍 Keeping filter for ${identifier} with values:`, newValues);
                                                     handleMultiSelectFilterChange(index, identifier, newValues);
                                                   }
                                                 }
@@ -2362,7 +2170,6 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                         {(() => {
                           const hasValidAxes = config.xAxis && config.yAxes && config.yAxes.length > 0 && config.yAxes.every(y => y);
                           const yAxesString = config.yAxes.join(',');
-                          console.log('🔍 ExploreCanvas: Chart rendering condition check:', {
                             index,
                             xAxis: config.xAxis,
                             yAxes: config.yAxes,
@@ -2404,9 +2211,6 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                             onDataLabelsToggle={(enabled) => handleChartDataLabelsToggle(index, enabled)}
                             onSave={() => handleChartSave(index)}
                             onSortChange={(chartIndex) => {
-                              console.log('🔄 ExploreCanvas: Sort change detected for chart', chartIndex);
-                              console.log('🔄 Current chartDataSets:', chartDataSets);
-                              console.log('🔄 Updating sort counter for chart', index);
                               setChartSortCounters(prev => ({
                                 ...prev,
                                 [index]: (prev[index] || 0) + 1
@@ -2510,7 +2314,6 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
       
       return null;
     } catch (error) {
-      console.warn('Error parsing date:', value, error);
       return null;
     }
   };
@@ -2561,7 +2364,6 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
               return `${formatDate(minDate)} - ${formatDate(maxDate)}`;
             }
           } catch (error) {
-            console.warn('Error parsing fetched date range:', error);
           }
         }
         
@@ -2572,7 +2374,6 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
           .sort((a, b) => a!.getTime() - b!.getTime());
         
         if (dates.length === 0) {
-          console.warn('No valid dates found for column:', columnName, 'Values:', values);
           return 'Invalid dates';
         }
         
@@ -2612,7 +2413,6 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
       }
       
     } catch (error) {
-      console.error('Error formatting time column values:', error);
       return 'Format error';
     }
   };
@@ -2648,11 +2448,7 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
             const summary = await response.json();
             const summaryData = Array.isArray(summary.summary) ? summary.summary.filter(Boolean) : [];
             onDataChange({ columnSummary: summaryData });
-          } else {
-            console.warn('ExploreCanvas - Column summary not found for:', safeData.dataframe);
-          }
-        } catch (error) {
-          console.error('ExploreCanvas - Error fetching column summary:', error);
+          }         } catch (error) {
         }
       };
       fetchColumnSummary();
@@ -2662,7 +2458,6 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
   // Also fetch column summary when filters are displayed but no summary is available
   useEffect(() => {
     if (isApplied && sampleDimensions.length > 0 && summaryList.length === 0 && safeData.dataframe) {
-      console.log('🔍 ExploreCanvas: Fetching column summary for filters');
       setIsLoadingColumnSummary(true);
       const fetchColumnSummary = async () => {
         try {
@@ -2671,12 +2466,7 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
             const summary = await response.json();
             const summaryData = Array.isArray(summary.summary) ? summary.summary.filter(Boolean) : [];
             onDataChange({ columnSummary: summaryData });
-            console.log('🔍 ExploreCanvas: Column summary fetched for filters:', summaryData.length, 'columns');
-          } else {
-            console.warn('ExploreCanvas - Column summary not found for filters:', safeData.dataframe);
-          }
-        } catch (error) {
-          console.error('ExploreCanvas - Error fetching column summary for filters:', error);
+          }         } catch (error) {
         } finally {
           setIsLoadingColumnSummary(false);
         }
@@ -2757,7 +2547,6 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
   // Handle save action for charts
   const handleChartSave = (chartIndex: number) => {
     // Implement save functionality here
-    console.log(`Saving chart ${chartIndex}`);
     // Success message removed - unnecessary notification popup
   };
 
@@ -2780,7 +2569,6 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
         }
       }
     } catch (error) {
-      console.warn('Failed to fetch date range for column:', columnName, error);
     }
   };
 
@@ -2927,10 +2715,7 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
             return true;
           });
           const filteredCount = identifiers.length;
-          if (originalCount !== filteredCount) {
-            console.log('🔍 ExploreCanvas: Filtered card dimensions for dimension', dimensionId, ':', originalCount, '->', filteredCount);
-          }
-        }
+                  }
         
         allIdentifiers[dimensionId] = identifiers;
       });
@@ -2994,12 +2779,8 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
 
   // Debug: Log initial filter state
   useEffect(() => {
-    console.log('🔍 ExploreCanvas: Initial chartFilters state:', chartFilters);
-    console.log('🔍 ExploreCanvas: chartFilters keys:', Object.keys(chartFilters));
     Object.entries(chartFilters).forEach(([chartIndex, filters]) => {
-      console.log(`🔍 ExploreCanvas: Chart ${chartIndex} filters:`, filters);
       Object.entries(filters).forEach(([identifier, values]) => {
-        console.log(`🔍 ExploreCanvas: Chart ${chartIndex}, Filter ${identifier}:`, values, 'length:', values?.length);
       });
     });
   }, [chartFilters]);

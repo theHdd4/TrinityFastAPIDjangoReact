@@ -101,39 +101,27 @@ const ExploreInput: React.FC<ExploreInputProps> = ({ data, settings, onDataChang
    * --------------------------------------------------*/
   const tryProjectLevelConfig = async (client_name: string, app_name: string, project_name: string) => {
     try {
-      console.log('🔍 ExploreInput: Trying project-level config for:', { client_name, app_name, project_name })
-      console.log('🔍 ExploreInput: Project-level API URL:', `${EXPLORE_API}/column-classifier/config/${encodeURIComponent(client_name)}/${encodeURIComponent(app_name)}/${encodeURIComponent(project_name)}`)
       
       const response = await fetch(`${EXPLORE_API}/column-classifier/config/${encodeURIComponent(client_name)}/${encodeURIComponent(app_name)}/${encodeURIComponent(project_name)}`)
       
       if (response.ok) {
         const result = await response.json()
-        console.log('🔍 ExploreInput: Project-level column classifier response:', result)
         
         if (result.status === 'success' && result.config) {
-          console.log('🔍 ExploreInput: Found project-level column classifier config:', result.config)
-          console.log('🔍 ExploreInput: WARNING: This config may be for a different file in the same project')
           
           // Store the config locally for reference but don't set it as active
           setColumnClassifierConfig(result.config)
-          console.log('🔍 ExploreInput: Project-level config found but not automatically activated')
         } else if (result.status === 'success' && result.data) {
-          console.log('🔍 ExploreInput: Found project-level column classifier config from data field:', result.data)
-          console.log('🔍 ExploreInput: WARNING: This config may be for a different file in the same project')
           
           // Store the config locally for reference but don't set it as active
           setColumnClassifierConfig(result.data)
-          console.log('🔍 ExploreInput: Project-level config found but not automatically activated')
         } else {
-          console.warn('No project-level column classifier config found')
           setColumnClassifierConfig(null)
         }
       } else {
-        console.warn('Project-level column classifier config not found, continuing without it')
         setColumnClassifierConfig(null)
       }
     } catch (error) {
-      console.error('Error fetching project-level column classifier config:', error)
       setColumnClassifierConfig(null)
     }
   }
@@ -153,11 +141,8 @@ const ExploreInput: React.FC<ExploreInputProps> = ({ data, settings, onDataChang
         const project_name = pathParts[2] // marketing-mix project
         const fileName = pathParts[pathParts.length - 1] // filename.arrow
         
-        console.log('🔍 ExploreInput: Fetching column classifier config for file:', fileKey)
-        console.log('🔍 ExploreInput: Extracted path parts:', { client_name, app_name, project_name, fileName })
         
         // Try to fetch config specific to this file first
-        console.log('🔍 ExploreInput: API URL:', `${EXPLORE_API}/column-classifier/config/${encodeURIComponent(client_name)}/${encodeURIComponent(app_name)}/${encodeURIComponent(project_name)}?file=${encodeURIComponent(fileName)}`)
         
         // Add timeout to prevent infinite loading
         const controller = new AbortController()
@@ -171,49 +156,32 @@ const ExploreInput: React.FC<ExploreInputProps> = ({ data, settings, onDataChang
         
         if (response.ok) {
           const result = await response.json()
-          console.log('🔍 ExploreInput: Column classifier response:', result)
-          console.log('🔍 ExploreInput: Response status:', result.status)
-          console.log('🔍 ExploreInput: Response config:', result.config)
           
           if (result.status === 'success' && result.config) {
-            console.log('🔍 ExploreInput: Found file-specific column classifier config:', result.config)
-            console.log('🔍 ExploreInput: Config identifiers:', result.config.identifiers)
-            console.log('🔍 ExploreInput: Config measures:', result.config.measures)
-            console.log('🔍 ExploreInput: Config dimensions:', result.config.dimensions)
             
             // Store the config locally for reference but don't set it as active
             setColumnClassifierConfig(result.config)
             // Don't automatically set it as the active config - only show if user explicitly configures it
-            console.log('🔍 ExploreInput: Column classifier config found but not automatically activated')
           } else if (result.status === 'success' && result.data) {
             // Handle alternative response format where config is in 'data' field
-            console.log('🔍 ExploreInput: Found file-specific column classifier config from data field:', result.data)
-            console.log('🔍 ExploreInput: Data identifiers:', result.data.identifiers)
-            console.log('🔍 ExploreInput: Data measures:', result.data.measures)
-            console.log('🔍 ExploreInput: Data dimensions:', result.data.dimensions)
             
             // Store the config locally for reference but don't set it as active
             setColumnClassifierConfig(result.data)
             // Don't automatically set it as the active config - only show if user explicitly configures it
-            console.log('🔍 ExploreInput: Column classifier config found but not automatically activated')
           } else {
-            console.warn('File-specific column classifier config not found, trying project-level config...')
             // Try fallback to project-level config
             await tryProjectLevelConfig(client_name, app_name, project_name)
           }
         } else {
-          console.warn('File-specific column classifier config not found, trying project-level config...')
           // Try fallback to project-level config
           await tryProjectLevelConfig(client_name, app_name, project_name)
         }
       } else {
-        console.warn('File path does not contain enough parts to extract client/app/project names:', fileKey)
         setColumnClassifierConfig(null)
         // Still call onDataChange to clear any previous config
         onDataChange({ columnClassifierConfig: null })
       }
     } catch (error) {
-      console.error('Error fetching column classifier config:', error)
       setColumnClassifierConfig(null)
       // Still call onDataChange to clear any previous config
       onDataChange({ columnClassifierConfig: null })
@@ -249,8 +217,6 @@ const ExploreInput: React.FC<ExploreInputProps> = ({ data, settings, onDataChang
           .filter(col => col.is_numerical)
           .map(col => col.column)
         
-        console.log('🔍 ExploreInput: Extracted dimensions from column summary:', extractedDimensions)
-        console.log('🔍 ExploreInput: Extracted measures from column summary:', extractedMeasures)
         
         // Update settings with the column summary and extracted dimensions/measures
         onDataChange({ 
@@ -262,12 +228,10 @@ const ExploreInput: React.FC<ExploreInputProps> = ({ data, settings, onDataChang
           fallbackMeasures: extractedMeasures
         })
       } else {
-        console.warn('Column summary not found for:', objectName)
         setColumnSummary([])
         onDataChange({ columnSummary: [], allColumns: [], dataframe: fileKey })
       }
     } catch (error) {
-      console.error('Error fetching column summary:', error)
       setColumnSummary([])
       onDataChange({ columnSummary: [], allColumns: [], dataframe: fileKey })
     } finally {

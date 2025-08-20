@@ -92,7 +92,6 @@ function App() {
         years: res.data.years || [],
       })
     } catch (error) {
-      console.error("Error fetching filter options:", error)
     }
   }
 
@@ -134,7 +133,6 @@ function App() {
       }))
       setMarketShareData(marketShareRes.data)
     } catch (error) {
-      console.error("Error fetching chart data:", error)
     } finally {
       setLoading(false)
     }

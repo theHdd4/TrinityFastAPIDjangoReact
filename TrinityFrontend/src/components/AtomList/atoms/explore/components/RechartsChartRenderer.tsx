@@ -379,28 +379,12 @@ const RechartsChartRenderer: React.FC<Props> = ({
     return [];
   }, [data, type, legendField]);
 
-  // CRITICAL FIX: Ensure detected legend field is used consistently
-  useEffect(() => {
-    if (detectedLegendField && legendField) {
-      console.log('🎨 Detected legend field updated:', detectedLegendField);
-      console.log('🎨 This should prevent fallback to original data');
-    }
-  }, [detectedLegendField, legendField]);
-  
   // Simple chart render key
   const chartRenderKey = useMemo(() => {
     const key = `chart-${type}-${chartDataForRendering.length}`;
     return key;
   }, [type, chartDataForRendering]);
   
-  // Debug logging for chart data source
-  useEffect(() => {
-    console.log('🔍 Chart data source updated:');
-    console.log('- data prop length:', data?.length);
-    console.log('- chartDataForRendering length:', chartDataForRendering.length);
-    console.log('- chartDataForRendering sample:', chartDataForRendering.slice(0, 2));
-  }, [data, chartDataForRendering]);
-
   // Use external props if provided, otherwise use internal state
   const currentShowGrid = propShowGrid !== undefined ? propShowGrid : showGrid;
   const currentShowLegend = propShowLegend !== undefined ? propShowLegend : showLegend;
@@ -485,7 +469,6 @@ const RechartsChartRenderer: React.FC<Props> = ({
         );
       
       if (isDataAlreadyPivoted) {
-        console.log('🔍 RechartsChartRenderer: Data is already pivoted, extracting legend values from columns');
         // Data is already pivoted, extract legend values from column names
         const firstRow = chartDataForRendering[0];
         const legendColumns = Object.keys(firstRow).filter(key => {
@@ -505,7 +488,6 @@ const RechartsChartRenderer: React.FC<Props> = ({
           uniqueValues: legendColumns 
         };
       } else {
-        console.log('🔍 RechartsChartRenderer: Data needs pivoting, using pivotDataByLegend function');
         // Data needs pivoting, use the existing function
         return pivotDataByLegend(chartDataForRendering, xField, yField, legendField);
       }
@@ -628,7 +610,6 @@ const RechartsChartRenderer: React.FC<Props> = ({
       
       // Only close menus if click is outside ALL active menus
       if (isOutsideMainMenu && isOutsideColorSubmenu) {
-        console.log('Closing all menus due to click outside');
         // Add a small delay to ensure button clicks are processed first
         setTimeout(() => {
           setShowContextMenu(false);
@@ -862,10 +843,6 @@ const RechartsChartRenderer: React.FC<Props> = ({
     }
     
     // Debug: Show what data is being used for rendering
-    console.log('🔍 renderChart - Data being used for rendering:');
-    console.log('- chartDataForRendering length:', chartDataForRendering.length);
-    console.log('- chartDataForRendering sample:', chartDataForRendering.slice(0, 3));
-    console.log('- data prop length:', data?.length);
     
     // Check if required fields are provided
     if (!xField && !yField) {
@@ -892,8 +869,6 @@ const RechartsChartRenderer: React.FC<Props> = ({
     let yKey = yField;
     let yKeys: string[] = yFields || [];
     
-    console.log('🔧 Key assignment - xField:', xField, 'yField:', yField);
-    console.log('🔧 Initial xKey:', xKey, 'yKey:', yKey);
 
     // Auto-detect keys based on data structure and chart type
     if (!xKey || !yKey) {
@@ -952,8 +927,6 @@ const RechartsChartRenderer: React.FC<Props> = ({
       }
     }
     
-    console.log('🔧 Final key assignment - xKey:', xKey, 'yKey:', yKey);
-    console.log('🔧 yKeys array:', yKeys);
     
 
     
@@ -1093,17 +1066,12 @@ const RechartsChartRenderer: React.FC<Props> = ({
     if (type === 'bar_chart' && xField && yField && chartDataForRendering.length > 0) {
       const firstItem = chartDataForRendering[0];
       const availableKeys = Object.keys(firstItem);
-      console.log('🔧 Available keys in data:', availableKeys);
-      console.log('🔧 Raw data item:', firstItem);
       
       // Check if data has generic keys OR if the field names don't match what we expect
       const needsTransformation = availableKeys.includes('x') || availableKeys.includes('y') || availableKeys.includes('name') || availableKeys.includes('value') || 
                                  (xField && !availableKeys.includes(xField)) || (yField && !availableKeys.includes(yField));
       
       if (needsTransformation) {
-        console.log('🔧 Data needs transformation - generic keys or field name mismatch detected');
-        console.log('🔧 xField:', xField, 'yField:', yField);
-        console.log('🔧 Available keys:', availableKeys);
         
         transformedChartData = chartDataForRendering.map((item: any) => {
           const transformed: any = {};
@@ -1138,19 +1106,11 @@ const RechartsChartRenderer: React.FC<Props> = ({
           return transformed;
         });
         
-        console.log('🔧 Transformed data sample:', transformedChartData[0]);
-        console.log('🔧 Full transformed data:', transformedChartData);
       }
     }
 
     switch (type) {
       case 'bar_chart':
-        console.log('🎯 Bar chart rendering - type:', type);
-        console.log('🎯 Legend field:', legendField);
-        console.log('🎯 Legend values:', legendValues);
-        console.log('🎯 Pivoted data length:', pivotedLineData?.length);
-        console.log('🎯 Chart data for rendering length:', chartDataForRendering?.length);
-        console.log('🎯 X key:', xKey, 'Y key:', yKey);
         
         /* -------------------------------------------------------------
          * Multi-bar rendering when a legend field is provided
@@ -1233,14 +1193,6 @@ const RechartsChartRenderer: React.FC<Props> = ({
           );
         } else {
           // ---- Fallback to original single-bar rendering ----
-          console.log('🎨 No legend field detected - using single bar chart');
-          console.log('🎨 Legend field value:', legendField);
-          console.log('🎨 Using fallback single bar chart rendering');
-          console.log('🎨 Data length:', chartDataForRendering?.length);
-          console.log('🎨 X key:', xKey, 'Y key:', yKey);
-          console.log('🎨 Sample data item:', transformedChartData?.[0]);
-          console.log('🎨 Data keys available:', transformedChartData?.[0] ? Object.keys(transformedChartData[0]) : 'No data');
-          console.log('🎨 Using transformed data for rendering, length:', transformedChartData?.length);
           return (
             <BarChart data={transformedChartData} margin={{ top: 20, right: 30, left: 20, bottom: 60 }}>
               {currentShowGrid && <CartesianGrid strokeDasharray="3 3" />}
@@ -1430,10 +1382,6 @@ const RechartsChartRenderer: React.FC<Props> = ({
         } else {
           // ---- Fallback to original single-line rendering ----
           // Original single line chart logic
-          console.log('🎨 No legend field detected - using single line chart');
-          console.log('🎨 Legend field value:', legendField);
-          console.log('🎨 Data length:', chartDataForRendering.length);
-          console.log('🎨 First item:', chartDataForRendering[0]);
           return (
             <LineChart data={chartDataForRendering} margin={{ top: 20, right: 30, left: 20, bottom: 60 }} className="explore-chart-line">
               {currentShowGrid && <CartesianGrid strokeDasharray="3 3" />}
@@ -1898,7 +1846,6 @@ const RechartsChartRenderer: React.FC<Props> = ({
                 try {
                   return renderChart();
                 } catch (error) {
-                  console.error('Chart rendering error:', error);
                   return (
                     <div className="flex items-center justify-center h-full text-red-500">
                       <div className="text-center">

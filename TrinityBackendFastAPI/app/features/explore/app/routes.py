@@ -1736,7 +1736,15 @@ async def chart_data_multidim(explore_atom_id: str):
     # Prepare data for saving and returning
     print(f"⏱️ Chart data generation completed at: {datetime.now()}")
     print(f"🔍 Debug: chart_data length: {len(chart_data) if chart_data else 0}")
-    print(f"🔍 Debug: chart_data sample: {chart_data[:2] if chart_data else 'No data'}")
+    if chart_data:
+        if isinstance(chart_data, dict):
+            sample_keys = list(chart_data)[:2]
+            sample = {k: chart_data[k] for k in sample_keys}
+        else:
+            sample = chart_data[:2]
+        print(f"🔍 Debug: chart_data sample: {sample}")
+    else:
+        print("🔍 Debug: chart_data sample: No data")
     converted_chart_data = convert_numpy_types(chart_data)
     print(f"🔍 Debug: converted_chart_data length: {len(converted_chart_data) if converted_chart_data else 0}")
     
