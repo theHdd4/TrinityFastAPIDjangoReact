@@ -1034,38 +1034,34 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
         return;
       }
 
-      // Check if column classifier config is available
-      if (!safeData.columnClassifierConfig) {
-        setError('No column classifier configuration available. Please configure column classifier first.');
-        return;
-      }
-      
-      // Check if we have any available columns from column classifier config
+      // Check if we have any available columns for chart generation
       const hasAvailableColumns = allAvailableColumns.length > 0;
-      
+
       console.log('🔍 ExploreCanvas: Chart generation - allAvailableColumns:', allAvailableColumns);
       console.log('🔍 ExploreCanvas: Chart generation - hasAvailableColumns:', hasAvailableColumns);
-      
+
       if (!hasAvailableColumns) {
-        setError('No columns available from column classifier configuration. Please ensure column classifier is properly configured.');
+        setError('No columns available for chart generation.');
         return;
       }
 
       // Allow both identifiers and measures for X and Y axes
       console.log('🔍 ExploreCanvas: Generating chart with config:', config);
       console.log('🔍 ExploreCanvas: X-axis:', config.xAxis);
-              console.log('🔍 ExploreCanvas: Y-axes:', config.yAxes);
+      console.log('🔍 ExploreCanvas: Y-axes:', config.yAxes);
       console.log('🔍 ExploreCanvas: Legend field:', config.legendField);
-      
-      const dimensions = Object.keys(safeData.columnClassifierConfig?.dimensions || {});
-      const measures = safeData.columnClassifierConfig?.measures || [];
-      console.log('🔍 ExploreCanvas: Available dimensions from config:', dimensions);
-      console.log('🔍 ExploreCanvas: Available measures from config:', measures);
-      
-      // Only use column classifier config - no fallback
-      console.log('🔍 ExploreCanvas: Using column classifier config for chart generation');
+
+      const dimensions = safeData.columnClassifierConfig
+        ? Object.keys(safeData.columnClassifierConfig.dimensions || {})
+        : safeData.fallbackDimensions || [];
+      const measures = safeData.columnClassifierConfig
+        ? safeData.columnClassifierConfig.measures || []
+        : safeData.fallbackMeasures || [];
+      console.log('🔍 ExploreCanvas: Available dimensions:', dimensions);
+      console.log('🔍 ExploreCanvas: Available measures:', measures);
+
       const availableColumns = [...dimensions, ...measures];
-      console.log('🔍 ExploreCanvas: Available columns from column classifier:', availableColumns);
+      console.log('🔍 ExploreCanvas: Available columns for chart generation:', availableColumns);
       
 
 
@@ -2271,7 +2267,7 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
             )}
 
             {/* Chart Status Indicator */}
-                            {config.xAxis && hasValidYAxes(config.yAxes) && !isChartLoading(index) && !chartDataSets[index] && (
+                            {config.xAxis && hasValidYAxes(config.yAxes) && !isChartLoading(index) && !chartDataSets[index] && !error && (
               <div className="mb-3 p-2 bg-blue-50 border border-blue-200 rounded-lg min-w-0">
                 <div className="flex items-center space-x-2 text-xs text-blue-700 min-w-0">
                   <div className="w-3 h-3 border-2 border-blue-300 border-t-blue-600 rounded-full animate-spin"></div>
