@@ -1116,7 +1116,7 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
                        e.stopPropagation();
                      }}
                    >
-                    <div className="bg-white border-b-2 border-yellow-400 p-4 relative flex-shrink-0 group-hover:shadow-lg transition-shadow duration-300">
+                    <div className="bg-white border-b border-black p-4 relative flex-shrink-0 group-hover:shadow-lg transition-shadow duration-300">
                       <CardTitle className={`font-bold text-gray-900 flex items-center justify-between ${isCompact ? 'text-base' : 'text-lg'}`}>
                         <div className="flex items-center">
                           <BarChart3 className={`mr-2 ${isCompact ? 'w-4 h-4' : 'w-5 h-5'} text-gray-900`} />
