@@ -96,6 +96,10 @@ export const FEATURE_OVERVIEW_API =
   normalizeUrl(import.meta.env.VITE_FEATURE_OVERVIEW_API) ||
   `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/feature-overview`;
 
+export const EXPLORE_API =
+  normalizeUrl(import.meta.env.VITE_EXPLORE_API) ||
+  `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/explore`;
+
 export const SCOPE_SELECTOR_API =
   normalizeUrl(import.meta.env.VITE_SCOPE_SELECTOR_API) ||
   `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/scope-selector`;
