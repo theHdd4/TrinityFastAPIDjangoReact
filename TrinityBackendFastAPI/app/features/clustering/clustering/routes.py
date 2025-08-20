@@ -252,18 +252,43 @@ async def filter_and_cluster(request: FilterAndClusterRequest):
         df = await load_csv_from_minio(request.file_path)
         original_rows = len(df)
         
+        # Validate that the dataframe has data
+        if df.empty:
+            error_msg = "The loaded dataset is empty. Please check your data source."
+            raise HTTPException(400, error_msg)
+        
+        print(f"✅ Data loaded successfully: {df.shape[0]} rows, {df.shape[1]} columns")
+        print(f"🔍 Available columns: {list(df.columns)}")
+        
+        # Apply date range filter if provided
         if request.date_range and request.date_range.column and request.date_range.from_date and request.date_range.to_date:
+            try:
+                # Convert string dates to datetime objects
+                from_date = pd.to_datetime(request.date_range.from_date)
+                to_date = pd.to_datetime(request.date_range.to_date)
                 
-            # Convert string dates to datetime objects
-            from_date = pd.to_datetime(request.date_range.from_date)
-            to_date = pd.to_datetime(request.date_range.to_date)
-            
-            print(f"🔍 Converted dates - from_date: {from_date}, to_date: {to_date}")
-            
-            # Convert the column to datetime for comparison
-            df[request.date_range.column] = pd.to_datetime(df[request.date_range.column], errors='coerce')
-            # Apply the date range filter
-            df = df[(df[request.date_range.column] >= from_date) & (df[request.date_range.column] <= to_date)]
+                print(f"🔍 Converted dates - from_date: {from_date}, to_date: {to_date}")
+                
+                # Check if the date column exists in the dataframe
+                if request.date_range.column not in df.columns:
+                    error_msg = f"Date column '{request.date_range.column}' not found in data. Available columns: {list(df.columns)}"
+                    raise HTTPException(400, error_msg)
+                
+                # Convert the column to datetime for comparison
+                df[request.date_range.column] = pd.to_datetime(df[request.date_range.column], errors='coerce')
+                
+                # Apply the date range filter
+                df = df[(df[request.date_range.column] >= from_date) & (df[request.date_range.column] <= to_date)]
+                
+                print(f"✅ Date range filter applied: {len(df)} rows remaining")
+                
+            except Exception as e:
+                error_msg = f"Error applying date range filter: {str(e)}"
+                print(f"❌ Date range filter error: {error_msg}")
+                raise HTTPException(400, error_msg)
+        else:
+            print("ℹ️ No date range filter provided - clustering will proceed without date filtering")
+            print(f"ℹ️ Dataset shape after loading: {df.shape[0]} rows, {df.shape[1]} columns")
 
 
             
@@ -319,10 +344,6 @@ async def filter_and_cluster(request: FilterAndClusterRequest):
             if df_after_filter > 0:
                 print(f"🔍 Sample data after identifier filtering:")
                 print(df.head(3).to_dict(orient="records"))
-
-        # Apply date range filter
-
-
 
         # Apply measure filters
         if request.measure_filters:

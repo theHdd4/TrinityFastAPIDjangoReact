@@ -27,6 +27,8 @@ import DataFrameOperationsAtom from '@/components/AtomList/atoms/dataframe-opera
 import ScopeSelectorAtom from '@/components/AtomList/atoms/scope-selector/ScopeSelectorAtom';
 import CreateColumnAtom from '@/components/AtomList/atoms/createcolumn/CreateColumnAtom';
 import GroupByAtom from '@/components/AtomList/atoms/groupby-wtg-avg/GroupByAtom';
+import ChartMakerAtom from '@/components/AtomList/atoms/chart-maker/ChartMakerAtom';
+import BuildModelFeatureBasedAtom from '@/components/AtomList/atoms/build-model-feature-based/BuildModelFeatureBasedAtom';
 import ClusteringAtom from '@/components/AtomList/atoms/clustering/ClusteringAtom';
 import { fetchDimensionMapping } from '@/lib/dimensions';
 
@@ -61,6 +63,8 @@ const LLM_MAP: Record<string, string> = {
   'chart-maker': 'Agent Chart Maker',
   merge: 'Agent Merge',
   clustering: 'Agent Clustering',
+  'create-column': 'Agent Create Transform',
+  'groupby-wtg-avg': 'Agent GroupBy',
 };
 
 const CanvasArea: React.FC<CanvasAreaProps> = ({
@@ -986,6 +990,8 @@ const handleAddDragLeave = (e: React.DragEvent) => {
                                       <FeatureOverviewAtom atomId={atom.id} />
                                     ) : atom.atomId === 'clustering' ? (
                                       <ClusteringAtom atomId={atom.id} />
+                                    ) : atom.atomId === 'chart-maker' ? (
+                                      <ChartMakerAtom atomId={atom.id} />
                                     ) : (
                                       <div>
                                         <h4 className="font-semibold text-gray-900 mb-1 text-sm">{atom.title}</h4>
@@ -1182,6 +1188,8 @@ const handleAddDragLeave = (e: React.DragEvent) => {
                         <FeatureOverviewAtom atomId={atom.id} />
                       ) : atom.atomId === 'clustering' ? (
                         <ClusteringAtom atomId={atom.id} />
+                      ) : atom.atomId === 'chart-maker' ? (
+                        <ChartMakerAtom atomId={atom.id} />
                       ) : atom.atomId === 'concat' ? (
                         <ConcatAtom atomId={atom.id} />
                       ) : atom.atomId === 'merge' ? (
@@ -1194,7 +1202,9 @@ const handleAddDragLeave = (e: React.DragEvent) => {
                         <CreateColumnAtom atomId={atom.id} />
                       ) : atom.atomId === 'groupby-wtg-avg' ? (
                         <GroupByAtom atomId={atom.id} />
-                      ) : atom.atomId === 'scope-selector' ? (
+                      ) : atom.atomId === 'build-model-feature-based' ? (
+                          <BuildModelFeatureBasedAtom atomId={atom.id} />
+                       ) : atom.atomId === 'scope-selector' ? (
                         <ScopeSelectorAtom atomId={atom.id} />
                       ) : (
                         <div>

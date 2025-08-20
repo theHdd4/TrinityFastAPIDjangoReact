@@ -50,6 +50,16 @@ const GroupByInputFiles: React.FC<Props> = ({ atomId }) => {
     }
   }, [settings.allColumns]);
 
+  // --- Auto-fetch identifiers/measures when a file is already selected (e.g. after reload) ---
+  const initFetchedRef = React.useRef<string>('');
+  React.useEffect(() => {
+    if (settings.dataSource && settings.dataSource !== initFetchedRef.current) {
+      console.log('[GroupBy] calling /groupby/init for', settings.dataSource);
+      initFetchedRef.current = settings.dataSource;
+      handleFrameChange(settings.dataSource);
+    }
+  }, [settings.dataSource]);
+
   const handleFrameChange = async (val: string) => {
     if (!val.endsWith('.arrow')) {
       val += '.arrow';
@@ -68,22 +78,38 @@ const GroupByInputFiles: React.FC<Props> = ({ atomId }) => {
     let fetchedMeasures: string[] = [];
     try {
       const atom = useLaboratoryStore.getState().getAtom(atomId);
-      const validator_atom_id = atom?.settings?.validator_atom_id || '';
       const file_key = val;
-      if (validator_atom_id && file_key) {
-        const formData = new FormData();
-        formData.append('bucket_name', 'trinity');
-        formData.append('object_names', file_key);
-        formData.append('validator_atom_id', validator_atom_id);
-        formData.append('file_key', file_key);
+
+      // Extract client/app/project from file path like scope_selector does
+      const pathParts = val.split('/')
+      const clientName = pathParts[0] ?? ''
+      const appName = pathParts[1] ?? ''
+      const projectName = pathParts[2] ?? ''
+
+      // Always request identifiers/measures using client/app/project context
+      const formData = new FormData();
+      formData.append('bucket_name', 'trinity');
+      formData.append('object_names', file_key);
+      formData.append('client_name', clientName);
+      formData.append('app_name', appName);
+      formData.append('project_name', projectName);
+      formData.append('file_key', file_key);
+      try {
         const resp = await fetch(`${GROUPBY_API}/init`, { method: 'POST', body: formData });
+        console.log('[GroupBy] /init status', resp.status);
+        let data: any = {};
+        try { data = await resp.clone().json(); } catch {}
+        console.log('[GroupBy] /init payload', data);
         if (resp.ok) {
-          const data = await resp.json();
+          // if json already parsed above use that
+          if (!data || Object.keys(data).length === 0) data = await resp.json();
           fetchedIdentifiers = Array.isArray(data.identifiers) ? data.identifiers.filter(Boolean) : [];
           fetchedMeasures = Array.isArray(data.measures) ? data.measures.filter(Boolean) : [];
           setIdentifiers(fetchedIdentifiers);
           setMeasures(fetchedMeasures);
         }
+      } catch (err) {
+        // Ignore network or backend errors; fallback logic will kick in
       }
     } catch (err) {
       // ignore, fallback later
@@ -93,14 +119,15 @@ const GroupByInputFiles: React.FC<Props> = ({ atomId }) => {
     const finalIdentifiers = fetchedIdentifiers.length ? fetchedIdentifiers : identifiers;
     const finalMeasures = fetchedMeasures.length ? fetchedMeasures : measures;
 
-    // Set selectedMeasures to a single measure config object by default
+    // Add exactly one measure configuration by default
     let defaultSelectedMeasures = [];
     const allMeasures = finalMeasures.length > 0 ? finalMeasures : summary.filter(c => c.data_type && (c.data_type.toLowerCase().includes('int') || c.data_type.toLowerCase().includes('float') || c.data_type.toLowerCase().includes('number'))).map(c => c.column);
 
     if (allMeasures.length > 0) {
       // Use the first available measure and default aggregator
-      defaultSelectedMeasures = [{ field: allMeasures[0], aggregator: 'Sum' }];
+      defaultSelectedMeasures = [{ field: allMeasures[0], aggregator: 'Sum', weight_by: '', rename_to: '' }];
     }
+
     updateSettings(atomId, {
       dataSource: val,
       allColumns: summary,
@@ -112,6 +139,23 @@ const GroupByInputFiles: React.FC<Props> = ({ atomId }) => {
 
   return (
     <div className="space-y-4 p-2">
+      <style jsx global>{`
+        .custom-scrollbar::-webkit-scrollbar {
+          width: 6px;
+          height: 6px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+          background: #f1f1f1;
+          border-radius: 10px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+          background: #cbd5e0;
+          border-radius: 10px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+          background: #a0aec0;
+        }
+      `}</style>
       <Card className="p-4 space-y-3">
         <label className="text-sm font-medium text-gray-700 block">Data Source</label>
         <Select value={settings.dataSource} onValueChange={handleFrameChange}>
@@ -140,31 +184,43 @@ const GroupByInputFiles: React.FC<Props> = ({ atomId }) => {
       {columns.length > 0 && (
         <Card className="p-4 space-y-3 bg-gradient-to-br from-yellow-50 to-yellow-100">
           <div className="overflow-x-auto rounded-lg border border-gray-100 bg-white">
-            <table className="min-w-full divide-y divide-gray-200 text-sm">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-4 py-2 text-left font-semibold text-gray-700">Column Name</th>
-                  <th className="px-4 py-2 text-left font-semibold text-gray-700">Type</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {columns.map(c => (
-                  <tr key={c.column} className="hover:bg-yellow-50 transition-colors">
-                    <td className="px-4 py-2 font-medium text-gray-900">{c.column}</td>
-                    <td className="px-4 py-2">
-                      <span className={`inline-block px-2 py-0.5 rounded text-xs font-semibold 
-                        ${c.data_type.toLowerCase().includes('int') || c.data_type.toLowerCase().includes('float') || c.data_type.toLowerCase().includes('number') ? 'bg-blue-100 text-blue-700' :
-                          c.data_type.toLowerCase().includes('object') || c.data_type.toLowerCase().includes('string') || c.data_type.toLowerCase().includes('category') ? 'bg-yellow-100 text-yellow-700' :
-                          c.data_type.toLowerCase().includes('bool') ? 'bg-purple-100 text-purple-700' :
-                          'bg-gray-100 text-gray-700'}
-                      `}>
-                        {c.data_type}
-                      </span>
-                    </td>
+            <div className="overflow-auto max-h-96">
+              <table className="min-w-full divide-y divide-gray-200 text-sm">
+                <thead className="bg-gray-50 sticky top-0 z-10">
+                  <tr>
+                    <th className="px-4 py-2 text-left font-semibold text-gray-700 whitespace-nowrap">Column Name</th>
+                    <th className="px-4 py-2 text-left font-semibold text-gray-700 whitespace-nowrap">Unique Values</th>
+                    <th className="px-4 py-2 text-left font-semibold text-gray-700 whitespace-nowrap">Unique Count</th>
+                    <th className="px-4 py-2 text-left font-semibold text-gray-700 whitespace-nowrap">Type</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {columns.map(c => (
+                    <tr key={c.column} className="hover:bg-yellow-50 transition-colors">
+                      <td className="px-4 py-2 font-medium text-gray-900 whitespace-nowrap">{c.column}</td>
+                      <td className="px-4 py-2 text-gray-700 max-w-xs">
+                        <div className="max-h-20 overflow-y-auto pr-2 custom-scrollbar">
+                          <div className="text-sm text-gray-600">
+                            {c.unique_values?.join(', ') || 'N/A'}
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-4 py-2 text-gray-600">{c.unique_count}</td>
+                      <td className="px-4 py-2">
+                        <span className={`inline-block px-2 py-0.5 rounded text-xs font-semibold 
+                          ${c.data_type.toLowerCase().includes('int') || c.data_type.toLowerCase().includes('float') || c.data_type.toLowerCase().includes('number') ? 'bg-blue-100 text-blue-700' :
+                            c.data_type.toLowerCase().includes('object') || c.data_type.toLowerCase().includes('string') || c.data_type.toLowerCase().includes('category') ? 'bg-yellow-100 text-yellow-700' :
+                            c.data_type.toLowerCase().includes('bool') ? 'bg-purple-100 text-purple-700' :
+                            'bg-gray-100 text-gray-700'}
+                        `}>
+                          {c.data_type}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         </Card>
       )}

@@ -51,6 +51,25 @@ const ClusteringCanvas: React.FC<ClusteringCanvasProps> = ({
   const selectedMeasures = clusteringData.selectedMeasures || [];
   const clusterResults = clusteringData.clusterResults;
   
+  // Get the measures that were actually used in the clustering run
+  const getActualMeasuresFromResults = () => {
+    if (!clusterResults?.cluster_stats || !Array.isArray(clusterResults.cluster_stats) || clusterResults.cluster_stats.length === 0) {
+      return [];
+    }
+    
+    // Get the first cluster stat to see what measures are available
+    const firstStat = clusterResults.cluster_stats[0];
+    if (!firstStat?.centroid) {
+      return [];
+    }
+    
+    // Return the actual measure names from the centroid data
+    return Object.keys(firstStat.centroid);
+  };
+  
+  // Use actual measures from results if available, otherwise use selected measures
+  const displayMeasures = clusterResults ? getActualMeasuresFromResults() : selectedMeasures;
+  
   // Initialize identifierFilters state properly
   const [identifierFilters, setIdentifierFilters] = useState<Record<string, string[]>>({});
   const [uniqueValues, setUniqueValues] = useState<Record<string, string[]>>({});
@@ -276,17 +295,34 @@ const ClusteringCanvas: React.FC<ClusteringCanvasProps> = ({
           throw new Error(`Clustering failed: ${response.status} ${response.statusText} - ${errorText}`);
         }
 
-        const result = await response.json();
-        console.log('✅ Clustering API call successful');
-        console.log('Clustering result:', result);
-        console.log('Result structure:', {
-          hasClusterStats: !!result.cluster_stats,
-          clusterStatsType: typeof result.cluster_stats,
-          clusterStatsLength: Array.isArray(result.cluster_stats) ? result.cluster_stats.length : 'not array',
-          hasClusterResults: !!result,
-          resultKeys: Object.keys(result || {}),
-          sampleStat: Array.isArray(result.cluster_stats) && result.cluster_stats.length > 0 ? result.cluster_stats[0] : 'no cluster_stats'
-        });
+                 const result = await response.json();
+         console.log('✅ Clustering API call successful');
+         console.log('Clustering result:', result);
+         console.log('Result structure:', {
+           hasClusterStats: !!result.cluster_stats,
+           clusterStatsType: typeof result.cluster_stats,
+           clusterStatsLength: Array.isArray(result.cluster_stats) ? result.cluster_stats.length : 'not array',
+           hasClusterResults: !!result,
+           resultKeys: Object.keys(result || {}),
+           sampleStat: Array.isArray(result.cluster_stats) && result.cluster_stats.length > 0 ? result.cluster_stats[0] : 'no cluster_stats'
+         });
+         
+         // Additional debugging for centroid data structure
+         if (Array.isArray(result.cluster_stats) && result.cluster_stats.length > 0) {
+           console.log('🔍 Detailed cluster stats analysis:');
+           result.cluster_stats.forEach((stat, index) => {
+             console.log(`Cluster ${index}:`, {
+               cluster_id: stat.cluster_id,
+               size: stat.size,
+               centroid: stat.centroid,
+               centroidKeys: stat.centroid ? Object.keys(stat.centroid) : [],
+               allKeys: Object.keys(stat),
+               selectedMeasures: selectedMeasures,
+               hasCentroid: !!stat.centroid,
+               centroidType: typeof stat.centroid
+             });
+           });
+         }
 
         // Update settings with results
         onSettingsChange({
@@ -461,20 +497,20 @@ const ClusteringCanvas: React.FC<ClusteringCanvasProps> = ({
         apiBase={FEATURE_OVERVIEW_API}
       />
 
-      {/* Identifier Value Selectors - Only show identifiers with >1 unique value */}
-      <Card className="p-3 bg-gradient-to-br from-blue-50 to-indigo-50 border-blue-200">
-        <div className="mb-2">
-          <h3 className="text-base font-medium text-blue-900">Identifier Filters</h3>
-        </div>
-        
-        {Array.isArray(filteredIdentifiers) && filteredIdentifiers.length > 0 ? (
-          <div className="grid grid-cols-4 gap-2">
-            {filteredIdentifiers.map((identifier) => (
-              <div key={identifier} className="flex flex-col items-center space-y-1">
-                {/* Identifier Name Label */}
-                <div className="text-xs font-medium text-blue-800 text-center">
-                  {capitalizeFirstLetter(identifier)}
-      </div>
+             {/* Identifier Value Selectors - Only show identifiers with >1 unique value */}
+              <Card className="p-2 border border-gray-200">
+         <div className="mb-3">
+                      <h3 className="text-base font-medium text-black">Identifier Filters</h3>
+         </div>
+         
+                  {Array.isArray(filteredIdentifiers) && filteredIdentifiers.length > 0 ? (
+            <div className="grid grid-cols-3 gap-4">
+              {filteredIdentifiers.map((identifier) => (
+                <div key={identifier} className="flex flex-col space-y-1">
+                  {/* Identifier Name Label */}
+                  <div className="text-xs font-medium text-black">
+                    {capitalizeFirstLetter(identifier)}
+                  </div>
 
             <Select
                   onValueChange={(value) => {
@@ -483,15 +519,15 @@ const ClusteringCanvas: React.FC<ClusteringCanvasProps> = ({
                     }
                   }}
                 >
-                  <SelectTrigger className="bg-white border-blue-300 hover:border-blue-400 transition-colors w-full">
-                    <span className="text-sm text-gray-700">
-                      {identifierFilters[identifier]?.length === 0
-                        ? ""
-                        : identifierFilters[identifier]?.length === uniqueValues[identifier]?.length
-                        ? "All"
-                        : `+${identifierFilters[identifier].length} selected`}
-                    </span>
-              </SelectTrigger>
+                                                                           <SelectTrigger className="bg-white border border-gray-300 hover:border-gray-400 transition-colors w-full h-8 px-2">
+                                                                                                                                                                         <span className="text-xs text-gray-700">
+                         {identifierFilters[identifier]?.length === 0
+                           ? "None"
+                           : identifierFilters[identifier]?.length === uniqueValues[identifier]?.length
+                           ? "All values"
+                           : `${identifierFilters[identifier].length} selected`}
+                       </span>
+               </SelectTrigger>
                   <SelectContent className="w-64 max-h-80">
                     <div className="p-3 space-y-2">
                       <div className="text-sm font-medium text-gray-700 mb-3 border-b pb-2">
@@ -543,7 +579,7 @@ const ClusteringCanvas: React.FC<ClusteringCanvasProps> = ({
                                 onChange={() => handleIdentifierFilterChange(identifier, identifierFilters[identifier]?.includes(value) ? identifierFilters[identifier]?.filter(v => v !== value) : [...(identifierFilters[identifier] || []), value])}
                                 className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
                               />
-                              <span className="text-sm">{value}</span>
+                              <span className="text-xs">{value}</span>
                             </div>
                           ))
                         ) : (
@@ -567,28 +603,30 @@ const ClusteringCanvas: React.FC<ClusteringCanvasProps> = ({
         )}
       </Card>
 
-      {/* Measures Section - Row format below identifiers */}
-      <Card className="p-3 bg-gradient-to-br from-orange-50 to-amber-50 border-orange-200">
-        <div className="mb-2">
-          <h3 className="text-base font-medium text-orange-900">Measures for Clustering</h3>
-      </div>
+             {/* Measures Section - Row format below identifiers */}
+              <Card className="p-2 border border-gray-200">
+         <div className="mb-3">
+                      <h3 className="text-base font-medium text-black">Measures for Clustering</h3>
+       </div>
 
-        <div className="grid grid-cols-4 gap-2">
-          {selectedMeasures.length > 0 ? (
-            selectedMeasures.map((measure) => (
-              <div key={measure} className="flex items-center justify-center p-1.5 bg-white rounded-lg border border-orange-200">
-                <Label className="text-xs font-medium text-orange-900 text-center">
-                  {capitalizeFirstLetter(measure)}
-                </Label>
-              </div>
-            ))
-          ) : (
-            <div className="col-span-4 text-center py-6 text-gray-500">
-              No measures selected. Please select measures in the Properties panel.
-            </div>
-          )}
-        </div>
-      </Card>
+                                    <div className="grid grid-cols-3 gap-4">
+             {selectedMeasures.length > 0 ? (
+               selectedMeasures.map((measure) => (
+                 <div key={measure} className="flex flex-col space-y-1">
+                   <div className="bg-white border border-gray-300 rounded-md p-1 text-left">
+                     <span className="text-xs text-gray-700">
+                       {capitalizeFirstLetter(measure)}
+                     </span>
+                   </div>
+                 </div>
+               ))
+             ) : (
+               <div className="col-span-3 text-center py-3 text-gray-500">
+                 No measures selected. Please select measures in the Properties panel.
+               </div>
+             )}
+           </div>
+       </Card>
 
       <Separator />
 
@@ -642,107 +680,142 @@ const ClusteringCanvas: React.FC<ClusteringCanvasProps> = ({
       )}
 
       {/* Visualization Area */}
-      <Card className="p-6 bg-gradient-to-br from-orange-50 to-red-50 border-orange-200">
+             <Card className="p-6 border border-gray-200">
         <div className="flex items-center gap-2 mb-4">
-          <BarChart3 className="h-5 w-5 text-orange-600" />
-          <h3 className="text-lg font-semibold text-orange-900">Clustering Results</h3>
+          <BarChart3 className="h-5 w-5 text-gray-600" />
+                     <h3 className="text-lg font-semibold text-black">Clustering Results</h3>
         </div>
         
-        <div className="bg-white rounded-lg border-2 border-dashed border-orange-300 p-8 text-center">
+                 <div className="bg-white rounded-lg border border-gray-200 p-8 text-center">
           {clusterResults && typeof clusterResults === 'object' && 'cluster_stats' in clusterResults ? (
                           <div className="space-y-6">
               
               {/* Cluster Stats Table */}
               <div className="mt-6">
-                <h4 className="text-lg font-semibold text-gray-800 mb-4">Cluster Statistics</h4>
+                                 <h4 className="text-lg font-semibold text-black mb-4">Cluster Statistics</h4>
                 
                 {/* Summary Cards */}
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-                  <div className="bg-orange-50 p-2 rounded-lg border border-orange-200">
-                    <div className="text-lg font-bold text-orange-700">
-                      {clusteringData.algorithm ? capitalizeFirstLetter(clusteringData.algorithm) : 'N/A'}
-                    </div>
-                    <div className="text-xs text-orange-600">Clustering Method</div>
-                  </div>
-                  <div className="bg-orange-50 p-2 rounded-lg border border-orange-200">
-                    <div className="text-lg font-bold text-orange-700">
-                      {clusteringData.k_selection ? clusteringData.k_selection.charAt(0).toUpperCase() + clusteringData.k_selection.slice(1) : 'N/A'}
-                    </div>
-                    <div className="text-xs text-orange-600">K-Selection Method</div>
-                  </div>
-                  <div className="bg-orange-50 p-2 rounded-lg border border-orange-200">
-                    <div className="text-lg font-bold text-orange-700">
-                      {clusterResults.n_clusters_found || (Array.isArray(clusterResults.cluster_stats) ? clusterResults.cluster_stats.length : 0)}
-                    </div>
-                    <div className="text-xs text-orange-600">Total Clusters</div>
-                  </div>
-                  <div className="bg-orange-50 p-2 rounded-lg border border-orange-200">
-                    <div className="text-lg font-bold text-orange-700">
-                      {Array.isArray(clusterResults.cluster_stats) ? clusterResults.cluster_stats.reduce((sum: number, stat: any) => sum + (stat.size || 0), 0) : 0}
-                </div>
-                    <div className="text-xs text-orange-600">Total Rows</div>
-            </div>
-          </div>
-                {/* Detailed Cluster Table */}
-                <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
-                  <div className="max-h-96 overflow-y-auto">
-                    <table className="min-w-full">
-                      <thead className="bg-gray-50 sticky top-0">
-                        <tr>
-                          <th className="px-4 py-3 text-center text-sm font-medium text-gray-700 border-b border-r border-gray-300">Cluster ID</th>
-                          <th className="px-4 py-3 text-center text-sm font-medium text-gray-700 border-b border-r border-gray-300">Size</th>
-                          <th className="px-4 py-3 text-center text-sm font-medium text-gray-700 border-b">Centroid Values</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {clusterResults.cluster_stats && Array.isArray(clusterResults.cluster_stats) && clusterResults.cluster_stats.length > 0 ? (
-                          clusterResults.cluster_stats.map((stat: any, index: number) => (
-                            <tr key={index} className="hover:bg-gray-50 border-b border-gray-100">
-                              <td className="px-4 py-3 text-sm text-gray-900 text-center border-r border-gray-300">
-                                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
-                                  Cluster {stat.cluster_id !== undefined && stat.cluster_id !== null ? stat.cluster_id : index + 1}
-                                </span>
-                              </td>
-                              <td className="px-4 py-3 text-sm text-gray-900 text-center border-r border-gray-300">
-                                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                                  {stat.size || 'N/A'}
-                                </span>
-                              </td>
-                                                            <td className="px-4 py-3 text-sm text-gray-900 text-center">
-                                <div className="overflow-x-auto">
-                                  <div className="flex justify-center space-x-4 min-w-max px-2">
-                                    {stat.centroid && typeof stat.centroid === 'object' && Object.keys(stat.centroid).length > 0 ? (
-                                      Object.entries(stat.centroid).map(([col, val]: [string, any], i: number) => (
-                                        <div key={i} className="text-center min-w-[120px] flex-shrink-0">
-                                          <div className="font-medium text-gray-700 text-xs">{col}</div>
-                                          <div className="text-gray-900 font-mono text-xs">{typeof val === 'number' ? val.toFixed(3) : val}</div>
-                                        </div>
-                                      ))
-                                    ) : (
-                                      <span className="text-gray-400">No centroid data</span>
-                                    )}
-                                  </div>
-                                </div>
-                              </td>
-
-                            </tr>
-                          ))
-                        ) : (
-                          <tr>
-                            <td colSpan={3} className="px-4 py-8 text-center text-gray-500">
-                              No cluster statistics available
-                            </td>
+                                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+                   <div className="bg-white p-2 rounded-lg border border-gray-200">
+                     <div className="text-lg font-bold text-black">
+                       {clusteringData.algorithm ? capitalizeFirstLetter(clusteringData.algorithm) : 'N/A'}
+                     </div>
+                     <div className="text-xs text-black">Clustering Method</div>
+                   </div>
+                   <div className="bg-white p-2 rounded-lg border border-gray-200">
+                     <div className="text-lg font-bold text-black">
+                       {clusteringData.k_selection ? clusteringData.k_selection.charAt(0).toUpperCase() + clusteringData.k_selection.slice(1) : 'N/A'}
+                     </div>
+                     <div className="text-xs text-black">K-Selection Method</div>
+                   </div>
+                   <div className="bg-white p-2 rounded-lg border border-gray-200">
+                     <div className="text-lg font-bold text-black">
+                       {clusterResults.n_clusters_found || (Array.isArray(clusterResults.cluster_stats) ? clusterResults.cluster_stats.length : 0)}
+                     </div>
+                     <div className="text-xs text-black">Total Clusters</div>
+                   </div>
+                   <div className="bg-white p-2 rounded-lg border border-gray-200">
+                     <div className="text-lg font-bold text-black">
+                       {Array.isArray(clusterResults.cluster_stats) ? clusterResults.cluster_stats.reduce((sum: number, stat: any) => sum + (stat.size || 0), 0) : 0}
+                 </div>
+                     <div className="text-xs text-black">Total Rows</div>
+             </div>
+           </div>
+                                 {/* Detailed Cluster Table */}
+                 <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+                   <div className="max-h-96 overflow-y-auto">
+                     <table className="min-w-full">
+                       <thead className="bg-gray-50 sticky top-0">
+                         <tr>
+                           <th className="px-4 py-3 text-center text-sm font-medium text-black border-b border-r border-gray-300">Cluster ID</th>
+                           <th className="px-4 py-3 text-center text-sm font-medium text-black border-b border-r border-gray-300">Size</th>
+                           <th className="px-4 py-3 text-left text-sm font-medium text-black border-b" colSpan={displayMeasures.length || 1}>
+                              Centroid Values
+                            </th>
                           </tr>
-                        )}
-                      </tbody>
-                    </table>
-            </div>
-          </div>
+                                                     {/* Sub-header row for measure names */}
+                           <tr className="bg-gray-50">
+                             <th className="px-4 py-2 text-center text-sm font-medium text-black border-r border-gray-300"></th>
+                             <th className="px-4 py-2 text-center text-sm font-medium text-black border-r border-gray-300"></th>
+                            {displayMeasures.length > 0 ? (
+                              displayMeasures.map((measure, measureIndex) => (
+                                <th key={measure} className="px-4 py-2 text-center text-sm font-medium text-black border-b border-gray-300">
+                                  {capitalizeFirstLetter(measure)}
+                                </th>
+                              ))
+                            ) : (
+                              <th className="px-4 py-2 text-center text-sm font-medium text-black border-b border-gray-300">
+                                Measures
+                              </th>
+                            )}
+                          </tr>
+                       </thead>
+                       <tbody>
+                         {clusterResults.cluster_stats && Array.isArray(clusterResults.cluster_stats) && clusterResults.cluster_stats.length > 0 ? (
+                           clusterResults.cluster_stats.map((stat: any, index: number) => (
+                             <tr key={index} className="hover:bg-gray-50 border-b border-gray-100">
+                               <td className="px-4 py-3 text-sm text-black text-center border-r border-gray-300">
+                                 <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                                   {stat.cluster_id !== undefined && stat.cluster_id !== null ? stat.cluster_id : index + 1}
+                                 </span>
+                               </td>
+                               <td className="px-4 py-3 text-sm text-black text-center border-r border-gray-300">
+                                 <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                                   {stat.size || 'N/A'}
+                                 </span>
+                               </td>
+                                                                                               {/* Centroid Values as separate columns */}
+                                 {displayMeasures.length > 0 ? (
+                                   displayMeasures.map((measure, measureIndex) => (
+                                     <td key={measure} className="px-4 py-3 text-sm text-black text-center border-gray-300">
+                                       <span className="font-mono text-xs">
+                                         {(() => {
+                                           // Debug logging to see what we're getting
+                                           console.log(`Debug - Cluster ${stat.cluster_id}, Measure ${measure}:`, {
+                                             stat: stat,
+                                             centroid: stat.centroid,
+                                             measureValue: stat.centroid?.[measure],
+                                             hasCentroid: !!stat.centroid,
+                                             centroidKeys: stat.centroid ? Object.keys(stat.centroid) : [],
+                                             displayMeasures: displayMeasures
+                                           });
+                                           
+                                           // Since we're using displayMeasures (actual measures from results), 
+                                           // we can directly access the centroid value
+                                           const value = stat.centroid?.[measure];
+                                           
+                                           if (value !== null && value !== undefined) {
+                                             return typeof value === 'number' ? value.toFixed(3) : String(value);
+                                           } else {
+                                             return 'N/A';
+                                           }
+                                         })()}
+                                       </span>
+                                     </td>
+                                   ))
+                                 ) : (
+                                   <td className="px-4 py-3 text-sm text-black text-center border-gray-300">
+                                     <span className="text-gray-400">No measures</span>
+                                   </td>
+                                 )}
+                             </tr>
+                           ))
+                         ) : (
+                                                       <tr>
+                              <td colSpan={displayMeasures.length > 0 ? displayMeasures.length + 2 : 3} className="px-4 py-8 text-center text-gray-500">
+                                No cluster statistics available
+                              </td>
+                            </tr>
+                         )}
+                       </tbody>
+                     </table>
+                   </div>
+                 </div>
                 {/* Full Output Data with Cluster IDs */}
                 {clusterResults.output_data && Array.isArray(clusterResults.output_data) && clusterResults.output_data.length > 0 && (
                   <div className="mt-6">
                     <div className="flex items-center justify-between mb-4">
-                      <h4 className="text-lg font-semibold text-gray-800">Full Output Data with Cluster IDs</h4>
+                      <h4 className="text-lg font-semibold text-black">Full Output Data with Cluster IDs</h4>
                       <div className="flex items-center gap-4 text-sm text-gray-600">
                         <span>Total Rows: {clusterResults.output_data.length.toLocaleString()}</span>
                         {clusterResults.output_data.length > 1000 && (
@@ -757,11 +830,11 @@ const ClusteringCanvas: React.FC<ClusteringCanvasProps> = ({
                         <table className="min-w-full">
                           <thead className="bg-gray-50 sticky top-0 z-10">
                             <tr>
-                              {Object.keys(clusterResults.output_data[0]).map((column) => (
-                                <th key={column} className="px-4 py-3 text-center text-sm font-medium text-gray-700 border-b bg-gray-50 shadow-sm">
-                                  {column === 'cluster_id' ? 'Cluster ID' : column}
-                    </th>
-                  ))}
+                                                             {Object.keys(clusterResults.output_data[0]).map((column) => (
+                                 <th key={column} className="px-4 py-3 text-center text-sm font-medium text-black border-b bg-gray-50 shadow-sm">
+                                   {column === 'cluster_id' ? 'Cluster ID' : column}
+                     </th>
+                   ))}
                 </tr>
               </thead>
               <tbody>
@@ -769,15 +842,15 @@ const ClusteringCanvas: React.FC<ClusteringCanvasProps> = ({
                               <tr key={index} className="hover:bg-gray-50 border-b border-gray-100">
                                 {Object.entries(row).map(([column, value]) => (
                                   <td key={column} className="px-4 py-2 text-sm text-gray-900 text-center">
-                                    {column === 'cluster_id' ? (
-                                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
-                                        Cluster {String(value)}
-                                      </span>
-                                    ) : (
-                                      <span className={typeof value === 'number' ? 'font-mono' : ''}>
-                                        {typeof value === 'number' ? (value as number).toFixed(3) : String(value)}
-                                      </span>
-                                    )}
+                                                                     {column === 'cluster_id' ? (
+                                   <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                                     {String(value)}
+                                   </span>
+                                 ) : (
+                                   <span className={typeof value === 'number' ? 'font-mono' : ''}>
+                                     {typeof value === 'number' ? (value as number).toFixed(3) : String(value)}
+                                   </span>
+                                 )}
                       </td>
                     ))}
                   </tr>

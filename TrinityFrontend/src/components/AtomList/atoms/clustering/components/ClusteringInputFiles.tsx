@@ -6,7 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
-import { VALIDATE_API, FEATURE_OVERVIEW_API } from '@/lib/api';
+import { VALIDATE_API, FEATURE_OVERVIEW_API, CLUSTERING_API } from '@/lib/api';
 import { Save, Edit3 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 

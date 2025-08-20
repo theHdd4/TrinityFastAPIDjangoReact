@@ -42,7 +42,8 @@ const MergeProperties: React.FC<Props> = ({ atomId }) => {
 
     // Fetch common columns when both files are selected
     React.useEffect(() => {
-      if (settings.file1 && settings.file2) {
+      // Fetch only if both files selected and we haven't already fetched columns
+      if (settings.file1 && settings.file2 && settings.availableColumns.length === 0) {
         console.log('Triggering /init fetch with:', settings.file1, settings.file2);
         fetch(`${MERGE_API}/init`, {
           method: 'POST',
@@ -66,16 +67,18 @@ const MergeProperties: React.FC<Props> = ({ atomId }) => {
             const preservedJoinColumns = settings.joinColumns.filter(col => 
               newAvailableColumns.includes(col)
             );
+            // If no prior selection, default to all available columns
+            const defaultJoinColumns = preservedJoinColumns.length > 0 ? preservedJoinColumns : [...newAvailableColumns];
             handleChange({
               ...settings,
               availableColumns: newAvailableColumns,
-              joinColumns: preservedJoinColumns,
+              joinColumns: defaultJoinColumns,
             });
             setError(null);
           })
           .catch(e => {
-            console.error('Failed to fetch join columns:', e);
-            setError('Failed to fetch join columns: ' + (e.message || e));
+            // Quietly handle error without exposing backend details to the UI
+            setError('Failed to fetch join columns');
             handleChange({
               ...settings,
               availableColumns: [],

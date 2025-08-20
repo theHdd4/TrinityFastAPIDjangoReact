@@ -3,6 +3,7 @@ import { BarChart3, Download, Eye, Target } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { ClusteringSettings } from '@/components/LaboratoryMode/store/laboratoryStore';
+import { CLUSTERING_API } from '@/lib/api';
 
 interface ClusteringExhibitionProps {
   settings: ClusteringSettings;
@@ -79,7 +80,7 @@ const ClusteringExhibition: React.FC<ClusteringExhibitionProps> = ({ settings })
   const exportFromBackend = async (filePath: string, format: 'csv' | 'excel') => {
     try {
       const endpoint = format === 'csv' ? '/export_csv' : '/export_excel';
-      const url = `${process.env.NEXT_PUBLIC_CLUSTERING_API || '/api/clustering'}${endpoint}?object_name=${encodeURIComponent(filePath)}`;
+      const url = `${CLUSTERING_API}${endpoint}?object_name=${encodeURIComponent(filePath)}`;
       
       console.log(`Exporting ${format.toUpperCase()} from: ${url}`);
       

@@ -42,8 +42,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [user, setUser] = useState<UserInfo | null>(null);
   const [profile, setProfile] = useState<ProfileInfo | null>(null);
 
+  const resolveRole = () => {
+    if (user?.is_superuser) return 'super_admin';
+    if (user?.role && user.role !== 'viewer') return user.role;
+    if (user?.is_staff) return 'admin';
+    return user?.role;
+  };
+
   const hasPermission = (permission: AppPermission) =>
-    checkPermission(user?.role, permission);
+    checkPermission(resolveRole(), permission);
 
   const loadProfile = async () => {
     try {
