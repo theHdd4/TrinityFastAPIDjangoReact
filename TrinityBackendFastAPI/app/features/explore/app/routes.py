@@ -165,241 +165,9 @@ async def column_summary(object_name: str):
 
 
 
-@router.get("/get-dimensions-and-identifiers/{validator_atom_id}")
-async def get_dimensions_and_identifiers(
-    validator_atom_id: str,
-    client_name: str = Query(None, description="Client name for column classifier lookup"),
-    app_name: str = Query(None, description="App name for column classifier lookup"),
-    project_name: str = Query(None, description="Project name for column classifier lookup"),
-    file_key: str = Query(None, description="Specific file key to fetch dimensions for")
-):
-    """
-    Get all business dimensions with assignments from SOURCE database (validator_atoms_db)
-    Enhanced with robust column classifier integration - tries column classifier first, falls back to original logic
-    """
-    # If column classifier parameters are provided, try to fetch from column classifier first
-    if client_name and app_name and project_name:
-        try:
-            # Try Redis first (fast lookup)
-            key = f"{client_name}/{app_name}/{project_name}/column_classifier_config"
-            cached = redis_client.get(key)
-            
-            if cached:
-                config_data = json.loads(cached)
-                print(f"✅ Found column classifier config in Redis for {key}")
-                
-                # Extract dimensions and identifiers from column classifier config
-                dimensions = config_data.get("dimensions", {})
-                identifiers = config_data.get("identifiers", [])
-                
-                # Transform to match explore atom format
-                # Use provided file_key or default to "file"
-                actual_file_key = file_key if file_key else "file"
-                dimensions_data = {actual_file_key: {}}
-                
-                for dimension_name, identifiers_list in dimensions.items():
-                    dimensions_data[actual_file_key][dimension_name] = {
-                        "dimension_name": dimension_name,
-                        "identifiers": identifiers_list,
-                        "description": f"Dimension: {dimension_name}",
-                        "source": "column_classifier",
-                        "config_key": key
-                    }
-                
-                return {
-                    "status": "success",
-                    "validator_atom_id": validator_atom_id,
-                    "source": "column_classifier_redis",
-                    "dimensions_structure": dimensions_data,
-                    "column_classifier_config": {
-                        "client_name": client_name,
-                        "app_name": app_name,
-                        "project_name": project_name,
-                        "redis_key": key,
-                        "total_dimensions": len(dimensions),
-                        "total_identifiers": len(identifiers)
-                    },
-                    "summary": {
-                        "file_keys": [actual_file_key],
-                        "total_dimensions": len(dimensions_data[actual_file_key]),
-                        "total_identifiers": len(identifiers),
-                        "available_dimensions": list(dimensions.keys()),
-                        "available_identifiers": identifiers
-                    }
-                }
-            
-            # If not in Redis, try MongoDB
-            mongo_data = get_classifier_config_from_mongo(client_name, app_name, project_name)
-            if mongo_data:
-                # Cache back to Redis
-                redis_client.setex(key, 3600, json.dumps(mongo_data, default=str))
-                print(f"✅ Found column classifier config in MongoDB for {client_name}/{app_name}/{project_name}")
-                
-                # Extract dimensions and identifiers from column classifier config
-                dimensions = mongo_data.get("dimensions", {})
-                identifiers = mongo_data.get("identifiers", [])
-                
-                # Transform to match explore atom format
-                actual_file_key = file_key if file_key else "file"
-                dimensions_data = {actual_file_key: {}}
-                
-                for dimension_name, identifiers_list in dimensions.items():
-                    dimensions_data[actual_file_key][dimension_name] = {
-                        "dimension_name": dimension_name,
-                        "identifiers": identifiers_list,
-                        "description": f"Dimension: {dimension_name}",
-                        "source": "column_classifier",
-                        "config_key": key
-                    }
-                
-                return {
-                    "status": "success",
-                    "validator_atom_id": validator_atom_id,
-                    "source": "column_classifier_mongo",
-                    "dimensions_structure": dimensions_data,
-                    "column_classifier_config": {
-                        "client_name": client_name,
-                        "app_name": app_name,
-                        "project_name": project_name,
-                        "mongo_id": f"{client_name}/{app_name}/{project_name}",
-                        "total_dimensions": len(dimensions),
-                        "total_identifiers": len(identifiers)
-                    },
-                    "summary": {
-                        "file_keys": [actual_file_key],
-                        "total_dimensions": len(dimensions_data[actual_file_key]),
-                        "total_identifiers": len(identifiers),
-                        "available_dimensions": list(dimensions.keys()),
-                        "available_identifiers": identifiers
-                    }
-                }
-        except Exception as e:
-            print(f"⚠️ Column classifier lookup failed: {e}")
-            # Continue to fallback logic
-    
-    # Fallback to original logic
-    result = get_dimensions_from_mongo(validator_atom_id)
-    
-    if result["status"] == "error":
-        raise HTTPException(status_code=404, detail=result["message"])
-    
-    return result
-
-
-@router.get("/get-measures/{validator_atom_id}")
-async def get_measures(
-    validator_atom_id: str,
-    client_name: str = Query(None, description="Client name for column classifier lookup"),
-    app_name: str = Query(None, description="App name for column classifier lookup"),
-    project_name: str = Query(None, description="Project name for column classifier lookup"),
-    file_key: str = Query(None, description="Specific file key to fetch measures for")
-):
-    """
-    Get column classifications from SOURCE database (validator_atoms_db) to get available measures
-    Enhanced with robust column classifier integration - tries column classifier first, falls back to original logic
-    """
-    # If column classifier parameters are provided, try to fetch from column classifier first
-    if client_name and app_name and project_name:
-        try:
-            # Try Redis first (fast lookup)
-            key = f"{client_name}/{app_name}/{project_name}/column_classifier_config"
-            cached = redis_client.get(key)
-            
-            if cached:
-                config_data = json.loads(cached)
-                print(f"✅ Found column classifier config in Redis for {key}")
-                
-                # Extract measures and identifiers from column classifier config
-                measures = config_data.get("measures", [])
-                identifiers = config_data.get("identifiers", [])
-                
-                # Transform to match explore atom format
-                actual_file_key = file_key if file_key else "file"
-                measures_data = {
-                    actual_file_key: {
-                        "measures": measures,
-                        "identifiers": identifiers,
-                        "source": "column_classifier",
-                        "config_key": key
-                    }
-                }
-                
-                return {
-                    "status": "success",
-                    "validator_atom_id": validator_atom_id,
-                    "source": "column_classifier_redis",
-                    "measures_structure": measures_data,
-                    "column_classifier_config": {
-                        "client_name": client_name,
-                        "app_name": app_name,
-                        "project_name": project_name,
-                        "redis_key": key,
-                        "total_measures": len(measures),
-                        "total_identifiers": len(identifiers)
-                    },
-                    "summary": {
-                        "file_keys": [actual_file_key],
-                        "total_measures": len(measures),
-                        "total_identifiers": len(identifiers),
-                        "available_measures": measures,
-                        "available_identifiers": identifiers
-                    }
-                }
-            
-            # If not in Redis, try MongoDB
-            mongo_data = get_classifier_config_from_mongo(client_name, app_name, project_name)
-            if mongo_data:
-                # Cache back to Redis
-                redis_client.setex(key, 3600, json.dumps(mongo_data, default=str))
-                print(f"✅ Found column classifier config in MongoDB for {client_name}/{app_name}/{project_name}")
-                
-                # Extract measures and identifiers from column classifier config
-                measures = mongo_data.get("measures", [])
-                identifiers = mongo_data.get("identifiers", [])
-                
-                # Transform to match explore atom format
-                actual_file_key = file_key if file_key else "file"
-                measures_data = {
-                    actual_file_key: {
-                        "measures": measures,
-                        "identifiers": identifiers,
-                        "source": "column_classifier",
-                        "config_key": key
-                    }
-                }
-                
-                return {
-                    "status": "success",
-                    "validator_atom_id": validator_atom_id,
-                    "source": "column_classifier_mongo",
-                    "measures_structure": measures_data,
-                    "column_classifier_config": {
-                        "client_name": client_name,
-                        "app_name": app_name,
-                        "project_name": project_name,
-                        "mongo_id": f"{client_name}/{app_name}/{project_name}",
-                        "total_measures": len(measures),
-                        "total_identifiers": len(identifiers)
-                    },
-                    "summary": {
-                        "file_keys": [actual_file_key],
-                        "total_measures": len(measures),
-                        "total_identifiers": len(identifiers),
-                        "available_measures": measures,
-                        "available_identifiers": identifiers
-                    }
-                }
-        except Exception as e:
-            print(f"⚠️ Column classifier lookup failed: {e}")
-            # Continue to fallback logic
-    
-    # Fallback to original logic
-    result = get_measures_from_mongo(validator_atom_id)
-    
-    if result["status"] == "error":
-        raise HTTPException(status_code=404, detail=result["message"])
-    
-    return result
+# REMOVED: Unused API endpoints that were not being called by the frontend
+# - /get-dimensions-and-identifiers/{validator_atom_id}
+# - /get-measures/{validator_atom_id}
 
 
 @router.post("/select-dimensions-and-measures")
@@ -900,6 +668,92 @@ async def chart_data_multidim(explore_atom_id: str):
                 return col
         return None
     
+    # Helper function for manual pivoting in bar charts
+    def manual_pivot_for_bar_chart(grouped_result, actual_group_cols, actual_measure):
+        chart_data = []
+        
+        # Check if we have a legend field (more than one group column)
+        if len(actual_group_cols) > 1:
+            # We have a legend field, need to pivot the data properly
+            x_axis_col = actual_group_cols[0]  # First column is X-axis
+            legend_col = actual_group_cols[1]  # Second column is legend
+            
+            # Get unique values for X-axis and legend
+            unique_x_values = sorted(grouped_result[x_axis_col].unique())
+            unique_legend_values = sorted(grouped_result[legend_col].unique())
+            
+            print(f"🔍 Backend: Manual pivot - X-axis values: {unique_x_values}")
+            print(f"🔍 Backend: Manual pivot - Legend values: {unique_legend_values}")
+            
+            # Create pivoted data structure
+            for x_value in unique_x_values:
+                data_point = {
+                    x_axis_col: str(x_value),
+                    "category": str(x_value)  # Keep for backward compatibility
+                }
+                
+                # Add each legend value as a separate column
+                for legend_value in unique_legend_values:
+                    # Find the corresponding value for this x_value + legend_value combination
+                    matching_rows = grouped_result[
+                        (grouped_result[x_axis_col] == x_value) & 
+                        (grouped_result[legend_col] == legend_value)
+                    ]
+                    
+                    if len(matching_rows) > 0:
+                        y_value = matching_rows[actual_measure].iloc[0]
+                        if pd.api.types.is_numeric_dtype(grouped_result[actual_measure]):
+                            data_point[str(legend_value)] = float(y_value) if pd.notna(y_value) else 0
+                        else:
+                            data_point[str(legend_value)] = str(y_value) if pd.notna(y_value) else "Unknown"
+                    else:
+                        # No data for this combination, set to 0
+                        data_point[str(legend_value)] = 0
+                
+                chart_data.append(data_point)
+            
+            print(f"🔍 Backend: Manual pivot completed - {len(chart_data)} data points")
+            print(f"🔍 Backend: Sample pivoted data: {chart_data[:2] if chart_data else 'No data'}")
+            
+        else:
+            # No legend field, use simple single bar logic
+            sorted_result = grouped_result.sort_values(actual_measure, ascending=False)
+            
+            for _, row in sorted_result.iterrows():
+                # Create bar chart data point
+                y_value = row[actual_measure]
+                if pd.api.types.is_numeric_dtype(grouped_result[actual_measure]):
+                    y_value = float(y_value) if pd.notna(y_value) else 0
+                else:
+                    y_value = str(y_value) if pd.notna(y_value) else "Unknown"
+                
+                # Create data point with proper X and Y axis field names
+                data_point = {}
+                
+                # Add X-axis field (first group column) with its actual name
+                if actual_group_cols:
+                    x_axis_col = actual_group_cols[0]
+                    data_point[x_axis_col] = str(row[x_axis_col])
+                    # Only add category for backward compatibility if needed
+                    # data_point["category"] = str(row[x_axis_col])
+                else:
+                    data_point["category"] = "Category"
+                
+                # Add Y-axis field (measure) with its actual name
+                data_point[actual_measure] = y_value
+                
+                # Add ALL grouping dimensions as separate columns (not just as labels)
+                for i, group_col in enumerate(actual_group_cols):
+                    data_point[group_col] = str(row[group_col])
+                
+                # Add additional grouping dimensions as labels if available (for backward compatibility)
+                if len(actual_group_cols) > 1:
+                    data_point["label"] = " | ".join([str(row[col]) for col in actual_group_cols[1:]])
+                
+                chart_data.append(data_point)
+        
+        return chart_data
+    
     # Apply filters with smart matching and date range filtering
     print(f"⏱️ Starting data processing at: {datetime.now()}")
     processed_df = df.copy()
@@ -993,6 +847,9 @@ async def chart_data_multidim(explore_atom_id: str):
 
     # Multi-dimensional grouping
     actual_group_cols = []
+    print(f"🔍 Backend: Processing group_by: {group_by}")
+    print(f"🔍 Backend: Available columns in dataframe: {list(df.columns)}")
+    
     for group_col in group_by:
         actual_col = find_column(group_col, df.columns)
         if actual_col:
@@ -1000,6 +857,9 @@ async def chart_data_multidim(explore_atom_id: str):
             print(f"✅ Group by: {group_col} → {actual_col}")
         else:
             print(f"❌ Group by column '{group_col}' not found")
+            print(f"🔍 Backend: Column '{group_col}' not found in available columns: {list(df.columns)}")
+    
+    print(f"🔍 Backend: Final actual_group_cols: {actual_group_cols}")
     
     if not actual_group_cols:
         raise HTTPException(status_code=400, detail="No valid group by columns found")
@@ -1180,11 +1040,16 @@ async def chart_data_multidim(explore_atom_id: str):
                 grouped_result = grouped_result.merge(measure_result, on=actual_group_cols, how='left')
             
             print(f"✅ Multiple measures aggregation completed: {len(grouped_result)} combinations")
+            print(f"🔍 Backend: Final grouped result columns: {list(grouped_result.columns)}")
+            print(f"🔍 Backend: Sample grouped result: {grouped_result.head(2).to_dict('records')}")
             
         else:
             # Single measure aggregation (existing logic)
             if agg_type == "sum":
                 grouped_result = processed_df.groupby(actual_group_cols)[actual_measure].sum().reset_index()
+                print(f"🔍 Backend: Sum aggregation completed")
+                print(f"🔍 Backend: Final grouped result columns: {list(grouped_result.columns)}")
+                print(f"🔍 Backend: Sample grouped result: {grouped_result.head(2).to_dict('records')}")
             
             elif agg_type == "avg":
                 grouped_result = processed_df.groupby(actual_group_cols)[actual_measure].mean().reset_index()
@@ -1209,7 +1074,7 @@ async def chart_data_multidim(explore_atom_id: str):
                 
                 def weighted_avg_func(group):
                     numerator = (group[actual_measure] * group[actual_weight]).sum()
-                    denominator = group[actual_weight].sum()
+                    denominator = group[weight_column].sum()
                     return numerator / denominator if denominator != 0 else 0
                 
                 # Apply weighted average calculation
@@ -1217,6 +1082,8 @@ async def chart_data_multidim(explore_atom_id: str):
                 grouped_result.columns = actual_group_cols + [actual_measure]
                 
                 print(f"✅ Weighted average calculated using {actual_weight} as weight")
+                print(f"🔍 Backend: Final grouped result columns: {list(grouped_result.columns)}")
+                print(f"🔍 Backend: Sample grouped result: {grouped_result.head(2).to_dict('records')}")
             
             elif agg_type == "null":
                 # No aggregation - for identifiers, we want to show the actual values
@@ -1314,117 +1181,113 @@ async def chart_data_multidim(explore_atom_id: str):
         else:
             # Single measure line chart with legend field support
             if line_id_cols:
-                # Use chart maker service for proper pivoting when legend field is specified
-                try:
-                    # Check if we have a legend field in the group_by (excluding x_axis)
-                    legend_field = None
-                    for col in line_id_cols:
-                        if col != actual_x_axis:
-                            legend_field = col
-                            break
+                # Check if we have a legend field in the group_by (excluding x_axis)
+                legend_field = None
+                for col in line_id_cols:
+                    if col != actual_x_axis:
+                        legend_field = col
+                        break
+                
+                # CRITICAL FIX: Check if legend_field should actually be used
+                # If the user has deselected the legend, we should treat this as a simple line chart
+                # We can detect this by checking if the frontend is expecting legend behavior
+                use_legend = legend_field is not None
+                
+                if use_legend and legend_field:
+                    print(f"🔍 Backend: Processing line chart with legend field: {legend_field}")
+                    print(f"🔍 Backend: X-axis: {actual_x_axis}, Y-axis: {actual_measure}, Legend: {legend_field}")
+                
+                    # For line charts with legend, we need to create data that shows each legend value as a separate line
+                    # This is different from bar charts - we want each legend value to have its own series
                     
-                    if legend_field:
-                        print(f"🔍 Backend: Using chart maker service for legend-based pivoting")
-                        print(f"🔍 Backend: X-axis: {actual_x_axis}, Y-axis: {actual_measure}, Legend: {legend_field}")
-                        print(f"🔍 Backend: Grouped result sample: {grouped_result.head(2).to_dict('records')}")
+                    # Get unique values for X-axis and legend
+                    unique_x_values = sorted(grouped_result[actual_x_axis].unique())
+                    unique_legend_values = sorted(grouped_result[legend_field].unique())
+                    
+                    print(f"🔍 Backend: Line chart - X-axis values: {unique_x_values}")
+                    print(f"🔍 Backend: Line chart - Legend values: {unique_legend_values}")
+                    
+                    # Create line chart data structure where each X-axis value gets one data point
+                    # with all legend values as separate columns (like bar charts)
+                    for x_value in unique_x_values:
+                        # Create one data point per X-axis value
+                        data_point = {
+                            actual_x_axis: str(x_value),
+                            "category": str(x_value),    # Keep for backward compatibility
+                            "x": str(x_value)           # Alternative x-axis field for frontend compatibility
+                        }
                         
-                        # Use the chart maker service's pivoting method
-                        try:
-                            pivoted_data, unique_legend_values = chart_service._pivot_data_for_legend(
-                                grouped_result,
-                                actual_x_axis,
-                                actual_measure,
-                                legend_field,
-                                agg_type if agg_type != "null" else "sum"
-                            )
+                        # Add each legend value as a separate column for this X-axis value
+                        for legend_value in unique_legend_values:
+                            # Find the corresponding value for this x_value + legend_value combination
+                            matching_rows = grouped_result[
+                                (grouped_result[actual_x_axis] == x_value) & 
+                                (grouped_result[legend_field] == legend_value)
+                            ]
                             
-                            chart_data = pivoted_data
-                            print(f"✅ Chart maker service pivoting: {len(chart_data)} data points with {len(unique_legend_values)} legend values")
-                            print(f"🔍 Backend: Legend values: {unique_legend_values}")
-                            print(f"🔍 Backend: Pivoted data sample: {chart_data[:2] if chart_data else 'No data'}")
-                            
-                            # Add metadata to help frontend understand this is pivoted data
-                            chart_metadata = {
-                                "is_pivoted": True,
-                                "legend_field": legend_field,
-                                "legend_values": unique_legend_values,
-                                "x_axis": actual_x_axis,
-                                "y_axis": actual_measure
-                            }
-                        except Exception as e:
-                            print(f"❌ Chart maker service pivoting failed: {e}")
-                            # Fallback to manual pivoting
-                            raise e
-                    else:
-                        # Fallback to manual pivoting
-                        pivot_data = {}
-                        
-                        for line_name in grouped_result['line_id'].unique():
-                            line_data = grouped_result[grouped_result['line_id'] == line_name].sort_values(actual_x_axis)
-                            
-                            for _, row in line_data.iterrows():
-                                x_value = str(row[actual_x_axis])
-                                y_value = row[actual_measure]
-                                
+                            if len(matching_rows) > 0:
+                                y_value = matching_rows[actual_measure].iloc[0]
                                 if pd.api.types.is_numeric_dtype(grouped_result[actual_measure]):
-                                    y_value = float(y_value) if pd.notna(y_value) else 0
+                                    data_point[str(legend_value)] = float(y_value) if pd.notna(y_value) else 0
                                 else:
-                                    y_value = str(y_value) if pd.notna(y_value) else "Unknown"
-                                
-                                if x_value not in pivot_data:
-                                    pivot_data[x_value] = {actual_x_axis: x_value}
-                                
-                                # Use the actual legend field column name as the key
-                                legend_key = line_id_cols[0]
-                                pivot_data[x_value][legend_key] = y_value
+                                    data_point[str(legend_value)] = str(y_value) if pd.notna(y_value) else "Unknown"
+                            else:
+                                # No data for this combination, set to 0
+                                data_point[str(legend_value)] = 0
                         
-                        # Convert to list and sort by X-axis
-                        chart_data = list(pivot_data.values())
-                        try:
-                            # Try to sort numerically if possible
-                            chart_data.sort(key=lambda x: float(x[actual_x_axis]) if str(x[actual_x_axis]).replace('.', '').replace('-', '').isdigit() else x[actual_x_axis])
-                        except (ValueError, TypeError):
-                            # Fall back to string sorting
-                            chart_data.sort(key=lambda x: str(x[actual_x_axis]))
-                        
-                        print(f"✅ Manual legend-based line chart: {len(chart_data)} data points generated with {len(line_id_cols)} legend fields")
-                        
-                except Exception as e:
-                    print(f"⚠️ Chart maker service pivoting failed, falling back to manual method: {e}")
-                    # Fallback to manual pivoting
-                    pivot_data = {}
+                        chart_data.append(data_point)
                     
+                    print(f"✅ Line chart with legend: {len(chart_data)} data points generated")
+                    print(f"🔍 Backend: Sample line chart data: {chart_data[:3] if chart_data else 'No data'}")
+                    
+                    # Add metadata to help frontend understand this is a line chart with legend
+                    chart_metadata = {
+                        "is_pivoted": True,  # Line charts with legend now use pivoted data like bar charts
+                        "legend_field": legend_field,
+                        "x_axis": actual_x_axis,
+                        "y_axis": actual_measure,
+                        "chart_type": "line_chart_with_legend"
+                    }
+                    
+                else:
+                    # No legend field or legend should be ignored, use simple line logic
+                    print(f"🔍 Backend: Processing simple line chart without legend")
+                    print(f"🔍 Backend: X-axis: {actual_x_axis}, Y-axis: {actual_measure}")
+                    
+                    # Create simple line chart data with just X and Y axes
                     for line_name in grouped_result['line_id'].unique():
                         line_data = grouped_result[grouped_result['line_id'] == line_name].sort_values(actual_x_axis)
                         
+                        # Create individual data points for each x-y pair
                         for _, row in line_data.iterrows():
-                            x_value = str(row[actual_x_axis])
+                            # Handle both numeric and categorical Y-axis values
                             y_value = row[actual_measure]
-                            
                             if pd.api.types.is_numeric_dtype(grouped_result[actual_measure]):
                                 y_value = float(y_value) if pd.notna(y_value) else 0
                             else:
                                 y_value = str(y_value) if pd.notna(y_value) else "Unknown"
                             
-                            if x_value not in pivot_data:
-                                pivot_data[x_value] = {actual_x_axis: x_value}
-                            
-                            # Use the actual legend field column name as the key
-                            legend_key = line_id_cols[0]
-                            pivot_data[x_value][legend_key] = y_value
+                            chart_data.append({
+                                actual_x_axis: str(row[actual_x_axis]),
+                                actual_measure: y_value
+                                # Remove "series" field to avoid confusion
+                            })
                     
-                    # Convert to list and sort by X-axis
-                    chart_data = list(pivot_data.values())
-                    try:
-                        # Try to sort numerically if possible
-                        chart_data.sort(key=lambda x: float(x[actual_x_axis]) if str(x[actual_x_axis]).replace('.', '').replace('-', '').isdigit() else x[actual_x_axis])
-                    except (ValueError, TypeError):
-                        # Fall back to string sorting
-                        chart_data.sort(key=lambda x: str(x[actual_x_axis]))
+                    print(f"✅ Simple line chart without legend: {len(chart_data)} data points generated")
+                    print(f"🔍 Backend: Sample simple line chart data: {chart_data[:3] if chart_data else 'No data'}")
                     
-                    print(f"✅ Fallback manual legend-based line chart: {len(chart_data)} data points generated")
+                    # Add metadata to help frontend understand this is a simple line chart
+                    chart_metadata = {
+                        "is_pivoted": False,
+                        "x_axis": actual_x_axis,
+                        "y_axis": actual_measure,
+                        "chart_type": "simple_line_chart"
+                    }
             else:
                 # Fallback to original logic for non-legend charts
+                print(f"🔍 Backend: Processing fallback line chart logic")
+                print(f"🔍 Backend: X-axis: {actual_x_axis}, Y-axis: {actual_measure}")
+                
                 for line_name in grouped_result['line_id'].unique():
                     line_data = grouped_result[grouped_result['line_id'] == line_name].sort_values(actual_x_axis)
                     
@@ -1439,11 +1302,20 @@ async def chart_data_multidim(explore_atom_id: str):
                         
                         chart_data.append({
                             actual_x_axis: str(row[actual_x_axis]),
-                            actual_measure: y_value,
-                            "series": line_name
+                            actual_measure: y_value
+                            # Remove "series" field to avoid confusion
                         })
                 
-                print(f"✅ Single line chart: {len(chart_data)} data points generated")
+                print(f"✅ Fallback line chart: {len(chart_data)} data points generated")
+                print(f"🔍 Backend: Sample fallback line chart data: {chart_data[:3] if chart_data else 'No data'}")
+                
+                # Add metadata to help frontend understand this is a fallback line chart
+                chart_metadata = {
+                    "is_pivoted": False,
+                    "x_axis": actual_x_axis,
+                    "y_axis": actual_measure,
+                    "chart_type": "fallback_line_chart"
+                }
 
     elif chart_type == "bar_chart":
         print(f"🔍 Backend: Processing BAR CHART branch")
@@ -1460,10 +1332,16 @@ async def chart_data_multidim(explore_atom_id: str):
             
             for _, row in sorted_result.iterrows():
                 # Create bar chart data point with actual field names
-                data_point = {
-                    actual_group_cols[0] if actual_group_cols else "category": str(row[actual_group_cols[0]]) if actual_group_cols else "Category",
-                    "category": str(row[actual_group_cols[0]]) if actual_group_cols else "Category"
-                }
+                data_point = {}
+                
+                # Add X-axis field (first group column) with its actual name
+                if actual_group_cols:
+                    x_axis_col = actual_group_cols[0]
+                    data_point[x_axis_col] = str(row[x_axis_col])
+                    # Remove extra fields to avoid confusion
+                    # data_point["category"] = str(row[x_axis_col])
+                else:
+                    data_point["category"] = "Category"
                 
                 # Add each measure as a separate field
                 for measure_info in multiple_measures:
@@ -1477,7 +1355,11 @@ async def chart_data_multidim(explore_atom_id: str):
                         else:
                             data_point[measure_name] = str(y_value) if pd.notna(y_value) else "Unknown"
                 
-                # Add additional grouping dimensions as labels if available
+                # Add ALL grouping dimensions as separate columns (not just as labels)
+                for i, group_col in enumerate(actual_group_cols):
+                    data_point[group_col] = str(row[group_col])
+                
+                # Add additional grouping dimensions as labels if available (for backward compatibility)
                 if len(actual_group_cols) > 1:
                     data_point["label"] = " | ".join([str(row[col]) for col in actual_group_cols[1:]])
                 
@@ -1486,30 +1368,82 @@ async def chart_data_multidim(explore_atom_id: str):
             print(f"✅ Bar chart with multiple measures: {len(chart_data)} bars generated")
             
         else:
-            # Single measure bar chart (existing logic)
-            # Sort by measure value (descending) for better bar chart visualization
-            sorted_result = grouped_result.sort_values(actual_measure, ascending=False)
-            
-            for _, row in sorted_result.iterrows():
-                # Create bar chart data point
-                # Handle both numeric and categorical Y-axis values
-                y_value = row[actual_measure]
-                if pd.api.types.is_numeric_dtype(grouped_result[actual_measure]):
-                    y_value = float(y_value) if pd.notna(y_value) else 0
-                else:
-                    y_value = str(y_value) if pd.notna(y_value) else "Unknown"
+            # Single measure bar chart with legend field support
+            if len(actual_group_cols) > 1:
+                # We have a legend field, use chart maker service for proper pivoting
+                try:
+                    # Find the legend field (the second group column, since first is X-axis)
+                    legend_field = actual_group_cols[1] if len(actual_group_cols) > 1 else None
+                    
+                    if legend_field:
+                        print(f"🔍 Backend: Using chart maker service for bar chart legend-based pivoting")
+                        print(f"🔍 Backend: X-axis: {actual_group_cols[0]}, Y-axis: {actual_measure}, Legend: {legend_field}")
+                        print(f"🔍 Backend: Grouped result sample: {grouped_result.head(2).to_dict('records')}")
+                        
+                        # Use the chart maker service's pivoting method
+                        try:
+                            pivoted_data, unique_legend_values = chart_service._pivot_data_for_legend(
+                                grouped_result,
+                                actual_group_cols[0],  # X-axis
+                                actual_measure,         # Y-axis
+                                legend_field,           # Legend field
+                                agg_type if agg_type != "null" else "sum"
+                            )
+                            
+                            chart_data = pivoted_data
+                            print(f"✅ Bar chart pivoting: {len(chart_data)} data points with {len(unique_legend_values)} legend values")
+                            print(f"🔍 Backend: Legend values: {unique_legend_values}")
+                            print(f"🔍 Backend: Pivoted data sample: {chart_data[:2] if chart_data else 'No data'}")
+                            
+                            # Add metadata to help frontend understand this is pivoted data
+                            chart_metadata = {
+                                "is_pivoted": True,
+                                "legend_field": legend_field,
+                                "legend_values": unique_legend_values,
+                                "x_axis": actual_group_cols[0],
+                                "y_axis": actual_measure
+                            }
+                        except Exception as e:
+                            print(f"❌ Chart maker service pivoting failed: {e}")
+                            # Fallback to manual pivoting
+                            chart_data = manual_pivot_for_bar_chart(grouped_result, actual_group_cols, actual_measure)
+                    else:
+                        # Fallback to manual pivoting
+                        chart_data = manual_pivot_for_bar_chart(grouped_result, actual_group_cols, actual_measure)
+                except Exception as e:
+                    print(f"⚠️ Bar chart pivoting failed, falling back to manual method: {e}")
+                    # Fallback to manual pivoting
+                    chart_data = manual_pivot_for_bar_chart(grouped_result, actual_group_cols, actual_measure)
+            else:
+                # No legend field, use simple single bar logic
+                print(f"🔍 Backend: Processing simple bar chart without legend")
+                print(f"🔍 Backend: X-axis: {actual_group_cols[0]}, Y-axis: {actual_measure}")
                 
-                data_point = {
-                    actual_group_cols[0] if actual_group_cols else "category": str(row[actual_group_cols[0]]) if actual_group_cols else "Category",
-                    actual_measure: y_value,
-                    "category": str(row[actual_group_cols[0]]) if actual_group_cols else "Category"
+                # Create simple bar chart data with just X and Y axes
+                for _, row in grouped_result.iterrows():
+                    # Handle both numeric and categorical Y-axis values
+                    y_value = row[actual_measure]
+                    if pd.api.types.is_numeric_dtype(grouped_result[actual_measure]):
+                        y_value = float(y_value) if pd.notna(y_value) else 0
+                    else:
+                        y_value = str(y_value) if pd.notna(y_value) else "Unknown"
+                    
+                    chart_data.append({
+                        actual_group_cols[0]: str(row[actual_group_cols[0]]),
+                        actual_measure: y_value
+                        # Remove extra fields to avoid confusion
+                    })
+                
+                print(f"✅ Simple bar chart without legend: {len(chart_data)} bars generated")
+                print(f"🔍 Backend: Sample simple bar chart data: {chart_data[:3] if chart_data else 'No data'}")
+                
+                # Add metadata to help frontend understand this is a simple bar chart
+                chart_metadata = {
+                    "is_pivoted": False,
+                    "x_axis": actual_group_cols[0],
+                    "y_axis": actual_measure,
+                    "chart_type": "simple_bar_chart"
                 }
-                
-                # Add additional grouping dimensions as labels if available
-                if len(actual_group_cols) > 1:
-                    data_point["label"] = " | ".join([str(row[col]) for col in actual_group_cols[1:]])
-                
-                chart_data.append(data_point)
             
             print(f"✅ Bar chart: {len(chart_data)} bars generated")
 
@@ -1589,68 +1523,136 @@ async def chart_data_multidim(explore_atom_id: str):
         # Pie chart specific processing
         chart_data = []
         
-        # Check if we have multiple measures for dual Y-axes
-        if len(multiple_measures) > 1:
-            print(f"🔍 Backend: Generating pie chart with multiple measures for dual Y-axes")
+        # Check if we have a legend field (more than one group column)
+        if len(actual_group_cols) > 1:
+            # We have a legend field, need to create data that shows each legend value as a separate slice
+            x_axis_col = actual_group_cols[0]  # First column is X-axis (e.g., year)
+            legend_col = actual_group_cols[1]  # Second column is legend (e.g., brand)
             
-            # Sort by the first measure value (descending) for better pie chart visualization
-            first_measure_col = multiple_measures[0]['column']
-            sorted_result = grouped_result.sort_values(first_measure_col, ascending=False)
+            print(f"🔍 Backend: Processing pie chart with legend field: {legend_col}")
+            print(f"🔍 Backend: X-axis: {x_axis_col}, Y-axis: {actual_measure}, Legend: {legend_col}")
             
-            for _, row in sorted_result.iterrows():
-                # Create pie chart data point with actual field names
+            # Get unique values for legend (these will be the pie slices)
+            unique_legend_values = sorted(grouped_result[legend_col].unique())
+            print(f"🔍 Backend: Pie chart - Legend values: {unique_legend_values}")
+            
+            # For pie charts with legend, we want to show each legend value as a separate slice
+            # The value will be the sum/aggregation across all X-axis values for that legend
+            for legend_value in unique_legend_values:
+                # Get all rows for this legend value
+                legend_rows = grouped_result[grouped_result[legend_col] == legend_value]
+                
+                # Calculate the total value for this legend across all X-axis values
+                if pd.api.types.is_numeric_dtype(grouped_result[actual_measure]):
+                    total_value = legend_rows[actual_measure].sum()
+                    value = float(total_value) if pd.notna(total_value) else 0
+                else:
+                    # For non-numeric, count occurrences
+                    value = len(legend_rows)
+                
+                # Create pie chart data point with proper label/value structure
                 data_point = {
-                    "label": str(row[actual_group_cols[0]]) if actual_group_cols else "Category",
-                    "category": str(row[actual_group_cols[0]]) if actual_group_cols else "Category"
+                    "label": str(legend_value),  # Legend value becomes the slice label
+                    "value": value,              # Total value determines slice size
+                    "category": str(legend_value),  # Keep for backward compatibility
+                    "legend_value": str(legend_value),  # Store the actual legend value
+                    "x_axis_values": legend_rows[x_axis_col].unique().tolist()  # Store X-axis values for this legend
                 }
                 
-                # Add each measure as a separate field
-                for measure_info in multiple_measures:
-                    measure_name = measure_info['name']
-                    measure_col = measure_info['column']
-                    
-                    if measure_col in row.index:
-                        value = row[measure_col]
-                        if pd.api.types.is_numeric_dtype(grouped_result[measure_col]):
-                            data_point[measure_name] = float(value) if pd.notna(value) else 0
-                        else:
-                            data_point[measure_name] = str(value) if pd.notna(value) else "Unknown"
-                
                 # Add additional grouping dimensions as labels if available
-                if len(actual_group_cols) > 1:
-                    data_point["full_label"] = " | ".join([str(row[col]) for col in actual_group_cols])
+                if len(actual_group_cols) > 2:
+                    additional_dims = [str(row[col]) for col in actual_group_cols[2:] for _, row in legend_rows.iterrows()]
+                    data_point["additional_dimensions"] = list(set(additional_dims))
                 
                 chart_data.append(data_point)
             
-            print(f"✅ Pie chart with multiple measures: {len(chart_data)} slices generated")
+            print(f"✅ Pie chart with legend: {len(chart_data)} slices generated")
+            print(f"🔍 Backend: Sample pie chart data: {chart_data[:3] if chart_data else 'No data'}")
+            
+            # Add metadata to help frontend understand this is a pie chart with legend
+            chart_metadata = {
+                "is_pivoted": True,  # Pie charts with legend now use pivoted data like bar charts
+                "legend_field": legend_col,
+                "legend_values": unique_legend_values,
+                "x_axis": x_axis_col,
+                "y_axis": actual_measure,
+                "chart_type": "pie_chart_with_legend"
+            }
             
         else:
-            # Single measure pie chart (existing logic)
-            # Sort by measure value (descending) for better pie chart visualization
-            sorted_result = grouped_result.sort_values(actual_measure, ascending=False)
-            
-            for _, row in sorted_result.iterrows():
-                # Create pie chart data point
-                # Handle both numeric and categorical Y-axis values
-                value = row[actual_measure]
-                if pd.api.types.is_numeric_dtype(grouped_result[actual_measure]):
-                    value = float(value) if pd.notna(value) else 0
-                else:
-                    value = str(value) if pd.notna(value) else "Unknown"
+            # No legend field, use simple single pie logic
+            # Check if we have multiple measures for dual Y-axes
+            if len(multiple_measures) > 1:
+                print(f"🔍 Backend: Generating pie chart with multiple measures for dual Y-axes")
                 
-                data_point = {
-                    "label": str(row[actual_group_cols[0]]) if actual_group_cols else "Category",
-                    "value": value,
-                    "category": str(row[actual_group_cols[0]]) if actual_group_cols else "Category"
-                }
+                # Sort by the first measure value (descending) for better pie chart visualization
+                first_measure_col = multiple_measures[0]['column']
+                sorted_result = grouped_result.sort_values(first_measure_col, ascending=False)
                 
-                # Add additional grouping dimensions as labels if available
-                if len(actual_group_cols) > 1:
-                    data_point["full_label"] = " | ".join([str(row[col]) for col in actual_group_cols])
+                for _, row in sorted_result.iterrows():
+                    # Create pie chart data point with proper label/value structure for frontend
+                    data_point = {
+                        "label": str(row[actual_group_cols[0]]) if actual_group_cols else "Category",
+                        "value": 0,  # Will be set below
+                        "category": str(row[actual_group_cols[0]]) if actual_group_cols else "Category"
+                    }
+                    
+                    # Add each measure as a separate field, but also set the primary value
+                    for i, measure_info in enumerate(multiple_measures):
+                        measure_name = measure_info['name']
+                        measure_col = measure_info['column']
+                        
+                        if measure_col in row.index:
+                            value = row[measure_col]
+                            if pd.api.types.is_numeric_dtype(grouped_result[measure_col]):
+                                data_point[measure_name] = float(value) if pd.notna(value) else 0
+                                # Set the first measure as the primary value for pie chart
+                                if i == 0:
+                                    data_point["value"] = float(value) if pd.notna(value) else 0
+                            else:
+                                data_point[measure_name] = str(value) if pd.notna(value) else "Unknown"
+                                # Set the first measure as the primary value for pie chart
+                                if i == 0:
+                                    data_point["value"] = str(value) if pd.notna(value) else "Unknown"
+                    
+                    # Add additional grouping dimensions as labels if available
+                    if len(actual_group_cols) > 1:
+                        data_point["full_label"] = " | ".join([str(row[col]) for col in actual_group_cols])
+                    
+                    chart_data.append(data_point)
                 
-                chart_data.append(data_point)
-            
-            print(f"✅ Pie chart: {len(chart_data)} slices generated")
+                print(f"✅ Pie chart with multiple measures: {len(chart_data)} slices generated")
+                
+            else:
+                # Single measure pie chart - ensure proper label/value structure
+                # Sort by measure value (descending) for better pie chart visualization
+                sorted_result = grouped_result.sort_values(actual_measure, ascending=False)
+                
+                for _, row in sorted_result.iterrows():
+                    # Create pie chart data point with proper label/value structure
+                    # Handle both numeric and categorical Y-axis values
+                    value = row[actual_measure]
+                    if pd.api.types.is_numeric_dtype(grouped_result[actual_measure]):
+                        value = float(value) if pd.notna(value) else 0
+                    else:
+                        value = str(value) if pd.notna(value) else "Unknown"
+                    
+                    # For pie charts, we need label and value fields that the frontend expects
+                    data_point = {
+                        "label": str(row[actual_group_cols[0]]) if actual_group_cols else "Category",
+                        "value": value  # This is the Y-axis value that determines slice size
+                        # Remove extra fields to avoid confusion
+                        # "category": str(row[actual_group_cols[0]]) if actual_group_cols else "Category"
+                    }
+                    
+                    # Add additional grouping dimensions as labels if available
+                    if len(actual_group_cols) > 1:
+                        data_point["full_label"] = " | ".join([str(row[col]) for col in actual_group_cols])
+                    
+                    chart_data.append(data_point)
+                
+                print(f"✅ Single measure pie chart: {len(chart_data)} slices generated")
+                print(f"🔍 Backend: Sample pie chart data: {chart_data[:3] if chart_data else 'No data'}")
 
     else:
         print(f"🔍 Backend: Processing DEFAULT/ELSE branch for chart_type: {chart_type}")

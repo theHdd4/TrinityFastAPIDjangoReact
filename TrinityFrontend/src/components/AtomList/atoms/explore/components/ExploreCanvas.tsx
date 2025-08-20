@@ -69,12 +69,54 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
     }, delay);
   };
   
-  // State for dropdown positioning
-  const [dropdownPosition, setDropdownPosition] = useState<{ top: number; left: number } | null>(null);
+  // State for dropdown positioning - now per dropdown
+  const [dropdownPositions, setDropdownPositions] = useState<{ [key: string]: { top: number; left: number } }>({});
   
   // Helper function to capitalize first letter
   const capitalizeFirstLetter = (str: string) => {
     return str.charAt(0).toUpperCase() + str.slice(1);
+  };
+  
+  // Helper function to calculate optimal dropdown position
+  const calculateDropdownPosition = (
+    buttonRect: DOMRect,
+    parentRect: DOMRect, // New argument: parent's bounding rectangle
+    dropdownWidth: number = 192,
+    dropdownHeight: number = 128
+  ) => {
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+    const scrollX = window.scrollX;
+    const scrollY = window.scrollY;
+
+    // Calculate position relative to viewport (for fixed positioning)
+    // top: button's bottom position relative to viewport + offset
+    let top = buttonRect.bottom + scrollY + 4;
+    // left: button's left position relative to viewport
+    let left = buttonRect.left + scrollX;
+
+    // Adjust for viewport boundaries
+    // If dropdown goes below viewport, try to position above button
+    if (top + dropdownHeight > viewportHeight + scrollY) {
+      top = buttonRect.top + scrollY - dropdownHeight - 4;
+    }
+
+    // If dropdown goes beyond right edge of viewport
+    if (left + dropdownWidth > viewportWidth + scrollX) {
+      left = buttonRect.right + scrollX - dropdownWidth;
+    }
+
+    // Ensure dropdown doesn't go off left edge of viewport
+    if (left < scrollX) {
+      left = scrollX + 8; // Add small margin
+    }
+
+    // Ensure top position is not negative
+    if (top < scrollY) {
+      top = scrollY + 8; // Add small margin
+    }
+
+    return { top, left };
   };
   
 
@@ -429,24 +471,103 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
     }
   }, [safeData.selectedIdentifiers, safeData.dataframe, safeData.columnSummary]);
   
-  // Handle click outside to close dropdowns
+  // Handle click outside to close dropdowns and update positions on scroll/resize
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       const target = event.target as Element;
       
-              // Check if click is outside any dropdown
-        if (!target.closest('.filter-dropdown')) {
-          setOpenDropdowns({});
-          setDropdownPosition(null);
-        }
+      // Check if click is outside any dropdown
+      if (!target.closest('.filter-dropdown')) {
+        setOpenDropdowns({});
+        setDropdownPositions({});
+      }
     };
     
-    // Add event listener
+    const handleScrollOrResize = () => {
+      // Close all dropdowns immediately when scrolling or resizing to prevent positioning issues
+      setOpenDropdowns({});
+      setDropdownPositions({});
+    };
+    
+    // Enhanced scroll detection - catch all possible scroll events
+    const handleAnyScroll = (event: Event) => {
+      // Close dropdowns immediately on any scroll event
+      setOpenDropdowns({});
+      setDropdownPositions({});
+    };
+    
+    // Immediate scroll detection with no delay
+    const handleImmediateScroll = () => {
+      // Force immediate dropdown closure
+      setOpenDropdowns({});
+      setDropdownPositions({});
+    };
+    
+    // Add event listeners
     document.addEventListener('mousedown', handleClickOutside);
+    
+    // Window-level events
+    window.addEventListener('scroll', handleScrollOrResize, { passive: true });
+    window.addEventListener('resize', handleScrollOrResize, { passive: true });
+    window.addEventListener('wheel', handleImmediateScroll, { passive: true });
+    window.addEventListener('touchmove', handleImmediateScroll, { passive: true });
+    
+    // Document-level events
+    document.addEventListener('scroll', handleAnyScroll, { passive: true });
+    document.body.addEventListener('scroll', handleAnyScroll, { passive: true });
+    
+    // Enhanced scroll detection for all scrollable elements
+    const addScrollListenersToElements = () => {
+      // Find all scrollable elements and add scroll listeners
+      const scrollableElements = document.querySelectorAll('*');
+      scrollableElements.forEach(element => {
+        const style = window.getComputedStyle(element);
+        if (style.overflow === 'auto' || style.overflow === 'scroll' || style.overflowY === 'auto' || style.overflowY === 'scroll') {
+          element.addEventListener('scroll', handleAnyScroll, { passive: true });
+        }
+      });
+    };
+    
+    // Add scroll listeners to existing elements
+    addScrollListenersToElements();
+    
+    // Also listen for new elements being added (MutationObserver)
+    const observer = new MutationObserver((mutations) => {
+      mutations.forEach((mutation) => {
+        mutation.addedNodes.forEach((node) => {
+          if (node.nodeType === Node.ELEMENT_NODE) {
+            const element = node as Element;
+            const style = window.getComputedStyle(element);
+            if (style.overflow === 'auto' || style.overflow === 'scroll' || style.overflowY === 'auto' || style.overflowY === 'scroll') {
+              element.addEventListener('scroll', handleAnyScroll, { passive: true });
+            }
+          }
+        });
+      });
+    });
+    
+    observer.observe(document.body, {
+      childList: true,
+      subtree: true
+    });
     
     // Cleanup
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
+      window.removeEventListener('scroll', handleScrollOrResize);
+      window.removeEventListener('resize', handleScrollOrResize);
+      window.removeEventListener('wheel', handleImmediateScroll);
+      window.removeEventListener('touchmove', handleImmediateScroll);
+      document.removeEventListener('scroll', handleAnyScroll);
+      document.body.removeEventListener('scroll', handleAnyScroll);
+      
+      // Remove scroll listeners from all elements
+      const scrollableElements = document.querySelectorAll('*');
+      scrollableElements.forEach(element => {
+        element.removeEventListener('scroll', handleAnyScroll);
+      });
+      
+      observer.disconnect();
     };
   }, []);
 
@@ -818,6 +939,22 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
       ...prev,
       [index]: !prev[index]
     }));
+    
+    // CRITICAL FIX: Also collapse/expand the settings and filters sections when chart config is collapsed
+    const newCollapsedState = !chartConfigCollapsed[index];
+    
+    if (newCollapsedState) {
+      // When collapsing chart config, also hide settings and filters
+      setChartSettingsVisible(prev => ({
+        ...prev,
+        [index]: false
+      }));
+      setChartFiltersVisible(prev => ({
+        ...prev,
+        [index]: false
+      }));
+    }
+    // Note: When expanding, we don't automatically show settings/filters - user needs to click those buttons
   };
 
   // API Integration Functions
@@ -1808,21 +1945,20 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                       newConfigs[index] = { ...newConfigs[index], legendField: actualValue };
                       setChartConfigs(newConfigs);
                       
-                      // Only trigger chart generation when legend field is selected and all axes are available
-                      if (actualValue && config.xAxis && hasValidYAxes(config.yAxes)) {
-                        console.log('🔍 ExploreCanvas: Legend field selected, checking if chart generation is needed...');
+                      // CRITICAL FIX: Always trigger chart generation when legend field changes
+                      // This ensures the backend receives the updated group_by parameter
+                      if (config.xAxis && hasValidYAxes(config.yAxes)) {
+                        console.log('🔍 ExploreCanvas: Legend field changed, regenerating chart with new group_by parameter');
                         console.log('🔍 ExploreCanvas: X-axis:', config.xAxis);
                         console.log('🔍 ExploreCanvas: Y-axes:', config.yAxes);
                         console.log('🔍 ExploreCanvas: Legend field:', actualValue);
+                        console.log('🔍 ExploreCanvas: New group_by will be:', actualValue ? [config.xAxis, actualValue] : [config.xAxis]);
                         
                         // Create the new config for chart generation
                         const newConfig = { ...newConfigs[index], legendField: actualValue };
                         
-                        // Only generate chart if we have valid data
-                        if (newConfig.xAxis && hasValidYAxes(newConfig.yAxes)) {
-                          console.log('🔍 ExploreCanvas: All conditions met, auto-generating chart with debouncing');
-                          safeTriggerChartGeneration(index, newConfig, 100);
-                        }
+                        // Generate chart with debouncing
+                        safeTriggerChartGeneration(index, newConfig, 100);
                       }
                     }}
                   >
@@ -1859,7 +1995,7 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
             </div>
 
             {/* Individual Chart Settings Panel */}
-            {isSettingsVisible && (
+            {isSettingsVisible && !chartConfigCollapsed[index] && (
               <div className="mb-4 p-3 bg-blue-50 rounded-lg border border-blue-200 min-w-0 w-full explore-chart-settings">
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 min-w-0 w-full explore-chart-settings">
                   <div>
@@ -1973,7 +2109,7 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
             )}
 
             {/* Individual Chart Filters Panel */}
-            {chartFiltersVisible[index] && (
+            {chartFiltersVisible[index] && !chartConfigCollapsed[index] && (
               <div 
                 className={`mb-4 p-3 rounded-lg border relative group transition-all duration-200 cursor-pointer hover:shadow-sm hover:border-blue-300 min-w-0 ${
                   showFilterCrossButtons[index] 
@@ -2069,10 +2205,25 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                                       if (!openDropdowns[`${index}-${identifier}`]) {
                                         const button = e.currentTarget;
                                         const rect = button.getBoundingClientRect();
-                                        setDropdownPosition({
-                                          top: rect.bottom + window.scrollY + 4,
-                                          left: rect.left + window.scrollX
-                                        });
+                                        const dropdownKey = `${index}-${identifier}`;
+                                        
+                                        // Get parent element's rect for relative positioning
+                                        const parentDiv = button.closest('.relative'); // Get the parent div with 'relative' class
+                                        let parentRect: DOMRect | undefined;
+                                        if (parentDiv) {
+                                          parentRect = parentDiv.getBoundingClientRect();
+                                        } else {
+                                          console.error("Parent div with 'relative' class not found for dropdown positioning.");
+                                          return; // Prevent further execution if parent not found
+                                        }
+
+                                        // Calculate optimal position using helper function
+                                        const position = calculateDropdownPosition(rect, parentRect);
+                                        
+                                        setDropdownPositions(prev => ({
+                                          ...prev,
+                                          [dropdownKey]: position
+                                        }));
                                       }
                                     }}
                                 >
@@ -2091,14 +2242,21 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                                 </div>
                                 
                                 {/* Multi-select dropdown content */}
-                                                                 {openDropdowns[`${index}-${identifier}`] && dropdownPosition && (
+                                {openDropdowns[`${index}-${identifier}`] && dropdownPositions[`${index}-${identifier}`] && (
                                     <div 
-                                      className="fixed w-48 bg-white border border-gray-300 rounded-md shadow-lg z-50 max-h-32 overflow-y-auto"
+                                    className="fixed w-48 bg-white border border-gray-300 rounded-md shadow-lg z-50"
                                       style={{
-                                        top: `${dropdownPosition.top}px`,
-                                        left: `${dropdownPosition.left}px`,
+                                      top: `${dropdownPositions[`${index}-${identifier}`].top}px`,
+                                      left: `${dropdownPositions[`${index}-${identifier}`].left}px`,
                                         position: 'fixed',
-                                        zIndex: 9999
+                                      zIndex: 9999,
+                                      boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
+                                      border: '1px solid #d1d5db',
+                                      borderRadius: '0.375rem',
+                                      backdropFilter: 'blur(8px)',
+                                      backgroundColor: 'rgba(255, 255, 255, 0.95)',
+                                      maxHeight: 'none',
+                                      overflow: 'visible'
                                       }}
                                       onClick={(e) => e.stopPropagation()}
                                     >
@@ -2110,10 +2268,11 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                                         checked={chartFilters[index]?.[identifier] !== null && (chartFilters[index]?.[identifier]?.length || 0) === 0}
                                         onChange={() => {
                                           console.log(`🔍 "All" checkbox clicked for ${identifier}. Current state:`, chartFilters[index]?.[identifier]);
-                                          const currentValues = chartFilters[index]?.[identifier] || [];
+                                          const currentValues = chartFilters[index]?.[identifier];
                                           const allValues = identifierUniqueValues[identifier] || [];
                                           
-                                          if (currentValues.length === 0) {
+                                          // FIXED: Handle both null and empty array states properly
+                                          if (currentValues !== null && (currentValues?.length || 0) === 0) {
                                             // "All" is currently selected, deselect it by deselecting all individual options
                                             console.log(`🔍 Deselecting "All" for ${identifier}, deselecting all individual options`);
                                             // Set to null to represent "no options selected"
@@ -2134,7 +2293,7 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                                           type="checkbox"
                                           checked={chartFilters[index]?.[identifier] === null ? false : (chartFilters[index]?.[identifier]?.length || 0) === 0 || chartFilters[index]?.[identifier]?.includes(value) || false}
                                           onChange={(e) => {
-                                            const currentValues = chartFilters[index]?.[identifier] || [];
+                                            const currentValues = chartFilters[index]?.[identifier];
                                             const allValues = identifierUniqueValues[identifier] || [];
                                             
                                             console.log(`🔍 Individual checkbox clicked for ${identifier}: ${value}. Current values:`, currentValues, 'All values:', allValues);
@@ -2142,7 +2301,7 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                                             if (e.target.checked) {
                                                 // Adding a value
                                                 let newValues;
-                                                if (currentValues.length === 0) {
+                                                if (currentValues !== null && (currentValues?.length || 0) === 0) {
                                                   // Currently showing "All", so start with all values and add this one
                                                   // But since we're adding a value, we're deselecting "All"
                                                   newValues = [value];
@@ -2165,12 +2324,11 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                                                 }
                                               } else {
                                                 // Removing a value
-                                                const newValues = currentValues.filter(v => v !== value);
-                                                console.log(`🔍 Removing value ${value} from filter ${identifier}. Remaining values:`, newValues);
+                                                console.log(`🔍 Removing value ${value} from filter ${identifier}. Current state:`, currentValues);
                                               
                                                 // If we're removing a value and currently showing "All" (empty array),
                                                 // we need to start with all values and then remove this one
-                                                if (currentValues.length === 0) {
+                                                if (currentValues !== null && (currentValues?.length || 0) === 0) {
                                                   // Currently showing "All", so start with all values and remove this one
                                                   const allValuesExceptThis = allValues.filter(v => v !== value);
                                                   console.log(`🔍 Was showing "All", now filtering with:`, allValuesExceptThis);
@@ -2181,6 +2339,9 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                                                   handleMultiSelectFilterChange(index, identifier, null);
                                                 } else {
                                                   // Already filtering, just remove this value
+                                                  const newValues = currentValues.filter(v => v !== value);
+                                                  console.log(`🔍 Removing value ${value} from filter ${identifier}. Remaining values:`, newValues);
+                                                  
                                                   if (newValues.length === 0) {
                                                     // No values left, show "All"
                                                     console.log(`🔍 No values left for ${identifier}, setting to "All"`);

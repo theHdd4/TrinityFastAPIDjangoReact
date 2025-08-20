@@ -631,31 +631,37 @@ const RechartsChartRenderer: React.FC<Props> = ({
   // Close context menu when clicking outside
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
-      // Check if the click is outside all menus
+      // Check if the click is outside the context menu
       const target = e.target as Element;
-      const isOutsideMainMenu = !target.closest('.context-menu');
-      const isOutsideColorSubmenu = !target.closest('.color-submenu');
+      const isOutsideMenu = !target.closest('.context-menu') && !target.closest('.color-submenu');
       
-      // Only close menus if click is outside ALL active menus
-      if (isOutsideMainMenu && isOutsideColorSubmenu) {
-        console.log('Closing all menus due to click outside');
-        // Add a small delay to ensure button clicks are processed first
-        setTimeout(() => {
-          setShowContextMenu(false);
-          setShowColorSubmenu(false);
-        }, 50);
+      if (isOutsideMenu) {
+        console.log('Closing context menu due to click outside');
+        setShowContextMenu(false);
+        setShowColorSubmenu(false);
       }
     };
 
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        console.log('Closing context menu due to Escape key');
+        setShowContextMenu(false);
+        setShowColorSubmenu(false);
+      }
+    };
+
+    // Add event listener immediately when menu is shown
     if (showContextMenu || showColorSubmenu) {
-      // Use a longer delay to allow submenu to open properly
+      // Use a small delay to ensure the menu is fully rendered
       const timeoutId = setTimeout(() => {
-        document.addEventListener('click', handleClickOutside, false);
-      }, 200);
+        document.addEventListener('mousedown', handleClickOutside, true);
+        document.addEventListener('keydown', handleKeyDown, true);
+      }, 10);
       
       return () => {
         clearTimeout(timeoutId);
-        document.removeEventListener('click', handleClickOutside, false);
+        document.removeEventListener('mousedown', handleClickOutside, true);
+        document.removeEventListener('keydown', handleKeyDown, true);
       };
     }
   }, [showContextMenu, showColorSubmenu]);
@@ -677,6 +683,9 @@ const RechartsChartRenderer: React.FC<Props> = ({
           e.stopPropagation();
         }}
         onMouseDown={(e) => {
+          e.stopPropagation();
+        }}
+        onMouseUp={(e) => {
           e.stopPropagation();
         }}
       >
@@ -808,6 +817,15 @@ const RechartsChartRenderer: React.FC<Props> = ({
           maxHeight: '320px',
           overflowY: 'auto'
         }}
+        onClick={(e) => {
+          e.stopPropagation();
+        }}
+        onMouseDown={(e) => {
+          e.stopPropagation();
+        }}
+        onMouseUp={(e) => {
+          e.stopPropagation();
+        }}
       >
         <div className="px-2 py-2 text-sm font-semibold text-gray-700 border-b border-gray-200 mb-3">
           Color Theme
@@ -903,49 +921,106 @@ const RechartsChartRenderer: React.FC<Props> = ({
     console.log('🔧 Key assignment - xField:', xField, 'yField:', yField);
     console.log('🔧 Initial xKey:', xKey, 'yKey:', yKey);
 
-    // Auto-detect keys based on data structure and chart type
-    if (!xKey || !yKey) {
-      if (firstItem) {
-        const availableKeys = Object.keys(firstItem);
-        
+    // CRITICAL FIX: When no legend is selected, use the actual field names from the backend
+    if (!legendField) {
+      // No legend selected - use the actual field names directly
+      console.log('🔧 No legend selected - using actual field names from backend');
+      console.log('🔧 xField:', xField, 'yField:', yField);
+      
+      // Find the actual field names in the data (case-insensitive)
+      const availableKeys = Object.keys(firstItem);
+      const xFieldLower = xField?.toLowerCase();
+      const yFieldLower = yField?.toLowerCase();
+      
+      console.log('🔧 Debug: availableKeys:', availableKeys);
+      console.log('🔧 Debug: xFieldLower:', xFieldLower, 'yFieldLower:', yFieldLower);
+      
+      // Find exact or case-insensitive matches for X and Y fields
+      const actualXKey = availableKeys.find(key => 
+        key === xField || key.toLowerCase() === xFieldLower
+      );
+      const actualYKey = availableKeys.find(key => 
+        key === yField || key.toLowerCase() === yFieldLower
+      );
+      
+      console.log('🔧 Debug: actualXKey:', actualXKey, 'actualYKey:', actualYKey);
+      
+      if (actualXKey && actualYKey) {
+        xKey = actualXKey;
+        yKey = actualYKey;
+        // CRITICAL: Update yKeys array to use the actual field name
+        yKeys = [actualYKey];
+        console.log('🔧 Found actual field names - xKey:', xKey, 'yKey:', yKey);
+        console.log('🔧 Updated yKeys array:', yKeys);
+      } else {
+        console.log('🔧 Could not find actual field names, falling back to auto-detection');
+        // Fallback to auto-detection
         if (type === 'pie_chart') {
           xKey = availableKeys.includes('name') ? 'name' : availableKeys.includes('label') ? 'label' : availableKeys[0];
           yKey = availableKeys.includes('value') ? 'value' : availableKeys[1] || availableKeys[0];
         } else if (type === 'bar_chart') {
-          // For bar charts, prioritize actual field names over generic keys
           xKey = xField || (availableKeys.includes('x') ? 'x' : availableKeys.includes('name') ? 'name' : availableKeys.includes('category') ? 'category' : availableKeys[0]);
           yKey = yField || (availableKeys.includes('y') ? 'y' : availableKeys.includes('value') ? 'value' : availableKeys[1] || availableKeys[0]);
         } else if (type === 'line_chart') {
           xKey = availableKeys.includes('x') ? 'x' : availableKeys.includes('date') ? 'date' : availableKeys[0];
           yKey = availableKeys.includes('y') ? 'y' : availableKeys.includes('value') ? 'value' : availableKeys[1] || availableKeys[0];
         }
-        
       }
     } else {
-      // If xKey and yKey are provided but don't exist in the data, try to auto-detect
-      if (firstItem && (!firstItem[xKey] || !firstItem[yKey])) {
-        const availableKeys = Object.keys(firstItem);
-        
-        if (type === 'pie_chart') {
-          xKey = availableKeys.includes('name') ? 'name' : availableKeys.includes('label') ? 'label' : availableKeys[0];
-          yKey = availableKeys.includes('value') ? 'value' : availableKeys[1] || availableKeys[0];
-        } else if (type === 'bar_chart') {
-          xKey = xField || (availableKeys.includes('x') ? 'x' : availableKeys.includes('name') ? 'name' : availableKeys.includes('category') ? 'category' : availableKeys[0]);
-          yKey = yField || (availableKeys.includes('y') ? 'y' : availableKeys.includes('value') ? 'value' : availableKeys[1] || availableKeys[0]);
-        } else if (type === 'line_chart') {
-          xKey = availableKeys.includes('x') ? 'x' : availableKeys.includes('date') ? 'date' : availableKeys[0];
-          yKey = availableKeys.includes('y') ? 'y' : availableKeys.includes('value') ? 'value' : availableKeys[1] || availableKeys[0];
+      // Legend is selected - use existing logic
+      if (!xKey || !yKey) {
+        if (firstItem) {
+          const availableKeys = Object.keys(firstItem);
+          
+          if (type === 'pie_chart') {
+            xKey = availableKeys.includes('name') ? 'name' : availableKeys.includes('label') ? 'label' : availableKeys[0];
+            yKey = availableKeys.includes('value') ? 'value' : availableKeys[1] || availableKeys[0];
+          } else if (type === 'bar_chart') {
+            xKey = xField || (availableKeys.includes('x') ? 'x' : availableKeys.includes('name') ? 'name' : availableKeys.includes('category') ? 'category' : availableKeys[0]);
+            yKey = yField || (availableKeys.includes('y') ? 'y' : availableKeys.includes('value') ? 'value' : availableKeys[1] || availableKeys[0]);
+          } else if (type === 'line_chart') {
+            xKey = availableKeys.includes('x') ? 'x' : availableKeys.includes('date') ? 'date' : availableKeys[0];
+            yKey = availableKeys.includes('y') ? 'y' : availableKeys.includes('value') ? 'value' : availableKeys[1] || availableKeys[0];
+          }
         }
-        
+      } else {
+        // If xKey and yKey are provided but don't exist in the data, try to auto-detect
+        if (firstItem && (!firstItem[xKey] || !firstItem[yKey])) {
+          const availableKeys = Object.keys(firstItem);
+          
+          if (type === 'pie_chart') {
+            xKey = availableKeys.includes('name') ? 'name' : availableKeys.includes('label') ? 'label' : availableKeys[0];
+            yKey = availableKeys.includes('value') ? 'value' : availableKeys[1] || availableKeys[0];
+          } else if (type === 'bar_chart') {
+            xKey = xField || (availableKeys.includes('x') ? 'x' : availableKeys.includes('name') ? 'name' : availableKeys.includes('category') ? 'category' : availableKeys[0]);
+            yKey = yField || (availableKeys.includes('y') ? 'y' : availableKeys.includes('value') ? 'value' : availableKeys[1] || availableKeys[0]);
+          } else if (type === 'line_chart') {
+            xKey = availableKeys.includes('x') ? 'x' : availableKeys.includes('date') ? 'date' : availableKeys[0];
+            yKey = availableKeys.includes('y') ? 'y' : availableKeys.includes('value') ? 'value' : availableKeys[1] || availableKeys[0];
+          }
+        }
       }
     }
     
-    // Handle dual Y-axes detection
-    if (yKeys.length === 0 && yFields && yFields.length > 0) {
+    // Handle dual Y-axes detection - SIMPLIFIED to prevent infinite loops
+    if (yFields && yFields.length > 1) {
+      // Only override when we actually have multiple Y-axes
       yKeys = yFields;
+      yKey = yFields[0];
+      
+      console.log('🔧 Dual Y-axes detected - yFields:', yFields);
+      console.log('🔧 Setting yKeys to:', yKeys);
+      console.log('🔧 Setting yKey to:', yKey);
+    } else if (yFields && yFields.length === 1) {
+      // Single Y-axis from yFields - use it but don't override if we already found a valid yKey
+      if (!yKey || yKey === yField) {
+        yKey = yFields[0];
+        yKeys = [yFields[0]];
+        console.log('🔧 Single Y-axis from yFields - yKey:', yKey);
+      }
     } else if (yKeys.length === 0 && firstItem) {
+      // Fallback: try to find multiple numeric fields
       const availableKeys = Object.keys(firstItem);
-      // For dual Y-axes, try to find multiple numeric fields
       const numericKeys = availableKeys.filter(key => 
         key !== xKey && 
         key !== 'category' && 
@@ -954,206 +1029,99 @@ const RechartsChartRenderer: React.FC<Props> = ({
         !isNaN(firstItem[key])
       );
       if (numericKeys.length >= 2) {
-        yKeys = numericKeys.slice(0, 2); // Take first two numeric fields
+        yKeys = numericKeys.slice(0, 2);
+        yKey = numericKeys[0];
       } else if (numericKeys.length === 1) {
         yKeys = [numericKeys[0]];
+        yKey = numericKeys[0];
       }
     }
     
     console.log('🔧 Final key assignment - xKey:', xKey, 'yKey:', yKey);
     console.log('🔧 yKeys array:', yKeys);
+    console.log('🔧 Data sample with final keys:', firstItem ? { [xKey]: firstItem[xKey], [yKey]: firstItem[yKey] } : 'No data');
     
-
+    // CRITICAL: Remove complex data transformation logic that causes infinite loops
+    // For dual Y-axes, we'll use the data as-is since the backend should provide the correct structure
+    let transformedChartData = chartDataForRendering;
     
-
-    
-    // If we have yFields but the data only has 'x' and 'y' keys, we need to transform the data
-    if (yFields && yFields.length > 1 && firstItem && firstItem.x !== undefined && firstItem.y !== undefined) {
-      // Transform data to use actual field names instead of generic x/y
-      const transformedData = chartDataForRendering.map((item: any, index: number) => {
+    // Only transform if absolutely necessary (when data has generic x/y keys)
+    if (yFields && yFields.length > 1 && firstItem && 
+        (firstItem.x !== undefined || firstItem.y !== undefined) &&
+        !yFields.every(field => firstItem.hasOwnProperty(field))) {
+      
+      console.log('🔧 Transforming data for dual Y-axes with generic keys');
+      
+      transformedChartData = chartDataForRendering.map((item: any) => {
         const transformed: any = {};
         
-        // Keep the x-axis data
-        transformed[xKey] = item.x;
-        
-        // Map y-axis data to actual field names
-        if (yFields && yFields.length > 0) {
-          // For dual Y-axes, we need to create separate data points for each Y-axis
-          // Since the backend only provides one 'y' value, we'll use it for both axes
-          // but with different scaling to simulate dual Y-axes
-          transformed[yFields[0]] = item.y;
-          
-          // For the second Y-axis, we'll use a scaled version of the same data
-          // This is a workaround until the backend supports multiple measures
-          if (yFields.length > 1) {
-            // Scale the second Y-axis data differently to make it visually distinct
-            const scaleFactor = 0.5; // You can adjust this to make the second axis more or less prominent
-            transformed[yFields[1]] = typeof item.y === 'number' ? item.y * scaleFactor : item.y;
-          }
+        // Map X-axis
+        if (item.x !== undefined) {
+          transformed[xKey] = item.x;
+        } else if (item.name !== undefined) {
+          transformed[xKey] = item.name;
+        } else if (item.category !== undefined) {
+          transformed[xKey] = item.category;
+        } else {
+          transformed[xKey] = item[Object.keys(item)[0]];
         }
         
-        // CRITICAL: Preserve the legend field if it exists (case-insensitive)
-        if (legendField) {
-          // First try exact match
-          if (item[legendField] !== undefined) {
-            transformed[legendField] = item[legendField];
+        // Map Y-axes - use the actual field names
+        yFields.forEach((field, index) => {
+          if (item.y !== undefined) {
+            // If data has generic 'y', distribute it across Y-axes
+            transformed[field] = typeof item.y === 'number' ? item.y * (1 - index * 0.3) : item.y;
+          } else if (item.value !== undefined) {
+            transformed[field] = typeof item.value === 'number' ? item.value * (1 - index * 0.3) : item.value;
           } else {
-            // Then try case-insensitive match
-            const keys = Object.keys(item);
-            const foundKey = keys.find(key => key.toLowerCase() === legendField.toLowerCase());
-            if (foundKey) {
-              transformed[foundKey] = item[foundKey];
+            // Use available numeric fields
+            const availableNumericKeys = Object.keys(item).filter(key => 
+              typeof item[key] === 'number' && !isNaN(item[key])
+            );
+            if (availableNumericKeys[index]) {
+              transformed[field] = item[availableNumericKeys[index]];
+            } else {
+              transformed[field] = 0; // Fallback
             }
           }
-        }
+        });
         
         return transformed;
       });
       
-      // Note: We don't reassign data anymore, chartDataForRendering handles this
-      
-      // Update the keys to use the actual field names
-      if (yFields && yFields.length > 0) {
-        yKey = yFields[0];
-        yKeys = yFields;
-      }
-    } else if (yFields && yFields.length > 1 && firstItem) {
-      // Check if the data already has the actual field names (backend supports multiple measures)
-      const hasActualFieldNames = yFields.every(field => firstItem.hasOwnProperty(field));
-      
-      if (hasActualFieldNames) {
-        // Use the actual field names directly
-        yKey = yFields[0];
-        yKeys = yFields;
-        
-        // For dual Y-axes, we need to find the x-axis key (it's usually 'x' or 'category' or the first key that's not a yField)
-        if (!xKey) {
-          const availableKeys = Object.keys(firstItem);
-          const nonYFieldKeys = availableKeys.filter(key => !yFields.includes(key));
-          xKey = nonYFieldKeys.find(key => key === 'x' || key === 'category' || key === 'label') || nonYFieldKeys[0] || 'x';
-        }
-      } else {
-        // Fallback to the original transformation logic
-        const transformedData = chartDataForRendering.map((item: any, index: number) => {
-          const transformed: any = {};
-          
-          // Keep the x-axis data
-          transformed[xKey] = item.x || item[Object.keys(item)[0]];
-          
-          // Map y-axis data to actual field names
-          if (yFields && yFields.length > 0) {
-            transformed[yFields[0]] = item.y || item[Object.keys(item)[1]];
-            
-            if (yFields.length > 1) {
-              const scaleFactor = 0.5;
-              transformed[yFields[1]] = typeof (item.y || item[Object.keys(item)[1]]) === 'number' 
-                ? (item.y || item[Object.keys(item)[1]]) * scaleFactor 
-                : (item.y || item[Object.keys(item)[1]]);
-            }
-          }
-          
-          // CRITICAL: Preserve the legend field if it exists (case-insensitive)
-          if (legendField) {
-            // First try exact match
-            if (item[legendField] !== undefined) {
-              transformed[legendField] = item[legendField];
-            } else {
-              // Then try case-insensitive match
-              const keys = Object.keys(item);
-              const foundKey = keys.find(key => key.toLowerCase() === legendField.toLowerCase());
-              if (foundKey) {
-                transformed[foundKey] = item[foundKey];
-              }
-            }
-          }
-          
-          return transformed;
-        });
-        
-        // Store the transformed data that preserves legend fields
-        setTransformedDataWithLegend(transformedData);
-        yKey = yFields[0];
-        yKeys = yFields;
-      }
+      console.log('🔧 Transformed data sample:', transformedChartData[0]);
+    } else {
+      console.log('🔧 No transformation needed - using data as-is');
     }
-    
-    // Final validation for dual Y-axes - ensure we have the correct keys
-    if (yFields && yFields.length > 1 && yKeys.length === 0) {
-      yKeys = yFields;
-      yKey = yFields[0];
-    }
-    
-    // Validate that we have valid keys before rendering
-    if (!xKey || !yKey) {
-      return (
-        <div className="flex items-center justify-center h-full text-red-500">
-          <div className="text-center">
-            <div className="text-lg font-medium">Chart Rendering Error</div>
-            <div className="text-sm">Invalid data keys: xKey={xKey}, yKey={yKey}</div>
-          </div>
-        </div>
-      );
-    }
+     
+     // Validate that we have valid keys before rendering
+     if (!xKey || !yKey) {
+       return (
+         <div className="flex items-center justify-center h-full text-red-500">
+           <div className="text-center">
+             <div className="text-lg font-medium">Chart Rendering Error</div>
+             <div className="text-sm">Invalid data keys: xKey={xKey}, yKey={yKey}</div>
+           </div>
+         </div>
+       );
+     }
+     
+     // Final validation for dual Y-axes
+     const hasDualYAxes = yKeys.length > 1 || (yFields && yFields.length > 1);
+     
+     // DEBUG: Log final state before rendering
+     console.log('🔍 FINAL RENDERING STATE:');
+     console.log('- type:', type);
+     console.log('- xKey:', xKey);
+     console.log('- yKey:', yKey);
+     console.log('- yKeys:', yKeys);
+     console.log('- yFields:', yFields);
+     console.log('- legendField:', legendField);
+     console.log('- hasDualYAxes:', hasDualYAxes);
+     console.log('- transformedChartData length:', transformedChartData?.length);
+     console.log('- transformedChartData sample:', transformedChartData?.[0]);
 
-    // Final validation for dual Y-axes
-    const hasDualYAxes = yKeys.length > 1 || (yFields && yFields.length > 1);
-
-    // CRITICAL FIX: Transform data for single-axis bar charts when data has generic keys
-    let transformedChartData = chartDataForRendering;
-    if (type === 'bar_chart' && xField && yField && chartDataForRendering.length > 0) {
-      const firstItem = chartDataForRendering[0];
-      const availableKeys = Object.keys(firstItem);
-      console.log('🔧 Available keys in data:', availableKeys);
-      console.log('🔧 Raw data item:', firstItem);
-      
-      // Check if data has generic keys OR if the field names don't match what we expect
-      const needsTransformation = availableKeys.includes('x') || availableKeys.includes('y') || availableKeys.includes('name') || availableKeys.includes('value') || 
-                                 (xField && !availableKeys.includes(xField)) || (yField && !availableKeys.includes(yField));
-      
-      if (needsTransformation) {
-        console.log('🔧 Data needs transformation - generic keys or field name mismatch detected');
-        console.log('🔧 xField:', xField, 'yField:', yField);
-        console.log('🔧 Available keys:', availableKeys);
-        
-        transformedChartData = chartDataForRendering.map((item: any) => {
-          const transformed: any = {};
-          
-          // Map keys to actual field names
-          if (item.x !== undefined) {
-            transformed[xField] = item.x;
-          } else if (item.name !== undefined) {
-            transformed[xField] = item.name;
-          } else if (item.category !== undefined) {
-            transformed[xField] = item.category;
-          } else if (item.Year !== undefined) {
-            transformed[xField] = item.Year;
-          } else if (item.year !== undefined) {
-            transformed[xField] = item.year;
-          } else {
-            transformed[xField] = item[Object.keys(item)[0]];
-          }
-          
-          if (item.y !== undefined) {
-            transformed[yField] = item.y;
-          } else if (item.value !== undefined) {
-            transformed[yField] = item.value;
-          } else if (item.Volume !== undefined) {
-            transformed[yField] = item.Volume;
-          } else if (item.volume !== undefined) {
-            transformed[yField] = item.volume;
-          } else {
-            transformed[yField] = item[Object.keys(item)[1]] || item[Object.keys(item)[0]];
-          }
-          
-          return transformed;
-        });
-        
-        console.log('🔧 Transformed data sample:', transformedChartData[0]);
-        console.log('🔧 Full transformed data:', transformedChartData);
-      }
-    }
-
-    switch (type) {
+     switch (type) {
       case 'bar_chart':
         console.log('🎯 Bar chart rendering - type:', type);
         console.log('🎯 Legend field:', legendField);
@@ -1166,81 +1134,119 @@ const RechartsChartRenderer: React.FC<Props> = ({
          * Multi-bar rendering when a legend field is provided
          * ----------------------------------------------------------- */
         if (legendField && legendValues.length > 0 && pivotedLineData.length > 0) {
-          // Use first available key as X-axis key
-          const xKeyForBar = xField || Object.keys(pivotedLineData[0])[0];
-        return (
-            <BarChart data={pivotedLineData} margin={{ top: 20, right: 30, left: 20, bottom: 60 }}>
-              {currentShowGrid && <CartesianGrid strokeDasharray="3 3" />}
-              <XAxis
-                dataKey={xKeyForBar}
-                label={currentShowAxisLabels && xAxisLabel ? { value: capitalizeWords(xAxisLabel), position: 'bottom', style: axisLabelStyle } : undefined}
-                tick={axisTickStyle}
-                tickLine={false}
-              />
-              <YAxis
-                tickFormatter={formatLargeNumber}
-                label={currentShowAxisLabels && yAxisLabel ? { value: capitalizeWords(yAxisLabel), angle: -90, position: 'left', style: axisLabelStyle } : undefined}
-                tick={axisTickStyle}
-                tickLine={false}
-              />
-              <Tooltip 
-                content={({ active, payload, label }) => {
-                  if (active && payload && payload.length) {
-                    return (
-                      <div className="explore-chart-tooltip">
-                        <p className="font-semibold text-gray-900 mb-2 text-sm">{label}</p>
-                        {payload.map((entry: any, index: number) => {
-                          return (
-                            <div key={index} className="flex items-center gap-2 mb-1">
-                              <div 
-                                className="w-3 h-3 rounded-full" 
-                                style={{ backgroundColor: entry.color }}
-                              />
-                              <span className="text-sm font-medium text-gray-700">
-                                {entry.dataKey}: 
-                              </span>
-                              <span className="text-sm font-semibold text-gray-700">
-                                {typeof entry.value === 'number' ? formatTooltipNumber(entry.value) : entry.value}
-                              </span>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    );
-                  }
-                  return null;
-                }}
-                cursor={{ stroke: palette[0], strokeWidth: 1, strokeOpacity: 0.4 }}
-              />
-              {currentShowLegend && (
-                <Legend
-                  layout="horizontal"
-                  verticalAlign="bottom"
-                  align="center"
-                  wrapperStyle={{ paddingTop: '15px', fontSize: '11px' }}
+          // CRITICAL: Check if we have dual Y-axes - if so, prioritize dual Y-axes over legend
+          if (yFields && yFields.length > 1) {
+            console.log('🎯 Dual Y-axes detected with legend - prioritizing dual Y-axes rendering');
+            // Fall through to single bar chart with dual Y-axes
+          } else {
+            // Use legend-based rendering
+            console.log('🎯 Legend-based bar chart rendering');
+            
+            // CRITICAL FIX: Use the same X-axis key detection logic that works for non-legend charts
+            // This ensures years (2021, 2022, etc.) appear properly on the X-axis
+            const xKeyForBar = xKey || xField || (() => {
+              // Find the actual X-axis field in the pivoted data (case-insensitive)
+              const availableKeys = Object.keys(pivotedLineData[0]);
+              const xFieldLower = xField?.toLowerCase();
+              const actualXKey = availableKeys.find(key => 
+                key === xField || key.toLowerCase() === xFieldLower || 
+                key.toLowerCase() === 'year' || key.toLowerCase() === 'date' || 
+                key.toLowerCase() === 'category' || key.toLowerCase() === 'label'
+              );
+              return actualXKey || availableKeys[0];
+            })();
+            
+            console.log('🎯 Legend-based bar chart - X-axis key:', xKeyForBar);
+            console.log('🎯 Available keys in pivoted data:', Object.keys(pivotedLineData[0]));
+            console.log('🎯 Sample pivoted data item:', pivotedLineData[0]);
+            
+            // CRITICAL: Find the exact case-sensitive key from the pivoted data
+            const availableKeys = Object.keys(pivotedLineData[0]);
+            // Prioritize finding 'Year' (uppercase) as it's the actual key in the data
+            const exactXKey = availableKeys.find(key => key === 'Year') || 
+                             availableKeys.find(key => key.toLowerCase() === 'year') ||
+                             availableKeys.find(key => key.toLowerCase() === 'date') ||
+                             availableKeys.find(key => key.toLowerCase() === 'category');
+            
+            // CRITICAL: Ensure we're using the correct X-axis key for the XAxis component
+            const finalXKey = exactXKey || 'Year'; // Use exact match or fallback to 'Year'
+            console.log('🎯 Exact X-axis key found:', exactXKey);
+            console.log('🎯 Final X-axis key for bar chart:', finalXKey);
+            
+            return (
+              <BarChart data={pivotedLineData} margin={{ top: 20, right: 30, left: 20, bottom: 60 }}>
+                {currentShowGrid && <CartesianGrid strokeDasharray="3 3" />}
+                <XAxis
+                  dataKey={finalXKey}
+                  label={currentShowAxisLabels && xAxisLabel ? { value: capitalizeWords(xAxisLabel), position: 'bottom', style: axisLabelStyle } : undefined}
+                  tick={axisTickStyle}
+                  tickLine={false}
                 />
-              )}
-              {legendValues.map((seriesKey, idx) => (
-                <Bar
-                  key={seriesKey}
-                  dataKey={seriesKey}
-                  name={seriesKey}
-                  fill={palette[idx % palette.length]}
-                  animationDuration={800}
-                  animationEasing="ease-out"
-                >
-                  {currentShowDataLabels && (
-                    <LabelList 
-                      dataKey={seriesKey} 
-                      position="top" 
-                      formatter={(value) => formatLargeNumber(value)}
-                      style={{ fontSize: '11px', fontWeight: '500', fill: '#374151' }}
-                    />
-                  )}
-                </Bar>
-              ))}
-            </BarChart>
-          );
+                <YAxis
+                  tickFormatter={formatLargeNumber}
+                  label={currentShowAxisLabels && yAxisLabel ? { value: capitalizeWords(yAxisLabel), angle: -90, position: 'left', style: axisLabelStyle } : undefined}
+                  tick={axisTickStyle}
+                  tickLine={false}
+                />
+                <Tooltip 
+                  content={({ active, payload, label }) => {
+                    if (active && payload && payload.length) {
+                      return (
+                        <div className="explore-chart-tooltip">
+                          <p className="font-semibold text-gray-900 mb-2 text-sm">{label}</p>
+                          {payload.map((entry: any, index: number) => {
+                            return (
+                              <div key={index} className="flex items-center gap-2 mb-1">
+                                <div 
+                                  className="w-3 h-3 rounded-full" 
+                                  style={{ backgroundColor: entry.color }}
+                                />
+                                <span className="text-sm font-medium text-gray-700">
+                                  {entry.dataKey}: 
+                                </span>
+                                <span className="text-sm font-semibold text-gray-700">
+                                  {typeof entry.value === 'number' ? formatTooltipNumber(entry.value) : entry.value}
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      );
+                    }
+                    return null;
+                  }}
+                  cursor={{ stroke: palette[0], strokeWidth: 1, strokeOpacity: 0.4 }}
+                />
+                {currentShowLegend && (
+                  <Legend
+                    layout="horizontal"
+                    verticalAlign="bottom"
+                    align="center"
+                    wrapperStyle={{ paddingTop: '15px', fontSize: '11px' }}
+                  />
+                )}
+                {legendValues.map((seriesKey, idx) => (
+                  <Bar
+                    key={seriesKey}
+                    dataKey={seriesKey}
+                    name={seriesKey}
+                    fill={palette[idx % palette.length]}
+                    animationDuration={800}
+                    animationEasing="ease-out"
+                  >
+                    {currentShowDataLabels && (
+                      <LabelList 
+                        dataKey={seriesKey} 
+                        position="top" 
+                        formatter={(value) => formatLargeNumber(value)}
+                        style={{ fontSize: '11px', fontWeight: '500', fill: '#374151' }}
+                      />
+                    )}
+                  </Bar>
+                ))}
+              </BarChart>
+            );
+          }
         } else {
           // ---- Fallback to original single-bar rendering ----
           console.log('🎨 No legend field detected - using single bar chart');
@@ -1388,8 +1394,31 @@ const RechartsChartRenderer: React.FC<Props> = ({
          * Multi-line rendering when a legend field is provided
          * ----------------------------------------------------------- */
         if (legendField && legendValues.length > 0 && pivotedLineData.length > 0) {
-          // Use first available key as X-axis key
-          const xKeyForLine = xField || Object.keys(pivotedLineData[0])[0];
+          // CRITICAL: Check if we have dual Y-axes - if so, prioritize dual Y-axes over legend
+          if (yFields && yFields.length > 1) {
+            console.log('🎯 Dual Y-axes detected with legend - prioritizing dual Y-axes rendering');
+            // Fall through to single line chart with dual Y-axes
+          } else {
+            // Use legend-based rendering
+            console.log('🎯 Legend-based line chart rendering');
+            
+            // CRITICAL FIX: Use the same X-axis key detection logic that works for non-legend charts
+            // This ensures years (2021, 2022, etc.) appear properly on the X-axis
+            const xKeyForLine = xKey || xField || (() => {
+            // Find the actual X-axis field in the pivoted data (case-insensitive)
+            const availableKeys = Object.keys(pivotedLineData[0]);
+            const xFieldLower = xField?.toLowerCase();
+            const actualXKey = availableKeys.find(key => 
+              key === xField || key.toLowerCase() === xFieldLower || 
+              key.toLowerCase() === 'year' || key.toLowerCase() === 'date' || 
+              key.toLowerCase() === 'category' || key.toLowerCase() === 'label'
+            );
+            return actualXKey || availableKeys[0];
+          })();
+          
+          console.log('🎯 Legend-based line chart - X-axis key:', xKeyForLine);
+          console.log('🎯 Available keys in pivoted data:', Object.keys(pivotedLineData[0]));
+          console.log('🎯 Sample pivoted data item:', pivotedLineData[0]);
           return (
             <LineChart data={pivotedLineData} margin={{ top: 20, right: 30, left: 20, bottom: 60 }}>
               {currentShowGrid && <CartesianGrid strokeDasharray="3 3" />}
@@ -1405,7 +1434,35 @@ const RechartsChartRenderer: React.FC<Props> = ({
                 tick={axisTickStyle}
                 tickLine={false}
               />
-              <Tooltip formatter={(v: number) => formatTooltipNumber(v as number)} />
+              <Tooltip 
+                content={({ active, payload, label }) => {
+                  if (active && payload && payload.length) {
+                    return (
+                      <div className="explore-chart-tooltip">
+                        <p className="font-semibold text-gray-900 mb-2 text-sm">{label}</p>
+                        {payload.map((entry: any, index: number) => {
+                          return (
+                            <div key={index} className="flex items-center gap-2 mb-1">
+                              <div 
+                                className="w-3 h-3 rounded-full" 
+                                style={{ backgroundColor: entry.color }}
+                              />
+                              <span className="text-sm font-medium text-gray-700">
+                                {entry.dataKey}: 
+                              </span>
+                              <span className="text-sm font-semibold text-gray-700">
+                                {typeof entry.value === 'number' ? formatTooltipNumber(entry.value) : entry.value}
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    );
+                  }
+                  return null;
+                }}
+                cursor={{ stroke: palette[0], strokeWidth: 1, strokeOpacity: 0.4 }}
+              />
               {currentShowLegend && (
                 <Legend
                   layout="horizontal"
@@ -1437,6 +1494,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
               ))}
             </LineChart>
           );
+          } // Close the else block for legend-based rendering
         } else {
           // ---- Fallback to original single-line rendering ----
           // Original single line chart logic
@@ -1552,7 +1610,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
                 }}
                 yAxisId={0}
               >
-                {showDataLabels && (
+                {currentShowDataLabels && (
                   <LabelList 
                     dataKey={yKey} 
                     position="top" 
@@ -1579,15 +1637,15 @@ const RechartsChartRenderer: React.FC<Props> = ({
                   }}
                   yAxisId={1}
                 >
-                  {showDataLabels && (
-                    <LabelList 
-                      dataKey={yKeys[1] || yFields[1]} 
-                      position="top" 
-                      formatter={(value) => formatLargeNumber(value)}
-                      style={{ fontSize: '11px', fontWeight: '500', fill: '#374151' }}
-                      offset={10}
-                    />
-                  )}
+                                     {currentShowDataLabels && (
+                     <LabelList 
+                       dataKey={yKeys[1] || yFields[1]} 
+                       position="top" 
+                       formatter={(value) => formatLargeNumber(value)}
+                       style={{ fontSize: '11px', fontWeight: '500', fill: '#374151' }}
+                       offset={10}
+                     />
+                   )}
                 </Line>
               )}
             </LineChart>
