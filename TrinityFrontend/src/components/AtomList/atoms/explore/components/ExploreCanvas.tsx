@@ -2340,7 +2340,7 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                 {!isChartLoading(index) && (
                   <div className="w-full h-full min-w-0 flex-shrink-0" style={{ height: 'calc(100% - 60px)' }}>
                     {/* Check if chart data exists and has valid structure */}
-                    {(!chartDataSets[index] || chartDataSets[index].length === 0 || !Array.isArray(chartDataSets[index])) ? (
+                    {(!chartDataSets[index] || (Array.isArray(chartDataSets[index]) && chartDataSets[index].length === 0)) ? (
                       <div className="text-center p-4 border-2 border-dashed border-gray-300 rounded-lg h-full flex items-center justify-center">
                         <div className="text-gray-500 text-sm">
                           {config.xAxis && config.yAxes && config.yAxes.length > 0 && config.yAxes.every(y => y) ? 

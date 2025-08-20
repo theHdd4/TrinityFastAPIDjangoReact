@@ -1314,115 +1314,76 @@ async def chart_data_multidim(explore_atom_id: str):
         else:
             # Single measure line chart with legend field support
             if line_id_cols:
-                # Use chart maker service for proper pivoting when legend field is specified
+                # Determine the legend field from group columns
+                legend_field = None
+                for col in line_id_cols:
+                    if col != actual_x_axis:
+                        legend_field = col
+                        break
+                if not legend_field and line_id_cols:
+                    legend_field = line_id_cols[0]
+
+                # Try to use chart maker service for pivoting
                 try:
-                    # Check if we have a legend field in the group_by (excluding x_axis)
-                    legend_field = None
-                    for col in line_id_cols:
-                        if col != actual_x_axis:
-                            legend_field = col
-                            break
-                    
-                    if legend_field:
-                        print(f"🔍 Backend: Using chart maker service for legend-based pivoting")
-                        print(f"🔍 Backend: X-axis: {actual_x_axis}, Y-axis: {actual_measure}, Legend: {legend_field}")
-                        print(f"🔍 Backend: Grouped result sample: {grouped_result.head(2).to_dict('records')}")
-                        
-                        # Use the chart maker service's pivoting method
-                        try:
-                            pivoted_data, unique_legend_values = chart_service._pivot_data_for_legend(
-                                grouped_result,
-                                actual_x_axis,
-                                actual_measure,
-                                legend_field,
-                                agg_type if agg_type != "null" else "sum"
-                            )
-                            
-                            chart_data = pivoted_data
-                            print(f"✅ Chart maker service pivoting: {len(chart_data)} data points with {len(unique_legend_values)} legend values")
-                            print(f"🔍 Backend: Legend values: {unique_legend_values}")
-                            print(f"🔍 Backend: Pivoted data sample: {chart_data[:2] if chart_data else 'No data'}")
-                            
-                            # Add metadata to help frontend understand this is pivoted data
-                            chart_metadata = {
-                                "is_pivoted": True,
-                                "legend_field": legend_field,
-                                "legend_values": unique_legend_values,
-                                "x_axis": actual_x_axis,
-                                "y_axis": actual_measure
-                            }
-                        except Exception as e:
-                            print(f"❌ Chart maker service pivoting failed: {e}")
-                            # Fallback to manual pivoting
-                            raise e
-                    else:
-                        # Fallback to manual pivoting
-                        pivot_data = {}
-                        
-                        for line_name in grouped_result['line_id'].unique():
-                            line_data = grouped_result[grouped_result['line_id'] == line_name].sort_values(actual_x_axis)
-                            
-                            for _, row in line_data.iterrows():
-                                x_value = str(row[actual_x_axis])
-                                y_value = row[actual_measure]
-                                
-                                if pd.api.types.is_numeric_dtype(grouped_result[actual_measure]):
-                                    y_value = float(y_value) if pd.notna(y_value) else 0
-                                else:
-                                    y_value = str(y_value) if pd.notna(y_value) else "Unknown"
-                                
-                                if x_value not in pivot_data:
-                                    pivot_data[x_value] = {actual_x_axis: x_value}
-                                
-                                # Use the actual legend field column name as the key
-                                legend_key = line_id_cols[0]
-                                pivot_data[x_value][legend_key] = y_value
-                        
-                        # Convert to list and sort by X-axis
-                        chart_data = list(pivot_data.values())
-                        try:
-                            # Try to sort numerically if possible
-                            chart_data.sort(key=lambda x: float(x[actual_x_axis]) if str(x[actual_x_axis]).replace('.', '').replace('-', '').isdigit() else x[actual_x_axis])
-                        except (ValueError, TypeError):
-                            # Fall back to string sorting
-                            chart_data.sort(key=lambda x: str(x[actual_x_axis]))
-                        
-                        print(f"✅ Manual legend-based line chart: {len(chart_data)} data points generated with {len(line_id_cols)} legend fields")
-                        
+                    pivoted_data, unique_legend_values = chart_service._pivot_data_for_legend(
+                        grouped_result,
+                        actual_x_axis,
+                        actual_measure,
+                        legend_field,
+                        agg_type if agg_type != "null" else "sum"
+                    )
+
+                    chart_data = pivoted_data
+                    chart_metadata = {
+                        "is_pivoted": True,
+                        "legend_field": legend_field,
+                        "legend_values": unique_legend_values,
+                        "x_axis": actual_x_axis,
+                        "y_axis": actual_measure
+                    }
+                    print(
+                        f"✅ Chart maker service pivoting: {len(chart_data)} data points with {len(unique_legend_values)} legend values"
+                    )
                 except Exception as e:
                     print(f"⚠️ Chart maker service pivoting failed, falling back to manual method: {e}")
-                    # Fallback to manual pivoting
-                    pivot_data = {}
-                    
-                    for line_name in grouped_result['line_id'].unique():
-                        line_data = grouped_result[grouped_result['line_id'] == line_name].sort_values(actual_x_axis)
-                        
-                        for _, row in line_data.iterrows():
-                            x_value = str(row[actual_x_axis])
-                            y_value = row[actual_measure]
-                            
-                            if pd.api.types.is_numeric_dtype(grouped_result[actual_measure]):
-                                y_value = float(y_value) if pd.notna(y_value) else 0
-                            else:
-                                y_value = str(y_value) if pd.notna(y_value) else "Unknown"
-                            
-                            if x_value not in pivot_data:
-                                pivot_data[x_value] = {actual_x_axis: x_value}
-                            
-                            # Use the actual legend field column name as the key
-                            legend_key = line_id_cols[0]
-                            pivot_data[x_value][legend_key] = y_value
-                    
-                    # Convert to list and sort by X-axis
+                    # Manual pivoting by legend values
+                    pivot_data: Dict[str, Dict[str, Any]] = {}
+                    legend_values: List[str] = []
+
+                    for _, row in grouped_result.sort_values(actual_x_axis).iterrows():
+                        x_value = str(row[actual_x_axis])
+                        legend_val = str(row[legend_field]) if legend_field in row else str(row.get("line_id", "Unknown"))
+                        y_value = row[actual_measure]
+
+                        if pd.api.types.is_numeric_dtype(grouped_result[actual_measure]):
+                            y_value = float(y_value) if pd.notna(y_value) else 0
+                        else:
+                            y_value = str(y_value) if pd.notna(y_value) else "Unknown"
+
+                        if x_value not in pivot_data:
+                            pivot_data[x_value] = {actual_x_axis: x_value}
+
+                        pivot_data[x_value][legend_val] = y_value
+                        if legend_val not in legend_values:
+                            legend_values.append(legend_val)
+
                     chart_data = list(pivot_data.values())
                     try:
-                        # Try to sort numerically if possible
-                        chart_data.sort(key=lambda x: float(x[actual_x_axis]) if str(x[actual_x_axis]).replace('.', '').replace('-', '').isdigit() else x[actual_x_axis])
+                        chart_data.sort(
+                            key=lambda x: float(x[actual_x_axis])
+                            if str(x[actual_x_axis]).replace('.', '').replace('-', '').isdigit()
+                            else x[actual_x_axis]
+                        )
                     except (ValueError, TypeError):
-                        # Fall back to string sorting
                         chart_data.sort(key=lambda x: str(x[actual_x_axis]))
-                    
-                    print(f"✅ Fallback manual legend-based line chart: {len(chart_data)} data points generated")
+
+                    chart_metadata = {
+                        "legend_field": legend_field,
+                        "legend_values": legend_values,
+                    }
+                    print(
+                        f"✅ Fallback manual legend-based line chart: {len(chart_data)} data points generated with {len(legend_values)} legend values"
+                    )
             else:
                 # Fallback to original logic for non-legend charts
                 for line_name in grouped_result['line_id'].unique():
