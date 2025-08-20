@@ -551,10 +551,10 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
             ? { ...DEFAULT_TEXTBOX_SETTINGS }
             : atom.id === 'data-upload-validate'
             ? { ...DEFAULT_DATAUPLOAD_SETTINGS }
-            : atom.id === 'feature-overview'
+          : atom.id === 'feature-overview'
             ? { ...DEFAULT_FEATURE_OVERVIEW_SETTINGS }
             : atom.id === 'explore'
-            ? { data: {}, settings: {} }
+            ? { data: { ...DEFAULT_EXPLORE_DATA }, settings: { ...DEFAULT_EXPLORE_SETTINGS } }
             : atom.id === 'chart-maker'
             ? { ...DEFAULT_CHART_MAKER_SETTINGS }
             : undefined,
@@ -620,6 +620,8 @@ const addNewCardWithAtom = (
         ? { ...DEFAULT_DATAUPLOAD_SETTINGS }
         : atomId === 'feature-overview'
         ? { ...DEFAULT_FEATURE_OVERVIEW_SETTINGS }
+        : atomId === 'explore'
+        ? { data: { ...DEFAULT_EXPLORE_DATA }, settings: { ...DEFAULT_EXPLORE_SETTINGS } }
         : atomId === 'chart-maker'
         ? { ...DEFAULT_CHART_MAKER_SETTINGS }
         : undefined,
