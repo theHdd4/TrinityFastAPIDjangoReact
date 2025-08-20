@@ -120,6 +120,8 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
     selectedIdentifiers: {},
     allColumns: [],
     numericalColumns: [],
+    fallbackDimensions: [],
+    fallbackMeasures: [],
     dataframe: '',
     aggregation: 'no_aggregation', // Default to no aggregation
     weightColumn: '',
@@ -1296,43 +1298,51 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
   const [isLoadingColumns, setIsLoadingColumns] = useState(false);
   
   // Combine all available columns for both X and Y axis dropdowns
-  // Only use column classifier config - no fallback
-  const allAvailableColumns = [...availableIdentifiers, ...availableMeasures];
+  // Deduplicate to avoid repeated entries
+  const allAvailableColumns = Array.from(new Set([...availableIdentifiers, ...availableMeasures]));
   
 
   
-    // Use column classifier config as the primary source for dimensions, identifiers, and measures
+  // Load available columns using column classifier config when available, falling back to column summary data
   useEffect(() => {
-
-    
     if (!safeData.dataframe) {
-      
       return;
     }
-    
+
     setIsLoadingColumns(true);
-    
+
     try {
-      // Extract identifiers and measures from column classifier config
-      const columnClassifierIdentifiers = safeData.columnClassifierConfig?.identifiers || [];
-      const columnClassifierMeasures = safeData.columnClassifierConfig?.measures || [];
-      
+      const identifiers = safeData.columnClassifierConfig?.identifiers?.length
+        ? safeData.columnClassifierConfig.identifiers
+        : safeData.fallbackDimensions?.length
+          ? safeData.fallbackDimensions
+          : safeData.allColumns || [];
 
-      
-      // Set the available columns from column classifier config
-      setAvailableIdentifiers(columnClassifierIdentifiers);
-      setAvailableMeasures(columnClassifierMeasures);
-      
+      const measures = safeData.columnClassifierConfig?.measures?.length
+        ? safeData.columnClassifierConfig.measures
+        : safeData.fallbackMeasures?.length
+          ? safeData.fallbackMeasures
+          : safeData.allColumns || [];
 
-      
+      setAvailableIdentifiers(identifiers);
+      setAvailableMeasures(measures);
     } catch (error) {
       console.error('Error loading column classifier config:', error);
+      // Fall back to all columns if something goes wrong
+      setAvailableIdentifiers(safeData.allColumns || []);
+      setAvailableMeasures(safeData.allColumns || []);
     } finally {
       setIsLoadingColumns(false);
     }
-  }, [safeData.dataframe, safeData.columnClassifierConfig]);
-  
-  // Column classifier config is now the primary source - no fallback needed
+  }, [
+    safeData.dataframe,
+    safeData.columnClassifierConfig,
+    safeData.fallbackDimensions,
+    safeData.fallbackMeasures,
+    safeData.allColumns,
+  ]);
+
+  // Log available columns for debugging
   
   console.log('🔍 ExploreCanvas: Selected dimensions:', selectedDimensions);
   console.log('🔍 ExploreCanvas: Column classifier config dimensions:', dimensionsWithIdentifiers);
