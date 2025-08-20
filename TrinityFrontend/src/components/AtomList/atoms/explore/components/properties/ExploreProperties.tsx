@@ -3,31 +3,43 @@
 import React from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Upload, Settings, Eye } from 'lucide-react';
-import ExploreInput from './ExploreInput';
-import ExploreSettings from './ExploreSettings';
-import ExploreExhibition from './ExploreExhibition';
+import ExploreInput from '../ExploreInput';
+import ExploreSettings from '../ExploreSettings';
+import ExploreExhibition from '../ExploreExhibition';
 import ErrorBoundary from '@/components/ErrorBoundary';
-import { ExploreData, ExploreSettings as ExploreSettingsType } from '../ExploreAtom';
+import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
+import type { ExploreData, ExploreSettings as ExploreSettingsType } from '../ExploreAtom';
 
-interface ExplorePropertiesProps {
-  data: ExploreData;
-  settings: ExploreSettingsType;
-  onDataChange: (data: Partial<ExploreData>) => void;
-  onSettingsChange: (settings: Partial<ExploreSettingsType>) => void;
-  onDataUpload: (data: any, fileId: string) => void;
-  onApply?: (config: any) => void;
-  chartData?: any; // Add chart data prop
+interface Props {
+  atomId: string;
 }
 
-const ExploreProperties: React.FC<ExplorePropertiesProps> = ({
-  data,
-  settings,
-  onDataChange,
-  onSettingsChange,
-  onDataUpload,
-  onApply,
-  chartData
-}) => {
+const ExploreProperties: React.FC<Props> = ({ atomId }) => {
+  const atom = useLaboratoryStore(state => state.getAtom(atomId));
+  const updateSettings = useLaboratoryStore(state => state.updateAtomSettings);
+
+  const data = (atom?.settings?.data || {}) as ExploreData;
+  const settings = (atom?.settings?.settings || {}) as ExploreSettingsType;
+  const chartData = atom?.settings?.chartData;
+
+  const handleDataChange = (newData: Partial<ExploreData>) => {
+    updateSettings(atomId, {
+      data: { ...data, ...newData },
+    });
+  };
+
+  const handleDataUpload = (summary: any, fileId: string) => {
+    updateSettings(atomId, {
+      data: { ...data, columnSummary: summary, dataframe: fileId },
+    });
+  };
+
+  const handleApply = (config?: any) => {
+    updateSettings(atomId, {
+      data: { ...data, ...(config || {}), applied: true },
+    });
+  };
+
   return (
     <div className="w-80 h-full bg-background border-l border-border flex flex-col">
       <div className="flex-1 overflow-hidden">
@@ -45,20 +57,20 @@ const ExploreProperties: React.FC<ExplorePropertiesProps> = ({
           </TabsList>
           <div className="h-[calc(100%-60px)] overflow-y-auto">
             <TabsContent value="input" className="h-full m-0 p-2" forceMount>
-              <ExploreInput 
+              <ExploreInput
                 data={data}
                 settings={settings}
-                onDataChange={onDataChange}
-                onDataUpload={onDataUpload}
+                onDataChange={handleDataChange}
+                onDataUpload={handleDataUpload}
               />
             </TabsContent>
             <TabsContent value="settings" className="h-full m-0 p-2" forceMount>
               <ErrorBoundary>
-                <ExploreSettings 
+                <ExploreSettings
                   data={data}
                   settings={settings}
-                  onDataChange={onDataChange}
-                  onApply={onApply}
+                  onDataChange={handleDataChange}
+                  onApply={() => handleApply()}
                 />
               </ErrorBoundary>
             </TabsContent>
@@ -73,3 +85,4 @@ const ExploreProperties: React.FC<ExplorePropertiesProps> = ({
 };
 
 export default ExploreProperties;
+

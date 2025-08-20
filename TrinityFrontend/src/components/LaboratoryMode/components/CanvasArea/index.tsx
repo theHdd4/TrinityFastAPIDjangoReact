@@ -718,6 +718,10 @@ const handleAddDragLeave = (e: React.DragEvent) => {
           ? { ...DEFAULT_FEATURE_OVERVIEW_SETTINGS }
           : info.id === 'dataframe-operations'
           ? { ...DEFAULT_DATAFRAME_OPERATIONS_SETTINGS }
+          : info.id === 'chart-maker'
+          ? { ...DEFAULT_CHART_MAKER_SETTINGS }
+          : info.id === 'explore'
+          ? { data: {}, settings: {} }
           : undefined,
     };
     setLayoutCards(
