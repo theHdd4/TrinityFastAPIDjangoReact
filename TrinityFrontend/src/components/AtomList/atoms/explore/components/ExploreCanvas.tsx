@@ -2161,16 +2161,11 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                       }}>
                         {/* Only render the chart if we have valid xAxis and yAxes */}
                         {(() => {
-                          const hasValidAxes = config.xAxis && config.yAxes && config.yAxes.length > 0 && config.yAxes.every(y => y);
-                          const yAxesString = config.yAxes.join(',');
-                            index,
-                            xAxis: config.xAxis,
-                            yAxes: config.yAxes,
-                            yAxesString,
-                            hasValidAxes,
-                            chartData: chartDataSets[index],
-                            chartDataLength: chartDataSets[index]?.length || 0
-                          });
+                          const hasValidAxes =
+                            config.xAxis &&
+                            config.yAxes &&
+                            config.yAxes.length > 0 &&
+                            config.yAxes.every((y) => y);
                           return hasValidAxes;
                         })() ? (
                           <RechartsChartRenderer
