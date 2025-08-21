@@ -1671,24 +1671,29 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
               </div>
               
                 <div className="flex items-center ml-4">
-                  <Label htmlFor={`unique-toggle-${index}`} className="text-xs mr-2">
-                    Show unique values for categorical columns
-                  </Label>
-                  <Switch
-                    id={`unique-toggle-${index}`}
-                    checked={showUniqueToggles[index] || false}
-                    onCheckedChange={(checked) => {
-                      setShowUniqueToggles(prev => ({ ...prev, [index]: checked }));
-                      const newConfigs = [...chartConfigs];
-                      if (!checked) {
-                        newConfigs[index] = { ...newConfigs[index], legendField: '' };
-                        setChartConfigs(newConfigs);
-                        if (config.xAxis && hasValidYAxes(config.yAxes)) {
-                          safeTriggerChartGeneration(index, newConfigs[index], 100);
+                  <div className="flex items-center flex-1 min-w-0">
+                    <Label
+                      htmlFor={`unique-toggle-${index}`}
+                      className="text-xs mr-2 truncate"
+                    >
+                      Show unique values for categorical columns
+                    </Label>
+                    <Switch
+                      id={`unique-toggle-${index}`}
+                      checked={showUniqueToggles[index] || false}
+                      onCheckedChange={(checked) => {
+                        setShowUniqueToggles(prev => ({ ...prev, [index]: checked }));
+                        const newConfigs = [...chartConfigs];
+                        if (!checked) {
+                          newConfigs[index] = { ...newConfigs[index], legendField: '' };
+                          setChartConfigs(newConfigs);
+                          if (config.xAxis && hasValidYAxes(config.yAxes)) {
+                            safeTriggerChartGeneration(index, newConfigs[index], 100);
+                          }
                         }
-                      }
-                    }}
-                  />
+                      }}
+                    />
+                  </div>
                   {showUniqueToggles[index] && (
                     <Select
                       value={config.legendField || ''}

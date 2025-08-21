@@ -380,12 +380,20 @@ const RechartsChartRenderer: React.FC<Props> = ({
         }
       }
 
-      // When no legend field is provided, convert simple key-value pairs to { name, value }
+      // When no legend field is provided, convert simple key-value pairs to an
+      // array of objects. Some APIs return values as nested objects (e.g.
+      // { category: { metric: 10 } }), which would otherwise break the pie
+      // chart because Recharts expects numeric values. Extract the first
+      // numeric field from such objects.
       try {
-        return Object.entries(data as Record<string, number | string>).map(([name, value]) => ({
-          name,
-          value,
-        }));
+        return Object.entries(data as Record<string, any>).map(([name, value]) => {
+          let numericValue: any = value;
+          if (typeof value === 'object' && value !== null) {
+            const firstNumber = Object.values(value).find(v => typeof v === 'number');
+            numericValue = firstNumber !== undefined ? firstNumber : value;
+          }
+          return { name, value: numericValue };
+        });
       } catch {
         return [];
       }
