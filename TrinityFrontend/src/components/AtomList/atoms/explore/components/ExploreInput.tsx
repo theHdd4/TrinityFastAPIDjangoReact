@@ -37,7 +37,7 @@ const ExploreInput: React.FC<ExploreInputProps> = ({ data, settings, onDataChang
    * Local state
    * --------------------------------------------------*/
   const [frames, setFrames] = useState<{ object_name: string; csv_name: string }[]>([])
-  const [selected, setSelected] = useState<string>(settings.dataSource || "")
+  const [selected, setSelected] = useState<string>(data.dataframe || "")
 
   const [columnSummary, setColumnSummary] = useState<ColumnSummary[]>([])
   const [originalColumnSummary, setOriginalColumnSummary] = useState<ColumnSummary[]>([])
@@ -47,7 +47,7 @@ const ExploreInput: React.FC<ExploreInputProps> = ({ data, settings, onDataChang
   const [columnClassifierConfig, setColumnClassifierConfig] = useState<ColumnClassifierConfig | null>(null)
   // Select Columns UI state
   const [selectedColumns, setSelectedColumns] = useState<string[]>([])
-  const [filterUnique, setFilterUnique] = useState<boolean>(settings.filterUnique || false)
+  const [filterUnique, setFilterUnique] = useState<boolean>(data.filterUnique || false)
   const [isLoadingClassifier, setIsLoadingClassifier] = useState(false)
 
   /** --------------------------------------------------
@@ -61,18 +61,18 @@ const ExploreInput: React.FC<ExploreInputProps> = ({ data, settings, onDataChang
   }, [])
 
   /** --------------------------------------------------
-   * Sync selected file from external settings
+   * Sync selected file from external data
    * --------------------------------------------------*/
   useEffect(() => {
-    setSelected(settings.dataSource || "")
-  }, [settings.dataSource])
+    setSelected(data.dataframe || "")
+  }, [data.dataframe])
 
   /** --------------------------------------------------
-   * Sync filterUnique from external settings
+   * Sync filterUnique from external data
    * --------------------------------------------------*/
   useEffect(() => {
-    setFilterUnique(settings.filterUnique || false)
-  }, [settings.filterUnique])
+    setFilterUnique(data.filterUnique || false)
+  }, [data.filterUnique])
 
   /** --------------------------------------------------
    * Sync columnSummary from external data

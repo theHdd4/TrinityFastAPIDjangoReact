@@ -46,7 +46,7 @@ const ExploreSettings = ({ data, settings, onDataChange, onApply }) => {
     to: new Date('2025-03-30'),
   });
   const [availableDateRange, setAvailableDateRange] = useState<DateRangeData | null>(null);
-  const [graphLayout, setGraphLayout] = useState(defaultGraphLayout);
+  const [graphLayout, setGraphLayout] = useState(data.graphLayout || defaultGraphLayout);
   const [fromOpen, setFromOpen] = useState(false);
   const [toOpen, setToOpen] = useState(false);
   const [isLoadingDateRange, setIsLoadingDateRange] = useState(false);
@@ -111,6 +111,11 @@ const ExploreSettings = ({ data, settings, onDataChange, onApply }) => {
     }
   }, [data, data?.columnClassifierConfig]);
 
+  // Keep local graph layout in sync with external data
+  useEffect(() => {
+    setGraphLayout(data.graphLayout || defaultGraphLayout);
+  }, [data.graphLayout]);
+
   // Automatically populate selectedIdentifiers on component load if not already set
   useEffect(() => {
     if (columnClassifierConfig?.dimensions && 
@@ -125,24 +130,24 @@ const ExploreSettings = ({ data, settings, onDataChange, onApply }) => {
 
   // Fetch column names if data source is available
   useEffect(() => {
-    if (settings?.dataSource && !columnNames.length) {
+    if (data?.dataframe && !columnNames.length) {
       fetchColumnNames();
     }
-  }, [settings?.dataSource, columnNames.length]);
+  }, [data?.dataframe, columnNames.length]);
 
   // Fetch date range if data source is available
   useEffect(() => {
-    if (settings?.dataSource && !availableDateRange) {
+    if (data?.dataframe && !availableDateRange) {
       fetchDateRange();
     }
-  }, [settings?.dataSource, availableDateRange]);
+  }, [data?.dataframe, availableDateRange]);
 
   const fetchColumnNames = async () => {
-    if (!settings?.dataSource) return;
+    if (!data?.dataframe) return;
     
     setIsLoadingColumns(true);
     try {
-      const response = await fetch(`${EXPLORE_API}/columns?object_name=${encodeURIComponent(settings.dataSource)}`);
+      const response = await fetch(`${EXPLORE_API}/columns?object_name=${encodeURIComponent(data.dataframe)}`);
       if (response.ok) {
         const result = await response.json();
         if (result.columns) {
@@ -156,11 +161,11 @@ const ExploreSettings = ({ data, settings, onDataChange, onApply }) => {
   };
 
   const fetchDateRange = async () => {
-    if (!settings?.dataSource) return;
+    if (!data?.dataframe) return;
     
     setIsLoadingDateRange(true);
     try {
-      const response = await fetch(`${EXPLORE_API}/get-date-range?data_source=${encodeURIComponent(settings.dataSource)}`);
+      const response = await fetch(`${EXPLORE_API}/get-date-range?data_source=${encodeURIComponent(data.dataframe)}`);
       if (response.ok) {
         const result = await response.json();
         if (result.status === 'success' && result.date_range) {
@@ -173,8 +178,11 @@ const ExploreSettings = ({ data, settings, onDataChange, onApply }) => {
     }
   };
 
+  const existingDims = Object.keys(data.columnClassifierConfig?.dimensions || {});
   const categoricalColumns = Array.isArray(data.columnSummary)
-    ? data.columnSummary.filter((col: any) => !col.is_numerical).map((col: any) => col.column)
+    ? data.columnSummary
+        .filter((col: any) => !col.is_numerical && !existingDims.includes(col.column))
+        .map((col: any) => col.column)
     : [];
 
   const handleAddFilters = () => {
@@ -192,7 +200,8 @@ const ExploreSettings = ({ data, settings, onDataChange, onApply }) => {
     onDataChange({
       columnClassifierConfig: updatedConfig,
       selectedIdentifiers: newSelectedIdentifiers,
-      dimensions: Array.from(new Set([...(data.dimensions || []), ...selectedFilterColumns]))
+      dimensions: Array.from(new Set([...(data.dimensions || []), ...selectedFilterColumns])),
+      applied: true
     });
     setSelectedFilterColumns([]);
     setShowFilterSelector(false);
