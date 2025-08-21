@@ -8,15 +8,14 @@ import { Label } from '@/components/ui/label';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Switch } from '@/components/ui/switch';
-import { BarChart3, Settings, Filter, Eye, EyeOff, Edit3, Palette, ChevronDown, ChevronUp, X, Plus, RotateCcw, Database } from 'lucide-react';
+import { BarChart3, Settings, Filter, Eye, EyeOff, Edit3, Palette, ChevronDown, ChevronUp, X, Plus, RotateCcw, Database, Maximize2 } from 'lucide-react';
 import { ExploreData } from '../ExploreAtom';
-// Replace the legacy Recharts renderer with a wrapper around
-// the Chart Maker canvas so Explore shares the same chart
-// rendering logic as the Chart Maker atom's simple mode.
-import ChartMakerRenderer from './ChartMakerRenderer';
+import RechartsChartRenderer from './RechartsChartRenderer';
 import { EXPLORE_API } from '@/lib/api';
 import { toast } from '@/components/ui/use-toast';
 import './ExploreCanvas.css';
+import ChatBubble from '../../chart-maker/components/ChatBubble';
+import { Dialog, DialogContent, DialogTrigger } from '@/components/ui/dialog';
 
 // Chart color palette using specified base colors and lighter shades
 const CHART_COLORS = [
@@ -151,6 +150,36 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
       legendField: safeData.legendField || '', // Field to use for creating multiple lines/series
     }
   ]);
+
+  const [chatBubble, setChatBubble] = useState({
+    visible: false,
+    chartIndex: null as number | null,
+    anchor: { x: 0, y: 0 }
+  });
+  const [chatBubbleShouldRender, setChatBubbleShouldRender] = useState(false);
+
+  const openChartTypeTray = (e: React.MouseEvent, index: number) => {
+    e.preventDefault();
+    setChatBubble({ visible: true, chartIndex: index, anchor: { x: e.clientX, y: e.clientY } });
+    setChatBubbleShouldRender(true);
+  };
+
+  const handleChartTypeSelect = (type: string) => {
+    if (chatBubble.chartIndex !== null) {
+      const newConfigs = [...chartConfigs];
+      const mappedType = `${type}_chart` as typeof newConfigs[number]['chartType'];
+      newConfigs[chatBubble.chartIndex] = { ...newConfigs[chatBubble.chartIndex], chartType: mappedType };
+      setChartConfigs(newConfigs);
+      const cfg = newConfigs[chatBubble.chartIndex];
+      if (cfg.xAxis && hasValidYAxes(cfg.yAxes)) {
+        safeTriggerChartGeneration(chatBubble.chartIndex, cfg, 100);
+      }
+    }
+    setChatBubble(prev => ({ ...prev, visible: false }));
+  };
+
+  const closeChatBubble = () => setChatBubble(prev => ({ ...prev, visible: false }));
+  const handleBubbleExited = () => setChatBubbleShouldRender(false);
 
   // Initialize data summary collapse state
   useEffect(() => {
@@ -839,6 +868,10 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
       ...prev,
       [index]: !prev[index]
     }));
+
+    if (!cardSelectedIdentifiers[index]) {
+      initializeCardDimensions(index);
+    }
   };
 
   // Toggle functions for per-card collapse states
@@ -1405,13 +1438,46 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
   const renderChartComponent = (index: number) => {
     const config = chartConfigs[index] || chartConfigs[0];
     const isSettingsVisible = chartSettingsVisible[index] || false;
+    const rendererProps = {
+      key: `chart-${index}-${config.chartType}-${chartThemes[index] || 'default'}-${chartDataSets[index]?.length || 0}-${Object.keys(chartFilters[index] || {}).length}-${appliedFilters[index] ? 'filtered' : 'unfiltered'}-theme-${chartThemes[index] || 'default'}-sort-${chartSortCounters[index] || 0}-yaxes-${config.yAxes.join('-')}`,
+      type: config.chartType as 'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart',
+      data: chartDataSets[index] || [],
+      xField: config.xAxis || undefined,
+      yField: config.yAxes[0] || undefined,
+      title: config.title,
+      xAxisLabel: config.xAxisLabel || config.xAxis || '',
+      yAxisLabel: config.yAxisLabels[0] || config.yAxes[0] || '',
+      yFields: config.yAxes,
+      yAxisLabels: config.yAxes.map((yAxis: string, idx: number) => config.yAxisLabels[idx] || yAxis || ''),
+      legendField: config.legendField || undefined,
+      chartsPerRow: safeData.graphLayout.numberOfGraphsInRow,
+      colors: CHART_COLORS,
+      theme: chartThemes[index] || 'default',
+      enableScroll: false,
+      onThemeChange: (theme: string) => handleChartThemeChange(index, theme),
+      onGridToggle: (enabled: boolean) => handleChartGridToggle(index, enabled),
+      onLegendToggle: (enabled: boolean) => handleChartLegendToggle(index, enabled),
+      onAxisLabelsToggle: (enabled: boolean) => handleChartAxisLabelsToggle(index, enabled),
+      onDataLabelsToggle: (enabled: boolean) => handleChartDataLabelsToggle(index, enabled),
+      onSave: () => handleChartSave(index),
+      onSortChange: () => {
+        setChartSortCounters(prev => ({
+          ...prev,
+          [index]: (prev[index] || 0) + 1
+        }));
+      },
+      showLegend: chartOptions[index]?.legend,
+      showAxisLabels: chartOptions[index]?.axisLabels,
+      showDataLabels: chartOptions[index]?.dataLabels,
+      showGrid: chartOptions[index]?.grid
+    } as const;
     
     return (
       <div key={index} className="relative h-full w-full min-w-0 explore-chart-card">
         <Card className="border-pink-200 h-full w-full explore-chart-card">
           <CardContent className="p-4 flex flex-col h-full w-full min-w-0 explore-chart-content">
                         {/* Chart Configuration Header with Toggle */}
-            <div className="flex items-center mb-4 p-3 bg-gray-50 rounded-lg">
+            <div className="flex items-center mb-4 p-3 bg-gray-50 rounded-lg" onContextMenu={(e) => openChartTypeTray(e, index)}>
               <div className="flex items-center space-x-2">
                 <div className="flex items-center justify-center w-6 h-6 bg-pink-100 rounded-md">
                   <BarChart3 className="w-3 h-3 text-pink-600" />
@@ -1444,6 +1510,22 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                 >
                   <X className="w-3 h-3" />
                 </Button>
+                <Dialog>
+                  <DialogTrigger asChild>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-8 w-8 p-0"
+                    >
+                      <Maximize2 className="w-3 h-3" />
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent className="max-w-4xl">
+                    <div className="h-[500px] w-full">
+                      <RechartsChartRenderer {...rendererProps} />
+                    </div>
+                  </DialogContent>
+                </Dialog>
                 <button
                   onClick={() => toggleChartConfigCollapsed(index)}
                   className="p-2 hover:bg-pink-100 rounded-lg transition-colors"
@@ -1461,7 +1543,7 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
             {/* Collapsible Chart Configuration Area */}
             <div className={`transition-all duration-300 ease-in-out min-w-0 w-full explore-chart-config ${chartConfigCollapsed[index] ? 'max-h-0 opacity-0 overflow-hidden' : 'max-h-none opacity-100'}`}>
               {/* Axis Selectors */}
-              <div className="flex items-center space-x-2 mb-3 p-3 bg-gray-50 rounded-lg min-w-0 w-full explore-axis-selectors">
+              <div className="flex items-center space-x-2 mb-3 p-3 bg-gray-50 rounded-lg min-w-0 w-full explore-axis-selectors" onContextMenu={(e) => openChartTypeTray(e, index)}>
                 <Select
                   value={config.xAxis}
                   onValueChange={(value) => {
@@ -1629,7 +1711,7 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                       htmlFor={`unique-toggle-${index}`}
                       className="text-xs mr-2 truncate"
                     >
-                      Show unique values for categorical columns
+                      Field Values
                     </Label>
                     <Switch
                       id={`unique-toggle-${index}`}
@@ -2125,7 +2207,7 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                         }`}
                         style={{
                           minHeight: config.chartType === 'pie_chart' ? '450px' : '400px',
-                          height: config.chartType === 'pie_chart' ? 'auto' : '400px',
+                          height: config.chartType === 'pie_chart' ? '450px' : '400px',
                           maxWidth: '100%'
                         }}
                       >
@@ -2136,57 +2218,25 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                             config.yAxes &&
                             config.yAxes.length > 0 &&
                             config.yAxes.every((y) => y);
-                          return hasValidAxes;
-                        })() ? (
-                          <ChartMakerRenderer
-                            key={`chart-${index}-${config.chartType}-${chartThemes[index] || 'default'}-${chartDataSets[index]?.length || 0}-${Object.keys(chartFilters[index] || {}).length}-${appliedFilters[index] ? 'filtered' : 'unfiltered'}-theme-${chartThemes[index] || 'default'}-sort-${chartSortCounters[index] || 0}-yaxes-${config.yAxes.join('-')}`}
-                            type={config.chartType as 'bar_chart' | 'line_chart' | 'pie_chart'}
-                            data={chartDataSets[index] || []}
-                            xField={config.xAxis || undefined}
-                            yField={config.yAxes[0] || undefined}
-                            title={config.title}
-                            xAxisLabel={config.xAxisLabel || config.xAxis || ''}
-                            yAxisLabel={config.yAxisLabels[0] || config.yAxes[0] || ''}
-                            yFields={config.yAxes}
-                            yAxisLabels={config.yAxes.map((yAxis: string, idx: number) =>
-                              config.yAxisLabels[idx] || yAxis || ''
-                            )}
-                            legendField={config.legendField || undefined}
-                            chartsPerRow={safeData.graphLayout.numberOfGraphsInRow}
-                            colors={CHART_COLORS}
-                            // Add debugging props to help troubleshoot
-                            data-testid={`chart-${index}`}
-                            data-yaxes={JSON.stringify(config.yAxes)}
-                            data-yaxislabels={JSON.stringify(config.yAxisLabels)}
-                            data-legendfield={config.legendField || 'undefined'}
-                            data-chartdata={JSON.stringify(chartDataSets[index] || [])}
-                            data-chartdatalength={chartDataSets[index]?.length || 0}
-                            theme={chartThemes[index] || 'default'}
-                            enableScroll={false}
-                            onThemeChange={(theme) => handleChartThemeChange(index, theme)}
-                            onGridToggle={(enabled) => handleChartGridToggle(index, enabled)}
-                            onLegendToggle={(enabled) => handleChartLegendToggle(index, enabled)}
-                            onAxisLabelsToggle={(enabled) => handleChartAxisLabelsToggle(index, enabled)}
-                            onDataLabelsToggle={(enabled) => handleChartDataLabelsToggle(index, enabled)}
-                            onSave={() => handleChartSave(index)}
-                            onSortChange={(chartIndex) => {
-                              setChartSortCounters(prev => ({
-                                ...prev,
-                                [index]: (prev[index] || 0) + 1
-                              }));
-                            }}
-                            showLegend={chartOptions[index]?.legend}
-                            showAxisLabels={chartOptions[index]?.axisLabels}
-                            showDataLabels={chartOptions[index]?.dataLabels}
-                            showGrid={chartOptions[index]?.grid}
-                          />
-                        ) : (
-                          <div className="text-center p-4 border-2 border-dashed border-gray-300 rounded-lg h-full flex items-center justify-center">
-                            <div className="text-gray-500 text-sm">
-                              Select X and Y axes to generate chart
-                            </div>
-                          </div>
-                        )}
+                          if (!hasValidAxes) {
+                            return (
+                              <div className="text-center p-4 border-2 border-dashed border-gray-300 rounded-lg h-full flex items-center justify-center">
+                                <div className="text-gray-500 text-sm">
+                                  {config.xAxis && config.yAxes && config.yAxes.length > 0 && config.yAxes.every(y => y) ? (
+                                    chartDataSets[index] && chartDataSets[index].length === 0 ? (
+                                      'No data available for the selected filters. Try adjusting your filter criteria.'
+                                    ) : (
+                                      `Chart ready: ${config.xAxis} vs ${config.yAxes.filter(y => y).join(', ')}`
+                                    )
+                                  ) : (
+                                    'Select X and Y axes to generate chart'
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          }
+                          return <RechartsChartRenderer {...rendererProps} />;
+                        })()}
                       </div>
                     )}
                   </div>
@@ -2958,6 +3008,25 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
             </div>
           )}
         </>
+      )}
+      {chatBubbleShouldRender && (
+        <div
+          style={{
+            position: 'fixed',
+            left: chatBubble.anchor.x,
+            top: chatBubble.anchor.y,
+            transform: 'translate(-50%, 0)',
+            zIndex: 4000
+          }}
+        >
+          <ChatBubble
+            visible={chatBubble.visible}
+            chartType={chartConfigs[chatBubble.chartIndex ?? 0]?.chartType.replace('_chart', '') || 'line'}
+            onChartTypeSelect={handleChartTypeSelect}
+            onClose={closeChatBubble}
+            onExited={handleBubbleExited}
+          />
+        </div>
       )}
     </div>
   );

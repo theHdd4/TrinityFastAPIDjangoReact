@@ -4,6 +4,10 @@ import {
   Bar,
   LineChart,
   Line,
+  AreaChart,
+  Area,
+  ScatterChart,
+  Scatter,
   PieChart,
   Pie,
   Cell,
@@ -17,7 +21,7 @@ import {
 } from 'recharts';
 
 interface Props {
-  type: 'bar_chart' | 'line_chart' | 'pie_chart';
+  type: 'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart';
   data: any[];
   xField?: string;
   yField?: string;
@@ -511,7 +515,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
 
   // Memoized pivoted data for line charts and bar charts with legend field
   const { pivoted: pivotedLineData, uniqueValues: legendValues } = useMemo(() => {
-    if ((type === 'line_chart' || type === 'bar_chart') && legendField && xField && yField) {
+    if ((type === 'line_chart' || type === 'bar_chart' || type === 'area_chart' || type === 'scatter_chart') && legendField && xField && yField) {
       // Check if data is already pivoted (has multiple Y-axis columns)
       const isDataAlreadyPivoted = chartDataForRendering.length > 0 && 
         chartDataForRendering[0] && 
@@ -1114,14 +1118,14 @@ const RechartsChartRenderer: React.FC<Props> = ({
     // Final validation for dual Y-axes
     const hasDualYAxes = yKeys.length > 1 || (yFields && yFields.length > 1);
 
-    // CRITICAL FIX: Transform data for single-axis bar charts when data has generic keys
+    // CRITICAL FIX: Transform data for charts when data has generic keys
     let transformedChartData = chartDataForRendering;
-    if (type === 'bar_chart' && xField && yField && chartDataForRendering.length > 0) {
+    if ((type === 'bar_chart' || type === 'line_chart' || type === 'area_chart' || type === 'scatter_chart') && xField && yField && chartDataForRendering.length > 0) {
       const firstItem = chartDataForRendering[0];
       const availableKeys = Object.keys(firstItem);
       
       // Check if data has generic keys OR if the field names don't match what we expect
-      const needsTransformation = availableKeys.includes('x') || availableKeys.includes('y') || availableKeys.includes('name') || availableKeys.includes('value') || 
+      const needsTransformation = availableKeys.includes('x') || availableKeys.includes('y') || availableKeys.includes('name') || availableKeys.includes('value') ||
                                  (xField && !availableKeys.includes(xField)) || (yField && !availableKeys.includes(yField));
       
       if (needsTransformation) {
@@ -1156,9 +1160,22 @@ const RechartsChartRenderer: React.FC<Props> = ({
             transformed[yField] = item[Object.keys(item)[1]] || item[Object.keys(item)[0]];
           }
           
+          // Preserve legend field if present
+          if (legendField) {
+            if (item[legendField] !== undefined) {
+              transformed[legendField] = item[legendField];
+            } else {
+              const keys = Object.keys(item);
+              const foundKey = keys.find(key => key.toLowerCase() === legendField.toLowerCase());
+              if (foundKey) {
+                transformed[foundKey] = item[foundKey];
+              }
+            }
+          }
+
           return transformed;
         });
-        
+
       }
     }
 
@@ -1436,7 +1453,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
           // ---- Fallback to original single-line rendering ----
           // Original single line chart logic
           return (
-            <LineChart data={chartDataForRendering} margin={{ top: 20, right: 30, left: 20, bottom: 60 }} className="explore-chart-line">
+            <LineChart data={transformedChartData} margin={{ top: 20, right: 30, left: 20, bottom: 60 }} className="explore-chart-line">
               {currentShowGrid && <CartesianGrid strokeDasharray="3 3" />}
               <XAxis 
                 dataKey={xKey}
@@ -1586,6 +1603,138 @@ const RechartsChartRenderer: React.FC<Props> = ({
         }
         break;
 
+      case 'area_chart':
+        if (legendField && legendValues.length > 0 && pivotedLineData.length > 0) {
+          const xKeyForArea = xField || Object.keys(pivotedLineData[0])[0];
+          return (
+            <AreaChart data={pivotedLineData} margin={{ top: 20, right: 30, left: 20, bottom: 60 }}>
+              {currentShowGrid && <CartesianGrid strokeDasharray="3 3" />}
+              <XAxis
+                dataKey={xKeyForArea}
+                label={currentShowAxisLabels && xAxisLabel ? { value: capitalizeWords(xAxisLabel), position: 'bottom', style: axisLabelStyle } : undefined}
+                tick={axisTickStyle}
+                tickLine={false}
+              />
+              <YAxis
+                tickFormatter={formatLargeNumber}
+                label={currentShowAxisLabels && yAxisLabel ? { value: capitalizeWords(yAxisLabel), angle: -90, position: 'left', style: axisLabelStyle } : undefined}
+                tick={axisTickStyle}
+                tickLine={false}
+              />
+              <Tooltip formatter={(v: number) => formatTooltipNumber(v)} />
+              {currentShowLegend && (
+                <Legend
+                  layout="horizontal"
+                  verticalAlign="bottom"
+                  align="center"
+                  wrapperStyle={{ paddingTop: '15px', fontSize: '11px' }}
+                />
+              )}
+              {legendValues.map((seriesKey, idx) => (
+                <Area
+                  key={seriesKey}
+                  type="monotone"
+                  dataKey={seriesKey}
+                  stroke={palette[idx % palette.length]}
+                  fill={palette[(idx + 1) % palette.length]}
+                />
+              ))}
+            </AreaChart>
+          );
+        }
+        return (
+          <AreaChart data={transformedChartData} margin={{ top: 20, right: 30, left: 20, bottom: 60 }}>
+            {currentShowGrid && <CartesianGrid strokeDasharray="3 3" />}
+            <XAxis
+              dataKey={xKey}
+              label={currentShowAxisLabels && xAxisLabel && xAxisLabel.trim() ? { value: capitalizeWords(xAxisLabel), position: 'bottom', style: axisLabelStyle } : undefined}
+              tick={axisTickStyle}
+              tickLine={false}
+            />
+            <YAxis
+              yAxisId={0}
+              label={currentShowAxisLabels && yAxisLabel && yAxisLabel.trim() ? { value: capitalizeWords(yAxisLabel), angle: -90, position: 'left', style: axisLabelStyle } : undefined}
+              tick={axisTickStyle}
+              tickLine={false}
+              tickFormatter={formatLargeNumber}
+            />
+            {(yKeys.length > 1 || (yFields && yFields.length > 1)) && (
+              <YAxis
+                yAxisId={1}
+                orientation="right"
+                label={currentShowAxisLabels && yAxisLabels && yAxisLabels[1] ? { value: capitalizeWords(yAxisLabels[1]), angle: 90, position: 'right', style: axisLabelStyle } : undefined}
+                tick={axisTickStyle}
+                tickLine={false}
+                tickFormatter={formatLargeNumber}
+              />
+            )}
+            <Tooltip formatter={(v: number) => formatTooltipNumber(v)} />
+            {currentShowLegend && (
+              <Legend
+                layout="horizontal"
+                verticalAlign="bottom"
+                align="center"
+                wrapperStyle={{ paddingTop: '15px', fontSize: '11px' }}
+              />
+            )}
+            <Area type="monotone" dataKey={yKey} stroke={palette[0]} fill={palette[1]} yAxisId={0} />
+            {(yKeys.length > 1 || (yFields && yFields.length > 1)) && (
+              <Area type="monotone" dataKey={yKeys[1] || yFields[1]} stroke={palette[1]} fill={palette[2]} yAxisId={1} />
+            )}
+          </AreaChart>
+        );
+
+      case 'scatter_chart':
+        return (
+          <ScatterChart margin={{ top: 20, right: 30, left: 20, bottom: 60 }}>
+            {currentShowGrid && <CartesianGrid strokeDasharray="3 3" />}
+            <XAxis
+              dataKey={xKey}
+              label={currentShowAxisLabels && xAxisLabel && xAxisLabel.trim() ? { value: capitalizeWords(xAxisLabel), position: 'bottom', style: axisLabelStyle } : undefined}
+              tick={axisTickStyle}
+              tickLine={false}
+            />
+            <YAxis
+              yAxisId={0}
+              label={currentShowAxisLabels && yAxisLabel && yAxisLabel.trim() ? { value: capitalizeWords(yAxisLabel), angle: -90, position: 'left', style: axisLabelStyle } : undefined}
+              tick={axisTickStyle}
+              tickLine={false}
+              tickFormatter={formatLargeNumber}
+            />
+            {(yKeys.length > 1 || (yFields && yFields.length > 1)) && (
+              <YAxis
+                yAxisId={1}
+                orientation="right"
+                label={currentShowAxisLabels && yAxisLabels && yAxisLabels[1] ? { value: capitalizeWords(yAxisLabels[1]), angle: 90, position: 'right', style: axisLabelStyle } : undefined}
+                tick={axisTickStyle}
+                tickLine={false}
+                tickFormatter={formatLargeNumber}
+              />
+            )}
+            <Tooltip formatter={(v: number) => formatTooltipNumber(v)} />
+            {legendField && currentShowLegend && (
+              <Legend
+                layout="horizontal"
+                verticalAlign="bottom"
+                align="center"
+                wrapperStyle={{ paddingTop: '15px', fontSize: '11px' }}
+              />
+            )}
+            {legendField && legendValues.length > 0 && pivotedLineData.length > 0 ? (
+              legendValues.map((seriesKey, idx) => (
+                <Scatter key={seriesKey} data={pivotedLineData} dataKey={seriesKey} name={seriesKey} fill={palette[idx % palette.length]} />
+              ))
+            ) : (
+              <> 
+                <Scatter data={transformedChartData} dataKey={yKey} fill={palette[0]} yAxisId={0} />
+                {(yKeys.length > 1 || (yFields && yFields.length > 1)) && (
+                  <Scatter data={transformedChartData} dataKey={yKeys[1] || yFields[1]} fill={palette[1]} yAxisId={1} />
+                )}
+              </>
+            )}
+          </ScatterChart>
+        );
+
       case 'pie_chart':
         // For pie charts with dual Y-axes, we need to handle it differently
         const hasDualYAxesForPie = yKeys.length > 1 || (yFields && yFields.length > 1);
@@ -1612,7 +1761,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
             >
               {Object.entries(pieGroups).map(([legendValue, slices]) => (
                 <div key={legendValue} className="flex flex-col items-center">
-                  <PieChart width={300} height={300}>
+                  <PieChart width={300} height={300} onContextMenu={handleContextMenu}>
                     <Pie
                       data={slices}
                       cx="50%"
@@ -1653,7 +1802,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
           const primaryYKey = yKeys[0] || yFields[0];
 
           return (
-            <PieChart margin={{ top: 20, right: 20, left: 20, bottom: 60 }}>
+            <PieChart margin={{ top: 20, right: 20, left: 20, bottom: 60 }} onContextMenu={handleContextMenu}>
               <Pie
                 data={chartDataForRendering}
                 cx="50%"
@@ -1744,7 +1893,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
         } else {
           // Single Y-axis pie chart (existing logic)
           return (
-            <PieChart margin={{ top: 20, right: 20, left: 20, bottom: 60 }}>
+            <PieChart margin={{ top: 20, right: 20, left: 20, bottom: 60 }} onContextMenu={handleContextMenu}>
               <Pie
                 data={chartDataForRendering}
                 cx="50%"
