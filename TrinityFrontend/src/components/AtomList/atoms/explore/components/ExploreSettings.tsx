@@ -141,11 +141,9 @@ const ExploreSettings = ({ data, settings, onDataChange, onApply }) => {
         const result = await response.json();
         if (result.columns) {
           setColumnNames(result.columns);
-          console.log('🔍 ExploreSettings: Fetched columns:', result.columns);
         }
       }
     } catch (error) {
-      console.error('Error fetching columns:', error);
     } finally {
       setIsLoadingColumns(false);
     }
@@ -161,11 +159,9 @@ const ExploreSettings = ({ data, settings, onDataChange, onApply }) => {
         const result = await response.json();
         if (result.status === 'success' && result.date_range) {
           setAvailableDateRange(result.date_range);
-          console.log('🔍 ExploreSettings: Fetched date range:', result.date_range);
         }
       }
     } catch (error) {
-      console.error('Error fetching date range:', error);
     } finally {
       setIsLoadingDateRange(false);
     }

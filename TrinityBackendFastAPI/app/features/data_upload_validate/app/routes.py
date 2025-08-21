@@ -2631,6 +2631,12 @@ async def save_dataframes(
             continue
 
         arrow_buf = io.BytesIO()
+        # Normalize column names and types to prevent ArrowTypeError when
+        # object columns contain non-string values (e.g., floats)
+        df.columns = df.columns.map(str)
+        object_cols = df.select_dtypes(include=["object"]).columns
+        for col in object_cols:
+            df[col] = df[col].astype(str)
         table = pa.Table.from_pandas(df)
         with ipc.new_file(arrow_buf, table.schema) as writer:
             writer.write_table(table)

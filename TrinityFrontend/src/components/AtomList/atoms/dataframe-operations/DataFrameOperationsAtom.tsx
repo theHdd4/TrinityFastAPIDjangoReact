@@ -6,8 +6,12 @@ import DataFrameOperationsCanvas from './components/DataFrameOperationsCanvas';
 import DataFrameOperationsSettings from './components/DataFrameOperationsSettings';
 import DataFrameOperationsVisualisation from './components/DataFrameOperationsVisualisation';
 import DataFrameOperationsExhibition from './components/DataFrameOperationsExhibition';
-import { useLaboratoryStore, DEFAULT_FEATURE_OVERVIEW_SETTINGS } from '@/components/LaboratoryMode/store/laboratoryStore';
+import {
+  useLaboratoryStore,
+  DEFAULT_FEATURE_OVERVIEW_SETTINGS,
+} from '@/components/LaboratoryMode/store/laboratoryStore';
 import { Button } from '@/components/ui/button';
+import ErrorBoundary from '@/components/ErrorBoundary';
 
 export interface DataFrameRow {
   [key: string]: string | number | null;
@@ -38,26 +42,6 @@ export interface DataFrameSettings {
 
 interface Props {
   atomId: string;
-}
-
-// Error Boundary Component
-class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean; error: any }> {
-  constructor(props: any) {
-    super(props);
-    this.state = { hasError: false, error: null };
-  }
-  static getDerivedStateFromError(error: any) {
-    return { hasError: true, error };
-  }
-  componentDidCatch(error: any, errorInfo: any) {
-    // You can log error here
-  }
-  render() {
-    if (this.state.hasError) {
-      return <div style={{ color: 'red', padding: 16 }}>Something went wrong: {this.state.error?.toString()}</div>;
-    }
-    return this.props.children;
-  }
 }
 
 const DataFrameOperationsAtom: React.FC<Props> = ({ atomId }) => {
