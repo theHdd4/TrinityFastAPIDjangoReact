@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from "react";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import Table from "@/Templates/Table/table";
 import {
-  Table,
+  Table as UITable,
   TableBody,
   TableCell,
   TableHead,
@@ -289,90 +290,63 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
       )}
       {summaryList.length > 0 && (
         <div className="mb-8">
-          <div className="flex items-center mb-6">
-            <div className="w-1 h-8 bg-gradient-to-b from-blue-500 to-blue-600 rounded-full mr-4"></div>
-            <h3 className="text-xl font-bold text-gray-900">Column View</h3>
-          </div>
-
-          <Card className="border-0 shadow-xl bg-white/80 backdrop-blur-sm mb-6 overflow-hidden">
-            <div className="bg-gradient-to-r from-blue-500 to-blue-600 p-0.5">
-              <div className="bg-white rounded-sm">
-                <Table>
-                  <TableHeader>
-                    <TableRow className="bg-gradient-to-r from-gray-50 to-blue-50 border-b-2 border-blue-100">
-                      <TableHead className="font-bold text-gray-800 text-center py-4">
-                        Columns
-                      </TableHead>
-                      <TableHead className="font-bold text-gray-800 text-center py-4">
-                        Data Type
-                      </TableHead>
-                      <TableHead className="font-bold text-gray-800 text-center py-4">
-                        Unique Counts
-                      </TableHead>
-                      <TableHead className="font-bold text-gray-800 text-center py-4">
-                        Unique Values
-                      </TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {Array.isArray(summaryList) &&
-                      summaryList.map((c: ColumnInfo) => (
-                        <TableRow
-                          key={c.column}
-                          className="hover:bg-blue-50/50 transition-all duration-200 border-b border-gray-100"
-                        >
-                          <TableCell className="font-semibold text-gray-900 text-center py-4">
-                            {c.column}
-                          </TableCell>
-                          <TableCell className="text-center py-4">
+          <div className="mx-auto max-w-screen-2xl rounded-2xl border border-slate-200 bg-white shadow-sm">
+            <div className="flex items-center justify-between border-b border-slate-200 px-5 py-3">
+              <h3 className="text-base font-semibold text-slate-800">Cardinality View</h3>
+            </div>
+            <Table
+              headers={["Columns", "Data Type", "Unique Counts", "Unique Values"]}
+              colClasses={["w-[30%]", "w-[20%]", "w-[15%]", "w-[35%]"]}
+              bodyClassName="max-h-[484px] overflow-y-auto"
+            >
+              {Array.isArray(summaryList) &&
+                summaryList.map((c: ColumnInfo) => (
+                  <tr key={c.column} className="table-row">
+                    <td className="table-cell-primary">{c.column}</td>
+                    <td className="table-cell">
+                      <Badge
+                        variant="outline"
+                        className={`text-xs font-medium ${getDataTypeColor(c.data_type)} shadow-sm`}
+                      >
+                        {c.data_type}
+                      </Badge>
+                    </td>
+                    <td className="table-cell">{c.unique_count}</td>
+                    <td className="table-cell">
+                      <div className="flex flex-wrap gap-1">
+                        {(Array.isArray(c.unique_values)
+                          ? c.unique_values.slice(0, 3)
+                          : []
+                        ).map((v, i) => (
+                          <Badge
+                            key={i}
+                            variant="outline"
+                            className="p-0 px-1 text-xs bg-gray-50 text-slate-700 hover:bg-gray-50"
+                          >
+                            {v}
+                          </Badge>
+                        ))}
+                        {Array.isArray(c.unique_values) &&
+                          c.unique_values.length > 3 && (
                             <Badge
                               variant="outline"
-                              className={`text-xs font-medium ${getDataTypeColor(c.data_type)} shadow-sm`}
+                              className="p-0 px-1 text-xs bg-orange-50 text-orange-700 border-orange-200"
                             >
-                              {c.data_type}
+                              +{c.unique_values.length - 3}
                             </Badge>
-                          </TableCell>
-                          <TableCell className="text-gray-700 text-center font-medium py-4">
-                            {c.unique_count}
-                          </TableCell>
-                          <TableCell className="text-center py-4">
-                            <div className="flex flex-wrap gap-1 justify-center">
-                              {(Array.isArray(c.unique_values)
-                                ? c.unique_values.slice(0, 3)
-                                : []
-                              ).map((v, i) => (
-                                <Badge
-                                  key={i}
-                                  variant="outline"
-                                  className="text-xs bg-gray-50 hover:bg-gray-100 transition-colors"
-                                >
-                                  {v}
-                                </Badge>
-                              ))}
-                              {Array.isArray(c.unique_values) &&
-                                c.unique_values.length > 3 && (
-                                  <Badge
-                                    variant="outline"
-                                    className="text-xs bg-orange-50 text-orange-700 border-orange-200"
-                                  >
-                                    +{c.unique_values.length - 3}
-                                  </Badge>
-                                )}
-                              {Array.isArray(c.unique_values) &&
-                                c.unique_values.length === 0 && (
-                                  <span className="text-xs text-gray-500 italic font-medium">
-                                    Multiple values
-                                  </span>
-                                )}
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                  </TableBody>
-                </Table>
-              </div>
-            </div>
-          </Card>
+                          )}
+                        {Array.isArray(c.unique_values) &&
+                          c.unique_values.length === 0 && (
+                            <span className="text-xs text-gray-500 italic font-medium">
+                              Multiple values
+                            </span>
+                          )}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+            </Table>
+          </div>
         </div>
       )}
 
@@ -417,7 +391,7 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
               <div className="bg-gradient-to-r from-purple-500 to-purple-600 p-0.5">
                 <div className="bg-white rounded-sm overflow-x-auto">
                   <div className="max-h-[440px] overflow-y-auto">
-                    <Table className="min-w-max">
+                    <UITable className="min-w-max">
                       <TableHeader>
                         <TableRow className="sticky top-0 z-10 bg-white">
                           <TableHead>SR NO.</TableHead>
@@ -540,7 +514,7 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
                           </React.Fragment>
                         ))}
                       </TableBody>
-                    </Table>
+                    </UITable>
                   </div>
                 </div>
               </div>
