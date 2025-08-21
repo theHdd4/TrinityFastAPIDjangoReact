@@ -121,8 +121,8 @@ const ColumnClassifierCanvas: React.FC<ColumnClassifierCanvasProps> = ({
       },
       measures: {
         indicator: 'bg-gradient-to-r from-emerald-500 to-emerald-600',
-        border: 'border-emerald-400',
-        active: 'border-emerald-500',
+        border: 'border-emerald-200',
+        active: 'border-emerald-400',
       },
     }[id];
 
@@ -133,15 +133,15 @@ const ColumnClassifierCanvas: React.FC<ColumnClassifierCanvasProps> = ({
           isOver ? `${sectionStyles.active} shadow-xl scale-105` : `${sectionStyles.border} hover:shadow-lg`
         } flex flex-col`}
       >
-        <div className="p-6 flex flex-col h-full">
-          <div className="flex items-center mb-4">
-            <div className={`w-2 h-8 rounded-full mr-3 ${sectionStyles.indicator}`} />
-            <h4 className="text-lg font-bold text-gray-900">{title}</h4>
-          </div>
+        <div className="flex items-center gap-3 border-b border-slate-200 px-5 py-3">
+          <div className={`w-2 h-4 rounded-full ${sectionStyles.indicator}`} />
+          <h4 className="text-base font-semibold text-gray-900">{title}</h4>
+        </div>
+        <div className="flex-1 p-5">
           <div
-            className={`relative flex-1 min-h-[450px] p-4 rounded-lg bg-white transition-all duration-300 ${
+            className={`relative flex-1 min-h-[450px] rounded-lg bg-white transition-all duration-300 ${
               isOver ? 'bg-blue-50' : ''
-            }`}
+            } p-4`}
           >
             <div className="flex flex-wrap gap-3">
               {columns.map((column, index) => (

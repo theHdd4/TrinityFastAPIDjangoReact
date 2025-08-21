@@ -2,6 +2,8 @@
 
 import React from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Button } from '@/components/ui/button';
+import { useToast } from '@/components/ui/use-toast';
 import { Upload, Settings, Eye } from 'lucide-react';
 import ExploreInput from '../ExploreInput';
 import ExploreSettings from '../ExploreSettings';
@@ -22,6 +24,7 @@ interface Props {
 const ExploreProperties: React.FC<Props> = ({ atomId }) => {
   const atom = useLaboratoryStore(state => state.getAtom(atomId));
   const updateSettings = useLaboratoryStore(state => state.updateAtomSettings);
+  const { toast } = useToast();
 
   const data = (atom?.settings?.data as ExploreData) || { ...DEFAULT_EXPLORE_DATA };
   const settings = (atom?.settings?.settings as ExploreSettingsType) || {
@@ -86,6 +89,23 @@ const ExploreProperties: React.FC<Props> = ({ atomId }) => {
             </TabsContent>
           </div>
         </Tabs>
+      </div>
+      <div className="p-2 border-t">
+        <Button
+          className="w-full"
+          onClick={() => {
+            if (data.dataframe) {
+              handleApply();
+            } else {
+              toast({
+                title: 'Select a dataframe',
+                description: 'Choose a dataframe before exploring',
+              });
+            }
+          }}
+        >
+          Explore
+        </Button>
       </div>
     </div>
   );

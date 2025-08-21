@@ -59,7 +59,7 @@ async def column_summary(object_name: str):
                     return pd.to_datetime(v).isoformat()
                 return str(v)
 
-            safe_vals = [_serialize(v) for v in vals[:10]]
+            safe_vals = [_serialize(v) for v in vals]
             summary.append(
                 {
                     "column": col,

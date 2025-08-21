@@ -37,7 +37,7 @@ const ExploreInput: React.FC<ExploreInputProps> = ({ data, settings, onDataChang
    * Local state
    * --------------------------------------------------*/
   const [frames, setFrames] = useState<{ object_name: string; csv_name: string }[]>([])
-  const [selected, setSelected] = useState<string>(settings.dataSource || "")
+  const [selected, setSelected] = useState<string>(data.dataframe || "")
 
   const [columnSummary, setColumnSummary] = useState<ColumnSummary[]>([])
   const [originalColumnSummary, setOriginalColumnSummary] = useState<ColumnSummary[]>([])
@@ -47,7 +47,7 @@ const ExploreInput: React.FC<ExploreInputProps> = ({ data, settings, onDataChang
   const [columnClassifierConfig, setColumnClassifierConfig] = useState<ColumnClassifierConfig | null>(null)
   // Select Columns UI state
   const [selectedColumns, setSelectedColumns] = useState<string[]>([])
-  const [filterUnique, setFilterUnique] = useState<boolean>(settings.filterUnique || false)
+  const [filterUnique, setFilterUnique] = useState<boolean>(data.filterUnique || false)
   const [isLoadingClassifier, setIsLoadingClassifier] = useState(false)
 
   /** --------------------------------------------------
@@ -61,18 +61,18 @@ const ExploreInput: React.FC<ExploreInputProps> = ({ data, settings, onDataChang
   }, [])
 
   /** --------------------------------------------------
-   * Sync selected file from external settings
+   * Sync selected file from external data
    * --------------------------------------------------*/
   useEffect(() => {
-    setSelected(settings.dataSource || "")
-  }, [settings.dataSource])
+    setSelected(data.dataframe || "")
+  }, [data.dataframe])
 
   /** --------------------------------------------------
-   * Sync filterUnique from external settings
+   * Sync filterUnique from external data
    * --------------------------------------------------*/
   useEffect(() => {
-    setFilterUnique(settings.filterUnique || false)
-  }, [settings.filterUnique])
+    setFilterUnique(data.filterUnique || false)
+  }, [data.filterUnique])
 
   /** --------------------------------------------------
    * Sync columnSummary from external data
@@ -106,15 +106,24 @@ const ExploreInput: React.FC<ExploreInputProps> = ({ data, settings, onDataChang
       
       if (response.ok) {
         const result = await response.json()
-        
-        if (result.status === 'success' && result.config) {
-          
-          // Store the config locally for reference but don't set it as active
-          setColumnClassifierConfig(result.config)
-        } else if (result.status === 'success' && result.data) {
-          
-          // Store the config locally for reference but don't set it as active
-          setColumnClassifierConfig(result.data)
+
+        if (result.status === 'success' && (result.config || result.data)) {
+          const rawConfig = result.config || result.data
+          const filteredDims = Object.fromEntries(
+            Object.entries(rawConfig.dimensions || {}).filter(
+              ([key]) => key.toLowerCase() !== 'unattributed'
+            )
+          )
+          const cleanedConfig = { ...rawConfig, dimensions: filteredDims }
+          setColumnClassifierConfig(cleanedConfig)
+          onDataChange({
+            columnClassifierConfig: cleanedConfig,
+            dimensions: Object.keys(filteredDims),
+            measures: rawConfig.measures || [],
+            selectedIdentifiers: Object.fromEntries(
+              Object.entries(filteredDims).map(([dim, ids]) => [dim, ids || []])
+            )
+          })
         } else {
           setColumnClassifierConfig(null)
         }
@@ -156,18 +165,26 @@ const ExploreInput: React.FC<ExploreInputProps> = ({ data, settings, onDataChang
         
         if (response.ok) {
           const result = await response.json()
-          
-          if (result.status === 'success' && result.config) {
-            
-            // Store the config locally for reference but don't set it as active
-            setColumnClassifierConfig(result.config)
-            // Don't automatically set it as the active config - only show if user explicitly configures it
-          } else if (result.status === 'success' && result.data) {
-            // Handle alternative response format where config is in 'data' field
-            
-            // Store the config locally for reference but don't set it as active
-            setColumnClassifierConfig(result.data)
-            // Don't automatically set it as the active config - only show if user explicitly configures it
+
+          if (result.status === 'success' && (result.config || result.data)) {
+            const rawConfig = result.config || result.data
+            const filteredDims = Object.fromEntries(
+              Object.entries(rawConfig.dimensions || {}).filter(
+                ([key]) => key.toLowerCase() !== 'unattributed'
+              )
+            )
+            const cleanedConfig = { ...rawConfig, dimensions: filteredDims }
+            setColumnClassifierConfig(cleanedConfig)
+
+            // Immediately apply config so filters show up in canvas
+            onDataChange({
+              columnClassifierConfig: cleanedConfig,
+              dimensions: Object.keys(filteredDims),
+              measures: rawConfig.measures || [],
+              selectedIdentifiers: Object.fromEntries(
+                Object.entries(filteredDims).map(([dim, ids]) => [dim, ids || []])
+              )
+            })
           } else {
             // Try fallback to project-level config
             await tryProjectLevelConfig(client_name, app_name, project_name)

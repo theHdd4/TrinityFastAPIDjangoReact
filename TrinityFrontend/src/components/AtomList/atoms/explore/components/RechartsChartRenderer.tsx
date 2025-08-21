@@ -43,6 +43,7 @@ interface Props {
   showAxisLabels?: boolean; // External control for axis labels visibility
   showDataLabels?: boolean; // External control for data labels visibility
   showGrid?: boolean; // External control for grid visibility
+  chartsPerRow?: number; // For multi pie chart layouts
 }
 
 // Excel-like color themes
@@ -322,7 +323,8 @@ const RechartsChartRenderer: React.FC<Props> = ({
   showLegend: propShowLegend, // External control for legend visibility
   showAxisLabels: propShowAxisLabels, // External control for axis labels visibility
   showDataLabels: propShowDataLabels, // External control for data labels visibility
-  showGrid: propShowGrid // External control for grid visibility
+  showGrid: propShowGrid, // External control for grid visibility
+  chartsPerRow
 }) => {
 
   // State for color theme - simplified approach
@@ -368,9 +370,30 @@ const RechartsChartRenderer: React.FC<Props> = ({
     if (!data) return [];
     if (Array.isArray(data)) return data;
 
-    if (type === 'pie_chart' && legendField && typeof data === 'object') {
+    if (type === 'pie_chart' && typeof data === 'object') {
+      // If a legend field is provided, the backend may return an object keyed by legend value
+      if (legendField) {
+        try {
+          return Object.values(data as Record<string, any[]>).flat();
+        } catch {
+          return [];
+        }
+      }
+
+      // When no legend field is provided, convert simple key-value pairs to an
+      // array of objects. Some APIs return values as nested objects (e.g.
+      // { category: { metric: 10 } }), which would otherwise break the pie
+      // chart because Recharts expects numeric values. Extract the first
+      // numeric field from such objects.
       try {
-        return Object.values(data as Record<string, any[]>).flat();
+        return Object.entries(data as Record<string, any>).map(([name, value]) => {
+          let numericValue: any = value;
+          if (typeof value === 'object' && value !== null) {
+            const firstNumber = Object.values(value).find(v => typeof v === 'number');
+            numericValue = firstNumber !== undefined ? firstNumber : value;
+          }
+          return { name, value: numericValue };
+        });
       } catch {
         return [];
       }
@@ -1538,15 +1561,27 @@ const RechartsChartRenderer: React.FC<Props> = ({
         const hasDualYAxesForPie = yKeys.length > 1 || (yFields && yFields.length > 1);
 
         // Special case: legend field with multiple pie charts
-        if (legendField && data && !Array.isArray(data)) {
-          const pieGroups = data as Record<string, any[]>;
+        if (legendField && data) {
+          // Support both array and object data structures
+          const pieGroups: Record<string, any[]> = Array.isArray(data)
+            ? data.reduce((acc: Record<string, any[]>, item: any) => {
+                const key = item[legendField] ?? 'Unknown';
+                acc[key] = acc[key] || [];
+                acc[key].push(item);
+                return acc;
+              }, {})
+            : (data as Record<string, any[]>);
+
           const measureKey = yKey || yFields?.[0] || 'value';
           const nameKey = xKey || 'name';
+
           return (
-            <div className="flex flex-nowrap gap-8 overflow-x-auto overflow-y-hidden w-full">
+            <div
+              className="grid gap-8 w-full"
+              style={{ gridTemplateColumns: `repeat(${chartsPerRow || 2}, minmax(0, 1fr))` }}
+            >
               {Object.entries(pieGroups).map(([legendValue, slices]) => (
-                <div key={legendValue} className="flex-shrink-0 w-1/2 min-w-[300px] flex flex-col items-center">
-                  <p className="mb-2 font-semibold text-sm text-gray-700">{capitalizeWords(String(legendValue))}</p>
+                <div key={legendValue} className="flex flex-col items-center">
                   <PieChart width={300} height={300}>
                     <Pie
                       data={slices}
@@ -1574,6 +1609,9 @@ const RechartsChartRenderer: React.FC<Props> = ({
                     />
                     {showLegend && <Legend />}
                   </PieChart>
+                  <p className="mt-2 font-semibold text-sm text-gray-700">
+                    {capitalizeWords(String(legendValue))}
+                  </p>
                 </div>
               ))}
             </div>
