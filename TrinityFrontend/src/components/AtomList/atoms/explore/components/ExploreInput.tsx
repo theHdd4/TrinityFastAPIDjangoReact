@@ -106,15 +106,24 @@ const ExploreInput: React.FC<ExploreInputProps> = ({ data, settings, onDataChang
       
       if (response.ok) {
         const result = await response.json()
-        
-        if (result.status === 'success' && result.config) {
-          
-          // Store the config locally for reference but don't set it as active
-          setColumnClassifierConfig(result.config)
-        } else if (result.status === 'success' && result.data) {
-          
-          // Store the config locally for reference but don't set it as active
-          setColumnClassifierConfig(result.data)
+
+        if (result.status === 'success' && (result.config || result.data)) {
+          const rawConfig = result.config || result.data
+          const filteredDims = Object.fromEntries(
+            Object.entries(rawConfig.dimensions || {}).filter(
+              ([key]) => key.toLowerCase() !== 'unattributed'
+            )
+          )
+          const cleanedConfig = { ...rawConfig, dimensions: filteredDims }
+          setColumnClassifierConfig(cleanedConfig)
+          onDataChange({
+            columnClassifierConfig: cleanedConfig,
+            dimensions: Object.keys(filteredDims),
+            measures: rawConfig.measures || [],
+            selectedIdentifiers: Object.fromEntries(
+              Object.entries(filteredDims).map(([dim, ids]) => [dim, ids || []])
+            )
+          })
         } else {
           setColumnClassifierConfig(null)
         }
@@ -156,18 +165,26 @@ const ExploreInput: React.FC<ExploreInputProps> = ({ data, settings, onDataChang
         
         if (response.ok) {
           const result = await response.json()
-          
-          if (result.status === 'success' && result.config) {
-            
-            // Store the config locally for reference but don't set it as active
-            setColumnClassifierConfig(result.config)
-            // Don't automatically set it as the active config - only show if user explicitly configures it
-          } else if (result.status === 'success' && result.data) {
-            // Handle alternative response format where config is in 'data' field
-            
-            // Store the config locally for reference but don't set it as active
-            setColumnClassifierConfig(result.data)
-            // Don't automatically set it as the active config - only show if user explicitly configures it
+
+          if (result.status === 'success' && (result.config || result.data)) {
+            const rawConfig = result.config || result.data
+            const filteredDims = Object.fromEntries(
+              Object.entries(rawConfig.dimensions || {}).filter(
+                ([key]) => key.toLowerCase() !== 'unattributed'
+              )
+            )
+            const cleanedConfig = { ...rawConfig, dimensions: filteredDims }
+            setColumnClassifierConfig(cleanedConfig)
+
+            // Immediately apply config so filters show up in canvas
+            onDataChange({
+              columnClassifierConfig: cleanedConfig,
+              dimensions: Object.keys(filteredDims),
+              measures: rawConfig.measures || [],
+              selectedIdentifiers: Object.fromEntries(
+                Object.entries(filteredDims).map(([dim, ids]) => [dim, ids || []])
+              )
+            })
           } else {
             // Try fallback to project-level config
             await tryProjectLevelConfig(client_name, app_name, project_name)

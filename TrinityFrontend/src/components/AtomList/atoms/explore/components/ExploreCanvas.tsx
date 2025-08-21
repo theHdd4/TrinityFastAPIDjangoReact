@@ -2159,11 +2159,18 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                         </div>
                       </div>
                     ) : (
-                      <div className="w-full h-full min-w-0 overflow-hidden flex-shrink-0 flex items-center justify-center explore-chart-area" style={{ 
-                        minHeight: config.chartType === 'pie_chart' ? '450px' : '400px', 
-                        height: config.chartType === 'pie_chart' ? '500px' : '400px',
-                        maxWidth: '100%'
-                      }}>
+                      <div
+                        className={`w-full min-w-0 flex-shrink-0 explore-chart-area ${
+                          config.chartType === 'pie_chart'
+                            ? 'overflow-y-auto'
+                            : 'h-full overflow-hidden flex items-center justify-center'
+                        }`}
+                        style={{
+                          minHeight: config.chartType === 'pie_chart' ? '450px' : '400px',
+                          height: config.chartType === 'pie_chart' ? 'auto' : '400px',
+                          maxWidth: '100%'
+                        }}
+                      >
                         {/* Only render the chart if we have valid xAxis and yAxes */}
                         {(() => {
                           const hasValidAxes =

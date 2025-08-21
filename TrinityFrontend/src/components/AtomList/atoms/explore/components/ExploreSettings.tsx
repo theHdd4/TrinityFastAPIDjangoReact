@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Switch } from '@/components/ui/switch';
 import { DateRange } from 'react-day-picker';
 import { EXPLORE_API } from '@/lib/api';
 import { CalendarIcon, Database, BarChart3, Info, Filter, ChevronDown, ChevronUp, ChevronRight } from 'lucide-react';
@@ -27,6 +28,7 @@ interface ColumnSummary {
   data_type: string;
   unique_count: number;
   unique_values: string[];
+  is_numerical?: boolean;
 }
 
 interface ColumnClassifierConfig {
@@ -64,6 +66,10 @@ const ExploreSettings = ({ data, settings, onDataChange, onApply }) => {
   const [selectedDimensions, setSelectedDimensions] = useState<string[]>([]);
   const [selectedIdentifiers, setSelectedIdentifiers] = useState<{ [dimensionId: string]: string[] }>({});
   const [expandedDimensions, setExpandedDimensions] = useState<string[]>([]);
+
+  // Settings panel filter selection state
+  const [showFilterSelector, setShowFilterSelector] = useState(false);
+  const [selectedFilterColumns, setSelectedFilterColumns] = useState<string[]>([]);
 
   // Prevent rendering if basic data is not available
   if (!data || !settings) {
@@ -167,6 +173,31 @@ const ExploreSettings = ({ data, settings, onDataChange, onApply }) => {
     }
   };
 
+  const categoricalColumns = Array.isArray(data.columnSummary)
+    ? data.columnSummary.filter((col: any) => !col.is_numerical).map((col: any) => col.column)
+    : [];
+
+  const handleAddFilters = () => {
+    if (selectedFilterColumns.length === 0) return;
+    const currentConfig = data.columnClassifierConfig || { identifiers: [], measures: [], dimensions: {} };
+    const newDims = { ...currentConfig.dimensions };
+    selectedFilterColumns.forEach(col => {
+      newDims[col] = [col];
+    });
+    const updatedConfig = { ...currentConfig, dimensions: newDims };
+    const newSelectedIdentifiers = {
+      ...(data.selectedIdentifiers || {}),
+      ...selectedFilterColumns.reduce((acc, col) => ({ ...acc, [col]: [col] }), {})
+    };
+    onDataChange({
+      columnClassifierConfig: updatedConfig,
+      selectedIdentifiers: newSelectedIdentifiers,
+      dimensions: Array.from(new Set([...(data.dimensions || []), ...selectedFilterColumns]))
+    });
+    setSelectedFilterColumns([]);
+    setShowFilterSelector(false);
+  };
+
   // Handle apply button click
   const handleApply = () => {
     // Update the data with selected dimensions and their identifiers
@@ -239,6 +270,42 @@ const ExploreSettings = ({ data, settings, onDataChange, onApply }) => {
               </SelectContent>
             </Select>
           </div>
+        </div>
+        {/* Add Filter Toggle */}
+        <div className="space-y-4">
+          <div className="flex items-center space-x-2">
+            <Filter className="w-5 h-5 text-blue-600" />
+            <h3 className="text-base font-semibold text-gray-900">Add Filters</h3>
+          </div>
+          <div className="flex items-center space-x-2">
+            <Switch
+              id="show-filter-selector"
+              checked={showFilterSelector}
+              onCheckedChange={setShowFilterSelector}
+            />
+            <Label htmlFor="show-filter-selector">Select categorical columns</Label>
+          </div>
+          {showFilterSelector && (
+            <div className="space-y-2">
+              <div className="max-h-40 overflow-y-auto space-y-2">
+                {categoricalColumns.map(col => (
+                  <div key={col} className="flex items-center space-x-2">
+                    <Checkbox
+                      id={`col-${col}`}
+                      checked={selectedFilterColumns.includes(col)}
+                      onCheckedChange={(checked) => {
+                        setSelectedFilterColumns(prev =>
+                          checked ? [...prev, col] : prev.filter(c => c !== col)
+                        );
+                      }}
+                    />
+                    <Label htmlFor={`col-${col}`}>{col}</Label>
+                  </div>
+                ))}
+              </div>
+              <Button size="sm" onClick={handleAddFilters}>Add Filter</Button>
+            </div>
+          )}
         </div>
 
       </Card>
