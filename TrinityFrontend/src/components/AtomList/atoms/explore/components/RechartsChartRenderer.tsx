@@ -353,6 +353,15 @@ const RechartsChartRenderer: React.FC<Props> = ({
   const [contextMenuPosition, setContextMenuPosition] = useState({ x: 0, y: 0 });
   const chartRef = useRef<HTMLDivElement>(null);
 
+  const handleOverlayClick = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setShowContextMenu(false);
+    setShowColorSubmenu(false);
+  };
+
+  const overlayVisible = showContextMenu || showColorSubmenu;
+
   // State for chart options
   const [showGrid, setShowGrid] = useState(true);
   const [showLegend, setShowLegend] = useState(true);
@@ -2028,6 +2037,20 @@ const RechartsChartRenderer: React.FC<Props> = ({
             </ResponsiveContainer>
           </div>
         </div>
+        {overlayVisible && (
+          <div
+            style={{
+              position: 'fixed',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              background: 'transparent',
+              zIndex: 9998,
+            }}
+            onMouseDown={handleOverlayClick}
+          />
+        )}
         <ContextMenu />
         <ColorThemeSubmenu />
       </div>
