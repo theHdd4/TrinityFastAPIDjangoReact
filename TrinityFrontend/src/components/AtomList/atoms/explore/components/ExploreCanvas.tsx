@@ -252,6 +252,7 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
     e.stopPropagation();
     setOpenDropdowns({});
     closeChatBubble();
+    setChatBubbleShouldRender(false);
     if (Object.values(chartSettingsVisible).some(Boolean)) {
       setChartSettingsVisible({});
     }
@@ -261,6 +262,7 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
   };
 
   const overlayVisible =
+    chatBubble.visible ||
     chatBubbleShouldRender ||
     Object.values(chartSettingsVisible).some(Boolean) ||
     Object.values(chartFiltersVisible).some(Boolean);
@@ -269,6 +271,7 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
     const handleClickOutside = () => {
       setOpenDropdowns({});
       closeChatBubble();
+      setChatBubbleShouldRender(false);
       if (Object.values(chartSettingsVisible).some(Boolean)) {
         setChartSettingsVisible({});
       }
