@@ -7,11 +7,9 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Switch } from '@/components/ui/switch';
 import { DateRange } from 'react-day-picker';
 import { EXPLORE_API } from '@/lib/api';
-import { CalendarIcon, Database, BarChart3, Info, Filter, ChevronDown, ChevronUp, ChevronRight } from 'lucide-react';
+import { CalendarIcon, Database, BarChart3, Info, Filter, ChevronDown, ChevronUp, ChevronRight, Plus, Minus } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Separator } from '@/components/ui/separator';
 import { format } from 'date-fns';
 import { EnhancedCalendar } from '@/components/ui/enhanced-calendar';
 
@@ -222,7 +220,35 @@ const ExploreSettings = ({ data, settings, onDataChange, onApply }) => {
       selectedIdentifiers: selectedIdentifiers, // Add selectedIdentifiers at the top level
       applied: true // Mark as applied so charts show the filters
     };
-    
+
+    onDataChange(updatedData);
+    onApply();
+  };
+
+  const handleNumberOfChartsChange = (delta: number) => {
+    const newNumber = Math.max(1, Math.min(2, graphLayout.numberOfGraphsInRow + delta));
+    if (newNumber === graphLayout.numberOfGraphsInRow) return;
+
+    const newGraphLayout = {
+      numberOfGraphsInRow: newNumber,
+      rows: 1
+    };
+    setGraphLayout(newGraphLayout);
+
+    let updatedSelectedIdentifiers = { ...selectedIdentifiers };
+    if (columnClassifierConfig?.dimensions) {
+      Object.keys(columnClassifierConfig.dimensions).forEach(dimensionId => {
+        updatedSelectedIdentifiers[dimensionId] = columnClassifierConfig.dimensions[dimensionId] || [];
+      });
+      setSelectedIdentifiers(updatedSelectedIdentifiers);
+    }
+
+    const updatedData = {
+      ...data,
+      graphLayout: newGraphLayout,
+      selectedIdentifiers: updatedSelectedIdentifiers,
+      applied: true
+    };
     onDataChange(updatedData);
     onApply();
   };
@@ -233,52 +259,34 @@ const ExploreSettings = ({ data, settings, onDataChange, onApply }) => {
   return (
     <div className="space-y-6 p-4">
       <Card className="p-6 space-y-6">
-        {/* Graph Layout Section */}
+        {/* Chart Configuration Section */}
         <div className="space-y-4">
           <div className="flex items-center space-x-2">
             <BarChart3 className="w-5 h-5 text-blue-600" />
-            <h3 className="text-base font-semibold text-gray-900">Graph Layout</h3>
+            <h3 className="text-base font-semibold text-gray-900">Chart Configuration</h3>
           </div>
-          
+
           <div className="space-y-3">
-            <Label className="text-sm font-medium text-gray-700">Number of Graphs per Row</Label>
-            <Select
-              value={graphLayout.numberOfGraphsInRow > 0 ? graphLayout.numberOfGraphsInRow.toString() : ""}
-              onValueChange={(value) => {
-                const newGraphLayout = {
-                  numberOfGraphsInRow: parseInt(value),
-                  rows: 1
-                };
-                setGraphLayout(newGraphLayout);
-                
-                // Automatically populate selectedIdentifiers with all available identifiers from each dimension
-                let updatedSelectedIdentifiers = { ...selectedIdentifiers };
-                if (columnClassifierConfig?.dimensions) {
-                  Object.keys(columnClassifierConfig.dimensions).forEach(dimensionId => {
-                    updatedSelectedIdentifiers[dimensionId] = columnClassifierConfig.dimensions[dimensionId] || [];
-                  });
-                  setSelectedIdentifiers(updatedSelectedIdentifiers);
-                }
-                
-                // Immediately apply graph layout changes and show chart cards
-                const updatedData = {
-                  ...data,
-                  graphLayout: newGraphLayout,
-                  selectedIdentifiers: updatedSelectedIdentifiers,
-                  applied: true // Mark as applied so chart cards appear immediately
-                };
-                onDataChange(updatedData);
-                onApply(); // Call onApply to ensure the changes are properly applied
-              }}
-            >
-              <SelectTrigger className="w-full">
-                <SelectValue placeholder="Select" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="1">1 graph per row</SelectItem>
-                <SelectItem value="2">2 graphs per row</SelectItem>
-              </SelectContent>
-            </Select>
+            <Label className="text-sm font-medium text-gray-700">Number of Charts (Max 2)</Label>
+            <div className="flex items-center gap-2 mt-1">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => handleNumberOfChartsChange(-1)}
+                disabled={graphLayout.numberOfGraphsInRow <= 1}
+              >
+                <Minus className="w-3 h-3" />
+              </Button>
+              <span className="w-8 text-center font-medium">{graphLayout.numberOfGraphsInRow}</span>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => handleNumberOfChartsChange(1)}
+                disabled={graphLayout.numberOfGraphsInRow >= 2}
+              >
+                <Plus className="w-3 h-3" />
+              </Button>
+            </div>
           </div>
         </div>
         {/* Add Filter Toggle */}
