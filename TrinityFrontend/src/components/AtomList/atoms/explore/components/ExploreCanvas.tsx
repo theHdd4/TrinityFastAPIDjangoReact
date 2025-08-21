@@ -8,7 +8,7 @@ import { Label } from '@/components/ui/label';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Switch } from '@/components/ui/switch';
-import { BarChart3, LineChart, PieChart, ScatterChartIcon as ScatterIcon, Settings, Filter, Eye, EyeOff, Edit3, Palette, ChevronDown, ChevronUp, X, Plus, RotateCcw, Database } from 'lucide-react';
+import { BarChart3, Settings, Filter, Eye, EyeOff, Edit3, Palette, ChevronDown, ChevronUp, X, Plus, RotateCcw, Database } from 'lucide-react';
 import { ExploreData } from '../ExploreAtom';
 // Replace the legacy Recharts renderer with a wrapper around
 // the Chart Maker canvas so Explore shares the same chart
@@ -39,12 +39,6 @@ interface ChartData {
   data: any; // can be array or object depending on chart type
   metadata: any;
 }
-
-const chartTypes = [
-  { id: 'bar_chart', name: 'Bar Chart', icon: BarChart3 },
-  { id: 'line_chart', name: 'Line Chart', icon: LineChart },
-  { id: 'pie_chart', name: 'Pie Chart', icon: PieChart }
-];
 
 const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataChange, onChartDataChange }) => {
   const [chartDataSets, setChartDataSets] = useState<{ [idx: number]: any }>({});
@@ -1417,102 +1411,58 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
         <Card className="border-pink-200 h-full w-full explore-chart-card">
           <CardContent className="p-4 flex flex-col h-full w-full min-w-0 explore-chart-content">
                         {/* Chart Configuration Header with Toggle */}
-            <div className="flex items-center justify-between mb-4 p-3 bg-gray-50 rounded-lg">
+            <div className="flex items-center mb-4 p-3 bg-gray-50 rounded-lg">
               <div className="flex items-center space-x-2">
                 <div className="flex items-center justify-center w-6 h-6 bg-pink-100 rounded-md">
                   <BarChart3 className="w-3 h-3 text-pink-600" />
                 </div>
                 <span className="font-semibold text-sm text-gray-800">Chart Configuration</span>
-                <div className="h-px bg-gradient-to-r from-pink-200 to-transparent flex-1 ml-3"></div>
               </div>
-              <button
-                onClick={() => toggleChartConfigCollapsed(index)}
-                className="p-2 hover:bg-pink-100 rounded-lg transition-colors"
-                aria-label={chartConfigCollapsed[index] ? 'Expand chart configuration' : 'Collapse chart configuration'}
-              >
-                {chartConfigCollapsed[index] ? (
-                  <ChevronDown className="w-5 h-5 text-pink-600" />
-                ) : (
-                  <ChevronUp className="w-5 h-5 text-pink-600" />
-                )}
-              </button>
+              <div className="h-px bg-gradient-to-r from-pink-200 to-transparent flex-1 ml-3"></div>
+              <div className="flex items-center space-x-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 w-8 p-0"
+                  onClick={() => toggleChartSettings(index)}
+                >
+                  <Settings className="w-3 h-3" />
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 w-8 p-0"
+                  onClick={() => toggleChartFilters(index)}
+                >
+                  <Filter className="w-3 h-3" />
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 w-8 p-0 text-red-500 hover:text-red-700 hover:bg-red-50"
+                  onClick={() => deleteChart(index)}
+                >
+                  <X className="w-3 h-3" />
+                </Button>
+                <button
+                  onClick={() => toggleChartConfigCollapsed(index)}
+                  className="p-2 hover:bg-pink-100 rounded-lg transition-colors"
+                  aria-label={chartConfigCollapsed[index] ? 'Expand chart configuration' : 'Collapse chart configuration'}
+                >
+                  {chartConfigCollapsed[index] ? (
+                    <ChevronDown className="w-5 h-5 text-pink-600" />
+                  ) : (
+                    <ChevronUp className="w-5 h-5 text-pink-600" />
+                  )}
+                </button>
+              </div>
             </div>
 
             {/* Collapsible Chart Configuration Area */}
             <div className={`transition-all duration-300 ease-in-out min-w-0 w-full explore-chart-config ${chartConfigCollapsed[index] ? 'max-h-0 opacity-0 overflow-hidden' : 'max-h-none opacity-100'}`}>
-              {/* Top row: Chart Type Icons and Action Icons */}
-              <div className="flex items-center justify-between mb-3 p-3 bg-gray-50 rounded-lg min-w-0 w-full explore-chart-config">
-                {/* Left side: Chart Type Icons */}
-                <div className="flex items-center space-x-2 min-w-0">
-                  {Array.isArray(chartTypes) ? chartTypes.map((type) => {
-                    const Icon = type.icon;
-                    return (
-                      <div key={type.id} className="relative group/chart-type">
-                        <Button
-                          variant={config.chartType === type.id ? "default" : "outline"}
-                          size="sm"
-                          className={`h-8 w-8 p-0 hover:group ${
-                            config.chartType === type.id 
-                              ? 'bg-blue-500 text-white hover:bg-blue-600' 
-                              : 'hover:bg-blue-50'
-                          }`}
-                          onClick={() => {
-                            handleChartConfigChange('chartType', type.id);
-                            // Update the chart config
-                            const newConfigs = [...chartConfigs];
-                            newConfigs[index] = { ...newConfigs[index], chartType: type.id };
-                            setChartConfigs(newConfigs);
-                            
-                            // Regenerate chart when chart type changes to ensure proper rendering
-                            if (config.xAxis && hasValidYAxes(config.yAxes)) {
-                              const newConfig = { ...newConfigs[index], chartType: type.id };
-                              safeTriggerChartGeneration(index, newConfig, 100);
-                            }
-                          }}
-                        >
-                          <Icon className="w-3 h-3" />
-                        </Button>
-                        {/* Tooltip */}
-                        <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 bg-gray-900 text-white text-xs rounded opacity-0 group-hover/chart-type:opacity-100 transition-opacity duration-200 pointer-events-none whitespace-nowrap z-10">
-                          {type.name}
-                        </div>
-                      </div>
-                    );
-                  }) : null}
-                </div>
-
-                {/* Right side: Action Icons */}
-                <div className="flex items-center space-x-2 min-w-0 flex-shrink-0">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="h-8 w-8 p-0"
-                    onClick={() => toggleChartSettings(index)}
-                  >
-                    <Settings className="w-3 h-3" />
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="h-8 w-8 p-0"
-                    onClick={() => toggleChartFilters(index)}
-                  >
-                    <Filter className="w-3 h-3" />
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="h-8 w-8 p-0 text-red-500 hover:text-red-700 hover:bg-red-50"
-                    onClick={() => deleteChart(index)}
-                  >
-                    <X className="w-3 h-3" />
-                  </Button>
-                </div>
-              </div>
-
-              {/* Bottom row: Axis Selectors and Legend Field */}
+              {/* Axis Selectors */}
               <div className="flex items-center space-x-2 mb-3 p-3 bg-gray-50 rounded-lg min-w-0 w-full explore-axis-selectors">
-                <Select 
+                <Select
                   value={config.xAxis}
                   onValueChange={(value) => {
                     const newConfigs = [...chartConfigs];
