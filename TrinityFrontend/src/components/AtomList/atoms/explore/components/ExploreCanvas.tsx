@@ -836,6 +836,10 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
       ...prev,
       [index]: !prev[index]
     }));
+
+    if (!cardSelectedIdentifiers[index]) {
+      initializeCardDimensions(index);
+    }
   };
 
   // Toggle functions for per-card collapse states

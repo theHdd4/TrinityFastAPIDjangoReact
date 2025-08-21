@@ -200,7 +200,7 @@ const ExploreSettings = ({ data, settings, onDataChange, onApply }) => {
       columnClassifierConfig: updatedConfig,
       selectedIdentifiers: newSelectedIdentifiers,
       dimensions: Array.from(new Set([...(data.dimensions || []), ...selectedFilterColumns])),
-      applied: true
+      applied: false
     });
     setSelectedFilterColumns([]);
     setShowFilterSelector(false);
@@ -243,14 +243,11 @@ const ExploreSettings = ({ data, settings, onDataChange, onApply }) => {
       setSelectedIdentifiers(updatedSelectedIdentifiers);
     }
 
-    const updatedData = {
-      ...data,
+    onDataChange({
       graphLayout: newGraphLayout,
       selectedIdentifiers: updatedSelectedIdentifiers,
-      applied: true
-    };
-    onDataChange(updatedData);
-    onApply();
+      applied: false
+    });
   };
 
   // Don't show loading state - allow rendering without column classifier config
