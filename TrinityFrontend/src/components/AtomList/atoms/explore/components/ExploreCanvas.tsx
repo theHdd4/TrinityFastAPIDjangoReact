@@ -260,6 +260,11 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
     }
   };
 
+  const overlayVisible =
+    chatBubbleShouldRender ||
+    Object.values(chartSettingsVisible).some(Boolean) ||
+    Object.values(chartFiltersVisible).some(Boolean);
+
   useEffect(() => {
     const handleClickOutside = () => {
       setOpenDropdowns({});
@@ -1859,6 +1864,7 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
               <div
                 className="mb-4 p-3 bg-blue-50 rounded-lg border border-blue-200 min-w-0 w-full explore-chart-settings"
                 onClick={(e) => e.stopPropagation()}
+                style={{ position: 'relative', zIndex: 4001 }}
               >
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 min-w-0 w-full explore-chart-settings">
                   <div>
@@ -1977,6 +1983,7 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                 }`}
                 onDoubleClick={() => toggleFilterCrossButtons(index)}
                 onClick={(e) => e.stopPropagation()}
+                style={{ position: 'relative', zIndex: 4001 }}
               >
                 {/* Double-click hint removed from top-right */}
                 
@@ -3126,42 +3133,42 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
           )}
         </>
       )}
+      {overlayVisible && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            zIndex: 3000,
+            background: 'transparent'
+          }}
+          onMouseDown={handleOverlayClick}
+        />
+      )}
       {chatBubbleShouldRender && (
-        <>
-          <div
-            style={{
-              position: 'fixed',
-              top: 0,
-              left: 0,
-              right: 0,
-              bottom: 0,
-              zIndex: 3000,
-              background: 'transparent'
-            }}
-            onMouseDown={handleOverlayClick}
+        <div
+          style={{
+            position: 'fixed',
+            left: chatBubble.anchor.x,
+            top: chatBubble.anchor.y,
+            transform: 'translate(-50%, 0)',
+            zIndex: 4000
+          }}
+          onMouseDown={e => {
+            e.preventDefault();
+            e.stopPropagation();
+          }}
+        >
+          <ChatBubble
+            visible={chatBubble.visible}
+            chartType={chartConfigs[chatBubble.chartIndex ?? 0]?.chartType.replace('_chart', '') || 'line'}
+            onChartTypeSelect={handleChartTypeSelect}
+            onClose={closeChatBubble}
+            onExited={handleBubbleExited}
           />
-          <div
-            style={{
-              position: 'fixed',
-              left: chatBubble.anchor.x,
-              top: chatBubble.anchor.y,
-              transform: 'translate(-50%, 0)',
-              zIndex: 4000
-            }}
-            onMouseDown={e => {
-              e.preventDefault();
-              e.stopPropagation();
-            }}
-          >
-            <ChatBubble
-              visible={chatBubble.visible}
-              chartType={chartConfigs[chatBubble.chartIndex ?? 0]?.chartType.replace('_chart', '') || 'line'}
-              onChartTypeSelect={handleChartTypeSelect}
-              onClose={closeChatBubble}
-              onExited={handleBubbleExited}
-            />
-          </div>
-        </>
+        </div>
       )}
     </div>
   );
