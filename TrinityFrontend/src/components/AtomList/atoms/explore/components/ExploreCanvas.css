@@ -170,6 +170,25 @@
   justify-content: center;
 }
 
+/* Scrollable container for multiple pie charts */
+.pie-chart-container {
+  scrollbar-color: #cbd5e1 transparent;
+  scrollbar-width: thin;
+}
+
+.pie-chart-container::-webkit-scrollbar {
+  width: 6px;
+}
+
+.pie-chart-container::-webkit-scrollbar-thumb {
+  background-color: #cbd5e1;
+  border-radius: 9999px;
+}
+
+.pie-chart-container::-webkit-scrollbar-track {
+  background: transparent;
+}
+
 /* Additional responsive behavior for chart components */
 .explore-chart-container * {
   box-sizing: border-box;

@@ -1636,149 +1636,176 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
             {/* Collapsible Chart Configuration Area */}
             <div className={`transition-all duration-300 ease-in-out min-w-0 w-full explore-chart-config ${chartConfigCollapsed[index] ? 'max-h-0 opacity-0 overflow-hidden' : 'max-h-none opacity-100'}`}>
               {/* Axis Selectors */}
-              <div className="flex items-center space-x-2 mb-3 p-3 bg-gray-50 rounded-lg min-w-0 w-full explore-axis-selectors" onContextMenu={(e) => openChartTypeTray(e, index)}>
-                <Select
-                  value={config.xAxis}
-                  onValueChange={(value) => {
-                    const newConfigs = [...chartConfigs];
-                    newConfigs[index] = { ...newConfigs[index], xAxis: value };
-                    setChartConfigs(newConfigs);
-                    
-                    // Only trigger chart generation when both X and Y axes are available
-                    if (value && hasValidYAxes(config.yAxes)) {
-                      
-                      // Create the new config for chart generation
-                      const newConfig = { ...newConfigs[index], xAxis: value };
-                      
-                      // Only generate chart if we have valid data
-                      if (newConfig.xAxis && hasValidYAxes(newConfig.yAxes)) {
-                        safeTriggerChartGeneration(index, newConfig, 100);
+              <div
+                className="flex items-center mb-3 p-3 pr-2 bg-gray-50 rounded-lg min-w-0 w-full explore-axis-selectors"
+                onContextMenu={(e) => openChartTypeTray(e, index)}
+              >
+                <div className="flex items-center space-x-2">
+                  <Select
+                    value={config.xAxis}
+                    onValueChange={(value) => {
+                      const newConfigs = [...chartConfigs];
+                      newConfigs[index] = { ...newConfigs[index], xAxis: value };
+                      setChartConfigs(newConfigs);
+
+                      // Only trigger chart generation when both X and Y axes are available
+                      if (value && hasValidYAxes(config.yAxes)) {
+
+                        // Create the new config for chart generation
+                        const newConfig = { ...newConfigs[index], xAxis: value };
+
+                        // Only generate chart if we have valid data
+                        if (newConfig.xAxis && hasValidYAxes(newConfig.yAxes)) {
+                          safeTriggerChartGeneration(index, newConfig, 100);
+                        }
                       }
-                    }
-                  }}
-                >
-                  <SelectTrigger className="w-32 h-8 text-xs leading-none" disabled={isLoadingColumns}>
-                    <SelectValue placeholder={
-                      isLoadingColumns ? "Loading..." :
-                      allAvailableColumns.length === 0 ? "No column classifier config" :
-                      "x-axis"
-                    } />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {Array.isArray(allAvailableColumns) ? allAvailableColumns.map((column, idx) => (
-                      <SelectItem key={idx} value={column}>{column}</SelectItem>
-                    )) : (
-                      <div className="text-xs text-gray-500 p-2">No column classifier config</div>
-                    )}
-                  </SelectContent>
-                </Select>
-                
-                <div className="flex items-center gap-1">
-                  {Array.isArray(config.yAxes) ? config.yAxes.map((yAxis, yAxisIndex) => (
-                    <div key={yAxisIndex} className="flex items-center gap-1">
-                      <Select 
-                        value={yAxis}
-                        onValueChange={(value) => {
+                    }}
+                  >
+                    <SelectTrigger className="w-32 h-8 text-xs leading-none" disabled={isLoadingColumns}>
+                      <SelectValue
+                        placeholder={
+                          isLoadingColumns
+                            ? "Loading..."
+                            : allAvailableColumns.length === 0
+                            ? "No column classifier config"
+                            : "x-axis"
+                        }
+                      />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {Array.isArray(allAvailableColumns) ? (
+                        allAvailableColumns.map((column, idx) => (
+                          <SelectItem key={idx} value={column}>
+                            {column}
+                          </SelectItem>
+                        ))
+                      ) : (
+                        <div className="text-xs text-gray-500 p-2">
+                          No column classifier config
+                        </div>
+                      )}
+                    </SelectContent>
+                  </Select>
+
+                  <div className="flex items-center gap-1">
+                    {Array.isArray(config.yAxes)
+                      ? config.yAxes.map((yAxis, yAxisIndex) => (
+                          <div key={yAxisIndex} className="flex items-center gap-1">
+                            <Select
+                              value={yAxis}
+                              onValueChange={(value) => {
+                                const newConfigs = [...chartConfigs];
+
+                                // Update the Y-axis value
+                                const updatedYAxes = Array.isArray(newConfigs[index].yAxes)
+                                  ? newConfigs[index].yAxes.map((_, i) => (i === yAxisIndex ? value : _))
+                                  : [value];
+
+                                newConfigs[index] = {
+                                  ...newConfigs[index],
+                                  yAxes: updatedYAxes,
+                                };
+
+                                setChartConfigs(newConfigs);
+
+                                // Only trigger chart generation once when both X and Y axes are available
+                                if (value && config.xAxis) {
+                                  // Create the new config for chart generation
+                                  const newConfig = {
+                                    ...newConfigs[index],
+                                    yAxes: updatedYAxes,
+                                  };
+
+                                  // Only generate chart if we have valid data and haven't already triggered generation
+                                  const validYAxes = newConfig.yAxes.filter((y) => y && y.trim() !== '');
+                                  if (newConfig.xAxis && validYAxes.length > 0) {
+                                    safeTriggerChartGeneration(index, newConfig, 100);
+                                  }
+                                }
+                              }}
+                            >
+                              <SelectTrigger className="w-32 h-8 text-xs leading-none" disabled={isLoadingColumns}>
+                                <SelectValue
+                                  placeholder={
+                                    isLoadingColumns
+                                      ? "Loading..."
+                                      : allAvailableColumns.length === 0
+                                      ? "No column classifier config"
+                                      : "y-axis"
+                                  }
+                                />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {Array.isArray(allAvailableColumns) ? (
+                                  allAvailableColumns.map((column, idx) => (
+                                    <SelectItem key={idx} value={column}>
+                                      {column}
+                                    </SelectItem>
+                                  ))
+                                ) : (
+                                  <div className="text-xs text-gray-500 p-2">
+                                    No column classifier config
+                                  </div>
+                                )}
+                              </SelectContent>
+                            </Select>
+                            {/* Remove button for additional Y-axes (not the first one) */}
+                            {yAxisIndex > 0 && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="h-8 w-8 p-0 text-red-500 hover:text-red-700 hover:bg-red-50"
+                                onClick={() => {
+                                  const newConfigs = [...chartConfigs];
+                                  newConfigs[index] = {
+                                    ...newConfigs[index],
+                                    yAxes: newConfigs[index].yAxes.filter((_, i) => i !== yAxisIndex),
+                                    yAxisLabels: newConfigs[index].yAxisLabels.filter((_, i) => i !== yAxisIndex),
+                                  };
+                                  setChartConfigs(newConfigs);
+
+                                  // Clear chart data when Y-axis is removed to force re-render
+                                  setChartDataSets((prev) => {
+                                    const newData = { ...prev };
+                                    delete newData[index];
+                                    return newData;
+                                  });
+
+                                  // Regenerate chart when Y-axis is removed to update display
+                                  if (newConfigs[index].xAxis && hasValidYAxes(newConfigs[index].yAxes)) {
+                                    safeTriggerChartGeneration(index, newConfigs[index], 100);
+                                  }
+                                }}
+                              >
+                                <X className="w-3 h-3" />
+                              </Button>
+                            )}
+                          </div>
+                        ))
+                      : null}
+                    {/* Plus Button for adding additional Y-axis dropdowns - only show if less than 2 Y-axes */}
+                    {Array.isArray(config.yAxes) && config.yAxes.length < 2 && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-8 w-8 p-0"
+                        onClick={() => {
                           const newConfigs = [...chartConfigs];
-                          
-                          // Update the Y-axis value
-                          const updatedYAxes = Array.isArray(newConfigs[index].yAxes) ? 
-                            newConfigs[index].yAxes.map((_, i) => (i === yAxisIndex ? value : _)) : 
-                            [value];
-                          
                           newConfigs[index] = {
                             ...newConfigs[index],
-                            yAxes: updatedYAxes
+                            yAxes: [...newConfigs[index].yAxes, ''],
+                            yAxisLabels: [...newConfigs[index].yAxisLabels, ''],
                           };
-                          
                           setChartConfigs(newConfigs);
-                          
-                          // Only trigger chart generation once when both X and Y axes are available
-                          if (value && config.xAxis) {
-                            
-                            // Create the new config for chart generation
-                            const newConfig = { 
-                              ...newConfigs[index],
-                              yAxes: updatedYAxes
-                            };
-                            
-                            // Only generate chart if we have valid data and haven't already triggered generation
-                            const validYAxes = newConfig.yAxes.filter(y => y && y.trim() !== '');
-                            if (newConfig.xAxis && validYAxes.length > 0) {
-                              safeTriggerChartGeneration(index, newConfig, 100);
-                            }
-                          }
                         }}
                       >
-                        <SelectTrigger className="w-32 h-8 text-xs leading-none" disabled={isLoadingColumns}>
-                          <SelectValue placeholder={
-                            isLoadingColumns ? "Loading..." :
-                            allAvailableColumns.length === 0 ? "No column classifier config" :
-                            "y-axis"
-                          } />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {Array.isArray(allAvailableColumns) ? allAvailableColumns.map((column, idx) => (
-                            <SelectItem key={idx} value={column}>{column}</SelectItem>
-                          )) : (
-                            <div className="text-xs text-gray-500 p-2">No column classifier config</div>
-                          )}
-                        </SelectContent>
-                      </Select>
-                      {/* Remove button for additional Y-axes (not the first one) */}
-                      {yAxisIndex > 0 && (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="h-8 w-8 p-0 text-red-500 hover:text-red-700 hover:bg-red-50"
-                          onClick={() => {
-                            const newConfigs = [...chartConfigs];
-                            newConfigs[index] = {
-                              ...newConfigs[index],
-                              yAxes: newConfigs[index].yAxes.filter((_, i) => i !== yAxisIndex),
-                              yAxisLabels: newConfigs[index].yAxisLabels.filter((_, i) => i !== yAxisIndex)
-                            };
-                            setChartConfigs(newConfigs);
-                            
-                            // Clear chart data when Y-axis is removed to force re-render
-                            setChartDataSets(prev => {
-                              const newData = { ...prev };
-                              delete newData[index];
-                              return newData;
-                            });
-                            
-                            // Regenerate chart when Y-axis is removed to update display
-                            if (newConfigs[index].xAxis && hasValidYAxes(newConfigs[index].yAxes)) {
-                              safeTriggerChartGeneration(index, newConfigs[index], 100);
-                            }                           }}
-                        >
-                          <X className="w-3 h-3" />
-                        </Button>
-                      )}
-                    </div>
-                  )) : null}
-                  {/* Plus Button for adding additional Y-axis dropdowns - only show if less than 2 Y-axes */}
-                  {Array.isArray(config.yAxes) && config.yAxes.length < 2 && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="h-8 w-8 p-0"
-                      onClick={() => {
-                        const newConfigs = [...chartConfigs];
-                        newConfigs[index] = {
-                          ...newConfigs[index],
-                          yAxes: [...newConfigs[index].yAxes, ''],
-                          yAxisLabels: [...newConfigs[index].yAxisLabels, '']
-                        };
-                        setChartConfigs(newConfigs);
-                      }}
-                    >
-                      <Plus className="w-3 h-3" />
-                    </Button>
-                  )}
-              </div>
-              
-                <div className="flex items-center ml-auto">
+                        <Plus className="w-3 h-3" />
+                      </Button>
+                    )}
+                  </div>
+                </div>
+
+                <div className="ml-auto">
                   <Select
                     value={config.legendField || ''}
                     onValueChange={(value) => {
@@ -1803,7 +1830,9 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                       <SelectItem value="aggregate">Show Aggregate</SelectItem>
                       {Array.isArray(availableIdentifiers) && availableIdentifiers.length > 0 ? (
                         availableIdentifiers.map((column, idx) => (
-                          <SelectItem key={idx} value={column}>{column}</SelectItem>
+                          <SelectItem key={idx} value={column}>
+                            {column}
+                          </SelectItem>
                         ))
                       ) : (
                         <div className="text-xs text-gray-500 p-2">No categorical columns</div>
@@ -2256,7 +2285,7 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                       <div
                         className={`w-full min-w-0 flex-shrink-0 explore-chart-area ${
                           config.chartType === 'pie_chart'
-                            ? 'overflow-y-auto'
+                            ? 'pie-chart-container overflow-y-auto pr-2'
                             : 'h-full overflow-hidden flex items-center justify-center'
                         }`}
                         style={{
