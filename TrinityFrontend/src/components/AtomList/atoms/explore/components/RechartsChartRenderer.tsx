@@ -353,6 +353,15 @@ const RechartsChartRenderer: React.FC<Props> = ({
   const [contextMenuPosition, setContextMenuPosition] = useState({ x: 0, y: 0 });
   const chartRef = useRef<HTMLDivElement>(null);
 
+  const handleOverlayClick = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setShowContextMenu(false);
+    setShowColorSubmenu(false);
+  };
+
+  const overlayVisible = showContextMenu || showColorSubmenu;
+
   // State for chart options
   const [showGrid, setShowGrid] = useState(true);
   const [showLegend, setShowLegend] = useState(true);
@@ -1176,7 +1185,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
           // Use first available key as X-axis key
           const xKeyForBar = xField || Object.keys(pivotedLineData[0])[0];
         return (
-            <BarChart data={pivotedLineData} margin={{ top: 20, right: 30, left: 20, bottom: 60 }}>
+            <BarChart data={pivotedLineData} margin={{ top: 20, right: 20, left: 20, bottom: 20 }}>
               {currentShowGrid && <CartesianGrid strokeDasharray="3 3" />}
               <XAxis
                 dataKey={xKeyForBar}
@@ -1251,7 +1260,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
         } else {
           // ---- Fallback to original single-bar rendering ----
           return (
-            <BarChart data={transformedChartData} margin={{ top: 20, right: 30, left: 20, bottom: 60 }}>
+            <BarChart data={transformedChartData} margin={{ top: 20, right: 20, left: 20, bottom: 20 }}>
               {currentShowGrid && <CartesianGrid strokeDasharray="3 3" />}
             <XAxis 
               dataKey={xKey} 
@@ -1390,7 +1399,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
           // Use first available key as X-axis key
           const xKeyForLine = xField || Object.keys(pivotedLineData[0])[0];
           return (
-            <LineChart data={pivotedLineData} margin={{ top: 20, right: 30, left: 20, bottom: 60 }}>
+            <LineChart data={pivotedLineData} margin={{ top: 20, right: 20, left: 20, bottom: 20 }}>
               {currentShowGrid && <CartesianGrid strokeDasharray="3 3" />}
               <XAxis
                 dataKey={xKeyForLine}
@@ -1440,7 +1449,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
           // ---- Fallback to original single-line rendering ----
           // Original single line chart logic
           return (
-            <LineChart data={chartDataForRendering} margin={{ top: 20, right: 30, left: 20, bottom: 60 }} className="explore-chart-line">
+            <LineChart data={chartDataForRendering} margin={{ top: 20, right: 20, left: 20, bottom: 20 }} className="explore-chart-line">
               {currentShowGrid && <CartesianGrid strokeDasharray="3 3" />}
               <XAxis 
                 dataKey={xKey}
@@ -1592,7 +1601,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
 
       case 'area_chart':
         return (
-          <AreaChart data={chartDataForRendering} margin={{ top: 20, right: 30, left: 20, bottom: 60 }}>
+          <AreaChart data={chartDataForRendering} margin={{ top: 20, right: 20, left: 20, bottom: 20 }}>
             {currentShowGrid && <CartesianGrid strokeDasharray="3 3" />}
             <XAxis
               dataKey={xKey}
@@ -1635,7 +1644,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
 
       case 'scatter_chart':
         return (
-          <ScatterChart margin={{ top: 20, right: 30, left: 20, bottom: 60 }}>
+          <ScatterChart margin={{ top: 20, right: 20, left: 20, bottom: 20 }}>
             {currentShowGrid && <CartesianGrid strokeDasharray="3 3" />}
             <XAxis
               dataKey={xKey}
@@ -1751,7 +1760,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
           const primaryYKey = yKeys[0] || yFields[0];
 
           return (
-            <PieChart margin={{ top: 20, right: 20, left: 20, bottom: 60 }}>
+            <PieChart margin={{ top: 20, right: 20, left: 20, bottom: 20 }}>
               <Pie
                 data={chartDataForRendering}
                 cx="50%"
@@ -1842,7 +1851,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
         } else {
           // Single Y-axis pie chart (existing logic)
           return (
-            <PieChart margin={{ top: 20, right: 20, left: 20, bottom: 60 }}>
+            <PieChart margin={{ top: 20, right: 20, left: 20, bottom: 20 }}>
               <Pie
                 data={chartDataForRendering}
                 cx="50%"
@@ -2028,6 +2037,20 @@ const RechartsChartRenderer: React.FC<Props> = ({
             </ResponsiveContainer>
           </div>
         </div>
+        {overlayVisible && (
+          <div
+            style={{
+              position: 'fixed',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              background: 'transparent',
+              zIndex: 9998,
+            }}
+            onMouseDown={handleOverlayClick}
+          />
+        )}
         <ContextMenu />
         <ColorThemeSubmenu />
       </div>
