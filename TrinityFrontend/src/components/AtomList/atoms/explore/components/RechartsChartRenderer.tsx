@@ -1543,8 +1543,8 @@ const RechartsChartRenderer: React.FC<Props> = ({
           const measureKey = yKey || yFields?.[0] || 'value';
           const nameKey = xKey || 'name';
           return (
-            <div className="flex gap-8 overflow-x-auto overflow-y-hidden w-full">
-              {Object.entries(pieGroups).map(([legendValue, slices], idx) => (
+            <div className="flex flex-nowrap gap-8 overflow-x-auto overflow-y-hidden w-full">
+              {Object.entries(pieGroups).map(([legendValue, slices]) => (
                 <div key={legendValue} className="flex-shrink-0 w-1/2 min-w-[300px] flex flex-col items-center">
                   <p className="mb-2 font-semibold text-sm text-gray-700">{capitalizeWords(String(legendValue))}</p>
                   <PieChart width={300} height={300}>
