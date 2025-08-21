@@ -3,6 +3,7 @@ import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Plus } from 'lucide-react';
+import Table from '@/Templates/Table/table';
 import { FEATURE_OVERVIEW_API } from '@/lib/api';
 
 interface ColumnInfo {
@@ -98,73 +99,46 @@ const ColClassifierColumnView: React.FC<ColClassifierColumnViewProps> = ({
           </div>
         </div>
 
-        <div className="relative">
-          <div className="pointer-events-none absolute inset-y-0 left-0 w-6 bg-gradient-to-r from-white to-transparent" />
-          <div className="pointer-events-none absolute inset-y-0 right-0 w-6 bg-gradient-to-l from-white to-transparent" />
-
-          <div className="overflow-x-auto">
-            <table className="min-w-[700px] w-full border-collapse text-sm border border-black">
-              <colgroup>
-                <col className="w-[30%]" />
-                <col className="w-[20%]" />
-                <col className="w-[15%]" />
-                <col className="w-[35%]" />
-              </colgroup>
-              <thead className="sticky top-0 z-10 bg-slate-50 text-slate-600">
-                <tr className="border-b border-slate-200">
-                  <th className="px-5 py-3 text-left font-medium">Column</th>
-                  <th className="px-5 py-3 text-left font-medium">Data type</th>
-                  <th className="px-5 py-3 text-left font-medium">Unique count</th>
-                  <th className="px-5 py-3 text-left font-medium">Sample values</th>
-                </tr>
-              </thead>
-              <tbody>
-                {displayed.map(col => (
-                  <tr
-                    key={col.column}
-                    className="border-b border-slate-100 hover:bg-slate-50/60 transition-colors"
-                  >
-                    <td className="px-5 py-3 whitespace-nowrap text-slate-800">
-                      {col.column}
-                    </td>
-                    <td className="px-5 py-3 text-slate-700">{col.data_type}</td>
-                    <td className="px-5 py-3 text-slate-700">
-                      {col.unique_count.toLocaleString()}
-                    </td>
-                    <td className="px-5 py-3 text-slate-700">
-                      <div className="flex flex-wrap items-center gap-1">
-                        {col.unique_values.slice(0, 2).map((val, i) => (
-                          <Badge
-                            key={i}
-                            className="p-0 px-1 text-xs bg-gray-50 text-slate-700"
-                          >
-                            {String(val)}
-                          </Badge>
-                        ))}
-                        {col.unique_values.length > 2 && (
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <span className="flex items-center gap-0.5 text-xs text-slate-600 font-medium cursor-pointer">
-                                <Plus className="w-3 h-3" />
-                                {col.unique_values.length - 2}
-                              </span>
-                            </TooltipTrigger>
-                            <TooltipContent className="text-xs max-w-xs whitespace-pre-wrap">
-                              {col.unique_values
-                                .slice(2)
-                                .map(val => String(val))
-                                .join(', ')}
-                            </TooltipContent>
-                          </Tooltip>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
+        <Table
+          headers={["Column", "Data type", "Unique count", "Sample values"]}
+          colClasses={["w-[30%]", "w-[20%]", "w-[15%]", "w-[35%]"]}
+        >
+          {displayed.map(col => (
+            <tr key={col.column} className="table-row">
+              <td className="table-cell-primary">{col.column}</td>
+              <td className="table-cell">{col.data_type}</td>
+              <td className="table-cell">{col.unique_count.toLocaleString()}</td>
+              <td className="table-cell">
+                <div className="flex flex-wrap items-center gap-1">
+                  {col.unique_values.slice(0, 2).map((val, i) => (
+                    <Badge
+                      key={i}
+                      className="p-0 px-1 text-xs bg-gray-50 text-slate-700"
+                    >
+                      {String(val)}
+                    </Badge>
+                  ))}
+                  {col.unique_values.length > 2 && (
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span className="flex items-center gap-0.5 text-xs text-slate-600 font-medium cursor-pointer">
+                          <Plus className="w-3 h-3" />
+                          {col.unique_values.length - 2}
+                        </span>
+                      </TooltipTrigger>
+                      <TooltipContent className="text-xs max-w-xs whitespace-pre-wrap">
+                        {col.unique_values
+                          .slice(2)
+                          .map(val => String(val))
+                          .join(', ')}
+                      </TooltipContent>
+                    </Tooltip>
+                  )}
+                </div>
+              </td>
+            </tr>
+          ))}
+        </Table>
       </div>
     </div>
   );
