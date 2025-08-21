@@ -10,7 +10,10 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { Switch } from '@/components/ui/switch';
 import { BarChart3, LineChart, PieChart, ScatterChartIcon as ScatterIcon, Settings, Filter, Eye, EyeOff, Edit3, Palette, ChevronDown, ChevronUp, X, Plus, RotateCcw, Database } from 'lucide-react';
 import { ExploreData } from '../ExploreAtom';
-import RechartsChartRenderer from './RechartsChartRenderer';
+// Replace the legacy Recharts renderer with a wrapper around
+// the Chart Maker canvas so Explore shares the same chart
+// rendering logic as the Chart Maker atom's simple mode.
+import ChartMakerRenderer from './ChartMakerRenderer';
 import { EXPLORE_API } from '@/lib/api';
 import { toast } from '@/components/ui/use-toast';
 import './ExploreCanvas.css';
@@ -2185,7 +2188,7 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                             config.yAxes.every((y) => y);
                           return hasValidAxes;
                         })() ? (
-                          <RechartsChartRenderer
+                          <ChartMakerRenderer
                             key={`chart-${index}-${config.chartType}-${chartThemes[index] || 'default'}-${chartDataSets[index]?.length || 0}-${Object.keys(chartFilters[index] || {}).length}-${appliedFilters[index] ? 'filtered' : 'unfiltered'}-theme-${chartThemes[index] || 'default'}-sort-${chartSortCounters[index] || 0}-yaxes-${config.yAxes.join('-')}`}
                             type={config.chartType as 'bar_chart' | 'line_chart' | 'pie_chart'}
                             data={chartDataSets[index] || []}
