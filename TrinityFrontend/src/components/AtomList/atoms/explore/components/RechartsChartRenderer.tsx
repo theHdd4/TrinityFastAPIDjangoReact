@@ -1538,15 +1538,24 @@ const RechartsChartRenderer: React.FC<Props> = ({
         const hasDualYAxesForPie = yKeys.length > 1 || (yFields && yFields.length > 1);
 
         // Special case: legend field with multiple pie charts
-        if (legendField && data && !Array.isArray(data)) {
-          const pieGroups = data as Record<string, any[]>;
+        if (legendField && data) {
+          // Support both array and object data structures
+          const pieGroups: Record<string, any[]> = Array.isArray(data)
+            ? data.reduce((acc: Record<string, any[]>, item: any) => {
+                const key = item[legendField] ?? 'Unknown';
+                acc[key] = acc[key] || [];
+                acc[key].push(item);
+                return acc;
+              }, {})
+            : (data as Record<string, any[]>);
+
           const measureKey = yKey || yFields?.[0] || 'value';
           const nameKey = xKey || 'name';
+
           return (
             <div className="flex flex-nowrap gap-8 overflow-x-auto overflow-y-hidden w-full">
               {Object.entries(pieGroups).map(([legendValue, slices]) => (
                 <div key={legendValue} className="flex-shrink-0 w-1/2 min-w-[300px] flex flex-col items-center">
-                  <p className="mb-2 font-semibold text-sm text-gray-700">{capitalizeWords(String(legendValue))}</p>
                   <PieChart width={300} height={300}>
                     <Pie
                       data={slices}
@@ -1574,6 +1583,9 @@ const RechartsChartRenderer: React.FC<Props> = ({
                     />
                     {showLegend && <Legend />}
                   </PieChart>
+                  <p className="mt-2 font-semibold text-sm text-gray-700">
+                    {capitalizeWords(String(legendValue))}
+                  </p>
                 </div>
               ))}
             </div>
