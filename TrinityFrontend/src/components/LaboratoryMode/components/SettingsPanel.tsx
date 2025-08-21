@@ -18,6 +18,8 @@ import {
   DEFAULT_DATAFRAME_OPERATIONS_SETTINGS,
   ChartMakerSettings,
   DEFAULT_CHART_MAKER_SETTINGS,
+  ScenarioPlannerSettings,
+  DEFAULT_SCENARIO_PLANNER_SETTINGS,
 } from '../store/laboratoryStore';
 import DataUploadValidateProperties from '@/components/AtomList/atoms/data-upload-validate/components/properties/DataUploadValidateProperties';
 import FeatureOverviewProperties from '@/components/AtomList/atoms/feature-overview/components/properties/FeatureOverviewProperties';
@@ -31,6 +33,7 @@ import BuildModelFeatureBasedProperties from '@/components/AtomList/atoms/build-
 import ScopeSelectorProperties from '@/components/AtomList/atoms/scope-selector/components/properties/ScopeSelectorProperties';
 import DataFrameOperationsProperties from '@/components/AtomList/atoms/dataframe-operations/components/properties/DataFrameOperationsProperties';
 import ClusteringProperties from '@/components/AtomList/atoms/clustering/components/properties/ClusteringProperties';
+import { ScenarioPlannerProperties } from '@/components/AtomList/atoms/scenario-planner/components/properties/ScenarioPlannerProperties';
 
 interface SettingsPanelProps {
   isCollapsed: boolean;
@@ -57,7 +60,8 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
     | DataUploadSettings
     | FeatureOverviewSettings
     | DataFrameOperationsSettings
-    | ChartMakerSettings =
+    | ChartMakerSettings
+    | ScenarioPlannerSettings =
     atom?.settings ||
     (atom?.atomId === 'data-upload-validate'
       ? { ...DEFAULT_DATAUPLOAD_SETTINGS }
@@ -67,6 +71,8 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
       ? { ...DEFAULT_DATAFRAME_OPERATIONS_SETTINGS }
       : atom?.atomId === 'chart-maker'
       ? { ...DEFAULT_CHART_MAKER_SETTINGS }
+      : atom?.atomId === 'scenario-planner'
+      ? { ...DEFAULT_SCENARIO_PLANNER_SETTINGS }
       : { ...DEFAULT_TEXTBOX_SETTINGS });
 
   useEffect(() => {
@@ -132,6 +138,8 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
             <ScopeSelectorProperties atomId={selectedAtomId} />
           ) : selectedAtomId && atom?.atomId === 'clustering' ? (
             <ClusteringProperties atomId={selectedAtomId} />
+          ) : selectedAtomId && atom?.atomId === 'scenario-planner' ? (
+            <ScenarioPlannerProperties atomId={selectedAtomId} />
           ) : selectedAtomId && atom?.atomId === 'build-model-feature-based' ? (
             <BuildModelFeatureBasedProperties atomId={selectedAtomId} />
           ) : (

@@ -469,6 +469,114 @@ export const DEFAULT_CLUSTERING_SETTINGS: ClusteringSettings = {
   }
 };
 
+export interface ScenarioPlannerSettings {
+  selectedScenario: string;
+  identifiers: Array<{
+    id: string;
+    name: string;
+    values: Array<{
+      id: string;
+      name: string;
+      checked: boolean;
+    }>;
+  }>;
+  features: Array<{
+    id: string;
+    name: string;
+    selected: boolean;
+  }>;
+  outputs: Array<{
+    id: string;
+    name: string;
+    selected: boolean;
+  }>;
+  combinations: Array<{
+    id: string;
+    identifiers: string[];
+    values: Record<string, {
+      input: number;
+      change: number;
+      reference: number;
+    }>;
+  }>;
+  referenceMethod: 'mean' | 'median' | 'mode';
+  referencePeriod: {
+    from: string;
+    to: string;
+  };
+  resultViews: Array<{
+    id: string;
+    name: string;
+    selectedCombinations: string[];
+  }>;
+  selectedResultScenario: string;
+  selectedView: string;
+}
+
+export const DEFAULT_SCENARIO_PLANNER_SETTINGS: ScenarioPlannerSettings = {
+  selectedScenario: 'base-case',
+  identifiers: [
+    {
+      id: 'identifier-1',
+      name: 'Identifier 1',
+      values: [
+        { id: '1a', name: 'Identifier 1-A', checked: true },
+        { id: '1b', name: 'Identifier 1-B', checked: false },
+        { id: '1c', name: 'Identifier 1-C', checked: false },
+      ]
+    },
+    {
+      id: 'identifier-2',
+      name: 'Identifier 2',
+      values: [
+        { id: '2a', name: 'Identifier 2-A', checked: true },
+        { id: '2b', name: 'Identifier 2-B', checked: false },
+        { id: '2c', name: 'Identifier 2-C', checked: false },
+      ]
+    },
+    {
+      id: 'identifier-3',
+      name: 'Identifier 3',
+      values: [
+        { id: '3a', name: 'Identifier 3-A', checked: false },
+        { id: '3b', name: 'Identifier 3-B', checked: false },
+        { id: '3c', name: 'Identifier 3-C', checked: false },
+      ]
+    },
+    {
+      id: 'identifier-4',
+      name: 'Identifier 4',
+      values: [
+        { id: '4a', name: 'Identifier 4-A', checked: false },
+        { id: '4b', name: 'Identifier 4-B', checked: false },
+        { id: '4c', name: 'Identifier 4-C', checked: false },
+      ]
+    }
+  ],
+  features: [
+    { id: 'feature-1', name: 'Feature 1', selected: true },
+    { id: 'feature-2', name: 'Feature 2', selected: true },
+    { id: 'feature-3', name: 'Feature 3', selected: true },
+    { id: 'feature-4', name: 'Feature 4', selected: true },
+  ],
+  outputs: [
+    { id: 'output-1', name: 'Output 1', selected: true },
+    { id: 'output-2', name: 'Output 2', selected: true },
+    { id: 'output-3', name: 'Output 3', selected: true },
+    { id: 'output-4', name: 'Output 4', selected: true },
+  ],
+  combinations: [],
+  referenceMethod: 'mean',
+  referencePeriod: { from: '01-JAN-2020', to: '30-MAR-2025' },
+  resultViews: [
+    { id: 'view-1', name: 'View 1', selectedCombinations: [] },
+    { id: 'view-2', name: 'View 2', selectedCombinations: [] },
+    { id: 'view-3', name: 'View 3', selectedCombinations: [] },
+  ],
+  selectedResultScenario: 'scenario-1',
+  selectedView: 'view-1'
+};
+
 export interface DroppedAtom {
   id: string;
   atomId: string;

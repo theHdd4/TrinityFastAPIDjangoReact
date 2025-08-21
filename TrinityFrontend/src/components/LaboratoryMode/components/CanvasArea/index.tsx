@@ -30,6 +30,7 @@ import GroupByAtom from '@/components/AtomList/atoms/groupby-wtg-avg/GroupByAtom
 import ChartMakerAtom from '@/components/AtomList/atoms/chart-maker/ChartMakerAtom';
 import BuildModelFeatureBasedAtom from '@/components/AtomList/atoms/build-model-feature-based/BuildModelFeatureBasedAtom';
 import ClusteringAtom from '@/components/AtomList/atoms/clustering/ClusteringAtom';
+import ScenarioPlannerAtom from '@/components/AtomList/atoms/scenario-planner/ScenarioPlannerAtom';
 import { fetchDimensionMapping } from '@/lib/dimensions';
 
 import {
@@ -41,6 +42,7 @@ import {
   DEFAULT_FEATURE_OVERVIEW_SETTINGS,
   DEFAULT_DATAFRAME_OPERATIONS_SETTINGS,
   DEFAULT_CHART_MAKER_SETTINGS,
+  DEFAULT_SCENARIO_PLANNER_SETTINGS,
   DataUploadSettings,
   ColumnClassifierColumn,
 } from '../../store/laboratoryStore';
@@ -545,16 +547,18 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
         color: info?.color || atom.color || 'bg-gray-400',
         source: 'manual',
         llm: LLM_MAP[atom.id],
-        settings:
-          atom.id === 'text-box'
-            ? { ...DEFAULT_TEXTBOX_SETTINGS }
-            : atom.id === 'data-upload-validate'
-            ? { ...DEFAULT_DATAUPLOAD_SETTINGS }
-            : atom.id === 'feature-overview'
-            ? { ...DEFAULT_FEATURE_OVERVIEW_SETTINGS }
-            : atom.id === 'chart-maker'
-            ? { ...DEFAULT_CHART_MAKER_SETTINGS }
-            : undefined,
+                 settings:
+           atom.id === 'text-box'
+             ? { ...DEFAULT_TEXTBOX_SETTINGS }
+             : atom.id === 'data-upload-validate'
+             ? { ...DEFAULT_DATAUPLOAD_SETTINGS }
+             : atom.id === 'feature-overview'
+             ? { ...DEFAULT_FEATURE_OVERVIEW_SETTINGS }
+             : atom.id === 'chart-maker'
+             ? { ...DEFAULT_CHART_MAKER_SETTINGS }
+             : atom.id === 'scenario-planner'
+             ? { ...DEFAULT_SCENARIO_PLANNER_SETTINGS }
+             : undefined,
       };
       
       setLayoutCards(
@@ -619,6 +623,8 @@ const addNewCardWithAtom = (
         ? { ...DEFAULT_FEATURE_OVERVIEW_SETTINGS }
         : atomId === 'chart-maker'
         ? { ...DEFAULT_CHART_MAKER_SETTINGS }
+        : atomId === 'scenario-planner'
+        ? { ...DEFAULT_SCENARIO_PLANNER_SETTINGS }
         : undefined,
   };
   const newCard: LayoutCard = {
@@ -708,16 +714,18 @@ const handleAddDragLeave = (e: React.DragEvent) => {
       color: info.color,
       source: 'ai',
       llm: LLM_MAP[info.id] || info.id,
-      settings:
-        info.id === 'text-box'
-          ? { ...DEFAULT_TEXTBOX_SETTINGS }
-          : info.id === 'data-upload-validate'
-          ? { ...DEFAULT_DATAUPLOAD_SETTINGS }
-          : info.id === 'feature-overview'
-          ? { ...DEFAULT_FEATURE_OVERVIEW_SETTINGS }
-          : info.id === 'dataframe-operations'
-          ? { ...DEFAULT_DATAFRAME_OPERATIONS_SETTINGS }
-          : undefined,
+             settings:
+         info.id === 'text-box'
+           ? { ...DEFAULT_TEXTBOX_SETTINGS }
+           : info.id === 'data-upload-validate'
+           ? { ...DEFAULT_DATAUPLOAD_SETTINGS }
+           : info.id === 'feature-overview'
+           ? { ...DEFAULT_FEATURE_OVERVIEW_SETTINGS }
+           : info.id === 'scenario-planner'
+           ? { ...DEFAULT_SCENARIO_PLANNER_SETTINGS }
+           : info.id === 'dataframe-operations'
+           ? { ...DEFAULT_DATAFRAME_OPERATIONS_SETTINGS }
+           : undefined,
     };
     setLayoutCards(
       (Array.isArray(layoutCards) ? layoutCards : []).map(card =>
@@ -990,6 +998,8 @@ const handleAddDragLeave = (e: React.DragEvent) => {
                                       <FeatureOverviewAtom atomId={atom.id} />
                                     ) : atom.atomId === 'clustering' ? (
                                       <ClusteringAtom atomId={atom.id} />
+                                    ) : atom.atomId === 'scenario-planner' ? (
+                                      <ScenarioPlannerAtom atomId={atom.id} />
                                     ) : atom.atomId === 'chart-maker' ? (
                                       <ChartMakerAtom atomId={atom.id} />
                                     ) : (
@@ -1204,6 +1214,8 @@ const handleAddDragLeave = (e: React.DragEvent) => {
                         <GroupByAtom atomId={atom.id} />
                       ) : atom.atomId === 'build-model-feature-based' ? (
                           <BuildModelFeatureBasedAtom atomId={atom.id} />
+                       ) : atom.atomId === 'scenario-planner' ? (
+                        <ScenarioPlannerAtom atomId={atom.id} />
                        ) : atom.atomId === 'scope-selector' ? (
                         <ScopeSelectorAtom atomId={atom.id} />
                       ) : (
