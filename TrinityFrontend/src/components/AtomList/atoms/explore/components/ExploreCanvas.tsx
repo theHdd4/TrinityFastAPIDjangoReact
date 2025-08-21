@@ -133,23 +133,41 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
     weightColumn: '',
     dateFilters: [],
     filterUnique: false, // Default to false
+    chartConfigs: [],
+    chartFilters: {},
+    chartThemes: {},
+    chartOptions: {},
+    appliedFilters: {},
+    showUniqueToggles: {},
     ...data
   };
 
+  useEffect(() => {
+    if (safeData.chartFilters) setChartFilters(safeData.chartFilters);
+    if (safeData.chartThemes) setChartThemes(safeData.chartThemes);
+    if (safeData.chartOptions) setChartOptions(safeData.chartOptions);
+    if (safeData.appliedFilters) setAppliedFilters(safeData.appliedFilters);
+    if (safeData.showUniqueToggles) setShowUniqueToggles(safeData.showUniqueToggles);
+  }, []);
+
   // Multi-chart state
-  const [chartConfigs, setChartConfigs] = useState([
-    {
-      xAxis: safeData.xAxis || '',
-      yAxes: [safeData.yAxis || ''], // Array to support multiple Y-axes
-      xAxisLabel: safeData.xAxisLabel || '',
-      yAxisLabels: [safeData.yAxisLabel || ''], // Array to support multiple Y-axis labels
-      chartType: safeData.chartType || 'line_chart',
-      aggregation: safeData.aggregation || 'no_aggregation', // Default to no aggregation
-      weightColumn: safeData.weightColumn || '',
-      title: safeData.title || '',
-      legendField: safeData.legendField || '', // Field to use for creating multiple lines/series
-    }
-  ]);
+  const [chartConfigs, setChartConfigs] = useState(
+    safeData.chartConfigs && Array.isArray(safeData.chartConfigs) && safeData.chartConfigs.length > 0
+      ? safeData.chartConfigs
+      : [
+          {
+            xAxis: safeData.xAxis || '',
+            yAxes: [safeData.yAxis || ''], // Array to support multiple Y-axes
+            xAxisLabel: safeData.xAxisLabel || '',
+            yAxisLabels: [safeData.yAxisLabel || ''], // Array to support multiple Y-axis labels
+            chartType: safeData.chartType || 'line_chart',
+            aggregation: safeData.aggregation || 'no_aggregation', // Default to no aggregation
+            weightColumn: safeData.weightColumn || '',
+            title: safeData.title || '',
+            legendField: safeData.legendField || '', // Field to use for creating multiple lines/series
+          },
+        ]
+  );
 
   const [chatBubble, setChatBubble] = useState({
     visible: false,
@@ -181,17 +199,36 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
   const closeChatBubble = () => setChatBubble(prev => ({ ...prev, visible: false }));
   const handleBubbleExited = () => setChatBubbleShouldRender(false);
 
+  useEffect(() => {
+    const handleClickOutside = () => {
+      setOpenDropdowns({});
+      closeChatBubble();
+    };
+    if (Object.values(openDropdowns).some(Boolean) || chatBubble.visible) {
+      document.addEventListener('click', handleClickOutside);
+    }
+    return () => document.removeEventListener('click', handleClickOutside);
+  }, [openDropdowns, chatBubble.visible]);
+
   // Initialize data summary collapse state
   useEffect(() => {
     setDataSummaryCollapsed({ 0: false });
     
-    // Initialize chart options for the first chart
-    setChartOptions({ 0: { grid: true, legend: true, axisLabels: true, dataLabels: true } });
-    setChartSortCounters({ 0: 0 });
+    // Initialize chart options for the first chart if not provided
+    if (!chartOptions[0]) {
+      setChartOptions({ 0: { grid: true, legend: true, axisLabels: true, dataLabels: true } });
+    }
+    if (!chartSortCounters[0]) {
+      setChartSortCounters({ 0: 0 });
+    }
 
-    // Initialize loading state for the first chart
-    setIsLoading({ 0: false });
-    setShowUniqueToggles({ 0: false });
+    // Initialize loading state and toggles for the first chart
+    if (!isLoading[0]) {
+      setIsLoading({ 0: false });
+    }
+    if (showUniqueToggles[0] === undefined) {
+      setShowUniqueToggles({ 0: false });
+    }
     
     // Cleanup function to clear any pending chart generation timeouts
     return () => {
@@ -1565,26 +1602,16 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                     }
                   }}
                 >
-                  <SelectTrigger className="w-32 h-8 text-xs" disabled={isLoadingColumns}>
+                  <SelectTrigger className="w-32 h-8 text-xs leading-none" disabled={isLoadingColumns}>
                     <SelectValue placeholder={
-                      isLoadingColumns ? "Loading..." : 
-                      allAvailableColumns.length === 0 ? "No column classifier config" : 
-                      "Select X-Axis"
+                      isLoadingColumns ? "Loading..." :
+                      allAvailableColumns.length === 0 ? "No column classifier config" :
+                      "x-axis"
                     } />
                   </SelectTrigger>
                   <SelectContent>
                     {Array.isArray(allAvailableColumns) ? allAvailableColumns.map((column, idx) => (
-                      <SelectItem key={idx} value={column}>
-                        <div className="flex items-center space-x-2">
-                          <span>{column}</span>
-                          {availableIdentifiers.includes(column) && (
-                            <span className="text-xs text-blue-600 bg-blue-50 px-1 rounded">ID</span>
-                          )}
-                          {availableMeasures.includes(column) && (
-                            <span className="text-xs text-green-600 bg-blue-50 px-1 rounded">M</span>
-                          )}
-                        </div>
-                      </SelectItem>
+                      <SelectItem key={idx} value={column}>{column}</SelectItem>
                     )) : (
                       <div className="text-xs text-gray-500 p-2">No column classifier config</div>
                     )}
@@ -1628,26 +1655,16 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                           }
                         }}
                       >
-                        <SelectTrigger className="w-32 h-8 text-xs" disabled={isLoadingColumns}>
+                        <SelectTrigger className="w-32 h-8 text-xs leading-none" disabled={isLoadingColumns}>
                           <SelectValue placeholder={
-                            isLoadingColumns ? "Loading..." : 
-                            allAvailableColumns.length === 0 ? "No column classifier config" : 
-                            "Select Y-Axis"
+                            isLoadingColumns ? "Loading..." :
+                            allAvailableColumns.length === 0 ? "No column classifier config" :
+                            "y-axis"
                           } />
                         </SelectTrigger>
                         <SelectContent>
                           {Array.isArray(allAvailableColumns) ? allAvailableColumns.map((column, idx) => (
-                            <SelectItem key={idx} value={column}>
-                              <div className="flex items-center space-x-2">
-                                <span>{column}</span>
-                                {availableIdentifiers.includes(column) && (
-                                  <span className="text-xs text-blue-600 bg-blue-50 px-1 rounded">ID</span>
-                                )}
-                                {availableMeasures.includes(column) && (
-                                  <span className="text-xs text-green-600 bg-blue-50 px-1 rounded">M</span>
-                                )}
-                              </div>
-                            </SelectItem>
+                            <SelectItem key={idx} value={column}>{column}</SelectItem>
                           )) : (
                             <div className="text-xs text-gray-500 p-2">No column classifier config</div>
                           )}
@@ -1742,18 +1759,13 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                         }
                       }}
                     >
-                      <SelectTrigger className="w-28 h-8 text-xs ml-2" disabled={isLoadingColumns}>
+                      <SelectTrigger className="w-28 h-8 ml-2 text-xs leading-none" disabled={isLoadingColumns}>
                         <SelectValue placeholder="Select column" />
                       </SelectTrigger>
                       <SelectContent>
                         {Array.isArray(availableIdentifiers) && availableIdentifiers.length > 0 ? (
                           availableIdentifiers.map((column, idx) => (
-                            <SelectItem key={idx} value={column}>
-                              <div className="flex items-center space-x-2">
-                                <span>{column}</span>
-                                <span className="text-xs text-blue-600 bg-blue-50 px-1 rounded">ID</span>
-                              </div>
-                            </SelectItem>
+                            <SelectItem key={idx} value={column}>{column}</SelectItem>
                           ))
                         ) : (
                           <div className="text-xs text-gray-500 p-2">No categorical columns</div>
@@ -2560,8 +2572,27 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
 
   // Handle save action for charts
   const handleChartSave = (chartIndex: number) => {
-    // Implement save functionality here
-    // Success message removed - unnecessary notification popup
+    const config = chartConfigs[chartIndex];
+    if (!config) return;
+    const filters = chartFilters[chartIndex] || {};
+    onDataChange({
+      chartConfigs,
+      chartFilters,
+      chartThemes,
+      chartOptions,
+      appliedFilters,
+      showUniqueToggles,
+      xAxis: config.xAxis,
+      yAxis: config.yAxes?.[0] || '',
+      xAxisLabel: config.xAxisLabel || '',
+      yAxisLabel: config.yAxisLabels?.[0] || '',
+      chartType: config.chartType,
+      legendField: config.legendField,
+      aggregation: config.aggregation,
+      weightColumn: config.weightColumn,
+      title: config.title,
+      filters,
+    });
   };
 
   // Helper function to fetch date range for a specific column
