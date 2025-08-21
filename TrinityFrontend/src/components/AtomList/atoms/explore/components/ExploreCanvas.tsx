@@ -247,6 +247,19 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
   const closeChatBubble = () => setChatBubble(prev => ({ ...prev, visible: false }));
   const handleBubbleExited = () => setChatBubbleShouldRender(false);
 
+  const handleOverlayClick = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setOpenDropdowns({});
+    closeChatBubble();
+    if (Object.values(chartSettingsVisible).some(Boolean)) {
+      setChartSettingsVisible({});
+    }
+    if (Object.values(chartFiltersVisible).some(Boolean)) {
+      setChartFiltersVisible({});
+    }
+  };
+
   useEffect(() => {
     const handleClickOutside = () => {
       setOpenDropdowns({});
@@ -3114,23 +3127,41 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
         </>
       )}
       {chatBubbleShouldRender && (
-        <div
-          style={{
-            position: 'fixed',
-            left: chatBubble.anchor.x,
-            top: chatBubble.anchor.y,
-            transform: 'translate(-50%, 0)',
-            zIndex: 4000
-          }}
-        >
-          <ChatBubble
-            visible={chatBubble.visible}
-            chartType={chartConfigs[chatBubble.chartIndex ?? 0]?.chartType.replace('_chart', '') || 'line'}
-            onChartTypeSelect={handleChartTypeSelect}
-            onClose={closeChatBubble}
-            onExited={handleBubbleExited}
+        <>
+          <div
+            style={{
+              position: 'fixed',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              zIndex: 3000,
+              background: 'transparent'
+            }}
+            onMouseDown={handleOverlayClick}
           />
-        </div>
+          <div
+            style={{
+              position: 'fixed',
+              left: chatBubble.anchor.x,
+              top: chatBubble.anchor.y,
+              transform: 'translate(-50%, 0)',
+              zIndex: 4000
+            }}
+            onMouseDown={e => {
+              e.preventDefault();
+              e.stopPropagation();
+            }}
+          >
+            <ChatBubble
+              visible={chatBubble.visible}
+              chartType={chartConfigs[chatBubble.chartIndex ?? 0]?.chartType.replace('_chart', '') || 'line'}
+              onChartTypeSelect={handleChartTypeSelect}
+              onClose={closeChatBubble}
+              onExited={handleBubbleExited}
+            />
+          </div>
+        </>
       )}
     </div>
   );
