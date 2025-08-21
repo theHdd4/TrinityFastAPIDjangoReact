@@ -217,12 +217,17 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
     const handleClickOutside = () => {
       setOpenDropdowns({});
       closeChatBubble();
+      setChartSettingsVisible({});
+      setChartFiltersVisible({});
     };
-    if (Object.values(openDropdowns).some(Boolean) || chatBubble.visible) {
+    const hasOpenDropdown = Object.values(openDropdowns).some(Boolean);
+    const hasOpenSettings = Object.values(chartSettingsVisible).some(Boolean);
+    const hasOpenFilters = Object.values(chartFiltersVisible).some(Boolean);
+    if (hasOpenDropdown || chatBubble.visible || hasOpenSettings || hasOpenFilters) {
       document.addEventListener('click', handleClickOutside);
     }
     return () => document.removeEventListener('click', handleClickOutside);
-  }, [openDropdowns, chatBubble.visible]);
+  }, [openDropdowns, chatBubble.visible, chartSettingsVisible, chartFiltersVisible]);
 
   // Initialize data summary collapse state
   useEffect(() => {
@@ -1773,7 +1778,10 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                         }
                       }}
                     >
-                      <SelectTrigger className="w-28 h-8 ml-2 text-xs leading-none" disabled={isLoadingColumns}>
+                      <SelectTrigger
+                        className="w-32 min-w-[8rem] h-8 ml-2 text-xs leading-none"
+                        disabled={isLoadingColumns}
+                      >
                         <SelectValue placeholder="Select column" />
                       </SelectTrigger>
                       <SelectContent>
@@ -1795,7 +1803,10 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
 
             {/* Individual Chart Settings Panel */}
             {isSettingsVisible && (
-              <div className="mb-4 p-3 bg-blue-50 rounded-lg border border-blue-200 min-w-0 w-full explore-chart-settings">
+              <div
+                className="mb-4 p-3 bg-blue-50 rounded-lg border border-blue-200 min-w-0 w-full explore-chart-settings"
+                onClick={(e) => e.stopPropagation()}
+              >
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 min-w-0 w-full explore-chart-settings">
                   <div>
                     <Label className="text-xs text-gray-600">Chart Title</Label>
@@ -1905,13 +1916,14 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
 
             {/* Individual Chart Filters Panel */}
             {chartFiltersVisible[index] && (
-              <div 
+              <div
                 className={`mb-4 p-3 rounded-lg border relative group transition-all duration-200 cursor-pointer hover:shadow-sm hover:border-blue-300 min-w-0 ${
-                  showFilterCrossButtons[index] 
-                    ? 'bg-blue-100 border-2 border-blue-400 shadow-md' 
+                  showFilterCrossButtons[index]
+                    ? 'bg-blue-100 border-2 border-blue-400 shadow-md'
                     : 'bg-blue-50 border border-blue-200'
                 }`}
                 onDoubleClick={() => toggleFilterCrossButtons(index)}
+                onClick={(e) => e.stopPropagation()}
               >
                 {/* Double-click hint removed from top-right */}
                 
