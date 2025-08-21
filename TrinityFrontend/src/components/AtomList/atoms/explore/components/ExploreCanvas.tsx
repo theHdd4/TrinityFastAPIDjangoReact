@@ -916,19 +916,22 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
   };
   
   // Multi-selection filter handler
-  const handleMultiSelectFilterChange = (chartIndex: number, identifier: string, values: string[]) => {
-    
+  const handleMultiSelectFilterChange = (
+    chartIndex: number,
+    identifier: string,
+    values: string[] | null
+  ) => {
     setChartFilters(prev => {
       const newState = {
         ...prev,
         [chartIndex]: {
           ...prev[chartIndex],
-          [identifier]: values
-        }
+          [identifier]: values,
+        },
       };
       return newState;
     });
-    
+
     // Don't regenerate chart immediately - let user apply multiple filters first
   };
   
@@ -1217,7 +1220,9 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
 
 
   // Get selected dimensions and measures
-  const selectedDimensions = safeData.dimensions || [];
+  const selectedDimensions = safeData.selectedIdentifiers
+    ? Object.keys(safeData.selectedIdentifiers)
+    : (safeData.dimensions || []);
   const selectedMeasures = safeData.measures || [];
   const dimensionsWithIdentifiers = safeData.columnClassifierConfig?.dimensions || {};
   
@@ -2115,15 +2120,15 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
             )}
             
             {/* Chart Display */}
-            <div 
-              className="bg-white border border-gray-200 rounded-lg p-6 cursor-pointer hover:border-pink-300 transition-colors relative flex-1 overflow-hidden flex-shrink-0 flex items-center justify-center"
-              style={{ 
-                minHeight: '300px', 
-                height: (chartDataSets[index] && chartDataSets[index].length > 0) ? '400px' : '300px',
-                maxHeight: (chartDataSets[index] && chartDataSets[index].length > 0) ? '500px' : '300px'
+            <div
+              className="bg-white border border-gray-200 rounded-lg p-6 cursor-pointer hover:border-pink-300 transition-colors relative flex-1 overflow-y-auto flex-shrink-0 flex items-start justify-center"
+              style={{
+                minHeight: '300px',
+                height: chartDataSets[index] ? 'auto' : '300px',
+                maxHeight: '500px'
               }}
             >
-              <div className="h-full w-full flex flex-col min-w-0 overflow-hidden">
+              <div className="h-full w-full flex flex-col min-w-0">
                 
 
                 
