@@ -1,5 +1,4 @@
 import React, { useMemo } from 'react';
-import { Badge } from '@/components/ui/badge';
 import { BarChart3, Grid, TrendingUp, Clock, Database } from 'lucide-react';
 import ExploreCanvas from './components/ExploreCanvas';
 import { useLaboratoryStore, ExploreData } from '@/components/LaboratoryMode/store/laboratoryStore';
@@ -231,36 +230,22 @@ const ExploreAtom: React.FC<ExploreAtomProps> = ({ atomId }) => {
   };
 
   return (
-    <div className="w-full h-full bg-white border border-gray-200 rounded-lg">
-      {/* Header */}
-      <div className="flex items-center justify-between p-3 border-b border-gray-200 bg-gray-50">
-        <div className="flex items-center space-x-2">
-          <BarChart3 className="w-4 h-4 text-pink-500" />
-          <span className="font-medium text-gray-900 text-sm">Explore</span>
-        </div>
-        <Badge variant="secondary" className="bg-pink-100 text-pink-700 border-pink-200 text-xs">
-          Visualization
-        </Badge>
-      </div>
-      
-      {/* Content */}
-      <div className="flex-1 min-h-0">
-        {!data.dataframe ? (
-          renderCardPreview()
-        ) : (
-          <ExploreCanvas 
-            data={data} 
-            isApplied={isApplied}
-            onDataChange={(newData) => {
-              // Update the atom data in the laboratory store
-              const currentSettings = atom?.settings || {};
-              useLaboratoryStore.getState().updateAtomSettings(atomId, { 
-                data: { ...(currentSettings.data || {}), ...newData } 
-              });
-            }}
-          />
-        )}
-      </div>
+    <div className="w-full h-full">
+      {!data.dataframe ? (
+        renderCardPreview()
+      ) : (
+        <ExploreCanvas
+          data={data}
+          isApplied={isApplied}
+          onDataChange={(newData) => {
+            // Update the atom data in the laboratory store
+            const currentSettings = atom?.settings || {};
+            useLaboratoryStore.getState().updateAtomSettings(atomId, {
+              data: { ...(currentSettings.data || {}), ...newData }
+            });
+          }}
+        />
+      )}
     </div>
   );
 };
