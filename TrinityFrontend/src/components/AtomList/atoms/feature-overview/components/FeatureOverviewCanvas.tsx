@@ -441,7 +441,7 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
                               </Card>
                             </div>
                             <div className="xl:col-span-1">
-                              <Card className="border border-black shadow-xl bg-white/95 backdrop-blur-sm overflow-hidden transform hover:scale-[1.02] hover:-translate-y-1 transition-all duration-300 flex flex-col hover:shadow-2xl h-96">
+                              <Card className="border border-black shadow-xl bg-white/95 backdrop-blur-sm overflow-hidden transform hover:scale-[1.02] hover:-translate-y-1 transition-all duration-300 flex flex-col hover:shadow-2xl h-[460px]">
                                 <div className="bg-white border-b border-black p-4 relative flex-shrink-0">
                                   <h5 className="font-bold text-gray-900 text-sm flex items-center">
                                     <BarChart3 className="w-4 h-4 mr-2 text-gray-900" />
