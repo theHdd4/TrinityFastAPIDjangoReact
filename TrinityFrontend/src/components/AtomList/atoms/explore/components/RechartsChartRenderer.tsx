@@ -379,6 +379,9 @@ const RechartsChartRenderer: React.FC<Props> = ({
         (!legendField || legendField === '') &&
         Array.isArray(data[0])
       ) {
+        const xKeyName = xField || 'name';
+        const yKeyName = yField || 'value';
+
         return (data as any[]).map((item) => {
           const [name, rawValue] = item as [any, any];
           let numericValue = rawValue;
@@ -388,7 +391,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
             );
             numericValue = firstNumber !== undefined ? firstNumber : rawValue;
           }
-          return { name, value: numericValue };
+          return { [xKeyName]: name, [yKeyName]: numericValue };
         });
       }
       return data;
@@ -410,13 +413,16 @@ const RechartsChartRenderer: React.FC<Props> = ({
       // chart because Recharts expects numeric values. Extract the first
       // numeric field from such objects.
       try {
+        const xKeyName = xField || 'name';
+        const yKeyName = yField || 'value';
+
         return Object.entries(data as Record<string, any>).map(([name, value]) => {
           let numericValue: any = value;
           if (typeof value === 'object' && value !== null) {
             const firstNumber = Object.values(value).find(v => typeof v === 'number');
             numericValue = firstNumber !== undefined ? firstNumber : value;
           }
-          return { name, value: numericValue };
+          return { [xKeyName]: name, [yKeyName]: numericValue };
         });
       } catch {
         return [];
