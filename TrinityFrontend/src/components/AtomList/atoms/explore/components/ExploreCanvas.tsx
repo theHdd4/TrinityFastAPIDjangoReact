@@ -104,9 +104,6 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
   const [chartOptions, setChartOptions] = useState<{ [chartIndex: number]: { grid: boolean; legend: boolean; axisLabels: boolean; dataLabels: boolean } }>({});
   const [chartSortCounters, setChartSortCounters] = useState<{ [chartIndex: number]: number }>({});
   const [dateRanges, setDateRanges] = useState<{ [columnName: string]: { min_date: string; max_date: string } }>({});
-
-  // Toggle to display categorical breakdown selector per chart
-  const [showUniqueToggles, setShowUniqueToggles] = useState<{ [chartIndex: number]: boolean }>({});
   
   // Debouncing mechanism to prevent multiple chart generations
   const chartGenerationTimeouts = useRef<{ [chartIndex: number]: NodeJS.Timeout | null }>({});
@@ -138,7 +135,6 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
     chartThemes: {},
     chartOptions: {},
     appliedFilters: {},
-    showUniqueToggles: {},
     chartDataSets: {},
     chartGenerated: {},
     ...data
@@ -149,7 +145,6 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
     if (safeData.chartThemes) setChartThemes(safeData.chartThemes);
     if (safeData.chartOptions) setChartOptions(safeData.chartOptions);
     if (safeData.appliedFilters) setAppliedFilters(safeData.appliedFilters);
-    if (safeData.showUniqueToggles) setShowUniqueToggles(safeData.showUniqueToggles);
     if (safeData.chartDataSets) setChartDataSets(safeData.chartDataSets);
     if (safeData.chartGenerated) setChartGenerated(safeData.chartGenerated);
   }, []);
@@ -191,7 +186,6 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
       chartDataSets,
       chartGenerated,
       appliedFilters,
-      showUniqueToggles,
       xAxis: primaryConfig.xAxis || '',
       yAxis: primaryConfig.yAxes?.[0] || '',
       xAxisLabel: primaryConfig.xAxisLabel || '',
@@ -207,12 +201,11 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
     chartConfigs,
     chartFilters,
     chartThemes,
-    chartOptions,
-    chartDataSets,
-    chartGenerated,
-    appliedFilters,
-    showUniqueToggles,
-  ]);
+      chartOptions,
+      chartDataSets,
+      chartGenerated,
+      appliedFilters,
+    ]);
 
   // Auto-generate charts on mount if data and configs exist
   useEffect(() => {
@@ -281,12 +274,9 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
       setChartSortCounters({ 0: 0 });
     }
 
-    // Initialize loading state and toggles for the first chart
+    // Initialize loading state for the first chart
     if (!isLoading[0]) {
       setIsLoading({ 0: false });
-    }
-    if (showUniqueToggles[0] === undefined) {
-      setShowUniqueToggles({ 0: false });
     }
     
     // Cleanup function to clear any pending chart generation timeouts
@@ -1259,7 +1249,10 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
       const operationsPayload = {
         file_key: safeData.dataframe,
         filters: filtersList, // Use chart filters instead of dateFilters
-        group_by: config.legendField ? [config.xAxis, config.legendField] : [config.xAxis],
+        group_by:
+          config.legendField && config.legendField !== 'aggregate'
+            ? [config.xAxis, config.legendField]
+            : [config.xAxis],
         measures_config: measuresConfig,
         chart_type: config.chartType,
         x_axis: config.xAxis,
@@ -1545,7 +1538,10 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
       yAxisLabel: config.yAxisLabels[0] || config.yAxes[0] || '',
       yFields: config.yAxes,
       yAxisLabels: config.yAxes.map((yAxis: string, idx: number) => config.yAxisLabels[idx] || yAxis || ''),
-      legendField: config.legendField || undefined,
+      legendField:
+        config.legendField && config.legendField !== 'aggregate'
+          ? config.legendField
+          : undefined,
       chartsPerRow: safeData.graphLayout.numberOfGraphsInRow,
       colors: CHART_COLORS,
       theme: chartThemes[index] || 'default',
@@ -1782,59 +1778,38 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                   )}
               </div>
               
-                <div className="flex items-center ml-4">
-                  <div className="flex items-center flex-1 min-w-0">
-                    <Label
-                      htmlFor={`unique-toggle-${index}`}
-                      className="text-xs mr-2 truncate"
+                <div className="flex items-center ml-auto">
+                  <Select
+                    value={config.legendField || ''}
+                    onValueChange={(value) => {
+                      const newConfigs = [...chartConfigs];
+                      newConfigs[index] = {
+                        ...newConfigs[index],
+                        legendField: value,
+                      };
+                      setChartConfigs(newConfigs);
+                      if (config.xAxis && hasValidYAxes(config.yAxes)) {
+                        safeTriggerChartGeneration(index, newConfigs[index], 100);
+                      }
+                    }}
+                  >
+                    <SelectTrigger
+                      className="min-w-[8rem] h-8 ml-2 pr-4 text-xs leading-none whitespace-nowrap"
+                      disabled={isLoadingColumns}
                     >
-                      Field Values
-                    </Label>
-                    <Switch
-                      id={`unique-toggle-${index}`}
-                      checked={showUniqueToggles[index] || false}
-                      onCheckedChange={(checked) => {
-                        setShowUniqueToggles(prev => ({ ...prev, [index]: checked }));
-                        const newConfigs = [...chartConfigs];
-                        if (!checked) {
-                          newConfigs[index] = { ...newConfigs[index], legendField: '' };
-                          setChartConfigs(newConfigs);
-                          if (config.xAxis && hasValidYAxes(config.yAxes)) {
-                            safeTriggerChartGeneration(index, newConfigs[index], 100);
-                          }
-                        }
-                      }}
-                    />
-                  </div>
-                  {showUniqueToggles[index] && (
-                    <Select
-                      value={config.legendField || ''}
-                      onValueChange={(value) => {
-                        const newConfigs = [...chartConfigs];
-                        newConfigs[index] = { ...newConfigs[index], legendField: value };
-                        setChartConfigs(newConfigs);
-                        if (value && config.xAxis && hasValidYAxes(config.yAxes)) {
-                          safeTriggerChartGeneration(index, newConfigs[index], 100);
-                        }
-                      }}
-                    >
-                      <SelectTrigger
-                        className="min-w-[8rem] h-8 ml-2 pr-4 text-xs leading-none whitespace-nowrap"
-                        disabled={isLoadingColumns}
-                      >
-                        <SelectValue placeholder="Select column" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {Array.isArray(availableIdentifiers) && availableIdentifiers.length > 0 ? (
-                          availableIdentifiers.map((column, idx) => (
-                            <SelectItem key={idx} value={column}>{column}</SelectItem>
-                          ))
-                        ) : (
-                          <div className="text-xs text-gray-500 p-2">No categorical columns</div>
-                        )}
-                      </SelectContent>
-                    </Select>
-                  )}
+                      <SelectValue placeholder="Select Column to Segregate Field Values" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="aggregate">Show Aggregate</SelectItem>
+                      {Array.isArray(availableIdentifiers) && availableIdentifiers.length > 0 ? (
+                        availableIdentifiers.map((column, idx) => (
+                          <SelectItem key={idx} value={column}>{column}</SelectItem>
+                        ))
+                      ) : (
+                        <div className="text-xs text-gray-500 p-2">No categorical columns</div>
+                      )}
+                    </SelectContent>
+                  </Select>
                 </div>
               </div>
               
@@ -2649,7 +2624,6 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
       chartDataSets,
       chartGenerated,
       appliedFilters,
-      showUniqueToggles,
       xAxis: config.xAxis,
       yAxis: config.yAxes?.[0] || '',
       xAxisLabel: config.xAxisLabel || '',
