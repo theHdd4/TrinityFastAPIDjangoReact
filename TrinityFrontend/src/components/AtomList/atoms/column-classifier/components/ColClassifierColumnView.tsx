@@ -105,7 +105,7 @@ const ColClassifierColumnView: React.FC<ColClassifierColumnViewProps> = ({
         <div className="flex items-center justify-between border-b border-slate-200 px-5 py-3">
           <h2 className="text-base font-semibold text-slate-800">Cardinality View</h2>
           <div className="flex items-center gap-2">
-            <span className="text-xs text-slate-500">&gt;1 unique</span>
+            <span className="text-xs text-slate-500">Select Columns with more than one unique values</span>
             <Switch
               checked={filterUnique}
               onCheckedChange={onFilterToggle}
@@ -119,7 +119,7 @@ const ColClassifierColumnView: React.FC<ColClassifierColumnViewProps> = ({
           <div className="pointer-events-none absolute inset-y-0 right-0 w-6 bg-gradient-to-l from-white to-transparent" />
 
           <div className="overflow-x-auto">
-            <table className="min-w-[700px] w-full border-collapse text-sm">
+            <table className="min-w-[700px] w-full border-collapse text-sm border border-black">
               <colgroup>
                 <col className="w-[30%]" />
                 <col className="w-[20%]" />
