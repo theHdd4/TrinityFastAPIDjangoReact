@@ -1553,9 +1553,9 @@ const RechartsChartRenderer: React.FC<Props> = ({
           const nameKey = xKey || 'name';
 
           return (
-            <div className="flex flex-nowrap gap-8 overflow-x-auto overflow-y-hidden w-full">
+            <div className="grid grid-cols-2 gap-8 w-full">
               {Object.entries(pieGroups).map(([legendValue, slices]) => (
-                <div key={legendValue} className="flex-shrink-0 w-1/2 min-w-[300px] flex flex-col items-center">
+                <div key={legendValue} className="flex flex-col items-center">
                   <PieChart width={300} height={300}>
                     <Pie
                       data={slices}

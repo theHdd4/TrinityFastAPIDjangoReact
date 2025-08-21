@@ -1666,6 +1666,9 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
               </div>
               
                 <div className="flex items-center ml-4">
+                  <Label htmlFor={`unique-toggle-${index}`} className="text-xs mr-2">
+                    Show unique values for categorical columns
+                  </Label>
                   <Switch
                     id={`unique-toggle-${index}`}
                     checked={showUniqueToggles[index] || false}
@@ -1681,9 +1684,6 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                       }
                     }}
                   />
-                  <Label htmlFor={`unique-toggle-${index}`} className="ml-2 text-xs">
-                    Show unique values for categorical columns
-                  </Label>
                   {showUniqueToggles[index] && (
                     <Select
                       value={config.legendField || ''}
