@@ -27,22 +27,6 @@ interface ColClassifierColumnViewProps {
   onFilterToggle: (val: boolean) => void;
 }
 
-const categoryColors: Record<ColumnInfoWithCategory['category'], string> = {
-  unclassified: '#d5def7',
-  identifiers: '#2153f3',
-  measures: '#0d1a4e',
-};
-
-function Dot({ color }: { color: string }) {
-  return (
-    <span
-      className="inline-block h-2.5 w-2.5 rounded-full translate-y-0.5"
-      style={{ backgroundColor: color }}
-      aria-hidden
-    />
-  );
-}
-
 const ColClassifierColumnView: React.FC<ColClassifierColumnViewProps> = ({
   objectName,
   columns,
@@ -141,10 +125,7 @@ const ColClassifierColumnView: React.FC<ColClassifierColumnViewProps> = ({
                     className="border-b border-slate-100 hover:bg-slate-50/60 transition-colors"
                   >
                     <td className="px-5 py-3 whitespace-nowrap text-slate-800">
-                      <div className="flex items-center gap-3">
-                        <Dot color={categoryColors[col.category]} />
-                        <span>{col.column}</span>
-                      </div>
+                      {col.column}
                     </td>
                     <td className="px-5 py-3 text-slate-700">{col.data_type}</td>
                     <td className="px-5 py-3 text-slate-700">
