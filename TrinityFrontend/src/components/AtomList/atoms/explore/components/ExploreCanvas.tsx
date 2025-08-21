@@ -8,7 +8,7 @@ import { Label } from '@/components/ui/label';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Switch } from '@/components/ui/switch';
-import { BarChart3, LineChart, PieChart, ScatterChartIcon as ScatterIcon, Settings, Filter, Eye, EyeOff, Edit3, Palette, ChevronDown, ChevronUp, X, Plus, RotateCcw } from 'lucide-react';
+import { BarChart3, LineChart, PieChart, ScatterChartIcon as ScatterIcon, Settings, Filter, Eye, EyeOff, Edit3, Palette, ChevronDown, ChevronUp, X, Plus, RotateCcw, Database } from 'lucide-react';
 import { ExploreData } from '../ExploreAtom';
 import RechartsChartRenderer from './RechartsChartRenderer';
 import { EXPLORE_API } from '@/lib/api';
@@ -2194,6 +2194,7 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                               config.yAxisLabels[idx] || yAxis || ''
                             )}
                             legendField={config.legendField || undefined}
+                            chartsPerRow={safeData.graphLayout.numberOfGraphsInRow}
                             colors={CHART_COLORS}
                             // Add debugging props to help troubleshoot
                             data-testid={`chart-${index}`}
@@ -2787,239 +2788,218 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
 
   return (
     <div className="h-full flex flex-col space-y-4 p-4 min-h-0">
-      {/* Data Summary Table Section - styled like Feature Overview */}
-      {summaryList.length > 0 && safeData.showDataSummary && (
-        <Card className="border-gray-200 bg-white shadow-sm mb-6">
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center space-x-2">
-                <div className="flex items-center justify-center w-6 h-6 bg-gray-100 rounded-md">
-                  <BarChart3 className="w-3 h-3 text-gray-600" />
-                </div>
-                <span className="font-semibold text-sm text-gray-800">DataFrame Summary</span>
-                <div className="h-px bg-gradient-to-r from-gray-200 to-transparent flex-1 ml-3"></div>
-              </div>
-              <div className="flex items-center gap-4">
-                {/* Toggle button for "Fetch columns with more than one unique value" */}
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-gray-500">Fetch columns with more than one unique value</span>
-                  <Switch
-                    checked={safeData.filterUnique || false}
-                    onCheckedChange={(val) => {
-                      onDataChange({ filterUnique: val });
-                    }}
-                    className="data-[state=checked]:bg-[#458EE2]"
-                  />
-                </div>
-                {/* Collapse/Expand button */}
-                <button
-                  onClick={() => toggleDataSummaryCollapsed(0)}
-                  className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
-                  aria-label={dataSummaryCollapsed[0] ? 'Expand data summary' : 'Collapse data summary'}
-                >
-                  {dataSummaryCollapsed[0] ? (
-                    <ChevronDown className="w-5 h-5 text-gray-600" />
-                  ) : (
-                    <ChevronUp className="w-5 h-5 text-gray-600" />
-                  )}
-                </button>
-              </div>
+      {!safeData.dataframe ? (
+        <div className="flex-1 flex items-center justify-center">
+          <div className="text-center">
+            <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-3">
+              <Database className="w-6 h-6 text-blue-600" />
             </div>
-
-            <div className={`transition-all duration-300 ease-in-out ${dataSummaryCollapsed[0] ? 'max-h-0 opacity-0 overflow-hidden' : 'max-h-none opacity-100'}`}>
-              <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
-                {/* Transposed Table Layout - Matching Column Classifier Column Overview */}
-                <div className="overflow-x-auto">
-                  <div className="min-w-max">
-                    <div className="grid grid-rows-4 gap-0">
-                      {/* Row 1: Column Names */}
-                      <div className="flex bg-white border-b border-gray-200">
-                        <div className="w-40 font-bold text-black bg-gray-100 border-r border-gray-300 flex items-center justify-center sticky left-0 z-10">
-                          Columns
-                        </div>
-                        {Array.isArray(summaryList) ? summaryList.map((col, index) => (
-                          <div
-                            key={index}
-                            className="w-32 text-sm font-semibold text-black border-r border-gray-200 flex items-center justify-center"
-                          >
-                            {col.column}
-                          </div>
-                        )) : null}
-                      </div>
-
-                      {/* Row 2: Data Types */}
-                      <div className="flex bg-white border-b border-gray-200">
-                        <div className="w-40 font-bold text-black bg-gray-100 border-r border-gray-300 flex items-center justify-center sticky left-0 z-10">
-                          Data Type
-                        </div>
-                        {Array.isArray(summaryList) ? summaryList.map((col, index) => (
-                          <div
-                            key={index}
-                            className="w-32 text-sm border-r border-gray-200 flex items-center justify-center"
-                          >
-                            <Badge
-                              className="p-0 text-xs font-medium bg-gray-50 text-black"
-                            >
-                              {col.data_type}
-                            </Badge>
-                          </div>
-                        )) : null}
-                      </div>
-
-                      {/* Row 3: Unique Counts */}
-                      <div className="flex bg-gray-50 border-b border-gray-200">
-                        <div className="w-40 font-bold text-black bg-gray-100 border-r border-gray-300 flex items-center justify-center sticky left-0 z-10">
-                          Unique Counts
-                        </div>
-                        {Array.isArray(summaryList) ? summaryList.map((col, index) => (
-                          <div
-                            key={index}
-                            className="w-32 text-sm text-black border-r border-gray-200 flex items-center justify-center font-medium"
-                          >
-                            {col.unique_count}
-                          </div>
-                        )) : null}
-                      </div>
-
-                      {/* Row 4: Unique Values */}
-                      <div className="flex bg-white">
-                        <div className="w-40 font-bold text-black bg-gray-100 border-r border-gray-300 flex items-center justify-center sticky left-0 z-10 py-1">
-                          Unique Values
-                        </div>
-                        {Array.isArray(summaryList) ? summaryList.map((col, index) => (
-                          <div
-                            key={index}
-                            className="w-32 text-sm border-r border-gray-200 flex items-center justify-center py-1"
-                          >
-                            <div className="flex flex-col gap-px items-center">
-                              {(() => {
-                                // Check if this is a time column
-                                const isTime = isTimeColumn(col.column, col.data_type);
-                                
-                                if (isTime) {
-                                  // For time columns, use the new formatTimeColumnValues function
-                                  const formattedValues = formatTimeColumnValues(col.column, col.unique_values, col.data_type);
-                                  return (
-                                    <Badge className="p-0 text-xs bg-gray-50 text-black">
-                                      {formattedValues}
-                                    </Badge>
-                                  );
-                                } else {
-                                  // For non-time columns, show first 2 values + count
-                                  const visibleValues = Array.isArray(col.unique_values) ? col.unique_values.slice(0, 2) : [];
-                                  const hiddenCount = Array.isArray(col.unique_values) ? col.unique_values.length - 2 : 0;
-                                  
-                                  return (
-                                    <>
-                                      {visibleValues.map((val, i) => (
-                                        <Badge
-                                          key={i}
-                                          className="p-0 text-xs bg-gray-50 text-black"
-                                        >
-                                          {String(val)}
-                                        </Badge>
-                                      ))}
-                                      {hiddenCount > 0 && (
-                                        <Tooltip>
-                                          <TooltipTrigger asChild>
-                                            <span className="flex items-center gap-0.5 text-xs text-gray-600 font-medium cursor-pointer">
-                                              +{hiddenCount}
-                                            </span>
-                                          </TooltipTrigger>
-                                          <TooltipContent className="text-xs max-w-xs whitespace-pre-wrap">
-                                            {Array.isArray(col.unique_values) ? col.unique_values
-                                              .slice(2)
-                                              .map(val => String(val))
-                                              .join(', ') : ''}
-                                          </TooltipContent>
-                                        </Tooltip>
-                                      )}
-                                    </>
-                                  );
-                                }
-                              })()}
-                              {Array.isArray(col.unique_values) && col.unique_values.length === 0 && (
-                                <span className="text-xs text-gray-500 italic font-medium">
-                                  No values
-                                </span>
-                              )}
-                            </div>
-                          </div>
-                        )) : null}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Show configuration message when atom is not applied but data summary is shown */}
-      {safeData.showDataSummary && summaryList.length > 0 && !isApplied && (
-        <div className="flex items-center justify-center py-8">
+            <h3 className="text-lg font-medium text-gray-900 mb-2">Select Dataframe</h3>
+            <p className="text-sm text-gray-600">Choose a saved dataframe in the Settings tab to start exploring.</p>
+          </div>
+        </div>
+      ) : !(isApplied || safeData.applied) ? (
+        <div className="flex-1 flex items-center justify-center">
           <div className="text-center">
             <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-3">
               <BarChart3 className="w-6 h-6 text-blue-600" />
             </div>
             <h3 className="text-lg font-medium text-gray-900 mb-2">Configure Explore Settings</h3>
-            <p className="text-sm text-gray-600 mb-4">
-              Go to the Settings tab to configure dimensions, measures, and chart layout, then click "Apply Settings"
-            </p>
-            <div className="flex items-center justify-center space-x-2 text-xs text-gray-500">
-              <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
-              <span>Data summary table is visible</span>
-            </div>
+            <p className="text-sm text-gray-600">Go to the Settings tab to configure dimensions, measures, and chart layout, then click "Apply Settings"</p>
           </div>
         </div>
-      )}
+      ) : (
+        <>
+          {summaryList.length > 0 && safeData.showDataSummary && (
+            <Card className="border-gray-200 bg-white shadow-sm mb-6">
+              <CardContent className="p-4">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center space-x-2">
+                    <div className="flex items-center justify-center w-6 h-6 bg-gray-100 rounded-md">
+                      <BarChart3 className="w-3 h-3 text-gray-600" />
+                    </div>
+                    <span className="font-semibold text-sm text-gray-800">DataFrame Summary</span>
+                    <div className="h-px bg-gradient-to-r from-gray-200 to-transparent flex-1 ml-3"></div>
+                  </div>
+                  <div className="flex items-center gap-4">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-gray-500">Fetch columns with more than one unique value</span>
+                      <Switch
+                        checked={safeData.filterUnique || false}
+                        onCheckedChange={(val) => {
+                          onDataChange({ filterUnique: val });
+                        }}
+                        className="data-[state=checked]:bg-[#458EE2]"
+                      />
+                    </div>
+                    <button
+                      onClick={() => toggleDataSummaryCollapsed(0)}
+                      className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                      aria-label={dataSummaryCollapsed[0] ? 'Expand data summary' : 'Collapse data summary'}
+                    >
+                      {dataSummaryCollapsed[0] ? (
+                        <ChevronDown className="w-5 h-5 text-gray-600" />
+                      ) : (
+                        <ChevronUp className="w-5 h-5 text-gray-600" />
+                      )}
+                    </button>
+                  </div>
+                </div>
 
+                <div className={`transition-all duration-300 ease-in-out ${dataSummaryCollapsed[0] ? 'max-h-0 opacity-0 overflow-hidden' : 'max-h-none opacity-100'}`}>
+                  <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+                    <div className="overflow-x-auto">
+                      <div className="min-w-max">
+                        <div className="grid grid-rows-4 gap-0">
+                          <div className="flex bg-white border-b border-gray-200">
+                            <div className="w-40 font-bold text-black bg-gray-100 border-r border-gray-300 flex items-center justify-center sticky left-0 z-10">
+                              Columns
+                            </div>
+                            {Array.isArray(summaryList) ? summaryList.map((col, index) => (
+                              <div
+                                key={index}
+                                className="w-32 text-sm font-semibold text-black border-r border-gray-200 flex items-center justify-center"
+                              >
+                                {col.column}
+                              </div>
+                            )) : null}
+                          </div>
 
+                          <div className="flex bg-white border-b border-gray-200">
+                            <div className="w-40 font-bold text-black bg-gray-100 border-r border-gray-300 flex items-center justify-center sticky left-0 z-10">
+                              Data Type
+                            </div>
+                            {Array.isArray(summaryList) ? summaryList.map((col, index) => (
+                              <div
+                                key={index}
+                                className="w-32 text-sm border-r border-gray-200 flex items-center justify-center"
+                              >
+                                <Badge className="p-0 text-xs font-medium bg-gray-50 text-black">
+                                  {col.data_type}
+                                </Badge>
+                              </div>
+                            )) : null}
+                          </div>
 
-      {/* Multi-Graph Layout with Plus Button */}
-      {safeData.dataframe && (isApplied || safeData.applied) && safeData.graphLayout.numberOfGraphsInRow > 0 && (
-        <div className="flex-1 explore-chart-container">
-          {safeData.graphLayout.numberOfGraphsInRow === 1 ? (
-            // 1 graph per row: Simple vertical layout with plus button
-            <div className="space-y-4">
-              {Array.isArray(chartConfigs) ? chartConfigs.map((_, index) => renderChartComponent(index)) : null}
-              
-              {/* Plus Button - Always visible for 1 graph per row */}
-              <div className="flex justify-center">
-                <Button
-                  onClick={addChart}
-                  className="w-8 h-8 rounded-full bg-gray-200 hover:bg-gray-300 text-black border-0 shadow-sm"
-                  size="sm"
-                >
-                  <Plus className="w-4 h-4" />
-                </Button>
-              </div>
-            </div>
-          ) : (
-            // 2+ graphs per row: Grid layout with centered plus button
-            <div className="space-y-4">
-              <div 
-                className="explore-chart-grid gap-6"
-                style={{
-                  gridTemplateColumns: `repeat(${safeData.graphLayout.numberOfGraphsInRow}, 1fr)`
-                }}
-              >
-                {Array.isArray(chartConfigs) ? chartConfigs.map((_, index) => renderChartComponent(index)) : null}
-              </div>
-              {/* Plus Button - Always centered below the grid */}
-              <div className="flex justify-center">
-                <Button
-                  onClick={addChart}
-                  className="w-8 h-8 rounded-full bg-gray-200 hover:bg-gray-300 text-black border-0 shadow-sm"
-                  size="sm"
-                >
-                  <Plus className="w-4 h-4" />
-                </Button>
-              </div>
+                          <div className="flex bg-gray-50 border-b border-gray-200">
+                            <div className="w-40 font-bold text-black bg-gray-100 border-r border-gray-300 flex items-center justify-center sticky left-0 z-10">
+                              Unique Counts
+                            </div>
+                            {Array.isArray(summaryList) ? summaryList.map((col, index) => (
+                              <div
+                                key={index}
+                                className="w-32 text-sm text-black border-r border-gray-200 flex items-center justify-center font-medium"
+                              >
+                                {col.unique_count}
+                              </div>
+                            )) : null}
+                          </div>
+
+                          <div className="flex bg-white">
+                            <div className="w-40 font-bold text-black bg-gray-100 border-r border-gray-300 flex items-center justify-center sticky left-0 z-10 py-1">
+                              Unique Values
+                            </div>
+                            {Array.isArray(summaryList) ? summaryList.map((col, index) => (
+                              <div
+                                key={index}
+                                className="w-32 text-sm border-r border-gray-200 flex items-center justify-center py-1"
+                              >
+                                <div className="flex flex-col gap-px items-center">
+                                  {(() => {
+                                    const isTime = isTimeColumn(col.column, col.data_type);
+
+                                    if (isTime) {
+                                      const formattedValues = formatTimeColumnValues(col.column, col.unique_values, col.data_type);
+                                      return (
+                                        <Badge className="p-0 text-xs bg-gray-50 text-black">
+                                          {formattedValues}
+                                        </Badge>
+                                      );
+                                    } else {
+                                      const visibleValues = Array.isArray(col.unique_values) ? col.unique_values.slice(0, 2) : [];
+                                      const hiddenCount = Array.isArray(col.unique_values) ? col.unique_values.length - 2 : 0;
+
+                                      return (
+                                        <>
+                                          {visibleValues.map((val, i) => (
+                                            <Badge key={i} className="p-0 text-xs bg-gray-50 text-black">
+                                              {String(val)}
+                                            </Badge>
+                                          ))}
+                                          {hiddenCount > 0 && (
+                                            <Tooltip>
+                                              <TooltipTrigger asChild>
+                                                <span className="flex items-center gap-0.5 text-xs text-gray-600 font-medium cursor-pointer">
+                                                  +{hiddenCount}
+                                                </span>
+                                              </TooltipTrigger>
+                                              <TooltipContent className="text-xs max-w-xs whitespace-pre-wrap">
+                                                {Array.isArray(col.unique_values) ? col.unique_values
+                                                  .slice(2)
+                                                  .map(val => String(val))
+                                                  .join(', ') : ''}
+                                              </TooltipContent>
+                                            </Tooltip>
+                                          )}
+                                        </>
+                                      );
+                                    }
+                                  })()}
+                                  {Array.isArray(col.unique_values) && col.unique_values.length === 0 && (
+                                    <span className="text-xs text-gray-500 italic font-medium">
+                                      No values
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            )) : null}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {safeData.graphLayout.numberOfGraphsInRow > 0 && (
+            <div className="flex-1 explore-chart-container">
+              {safeData.graphLayout.numberOfGraphsInRow === 1 ? (
+                <div className="space-y-4">
+                  {Array.isArray(chartConfigs) ? chartConfigs.map((_, index) => renderChartComponent(index)) : null}
+                  <div className="flex justify-center">
+                    <Button
+                      onClick={addChart}
+                      className="w-8 h-8 rounded-full bg-gray-200 hover:bg-gray-300 text-black border-0 shadow-sm"
+                      size="sm"
+                    >
+                      <Plus className="w-4 h-4" />
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  <div
+                    className="explore-chart-grid gap-6"
+                    style={{ gridTemplateColumns: `repeat(${safeData.graphLayout.numberOfGraphsInRow}, 1fr)` }}
+                  >
+                    {Array.isArray(chartConfigs) ? chartConfigs.map((_, index) => renderChartComponent(index)) : null}
+                  </div>
+                  <div className="flex justify-center">
+                    <Button
+                      onClick={addChart}
+                      className="w-8 h-8 rounded-full bg-gray-200 hover:bg-gray-300 text-black border-0 shadow-sm"
+                      size="sm"
+                    >
+                      <Plus className="w-4 h-4" />
+                    </Button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
-        </div>
+        </>
       )}
     </div>
   );

@@ -43,6 +43,7 @@ interface Props {
   showAxisLabels?: boolean; // External control for axis labels visibility
   showDataLabels?: boolean; // External control for data labels visibility
   showGrid?: boolean; // External control for grid visibility
+  chartsPerRow?: number; // For multi pie chart layouts
 }
 
 // Excel-like color themes
@@ -322,7 +323,8 @@ const RechartsChartRenderer: React.FC<Props> = ({
   showLegend: propShowLegend, // External control for legend visibility
   showAxisLabels: propShowAxisLabels, // External control for axis labels visibility
   showDataLabels: propShowDataLabels, // External control for data labels visibility
-  showGrid: propShowGrid // External control for grid visibility
+  showGrid: propShowGrid, // External control for grid visibility
+  chartsPerRow
 }) => {
 
   // State for color theme - simplified approach
@@ -368,9 +370,22 @@ const RechartsChartRenderer: React.FC<Props> = ({
     if (!data) return [];
     if (Array.isArray(data)) return data;
 
-    if (type === 'pie_chart' && legendField && typeof data === 'object') {
+    if (type === 'pie_chart' && typeof data === 'object') {
+      // If a legend field is provided, the backend may return an object keyed by legend value
+      if (legendField) {
+        try {
+          return Object.values(data as Record<string, any[]>).flat();
+        } catch {
+          return [];
+        }
+      }
+
+      // When no legend field is provided, convert simple key-value pairs to { name, value }
       try {
-        return Object.values(data as Record<string, any[]>).flat();
+        return Object.entries(data as Record<string, number | string>).map(([name, value]) => ({
+          name,
+          value,
+        }));
       } catch {
         return [];
       }
@@ -1553,7 +1568,10 @@ const RechartsChartRenderer: React.FC<Props> = ({
           const nameKey = xKey || 'name';
 
           return (
-            <div className="grid grid-cols-2 gap-8 w-full">
+            <div
+              className="grid gap-8 w-full"
+              style={{ gridTemplateColumns: `repeat(${chartsPerRow || 2}, minmax(0, 1fr))` }}
+            >
               {Object.entries(pieGroups).map(([legendValue, slices]) => (
                 <div key={legendValue} className="flex flex-col items-center">
                   <PieChart width={300} height={300}>
