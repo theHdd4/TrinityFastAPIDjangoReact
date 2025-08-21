@@ -180,6 +180,40 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
   });
   const [chatBubbleShouldRender, setChatBubbleShouldRender] = useState(false);
 
+  // Persist chart state changes to parent atom settings for saving/loading
+  useEffect(() => {
+    const primaryConfig = chartConfigs[0] || {};
+    onDataChange({
+      chartConfigs,
+      chartFilters,
+      chartThemes,
+      chartOptions,
+      chartDataSets,
+      chartGenerated,
+      appliedFilters,
+      showUniqueToggles,
+      xAxis: primaryConfig.xAxis || '',
+      yAxis: primaryConfig.yAxes?.[0] || '',
+      xAxisLabel: primaryConfig.xAxisLabel || '',
+      yAxisLabel: primaryConfig.yAxisLabels?.[0] || '',
+      chartType: primaryConfig.chartType || 'line_chart',
+      legendField: primaryConfig.legendField || '',
+      aggregation: primaryConfig.aggregation || 'no_aggregation',
+      weightColumn: primaryConfig.weightColumn || '',
+      title: primaryConfig.title || '',
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    chartConfigs,
+    chartFilters,
+    chartThemes,
+    chartOptions,
+    chartDataSets,
+    chartGenerated,
+    appliedFilters,
+    showUniqueToggles,
+  ]);
+
   // Auto-generate charts on mount if data and configs exist
   useEffect(() => {
     chartConfigs.forEach((cfg, index) => {
