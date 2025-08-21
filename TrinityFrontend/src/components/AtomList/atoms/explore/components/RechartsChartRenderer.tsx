@@ -368,7 +368,31 @@ const RechartsChartRenderer: React.FC<Props> = ({
   // to work.
   const chartDataForRendering = useMemo(() => {
     if (!data) return [];
-    if (Array.isArray(data)) return data;
+
+    // When data is already an array, handle special cases for pie charts
+    if (Array.isArray(data)) {
+      // Backend may return pie chart data as array of [label, value] when
+      // no legend field is specified. Convert such tuples into objects that
+      // Recharts can understand.
+      if (
+        type === 'pie_chart' &&
+        (!legendField || legendField === '') &&
+        Array.isArray(data[0])
+      ) {
+        return (data as any[]).map((item) => {
+          const [name, rawValue] = item as [any, any];
+          let numericValue = rawValue;
+          if (typeof rawValue === 'object' && rawValue !== null) {
+            const firstNumber = Object.values(rawValue).find(
+              (v) => typeof v === 'number'
+            );
+            numericValue = firstNumber !== undefined ? firstNumber : rawValue;
+          }
+          return { name, value: numericValue };
+        });
+      }
+      return data;
+    }
 
     if (type === 'pie_chart' && typeof data === 'object') {
       // If a legend field is provided, the backend may return an object keyed by legend value
