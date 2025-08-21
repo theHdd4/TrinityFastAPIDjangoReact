@@ -40,7 +40,7 @@ interface ChartData {
 }
 
 const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataChange, onChartDataChange }) => {
-  const [chartDataSets, setChartDataSets] = useState<{ [idx: number]: any }>({});
+  const [chartDataSets, setChartDataSets] = useState<{ [idx: number]: any }>(data.chartDataSets || {});
   const svgRef = useRef<SVGSVGElement>(null);
   const [chartData, setChartData] = useState<ChartData | null>(null);
   const [isLoading, setIsLoading] = useState<{ [chartIndex: number]: boolean }>({});
@@ -92,14 +92,14 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
   
   // Filter state for each chart - now supports arrays for multi-selection
   const [chartFilters, setChartFilters] = useState<{ [chartIndex: number]: { [identifier: string]: string[] } }>({});
-  
+
   // Unique values for each identifier
   const [identifierUniqueValues, setIdentifierUniqueValues] = useState<{ [identifier: string]: string[] }>({});
   const [loadingUniqueValues, setLoadingUniqueValues] = useState<{ [identifier: string]: boolean }>({});
   const [openDropdowns, setOpenDropdowns] = useState<{ [key: string]: boolean }>({});
   const [appliedFilters, setAppliedFilters] = useState<{ [chartIndex: number]: boolean }>({});
   const [originalChartData, setOriginalChartData] = useState<{ [chartIndex: number]: any }>({});
-  const [chartGenerated, setChartGenerated] = useState<{ [chartIndex: number]: boolean }>({});
+  const [chartGenerated, setChartGenerated] = useState<{ [chartIndex: number]: boolean }>(data.chartGenerated || {});
   const [chartThemes, setChartThemes] = useState<{ [chartIndex: number]: string }>({});
   const [chartOptions, setChartOptions] = useState<{ [chartIndex: number]: { grid: boolean; legend: boolean; axisLabels: boolean; dataLabels: boolean } }>({});
   const [chartSortCounters, setChartSortCounters] = useState<{ [chartIndex: number]: number }>({});
@@ -133,23 +133,45 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
     weightColumn: '',
     dateFilters: [],
     filterUnique: false, // Default to false
+    chartConfigs: [],
+    chartFilters: {},
+    chartThemes: {},
+    chartOptions: {},
+    appliedFilters: {},
+    showUniqueToggles: {},
+    chartDataSets: {},
+    chartGenerated: {},
     ...data
   };
 
+  useEffect(() => {
+    if (safeData.chartFilters) setChartFilters(safeData.chartFilters);
+    if (safeData.chartThemes) setChartThemes(safeData.chartThemes);
+    if (safeData.chartOptions) setChartOptions(safeData.chartOptions);
+    if (safeData.appliedFilters) setAppliedFilters(safeData.appliedFilters);
+    if (safeData.showUniqueToggles) setShowUniqueToggles(safeData.showUniqueToggles);
+    if (safeData.chartDataSets) setChartDataSets(safeData.chartDataSets);
+    if (safeData.chartGenerated) setChartGenerated(safeData.chartGenerated);
+  }, []);
+
   // Multi-chart state
-  const [chartConfigs, setChartConfigs] = useState([
-    {
-      xAxis: safeData.xAxis || '',
-      yAxes: [safeData.yAxis || ''], // Array to support multiple Y-axes
-      xAxisLabel: safeData.xAxisLabel || '',
-      yAxisLabels: [safeData.yAxisLabel || ''], // Array to support multiple Y-axis labels
-      chartType: safeData.chartType || 'line_chart',
-      aggregation: safeData.aggregation || 'no_aggregation', // Default to no aggregation
-      weightColumn: safeData.weightColumn || '',
-      title: safeData.title || '',
-      legendField: safeData.legendField || '', // Field to use for creating multiple lines/series
-    }
-  ]);
+  const [chartConfigs, setChartConfigs] = useState(
+    safeData.chartConfigs && Array.isArray(safeData.chartConfigs) && safeData.chartConfigs.length > 0
+      ? safeData.chartConfigs
+      : [
+          {
+            xAxis: safeData.xAxis || '',
+            yAxes: [safeData.yAxis || ''], // Array to support multiple Y-axes
+            xAxisLabel: safeData.xAxisLabel || '',
+            yAxisLabels: [safeData.yAxisLabel || ''], // Array to support multiple Y-axis labels
+            chartType: safeData.chartType || 'line_chart',
+            aggregation: safeData.aggregation || 'no_aggregation', // Default to no aggregation
+            weightColumn: safeData.weightColumn || '',
+            title: safeData.title || '',
+            legendField: safeData.legendField || '', // Field to use for creating multiple lines/series
+          },
+        ]
+  );
 
   const [chatBubble, setChatBubble] = useState({
     visible: false,
@@ -157,6 +179,16 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
     anchor: { x: 0, y: 0 }
   });
   const [chatBubbleShouldRender, setChatBubbleShouldRender] = useState(false);
+
+  // Auto-generate charts on mount if data and configs exist
+  useEffect(() => {
+    chartConfigs.forEach((cfg, index) => {
+      if (!chartDataSets[index] && cfg.xAxis && hasValidYAxes(cfg.yAxes)) {
+        safeTriggerChartGeneration(index, cfg, 0);
+      }
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const openChartTypeTray = (e: React.MouseEvent, index: number) => {
     e.preventDefault();
@@ -181,17 +213,41 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
   const closeChatBubble = () => setChatBubble(prev => ({ ...prev, visible: false }));
   const handleBubbleExited = () => setChatBubbleShouldRender(false);
 
+  useEffect(() => {
+    const handleClickOutside = () => {
+      setOpenDropdowns({});
+      closeChatBubble();
+      setChartSettingsVisible({});
+      setChartFiltersVisible({});
+    };
+    const hasOpenDropdown = Object.values(openDropdowns).some(Boolean);
+    const hasOpenSettings = Object.values(chartSettingsVisible).some(Boolean);
+    const hasOpenFilters = Object.values(chartFiltersVisible).some(Boolean);
+    if (hasOpenDropdown || chatBubble.visible || hasOpenSettings || hasOpenFilters) {
+      document.addEventListener('click', handleClickOutside);
+    }
+    return () => document.removeEventListener('click', handleClickOutside);
+  }, [openDropdowns, chatBubble.visible, chartSettingsVisible, chartFiltersVisible]);
+
   // Initialize data summary collapse state
   useEffect(() => {
     setDataSummaryCollapsed({ 0: false });
     
-    // Initialize chart options for the first chart
-    setChartOptions({ 0: { grid: true, legend: true, axisLabels: true, dataLabels: true } });
-    setChartSortCounters({ 0: 0 });
+    // Initialize chart options for the first chart if not provided
+    if (!chartOptions[0]) {
+      setChartOptions({ 0: { grid: true, legend: true, axisLabels: true, dataLabels: true } });
+    }
+    if (!chartSortCounters[0]) {
+      setChartSortCounters({ 0: 0 });
+    }
 
-    // Initialize loading state for the first chart
-    setIsLoading({ 0: false });
-    setShowUniqueToggles({ 0: false });
+    // Initialize loading state and toggles for the first chart
+    if (!isLoading[0]) {
+      setIsLoading({ 0: false });
+    }
+    if (showUniqueToggles[0] === undefined) {
+      setShowUniqueToggles({ 0: false });
+    }
     
     // Cleanup function to clear any pending chart generation timeouts
     return () => {
@@ -1510,6 +1566,23 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                 >
                   <X className="w-3 h-3" />
                 </Button>
+                <Dialog>
+                  <DialogTrigger asChild>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-8 w-8 p-0"
+                      aria-label="Full screen"
+                    >
+                      <Maximize2 className="w-3 h-3" />
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent className="max-w-4xl">
+                    <div className="h-[500px] w-full">
+                      <RechartsChartRenderer {...rendererProps} />
+                    </div>
+                  </DialogContent>
+                </Dialog>
                 <button
                   onClick={() => toggleChartConfigCollapsed(index)}
                   className="p-2 hover:bg-pink-100 rounded-lg transition-colors"
@@ -1548,26 +1621,16 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                     }
                   }}
                 >
-                  <SelectTrigger className="w-32 h-8 text-xs" disabled={isLoadingColumns}>
+                  <SelectTrigger className="w-32 h-8 text-xs leading-none" disabled={isLoadingColumns}>
                     <SelectValue placeholder={
-                      isLoadingColumns ? "Loading..." : 
-                      allAvailableColumns.length === 0 ? "No column classifier config" : 
-                      "Select X-Axis"
+                      isLoadingColumns ? "Loading..." :
+                      allAvailableColumns.length === 0 ? "No column classifier config" :
+                      "x-axis"
                     } />
                   </SelectTrigger>
                   <SelectContent>
                     {Array.isArray(allAvailableColumns) ? allAvailableColumns.map((column, idx) => (
-                      <SelectItem key={idx} value={column}>
-                        <div className="flex items-center space-x-2">
-                          <span>{column}</span>
-                          {availableIdentifiers.includes(column) && (
-                            <span className="text-xs text-blue-600 bg-blue-50 px-1 rounded">ID</span>
-                          )}
-                          {availableMeasures.includes(column) && (
-                            <span className="text-xs text-green-600 bg-blue-50 px-1 rounded">M</span>
-                          )}
-                        </div>
-                      </SelectItem>
+                      <SelectItem key={idx} value={column}>{column}</SelectItem>
                     )) : (
                       <div className="text-xs text-gray-500 p-2">No column classifier config</div>
                     )}
@@ -1611,26 +1674,16 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                           }
                         }}
                       >
-                        <SelectTrigger className="w-32 h-8 text-xs" disabled={isLoadingColumns}>
+                        <SelectTrigger className="w-32 h-8 text-xs leading-none" disabled={isLoadingColumns}>
                           <SelectValue placeholder={
-                            isLoadingColumns ? "Loading..." : 
-                            allAvailableColumns.length === 0 ? "No column classifier config" : 
-                            "Select Y-Axis"
+                            isLoadingColumns ? "Loading..." :
+                            allAvailableColumns.length === 0 ? "No column classifier config" :
+                            "y-axis"
                           } />
                         </SelectTrigger>
                         <SelectContent>
                           {Array.isArray(allAvailableColumns) ? allAvailableColumns.map((column, idx) => (
-                            <SelectItem key={idx} value={column}>
-                              <div className="flex items-center space-x-2">
-                                <span>{column}</span>
-                                {availableIdentifiers.includes(column) && (
-                                  <span className="text-xs text-blue-600 bg-blue-50 px-1 rounded">ID</span>
-                                )}
-                                {availableMeasures.includes(column) && (
-                                  <span className="text-xs text-green-600 bg-blue-50 px-1 rounded">M</span>
-                                )}
-                              </div>
-                            </SelectItem>
+                            <SelectItem key={idx} value={column}>{column}</SelectItem>
                           )) : (
                             <div className="text-xs text-gray-500 p-2">No column classifier config</div>
                           )}
@@ -1725,18 +1778,16 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                         }
                       }}
                     >
-                      <SelectTrigger className="w-28 h-8 text-xs ml-2" disabled={isLoadingColumns}>
+                      <SelectTrigger
+                        className="w-32 min-w-[8rem] h-8 ml-2 text-xs leading-none"
+                        disabled={isLoadingColumns}
+                      >
                         <SelectValue placeholder="Select column" />
                       </SelectTrigger>
                       <SelectContent>
                         {Array.isArray(availableIdentifiers) && availableIdentifiers.length > 0 ? (
                           availableIdentifiers.map((column, idx) => (
-                            <SelectItem key={idx} value={column}>
-                              <div className="flex items-center space-x-2">
-                                <span>{column}</span>
-                                <span className="text-xs text-blue-600 bg-blue-50 px-1 rounded">ID</span>
-                              </div>
-                            </SelectItem>
+                            <SelectItem key={idx} value={column}>{column}</SelectItem>
                           ))
                         ) : (
                           <div className="text-xs text-gray-500 p-2">No categorical columns</div>
@@ -1752,7 +1803,10 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
 
             {/* Individual Chart Settings Panel */}
             {isSettingsVisible && (
-              <div className="mb-4 p-3 bg-blue-50 rounded-lg border border-blue-200 min-w-0 w-full explore-chart-settings">
+              <div
+                className="mb-4 p-3 bg-blue-50 rounded-lg border border-blue-200 min-w-0 w-full explore-chart-settings"
+                onClick={(e) => e.stopPropagation()}
+              >
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 min-w-0 w-full explore-chart-settings">
                   <div>
                     <Label className="text-xs text-gray-600">Chart Title</Label>
@@ -1862,13 +1916,14 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
 
             {/* Individual Chart Filters Panel */}
             {chartFiltersVisible[index] && (
-              <div 
+              <div
                 className={`mb-4 p-3 rounded-lg border relative group transition-all duration-200 cursor-pointer hover:shadow-sm hover:border-blue-300 min-w-0 ${
-                  showFilterCrossButtons[index] 
-                    ? 'bg-blue-100 border-2 border-blue-400 shadow-md' 
+                  showFilterCrossButtons[index]
+                    ? 'bg-blue-100 border-2 border-blue-400 shadow-md'
                     : 'bg-blue-50 border border-blue-200'
                 }`}
                 onDoubleClick={() => toggleFilterCrossButtons(index)}
+                onClick={(e) => e.stopPropagation()}
               >
                 {/* Double-click hint removed from top-right */}
                 
@@ -2191,7 +2246,7 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                         }`}
                         style={{
                           minHeight: config.chartType === 'pie_chart' ? '450px' : '400px',
-                          height: config.chartType === 'pie_chart' ? 'auto' : '400px',
+                          height: config.chartType === 'pie_chart' ? '450px' : '400px',
                           maxWidth: '100%'
                         }}
                       >
@@ -2221,18 +2276,6 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                           }
                           return (
                             <div className="relative w-full h-full">
-                              <Dialog>
-                                <DialogTrigger asChild>
-                                  <button type="button" aria-label="Full screen" className="absolute top-2 right-2 z-10">
-                                    <Maximize2 className="w-4 h-4 text-gray-900" />
-                                  </button>
-                                </DialogTrigger>
-                                <DialogContent className="max-w-4xl">
-                                  <div className="h-[500px] w-full">
-                                    <RechartsChartRenderer {...rendererProps} />
-                                  </div>
-                                </DialogContent>
-                              </Dialog>
                               <RechartsChartRenderer {...rendererProps} />
                             </div>
                           );
@@ -2555,8 +2598,29 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
 
   // Handle save action for charts
   const handleChartSave = (chartIndex: number) => {
-    // Implement save functionality here
-    // Success message removed - unnecessary notification popup
+    const config = chartConfigs[chartIndex];
+    if (!config) return;
+    const filters = chartFilters[chartIndex] || {};
+    onDataChange({
+      chartConfigs,
+      chartFilters,
+      chartThemes,
+      chartOptions,
+      chartDataSets,
+      chartGenerated,
+      appliedFilters,
+      showUniqueToggles,
+      xAxis: config.xAxis,
+      yAxis: config.yAxes?.[0] || '',
+      xAxisLabel: config.xAxisLabel || '',
+      yAxisLabel: config.yAxisLabels?.[0] || '',
+      chartType: config.chartType,
+      legendField: config.legendField,
+      aggregation: config.aggregation,
+      weightColumn: config.weightColumn,
+      title: config.title,
+      filters,
+    });
   };
 
   // Helper function to fetch date range for a specific column
