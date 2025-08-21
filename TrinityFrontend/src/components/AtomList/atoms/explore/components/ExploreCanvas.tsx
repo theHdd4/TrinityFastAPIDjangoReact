@@ -40,7 +40,7 @@ interface ChartData {
 }
 
 const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataChange, onChartDataChange }) => {
-  const [chartDataSets, setChartDataSets] = useState<{ [idx: number]: any }>({});
+  const [chartDataSets, setChartDataSets] = useState<{ [idx: number]: any }>(data.chartDataSets || {});
   const svgRef = useRef<SVGSVGElement>(null);
   const [chartData, setChartData] = useState<ChartData | null>(null);
   const [isLoading, setIsLoading] = useState<{ [chartIndex: number]: boolean }>({});
@@ -92,14 +92,14 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
   
   // Filter state for each chart - now supports arrays for multi-selection
   const [chartFilters, setChartFilters] = useState<{ [chartIndex: number]: { [identifier: string]: string[] } }>({});
-  
+
   // Unique values for each identifier
   const [identifierUniqueValues, setIdentifierUniqueValues] = useState<{ [identifier: string]: string[] }>({});
   const [loadingUniqueValues, setLoadingUniqueValues] = useState<{ [identifier: string]: boolean }>({});
   const [openDropdowns, setOpenDropdowns] = useState<{ [key: string]: boolean }>({});
   const [appliedFilters, setAppliedFilters] = useState<{ [chartIndex: number]: boolean }>({});
   const [originalChartData, setOriginalChartData] = useState<{ [chartIndex: number]: any }>({});
-  const [chartGenerated, setChartGenerated] = useState<{ [chartIndex: number]: boolean }>({});
+  const [chartGenerated, setChartGenerated] = useState<{ [chartIndex: number]: boolean }>(data.chartGenerated || {});
   const [chartThemes, setChartThemes] = useState<{ [chartIndex: number]: string }>({});
   const [chartOptions, setChartOptions] = useState<{ [chartIndex: number]: { grid: boolean; legend: boolean; axisLabels: boolean; dataLabels: boolean } }>({});
   const [chartSortCounters, setChartSortCounters] = useState<{ [chartIndex: number]: number }>({});
@@ -139,6 +139,8 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
     chartOptions: {},
     appliedFilters: {},
     showUniqueToggles: {},
+    chartDataSets: {},
+    chartGenerated: {},
     ...data
   };
 
@@ -148,6 +150,8 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
     if (safeData.chartOptions) setChartOptions(safeData.chartOptions);
     if (safeData.appliedFilters) setAppliedFilters(safeData.appliedFilters);
     if (safeData.showUniqueToggles) setShowUniqueToggles(safeData.showUniqueToggles);
+    if (safeData.chartDataSets) setChartDataSets(safeData.chartDataSets);
+    if (safeData.chartGenerated) setChartGenerated(safeData.chartGenerated);
   }, []);
 
   // Multi-chart state
@@ -175,6 +179,16 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
     anchor: { x: 0, y: 0 }
   });
   const [chatBubbleShouldRender, setChatBubbleShouldRender] = useState(false);
+
+  // Auto-generate charts on mount if data and configs exist
+  useEffect(() => {
+    chartConfigs.forEach((cfg, index) => {
+      if (!chartDataSets[index] && cfg.xAxis && hasValidYAxes(cfg.yAxes)) {
+        safeTriggerChartGeneration(index, cfg, 0);
+      }
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const openChartTypeTray = (e: React.MouseEvent, index: number) => {
     e.preventDefault();
@@ -2580,6 +2594,8 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
       chartFilters,
       chartThemes,
       chartOptions,
+      chartDataSets,
+      chartGenerated,
       appliedFilters,
       showUniqueToggles,
       xAxis: config.xAxis,

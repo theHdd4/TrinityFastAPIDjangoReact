@@ -321,6 +321,8 @@ export interface ExploreData {
   fallbackDimensions?: string[];
   fallbackMeasures?: string[];
   applied?: boolean;
+  chartDataSets?: { [idx: number]: any };
+  chartGenerated?: { [chartIndex: number]: boolean };
   [key: string]: any;
 }
 
