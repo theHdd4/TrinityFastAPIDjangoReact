@@ -513,9 +513,9 @@ const RechartsChartRenderer: React.FC<Props> = ({
     return { pivoted: Array.from(map.values()), uniqueValues };
   };
 
-  // Memoized pivoted data for line charts and bar charts with legend field
+  // Memoized pivoted data for charts with legend field
   const { pivoted: pivotedLineData, uniqueValues: legendValues } = useMemo(() => {
-    if ((type === 'line_chart' || type === 'bar_chart') && legendField && xField && yField) {
+    if ((type === 'line_chart' || type === 'bar_chart' || type === 'area_chart' || type === 'scatter_chart') && legendField && xField && yField) {
       // Check if data is already pivoted (has multiple Y-axis columns)
       const isDataAlreadyPivoted = chartDataForRendering.length > 0 && 
         chartDataForRendering[0] && 
@@ -939,7 +939,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
           // For bar charts, prioritize actual field names over generic keys
           xKey = xField || (availableKeys.includes('x') ? 'x' : availableKeys.includes('name') ? 'name' : availableKeys.includes('category') ? 'category' : availableKeys[0]);
           yKey = yField || (availableKeys.includes('y') ? 'y' : availableKeys.includes('value') ? 'value' : availableKeys[1] || availableKeys[0]);
-        } else if (type === 'line_chart') {
+    } else if (type === 'line_chart' || type === 'area_chart' || type === 'scatter_chart') {
           xKey = availableKeys.includes('x') ? 'x' : availableKeys.includes('date') ? 'date' : availableKeys[0];
           yKey = availableKeys.includes('y') ? 'y' : availableKeys.includes('value') ? 'value' : availableKeys[1] || availableKeys[0];
         }
@@ -956,7 +956,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
         } else if (type === 'bar_chart') {
           xKey = xField || (availableKeys.includes('x') ? 'x' : availableKeys.includes('name') ? 'name' : availableKeys.includes('category') ? 'category' : availableKeys[0]);
           yKey = yField || (availableKeys.includes('y') ? 'y' : availableKeys.includes('value') ? 'value' : availableKeys[1] || availableKeys[0]);
-        } else if (type === 'line_chart') {
+        } else if (type === 'line_chart' || type === 'area_chart' || type === 'scatter_chart') {
           xKey = availableKeys.includes('x') ? 'x' : availableKeys.includes('date') ? 'date' : availableKeys[0];
           yKey = availableKeys.includes('y') ? 'y' : availableKeys.includes('value') ? 'value' : availableKeys[1] || availableKeys[0];
         }
@@ -1977,8 +1977,8 @@ const RechartsChartRenderer: React.FC<Props> = ({
                 const baseWidth = 800; // Minimum width
                 let calculatedWidth = baseWidth;
                 
-                if (type === 'line_chart' || type === 'bar_chart') {
-                  // For line and bar charts, allocate more width per data point
+                if (type === 'line_chart' || type === 'bar_chart' || type === 'area_chart' || type === 'scatter_chart') {
+                  // For line, bar, area and scatter charts, allocate more width per data point
                   calculatedWidth = Math.max(chartDataForRendering.length * 60, baseWidth);
                 } else if (type === 'pie_chart') {
                   // For pie charts, use fixed width as they don't need horizontal scrolling

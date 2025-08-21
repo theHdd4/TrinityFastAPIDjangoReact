@@ -1510,6 +1510,23 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                 >
                   <X className="w-3 h-3" />
                 </Button>
+                <Dialog>
+                  <DialogTrigger asChild>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-8 w-8 p-0"
+                      aria-label="Full screen"
+                    >
+                      <Maximize2 className="w-3 h-3" />
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent className="max-w-4xl">
+                    <div className="h-[500px] w-full">
+                      <RechartsChartRenderer {...rendererProps} />
+                    </div>
+                  </DialogContent>
+                </Dialog>
                 <button
                   onClick={() => toggleChartConfigCollapsed(index)}
                   className="p-2 hover:bg-pink-100 rounded-lg transition-colors"
@@ -2191,7 +2208,7 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                         }`}
                         style={{
                           minHeight: config.chartType === 'pie_chart' ? '450px' : '400px',
-                          height: config.chartType === 'pie_chart' ? 'auto' : '400px',
+                          height: config.chartType === 'pie_chart' ? '450px' : '400px',
                           maxWidth: '100%'
                         }}
                       >
@@ -2221,18 +2238,6 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                           }
                           return (
                             <div className="relative w-full h-full">
-                              <Dialog>
-                                <DialogTrigger asChild>
-                                  <button type="button" aria-label="Full screen" className="absolute top-2 right-2 z-10">
-                                    <Maximize2 className="w-4 h-4 text-gray-900" />
-                                  </button>
-                                </DialogTrigger>
-                                <DialogContent className="max-w-4xl">
-                                  <div className="h-[500px] w-full">
-                                    <RechartsChartRenderer {...rendererProps} />
-                                  </div>
-                                </DialogContent>
-                              </Dialog>
                               <RechartsChartRenderer {...rendererProps} />
                             </div>
                           );
