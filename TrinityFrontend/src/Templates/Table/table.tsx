@@ -5,14 +5,20 @@ interface TableProps {
   headers: React.ReactNode[];
   colClasses?: string[];
   children: React.ReactNode;
+  bodyClassName?: string;
 }
 
-const Table: React.FC<TableProps> = ({ headers, colClasses = [], children }) => {
+const Table: React.FC<TableProps> = ({
+  headers,
+  colClasses = [],
+  children,
+  bodyClassName = '',
+}) => {
   return (
     <div className="table-wrapper">
       <div className="table-edge-left" />
       <div className="table-edge-right" />
-      <div className="table-overflow">
+      <div className={`table-overflow ${bodyClassName}`}>
         <table className="table-base">
           {colClasses.length > 0 && (
             <colgroup>

@@ -76,10 +76,9 @@ const ColClassifierColumnView: React.FC<ColClassifierColumnViewProps> = ({
   }, [columns, summary]);
 
   const displayed = useMemo(() => {
-    const filtered = filterUnique
+    return filterUnique
       ? allColumns.filter(c => c.unique_count > 1)
       : allColumns;
-    return filtered.slice(0, 20);
   }, [allColumns, filterUnique]);
 
   if (!displayed.length) return null;
@@ -102,6 +101,7 @@ const ColClassifierColumnView: React.FC<ColClassifierColumnViewProps> = ({
         <Table
           headers={["Column", "Data type", "Unique count", "Sample values"]}
           colClasses={["w-[30%]", "w-[20%]", "w-[15%]", "w-[35%]"]}
+          bodyClassName="max-h-[484px] overflow-y-auto"
         >
           {displayed.map(col => (
             <tr key={col.column} className="table-row">

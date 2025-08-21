@@ -12,6 +12,22 @@
 
 .table-overflow {
   @apply overflow-x-auto;
+  scrollbar-color: #cbd5e1 transparent;
+  scrollbar-width: thin;
+}
+
+.table-overflow::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.table-overflow::-webkit-scrollbar-thumb {
+  background-color: #cbd5e1;
+  border-radius: 9999px;
+}
+
+.table-overflow::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 .table-base {
