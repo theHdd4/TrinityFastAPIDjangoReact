@@ -178,7 +178,8 @@ const ExploreSettings = ({ data, settings, onDataChange, onApply }) => {
     }
   };
 
-  const existingDims = Object.keys(data.columnClassifierConfig?.dimensions || {});
+  const existingDims = Object.values(data.columnClassifierConfig?.dimensions || {})
+    .flat();
   const categoricalColumns = Array.isArray(data.columnSummary)
     ? data.columnSummary
         .filter((col: any) => !col.is_numerical && !existingDims.includes(col.column))
@@ -292,7 +293,7 @@ const ExploreSettings = ({ data, settings, onDataChange, onApply }) => {
               checked={showFilterSelector}
               onCheckedChange={setShowFilterSelector}
             />
-            <Label htmlFor="show-filter-selector">Select categorical columns</Label>
+            <Label htmlFor="show-filter-selector">Select Additional Filters</Label>
           </div>
           {showFilterSelector && (
             <div className="space-y-2">
