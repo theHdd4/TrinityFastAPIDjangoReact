@@ -1,5 +1,4 @@
 import React, { useEffect, useState, useMemo } from 'react';
-import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
@@ -13,6 +12,10 @@ interface ColumnInfo {
   unique_values: string[];
 }
 
+interface ColumnInfoWithCategory extends ColumnInfo {
+  category: 'unclassified' | 'identifiers' | 'measures';
+}
+
 interface ColClassifierColumnViewProps {
   objectName: string;
   columns: {
@@ -22,6 +25,22 @@ interface ColClassifierColumnViewProps {
   };
   filterUnique: boolean;
   onFilterToggle: (val: boolean) => void;
+}
+
+const categoryColors: Record<ColumnInfoWithCategory['category'], string> = {
+  unclassified: '#d5def7',
+  identifiers: '#2153f3',
+  measures: '#0d1a4e',
+};
+
+function Dot({ color }: { color: string }) {
+  return (
+    <span
+      className="inline-block h-2.5 w-2.5 rounded-full translate-y-0.5"
+      style={{ backgroundColor: color }}
+      aria-hidden
+    />
+  );
 }
 
 const ColClassifierColumnView: React.FC<ColClassifierColumnViewProps> = ({
@@ -52,138 +71,123 @@ const ColClassifierColumnView: React.FC<ColClassifierColumnViewProps> = ({
     fetchSummary();
   }, [objectName]);
 
-  const allColumns = useMemo(
-    () =>
-      columns.unclassified
-        .concat(columns.identifiers, columns.measures)
-        .map(name => summary.find(s => s.column === name)!)
-        .filter(Boolean),
-    [columns, summary]
-  );
+  const allColumns = useMemo(() => {
+    const mapWithCategory = (
+      names: string[],
+      category: ColumnInfoWithCategory['category']
+    ) =>
+      names
+        .map(name => {
+          const info = summary.find(s => s.column === name);
+          return info ? { ...info, category } : null;
+        })
+        .filter(Boolean) as ColumnInfoWithCategory[];
 
-  const displayed = useMemo(
-    () => {
-      const filtered = filterUnique
-        ? allColumns.filter(c => c.unique_count > 1)
-        : allColumns;
-      return filtered.slice(0, 20);
-    },
-    [allColumns, filterUnique]
-  );
+    return [
+      ...mapWithCategory(columns.unclassified, 'unclassified'),
+      ...mapWithCategory(columns.identifiers, 'identifiers'),
+      ...mapWithCategory(columns.measures, 'measures'),
+    ];
+  }, [columns, summary]);
+
+  const displayed = useMemo(() => {
+    const filtered = filterUnique
+      ? allColumns.filter(c => c.unique_count > 1)
+      : allColumns;
+    return filtered.slice(0, 20);
+  }, [allColumns, filterUnique]);
 
   if (!displayed.length) return null;
 
   return (
-    <div>
-      <div className="flex items-center justify-between mb-2">
-        <div className="flex items-center">
-          <div className="w-1 h-6 bg-gradient-to-b from-primary to-primary/80 rounded-full mr-4" />
-          <h3 className="text-xl font-bold text-foreground">Column Overview</h3>
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-gray-500">Fetch columns with more than one unique value</span>
-          <Switch
-            checked={filterUnique}
-            onCheckedChange={onFilterToggle}
-            className="data-[state=checked]:bg-[#458EE2]"
-          />
-        </div>
-      </div>
-
-      <Card className="border-2 border-black shadow-lg bg-white overflow-hidden">
-        <div className="overflow-x-auto">
-          <div className="min-w-max">
-            <div className="grid grid-rows-4 gap-0">
-              <div className="flex bg-white border-b border-gray-200">
-                <div className="w-40 font-bold text-black bg-gray-100 border-r border-gray-300 flex items-center justify-center sticky left-0 z-10">
-                  Columns
-                </div>
-                {displayed.map((col, index) => (
-                  <div
-                    key={index}
-                    className="w-32 text-sm font-semibold text-black border-r border-gray-200 flex items-center justify-center"
-                  >
-                    {col.column}
-                  </div>
-                ))}
-              </div>
-
-              <div className="flex bg-white border-b border-gray-200">
-                <div className="w-40 font-bold text-black bg-gray-100 border-r border-gray-300 flex items-center justify-center sticky left-0 z-10">
-                  Data Type
-                </div>
-                {displayed.map((col, index) => (
-                  <div
-                    key={index}
-                    className="w-32 text-sm border-r border-gray-200 flex items-center justify-center"
-                  >
-                    <Badge
-                      className="p-0 text-xs font-medium bg-gray-50 text-black"
-                    >
-                      {col.data_type}
-                    </Badge>
-                  </div>
-                ))}
-              </div>
-
-              <div className="flex bg-gray-50 border-b border-gray-200">
-                <div className="w-40 font-bold text-black bg-gray-100 border-r border-gray-300 flex items-center justify-center sticky left-0 z-10">
-                  Unique Counts
-                </div>
-                {displayed.map((col, index) => (
-                  <div
-                    key={index}
-                    className="w-32 text-sm text-black border-r border-gray-200 flex items-center justify-center font-medium"
-                  >
-                    {col.unique_count}
-                  </div>
-                ))}
-              </div>
-
-              <div className="flex bg-white">
-                <div className="w-40 font-bold text-black bg-gray-100 border-r border-gray-300 flex items-center justify-center sticky left-0 z-10 py-1">
-                  Unique Values
-                </div>
-                {displayed.map((col, index) => (
-                  <div
-                    key={index}
-                    className="w-32 text-sm border-r border-gray-200 flex items-center justify-center py-1"
-                  >
-                    <div className="flex flex-col gap-px items-center">
-                      {col.unique_values.slice(0, 2).map((val, i) => (
-                        <Badge
-                          key={i}
-                          className="p-0 text-xs bg-gray-50 text-black"
-                        >
-                          {String(val)}
-                        </Badge>
-                      ))}
-                      {col.unique_values.length > 2 && (
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <span className="flex items-center gap-0.5 text-xs text-gray-600 font-medium cursor-pointer">
-                              <Plus className="w-3 h-3" />
-                              {col.unique_values.length - 2}
-                            </span>
-                          </TooltipTrigger>
-                          <TooltipContent className="text-xs max-w-xs whitespace-pre-wrap">
-                            {col.unique_values
-                              .slice(2)
-                              .map(val => String(val))
-                              .join(', ')}
-                          </TooltipContent>
-                        </Tooltip>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
+    <div className="w-full">
+      <div className="mx-auto max-w-screen-2xl rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <div className="flex items-center justify-between border-b border-slate-200 px-5 py-3">
+          <h2 className="text-base font-semibold text-slate-800">Cardinality View</h2>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-slate-500">&gt;1 unique</span>
+            <Switch
+              checked={filterUnique}
+              onCheckedChange={onFilterToggle}
+              className="data-[state=checked]:bg-[#458EE2]"
+            />
           </div>
         </div>
-      </Card>
+
+        <div className="relative">
+          <div className="pointer-events-none absolute inset-y-0 left-0 w-6 bg-gradient-to-r from-white to-transparent" />
+          <div className="pointer-events-none absolute inset-y-0 right-0 w-6 bg-gradient-to-l from-white to-transparent" />
+
+          <div className="overflow-x-auto">
+            <table className="min-w-[700px] w-full border-collapse text-sm">
+              <colgroup>
+                <col className="w-[30%]" />
+                <col className="w-[20%]" />
+                <col className="w-[15%]" />
+                <col className="w-[35%]" />
+              </colgroup>
+              <thead className="sticky top-0 z-10 bg-slate-50 text-slate-600">
+                <tr className="border-b border-slate-200">
+                  <th className="px-5 py-3 text-left font-medium">Column</th>
+                  <th className="px-5 py-3 text-left font-medium">Data type</th>
+                  <th className="px-5 py-3 text-left font-medium">Unique count</th>
+                  <th className="px-5 py-3 text-left font-medium">Sample values</th>
+                </tr>
+              </thead>
+              <tbody>
+                {displayed.map(col => (
+                  <tr
+                    key={col.column}
+                    className="border-b border-slate-100 hover:bg-slate-50/60 transition-colors"
+                  >
+                    <td className="px-5 py-3 whitespace-nowrap text-slate-800">
+                      <div className="flex items-center gap-3">
+                        <Dot color={categoryColors[col.category]} />
+                        <span>{col.column}</span>
+                      </div>
+                    </td>
+                    <td className="px-5 py-3 text-slate-700">{col.data_type}</td>
+                    <td className="px-5 py-3 text-slate-700">
+                      {col.unique_count.toLocaleString()}
+                    </td>
+                    <td className="px-5 py-3 text-slate-700">
+                      <div className="flex flex-wrap items-center gap-1">
+                        {col.unique_values.slice(0, 2).map((val, i) => (
+                          <Badge
+                            key={i}
+                            className="p-0 px-1 text-xs bg-gray-50 text-slate-700"
+                          >
+                            {String(val)}
+                          </Badge>
+                        ))}
+                        {col.unique_values.length > 2 && (
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <span className="flex items-center gap-0.5 text-xs text-slate-600 font-medium cursor-pointer">
+                                <Plus className="w-3 h-3" />
+                                {col.unique_values.length - 2}
+                              </span>
+                            </TooltipTrigger>
+                            <TooltipContent className="text-xs max-w-xs whitespace-pre-wrap">
+                              {col.unique_values
+                                .slice(2)
+                                .map(val => String(val))
+                                .join(', ')}
+                            </TooltipContent>
+                          </Tooltip>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
     </div>
   );
 };
 
 export default ColClassifierColumnView;
+
