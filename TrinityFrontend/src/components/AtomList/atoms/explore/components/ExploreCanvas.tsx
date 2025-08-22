@@ -1058,12 +1058,26 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
   const handleFilterChange = (dimensionId: string, values: string[]) => {
     const currentFilters = safeData.dateFilters || [];
     const updatedFilters = currentFilters.filter(f => f.column !== dimensionId);
-    
+
     if (values.length > 0) {
       updatedFilters.push({ column: dimensionId, values });
     }
-    
-    onDataChange({ dateFilters: updatedFilters });
+
+    const updatedChartFilters: { [chartIndex: number]: { [identifier: string]: string[] } } = {};
+    chartConfigs.forEach((_, idx) => {
+      const existing = chartFilters[idx] || {};
+      const chartFilter = { ...existing };
+      if (values.length > 0) {
+        chartFilter[dimensionId] = values;
+      } else {
+        delete chartFilter[dimensionId];
+      }
+      updatedChartFilters[idx] = chartFilter;
+    });
+
+    setChartFilters(updatedChartFilters);
+
+    onDataChange({ dateFilters: updatedFilters, chartFilters: updatedChartFilters });
   };
   
   // Multi-selection filter handler
@@ -1477,7 +1491,7 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
 
   // Render identifier chip for filter UI
   const renderIdentifierChip = (dimensionId: string, identifier: string) => {
-    const selectedFilters = safeData.dateFilters?.find(f => f.column === `${dimensionId}_${identifier}`)?.values || [];
+    const selectedFilters = chartFilters[0]?.[`${dimensionId}_${identifier}`] || [];
     
     const getUniqueValues = (dimId: string, ident: string) => {
       // Look up unique values from column summary if available
@@ -1501,7 +1515,7 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
         <Select 
           value={selectedFilters.length > 0 ? selectedFilters[0] : ''}
           onValueChange={(value) => {
-            const currentFilters = safeData.dateFilters?.find(f => f.column === `${dimensionId}_${identifier}`)?.values || [];
+            const currentFilters = chartFilters[0]?.[`${dimensionId}_${identifier}`] || [];
             const newFilters = currentFilters.includes(value) 
               ? currentFilters.filter(f => f !== value)
               : [...currentFilters, value];
