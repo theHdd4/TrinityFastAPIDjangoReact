@@ -522,9 +522,12 @@ const RechartsChartRenderer: React.FC<Props> = ({
           row.name ??
           row.category ??
           row.Year ??
-          row.year ??
-          row[Object.keys(row)[0]];
+          row.year;
       }
+      // If no valid X value is found, skip this row to prevent accidental
+      // replacement of the X-axis label with a Y-axis value.
+      if (xVal === undefined) return;
+
       // Coerce numeric strings back to numbers so axis labels keep original type
       if (typeof xVal === 'string' && xVal.trim() !== '' && !isNaN(Number(xVal))) {
         xVal = Number(xVal);
