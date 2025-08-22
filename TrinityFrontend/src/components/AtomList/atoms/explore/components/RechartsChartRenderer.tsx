@@ -549,7 +549,14 @@ const RechartsChartRenderer: React.FC<Props> = ({
       // Use stringified key to preserve original order and ensure exact matches
       const key = String(xVal);
       const existing = map.get(key) || { [actualXKey]: xVal };
-      existing[legendVal] = yVal;
+
+      // Safeguard: If legend value happens to match the X-axis key name,
+      // store the legend series under a suffixed key to avoid overwriting
+      // the actual X value.
+      const legendKeyName = String(legendVal) === actualXKey ? `${legendVal}_series` : legendVal;
+      existing[legendKeyName] = yVal;
+      // Ensure the original X value is always retained
+      existing[actualXKey] = xVal;
       map.set(key, existing);
     });
 
@@ -568,21 +575,26 @@ const RechartsChartRenderer: React.FC<Props> = ({
   // Memoized pivoted data for charts with legend field
   const { pivoted: pivotedLineData, uniqueValues: legendValues, actualXKey: pivotActualXKey } = useMemo(() => {
     if ((type === 'line_chart' || type === 'bar_chart' || type === 'area_chart' || type === 'scatter_chart') && legendField && xField && yField) {
-      // Check if data is already pivoted (has multiple Y-axis columns)
-      const isDataAlreadyPivoted = chartDataForRendering.length > 0 && 
-        chartDataForRendering[0] && 
-        Object.keys(chartDataForRendering[0]).some(key => 
-          key !== xField && 
-          key !== legendField && 
-          typeof chartDataForRendering[0][key] === 'number'
-        );
-      
+      // Check if data is already pivoted (has multiple numeric columns beyond
+      // the designated x, y, and legend fields)
+      const firstRow = chartDataForRendering[0];
+      const numericColumns = firstRow
+        ? Object.keys(firstRow).filter(key => {
+            const lower = key.toLowerCase();
+            if (lower === xField.toLowerCase()) return false;
+            if (lower === yField.toLowerCase()) return false;
+            if (lower === legendField.toLowerCase()) return false;
+            return typeof firstRow[key] === 'number';
+          })
+        : [];
+      const isDataAlreadyPivoted = numericColumns.length > 1;
+
       if (isDataAlreadyPivoted) {
         // Data is already pivoted, extract legend values from column names
-        const firstRow = chartDataForRendering[0];
         const legendColumns = Object.keys(firstRow).filter(key => {
           // Filter out X-axis field (case-insensitive)
           const isXAxisField = key.toLowerCase() === xField.toLowerCase() ||
+                              key.toLowerCase() === yField.toLowerCase() ||
                               key.toLowerCase() === 'year' ||
                               key.toLowerCase() === 'date' ||
                               key.toLowerCase() === 'category' ||
