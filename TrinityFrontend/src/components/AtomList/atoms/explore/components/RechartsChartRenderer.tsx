@@ -514,11 +514,37 @@ const RechartsChartRenderer: React.FC<Props> = ({
     const map = new Map<string, any>();
 
     rows.forEach((row) => {
-      const xVal = row[actualXKey];
-      const legendVal = row[actualLegendKey];
-      const rawY = row[actualYKey];
+      // Resolve X value with multiple fallbacks so original data labels are preserved
+      let xVal = row[actualXKey];
+      if (xVal === undefined) {
+        xVal =
+          row.x ??
+          row.name ??
+          row.category ??
+          row.Year ??
+          row.year ??
+          row[Object.keys(row)[0]];
+      }
+      // Coerce numeric strings back to numbers so axis labels keep original type
+      if (typeof xVal === 'string' && xVal.trim() !== '' && !isNaN(Number(xVal))) {
+        xVal = Number(xVal);
+      }
+
+      // Resolve legend and Y values with generic fallbacks
+      let legendVal = row[actualLegendKey];
+      if (legendVal === undefined) {
+        const fallbackLegendKey = Object.keys(row).find(k => k !== actualXKey && k !== actualYKey);
+        legendVal = row[legendKey] ?? row.legend ?? row.series ?? row.group ?? (fallbackLegendKey ? row[fallbackLegendKey] : undefined);
+      }
+
+      let rawY = row[actualYKey];
+      if (rawY === undefined) {
+        const fallbackYKey = Object.keys(row).find(k => k !== actualXKey && k !== actualLegendKey);
+        rawY = row.y ?? row.value ?? row.Volume ?? row.volume ?? (fallbackYKey ? row[fallbackYKey] : undefined);
+      }
+
       const yVal = typeof rawY === 'number' ? rawY : Number(String(rawY).replace(/,/g, ''));
-      if (legendVal !== undefined && !uniqueValues.includes(legendVal)) uniqueValues.push(legendVal);
+      if (legendVal !== undefined && !uniqueValues.includes(String(legendVal))) uniqueValues.push(String(legendVal));
 
       // Use stringified key to preserve original order and ensure exact matches
       const key = String(xVal);
@@ -1306,11 +1332,12 @@ const RechartsChartRenderer: React.FC<Props> = ({
               {currentShowGrid && <CartesianGrid strokeDasharray="3 3" />}
               <XAxis
                 dataKey={xKeyForBar}
+                type="category"
                 label={currentShowAxisLabels && xAxisLabel ? { value: capitalizeWords(xAxisLabel), position: 'bottom', style: axisLabelStyle } : undefined}
                 tick={axisTickStyle}
                 tickLine={false}
                 allowDuplicatedCategory={false}
-                tickFormatter={(v) => String(v)}
+                tickFormatter={(v) => (typeof v === 'number' ? v : String(v))}
               />
               <YAxis
                 tickFormatter={formatLargeNumber}
