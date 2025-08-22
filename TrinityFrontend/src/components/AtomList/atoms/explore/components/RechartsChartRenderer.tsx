@@ -241,22 +241,23 @@ const DEFAULT_COLORS = [
 
 const FONT_FAMILY = `'Inter', 'Segoe UI', sans-serif`;
 
-// Number formatting function for large numbers
+// Number formatting function for large numbers with proper precision
 const formatLargeNumber = (value: number): string => {
   const absValue = Math.abs(value);
-  
-  if (absValue >= 1000000000) { // Billions (10^9)
-    const scaled = value / 1000000000;
-    return scaled.toFixed(0) + 'B';
-  } else if (absValue >= 1000000) { // Millions (10^6)
-    const scaled = value / 1000000;
-    return scaled.toFixed(0) + 'M';
-  } else if (absValue >= 1000) { // Thousands (10^3)
-    const scaled = value / 1000;
-    return scaled.toFixed(0) + 'K';
-  } else {
-    return value.toString(); // Numbers less than 1000
+
+  const formatScaled = (scaled: number): string => {
+    // Keep at most two decimals and trim trailing zeros (e.g. 2.34M, 2M)
+    return parseFloat(scaled.toFixed(2)).toString();
+  };
+
+  if (absValue >= 1_000_000_000) { // Billions (10^9)
+    return `${formatScaled(value / 1_000_000_000)}B`;
+  } else if (absValue >= 1_000_000) { // Millions (10^6)
+    return `${formatScaled(value / 1_000_000)}M`;
+  } else if (absValue >= 1_000) { // Thousands (10^3)
+    return `${formatScaled(value / 1_000)}K`;
   }
+  return value.toLocaleString(); // Numbers less than 1000
 };
 
 // Format numbers for tooltips - show exact values without suffixes
@@ -497,8 +498,8 @@ const RechartsChartRenderer: React.FC<Props> = ({
     xKey: string,
     yKey: string,
     legendKey: string
-  ): { pivoted: any[]; uniqueValues: string[] } => {
-    if (!rows || rows.length === 0) return { pivoted: [], uniqueValues: [] };
+  ): { pivoted: any[]; uniqueValues: string[]; actualXKey: string } => {
+    if (!rows || rows.length === 0) return { pivoted: [], uniqueValues: [], actualXKey: xKey };
 
     // Case-insensitive matching of provided keys to actual row keys
     const sampleRow = rows[0] || {};
@@ -510,18 +511,56 @@ const RechartsChartRenderer: React.FC<Props> = ({
     const uniqueValues: string[] = [];
 
     // Map from x value to aggregated object
-    const map = new Map<string | number, any>();
+    const map = new Map<string, any>();
 
     rows.forEach((row) => {
-      const xVal = row[actualXKey];
-      const legendVal = row[actualLegendKey];
-      const yVal = row[actualYKey];
-      if (legendVal !== undefined && !uniqueValues.includes(legendVal)) uniqueValues.push(legendVal);
+      // Resolve X value with multiple fallbacks so original data labels are preserved
+      let xVal = row[actualXKey];
+      if (xVal === undefined) {
+        xVal =
+          row.x ??
+          row.name ??
+          row.category ??
+          row.Year ??
+          row.year;
+      }
+      // If no valid X value is found, skip this row to prevent accidental
+      // replacement of the X-axis label with a Y-axis value.
+      if (xVal === undefined) return;
 
-      // Preserve the actual X-axis key from the source data to avoid casing mismatches
-      const existing = map.get(xVal) || { [actualXKey]: xVal };
-      existing[legendVal] = yVal;
-      map.set(xVal, existing);
+      // Coerce numeric strings back to numbers so axis labels keep original type
+      if (typeof xVal === 'string' && xVal.trim() !== '' && !isNaN(Number(xVal))) {
+        xVal = Number(xVal);
+      }
+
+      // Resolve legend and Y values with generic fallbacks
+      let legendVal = row[actualLegendKey];
+      if (legendVal === undefined) {
+        const fallbackLegendKey = Object.keys(row).find(k => k !== actualXKey && k !== actualYKey);
+        legendVal = row[legendKey] ?? row.legend ?? row.series ?? row.group ?? (fallbackLegendKey ? row[fallbackLegendKey] : undefined);
+      }
+
+      let rawY = row[actualYKey];
+      if (rawY === undefined) {
+        const fallbackYKey = Object.keys(row).find(k => k !== actualXKey && k !== actualLegendKey);
+        rawY = row.y ?? row.value ?? row.Volume ?? row.volume ?? (fallbackYKey ? row[fallbackYKey] : undefined);
+      }
+
+      const yVal = typeof rawY === 'number' ? rawY : Number(String(rawY).replace(/,/g, ''));
+      if (legendVal !== undefined && !uniqueValues.includes(String(legendVal))) uniqueValues.push(String(legendVal));
+
+      // Use stringified key to preserve original order and ensure exact matches
+      const key = String(xVal);
+      const existing = map.get(key) || { [actualXKey]: xVal };
+
+      // Safeguard: If legend value happens to match the X-axis key name,
+      // store the legend series under a suffixed key to avoid overwriting
+      // the actual X value.
+      const legendKeyName = String(legendVal) === actualXKey ? `${legendVal}_series` : legendVal;
+      existing[legendKeyName] = yVal;
+      // Ensure the original X value is always retained
+      existing[actualXKey] = xVal;
+      map.set(key, existing);
     });
 
     const pivotedArray = Array.from(map.values()).sort((a, b) => {
@@ -533,51 +572,58 @@ const RechartsChartRenderer: React.FC<Props> = ({
       return String(aVal).localeCompare(String(bVal));
     });
 
-    return { pivoted: pivotedArray, uniqueValues };
+    return { pivoted: pivotedArray, uniqueValues, actualXKey };
   };
 
   // Memoized pivoted data for charts with legend field
-  const { pivoted: pivotedLineData, uniqueValues: legendValues } = useMemo(() => {
+  const { pivoted: pivotedLineData, uniqueValues: legendValues, actualXKey: pivotActualXKey } = useMemo(() => {
     if ((type === 'line_chart' || type === 'bar_chart' || type === 'area_chart' || type === 'scatter_chart') && legendField && xField && yField) {
-      // Check if data is already pivoted (has multiple Y-axis columns)
-      const isDataAlreadyPivoted = chartDataForRendering.length > 0 && 
-        chartDataForRendering[0] && 
-        Object.keys(chartDataForRendering[0]).some(key => 
-          key !== xField && 
-          key !== legendField && 
-          typeof chartDataForRendering[0][key] === 'number'
-        );
-      
+      // Check if data is already pivoted (has multiple numeric columns beyond
+      // the designated x, y, and legend fields)
+      const firstRow = chartDataForRendering[0];
+      const numericColumns = firstRow
+        ? Object.keys(firstRow).filter(key => {
+            const lower = key.toLowerCase();
+            if (lower === xField.toLowerCase()) return false;
+            if (lower === yField.toLowerCase()) return false;
+            if (lower === legendField.toLowerCase()) return false;
+            return typeof firstRow[key] === 'number';
+          })
+        : [];
+      const isDataAlreadyPivoted = numericColumns.length > 1;
+
       if (isDataAlreadyPivoted) {
         // Data is already pivoted, extract legend values from column names
-        const firstRow = chartDataForRendering[0];
         const legendColumns = Object.keys(firstRow).filter(key => {
           // Filter out X-axis field (case-insensitive)
-          const isXAxisField = key.toLowerCase() === xField.toLowerCase() || 
-                              key.toLowerCase() === 'year' || 
-                              key.toLowerCase() === 'date' || 
+          const isXAxisField = key.toLowerCase() === xField.toLowerCase() ||
+                              key.toLowerCase() === yField.toLowerCase() ||
+                              key.toLowerCase() === 'year' ||
+                              key.toLowerCase() === 'date' ||
                               key.toLowerCase() === 'category' ||
                               key.toLowerCase() === 'label';
-          
+
           // Only include numeric fields that are NOT X-axis fields
           return !isXAxisField && typeof firstRow[key] === 'number';
         });
-        
-        return { 
-          pivoted: chartDataForRendering, 
-          uniqueValues: legendColumns 
+
+        const actualXKey = Object.keys(firstRow).find(k => k.toLowerCase() === xField.toLowerCase()) || Object.keys(firstRow)[0];
+
+        return {
+          pivoted: chartDataForRendering,
+          uniqueValues: legendColumns,
+          actualXKey
         };
-      } else {
-        // Data needs pivoting, use the existing function
-        return pivotDataByLegend(chartDataForRendering, xField, yField, legendField);
       }
+      // Data needs pivoting, use the existing function
+      return pivotDataByLegend(chartDataForRendering, xField, yField, legendField);
     }
-    return { pivoted: [], uniqueValues: [] };
+    return { pivoted: [], uniqueValues: [], actualXKey: xField };
   }, [type, chartDataForRendering, xField, yField, legendField]);
-  
+
   // Styling for axis ticks & labels
   const axisTickStyle = { fontFamily: FONT_FAMILY, fontSize: 12, fill: '#475569' } as const;
-  const axisLabelStyle = { 
+  const axisLabelStyle = {
     fontFamily: FONT_FAMILY, 
     fontSize: 14, 
     fontWeight: 'bold',
@@ -1295,19 +1341,18 @@ const RechartsChartRenderer: React.FC<Props> = ({
          * Multi-bar rendering when a legend field is provided
          * ----------------------------------------------------------- */
         if (legendField && legendValues.length > 0 && pivotedLineData.length > 0) {
-          // Resolve actual X-axis key in case of casing differences
-          const xKeyForBar = xField
-            ? Object.keys(pivotedLineData[0]).find(k => k.toLowerCase() === xField.toLowerCase()) || Object.keys(pivotedLineData[0])[0]
-            : Object.keys(pivotedLineData[0])[0];
+          const xKeyForBar = pivotActualXKey || xField || Object.keys(pivotedLineData[0] || {})[0];
           return (
             <BarChart data={pivotedLineData} margin={{ top: 20, right: 20, left: 20, bottom: 20 }}>
               {currentShowGrid && <CartesianGrid strokeDasharray="3 3" />}
               <XAxis
                 dataKey={xKeyForBar}
+                type="category"
                 label={currentShowAxisLabels && xAxisLabel ? { value: capitalizeWords(xAxisLabel), position: 'bottom', style: axisLabelStyle } : undefined}
                 tick={axisTickStyle}
                 tickLine={false}
                 allowDuplicatedCategory={false}
+                tickFormatter={(v) => (typeof v === 'number' ? v : String(v))}
               />
               <YAxis
                 tickFormatter={formatLargeNumber}
@@ -1315,28 +1360,26 @@ const RechartsChartRenderer: React.FC<Props> = ({
                 tick={axisTickStyle}
                 tickLine={false}
               />
-              <Tooltip 
+              <Tooltip
                 content={({ active, payload, label }) => {
                   if (active && payload && payload.length) {
                     return (
                       <div className="explore-chart-tooltip">
                         <p className="font-semibold text-gray-900 mb-2 text-sm">{label}</p>
-                        {payload.map((entry: any, index: number) => {
-                          return (
-                            <div key={index} className="flex items-center gap-2 mb-1">
-                              <div 
-                                className="w-3 h-3 rounded-full" 
-                                style={{ backgroundColor: entry.color }}
-                              />
-                              <span className="text-sm font-medium text-gray-700">
-                                {entry.dataKey}: 
-                              </span>
-                              <span className="text-sm font-semibold text-gray-700">
-                                {typeof entry.value === 'number' ? formatTooltipNumber(entry.value) : entry.value}
-                              </span>
-                            </div>
-                          );
-                        })}
+                        {payload.map((entry: any, index: number) => (
+                          <div key={index} className="flex items-center gap-2 mb-1">
+                            <div
+                              className="w-3 h-3 rounded-full"
+                              style={{ backgroundColor: entry.color }}
+                            />
+                            <span className="text-sm font-medium text-gray-700">
+                              {entry.dataKey}:
+                            </span>
+                            <span className="text-sm font-semibold text-gray-700">
+                              {typeof entry.value === 'number' ? formatTooltipNumber(entry.value) : entry.value}
+                            </span>
+                          </div>
+                        ))}
                       </div>
                     );
                   }
@@ -1362,9 +1405,9 @@ const RechartsChartRenderer: React.FC<Props> = ({
                   animationEasing="ease-out"
                 >
                   {currentShowDataLabels && (
-                    <LabelList 
-                      dataKey={seriesKey} 
-                      position="top" 
+                    <LabelList
+                      dataKey={seriesKey}
+                      position="top"
                       formatter={(value) => formatLargeNumber(value)}
                       style={{ fontSize: '11px', fontWeight: '500', fill: '#374151' }}
                     />
@@ -1512,10 +1555,8 @@ const RechartsChartRenderer: React.FC<Props> = ({
          * Multi-line rendering when a legend field is provided
          * ----------------------------------------------------------- */
         if (legendField && legendValues.length > 0 && pivotedLineData.length > 0) {
-          // Resolve actual X-axis key in case of casing differences
-          const xKeyForLine = xField
-            ? Object.keys(pivotedLineData[0]).find(k => k.toLowerCase() === xField.toLowerCase()) || Object.keys(pivotedLineData[0])[0]
-            : Object.keys(pivotedLineData[0])[0];
+          // Use the actual X-axis key determined during pivoting
+          const xKeyForLine = pivotActualXKey || xField || Object.keys(pivotedLineData[0])[0];
           return (
             <LineChart data={pivotedLineData} margin={{ top: 20, right: 20, left: 20, bottom: 20 }}>
               {currentShowGrid && <CartesianGrid strokeDasharray="3 3" />}
@@ -1525,6 +1566,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
                 tick={axisTickStyle}
                 tickLine={false}
                 allowDuplicatedCategory={false}
+                tickFormatter={(v) => String(v)}
               />
               <YAxis
                 tickFormatter={formatLargeNumber}
@@ -1720,9 +1762,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
 
       case 'area_chart':
         if (legendField && legendValues.length > 0 && pivotedLineData.length > 0) {
-          const xKeyForArea = xField
-            ? Object.keys(pivotedLineData[0]).find(k => k.toLowerCase() === xField.toLowerCase()) || Object.keys(pivotedLineData[0])[0]
-            : Object.keys(pivotedLineData[0])[0];
+          const xKeyForArea = pivotActualXKey || xField || Object.keys(pivotedLineData[0])[0];
           return (
             <AreaChart data={pivotedLineData} margin={{ top: 20, right: 20, left: 20, bottom: 20 }}>
               {currentShowGrid && <CartesianGrid strokeDasharray="3 3" />}
@@ -1732,6 +1772,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
                 tick={axisTickStyle}
                 tickLine={false}
                 allowDuplicatedCategory={false}
+                tickFormatter={(v) => String(v)}
               />
               <YAxis
                 label={currentShowAxisLabels && yAxisLabel && yAxisLabel.trim() ? { value: capitalizeWords(yAxisLabel), angle: -90, position: 'left', style: axisLabelStyle } : undefined}
@@ -1806,9 +1847,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
       case 'scatter_chart':
         const xKeyForScatter =
           legendField && legendValues.length > 0 && pivotedLineData.length > 0
-            ? (xField
-                ? Object.keys(pivotedLineData[0]).find(k => k.toLowerCase() === xField.toLowerCase()) || Object.keys(pivotedLineData[0])[0]
-                : Object.keys(pivotedLineData[0])[0])
+            ? pivotActualXKey || xField || Object.keys(pivotedLineData[0])[0]
             : xKey;
         return (
           <ScatterChart margin={{ top: 20, right: 20, left: 20, bottom: 20 }}>
@@ -1819,6 +1858,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
               tick={axisTickStyle}
               tickLine={false}
               allowDuplicatedCategory={false}
+              tickFormatter={(v) => String(v)}
             />
             <YAxis
               yAxisId={0}
