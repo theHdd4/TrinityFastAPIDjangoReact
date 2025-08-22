@@ -514,7 +514,8 @@ const RechartsChartRenderer: React.FC<Props> = ({
       const yVal = row[actualYKey];
       if (legendVal !== undefined && !uniqueValues.includes(legendVal)) uniqueValues.push(legendVal);
 
-      const existing = map.get(xVal) || { [xKey]: xVal };
+      // Preserve the actual X-axis key from the source data to avoid casing mismatches
+      const existing = map.get(xVal) || { [actualXKey]: xVal };
       existing[legendVal] = yVal;
       map.set(xVal, existing);
     });
@@ -1191,9 +1192,11 @@ const RechartsChartRenderer: React.FC<Props> = ({
          * Multi-bar rendering when a legend field is provided
          * ----------------------------------------------------------- */
         if (legendField && legendValues.length > 0 && pivotedLineData.length > 0) {
-          // Use first available key as X-axis key
-          const xKeyForBar = xField || Object.keys(pivotedLineData[0])[0];
-        return (
+          // Resolve actual X-axis key in case of casing differences
+          const xKeyForBar = xField
+            ? Object.keys(pivotedLineData[0]).find(k => k.toLowerCase() === xField.toLowerCase()) || Object.keys(pivotedLineData[0])[0]
+            : Object.keys(pivotedLineData[0])[0];
+          return (
             <BarChart data={pivotedLineData} margin={{ top: 20, right: 20, left: 20, bottom: 20 }}>
               {currentShowGrid && <CartesianGrid strokeDasharray="3 3" />}
               <XAxis
@@ -1201,6 +1204,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
                 label={currentShowAxisLabels && xAxisLabel ? { value: capitalizeWords(xAxisLabel), position: 'bottom', style: axisLabelStyle } : undefined}
                 tick={axisTickStyle}
                 tickLine={false}
+                allowDuplicatedCategory={false}
               />
               <YAxis
                 tickFormatter={formatLargeNumber}
@@ -1405,8 +1409,10 @@ const RechartsChartRenderer: React.FC<Props> = ({
          * Multi-line rendering when a legend field is provided
          * ----------------------------------------------------------- */
         if (legendField && legendValues.length > 0 && pivotedLineData.length > 0) {
-          // Use first available key as X-axis key
-          const xKeyForLine = xField || Object.keys(pivotedLineData[0])[0];
+          // Resolve actual X-axis key in case of casing differences
+          const xKeyForLine = xField
+            ? Object.keys(pivotedLineData[0]).find(k => k.toLowerCase() === xField.toLowerCase()) || Object.keys(pivotedLineData[0])[0]
+            : Object.keys(pivotedLineData[0])[0];
           return (
             <LineChart data={pivotedLineData} margin={{ top: 20, right: 20, left: 20, bottom: 20 }}>
               {currentShowGrid && <CartesianGrid strokeDasharray="3 3" />}
@@ -1415,6 +1421,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
                 label={currentShowAxisLabels && xAxisLabel ? { value: capitalizeWords(xAxisLabel), position: 'bottom', style: axisLabelStyle } : undefined}
                 tick={axisTickStyle}
                 tickLine={false}
+                allowDuplicatedCategory={false}
               />
               <YAxis
                 tickFormatter={formatLargeNumber}
@@ -1610,7 +1617,9 @@ const RechartsChartRenderer: React.FC<Props> = ({
 
       case 'area_chart':
         if (legendField && legendValues.length > 0 && pivotedLineData.length > 0) {
-          const xKeyForArea = xField || Object.keys(pivotedLineData[0])[0];
+          const xKeyForArea = xField
+            ? Object.keys(pivotedLineData[0]).find(k => k.toLowerCase() === xField.toLowerCase()) || Object.keys(pivotedLineData[0])[0]
+            : Object.keys(pivotedLineData[0])[0];
           return (
             <AreaChart data={pivotedLineData} margin={{ top: 20, right: 20, left: 20, bottom: 20 }}>
               {currentShowGrid && <CartesianGrid strokeDasharray="3 3" />}
@@ -1619,6 +1628,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
                 label={currentShowAxisLabels && xAxisLabel && xAxisLabel.trim() ? { value: capitalizeWords(xAxisLabel), position: 'bottom', style: axisLabelStyle } : undefined}
                 tick={axisTickStyle}
                 tickLine={false}
+                allowDuplicatedCategory={false}
               />
               <YAxis
                 label={currentShowAxisLabels && yAxisLabel && yAxisLabel.trim() ? { value: capitalizeWords(yAxisLabel), angle: -90, position: 'left', style: axisLabelStyle } : undefined}
@@ -1693,7 +1703,9 @@ const RechartsChartRenderer: React.FC<Props> = ({
       case 'scatter_chart':
         const xKeyForScatter =
           legendField && legendValues.length > 0 && pivotedLineData.length > 0
-            ? xField || Object.keys(pivotedLineData[0])[0]
+            ? (xField
+                ? Object.keys(pivotedLineData[0]).find(k => k.toLowerCase() === xField.toLowerCase()) || Object.keys(pivotedLineData[0])[0]
+                : Object.keys(pivotedLineData[0])[0])
             : xKey;
         return (
           <ScatterChart margin={{ top: 20, right: 20, left: 20, bottom: 20 }}>
@@ -1703,6 +1715,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
               label={currentShowAxisLabels && xAxisLabel && xAxisLabel.trim() ? { value: capitalizeWords(xAxisLabel), position: 'bottom', style: axisLabelStyle } : undefined}
               tick={axisTickStyle}
               tickLine={false}
+              allowDuplicatedCategory={false}
             />
             <YAxis
               yAxisId={0}
@@ -1731,9 +1744,12 @@ const RechartsChartRenderer: React.FC<Props> = ({
               />
             )}
             {legendField && legendValues.length > 0 && pivotedLineData.length > 0 ? (
-              legendValues.map((seriesKey, idx) => (
-                <Scatter key={seriesKey} data={pivotedLineData} dataKey={seriesKey} name={seriesKey} fill={palette[idx % palette.length]} />
-              ))
+              legendValues.map((seriesKey, idx) => {
+                const seriesData = pivotedLineData.filter(d => d[seriesKey] !== undefined && d[seriesKey] !== null);
+                return (
+                  <Scatter key={seriesKey} data={seriesData} dataKey={seriesKey} name={seriesKey} fill={palette[idx % palette.length]} />
+                );
+              })
             ) : (
               <>
                 <Scatter data={chartDataForRendering} dataKey={yKey} fill={palette[0]} yAxisId={0} />
