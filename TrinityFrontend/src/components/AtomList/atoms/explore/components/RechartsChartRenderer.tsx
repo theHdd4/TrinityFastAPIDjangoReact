@@ -627,10 +627,11 @@ const RechartsChartRenderer: React.FC<Props> = ({
   // Styling for axis ticks & labels
   const axisTickStyle = { fontFamily: FONT_FAMILY, fontSize: 12, fill: '#475569' } as const;
   const axisLabelStyle = {
-    fontFamily: FONT_FAMILY, 
-    fontSize: 14, 
+    fontFamily: FONT_FAMILY,
+    fontSize: 14,
     fontWeight: 'bold',
-    fill: '#334155' 
+    fill: '#334155',
+    textAnchor: 'middle'
   } as const;
 
   // Handle right-click context menu
@@ -1350,7 +1351,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
             Object.keys(pivotedLineData[0] || {}).find(k => !legendValues.includes(k)) ||
             Object.keys(pivotedLineData[0] || {})[0];
           return (
-            <BarChart data={pivotedLineData} margin={{ top: 20, right: 20, left: 20, bottom: 20 }}>
+            <BarChart data={pivotedLineData} margin={{ top: 20, right: 20, left: 20, bottom: 40 }}>
               {currentShowGrid && <CartesianGrid strokeDasharray="3 3" />}
               <XAxis
                 dataKey={xKeyForBar}
@@ -1399,7 +1400,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
                   layout="horizontal"
                   verticalAlign="bottom"
                   align="center"
-                  wrapperStyle={{ paddingTop: '15px', fontSize: '11px' }}
+                  wrapperStyle={{ bottom: 20, fontSize: '11px' }}
                 />
               )}
               {legendValues.map((seriesKey, idx) => (
@@ -1426,7 +1427,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
         } else {
           // ---- Fallback to original single-bar rendering ----
           return (
-            <BarChart data={transformedChartData} margin={{ top: 20, right: 20, left: 20, bottom: 20 }}>
+            <BarChart data={transformedChartData} margin={{ top: 20, right: 20, left: 20, bottom: 40 }}>
               {currentShowGrid && <CartesianGrid strokeDasharray="3 3" />}
             <XAxis 
               dataKey={xKey} 
@@ -1491,16 +1492,11 @@ const RechartsChartRenderer: React.FC<Props> = ({
               cursor={{ stroke: palette[0], strokeWidth: 1, strokeOpacity: 0.4 }}
             />
             {currentShowLegend && (
-              <Legend 
+              <Legend
                 layout="horizontal"
                 verticalAlign="bottom"
                 align="center"
-                wrapperStyle={{ 
-                  paddingTop: '15px',
-                  paddingBottom: '10px',
-                  fontSize: '11px',
-                  marginBottom: '0px'
-                }}
+                wrapperStyle={{ bottom: 20, fontSize: '11px' }}
                 formatter={(value, entry) => {
                   // Format legend labels for dual y-axes
                   if (yFields && yFields.length > 1) {
@@ -1569,7 +1565,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
             Object.keys(pivotedLineData[0] || {}).find(k => !legendValues.includes(k)) ||
             Object.keys(pivotedLineData[0] || {})[0];
           return (
-            <LineChart data={pivotedLineData} margin={{ top: 20, right: 20, left: 20, bottom: 20 }}>
+            <LineChart data={pivotedLineData} margin={{ top: 20, right: 20, left: 20, bottom: 40 }}>
               {currentShowGrid && <CartesianGrid strokeDasharray="3 3" />}
               <XAxis
                 dataKey={xKeyForLine}
@@ -1591,7 +1587,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
                   layout="horizontal"
                   verticalAlign="bottom"
                   align="center"
-                  wrapperStyle={{ paddingTop: '15px', fontSize: '11px' }}
+                  wrapperStyle={{ bottom: 20, fontSize: '11px' }}
                 />
               )}
               {legendValues.map((seriesKey, idx) => (
@@ -1621,7 +1617,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
           // ---- Fallback to original single-line rendering ----
           // Original single line chart logic
           return (
-            <LineChart data={chartDataForRendering} margin={{ top: 20, right: 20, left: 20, bottom: 20 }} className="explore-chart-line">
+            <LineChart data={chartDataForRendering} margin={{ top: 20, right: 20, left: 20, bottom: 40 }} className="explore-chart-line">
               {currentShowGrid && <CartesianGrid strokeDasharray="3 3" />}
               <XAxis 
                 dataKey={xKey}
@@ -1686,16 +1682,11 @@ const RechartsChartRenderer: React.FC<Props> = ({
                 cursor={{ stroke: palette[0], strokeWidth: 1, strokeOpacity: 0.4 }}
               />
               {currentShowLegend && (
-                <Legend 
+                <Legend
                   layout="horizontal"
                   verticalAlign="bottom"
                   align="center"
-                  wrapperStyle={{ 
-                    paddingTop: '15px',
-                    paddingBottom: '10px',
-                    fontSize: '11px',
-                    marginBottom: '0px'
-                  }}
+                  wrapperStyle={{ bottom: 20, fontSize: '11px' }}
                   formatter={(value, entry) => {
                     // Format legend labels for dual y-axes
                     if (yFields && yFields.length > 1) {
@@ -1779,7 +1770,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
             Object.keys(pivotedLineData[0] || {}).find(k => !legendValues.includes(k)) ||
             Object.keys(pivotedLineData[0] || {})[0];
           return (
-            <AreaChart data={pivotedLineData} margin={{ top: 20, right: 20, left: 20, bottom: 20 }}>
+            <AreaChart data={pivotedLineData} margin={{ top: 20, right: 20, left: 20, bottom: 40 }}>
               {currentShowGrid && <CartesianGrid strokeDasharray="3 3" />}
               <XAxis
                 dataKey={xKeyForArea}
@@ -1801,7 +1792,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
                   layout="horizontal"
                   verticalAlign="bottom"
                   align="center"
-                  wrapperStyle={{ paddingTop: '15px', fontSize: '11px' }}
+                  wrapperStyle={{ bottom: 20, fontSize: '11px' }}
                 />
               )}
               {legendValues.map((seriesKey, idx) => (
@@ -1818,7 +1809,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
           );
         }
         return (
-          <AreaChart data={chartDataForRendering} margin={{ top: 20, right: 20, left: 20, bottom: 20 }}>
+          <AreaChart data={chartDataForRendering} margin={{ top: 20, right: 20, left: 20, bottom: 40 }}>
             {currentShowGrid && <CartesianGrid strokeDasharray="3 3" />}
             <XAxis
               dataKey={xKey}
@@ -1849,7 +1840,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
                 layout="horizontal"
                 verticalAlign="bottom"
                 align="center"
-                wrapperStyle={{ paddingTop: '15px', fontSize: '11px' }}
+                wrapperStyle={{ bottom: 20, fontSize: '11px' }}
               />
             )}
             <Area type="monotone" dataKey={yKey} stroke={palette[0]} fill={palette[1]} yAxisId={0} />
@@ -1869,7 +1860,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
                 Object.keys(pivotedLineData[0] || {})[0]
             : xKey;
         return (
-          <ScatterChart margin={{ top: 20, right: 20, left: 20, bottom: 20 }}>
+          <ScatterChart margin={{ top: 20, right: 20, left: 20, bottom: 40 }}>
             {currentShowGrid && <CartesianGrid strokeDasharray="3 3" />}
             <XAxis
               dataKey={xKeyForScatter}
@@ -1902,7 +1893,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
                 layout="horizontal"
                 verticalAlign="bottom"
                 align="center"
-                wrapperStyle={{ paddingTop: '15px', fontSize: '11px' }}
+                wrapperStyle={{ bottom: 20, fontSize: '11px' }}
               />
             )}
             {legendField && legendValues.length > 0 && pivotedLineData.length > 0 ? (

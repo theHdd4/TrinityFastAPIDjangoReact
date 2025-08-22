@@ -1679,7 +1679,7 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                       }
                     }}
                   >
-                    <SelectTrigger className="w-32 h-8 text-xs leading-none" disabled={isLoadingColumns}>
+                    <SelectTrigger className="w-24 h-8 text-xs leading-none" disabled={isLoadingColumns}>
                       <SelectValue
                         placeholder={
                           isLoadingColumns
@@ -1742,7 +1742,7 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                                 }
                               }}
                             >
-                              <SelectTrigger className="w-32 h-8 text-xs leading-none" disabled={isLoadingColumns}>
+                              <SelectTrigger className="w-24 h-8 text-xs leading-none" disabled={isLoadingColumns}>
                                 <SelectValue
                                   placeholder={
                                     isLoadingColumns
@@ -1854,10 +1854,10 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                     }}
                   >
                     <SelectTrigger
-                      className="w-40 h-8 ml-2 pr-4 text-xs leading-none truncate"
+                      className="w-40 h-8 ml-2 pr-2 text-xs leading-none [&>span:last-child>svg]:w-3 [&>span:last-child>svg]:h-3"
                       disabled={isLoadingColumns}
                     >
-                      <SelectValue placeholder="Segregate Field Values" />
+                      <SelectValue placeholder="Segregate Field Values" className="truncate" />
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="aggregate">Show Aggregate</SelectItem>
