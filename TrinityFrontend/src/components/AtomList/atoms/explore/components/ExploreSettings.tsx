@@ -196,12 +196,23 @@ const ExploreSettings = ({ data, settings, onDataChange, onApply }) => {
       ...(data.selectedIdentifiers || {}),
       ...selectedFilterColumns.reduce((acc, col) => ({ ...acc, [col]: [col] }), {})
     };
+
+    // Update parent data without resetting applied state so filters appear immediately
     onDataChange({
       columnClassifierConfig: updatedConfig,
       selectedIdentifiers: newSelectedIdentifiers,
-      dimensions: Array.from(new Set([...(data.dimensions || []), ...selectedFilterColumns])),
-      applied: false
+      dimensions: Array.from(new Set([...(data.dimensions || []), ...selectedFilterColumns]))
     });
+
+    // Keep local dimension and identifier state in sync
+    setSelectedDimensions(prev =>
+      Array.from(new Set([...prev, ...selectedFilterColumns]))
+    );
+    setSelectedIdentifiers(prev => ({
+      ...prev,
+      ...selectedFilterColumns.reduce((acc, col) => ({ ...acc, [col]: [col] }), {})
+    }));
+
     setSelectedFilterColumns([]);
     setShowFilterSelector(false);
   };

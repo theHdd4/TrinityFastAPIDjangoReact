@@ -2953,15 +2953,18 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
     }
   }, [safeData.columnClassifierConfig, safeData.columnSummary]);
   
-  // Re-initialize all existing cards when column summary changes (to apply filtering)
+  // Re-initialize all existing cards when column summary or dimensions change (to apply filtering)
   useEffect(() => {
-    if (safeData.columnSummary && Object.keys(cardSelectedIdentifiers).length > 0) {
-      // Re-initialize all existing cards with filtered identifiers
+    if (
+      (safeData.columnSummary || safeData.columnClassifierConfig?.dimensions) &&
+      Object.keys(cardSelectedIdentifiers).length > 0
+    ) {
+      // Re-initialize all existing cards with updated identifiers
       Object.keys(cardSelectedIdentifiers).forEach(chartIndex => {
         initializeCardDimensions(parseInt(chartIndex));
       });
     }
-  }, [safeData.columnSummary]);
+  }, [safeData.columnSummary, safeData.columnClassifierConfig?.dimensions]);
 
   // Debug: Log initial filter state
   useEffect(() => {
