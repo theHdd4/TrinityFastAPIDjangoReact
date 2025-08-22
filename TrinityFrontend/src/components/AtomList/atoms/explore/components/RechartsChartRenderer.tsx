@@ -516,7 +516,8 @@ const RechartsChartRenderer: React.FC<Props> = ({
     rows.forEach((row) => {
       const xVal = row[actualXKey];
       const legendVal = row[actualLegendKey];
-      const yVal = row[actualYKey];
+      const rawY = row[actualYKey];
+      const yVal = typeof rawY === 'number' ? rawY : Number(String(rawY).replace(/,/g, ''));
       if (legendVal !== undefined && !uniqueValues.includes(legendVal)) uniqueValues.push(legendVal);
 
       // Use stringified key to preserve original order and ensure exact matches
@@ -579,61 +580,9 @@ const RechartsChartRenderer: React.FC<Props> = ({
     return { pivoted: [], uniqueValues: [], actualXKey: xField };
   }, [type, chartDataForRendering, xField, yField, legendField]);
 
-  // Prepare grouped bar chart data when segregating by a legend field
-  const { data: segregatedBarData, legends: barLegendValues, xKey: barActualXKey } = useMemo(() => {
-    if (type !== 'bar_chart' || !legendField || !xField || !yField || chartDataForRendering.length === 0) {
-      return { data: [], legends: [], xKey: xField };
-    }
-
-    // Normalize rows using actual field names (case-insensitive) and ensure Y values are numeric
-    const normalized = chartDataForRendering.map(row => {
-      const lowerKeyMap = Object.fromEntries(Object.keys(row).map(k => [k.toLowerCase(), k]));
-      const xKeyActual = lowerKeyMap[xField.toLowerCase()] || xField;
-      const yKeyActual = lowerKeyMap[yField.toLowerCase()] || yField;
-      const legendKeyActual = lowerKeyMap[legendField.toLowerCase()] || legendField;
-
-      const xVal = row[xKeyActual];
-      const yRaw = row[yKeyActual];
-      const legendVal = row[legendKeyActual];
-
-      return {
-        [xField]: xVal,
-        [legendField]: legendVal,
-        [yField]: typeof yRaw === 'number' ? yRaw : Number(String(yRaw).replace(/,/g, ''))
-      };
-    });
-
-    const legends: string[] = [];
-    const map = new Map<string, any>();
-
-    normalized.forEach(row => {
-      const xVal = row[xField];
-      const legendVal = row[legendField];
-      const yVal = row[yField];
-
-      if (legendVal !== undefined && !legends.includes(legendVal)) legends.push(legendVal);
-
-      const key = String(xVal);
-      const existing = map.get(key) || { [xField]: xVal };
-      existing[legendVal] = yVal;
-      map.set(key, existing);
-    });
-
-    const pivoted = Array.from(map.values()).sort((a, b) => {
-      const aVal = a[xField];
-      const bVal = b[xField];
-      if (typeof aVal === 'number' && typeof bVal === 'number') {
-        return aVal - bVal;
-      }
-      return String(aVal).localeCompare(String(bVal));
-    });
-
-    return { data: pivoted, legends, xKey: xField };
-  }, [type, chartDataForRendering, xField, yField, legendField]);
-  
   // Styling for axis ticks & labels
   const axisTickStyle = { fontFamily: FONT_FAMILY, fontSize: 12, fill: '#475569' } as const;
-  const axisLabelStyle = { 
+  const axisLabelStyle = {
     fontFamily: FONT_FAMILY, 
     fontSize: 14, 
     fontWeight: 'bold',
@@ -1350,10 +1299,10 @@ const RechartsChartRenderer: React.FC<Props> = ({
         /* -------------------------------------------------------------
          * Multi-bar rendering when a legend field is provided
          * ----------------------------------------------------------- */
-        if (legendField && barLegendValues.length > 0 && segregatedBarData.length > 0) {
-          const xKeyForBar = barActualXKey || xField || Object.keys(segregatedBarData[0] || {})[0];
+        if (legendField && legendValues.length > 0 && pivotedLineData.length > 0) {
+          const xKeyForBar = pivotActualXKey || xField || Object.keys(pivotedLineData[0] || {})[0];
           return (
-            <BarChart data={segregatedBarData} margin={{ top: 20, right: 20, left: 20, bottom: 20 }}>
+            <BarChart data={pivotedLineData} margin={{ top: 20, right: 20, left: 20, bottom: 20 }}>
               {currentShowGrid && <CartesianGrid strokeDasharray="3 3" />}
               <XAxis
                 dataKey={xKeyForBar}
@@ -1404,7 +1353,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
                   wrapperStyle={{ paddingTop: '15px', fontSize: '11px' }}
                 />
               )}
-              {barLegendValues.map((seriesKey, idx) => (
+              {legendValues.map((seriesKey, idx) => (
                 <Bar
                   key={seriesKey}
                   dataKey={seriesKey}
