@@ -582,41 +582,39 @@ const RechartsChartRenderer: React.FC<Props> = ({
   // Prepare grouped bar chart data when segregating by a legend field
   const { data: segregatedBarData, legends: barLegendValues, xKey: barActualXKey } = useMemo(() => {
     if (type === 'bar_chart' && legendField && xField && yField && chartDataForRendering.length > 0) {
-      const sampleRow = chartDataForRendering[0];
-      const actualXKey = Object.keys(sampleRow).find(k => k.toLowerCase() === xField.toLowerCase()) || xField;
-      const actualYKey = Object.keys(sampleRow).find(k => k.toLowerCase() === yField.toLowerCase()) || yField;
-      const actualLegendKey = Object.keys(sampleRow).find(k => k.toLowerCase() === legendField.toLowerCase());
+      // Normalize rows so that generic keys (x, y, value, etc.) map to the actual
+      // xField/yField names and ensure Y values are numeric.
+      const normalizedRows = chartDataForRendering.map(row => {
+        const normalized: any = {};
 
-      // If legend field is missing, data is already pivoted
-      if (!actualLegendKey) {
-        const legends = Object.keys(sampleRow).filter(k => k !== actualXKey && typeof sampleRow[k] === 'number');
-        return { data: chartDataForRendering, legends, xKey: actualXKey };
+        const keys = Object.keys(row);
+        const xCandidate = keys.find(k => k.toLowerCase() === xField.toLowerCase() || ['x', 'name', 'category', 'year'].includes(k.toLowerCase()));
+        const yCandidate = keys.find(k => k.toLowerCase() === yField.toLowerCase() || ['y', 'value', 'volume'].includes(k.toLowerCase()));
+        const legendCandidate = keys.find(k => k.toLowerCase() === legendField.toLowerCase());
+
+        if (xCandidate) normalized[xField] = row[xCandidate];
+        if (yCandidate) {
+          const raw = row[yCandidate];
+          normalized[yField] = typeof raw === 'number' ? raw : Number(String(raw).replace(/,/g, ''));
+        }
+        if (legendCandidate) normalized[legendField] = row[legendCandidate];
+
+        return normalized;
+      });
+
+      const first = normalizedRows[0] || {};
+      const hasLegend = Object.keys(first).some(k => k.toLowerCase() === legendField.toLowerCase());
+      const actualXKey = Object.keys(first).find(k => k.toLowerCase() === xField.toLowerCase()) || xField;
+
+      if (!hasLegend) {
+        // Data is already pivoted (no legend field present)
+        const legends = Object.keys(first).filter(k => k !== actualXKey && typeof first[k] === 'number');
+        return { data: normalizedRows, legends, xKey: actualXKey };
       }
 
-      const map = new Map<string, any>();
-      const legends: string[] = [];
-      chartDataForRendering.forEach(row => {
-        const xVal = row[actualXKey];
-        const legendVal = row[actualLegendKey];
-        const yVal = row[actualYKey];
-        if (legendVal !== undefined && !legends.includes(legendVal)) legends.push(legendVal);
-
-        const key = String(xVal);
-        const record = map.get(key) || { [actualXKey]: xVal };
-        record[legendVal] = yVal;
-        map.set(key, record);
-      });
-
-      const data = Array.from(map.values()).sort((a, b) => {
-        const aVal = a[actualXKey];
-        const bVal = b[actualXKey];
-        if (typeof aVal === 'number' && typeof bVal === 'number') {
-          return aVal - bVal;
-        }
-        return String(aVal).localeCompare(String(bVal));
-      });
-
-      return { data, legends, xKey: actualXKey };
+      // Pivot the normalized rows to build grouped bar data
+      const { pivoted, uniqueValues, actualXKey: resolvedXKey } = pivotDataByLegend(normalizedRows, xField, yField, legendField);
+      return { data: pivoted, legends: uniqueValues, xKey: resolvedXKey };
     }
     return { data: [], legends: [], xKey: xField };
   }, [type, chartDataForRendering, xField, yField, legendField]);
