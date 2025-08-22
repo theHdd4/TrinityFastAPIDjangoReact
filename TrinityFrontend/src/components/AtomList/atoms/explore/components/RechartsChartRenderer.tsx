@@ -519,7 +519,16 @@ const RechartsChartRenderer: React.FC<Props> = ({
       map.set(xVal, existing);
     });
 
-    return { pivoted: Array.from(map.values()), uniqueValues };
+    const pivotedArray = Array.from(map.values()).sort((a, b) => {
+      const aVal = a[actualXKey];
+      const bVal = b[actualXKey];
+      if (typeof aVal === 'number' && typeof bVal === 'number') {
+        return aVal - bVal;
+      }
+      return String(aVal).localeCompare(String(bVal));
+    });
+
+    return { pivoted: pivotedArray, uniqueValues };
   };
 
   // Memoized pivoted data for charts with legend field
@@ -1600,6 +1609,45 @@ const RechartsChartRenderer: React.FC<Props> = ({
         break;
 
       case 'area_chart':
+        if (legendField && legendValues.length > 0 && pivotedLineData.length > 0) {
+          const xKeyForArea = xField || Object.keys(pivotedLineData[0])[0];
+          return (
+            <AreaChart data={pivotedLineData} margin={{ top: 20, right: 20, left: 20, bottom: 20 }}>
+              {currentShowGrid && <CartesianGrid strokeDasharray="3 3" />}
+              <XAxis
+                dataKey={xKeyForArea}
+                label={currentShowAxisLabels && xAxisLabel && xAxisLabel.trim() ? { value: capitalizeWords(xAxisLabel), position: 'bottom', style: axisLabelStyle } : undefined}
+                tick={axisTickStyle}
+                tickLine={false}
+              />
+              <YAxis
+                label={currentShowAxisLabels && yAxisLabel && yAxisLabel.trim() ? { value: capitalizeWords(yAxisLabel), angle: -90, position: 'left', style: axisLabelStyle } : undefined}
+                tick={axisTickStyle}
+                tickLine={false}
+                tickFormatter={formatLargeNumber}
+              />
+              <Tooltip formatter={(v: number) => formatTooltipNumber(v)} />
+              {currentShowLegend && (
+                <Legend
+                  layout="horizontal"
+                  verticalAlign="bottom"
+                  align="center"
+                  wrapperStyle={{ paddingTop: '15px', fontSize: '11px' }}
+                />
+              )}
+              {legendValues.map((seriesKey, idx) => (
+                <Area
+                  key={seriesKey}
+                  type="monotone"
+                  dataKey={seriesKey}
+                  name={seriesKey}
+                  stroke={palette[idx % palette.length]}
+                  fill={palette[idx % palette.length]}
+                />
+              ))}
+            </AreaChart>
+          );
+        }
         return (
           <AreaChart data={chartDataForRendering} margin={{ top: 20, right: 20, left: 20, bottom: 20 }}>
             {currentShowGrid && <CartesianGrid strokeDasharray="3 3" />}
@@ -1643,11 +1691,15 @@ const RechartsChartRenderer: React.FC<Props> = ({
         );
 
       case 'scatter_chart':
+        const xKeyForScatter =
+          legendField && legendValues.length > 0 && pivotedLineData.length > 0
+            ? xField || Object.keys(pivotedLineData[0])[0]
+            : xKey;
         return (
           <ScatterChart margin={{ top: 20, right: 20, left: 20, bottom: 20 }}>
             {currentShowGrid && <CartesianGrid strokeDasharray="3 3" />}
             <XAxis
-              dataKey={xKey}
+              dataKey={xKeyForScatter}
               label={currentShowAxisLabels && xAxisLabel && xAxisLabel.trim() ? { value: capitalizeWords(xAxisLabel), position: 'bottom', style: axisLabelStyle } : undefined}
               tick={axisTickStyle}
               tickLine={false}

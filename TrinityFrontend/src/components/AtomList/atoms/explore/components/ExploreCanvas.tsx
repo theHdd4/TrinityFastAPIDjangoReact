@@ -1303,7 +1303,7 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
         filters: filtersList, // Use chart filters instead of dateFilters
         group_by:
           config.legendField && config.legendField !== 'aggregate'
-            ? [config.xAxis, config.legendField]
+            ? [config.legendField, config.xAxis]
             : [config.xAxis],
         measures_config: measuresConfig,
         chart_type: config.chartType,
