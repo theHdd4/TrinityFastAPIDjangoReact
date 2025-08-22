@@ -1854,10 +1854,10 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                     }}
                   >
                     <SelectTrigger
-                      className="min-w-[8rem] h-8 ml-2 pr-4 text-xs leading-none whitespace-nowrap"
+                      className="w-40 h-8 ml-2 pr-4 text-xs leading-none truncate"
                       disabled={isLoadingColumns}
                     >
-                      <SelectValue placeholder="Select Column to Segregate Field Values" />
+                      <SelectValue placeholder="Segregate Field Values" />
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="aggregate">Show Aggregate</SelectItem>
