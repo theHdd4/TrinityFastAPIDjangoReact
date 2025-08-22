@@ -349,6 +349,8 @@ const RechartsChartRenderer: React.FC<Props> = ({
   const [showContextMenu, setShowContextMenu] = useState(false);
   const [showColorSubmenu, setShowColorSubmenu] = useState(false);
   const [showSortSubmenu, setShowSortSubmenu] = useState(false);
+  const [colorSubmenuPosition, setColorSubmenuPosition] = useState({ x: 0, y: 0 });
+  const [sortSubmenuPosition, setSortSubmenuPosition] = useState({ x: 0, y: 0 });
 
 
 
@@ -659,15 +661,17 @@ const RechartsChartRenderer: React.FC<Props> = ({
   };
 
   // Handle color theme submenu toggle
-  const handleColorThemeClick = () => {
-    setShowColorSubmenu(prevState => {
-      const newState = !prevState;
-      return newState;
-    });
+  const handleColorThemeClick = (e: React.MouseEvent) => {
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    setColorSubmenuPosition({ x: rect.right + 4, y: rect.top });
+    setShowColorSubmenu(prevState => !prevState);
+    setShowSortSubmenu(false);
   };
 
   // Handle sort submenu toggle
-  const handleSortClick = () => {
+  const handleSortClick = (e: React.MouseEvent) => {
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    setSortSubmenuPosition({ x: rect.right + 4, y: rect.top });
     setShowSortSubmenu(prev => !prev);
     setShowColorSubmenu(false);
   };
@@ -804,7 +808,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
           onClick={(e) => {
             e.preventDefault();
             e.stopPropagation();
-            handleColorThemeClick();
+            handleColorThemeClick(e);
           }}
         >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -822,7 +826,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
           onClick={(e) => {
             e.preventDefault();
             e.stopPropagation();
-            handleSortClick();
+            handleSortClick(e);
           }}
         >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -935,11 +939,11 @@ const RechartsChartRenderer: React.FC<Props> = ({
     if (!showColorSubmenu) return null;
 
     return (
-      <div 
+      <div
         className="fixed z-[9999] bg-white border border-gray-300 rounded-lg shadow-xl p-3 color-submenu"
-        style={{ 
-          left: contextMenuPosition.x + 96, // Half of min-w-48 (192px/2) + small gap
-          top: contextMenuPosition.y - 120, // Align with the context menu
+        style={{
+          left: colorSubmenuPosition.x,
+          top: colorSubmenuPosition.y,
           minWidth: '240px',
           maxHeight: '320px',
           overflowY: 'auto'
@@ -996,8 +1000,8 @@ const RechartsChartRenderer: React.FC<Props> = ({
       <div
         className="fixed z-[9999] bg-white border border-gray-300 rounded-lg shadow-xl p-2 sort-submenu"
         style={{
-          left: contextMenuPosition.x + 96,
-          top: contextMenuPosition.y - 40,
+          left: sortSubmenuPosition.x,
+          top: sortSubmenuPosition.y,
           minWidth: '160px'
         }}
       >

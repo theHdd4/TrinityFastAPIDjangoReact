@@ -139,13 +139,32 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
   };
 
   useEffect(() => {
-    if (safeData.chartFilters) setChartFilters(safeData.chartFilters);
-    if (safeData.chartThemes) setChartThemes(safeData.chartThemes);
-    if (safeData.chartOptions) setChartOptions(safeData.chartOptions);
-    if (safeData.appliedFilters) setAppliedFilters(safeData.appliedFilters);
-    if (safeData.chartDataSets) setChartDataSets(safeData.chartDataSets);
-    if (safeData.chartGenerated) setChartGenerated(safeData.chartGenerated);
-  }, []);
+    if (data.chartFilters && data.chartFilters !== chartFilters) {
+      setChartFilters(data.chartFilters);
+    }
+    if (data.chartThemes && data.chartThemes !== chartThemes) {
+      setChartThemes(data.chartThemes);
+    }
+    if (data.chartOptions && data.chartOptions !== chartOptions) {
+      setChartOptions(data.chartOptions);
+    }
+    if (data.appliedFilters && data.appliedFilters !== appliedFilters) {
+      setAppliedFilters(data.appliedFilters);
+    }
+    if (data.chartDataSets && data.chartDataSets !== chartDataSets) {
+      setChartDataSets(data.chartDataSets);
+    }
+    if (data.chartGenerated && data.chartGenerated !== chartGenerated) {
+      setChartGenerated(data.chartGenerated);
+    }
+  }, [
+    data.chartFilters,
+    data.chartThemes,
+    data.chartOptions,
+    data.appliedFilters,
+    data.chartDataSets,
+    data.chartGenerated,
+  ]);
 
   // Multi-chart state
   const [chartConfigs, setChartConfigs] = useState(
