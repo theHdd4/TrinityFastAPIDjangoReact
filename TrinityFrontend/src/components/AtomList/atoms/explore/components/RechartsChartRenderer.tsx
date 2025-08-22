@@ -42,7 +42,8 @@ interface Props {
   onAxisLabelsToggle?: (enabled: boolean) => void; // Callback for axis labels toggle
   onDataLabelsToggle?: (enabled: boolean) => void; // Callback for data labels toggle
   onSave?: () => void; // Callback for save action
-  onSortChange?: (chartIndex: number) => void; // Callback when sorting changes
+  sortOrder?: 'asc' | 'desc' | null; // Current sort order
+  onSortChange?: (order: 'asc' | 'desc' | null) => void; // Callback when sorting changes
   showLegend?: boolean; // External control for legend visibility
   showAxisLabels?: boolean; // External control for axis labels visibility
   showDataLabels?: boolean; // External control for data labels visibility
@@ -323,6 +324,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
   onAxisLabelsToggle,
   onDataLabelsToggle,
   onSave,
+  sortOrder,
   onSortChange, // Callback when sorting changes
   showLegend: propShowLegend, // External control for legend visibility
   showAxisLabels: propShowAxisLabels, // External control for axis labels visibility
@@ -345,6 +347,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
 
   const [showContextMenu, setShowContextMenu] = useState(false);
   const [showColorSubmenu, setShowColorSubmenu] = useState(false);
+  const [showSortSubmenu, setShowSortSubmenu] = useState(false);
 
 
 
@@ -358,9 +361,10 @@ const RechartsChartRenderer: React.FC<Props> = ({
     e.stopPropagation();
     setShowContextMenu(false);
     setShowColorSubmenu(false);
+    setShowSortSubmenu(false);
   };
 
-  const overlayVisible = showContextMenu || showColorSubmenu;
+  const overlayVisible = showContextMenu || showColorSubmenu || showSortSubmenu;
 
   // State for chart options
   const [showGrid, setShowGrid] = useState(true);
@@ -612,6 +616,21 @@ const RechartsChartRenderer: React.FC<Props> = ({
     });
   };
 
+  // Handle sort submenu toggle
+  const handleSortClick = () => {
+    setShowSortSubmenu(prev => !prev);
+    setShowColorSubmenu(false);
+  };
+
+  // Apply selected sort order
+  const handleSortChange = (order: 'asc' | 'desc' | null) => {
+    if (onSortChange) {
+      onSortChange(order);
+    }
+    setShowContextMenu(false);
+    setShowSortSubmenu(false);
+  };
+
   // Handle grid toggle
   const handleGridToggle = () => {
     const newGridState = !showGrid;
@@ -683,18 +702,20 @@ const RechartsChartRenderer: React.FC<Props> = ({
       const target = e.target as Element;
       const isOutsideMainMenu = !target.closest('.context-menu');
       const isOutsideColorSubmenu = !target.closest('.color-submenu');
-      
+      const isOutsideSortSubmenu = !target.closest('.sort-submenu');
+
       // Only close menus if click is outside ALL active menus
-      if (isOutsideMainMenu && isOutsideColorSubmenu) {
+      if (isOutsideMainMenu && isOutsideColorSubmenu && isOutsideSortSubmenu) {
         // Add a small delay to ensure button clicks are processed first
         setTimeout(() => {
           setShowContextMenu(false);
           setShowColorSubmenu(false);
+          setShowSortSubmenu(false);
         }, 50);
       }
     };
 
-    if (showContextMenu || showColorSubmenu) {
+    if (showContextMenu || showColorSubmenu || showSortSubmenu) {
       // Use a longer delay to allow submenu to open properly
       const timeoutId = setTimeout(() => {
         document.addEventListener('click', handleClickOutside, false);
@@ -705,7 +726,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
         document.removeEventListener('click', handleClickOutside, false);
       };
     }
-  }, [showContextMenu, showColorSubmenu]);
+  }, [showContextMenu, showColorSubmenu, showSortSubmenu]);
 
   // Context menu component
   const ContextMenu = () => {
@@ -740,6 +761,24 @@ const RechartsChartRenderer: React.FC<Props> = ({
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zM21 5a2 2 0 00-2-2h-4a2 2 0 00-2 2v12a4 4 0 004 4h4a2 2 0 002-2V5z" />
           </svg>
           <span>Color Theme</span>
+          <svg className="w-4 h-4 ml-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+          </svg>
+        </button>
+
+        {/* Sort Option */}
+        <button
+          className="w-full px-4 py-2 text-sm text-left hover:bg-gray-50 flex items-center gap-3 text-gray-700 relative"
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            handleSortClick();
+          }}
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 9l6-6 6 6M18 15l-6 6-6-6" />
+          </svg>
+          <span>Sort</span>
           <svg className="w-4 h-4 ml-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
           </svg>
@@ -894,6 +933,70 @@ const RechartsChartRenderer: React.FC<Props> = ({
           <div className="text-xs text-gray-500 px-2">
             Click any color to apply the theme to your chart
           </div>
+        </div>
+      </div>
+    );
+  };
+
+  // Sort submenu component
+  const SortSubmenu = () => {
+    if (!showSortSubmenu) return null;
+
+    return (
+      <div
+        className="fixed z-[9999] bg-white border border-gray-300 rounded-lg shadow-xl p-2 sort-submenu"
+        style={{
+          left: contextMenuPosition.x + 96,
+          top: contextMenuPosition.y - 40,
+          minWidth: '160px'
+        }}
+      >
+        <div className="px-2 py-2 text-sm font-semibold text-gray-700 border-b border-gray-200 mb-2">
+          Sort
+        </div>
+        <div className="flex flex-col">
+          <button
+            className="px-4 py-2 text-sm text-left hover:bg-gray-50 flex items-center gap-2"
+            onMouseDown={(e) => {
+              e.preventDefault();
+              handleSortChange(null);
+            }}
+          >
+            {(!sortOrder || sortOrder === null) && (
+              <svg className="w-4 h-4 text-blue-500" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+              </svg>
+            )}
+            <span>Clear Sort</span>
+          </button>
+          <button
+            className="px-4 py-2 text-sm text-left hover:bg-gray-50 flex items-center gap-2"
+            onMouseDown={(e) => {
+              e.preventDefault();
+              handleSortChange('asc');
+            }}
+          >
+            {sortOrder === 'asc' && (
+              <svg className="w-4 h-4 text-blue-500" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+              </svg>
+            )}
+            <span>Ascending</span>
+          </button>
+          <button
+            className="px-4 py-2 text-sm text-left hover:bg-gray-50 flex items-center gap-2"
+            onMouseDown={(e) => {
+              e.preventDefault();
+              handleSortChange('desc');
+            }}
+          >
+            {sortOrder === 'desc' && (
+              <svg className="w-4 h-4 text-blue-500" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+              </svg>
+            )}
+            <span>Descending</span>
+          </button>
         </div>
       </div>
     );
@@ -2121,6 +2224,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
         )}
         <ContextMenu />
         <ColorThemeSubmenu />
+        <SortSubmenu />
       </div>
     </div>
   );
