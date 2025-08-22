@@ -1894,10 +1894,10 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                         const newConfigs = [...chartConfigs];
                         newConfigs[index] = { ...newConfigs[index], title: e.target.value };
                         setChartConfigs(newConfigs);
-                        
-                                                                         // Regenerate chart when title changes to update display
-                        if (config.xAxis && hasValidYAxes(config.yAxes)) {
-                          const newConfig = { ...newConfigs[index], title: e.target.value };
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && config.xAxis && hasValidYAxes(config.yAxes)) {
+                          const newConfig = { ...chartConfigs[index], title: e.currentTarget.value };
                           safeTriggerChartGeneration(index, newConfig, 100);
                         }
                       }}
@@ -1909,17 +1909,17 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                     <Label className="text-xs text-gray-600">X-Axis Label</Label>
                     <Input
                       value={config.xAxisLabel || ''}
-                                                onChange={(e) => {
-                            const newConfigs = [...chartConfigs];
-                            newConfigs[index] = { ...newConfigs[index], xAxisLabel: e.target.value };
-                            setChartConfigs(newConfigs);
-                            
-                                                                                 // Regenerate chart when X-axis label changes to update display
-                          if (config.xAxis && hasValidYAxes(config.yAxes)) {
-                            const newConfig = { ...newConfigs[index], xAxisLabel: e.target.value };
-                            safeTriggerChartGeneration(index, newConfig, 100);
-                          }
-                          }}
+                      onChange={(e) => {
+                        const newConfigs = [...chartConfigs];
+                        newConfigs[index] = { ...newConfigs[index], xAxisLabel: e.target.value };
+                        setChartConfigs(newConfigs);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && config.xAxis && hasValidYAxes(config.yAxes)) {
+                          const newConfig = { ...chartConfigs[index], xAxisLabel: e.currentTarget.value };
+                          safeTriggerChartGeneration(index, newConfig, 100);
+                        }
+                      }}
                       className="h-8 text-xs"
                       placeholder="X label"
                     />
@@ -1938,16 +1938,15 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                               yAxisLabels: Array.isArray(newConfigs[index].yAxisLabels) ? newConfigs[index].yAxisLabels.map((_, i) => (i === yAxisIndex ? e.target.value : _)) : []
                             };
                             setChartConfigs(newConfigs);
-                            
-                                                                                 // Regenerate chart when Y-axis label changes to update display
-                          if (config.xAxis && hasValidYAxes(config.yAxes)) {
-                            const newConfig = { 
-                              ...newConfigs[index],
-                              yAxisLabels: Array.isArray(newConfigs[index].yAxisLabels) ? 
-                                newConfigs[index].yAxisLabels.map((_, i) => (i === yAxisIndex ? e.target.value : _)) : []
-                            };
-                            safeTriggerChartGeneration(index, newConfig, 100);
-                          }
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' && config.xAxis && hasValidYAxes(config.yAxes)) {
+                              const updatedLabels = Array.isArray(config.yAxisLabels)
+                                ? config.yAxisLabels.map((label, i) => (i === yAxisIndex ? e.currentTarget.value : label))
+                                : [];
+                              const newConfig = { ...chartConfigs[index], yAxisLabels: updatedLabels };
+                              safeTriggerChartGeneration(index, newConfig, 100);
+                            }
                           }}
                           className="h-8 text-xs"
                           placeholder={`Y${yAxisIndex + 1} label`}
