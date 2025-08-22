@@ -34,17 +34,11 @@ from .schemas import (
     FilteredModel,
     ModelFilterRequest,
     ModelVariablesResponse,
-<<<<<<< HEAD
     VariableContribution,
     WeightedEnsembleRequest,ComboResult,WeightedEnsembleResponse,
-    ModelPerformanceMetrics, ActualVsPredicted,GenericModelSelectionRequest,SavedModelResponse
-=======
-    WeightedEnsembleRequest,
-    ComboResult,
-    WeightedEnsembleResponse,
+    ModelPerformanceMetrics, ActualVsPredicted,    
     GenericModelSelectionRequest,
     SavedModelResponse,
->>>>>>> origin/dev
 )
 
 from .config import get_settings, settings
