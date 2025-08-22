@@ -84,6 +84,8 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
   const [chartSettingsVisible, setChartSettingsVisible] = useState<{ [key: number]: boolean }>({});
   const [chartFiltersVisible, setChartFiltersVisible] = useState<{ [key: number]: boolean }>({});
 
+  const settingsRefs = useRef<{ [key: number]: HTMLDivElement | null }>({});
+
   const [isLoadingColumnSummary, setIsLoadingColumnSummary] = useState(false);
   
   // Per-card collapse states
@@ -102,7 +104,6 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
   const [chartGenerated, setChartGenerated] = useState<{ [chartIndex: number]: boolean }>(data.chartGenerated || {});
   const [chartThemes, setChartThemes] = useState<{ [chartIndex: number]: string }>({});
   const [chartOptions, setChartOptions] = useState<{ [chartIndex: number]: { grid: boolean; legend: boolean; axisLabels: boolean; dataLabels: boolean } }>({});
-  const [chartSortCounters, setChartSortCounters] = useState<{ [chartIndex: number]: number }>({});
   const [dateRanges, setDateRanges] = useState<{ [columnName: string]: { min_date: string; max_date: string } }>({});
   
   // Debouncing mechanism to prevent multiple chart generations
@@ -164,6 +165,7 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
             weightColumn: safeData.weightColumn || '',
             title: safeData.title || '',
             legendField: safeData.legendField || '', // Field to use for creating multiple lines/series
+            sortOrder: null,
           },
         ]
   );
@@ -227,7 +229,19 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
     if (chatBubble.chartIndex !== null) {
       const newConfigs = [...chartConfigs];
       const mappedType = `${type}_chart` as typeof newConfigs[number]['chartType'];
-      newConfigs[chatBubble.chartIndex] = { ...newConfigs[chatBubble.chartIndex], chartType: mappedType };
+
+      // Reset legendField and notify when pie charts don't support segregation
+      let legendField = newConfigs[chatBubble.chartIndex].legendField;
+      if (mappedType === 'pie_chart' && legendField && legendField !== 'aggregate') {
+        legendField = 'aggregate';
+        toast({ description: 'Segregation of Field Value is not allowed for pie chart' });
+      }
+
+      newConfigs[chatBubble.chartIndex] = {
+        ...newConfigs[chatBubble.chartIndex],
+        chartType: mappedType,
+        legendField
+      };
       setChartConfigs(newConfigs);
       const cfg = newConfigs[chatBubble.chartIndex];
       if (cfg.xAxis && hasValidYAxes(cfg.yAxes)) {
@@ -249,16 +263,12 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
     if (Object.values(chartSettingsVisible).some(Boolean)) {
       setChartSettingsVisible({});
     }
-    if (Object.values(chartFiltersVisible).some(Boolean)) {
-      setChartFiltersVisible({});
-    }
   };
 
   const overlayVisible =
     chatBubble.visible ||
     chatBubbleShouldRender ||
-    Object.values(chartSettingsVisible).some(Boolean) ||
-    Object.values(chartFiltersVisible).some(Boolean);
+    Object.values(chartSettingsVisible).some(Boolean);
 
   useEffect(() => {
     const handleClickOutside = () => {
@@ -268,20 +278,33 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
       if (Object.values(chartSettingsVisible).some(Boolean)) {
         setChartSettingsVisible({});
       }
-      if (Object.values(chartFiltersVisible).some(Boolean)) {
-        setChartFiltersVisible({});
-      }
     };
     if (
       Object.values(openDropdowns).some(Boolean) ||
       chatBubble.visible ||
-      Object.values(chartSettingsVisible).some(Boolean) ||
-      Object.values(chartFiltersVisible).some(Boolean)
+      Object.values(chartSettingsVisible).some(Boolean)
     ) {
       document.addEventListener('click', handleClickOutside);
     }
     return () => document.removeEventListener('click', handleClickOutside);
-  }, [openDropdowns, chatBubble.visible, chartSettingsVisible, chartFiltersVisible]);
+  }, [openDropdowns, chatBubble.visible, chartSettingsVisible]);
+
+  // Close settings tray when clicking outside of it
+  useEffect(() => {
+    const handleSettingsClick = (e: MouseEvent) => {
+      const openEntry = Object.entries(chartSettingsVisible).find(([, v]) => v);
+      if (!openEntry) return;
+      const [index] = openEntry;
+      const ref = settingsRefs.current[Number(index)];
+      if (ref && !ref.contains(e.target as Node)) {
+        setChartSettingsVisible(prev => ({ ...prev, [Number(index)]: false }));
+      }
+    };
+    if (Object.values(chartSettingsVisible).some(Boolean)) {
+      document.addEventListener('mousedown', handleSettingsClick);
+    }
+    return () => document.removeEventListener('mousedown', handleSettingsClick);
+  }, [chartSettingsVisible]);
 
   // Initialize data summary collapse state
   useEffect(() => {
@@ -290,9 +313,6 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
     // Initialize chart options for the first chart if not provided
     if (!chartOptions[0]) {
       setChartOptions({ 0: { grid: true, legend: true, axisLabels: true, dataLabels: true } });
-    }
-    if (!chartSortCounters[0]) {
-      setChartSortCounters({ 0: 0 });
     }
 
     // Initialize loading state for the first chart
@@ -310,9 +330,6 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
 
   // Update chartConfigs if layout changes
   useEffect(() => {
-    // Hide all filters when layout changes
-    hideAllFilters();
-    
     if (safeData.graphLayout.numberOfGraphsInRow === 2 && chartConfigs.length === 1) {
       // Add a second chart card while preserving the first one
       setChartConfigs(prev => [
@@ -327,6 +344,7 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
           weightColumn: '',
           title: '',
           legendField: '', // Field to use for creating multiple lines/series
+          sortOrder: null,
         }
       ]);
       
@@ -535,11 +553,6 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
     }
   }, [safeData.graphLayout.numberOfGraphsInRow, safeData.columnClassifierConfig?.dimensions]);
 
-  // Hide all filters whenever graph layout changes from settings
-  useEffect(() => {
-    hideAllFilters();
-  }, [safeData.graphLayout.numberOfGraphsInRow]);
-
   // Notify parent component when chart data changes
   useEffect(() => {
     if (onChartDataChange) {
@@ -627,6 +640,7 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
           weightColumn: '',
           title: '',
           legendField: '', // Field to use for creating multiple lines/series
+          sortOrder: null,
         }
       ]);
       
@@ -1204,26 +1218,31 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
         : safeData.fallbackMeasures || [];
 
       const availableColumns = [...dimensions, ...measures];
-      
 
+      // Prepare filters from chart filters early so we can include filter columns as dimensions
+      const chartFiltersData = resetMode ? {} : (chartFilters[index] || {});
 
       // Create explore atom with flexible structure - both X and Y can be identifiers or measures
+      // Include legend field and filter columns so backend can filter correctly
+      const dimensionColumns = new Set<string>([config.xAxis]);
+      if (config.legendField && config.legendField !== 'aggregate') {
+        dimensionColumns.add(config.legendField);
+      }
+      Object.keys(chartFiltersData).forEach(col => dimensionColumns.add(col));
+
       const selectedDimensions = {
-        [safeData.dataframe]: {
-          [config.xAxis]: [config.xAxis] // X-axis can be identifier or measure
-        }
+        [safeData.dataframe]: Array.from(dimensionColumns).reduce(
+          (acc, col) => ({ ...acc, [col]: [col] }),
+          {} as { [key: string]: string[] }
+        )
       };
 
       const selectedMeasures = {
         [safeData.dataframe]: config.yAxes.filter(y => y) // Y-axes can be identifiers or measures
       };
 
-
-
-
-
       // Create explore atom
-      
+
       const createResponse = await fetch(`${EXPLORE_API}/select-dimensions-and-measures`, {
         method: 'POST',
         headers: {
@@ -1249,7 +1268,6 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
 
 
       // Prepare filters from chart filters
-      const chartFiltersData = resetMode ? {} : (chartFilters[index] || {});
       const filtersList = Object.entries(chartFiltersData)
         .filter(([identifier, values]) => Array.isArray(values) && values.length > 0)
         .map(([identifier, values]) => ({
@@ -1272,12 +1290,13 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
         filters: filtersList, // Use chart filters instead of dateFilters
         group_by:
           config.legendField && config.legendField !== 'aggregate'
-            ? [config.xAxis, config.legendField]
+            ? [config.legendField, config.xAxis]
             : [config.xAxis],
         measures_config: measuresConfig,
         chart_type: config.chartType,
         x_axis: config.xAxis,
-        weight_column: config.weightColumn || null
+        weight_column: config.weightColumn || null,
+        sort_order: config.sortOrder || null
       };
       
 
@@ -1549,7 +1568,7 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
     const config = chartConfigs[index] || chartConfigs[0];
     const isSettingsVisible = chartSettingsVisible[index] || false;
     const rendererProps = {
-      key: `chart-${index}-${config.chartType}-${chartThemes[index] || 'default'}-${chartDataSets[index]?.length || 0}-${Object.keys(chartFilters[index] || {}).length}-${appliedFilters[index] ? 'filtered' : 'unfiltered'}-theme-${chartThemes[index] || 'default'}-sort-${chartSortCounters[index] || 0}-yaxes-${config.yAxes.join('-')}`,
+      key: `chart-${index}-${config.chartType}-${chartThemes[index] || 'default'}-${chartDataSets[index]?.length || 0}-${Object.keys(chartFilters[index] || {}).length}-${appliedFilters[index] ? 'filtered' : 'unfiltered'}-theme-${chartThemes[index] || 'default'}-sort-${config.sortOrder || 'none'}-yaxes-${config.yAxes.join('-')}`,
       type: config.chartType as 'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart',
       data: chartDataSets[index] || [],
       xField: config.xAxis || undefined,
@@ -1573,12 +1592,8 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
       onAxisLabelsToggle: (enabled: boolean) => handleChartAxisLabelsToggle(index, enabled),
       onDataLabelsToggle: (enabled: boolean) => handleChartDataLabelsToggle(index, enabled),
       onSave: () => handleChartSave(index),
-      onSortChange: () => {
-        setChartSortCounters(prev => ({
-          ...prev,
-          [index]: (prev[index] || 0) + 1
-        }));
-      },
+      sortOrder: config.sortOrder || null,
+      onSortChange: (order) => handleSortOrderChange(index, order),
       showLegend: chartOptions[index]?.legend,
       showAxisLabels: chartOptions[index]?.axisLabels,
       showDataLabels: chartOptions[index]?.dataLabels,
@@ -1660,6 +1675,7 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
               <div
                 className="flex items-center mb-3 p-3 pr-2 bg-gray-50 rounded-lg min-w-0 w-full explore-axis-selectors"
                 onContextMenu={(e) => openChartTypeTray(e, index)}
+                style={{ position: 'relative', zIndex: 40 }}
               >
                 <div className="flex items-center space-x-2">
                   <Select
@@ -1831,9 +1847,24 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                     value={config.legendField || ''}
                     onValueChange={(value) => {
                       const newConfigs = [...chartConfigs];
+                      if (
+                        newConfigs[index].chartType === 'pie_chart' &&
+                        value !== 'aggregate'
+                      ) {
+                        newConfigs[index] = {
+                          ...newConfigs[index],
+                          legendField: 'aggregate'
+                        };
+                        setChartConfigs(newConfigs);
+                        toast({ description: 'Segregation of Field Value is not allowed for pie chart' });
+                        if (config.xAxis && hasValidYAxes(config.yAxes)) {
+                          safeTriggerChartGeneration(index, newConfigs[index], 100);
+                        }
+                        return;
+                      }
                       newConfigs[index] = {
                         ...newConfigs[index],
-                        legendField: value,
+                        legendField: value
                       };
                       setChartConfigs(newConfigs);
                       if (config.xAxis && hasValidYAxes(config.yAxes)) {
@@ -1870,8 +1901,9 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
             {isSettingsVisible && (
               <div
                 className="mb-4 p-3 bg-blue-50 rounded-lg border border-blue-200 min-w-0 w-full explore-chart-settings"
+                ref={(el) => (settingsRefs.current[index] = el)}
                 onClick={(e) => e.stopPropagation()}
-                style={{ position: 'relative', zIndex: 4001 }}
+                style={{ position: 'relative', zIndex: 50 }}
               >
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 min-w-0 w-full explore-chart-settings">
                   <div>
@@ -1990,7 +2022,7 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                 }`}
                 onDoubleClick={() => toggleFilterCrossButtons(index)}
                 onClick={(e) => e.stopPropagation()}
-                style={{ position: 'relative', zIndex: 4001 }}
+                style={{ position: 'relative', zIndex: 30 }}
               >
                 {/* Double-click hint removed from top-right */}
                 
@@ -2663,6 +2695,14 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
     }));
   };
 
+  // Handle sort order change for charts
+  const handleSortOrderChange = (chartIndex: number, order: 'asc' | 'desc' | null) => {
+    const newConfigs = [...chartConfigs];
+    newConfigs[chartIndex] = { ...newConfigs[chartIndex], sortOrder: order };
+    setChartConfigs(newConfigs);
+    safeTriggerChartGeneration(chartIndex, newConfigs[chartIndex], 100);
+  };
+
   // Handle save action for charts
   const handleChartSave = (chartIndex: number) => {
     const config = chartConfigs[chartIndex];
@@ -2873,15 +2913,6 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
     }
   };
 
-  // Hide all filters when layout changes
-  const hideAllFilters = () => {
-    const newFilterVisibility: { [key: number]: boolean } = {};
-    chartConfigs.forEach((_, index) => {
-      newFilterVisibility[index] = false;
-    });
-    setChartFiltersVisible(newFilterVisibility);
-  };
-
   // Reset a card's filters back to original state
   const resetCardFilters = (chartIndex: number) => {
     const originalDimensions = originalDimensionsPerCard[chartIndex];
@@ -2906,15 +2937,18 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
     }
   }, [safeData.columnClassifierConfig, safeData.columnSummary]);
   
-  // Re-initialize all existing cards when column summary changes (to apply filtering)
+  // Re-initialize all existing cards when column summary or dimensions change (to apply filtering)
   useEffect(() => {
-    if (safeData.columnSummary && Object.keys(cardSelectedIdentifiers).length > 0) {
-      // Re-initialize all existing cards with filtered identifiers
+    if (
+      (safeData.columnSummary || safeData.columnClassifierConfig?.dimensions) &&
+      Object.keys(cardSelectedIdentifiers).length > 0
+    ) {
+      // Re-initialize all existing cards with updated identifiers
       Object.keys(cardSelectedIdentifiers).forEach(chartIndex => {
         initializeCardDimensions(parseInt(chartIndex));
       });
     }
-  }, [safeData.columnSummary]);
+  }, [safeData.columnSummary, safeData.columnClassifierConfig?.dimensions]);
 
   // Debug: Log initial filter state
   useEffect(() => {

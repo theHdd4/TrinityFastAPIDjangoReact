@@ -772,6 +772,7 @@ async def chart_data_multidim(explore_atom_id: str):
     measures_config = operations.get("measures_config", {})
     x_axis = operations.get("x_axis", group_by[0] if group_by else None)
     weight_column = operations.get("weight_column", None)
+    sort_order = operations.get("sort_order")
     
     # Initialize chart metadata for legend-based charts
     chart_metadata = {}
@@ -878,14 +879,7 @@ async def chart_data_multidim(explore_atom_id: str):
         print(f"📊 Cache status: {'HIT' if cache_hit else 'MISS'}")
         print(f"🔍 Debug: df columns: {list(df.columns)}")
         print(f"🔍 Debug: df head: {df.head(2).to_dict('records')}")
-        
-        # Performance optimization: Sample data for large datasets
-        if len(df) > 100000:  # If more than 100k rows
-            print(f"📊 Large dataset detected ({len(df)} rows), sampling for faster processing...")
-            sample_size = min(100000, len(df))
-            df = df.sample(n=sample_size, random_state=42)
-            print(f"📊 Sampled to {len(df)} rows for faster processing")
-        
+
         print(f"⏱️ Data fetch completed at: {datetime.now()}")
         
     except Exception as e:
@@ -1410,14 +1404,17 @@ async def chart_data_multidim(explore_atom_id: str):
         print(f"🔍 Backend: Processing BAR CHART branch")
         # Bar chart specific processing
         chart_data = []
-        
+
         # Check if we have multiple measures for dual Y-axes
         if len(multiple_measures) > 1:
             print(f"🔍 Backend: Generating bar chart with multiple measures for dual Y-axes")
-            
-            # Sort by the first measure value (descending) for better bar chart visualization
+
             first_measure_col = multiple_measures[0]['column']
-            sorted_result = grouped_result.sort_values(first_measure_col, ascending=False)
+            sorted_result = grouped_result
+            if sort_order == "asc":
+                sorted_result = grouped_result.sort_values(first_measure_col, ascending=True)
+            elif sort_order == "desc":
+                sorted_result = grouped_result.sort_values(first_measure_col, ascending=False)
             
             for _, row in sorted_result.iterrows():
                 # Create bar chart data point with actual field names
@@ -1448,8 +1445,11 @@ async def chart_data_multidim(explore_atom_id: str):
             
         else:
             # Single measure bar chart (existing logic)
-            # Sort by measure value (descending) for better bar chart visualization
-            sorted_result = grouped_result.sort_values(actual_measure, ascending=False)
+            sorted_result = grouped_result
+            if sort_order == "asc":
+                sorted_result = grouped_result.sort_values(actual_measure, ascending=True)
+            elif sort_order == "desc":
+                sorted_result = grouped_result.sort_values(actual_measure, ascending=False)
 
             if len(actual_group_cols) > 1:
                 # Legend field present - pivot so each unique legend value becomes its own bar series
@@ -1506,14 +1506,17 @@ async def chart_data_multidim(explore_atom_id: str):
         print(f"🔍 Backend: Processing STACKED BAR CHART branch")
         # Stacked bar chart specific processing
         chart_data = []
-        
+
         # Check if we have multiple measures for stacked bars
         if len(multiple_measures) > 1:
             print(f"🔍 Backend: Generating stacked bar chart with multiple measures")
-            
-            # Sort by the first measure value (descending) for better stacked bar chart visualization
+
             first_measure_col = multiple_measures[0]['column']
-            sorted_result = grouped_result.sort_values(first_measure_col, ascending=False)
+            sorted_result = grouped_result
+            if sort_order == "asc":
+                sorted_result = grouped_result.sort_values(first_measure_col, ascending=True)
+            elif sort_order == "desc":
+                sorted_result = grouped_result.sort_values(first_measure_col, ascending=False)
             
             for _, row in sorted_result.iterrows():
                 # Create stacked bar chart data point with actual field names
@@ -1546,8 +1549,11 @@ async def chart_data_multidim(explore_atom_id: str):
             
         else:
             # Single measure stacked bar chart (same as regular bar chart but with stacking capability)
-            # Sort by measure value (descending) for better stacked bar chart visualization
-            sorted_result = grouped_result.sort_values(actual_measure, ascending=False)
+            sorted_result = grouped_result
+            if sort_order == "asc":
+                sorted_result = grouped_result.sort_values(actual_measure, ascending=True)
+            elif sort_order == "desc":
+                sorted_result = grouped_result.sort_values(actual_measure, ascending=False)
             
             for _, row in sorted_result.iterrows():
                 # Create stacked bar chart data point
