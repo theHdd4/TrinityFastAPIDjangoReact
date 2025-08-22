@@ -246,8 +246,8 @@ const formatLargeNumber = (value: number): string => {
   const absValue = Math.abs(value);
 
   const formatScaled = (scaled: number): string => {
-    // Show one decimal place only if needed (e.g. 2.5M)
-    return scaled % 1 === 0 ? scaled.toString() : scaled.toFixed(1).replace(/\.0$/, '');
+    // Keep at most two decimals and trim trailing zeros (e.g. 2.34M, 2M)
+    return parseFloat(scaled.toFixed(2)).toString();
   };
 
   if (absValue >= 1_000_000_000) { // Billions (10^9)
@@ -257,7 +257,7 @@ const formatLargeNumber = (value: number): string => {
   } else if (absValue >= 1_000) { // Thousands (10^3)
     return `${formatScaled(value / 1_000)}K`;
   }
-  return value.toString(); // Numbers less than 1000
+  return value.toLocaleString(); // Numbers less than 1000
 };
 
 // Format numbers for tooltips - show exact values without suffixes
@@ -577,6 +577,35 @@ const RechartsChartRenderer: React.FC<Props> = ({
       return pivotDataByLegend(chartDataForRendering, xField, yField, legendField);
     }
     return { pivoted: [], uniqueValues: [], actualXKey: xField };
+  }, [type, chartDataForRendering, xField, yField, legendField]);
+
+  // Prepare grouped bar chart data when segregating by a legend field
+  const { data: segregatedBarData, legends: barLegendValues } = useMemo(() => {
+    if (type === 'bar_chart' && legendField && xField && yField && chartDataForRendering.length > 0) {
+      const firstRow = chartDataForRendering[0];
+
+      // If data is already pivoted (legend field not present), treat as ready
+      if (!(legendField in firstRow)) {
+        const legends = Object.keys(firstRow).filter(k => k !== xField && typeof firstRow[k] === 'number');
+        return { data: chartDataForRendering, legends };
+      }
+
+      const byX = new Map<any, any>();
+      const legends: string[] = [];
+      chartDataForRendering.forEach(row => {
+        const xVal = row[xField];
+        const legendVal = row[legendField];
+        const yVal = row[yField];
+        if (legendVal !== undefined && !legends.includes(legendVal)) legends.push(legendVal);
+
+        const record = byX.get(xVal) || { x: xVal };
+        record[legendVal] = yVal;
+        byX.set(xVal, record);
+      });
+
+      return { data: Array.from(byX.values()), legends };
+    }
+    return { data: [], legends: [] };
   }, [type, chartDataForRendering, xField, yField, legendField]);
   
   // Styling for axis ticks & labels
@@ -1298,14 +1327,12 @@ const RechartsChartRenderer: React.FC<Props> = ({
         /* -------------------------------------------------------------
          * Multi-bar rendering when a legend field is provided
          * ----------------------------------------------------------- */
-        if (legendField && legendValues.length > 0 && pivotedLineData.length > 0) {
-          // Use the actual X-axis key determined during pivoting
-          const xKeyForBar = pivotActualXKey || xField || Object.keys(pivotedLineData[0])[0];
+        if (legendField && barLegendValues.length > 0 && segregatedBarData.length > 0) {
           return (
-            <BarChart data={pivotedLineData} margin={{ top: 20, right: 20, left: 20, bottom: 20 }}>
+            <BarChart data={segregatedBarData} margin={{ top: 20, right: 20, left: 20, bottom: 20 }}>
               {currentShowGrid && <CartesianGrid strokeDasharray="3 3" />}
               <XAxis
-                dataKey={xKeyForBar}
+                dataKey="x"
                 label={currentShowAxisLabels && xAxisLabel ? { value: capitalizeWords(xAxisLabel), position: 'bottom', style: axisLabelStyle } : undefined}
                 tick={axisTickStyle}
                 tickLine={false}
@@ -1318,28 +1345,26 @@ const RechartsChartRenderer: React.FC<Props> = ({
                 tick={axisTickStyle}
                 tickLine={false}
               />
-              <Tooltip 
+              <Tooltip
                 content={({ active, payload, label }) => {
                   if (active && payload && payload.length) {
                     return (
                       <div className="explore-chart-tooltip">
                         <p className="font-semibold text-gray-900 mb-2 text-sm">{label}</p>
-                        {payload.map((entry: any, index: number) => {
-                          return (
-                            <div key={index} className="flex items-center gap-2 mb-1">
-                              <div 
-                                className="w-3 h-3 rounded-full" 
-                                style={{ backgroundColor: entry.color }}
-                              />
-                              <span className="text-sm font-medium text-gray-700">
-                                {entry.dataKey}: 
-                              </span>
-                              <span className="text-sm font-semibold text-gray-700">
-                                {typeof entry.value === 'number' ? formatTooltipNumber(entry.value) : entry.value}
-                              </span>
-                            </div>
-                          );
-                        })}
+                        {payload.map((entry: any, index: number) => (
+                          <div key={index} className="flex items-center gap-2 mb-1">
+                            <div
+                              className="w-3 h-3 rounded-full"
+                              style={{ backgroundColor: entry.color }}
+                            />
+                            <span className="text-sm font-medium text-gray-700">
+                              {entry.dataKey}:
+                            </span>
+                            <span className="text-sm font-semibold text-gray-700">
+                              {typeof entry.value === 'number' ? formatTooltipNumber(entry.value) : entry.value}
+                            </span>
+                          </div>
+                        ))}
                       </div>
                     );
                   }
@@ -1355,7 +1380,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
                   wrapperStyle={{ paddingTop: '15px', fontSize: '11px' }}
                 />
               )}
-              {legendValues.map((seriesKey, idx) => (
+              {barLegendValues.map((seriesKey, idx) => (
                 <Bar
                   key={seriesKey}
                   dataKey={seriesKey}
@@ -1365,9 +1390,9 @@ const RechartsChartRenderer: React.FC<Props> = ({
                   animationEasing="ease-out"
                 >
                   {currentShowDataLabels && (
-                    <LabelList 
-                      dataKey={seriesKey} 
-                      position="top" 
+                    <LabelList
+                      dataKey={seriesKey}
+                      position="top"
                       formatter={(value) => formatLargeNumber(value)}
                       style={{ fontSize: '11px', fontWeight: '500', fill: '#374151' }}
                     />
