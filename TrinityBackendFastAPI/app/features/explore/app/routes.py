@@ -878,14 +878,7 @@ async def chart_data_multidim(explore_atom_id: str):
         print(f"📊 Cache status: {'HIT' if cache_hit else 'MISS'}")
         print(f"🔍 Debug: df columns: {list(df.columns)}")
         print(f"🔍 Debug: df head: {df.head(2).to_dict('records')}")
-        
-        # Performance optimization: Sample data for large datasets
-        if len(df) > 100000:  # If more than 100k rows
-            print(f"📊 Large dataset detected ({len(df)} rows), sampling for faster processing...")
-            sample_size = min(100000, len(df))
-            df = df.sample(n=sample_size, random_state=42)
-            print(f"📊 Sampled to {len(df)} rows for faster processing")
-        
+
         print(f"⏱️ Data fetch completed at: {datetime.now()}")
         
     except Exception as e:

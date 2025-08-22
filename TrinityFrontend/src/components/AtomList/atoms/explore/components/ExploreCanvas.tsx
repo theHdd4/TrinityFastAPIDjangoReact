@@ -333,9 +333,6 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
 
   // Update chartConfigs if layout changes
   useEffect(() => {
-    // Hide all filters when layout changes
-    hideAllFilters();
-    
     if (safeData.graphLayout.numberOfGraphsInRow === 2 && chartConfigs.length === 1) {
       // Add a second chart card while preserving the first one
       setChartConfigs(prev => [
@@ -557,11 +554,6 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
       });
     }
   }, [safeData.graphLayout.numberOfGraphsInRow, safeData.columnClassifierConfig?.dimensions]);
-
-  // Hide all filters whenever graph layout changes from settings
-  useEffect(() => {
-    hideAllFilters();
-  }, [safeData.graphLayout.numberOfGraphsInRow]);
 
   // Notify parent component when chart data changes
   useEffect(() => {
@@ -1687,6 +1679,7 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
               <div
                 className="flex items-center mb-3 p-3 pr-2 bg-gray-50 rounded-lg min-w-0 w-full explore-axis-selectors"
                 onContextMenu={(e) => openChartTypeTray(e, index)}
+                style={{ position: 'relative', zIndex: 40 }}
               >
                 <div className="flex items-center space-x-2">
                   <Select
@@ -1914,7 +1907,7 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                 className="mb-4 p-3 bg-blue-50 rounded-lg border border-blue-200 min-w-0 w-full explore-chart-settings"
                 ref={(el) => (settingsRefs.current[index] = el)}
                 onClick={(e) => e.stopPropagation()}
-                style={{ position: 'relative', zIndex: 4001 }}
+                style={{ position: 'relative', zIndex: 50 }}
               >
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 min-w-0 w-full explore-chart-settings">
                   <div>
@@ -2033,7 +2026,7 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                 }`}
                 onDoubleClick={() => toggleFilterCrossButtons(index)}
                 onClick={(e) => e.stopPropagation()}
-                style={{ position: 'relative', zIndex: 4001 }}
+                style={{ position: 'relative', zIndex: 30 }}
               >
                 {/* Double-click hint removed from top-right */}
                 
@@ -2914,15 +2907,6 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
         [chartIndex]: allIdentifiers
       }));
     }
-  };
-
-  // Hide all filters when layout changes
-  const hideAllFilters = () => {
-    const newFilterVisibility: { [key: number]: boolean } = {};
-    chartConfigs.forEach((_, index) => {
-      newFilterVisibility[index] = false;
-    });
-    setChartFiltersVisible(newFilterVisibility);
   };
 
   // Reset a card's filters back to original state
