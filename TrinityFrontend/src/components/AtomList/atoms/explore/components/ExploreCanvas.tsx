@@ -1103,20 +1103,15 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
   // Apply filters and regenerate chart
   const applyFilters = (chartIndex: number) => {
     if (chartConfigs[chartIndex]?.xAxis && hasValidYAxes(chartConfigs[chartIndex]?.yAxes)) {
-      
-      // Set applied filters state
+      // Mark filters as applied so UI can reflect active filtering
       setAppliedFilters(prev => ({ ...prev, [chartIndex]: true }));
-      
-      // Clear any existing chart data for this index to force regeneration
-      setChartDataSets(prev => {
-        const newData = { ...prev };
-        delete newData[chartIndex];
-        return newData;
-      });
-      
-      // Generate chart with filters
+
+      // Regenerate the chart with the currently selected filters.
+      // We intentionally keep the previous chart data while the new data
+      // loads so the chart doesn't disappear if the request fails.
       generateChart(chartIndex, false);
-    }   };
+    }
+  };
   
   const resetFilters = (chartIndex: number) => {
     // Clear all filters for this chart
