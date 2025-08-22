@@ -84,6 +84,8 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
   const [chartSettingsVisible, setChartSettingsVisible] = useState<{ [key: number]: boolean }>({});
   const [chartFiltersVisible, setChartFiltersVisible] = useState<{ [key: number]: boolean }>({});
 
+  const settingsRefs = useRef<{ [key: number]: HTMLDivElement | null }>({});
+
   const [isLoadingColumnSummary, setIsLoadingColumnSummary] = useState(false);
   
   // Per-card collapse states
@@ -227,7 +229,19 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
     if (chatBubble.chartIndex !== null) {
       const newConfigs = [...chartConfigs];
       const mappedType = `${type}_chart` as typeof newConfigs[number]['chartType'];
-      newConfigs[chatBubble.chartIndex] = { ...newConfigs[chatBubble.chartIndex], chartType: mappedType };
+
+      // Reset legendField and notify when pie charts don't support segregation
+      let legendField = newConfigs[chatBubble.chartIndex].legendField;
+      if (mappedType === 'pie_chart' && legendField && legendField !== 'aggregate') {
+        legendField = 'aggregate';
+        toast({ description: 'Segregation of Field Value is not allowed for pie chart' });
+      }
+
+      newConfigs[chatBubble.chartIndex] = {
+        ...newConfigs[chatBubble.chartIndex],
+        chartType: mappedType,
+        legendField
+      };
       setChartConfigs(newConfigs);
       const cfg = newConfigs[chatBubble.chartIndex];
       if (cfg.xAxis && hasValidYAxes(cfg.yAxes)) {
@@ -282,6 +296,23 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
     }
     return () => document.removeEventListener('click', handleClickOutside);
   }, [openDropdowns, chatBubble.visible, chartSettingsVisible, chartFiltersVisible]);
+
+  // Close settings tray when clicking outside of it
+  useEffect(() => {
+    const handleSettingsClick = (e: MouseEvent) => {
+      const openEntry = Object.entries(chartSettingsVisible).find(([, v]) => v);
+      if (!openEntry) return;
+      const [index] = openEntry;
+      const ref = settingsRefs.current[Number(index)];
+      if (ref && !ref.contains(e.target as Node)) {
+        setChartSettingsVisible(prev => ({ ...prev, [Number(index)]: false }));
+      }
+    };
+    if (Object.values(chartSettingsVisible).some(Boolean)) {
+      document.addEventListener('mousedown', handleSettingsClick);
+    }
+    return () => document.removeEventListener('mousedown', handleSettingsClick);
+  }, [chartSettingsVisible]);
 
   // Initialize data summary collapse state
   useEffect(() => {
@@ -1831,9 +1862,24 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                     value={config.legendField || ''}
                     onValueChange={(value) => {
                       const newConfigs = [...chartConfigs];
+                      if (
+                        newConfigs[index].chartType === 'pie_chart' &&
+                        value !== 'aggregate'
+                      ) {
+                        newConfigs[index] = {
+                          ...newConfigs[index],
+                          legendField: 'aggregate'
+                        };
+                        setChartConfigs(newConfigs);
+                        toast({ description: 'Segregation of Field Value is not allowed for pie chart' });
+                        if (config.xAxis && hasValidYAxes(config.yAxes)) {
+                          safeTriggerChartGeneration(index, newConfigs[index], 100);
+                        }
+                        return;
+                      }
                       newConfigs[index] = {
                         ...newConfigs[index],
-                        legendField: value,
+                        legendField: value
                       };
                       setChartConfigs(newConfigs);
                       if (config.xAxis && hasValidYAxes(config.yAxes)) {
@@ -1870,6 +1916,7 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
             {isSettingsVisible && (
               <div
                 className="mb-4 p-3 bg-blue-50 rounded-lg border border-blue-200 min-w-0 w-full explore-chart-settings"
+                ref={(el) => (settingsRefs.current[index] = el)}
                 onClick={(e) => e.stopPropagation()}
                 style={{ position: 'relative', zIndex: 4001 }}
               >
