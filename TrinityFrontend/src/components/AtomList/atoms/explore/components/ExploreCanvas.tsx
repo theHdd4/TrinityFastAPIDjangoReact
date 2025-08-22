@@ -263,16 +263,12 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
     if (Object.values(chartSettingsVisible).some(Boolean)) {
       setChartSettingsVisible({});
     }
-    if (Object.values(chartFiltersVisible).some(Boolean)) {
-      setChartFiltersVisible({});
-    }
   };
 
   const overlayVisible =
     chatBubble.visible ||
     chatBubbleShouldRender ||
-    Object.values(chartSettingsVisible).some(Boolean) ||
-    Object.values(chartFiltersVisible).some(Boolean);
+    Object.values(chartSettingsVisible).some(Boolean);
 
   useEffect(() => {
     const handleClickOutside = () => {
@@ -282,20 +278,16 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
       if (Object.values(chartSettingsVisible).some(Boolean)) {
         setChartSettingsVisible({});
       }
-      if (Object.values(chartFiltersVisible).some(Boolean)) {
-        setChartFiltersVisible({});
-      }
     };
     if (
       Object.values(openDropdowns).some(Boolean) ||
       chatBubble.visible ||
-      Object.values(chartSettingsVisible).some(Boolean) ||
-      Object.values(chartFiltersVisible).some(Boolean)
+      Object.values(chartSettingsVisible).some(Boolean)
     ) {
       document.addEventListener('click', handleClickOutside);
     }
     return () => document.removeEventListener('click', handleClickOutside);
-  }, [openDropdowns, chatBubble.visible, chartSettingsVisible, chartFiltersVisible]);
+  }, [openDropdowns, chatBubble.visible, chartSettingsVisible]);
 
   // Close settings tray when clicking outside of it
   useEffect(() => {
@@ -1235,26 +1227,31 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
         : safeData.fallbackMeasures || [];
 
       const availableColumns = [...dimensions, ...measures];
-      
 
+      // Prepare filters from chart filters early so we can include filter columns as dimensions
+      const chartFiltersData = resetMode ? {} : (chartFilters[index] || {});
 
       // Create explore atom with flexible structure - both X and Y can be identifiers or measures
+      // Include legend field and filter columns so backend can filter correctly
+      const dimensionColumns = new Set<string>([config.xAxis]);
+      if (config.legendField && config.legendField !== 'aggregate') {
+        dimensionColumns.add(config.legendField);
+      }
+      Object.keys(chartFiltersData).forEach(col => dimensionColumns.add(col));
+
       const selectedDimensions = {
-        [safeData.dataframe]: {
-          [config.xAxis]: [config.xAxis] // X-axis can be identifier or measure
-        }
+        [safeData.dataframe]: Array.from(dimensionColumns).reduce(
+          (acc, col) => ({ ...acc, [col]: [col] }),
+          {} as { [key: string]: string[] }
+        )
       };
 
       const selectedMeasures = {
         [safeData.dataframe]: config.yAxes.filter(y => y) // Y-axes can be identifiers or measures
       };
 
-
-
-
-
       // Create explore atom
-      
+
       const createResponse = await fetch(`${EXPLORE_API}/select-dimensions-and-measures`, {
         method: 'POST',
         headers: {
@@ -1280,7 +1277,6 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
 
 
       // Prepare filters from chart filters
-      const chartFiltersData = resetMode ? {} : (chartFilters[index] || {});
       const filtersList = Object.entries(chartFiltersData)
         .filter(([identifier, values]) => Array.isArray(values) && values.length > 0)
         .map(([identifier, values]) => ({
