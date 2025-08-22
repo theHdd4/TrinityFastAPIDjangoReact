@@ -581,42 +581,54 @@ const RechartsChartRenderer: React.FC<Props> = ({
 
   // Prepare grouped bar chart data when segregating by a legend field
   const { data: segregatedBarData, legends: barLegendValues, xKey: barActualXKey } = useMemo(() => {
-    if (type === 'bar_chart' && legendField && xField && yField && chartDataForRendering.length > 0) {
-      // Normalize rows so that generic keys (x, y, value, etc.) map to the actual
-      // xField/yField names and ensure Y values are numeric.
-      const normalizedRows = chartDataForRendering.map(row => {
-        const normalized: any = {};
-
-        const keys = Object.keys(row);
-        const xCandidate = keys.find(k => k.toLowerCase() === xField.toLowerCase() || ['x', 'name', 'category', 'year'].includes(k.toLowerCase()));
-        const yCandidate = keys.find(k => k.toLowerCase() === yField.toLowerCase() || ['y', 'value', 'volume'].includes(k.toLowerCase()));
-        const legendCandidate = keys.find(k => k.toLowerCase() === legendField.toLowerCase());
-
-        if (xCandidate) normalized[xField] = row[xCandidate];
-        if (yCandidate) {
-          const raw = row[yCandidate];
-          normalized[yField] = typeof raw === 'number' ? raw : Number(String(raw).replace(/,/g, ''));
-        }
-        if (legendCandidate) normalized[legendField] = row[legendCandidate];
-
-        return normalized;
-      });
-
-      const first = normalizedRows[0] || {};
-      const hasLegend = Object.keys(first).some(k => k.toLowerCase() === legendField.toLowerCase());
-      const actualXKey = Object.keys(first).find(k => k.toLowerCase() === xField.toLowerCase()) || xField;
-
-      if (!hasLegend) {
-        // Data is already pivoted (no legend field present)
-        const legends = Object.keys(first).filter(k => k !== actualXKey && typeof first[k] === 'number');
-        return { data: normalizedRows, legends, xKey: actualXKey };
-      }
-
-      // Pivot the normalized rows to build grouped bar data
-      const { pivoted, uniqueValues, actualXKey: resolvedXKey } = pivotDataByLegend(normalizedRows, xField, yField, legendField);
-      return { data: pivoted, legends: uniqueValues, xKey: resolvedXKey };
+    if (type !== 'bar_chart' || !legendField || !xField || !yField || chartDataForRendering.length === 0) {
+      return { data: [], legends: [], xKey: xField };
     }
-    return { data: [], legends: [], xKey: xField };
+
+    // Normalize rows using actual field names (case-insensitive) and ensure Y values are numeric
+    const normalized = chartDataForRendering.map(row => {
+      const lowerKeyMap = Object.fromEntries(Object.keys(row).map(k => [k.toLowerCase(), k]));
+      const xKeyActual = lowerKeyMap[xField.toLowerCase()] || xField;
+      const yKeyActual = lowerKeyMap[yField.toLowerCase()] || yField;
+      const legendKeyActual = lowerKeyMap[legendField.toLowerCase()] || legendField;
+
+      const xVal = row[xKeyActual];
+      const yRaw = row[yKeyActual];
+      const legendVal = row[legendKeyActual];
+
+      return {
+        [xField]: xVal,
+        [legendField]: legendVal,
+        [yField]: typeof yRaw === 'number' ? yRaw : Number(String(yRaw).replace(/,/g, ''))
+      };
+    });
+
+    const legends: string[] = [];
+    const map = new Map<string, any>();
+
+    normalized.forEach(row => {
+      const xVal = row[xField];
+      const legendVal = row[legendField];
+      const yVal = row[yField];
+
+      if (legendVal !== undefined && !legends.includes(legendVal)) legends.push(legendVal);
+
+      const key = String(xVal);
+      const existing = map.get(key) || { [xField]: xVal };
+      existing[legendVal] = yVal;
+      map.set(key, existing);
+    });
+
+    const pivoted = Array.from(map.values()).sort((a, b) => {
+      const aVal = a[xField];
+      const bVal = b[xField];
+      if (typeof aVal === 'number' && typeof bVal === 'number') {
+        return aVal - bVal;
+      }
+      return String(aVal).localeCompare(String(bVal));
+    });
+
+    return { data: pivoted, legends, xKey: xField };
   }, [type, chartDataForRendering, xField, yField, legendField]);
   
   // Styling for axis ticks & labels
