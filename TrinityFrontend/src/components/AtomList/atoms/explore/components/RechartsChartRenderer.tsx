@@ -607,7 +607,10 @@ const RechartsChartRenderer: React.FC<Props> = ({
           return !isXAxisField && typeof firstRow[key] === 'number';
         });
 
-        const actualXKey = Object.keys(firstRow).find(k => k.toLowerCase() === xField.toLowerCase()) || Object.keys(firstRow)[0];
+        const actualXKey =
+          Object.keys(firstRow).find(k => k.toLowerCase() === xField.toLowerCase()) ||
+          Object.keys(firstRow).find(k => !legendColumns.includes(k)) ||
+          Object.keys(firstRow)[0];
 
         return {
           pivoted: chartDataForRendering,
@@ -1341,7 +1344,11 @@ const RechartsChartRenderer: React.FC<Props> = ({
          * Multi-bar rendering when a legend field is provided
          * ----------------------------------------------------------- */
         if (legendField && legendValues.length > 0 && pivotedLineData.length > 0) {
-          const xKeyForBar = pivotActualXKey || xField || Object.keys(pivotedLineData[0] || {})[0];
+          const xKeyForBar =
+            pivotActualXKey ||
+            xField ||
+            Object.keys(pivotedLineData[0] || {}).find(k => !legendValues.includes(k)) ||
+            Object.keys(pivotedLineData[0] || {})[0];
           return (
             <BarChart data={pivotedLineData} margin={{ top: 20, right: 20, left: 20, bottom: 20 }}>
               {currentShowGrid && <CartesianGrid strokeDasharray="3 3" />}
@@ -1556,7 +1563,11 @@ const RechartsChartRenderer: React.FC<Props> = ({
          * ----------------------------------------------------------- */
         if (legendField && legendValues.length > 0 && pivotedLineData.length > 0) {
           // Use the actual X-axis key determined during pivoting
-          const xKeyForLine = pivotActualXKey || xField || Object.keys(pivotedLineData[0])[0];
+          const xKeyForLine =
+            pivotActualXKey ||
+            xField ||
+            Object.keys(pivotedLineData[0] || {}).find(k => !legendValues.includes(k)) ||
+            Object.keys(pivotedLineData[0] || {})[0];
           return (
             <LineChart data={pivotedLineData} margin={{ top: 20, right: 20, left: 20, bottom: 20 }}>
               {currentShowGrid && <CartesianGrid strokeDasharray="3 3" />}
@@ -1762,7 +1773,11 @@ const RechartsChartRenderer: React.FC<Props> = ({
 
       case 'area_chart':
         if (legendField && legendValues.length > 0 && pivotedLineData.length > 0) {
-          const xKeyForArea = pivotActualXKey || xField || Object.keys(pivotedLineData[0])[0];
+          const xKeyForArea =
+            pivotActualXKey ||
+            xField ||
+            Object.keys(pivotedLineData[0] || {}).find(k => !legendValues.includes(k)) ||
+            Object.keys(pivotedLineData[0] || {})[0];
           return (
             <AreaChart data={pivotedLineData} margin={{ top: 20, right: 20, left: 20, bottom: 20 }}>
               {currentShowGrid && <CartesianGrid strokeDasharray="3 3" />}
@@ -1847,7 +1862,11 @@ const RechartsChartRenderer: React.FC<Props> = ({
       case 'scatter_chart':
         const xKeyForScatter =
           legendField && legendValues.length > 0 && pivotedLineData.length > 0
-            ? pivotActualXKey || xField || Object.keys(pivotedLineData[0])[0]
+            ?
+                pivotActualXKey ||
+                xField ||
+                Object.keys(pivotedLineData[0] || {}).find(k => !legendValues.includes(k)) ||
+                Object.keys(pivotedLineData[0] || {})[0]
             : xKey;
         return (
           <ScatterChart margin={{ top: 20, right: 20, left: 20, bottom: 20 }}>
