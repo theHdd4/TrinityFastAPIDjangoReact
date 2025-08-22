@@ -83,9 +83,6 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
 
   const [chartSettingsVisible, setChartSettingsVisible] = useState<{ [key: number]: boolean }>({});
   const [chartFiltersVisible, setChartFiltersVisible] = useState<{ [key: number]: boolean }>({});
-
-  const settingsRefs = useRef<{ [key: number]: HTMLDivElement | null }>({});
-
   const [isLoadingColumnSummary, setIsLoadingColumnSummary] = useState(false);
   
   // Per-card collapse states
@@ -260,51 +257,26 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
     setOpenDropdowns({});
     closeChatBubble();
     setChatBubbleShouldRender(false);
-    if (Object.values(chartSettingsVisible).some(Boolean)) {
-      setChartSettingsVisible({});
-    }
   };
 
   const overlayVisible =
     chatBubble.visible ||
-    chatBubbleShouldRender ||
-    Object.values(chartSettingsVisible).some(Boolean);
+    chatBubbleShouldRender;
 
   useEffect(() => {
     const handleClickOutside = () => {
       setOpenDropdowns({});
       closeChatBubble();
       setChatBubbleShouldRender(false);
-      if (Object.values(chartSettingsVisible).some(Boolean)) {
-        setChartSettingsVisible({});
-      }
     };
     if (
       Object.values(openDropdowns).some(Boolean) ||
-      chatBubble.visible ||
-      Object.values(chartSettingsVisible).some(Boolean)
+      chatBubble.visible
     ) {
       document.addEventListener('click', handleClickOutside);
     }
     return () => document.removeEventListener('click', handleClickOutside);
-  }, [openDropdowns, chatBubble.visible, chartSettingsVisible]);
-
-  // Close settings tray when clicking outside of it
-  useEffect(() => {
-    const handleSettingsClick = (e: MouseEvent) => {
-      const openEntry = Object.entries(chartSettingsVisible).find(([, v]) => v);
-      if (!openEntry) return;
-      const [index] = openEntry;
-      const ref = settingsRefs.current[Number(index)];
-      if (ref && !ref.contains(e.target as Node)) {
-        setChartSettingsVisible(prev => ({ ...prev, [Number(index)]: false }));
-      }
-    };
-    if (Object.values(chartSettingsVisible).some(Boolean)) {
-      document.addEventListener('mousedown', handleSettingsClick);
-    }
-    return () => document.removeEventListener('mousedown', handleSettingsClick);
-  }, [chartSettingsVisible]);
+  }, [openDropdowns, chatBubble.visible]);
 
   // Initialize data summary collapse state
   useEffect(() => {
@@ -1910,7 +1882,6 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
             {isSettingsVisible && (
               <div
                 className="mb-4 p-3 bg-blue-50 rounded-lg border border-blue-200 min-w-0 w-full explore-chart-settings"
-                ref={(el) => (settingsRefs.current[index] = el)}
                 onClick={(e) => e.stopPropagation()}
                 style={{ position: 'relative', zIndex: 50 }}
               >
