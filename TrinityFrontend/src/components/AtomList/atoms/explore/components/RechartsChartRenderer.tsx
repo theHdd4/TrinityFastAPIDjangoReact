@@ -580,32 +580,45 @@ const RechartsChartRenderer: React.FC<Props> = ({
   }, [type, chartDataForRendering, xField, yField, legendField]);
 
   // Prepare grouped bar chart data when segregating by a legend field
-  const { data: segregatedBarData, legends: barLegendValues } = useMemo(() => {
+  const { data: segregatedBarData, legends: barLegendValues, xKey: barActualXKey } = useMemo(() => {
     if (type === 'bar_chart' && legendField && xField && yField && chartDataForRendering.length > 0) {
-      const firstRow = chartDataForRendering[0];
+      const sampleRow = chartDataForRendering[0];
+      const actualXKey = Object.keys(sampleRow).find(k => k.toLowerCase() === xField.toLowerCase()) || xField;
+      const actualYKey = Object.keys(sampleRow).find(k => k.toLowerCase() === yField.toLowerCase()) || yField;
+      const actualLegendKey = Object.keys(sampleRow).find(k => k.toLowerCase() === legendField.toLowerCase());
 
-      // If data is already pivoted (legend field not present), treat as ready
-      if (!(legendField in firstRow)) {
-        const legends = Object.keys(firstRow).filter(k => k !== xField && typeof firstRow[k] === 'number');
-        return { data: chartDataForRendering, legends };
+      // If legend field is missing, data is already pivoted
+      if (!actualLegendKey) {
+        const legends = Object.keys(sampleRow).filter(k => k !== actualXKey && typeof sampleRow[k] === 'number');
+        return { data: chartDataForRendering, legends, xKey: actualXKey };
       }
 
-      const byX = new Map<any, any>();
+      const map = new Map<string, any>();
       const legends: string[] = [];
       chartDataForRendering.forEach(row => {
-        const xVal = row[xField];
-        const legendVal = row[legendField];
-        const yVal = row[yField];
+        const xVal = row[actualXKey];
+        const legendVal = row[actualLegendKey];
+        const yVal = row[actualYKey];
         if (legendVal !== undefined && !legends.includes(legendVal)) legends.push(legendVal);
 
-        const record = byX.get(xVal) || { x: xVal };
+        const key = String(xVal);
+        const record = map.get(key) || { [actualXKey]: xVal };
         record[legendVal] = yVal;
-        byX.set(xVal, record);
+        map.set(key, record);
       });
 
-      return { data: Array.from(byX.values()), legends };
+      const data = Array.from(map.values()).sort((a, b) => {
+        const aVal = a[actualXKey];
+        const bVal = b[actualXKey];
+        if (typeof aVal === 'number' && typeof bVal === 'number') {
+          return aVal - bVal;
+        }
+        return String(aVal).localeCompare(String(bVal));
+      });
+
+      return { data, legends, xKey: actualXKey };
     }
-    return { data: [], legends: [] };
+    return { data: [], legends: [], xKey: xField };
   }, [type, chartDataForRendering, xField, yField, legendField]);
   
   // Styling for axis ticks & labels
@@ -1328,11 +1341,12 @@ const RechartsChartRenderer: React.FC<Props> = ({
          * Multi-bar rendering when a legend field is provided
          * ----------------------------------------------------------- */
         if (legendField && barLegendValues.length > 0 && segregatedBarData.length > 0) {
+          const xKeyForBar = barActualXKey || xField || Object.keys(segregatedBarData[0] || {})[0];
           return (
             <BarChart data={segregatedBarData} margin={{ top: 20, right: 20, left: 20, bottom: 20 }}>
               {currentShowGrid && <CartesianGrid strokeDasharray="3 3" />}
               <XAxis
-                dataKey="x"
+                dataKey={xKeyForBar}
                 label={currentShowAxisLabels && xAxisLabel ? { value: capitalizeWords(xAxisLabel), position: 'bottom', style: axisLabelStyle } : undefined}
                 tick={axisTickStyle}
                 tickLine={false}
