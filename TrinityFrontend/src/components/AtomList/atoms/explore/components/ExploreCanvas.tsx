@@ -54,9 +54,14 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
   // Helper function to safely check loading state for a specific chart
   const isChartLoading = (chartIndex: number) => isLoading[chartIndex] || false;
   
-  // Helper function to validate Y-axes (filters out empty strings)
-  const hasValidYAxes = (yAxes: string[]): boolean => {
-    const validYAxes = yAxes?.filter(y => y && y.trim() !== '') || [];
+  // Helper function to validate Y-axes (accepts string or array and filters out empty values)
+  const hasValidYAxes = (yAxes: string[] | string | undefined): boolean => {
+    const axes = Array.isArray(yAxes)
+      ? yAxes
+      : typeof yAxes === 'string'
+      ? [yAxes]
+      : [];
+    const validYAxes = axes.filter(y => y && y.trim() !== '');
     return validYAxes.length > 0;
   };
 
@@ -217,7 +222,14 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
   // Multi-chart state
   const [chartConfigs, setChartConfigs] = useState(
     safeData.chartConfigs && Array.isArray(safeData.chartConfigs) && safeData.chartConfigs.length > 0
-      ? safeData.chartConfigs
+      ? safeData.chartConfigs.map(cfg => ({
+          ...cfg,
+          // Normalize legacy single y-axis configs to the new array format
+          yAxes: Array.isArray(cfg.yAxes) ? cfg.yAxes : [cfg.yAxis || ''],
+          yAxisLabels: Array.isArray(cfg.yAxisLabels)
+            ? cfg.yAxisLabels
+            : [cfg.yAxisLabel || ''],
+        }))
       : [
           {
             xAxis: safeData.xAxis || '',
@@ -532,17 +544,6 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
       });
       
       setChartThemes(prev => {
-        const newState = { ...prev };
-        Object.keys(newState).forEach(key => {
-          const keyNum = parseInt(key);
-          if (keyNum > 0) {
-            delete newState[keyNum];
-          }
-        });
-        return newState;
-      });
-      
-      setChartSortCounters(prev => {
         const newState = { ...prev };
         Object.keys(newState).forEach(key => {
           const keyNum = parseInt(key);
@@ -1258,7 +1259,7 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
       setIsLoading(prev => ({ ...prev, [index]: true }));
       clearError();
 
-      if (!config.xAxis || !hasValidYAxes(config.yAxes)) {
+      if (!config.xAxis || !hasValidYAxes(config.yAxes || (config as any).yAxis)) {
         setError('Please select both X and at least one Y axis');
         return;
       }
@@ -1636,17 +1637,37 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
   const renderChartComponent = (index: number) => {
     const config = chartConfigs[index] || chartConfigs[0];
     const isSettingsVisible = chartSettingsVisible[index] || false;
+
+    // Normalize Y-axis selections and preserve their labels
+    const yAxesArray = Array.isArray(config.yAxes)
+      ? config.yAxes
+      : config.yAxis
+      ? [config.yAxis]
+      : [];
+    const validYAxes = yAxesArray
+      .map((yAxis: string, idx: number) => ({
+        field: yAxis,
+        label: config.yAxisLabels?.[idx] || yAxis || '',
+      }))
+      .filter(({ field }) => field && field.trim() !== '');
+
     const rendererProps = {
-      key: `chart-${index}-${config.chartType}-${chartThemes[index] || 'default'}-${chartDataSets[index]?.length || 0}-${Object.keys(chartFilters[index] || {}).length}-${appliedFilters[index] ? 'filtered' : 'unfiltered'}-theme-${chartThemes[index] || 'default'}-sort-${config.sortOrder || 'none'}-yaxes-${config.yAxes.join('-')}`,
+      key: `chart-${index}-${config.chartType}-${chartThemes[index] || 'default'}-${
+        chartDataSets[index]?.length || 0
+      }-${Object.keys(chartFilters[index] || {}).length}-${appliedFilters[index] ? 'filtered' : 'unfiltered'}-theme-${
+        chartThemes[index] || 'default'
+      }-sort-${config.sortOrder || 'none'}-yaxes-${yAxesArray.join('-')}`,
       type: config.chartType as 'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart',
       data: chartDataSets[index] || [],
       xField: config.xAxis || undefined,
-      yField: config.yAxes[0] || undefined,
+      yField: validYAxes[0]?.field,
       title: config.title,
       xAxisLabel: config.xAxisLabel || config.xAxis || '',
-      yAxisLabel: config.yAxisLabels[0] || config.yAxes[0] || '',
-      yFields: config.yAxes,
-      yAxisLabels: config.yAxes.map((yAxis: string, idx: number) => config.yAxisLabels[idx] || yAxis || ''),
+      yAxisLabel: validYAxes[0]?.label || '',
+      ...(validYAxes.length > 1 && {
+        yFields: validYAxes.map((y) => y.field),
+        yAxisLabels: validYAxes.map((y) => y.label),
+      }),
       legendField:
         config.legendField && config.legendField !== 'aggregate'
           ? config.legendField
@@ -1666,7 +1687,7 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
       showLegend: chartOptions[index]?.legend,
       showAxisLabels: chartOptions[index]?.axisLabels,
       showDataLabels: chartOptions[index]?.dataLabels,
-      showGrid: chartOptions[index]?.grid
+      showGrid: chartOptions[index]?.grid,
     } as const;
     
     return (

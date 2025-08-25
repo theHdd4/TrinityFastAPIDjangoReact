@@ -303,18 +303,18 @@ const CustomPieLabel = ({ cx, cy, midAngle, innerRadius, outerRadius, percent, n
   );
 };
 
-const RechartsChartRenderer: React.FC<Props> = ({ 
-  type, 
-  data, 
-  xField, 
-  yField, 
-  yFields, 
-  width = 400, 
+const RechartsChartRenderer: React.FC<Props> = ({
+  type,
+  data,
+  xField,
+  yField: yFieldProp,
+  yFields: yFieldsProp,
+  width = 400,
   height = 300,
   title,
   xAxisLabel,
   yAxisLabel,
-  yAxisLabels,
+  yAxisLabels: yAxisLabelsProp,
   legendField,
   colors,
   enableScroll = false,
@@ -333,6 +333,12 @@ const RechartsChartRenderer: React.FC<Props> = ({
   showGrid: propShowGrid, // External control for grid visibility
   chartsPerRow
 }) => {
+
+  // Sanitize Y-axis props to ensure we only work with valid selections
+  const yFields = (yFieldsProp || []).filter((field) => field && field.trim() !== '');
+  const yAxisLabels = yFields.map((field, idx) => yAxisLabelsProp?.[idx] || field);
+  const yField = yFieldProp || yFields[0];
+  let yKeys: string[] = yFields.length > 0 ? yFields : (yField ? [yField] : []);
 
   // State for color theme - simplified approach
   const [selectedTheme, setSelectedTheme] = useState<string>('default');
@@ -1108,7 +1114,6 @@ const RechartsChartRenderer: React.FC<Props> = ({
     const firstItem = chartDataForRendering[0];
     let xKey = xField;
     let yKey = yField;
-    let yKeys: string[] = yFields || [];
     
 
     // Auto-detect keys based on data structure and chart type
@@ -1307,17 +1312,18 @@ const RechartsChartRenderer: React.FC<Props> = ({
     if (type === 'bar_chart' && xField && yField && chartDataForRendering.length > 0) {
       const firstItem = chartDataForRendering[0];
       const availableKeys = Object.keys(firstItem);
-      
-      // Check if data has generic keys OR if the field names don't match what we expect
-      const needsTransformation = availableKeys.includes('x') || availableKeys.includes('y') || availableKeys.includes('name') || availableKeys.includes('value') || 
-                                 (xField && !availableKeys.includes(xField)) || (yField && !availableKeys.includes(yField));
-      
+
+      // Determine if any expected fields are missing (case-insensitive check)
+      const hasField = (key: string) =>
+        availableKeys.some(k => k.toLowerCase() === key.toLowerCase());
+      const expectedFields = Array.from(new Set([xField, yField, ...yFields]));
+      const needsTransformation = expectedFields.some(field => !hasField(field));
+
       if (needsTransformation) {
-        
         transformedChartData = chartDataForRendering.map((item: any) => {
           const transformed: any = {};
-          
-          // Map keys to actual field names
+
+          // Map X value to the requested field
           if (item.x !== undefined) {
             transformed[xField] = item.x;
           } else if (item.name !== undefined) {
@@ -1331,7 +1337,8 @@ const RechartsChartRenderer: React.FC<Props> = ({
           } else {
             transformed[xField] = item[Object.keys(item)[0]];
           }
-          
+
+          // Map primary Y field
           if (item.y !== undefined) {
             transformed[yField] = item.y;
           } else if (item.value !== undefined) {
@@ -1343,10 +1350,31 @@ const RechartsChartRenderer: React.FC<Props> = ({
           } else {
             transformed[yField] = item[Object.keys(item)[1]] || item[Object.keys(item)[0]];
           }
-          
+
+          // Map secondary Y field if present
+          if (yFields && yFields.length > 1) {
+            const secondaryField = yFields[1];
+            if (item[secondaryField] !== undefined) {
+              transformed[secondaryField] = item[secondaryField];
+            } else if (item.value2 !== undefined) {
+              transformed[secondaryField] = item.value2;
+            } else if (item.y2 !== undefined) {
+              transformed[secondaryField] = item.y2;
+            } else if (item.Volume2 !== undefined) {
+              transformed[secondaryField] = item.Volume2;
+            } else if (item.volume2 !== undefined) {
+              transformed[secondaryField] = item.volume2;
+            }
+          }
+
           return transformed;
         });
-        
+
+        // Update the keys to point to the requested field names so the chart
+        // renders using the transformed data instead of the generic x/y keys.
+        xKey = xField;
+        yKey = yField;
+        yKeys = yFields.length > 0 ? yFields : [yField];
       }
     }
 
