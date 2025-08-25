@@ -1369,6 +1369,12 @@ const RechartsChartRenderer: React.FC<Props> = ({
 
           return transformed;
         });
+
+        // Update the keys to point to the requested field names so the chart
+        // renders using the transformed data instead of the generic x/y keys.
+        xKey = xField;
+        yKey = yField;
+        yKeys = yFields.length > 0 ? yFields : [yField];
       }
     }
 
