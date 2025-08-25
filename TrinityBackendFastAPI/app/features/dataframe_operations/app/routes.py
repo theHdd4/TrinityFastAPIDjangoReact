@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Response, Body, HTTPException
+from fastapi import APIRouter, Response, Body, HTTPException, UploadFile, File
 import os
 from minio import Minio
 from minio.error import S3Error
@@ -9,6 +9,7 @@ import pyarrow.ipc as ipc
 import pandas as pd
 import io
 import uuid
+from typing import Dict, Any, List
 
 router = APIRouter()
 
@@ -32,6 +33,27 @@ minio_client = Minio(
     secure=False
 )
 redis_client = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=REDIS_DB)
+
+# In-memory storage for dataframe sessions
+SESSIONS: Dict[str, pd.DataFrame] = {}
+
+
+def _get_df(df_id: str) -> pd.DataFrame:
+    df = SESSIONS.get(df_id)
+    if df is None:
+        raise HTTPException(status_code=404, detail="DataFrame not found")
+    return df
+
+
+def _df_payload(df: pd.DataFrame, df_id: str) -> Dict[str, Any]:
+    return {
+        "df_id": df_id,
+        "headers": list(df.columns),
+        "rows": df.head(100).to_dict(orient="records"),
+        "types": {col: str(df[col].dtype) for col in df.columns},
+        "row_count": len(df),
+        "column_count": len(df.columns),
+    }
 
 @router.get("/test_alive")
 async def test_alive():
@@ -124,3 +146,142 @@ async def save_dataframe(
         }
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+# ---------------------------------------------------------------------------
+# Backend dataframe operation endpoints
+# ---------------------------------------------------------------------------
+
+
+@router.post("/load")
+async def load_dataframe(file: UploadFile = File(...)):
+    """Load a CSV file and store it in a session."""
+    try:
+        content = await file.read()
+        df = pd.read_csv(io.BytesIO(content))
+    except Exception:
+        raise HTTPException(status_code=400, detail="Failed to parse uploaded file")
+    df_id = str(uuid.uuid4())
+    SESSIONS[df_id] = df
+    return _df_payload(df, df_id)
+
+
+@router.post("/filter_rows")
+async def filter_rows(df_id: str = Body(...), column: str = Body(...), value: Any = Body(...)):
+    df = _get_df(df_id)
+    try:
+        df = df[df[column] == value]
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    SESSIONS[df_id] = df
+    return _df_payload(df, df_id)
+
+
+@router.post("/sort")
+async def sort_dataframe(df_id: str = Body(...), column: str = Body(...), direction: str = Body("asc")):
+    df = _get_df(df_id)
+    try:
+        df = df.sort_values(by=column, ascending=direction == "asc").reset_index(drop=True)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    SESSIONS[df_id] = df
+    return _df_payload(df, df_id)
+
+
+@router.post("/insert_row")
+async def insert_row(df_id: str = Body(...), row: Dict[str, Any] = Body(...)):
+    df = _get_df(df_id)
+    df = pd.concat([df, pd.DataFrame([row])], ignore_index=True)
+    SESSIONS[df_id] = df
+    return _df_payload(df, df_id)
+
+
+@router.post("/delete_row")
+async def delete_row(df_id: str = Body(...), index: int = Body(...)):
+    df = _get_df(df_id)
+    try:
+        df = df.drop(index).reset_index(drop=True)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    SESSIONS[df_id] = df
+    return _df_payload(df, df_id)
+
+
+@router.post("/insert_column")
+async def insert_column(df_id: str = Body(...), column: str = Body(...), value: Any = Body(None)):
+    df = _get_df(df_id)
+    df[column] = value
+    SESSIONS[df_id] = df
+    return _df_payload(df, df_id)
+
+
+@router.post("/delete_column")
+async def delete_column(df_id: str = Body(...), column: str = Body(...)):
+    df = _get_df(df_id)
+    try:
+        df = df.drop(columns=[column])
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    SESSIONS[df_id] = df
+    return _df_payload(df, df_id)
+
+
+@router.post("/update_cell")
+async def update_cell(df_id: str = Body(...), row_idx: int = Body(...), column: str = Body(...), value: Any = Body(...)):
+    df = _get_df(df_id)
+    try:
+        df.at[row_idx, column] = value
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    SESSIONS[df_id] = df
+    return _df_payload(df, df_id)
+
+
+@router.post("/rename_column")
+async def rename_column(df_id: str = Body(...), old: str = Body(...), new: str = Body(...)):
+    df = _get_df(df_id)
+    df = df.rename(columns={old: new})
+    SESSIONS[df_id] = df
+    return _df_payload(df, df_id)
+
+
+@router.get("/preview")
+async def preview(df_id: str, n: int = 5):
+    df = _get_df(df_id)
+    preview_df = df.head(n)
+    return {
+        "df_id": df_id,
+        "headers": list(df.columns),
+        "rows": preview_df.to_dict(orient="records"),
+    }
+
+
+@router.get("/info")
+async def info(df_id: str):
+    df = _get_df(df_id)
+    return {
+        "df_id": df_id,
+        "row_count": len(df),
+        "column_count": len(df.columns),
+        "types": {col: str(df[col].dtype) for col in df.columns},
+    }
+
+
+@router.post("/ai/execute_operations")
+async def ai_execute(df_id: str = Body(...), operations: List[Dict[str, Any]] = Body(...)):
+    df = _get_df(df_id)
+    for op in operations:
+        name = op.get("op")
+        params = op.get("params", {})
+        if name == "filter_rows":
+            df = df[df[params.get("column")] == params.get("value")]
+        elif name == "sort":
+            df = df.sort_values(by=params.get("column"), ascending=params.get("direction", "asc") == "asc")
+        elif name == "insert_column":
+            df[params.get("column")] = params.get("value")
+        elif name == "delete_row":
+            df = df.drop(params.get("index")).reset_index(drop=True)
+        elif name == "update_cell":
+            df.at[params.get("row_idx"), params.get("column")] = params.get("value")
+    SESSIONS[df_id] = df.reset_index(drop=True)
+    return _df_payload(SESSIONS[df_id], df_id)

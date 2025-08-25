@@ -24,13 +24,23 @@ import {
 } from 'lucide-react';
 import { DataFrameData, DataFrameSettings } from '../DataFrameOperationsAtom';
 import { DATAFRAME_OPERATIONS_API, VALIDATE_API } from '@/lib/api';
+import {
+  loadDataframe,
+  updateCell as apiUpdateCell,
+  insertRow as apiInsertRow,
+  deleteRow as apiDeleteRow,
+  insertColumn as apiInsertColumn,
+  deleteColumn as apiDeleteColumn,
+  sortDataframe as apiSort,
+  filterRows as apiFilter,
+} from '../services/dataframeOperationsApi';
 import { toast } from '@/components/ui/use-toast';
 
 interface DataFrameOperationsCanvasProps {
   data: DataFrameData | null;
   settings: DataFrameSettings;
   onSettingsChange: (settings: Partial<DataFrameSettings>) => void;
-  onDataUpload: (data: DataFrameData) => void;
+  onDataUpload: (data: DataFrameData, backendFileId?: string) => void;
   onDataChange: (data: DataFrameData) => void;
   onClearAll: () => void;
   fileId?: string | null;
@@ -312,55 +322,31 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
   const startIndex = (currentPage - 1) * (settings.rowsPerPage || 15);
   const paginatedRows = processedData.filteredRows.slice(startIndex, startIndex + (settings.rowsPerPage || 15));
 
-  const handleFileUpload = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      try {
-        const text = e.target?.result as string;
-        const lines = text.split('\n').filter(line => line.trim());
-        if (lines.length === 0) {
-          setUploadError('File is empty');
-          return;
-        }
-
-        const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, ''));
-        const rows = lines.slice(1).map((line) => {
-          const values = line.split(',').map(v => v.trim().replace(/"/g, ''));
-          const row: any = {};
-          headers.forEach((header, i) => {
-            const value = values[i] || '';
-            row[header] = !isNaN(parseFloat(value)) && isFinite(parseFloat(value)) ? parseFloat(value) : value;
-          });
-          return row;
-        }).filter(row => Object.values(row).some(v => v !== null && v !== ''));
-
-        const columnTypes: any = {};
-        headers.forEach(header => {
-          const hasNumbers = rows.some(row => typeof row[header] === 'number');
-          columnTypes[header] = hasNumbers ? 'number' : 'text';
-        });
-
-        const newData: DataFrameData = {
-          headers,
-          rows,
-          fileName: file.name,
-          columnTypes,
-          pinnedColumns: [],
-          frozenColumns: 0,
-          cellColors: {}
-        };
-
-        setUploadError(null);
-        onDataUpload(newData);
-        setCurrentPage(1);
-      } catch (error) {
-        setUploadError('Error parsing file');
-      }
-    };
-    reader.readAsText(file);
+    try {
+      const resp = await loadDataframe(file);
+      const columnTypes: any = {};
+      resp.headers.forEach(h => {
+        const t = resp.types[h];
+        columnTypes[h] = t.includes('float') || t.includes('int') ? 'number' : 'text';
+      });
+      const newData: DataFrameData = {
+        headers: resp.headers,
+        rows: resp.rows,
+        fileName: file.name,
+        columnTypes,
+        pinnedColumns: [],
+        frozenColumns: 0,
+        cellColors: {}
+      };
+      setUploadError(null);
+      onDataUpload(newData, resp.df_id);
+      setCurrentPage(1);
+    } catch (e) {
+      setUploadError('Error parsing file');
+    }
   }, [onDataUpload]);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
@@ -386,37 +372,60 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
     setIsDragOver(false);
   }, []);
 
-  const handleSort = (column: string) => {
+  const handleSort = async (column: string) => {
+    if (!data || !fileId) return;
     const existingSort = settings.sortColumns.find(s => s.column === column);
-    let newSortColumns;
-    
-    if (existingSort) {
-      if (existingSort.direction === 'asc') {
-        newSortColumns = settings.sortColumns.map(s => 
-          s.column === column ? { ...s, direction: 'desc' as const } : s
-        );
-      } else {
-        newSortColumns = settings.sortColumns.filter(s => s.column !== column);
-      }
-    } else {
-      newSortColumns = [...settings.sortColumns, { column, direction: 'asc' as const }];
+    const direction: 'asc' | 'desc' = existingSort && existingSort.direction === 'asc' ? 'desc' : 'asc';
+    try {
+      const resp = await apiSort(fileId, column, direction);
+      const columnTypes: any = {};
+      resp.headers.forEach(h => {
+        const t = resp.types[h];
+        columnTypes[h] = t.includes('float') || t.includes('int') ? 'number' : 'text';
+      });
+      onDataChange({
+        headers: resp.headers,
+        rows: resp.rows,
+        fileName: data.fileName,
+        columnTypes,
+        pinnedColumns: data.pinnedColumns,
+        frozenColumns: data.frozenColumns,
+        cellColors: data.cellColors,
+      });
+      onSettingsChange({ sortColumns: [{ column, direction }] });
+    } catch (e) {
+      console.error(e);
     }
-    
-    onSettingsChange({ sortColumns: newSortColumns });
   };
 
-  const handleColumnFilter = (column: string, selectedValues: string[] | [number, number]) => {
-    const newFilters = { ...settings.filters };
-    if (Array.isArray(selectedValues) && selectedValues.length === 2 && typeof selectedValues[0] === 'number' && typeof selectedValues[1] === 'number') {
-      // Numeric range filter
-      newFilters[column] = { type: 'range', value: selectedValues };
-    } else if (Array.isArray(selectedValues) && selectedValues.length > 0) {
-      newFilters[column] = selectedValues;
-    } else {
-      delete newFilters[column];
+  const handleColumnFilter = async (column: string, selectedValues: string[] | [number, number]) => {
+    if (!data || !fileId) return;
+    let value: any = null;
+    if (Array.isArray(selectedValues) && selectedValues.length > 0) {
+      value = selectedValues[0];
     }
-    onSettingsChange({ filters: newFilters });
-    setCurrentPage(1);
+    if (value === null) return;
+    try {
+      const resp = await apiFilter(fileId, column, value);
+      const columnTypes: any = {};
+      resp.headers.forEach(h => {
+        const t = resp.types[h];
+        columnTypes[h] = t.includes('float') || t.includes('int') ? 'number' : 'text';
+      });
+      onDataChange({
+        headers: resp.headers,
+        rows: resp.rows,
+        fileName: data.fileName,
+        columnTypes,
+        pinnedColumns: data.pinnedColumns,
+        frozenColumns: data.frozenColumns,
+        cellColors: data.cellColors,
+      });
+      onSettingsChange({ filters: { ...settings.filters, [column]: value } });
+      setCurrentPage(1);
+    } catch (e) {
+      console.error(e);
+    }
   };
 
 // Helper to commit a cell edit after user finishes editing
@@ -448,63 +457,78 @@ const commitHeaderEdit = (colIdx: number, value?: string) => {
 };
 
 // Original immediate update util (kept for programmatic usage)
-const handleCellEdit = (rowIndex: number, column: string, newValue: string) => {
+const handleCellEdit = async (rowIndex: number, column: string, newValue: string) => {
     resetSaveSuccess();
-    if (!data) return;
-    
-    const updatedRows = [...data.rows];
+    if (!data || !fileId) return;
     const globalRowIndex = startIndex + rowIndex;
-    
-    let parsedValue: any = newValue;
-    if (data.columnTypes[column] === 'number' && newValue) {
-      const numValue = parseFloat(newValue);
-      if (!isNaN(numValue)) {
-        parsedValue = numValue;
-      }
+    try {
+      const resp = await apiUpdateCell(fileId, globalRowIndex, column, newValue);
+      const columnTypes: any = {};
+      resp.headers.forEach(h => {
+        const t = resp.types[h];
+        columnTypes[h] = t.includes('float') || t.includes('int') ? 'number' : 'text';
+      });
+      onDataChange({
+        headers: resp.headers,
+        rows: resp.rows,
+        fileName: data.fileName,
+        columnTypes,
+        pinnedColumns: data.pinnedColumns,
+        frozenColumns: data.frozenColumns,
+        cellColors: data.cellColors
+      });
+    } catch (e) {
+      console.error(e);
     }
-    
-    updatedRows[globalRowIndex] = {
-      ...updatedRows[globalRowIndex],
-      [column]: parsedValue
-    };
-
-    onDataChange({
-      ...data,
-      rows: updatedRows
-    });
   };
 
-  const handleAddRow = () => {
+  const handleAddRow = async () => {
     resetSaveSuccess();
-    if (!data) return;
-    const newRow: any = {};
-    data.headers.forEach(header => {
-      newRow[header] = data.columnTypes[header] === 'number' ? 0 : '';
-    });
-    
-    onDataChange({
-      ...data,
-      rows: [...data.rows, newRow]
-    });
+    if (!data || !fileId) return;
+    try {
+      const resp = await apiInsertRow(fileId, {});
+      const columnTypes: any = {};
+      resp.headers.forEach(h => {
+        const t = resp.types[h];
+        columnTypes[h] = t.includes('float') || t.includes('int') ? 'number' : 'text';
+      });
+      onDataChange({
+        headers: resp.headers,
+        rows: resp.rows,
+        fileName: data.fileName,
+        columnTypes,
+        pinnedColumns: data.pinnedColumns,
+        frozenColumns: data.frozenColumns,
+        cellColors: data.cellColors,
+      });
+    } catch (e) {
+      console.error(e);
+    }
   };
 
-  const handleAddColumn = () => {
+  const handleAddColumn = async () => {
     resetSaveSuccess();
-    if (!data) return;
+    if (!data || !fileId) return;
     const newColumnName = `Column_${data.headers.length + 1}`;
-    
-    onDataChange({
-      ...data,
-      headers: [...data.headers, newColumnName],
-      columnTypes: {
-        ...data.columnTypes,
-        [newColumnName]: 'text'
-      },
-      rows: data.rows.map(row => ({
-        ...row,
-        [newColumnName]: ''
-      }))
-    });
+    try {
+      const resp = await apiInsertColumn(fileId, newColumnName, '');
+      const columnTypes: any = {};
+      resp.headers.forEach(h => {
+        const t = resp.types[h];
+        columnTypes[h] = t.includes('float') || t.includes('int') ? 'number' : 'text';
+      });
+      onDataChange({
+        headers: resp.headers,
+        rows: resp.rows,
+        fileName: data.fileName,
+        columnTypes,
+        pinnedColumns: data.pinnedColumns,
+        frozenColumns: data.frozenColumns,
+        cellColors: data.cellColors,
+      });
+    } catch (e) {
+      console.error(e);
+    }
   };
 
   
@@ -648,42 +672,79 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
   
   };
 
-  const handleDeleteColumn = (colIdx: number) => {
-    if (!data) return;
+  const handleDeleteColumn = async (colIdx: number) => {
+    resetSaveSuccess();
+    if (!data || !fileId) return;
     if (colIdx < 0 || colIdx >= data.headers.length) return;
     const col = data.headers[colIdx];
-    const newHeaders = data.headers.filter((_, i) => i !== colIdx);
-    const newRows = data.rows.map(row => {
-      const newRow: any = {};
-      newHeaders.forEach(h => {
-        newRow[h] = row[h];
+    try {
+      const resp = await apiDeleteColumn(fileId, col);
+      const columnTypes: any = {};
+      resp.headers.forEach(h => {
+        const t = resp.types[h];
+        columnTypes[h] = t.includes('float') || t.includes('int') ? 'number' : 'text';
       });
-      return newRow;
-    });
-    const newColumnTypes = { ...data.columnTypes };
-    delete newColumnTypes[col];
-    onDataChange({ ...data, headers: newHeaders, rows: newRows, columnTypes: newColumnTypes });
-  
+      onDataChange({
+        headers: resp.headers,
+        rows: resp.rows,
+        fileName: data.fileName,
+        columnTypes,
+        pinnedColumns: data.pinnedColumns,
+        frozenColumns: data.frozenColumns,
+        cellColors: data.cellColors,
+      });
+    } catch (e) {
+      console.error(e);
+    }
   };
 
   // Row insert / delete handlers
-  const handleInsertRow = (position: 'above' | 'below', rowIdx: number) => {
-    if (!data) return;
-    const idx = Math.max(0, Math.min(rowIdx, data.rows.length - 1));
+  const handleInsertRow = async (position: 'above' | 'below', rowIdx: number) => {
+    if (!data || !fileId) return;
     const newRow: any = {};
-    data.headers.forEach(h => {
-      newRow[h] = '';
-    });
-    const newRows = [...data.rows];
-    newRows.splice(position === 'above' ? idx : idx + 1, 0, newRow);
-    onDataChange({ ...data, rows: newRows });
+    data.headers.forEach(h => { newRow[h] = ''; });
+    try {
+      const resp = await apiInsertRow(fileId, newRow);
+      const columnTypes: any = {};
+      resp.headers.forEach(h => {
+        const t = resp.types[h];
+        columnTypes[h] = t.includes('float') || t.includes('int') ? 'number' : 'text';
+      });
+      onDataChange({
+        headers: resp.headers,
+        rows: resp.rows,
+        fileName: data.fileName,
+        columnTypes,
+        pinnedColumns: data.pinnedColumns,
+        frozenColumns: data.frozenColumns,
+        cellColors: data.cellColors,
+      });
+    } catch (e) {
+      console.error(e);
+    }
   };
 
-  const handleDeleteRow = (rowIdx: number) => {
-    if (!data) return;
-    if (rowIdx < 0 || rowIdx >= data.rows.length) return;
-    const newRows = data.rows.filter((_, i) => i !== rowIdx);
-    onDataChange({ ...data, rows: newRows });
+  const handleDeleteRow = async (rowIdx: number) => {
+    if (!data || !fileId) return;
+    try {
+      const resp = await apiDeleteRow(fileId, rowIdx);
+      const columnTypes: any = {};
+      resp.headers.forEach(h => {
+        const t = resp.types[h];
+        columnTypes[h] = t.includes('float') || t.includes('int') ? 'number' : 'text';
+      });
+      onDataChange({
+        headers: resp.headers,
+        rows: resp.rows,
+        fileName: data.fileName,
+        columnTypes,
+        pinnedColumns: data.pinnedColumns,
+        frozenColumns: data.frozenColumns,
+        cellColors: data.cellColors,
+      });
+    } catch (e) {
+      console.error(e);
+    }
   };
 
 
