@@ -349,11 +349,8 @@ const RechartsChartRenderer: React.FC<Props> = ({
   const [showContextMenu, setShowContextMenu] = useState(false);
   const [showColorSubmenu, setShowColorSubmenu] = useState(false);
   const [showSortSubmenu, setShowSortSubmenu] = useState(false);
-
-
-
-
-
+  const [colorSubmenuPos, setColorSubmenuPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [sortSubmenuPos, setSortSubmenuPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [contextMenuPosition, setContextMenuPosition] = useState({ x: 0, y: 0 });
   const chartRef = useRef<HTMLDivElement>(null);
 
@@ -372,6 +369,23 @@ const RechartsChartRenderer: React.FC<Props> = ({
   const [showLegend, setShowLegend] = useState(true);
   const [showAxisLabels, setShowAxisLabels] = useState(true);
   const [showDataLabels, setShowDataLabels] = useState(true);
+
+  // Sync internal states with external props for persistence
+  useEffect(() => {
+    if (propShowGrid !== undefined) setShowGrid(propShowGrid);
+  }, [propShowGrid]);
+
+  useEffect(() => {
+    if (propShowLegend !== undefined) setShowLegend(propShowLegend);
+  }, [propShowLegend]);
+
+  useEffect(() => {
+    if (propShowAxisLabels !== undefined) setShowAxisLabels(propShowAxisLabels);
+  }, [propShowAxisLabels]);
+
+  useEffect(() => {
+    if (propShowDataLabels !== undefined) setShowDataLabels(propShowDataLabels);
+  }, [propShowDataLabels]);
 
   // Use data prop directly now that sorting is removed
   const chartData = data;
@@ -607,7 +621,10 @@ const RechartsChartRenderer: React.FC<Props> = ({
           return !isXAxisField && typeof firstRow[key] === 'number';
         });
 
-        const actualXKey = Object.keys(firstRow).find(k => k.toLowerCase() === xField.toLowerCase()) || Object.keys(firstRow)[0];
+        const actualXKey =
+          Object.keys(firstRow).find(k => k.toLowerCase() === xField.toLowerCase()) ||
+          Object.keys(firstRow).find(k => !legendColumns.includes(k)) ||
+          Object.keys(firstRow)[0];
 
         return {
           pivoted: chartDataForRendering,
@@ -624,10 +641,11 @@ const RechartsChartRenderer: React.FC<Props> = ({
   // Styling for axis ticks & labels
   const axisTickStyle = { fontFamily: FONT_FAMILY, fontSize: 12, fill: '#475569' } as const;
   const axisLabelStyle = {
-    fontFamily: FONT_FAMILY, 
-    fontSize: 14, 
+    fontFamily: FONT_FAMILY,
+    fontSize: 14,
     fontWeight: 'bold',
-    fill: '#334155' 
+    fill: '#334155',
+    textAnchor: 'middle'
   } as const;
 
   // Handle right-click context menu
@@ -655,15 +673,21 @@ const RechartsChartRenderer: React.FC<Props> = ({
   };
 
   // Handle color theme submenu toggle
-  const handleColorThemeClick = () => {
-    setShowColorSubmenu(prevState => {
-      const newState = !prevState;
-      return newState;
-    });
+  const handleColorThemeClick = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    setColorSubmenuPos({ x: rect.right + 4, y: rect.top });
+    setShowColorSubmenu(prevState => !prevState);
+    setShowSortSubmenu(false);
   };
 
   // Handle sort submenu toggle
-  const handleSortClick = () => {
+  const handleSortClick = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    setSortSubmenuPos({ x: rect.right + 4, y: rect.top });
     setShowSortSubmenu(prev => !prev);
     setShowColorSubmenu(false);
   };
@@ -797,11 +821,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
         {/* Color Theme Option */}
         <button
           className="w-full px-4 py-2 text-sm text-left hover:bg-gray-50 flex items-center gap-3 text-gray-700 relative"
-          onClick={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            handleColorThemeClick();
-          }}
+          onClick={handleColorThemeClick}
         >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zM21 5a2 2 0 00-2-2h-4a2 2 0 00-2 2v12a4 4 0 004 4h4a2 2 0 002-2V5z" />
@@ -815,11 +835,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
         {/* Sort Option */}
         <button
           className="w-full px-4 py-2 text-sm text-left hover:bg-gray-50 flex items-center gap-3 text-gray-700 relative"
-          onClick={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            handleSortClick();
-          }}
+          onClick={handleSortClick}
         >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 9l6-6 6 6M18 15l-6 6-6-6" />
@@ -931,11 +947,11 @@ const RechartsChartRenderer: React.FC<Props> = ({
     if (!showColorSubmenu) return null;
 
     return (
-      <div 
+      <div
         className="fixed z-[9999] bg-white border border-gray-300 rounded-lg shadow-xl p-3 color-submenu"
-        style={{ 
-          left: contextMenuPosition.x + 96, // Half of min-w-48 (192px/2) + small gap
-          top: contextMenuPosition.y - 120, // Align with the context menu
+        style={{
+          left: colorSubmenuPos.x,
+          top: colorSubmenuPos.y,
           minWidth: '240px',
           maxHeight: '320px',
           overflowY: 'auto'
@@ -992,8 +1008,8 @@ const RechartsChartRenderer: React.FC<Props> = ({
       <div
         className="fixed z-[9999] bg-white border border-gray-300 rounded-lg shadow-xl p-2 sort-submenu"
         style={{
-          left: contextMenuPosition.x + 96,
-          top: contextMenuPosition.y - 40,
+          left: sortSubmenuPos.x,
+          top: sortSubmenuPos.y,
           minWidth: '160px'
         }}
       >
@@ -1341,9 +1357,13 @@ const RechartsChartRenderer: React.FC<Props> = ({
          * Multi-bar rendering when a legend field is provided
          * ----------------------------------------------------------- */
         if (legendField && legendValues.length > 0 && pivotedLineData.length > 0) {
-          const xKeyForBar = pivotActualXKey || xField || Object.keys(pivotedLineData[0] || {})[0];
+          const xKeyForBar =
+            pivotActualXKey ||
+            xField ||
+            Object.keys(pivotedLineData[0] || {}).find(k => !legendValues.includes(k)) ||
+            Object.keys(pivotedLineData[0] || {})[0];
           return (
-            <BarChart data={pivotedLineData} margin={{ top: 20, right: 20, left: 20, bottom: 20 }}>
+            <BarChart data={pivotedLineData} margin={{ top: 20, right: 20, left: 20, bottom: 40 }}>
               {currentShowGrid && <CartesianGrid strokeDasharray="3 3" />}
               <XAxis
                 dataKey={xKeyForBar}
@@ -1392,7 +1412,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
                   layout="horizontal"
                   verticalAlign="bottom"
                   align="center"
-                  wrapperStyle={{ paddingTop: '15px', fontSize: '11px' }}
+                  wrapperStyle={{ bottom: 20, fontSize: '11px' }}
                 />
               )}
               {legendValues.map((seriesKey, idx) => (
@@ -1419,7 +1439,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
         } else {
           // ---- Fallback to original single-bar rendering ----
           return (
-            <BarChart data={transformedChartData} margin={{ top: 20, right: 20, left: 20, bottom: 20 }}>
+            <BarChart data={transformedChartData} margin={{ top: 20, right: 20, left: 20, bottom: 40 }}>
               {currentShowGrid && <CartesianGrid strokeDasharray="3 3" />}
             <XAxis 
               dataKey={xKey} 
@@ -1484,16 +1504,11 @@ const RechartsChartRenderer: React.FC<Props> = ({
               cursor={{ stroke: palette[0], strokeWidth: 1, strokeOpacity: 0.4 }}
             />
             {currentShowLegend && (
-              <Legend 
+              <Legend
                 layout="horizontal"
                 verticalAlign="bottom"
                 align="center"
-                wrapperStyle={{ 
-                  paddingTop: '15px',
-                  paddingBottom: '10px',
-                  fontSize: '11px',
-                  marginBottom: '0px'
-                }}
+                wrapperStyle={{ bottom: 20, fontSize: '11px' }}
                 formatter={(value, entry) => {
                   // Format legend labels for dual y-axes
                   if (yFields && yFields.length > 1) {
@@ -1556,9 +1571,13 @@ const RechartsChartRenderer: React.FC<Props> = ({
          * ----------------------------------------------------------- */
         if (legendField && legendValues.length > 0 && pivotedLineData.length > 0) {
           // Use the actual X-axis key determined during pivoting
-          const xKeyForLine = pivotActualXKey || xField || Object.keys(pivotedLineData[0])[0];
+          const xKeyForLine =
+            pivotActualXKey ||
+            xField ||
+            Object.keys(pivotedLineData[0] || {}).find(k => !legendValues.includes(k)) ||
+            Object.keys(pivotedLineData[0] || {})[0];
           return (
-            <LineChart data={pivotedLineData} margin={{ top: 20, right: 20, left: 20, bottom: 20 }}>
+            <LineChart data={pivotedLineData} margin={{ top: 20, right: 20, left: 20, bottom: 40 }}>
               {currentShowGrid && <CartesianGrid strokeDasharray="3 3" />}
               <XAxis
                 dataKey={xKeyForLine}
@@ -1580,7 +1599,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
                   layout="horizontal"
                   verticalAlign="bottom"
                   align="center"
-                  wrapperStyle={{ paddingTop: '15px', fontSize: '11px' }}
+                  wrapperStyle={{ bottom: 20, fontSize: '11px' }}
                 />
               )}
               {legendValues.map((seriesKey, idx) => (
@@ -1610,7 +1629,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
           // ---- Fallback to original single-line rendering ----
           // Original single line chart logic
           return (
-            <LineChart data={chartDataForRendering} margin={{ top: 20, right: 20, left: 20, bottom: 20 }} className="explore-chart-line">
+            <LineChart data={chartDataForRendering} margin={{ top: 20, right: 20, left: 20, bottom: 40 }} className="explore-chart-line">
               {currentShowGrid && <CartesianGrid strokeDasharray="3 3" />}
               <XAxis 
                 dataKey={xKey}
@@ -1675,16 +1694,11 @@ const RechartsChartRenderer: React.FC<Props> = ({
                 cursor={{ stroke: palette[0], strokeWidth: 1, strokeOpacity: 0.4 }}
               />
               {currentShowLegend && (
-                <Legend 
+                <Legend
                   layout="horizontal"
                   verticalAlign="bottom"
                   align="center"
-                  wrapperStyle={{ 
-                    paddingTop: '15px',
-                    paddingBottom: '10px',
-                    fontSize: '11px',
-                    marginBottom: '0px'
-                  }}
+                  wrapperStyle={{ bottom: 20, fontSize: '11px' }}
                   formatter={(value, entry) => {
                     // Format legend labels for dual y-axes
                     if (yFields && yFields.length > 1) {
@@ -1762,9 +1776,13 @@ const RechartsChartRenderer: React.FC<Props> = ({
 
       case 'area_chart':
         if (legendField && legendValues.length > 0 && pivotedLineData.length > 0) {
-          const xKeyForArea = pivotActualXKey || xField || Object.keys(pivotedLineData[0])[0];
+          const xKeyForArea =
+            pivotActualXKey ||
+            xField ||
+            Object.keys(pivotedLineData[0] || {}).find(k => !legendValues.includes(k)) ||
+            Object.keys(pivotedLineData[0] || {})[0];
           return (
-            <AreaChart data={pivotedLineData} margin={{ top: 20, right: 20, left: 20, bottom: 20 }}>
+            <AreaChart data={pivotedLineData} margin={{ top: 20, right: 20, left: 20, bottom: 40 }}>
               {currentShowGrid && <CartesianGrid strokeDasharray="3 3" />}
               <XAxis
                 dataKey={xKeyForArea}
@@ -1786,7 +1804,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
                   layout="horizontal"
                   verticalAlign="bottom"
                   align="center"
-                  wrapperStyle={{ paddingTop: '15px', fontSize: '11px' }}
+                  wrapperStyle={{ bottom: 20, fontSize: '11px' }}
                 />
               )}
               {legendValues.map((seriesKey, idx) => (
@@ -1803,7 +1821,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
           );
         }
         return (
-          <AreaChart data={chartDataForRendering} margin={{ top: 20, right: 20, left: 20, bottom: 20 }}>
+          <AreaChart data={chartDataForRendering} margin={{ top: 20, right: 20, left: 20, bottom: 40 }}>
             {currentShowGrid && <CartesianGrid strokeDasharray="3 3" />}
             <XAxis
               dataKey={xKey}
@@ -1834,7 +1852,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
                 layout="horizontal"
                 verticalAlign="bottom"
                 align="center"
-                wrapperStyle={{ paddingTop: '15px', fontSize: '11px' }}
+                wrapperStyle={{ bottom: 20, fontSize: '11px' }}
               />
             )}
             <Area type="monotone" dataKey={yKey} stroke={palette[0]} fill={palette[1]} yAxisId={0} />
@@ -1847,10 +1865,14 @@ const RechartsChartRenderer: React.FC<Props> = ({
       case 'scatter_chart':
         const xKeyForScatter =
           legendField && legendValues.length > 0 && pivotedLineData.length > 0
-            ? pivotActualXKey || xField || Object.keys(pivotedLineData[0])[0]
+            ?
+                pivotActualXKey ||
+                xField ||
+                Object.keys(pivotedLineData[0] || {}).find(k => !legendValues.includes(k)) ||
+                Object.keys(pivotedLineData[0] || {})[0]
             : xKey;
         return (
-          <ScatterChart margin={{ top: 20, right: 20, left: 20, bottom: 20 }}>
+          <ScatterChart margin={{ top: 20, right: 20, left: 20, bottom: 40 }}>
             {currentShowGrid && <CartesianGrid strokeDasharray="3 3" />}
             <XAxis
               dataKey={xKeyForScatter}
@@ -1883,7 +1905,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
                 layout="horizontal"
                 verticalAlign="bottom"
                 align="center"
-                wrapperStyle={{ paddingTop: '15px', fontSize: '11px' }}
+                wrapperStyle={{ bottom: 20, fontSize: '11px' }}
               />
             )}
             {legendField && legendValues.length > 0 && pivotedLineData.length > 0 ? (

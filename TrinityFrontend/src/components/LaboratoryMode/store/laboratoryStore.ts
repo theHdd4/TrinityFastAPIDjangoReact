@@ -323,6 +323,7 @@ export interface ExploreData {
   applied?: boolean;
   chartDataSets?: { [idx: number]: any };
   chartGenerated?: { [chartIndex: number]: boolean };
+  chartNotes?: { [chartIndex: number]: string };
   [key: string]: any;
 }
 
