@@ -1656,7 +1656,7 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
         chartDataSets[index]?.length || 0
       }-${Object.keys(chartFilters[index] || {}).length}-${appliedFilters[index] ? 'filtered' : 'unfiltered'}-theme-${
         chartThemes[index] || 'default'
-      }-sort-${config.sortOrder || 'none'}-yaxes-${yAxesArray.join('-')}`,
+      }-sort-${config.sortOrder || 'none'}-yaxes-${validYAxes.map(y => y.field).join('-')}`,
       type: config.chartType as 'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart',
       data: chartDataSets[index] || [],
       xField: config.xAxis || undefined,
@@ -1664,10 +1664,8 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
       title: config.title,
       xAxisLabel: config.xAxisLabel || config.xAxis || '',
       yAxisLabel: validYAxes[0]?.label || '',
-      ...(validYAxes.length > 1 && {
-        yFields: validYAxes.map((y) => y.field),
-        yAxisLabels: validYAxes.map((y) => y.label),
-      }),
+      yFields: validYAxes.map((y) => y.field),
+      yAxisLabels: validYAxes.map((y) => y.label),
       legendField:
         config.legendField && config.legendField !== 'aggregate'
           ? config.legendField
@@ -2418,10 +2416,10 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                     {(!chartDataSets[index] || (Array.isArray(chartDataSets[index]) && chartDataSets[index].length === 0)) ? (
                       <div className="text-center p-4 border-2 border-dashed border-gray-300 rounded-lg h-full flex items-center justify-center">
                         <div className="text-gray-500 text-sm">
-                          {config.xAxis && config.yAxes && config.yAxes.length > 0 && config.yAxes.every(y => y) ?
-                            (chartDataSets[index] && chartDataSets[index].length === 0 ?
+                          {config.xAxis && validYAxes.length > 0 ?
+                            (Array.isArray(chartDataSets[index]) && chartDataSets[index].length === 0 ?
                               'No data available for the selected filters. Try adjusting your filter criteria.' :
-                              `Chart ready: ${config.xAxis} vs ${config.yAxes.filter(y => y).join(', ')}`
+                              `Chart ready: ${config.xAxis} vs ${validYAxes.map(y => y.field).join(', ')}`
                             ) :
                             'Select X and Y axes to generate chart'
                           }
@@ -2442,20 +2440,16 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                       >
                         {/* Only render the chart if we have valid xAxis and yAxes */}
                         {(() => {
-                          const hasValidAxes =
-                            config.xAxis &&
-                            config.yAxes &&
-                            config.yAxes.length > 0 &&
-                            config.yAxes.every((y) => y);
+                          const hasValidAxes = config.xAxis && validYAxes.length > 0;
                           if (!hasValidAxes) {
                             return (
                               <div className="text-center p-4 border-2 border-dashed border-gray-300 rounded-lg h-full flex items-center justify-center">
                                 <div className="text-gray-500 text-sm">
-                                  {config.xAxis && config.yAxes && config.yAxes.length > 0 && config.yAxes.every(y => y) ? (
-                                    chartDataSets[index] && chartDataSets[index].length === 0 ? (
+                                  {config.xAxis && validYAxes.length > 0 ? (
+                                    Array.isArray(chartDataSets[index]) && chartDataSets[index].length === 0 ? (
                                       'No data available for the selected filters. Try adjusting your filter criteria.'
                                     ) : (
-                                      `Chart ready: ${config.xAxis} vs ${config.yAxes.filter(y => y).join(', ')}`
+                                      `Chart ready: ${config.xAxis} vs ${validYAxes.map(y => y.field).join(', ')}`
                                     )
                                   ) : (
                                     'Select X and Y axes to generate chart'
