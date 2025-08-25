@@ -401,11 +401,10 @@ const RechartsChartRenderer: React.FC<Props> = ({
   const chartDataForRendering = useMemo(() => {
     if (!data) return [];
 
+    let arrayData: any[] = [];
+
     // When data is already an array, handle special cases for pie charts
     if (Array.isArray(data)) {
-      // Backend may return pie chart data as array of [label, value] when
-      // no legend field is specified. Convert such tuples into objects that
-      // Recharts can understand.
       if (
         type === 'pie_chart' &&
         (!legendField || legendField === '') &&
@@ -414,7 +413,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
         const xKeyName = xField || 'name';
         const yKeyName = yField || 'value';
 
-        return (data as any[]).map((item) => {
+        arrayData = (data as any[]).map((item) => {
           const [name, rawValue] = item as [any, any];
           let numericValue = rawValue;
           if (typeof rawValue === 'object' && rawValue !== null) {
@@ -425,44 +424,72 @@ const RechartsChartRenderer: React.FC<Props> = ({
           }
           return { [xKeyName]: name, [yKeyName]: numericValue };
         });
+      } else {
+        arrayData = data as any[];
       }
-      return data;
-    }
-
-    if (type === 'pie_chart' && typeof data === 'object') {
-      // If a legend field is provided, the backend may return an object keyed by legend value
+    } else if (type === 'pie_chart' && typeof data === 'object') {
       if (legendField) {
         try {
-          return Object.values(data as Record<string, any[]>).flat();
+          arrayData = Object.values(data as Record<string, any[]>).flat();
         } catch {
-          return [];
+          arrayData = [];
         }
-      }
+      } else {
+        try {
+          const xKeyName = xField || 'name';
+          const yKeyName = yField || 'value';
 
-      // When no legend field is provided, convert simple key-value pairs to an
-      // array of objects. Some APIs return values as nested objects (e.g.
-      // { category: { metric: 10 } }), which would otherwise break the pie
-      // chart because Recharts expects numeric values. Extract the first
-      // numeric field from such objects.
-      try {
-        const xKeyName = xField || 'name';
-        const yKeyName = yField || 'value';
-
-        return Object.entries(data as Record<string, any>).map(([name, value]) => {
-          let numericValue: any = value;
-          if (typeof value === 'object' && value !== null) {
-            const firstNumber = Object.values(value).find(v => typeof v === 'number');
-            numericValue = firstNumber !== undefined ? firstNumber : value;
-          }
-          return { [xKeyName]: name, [yKeyName]: numericValue };
-        });
-      } catch {
-        return [];
+          arrayData = Object.entries(data as Record<string, any>).map(([name, value]) => {
+            let numericValue: any = value;
+            if (typeof value === 'object' && value !== null) {
+              const firstNumber = Object.values(value).find(v => typeof v === 'number');
+              numericValue = firstNumber !== undefined ? firstNumber : value;
+            }
+            return { [xKeyName]: name, [yKeyName]: numericValue };
+          });
+        } catch {
+          arrayData = [];
+        }
       }
     }
 
-    return [];
-  }, [data, type, legendField]);
+    // Pivot long-form data for multiple Y-axes so each measure becomes its own field
+    if (Array.isArray(arrayData) && arrayData.length > 0 && yFields && yFields.length > 1) {
+      const sample = arrayData[0];
+      const lowerFields = yFields.map(f => f.toLowerCase());
+      const hasAllFields = lowerFields.every(f => Object.keys(sample).some(k => k.toLowerCase() === f));
+
+      if (!hasAllFields) {
+        const measureKey = Object.keys(sample).find(k => {
+          const v = sample[k];
+          return typeof v === 'string' && lowerFields.includes(String(v).toLowerCase());
+        });
+
+        const valueKey = Object.keys(sample).find(k => {
+          return typeof sample[k] === 'number' && k !== measureKey && (!xField || k.toLowerCase() !== xField.toLowerCase());
+        });
+
+        const xKeyName = xField || Object.keys(sample).find(k => k !== measureKey && k !== valueKey) || 'x';
+
+        if (measureKey && valueKey) {
+          const pivotMap = new Map<string, any>();
+          arrayData.forEach(row => {
+            let xVal = row[xKeyName] ?? row.x ?? row.name ?? row.category ?? row[Object.keys(row)[0]];
+            const measureName = row[measureKey];
+            const yVal = row[valueKey];
+            if (xVal === undefined || measureName === undefined) return;
+            const key = String(xVal);
+            const existing = pivotMap.get(key) || { [xKeyName]: xVal };
+            existing[measureName] = yVal;
+            pivotMap.set(key, existing);
+          });
+          arrayData = Array.from(pivotMap.values());
+        }
+      }
+    }
+
+    return arrayData;
+  }, [data, type, legendField, yFields, xField, yField]);
 
   // Simple chart render key
   const chartRenderKey = useMemo(() => {
@@ -1173,118 +1200,14 @@ const RechartsChartRenderer: React.FC<Props> = ({
     
 
     
-    // If we have yFields but the data only has 'x' and 'y' keys, we need to transform the data
-    if (yFields && yFields.length > 1 && firstItem && firstItem.x !== undefined && firstItem.y !== undefined) {
-      // Transform data to use actual field names instead of generic x/y
-      const transformedData = chartDataForRendering.map((item: any, index: number) => {
-        const transformed: any = {};
-        
-        // Keep the x-axis data
-        transformed[xKey] = item.x;
-        
-        // Map y-axis data to actual field names
-        if (yFields && yFields.length > 0) {
-          // For dual Y-axes, we need to create separate data points for each Y-axis
-          // Since the backend only provides one 'y' value, we'll use it for both axes
-          // but with different scaling to simulate dual Y-axes
-          transformed[yFields[0]] = item.y;
-          
-          // For the second Y-axis, we'll use a scaled version of the same data
-          // This is a workaround until the backend supports multiple measures
-          if (yFields.length > 1) {
-            // Scale the second Y-axis data differently to make it visually distinct
-            const scaleFactor = 0.5; // You can adjust this to make the second axis more or less prominent
-            transformed[yFields[1]] = typeof item.y === 'number' ? item.y * scaleFactor : item.y;
-          }
-        }
-        
-        // CRITICAL: Preserve the legend field if it exists (case-insensitive)
-        if (legendField) {
-          // First try exact match
-          if (item[legendField] !== undefined) {
-            transformed[legendField] = item[legendField];
-          } else {
-            // Then try case-insensitive match
-            const keys = Object.keys(item);
-            const foundKey = keys.find(key => key.toLowerCase() === legendField.toLowerCase());
-            if (foundKey) {
-              transformed[foundKey] = item[foundKey];
-            }
-          }
-        }
-        
-        return transformed;
-      });
-      
-      // Note: We don't reassign data anymore, chartDataForRendering handles this
-      
-      // Update the keys to use the actual field names
-      if (yFields && yFields.length > 0) {
-        yKey = yFields[0];
-        yKeys = yFields;
-      }
-    } else if (yFields && yFields.length > 1 && firstItem) {
-      // Check if the data already has the actual field names (backend supports multiple measures)
-      const hasActualFieldNames = yFields.every(field => firstItem.hasOwnProperty(field));
-      
-      if (hasActualFieldNames) {
-        // Use the actual field names directly
-        yKey = yFields[0];
-        yKeys = yFields;
-        
-        // For dual Y-axes, we need to find the x-axis key (it's usually 'x' or 'category' or the first key that's not a yField)
-        if (!xKey) {
-          const availableKeys = Object.keys(firstItem);
-          const nonYFieldKeys = availableKeys.filter(key => !yFields.includes(key));
-          xKey = nonYFieldKeys.find(key => key === 'x' || key === 'category' || key === 'label') || nonYFieldKeys[0] || 'x';
-        }
-      } else {
-        // Fallback to the original transformation logic
-        const transformedData = chartDataForRendering.map((item: any, index: number) => {
-          const transformed: any = {};
-          
-          // Keep the x-axis data
-          transformed[xKey] = item.x || item[Object.keys(item)[0]];
-          
-          // Map y-axis data to actual field names
-          if (yFields && yFields.length > 0) {
-            transformed[yFields[0]] = item.y || item[Object.keys(item)[1]];
-            
-            if (yFields.length > 1) {
-              const scaleFactor = 0.5;
-              transformed[yFields[1]] = typeof (item.y || item[Object.keys(item)[1]]) === 'number' 
-                ? (item.y || item[Object.keys(item)[1]]) * scaleFactor 
-                : (item.y || item[Object.keys(item)[1]]);
-            }
-          }
-          
-          // CRITICAL: Preserve the legend field if it exists (case-insensitive)
-          if (legendField) {
-            // First try exact match
-            if (item[legendField] !== undefined) {
-              transformed[legendField] = item[legendField];
-            } else {
-              // Then try case-insensitive match
-              const keys = Object.keys(item);
-              const foundKey = keys.find(key => key.toLowerCase() === legendField.toLowerCase());
-              if (foundKey) {
-                transformed[foundKey] = item[foundKey];
-              }
-            }
-          }
-          
-          return transformed;
-        });
-        
-        yKey = yFields[0];
-        yKeys = yFields;
-      }
+    // If yFields are provided, use them directly as Y-axis keys
+    if (yFields && yFields.length > 0) {
+      yKey = yFields[0];
+      yKeys = yFields;
     }
-    
-    // Final validation for dual Y-axes - ensure we have the correct keys
+
     if (yFields && yFields.length > 1 && yKeys.length === 0) {
       yKeys = yFields;
-      yKey = yFields[0];
     }
     
     // Validate that we have valid keys before rendering
@@ -1302,51 +1225,63 @@ const RechartsChartRenderer: React.FC<Props> = ({
     // Final validation for dual Y-axes
     const hasDualYAxes = yKeys.length > 1 || (yFields && yFields.length > 1);
 
-    // CRITICAL FIX: Transform data for single-axis bar charts when data has generic keys
+    // Normalize data to use the provided xField/yField/yFields when incoming data
+    // contains generic keys like x/y or name/value. This fixes charts failing to
+    // render when the backend doesn't use the explicit field names.
     let transformedChartData = chartDataForRendering;
-    if (type === 'bar_chart' && xField && yField && chartDataForRendering.length > 0) {
+    if (xField && chartDataForRendering.length > 0) {
       const firstItem = chartDataForRendering[0];
       const availableKeys = Object.keys(firstItem);
-      
-      // Check if data has generic keys OR if the field names don't match what we expect
-      const needsTransformation = availableKeys.includes('x') || availableKeys.includes('y') || availableKeys.includes('name') || availableKeys.includes('value') || 
-                                 (xField && !availableKeys.includes(xField)) || (yField && !availableKeys.includes(yField));
-      
+
+      // Determine which Y fields we expect
+      const targetYFields = yFields && yFields.length > 0 ? yFields : (yField ? [yField] : []);
+
+      // Detect if transformation is needed
+      const needsTransformation =
+        availableKeys.includes('x') ||
+        availableKeys.includes('y') ||
+        availableKeys.includes('name') ||
+        availableKeys.includes('value') ||
+        availableKeys.includes('category') ||
+        availableKeys.includes('Year') ||
+        availableKeys.includes('year') ||
+        !availableKeys.includes(xField) ||
+        targetYFields.some(f => !availableKeys.includes(f));
+
       if (needsTransformation) {
-        
         transformedChartData = chartDataForRendering.map((item: any) => {
           const transformed: any = {};
-          
-          // Map keys to actual field names
-          if (item.x !== undefined) {
-            transformed[xField] = item.x;
-          } else if (item.name !== undefined) {
-            transformed[xField] = item.name;
-          } else if (item.category !== undefined) {
-            transformed[xField] = item.category;
-          } else if (item.Year !== undefined) {
-            transformed[xField] = item.Year;
-          } else if (item.year !== undefined) {
-            transformed[xField] = item.year;
-          } else {
-            transformed[xField] = item[Object.keys(item)[0]];
-          }
-          
-          if (item.y !== undefined) {
-            transformed[yField] = item.y;
-          } else if (item.value !== undefined) {
-            transformed[yField] = item.value;
-          } else if (item.Volume !== undefined) {
-            transformed[yField] = item.Volume;
-          } else if (item.volume !== undefined) {
-            transformed[yField] = item.volume;
-          } else {
-            transformed[yField] = item[Object.keys(item)[1]] || item[Object.keys(item)[0]];
-          }
-          
+
+          // Map X value
+          transformed[xField] =
+            item[xField] ??
+            item.x ??
+            item.name ??
+            item.category ??
+            item.Year ??
+            item.year ??
+            item[Object.keys(item)[0]];
+
+          // Map each expected Y field
+          targetYFields.forEach((field, idx) => {
+            transformed[field] =
+              item[field] ??
+              item[`y${idx + 1}`] ??
+              (idx === 0 ? item.y : undefined) ??
+              item[`value${idx + 1}`] ??
+              (idx === 0 ? item.value : undefined) ??
+              item[`Volume${idx + 1}`] ??
+              (idx === 0 ? item.Volume : undefined) ??
+              item[`volume${idx + 1}`] ??
+              (idx === 0 ? item.volume : undefined) ??
+              // Fallback to sequential keys in the object
+              item[Object.keys(item)[idx + 1]] ??
+              item[Object.keys(item)[idx + 2]] ??
+              0;
+          });
+
           return transformed;
         });
-        
       }
     }
 
