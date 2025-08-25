@@ -1225,51 +1225,63 @@ const RechartsChartRenderer: React.FC<Props> = ({
     // Final validation for dual Y-axes
     const hasDualYAxes = yKeys.length > 1 || (yFields && yFields.length > 1);
 
-    // CRITICAL FIX: Transform data for single-axis bar charts when data has generic keys
+    // Normalize data to use the provided xField/yField/yFields when incoming data
+    // contains generic keys like x/y or name/value. This fixes charts failing to
+    // render when the backend doesn't use the explicit field names.
     let transformedChartData = chartDataForRendering;
-    if (type === 'bar_chart' && xField && yField && chartDataForRendering.length > 0) {
+    if (xField && chartDataForRendering.length > 0) {
       const firstItem = chartDataForRendering[0];
       const availableKeys = Object.keys(firstItem);
-      
-      // Check if data has generic keys OR if the field names don't match what we expect
-      const needsTransformation = availableKeys.includes('x') || availableKeys.includes('y') || availableKeys.includes('name') || availableKeys.includes('value') || 
-                                 (xField && !availableKeys.includes(xField)) || (yField && !availableKeys.includes(yField));
-      
+
+      // Determine which Y fields we expect
+      const targetYFields = yFields && yFields.length > 0 ? yFields : (yField ? [yField] : []);
+
+      // Detect if transformation is needed
+      const needsTransformation =
+        availableKeys.includes('x') ||
+        availableKeys.includes('y') ||
+        availableKeys.includes('name') ||
+        availableKeys.includes('value') ||
+        availableKeys.includes('category') ||
+        availableKeys.includes('Year') ||
+        availableKeys.includes('year') ||
+        !availableKeys.includes(xField) ||
+        targetYFields.some(f => !availableKeys.includes(f));
+
       if (needsTransformation) {
-        
         transformedChartData = chartDataForRendering.map((item: any) => {
           const transformed: any = {};
-          
-          // Map keys to actual field names
-          if (item.x !== undefined) {
-            transformed[xField] = item.x;
-          } else if (item.name !== undefined) {
-            transformed[xField] = item.name;
-          } else if (item.category !== undefined) {
-            transformed[xField] = item.category;
-          } else if (item.Year !== undefined) {
-            transformed[xField] = item.Year;
-          } else if (item.year !== undefined) {
-            transformed[xField] = item.year;
-          } else {
-            transformed[xField] = item[Object.keys(item)[0]];
-          }
-          
-          if (item.y !== undefined) {
-            transformed[yField] = item.y;
-          } else if (item.value !== undefined) {
-            transformed[yField] = item.value;
-          } else if (item.Volume !== undefined) {
-            transformed[yField] = item.Volume;
-          } else if (item.volume !== undefined) {
-            transformed[yField] = item.volume;
-          } else {
-            transformed[yField] = item[Object.keys(item)[1]] || item[Object.keys(item)[0]];
-          }
-          
+
+          // Map X value
+          transformed[xField] =
+            item[xField] ??
+            item.x ??
+            item.name ??
+            item.category ??
+            item.Year ??
+            item.year ??
+            item[Object.keys(item)[0]];
+
+          // Map each expected Y field
+          targetYFields.forEach((field, idx) => {
+            transformed[field] =
+              item[field] ??
+              item[`y${idx + 1}`] ??
+              (idx === 0 ? item.y : undefined) ??
+              item[`value${idx + 1}`] ??
+              (idx === 0 ? item.value : undefined) ??
+              item[`Volume${idx + 1}`] ??
+              (idx === 0 ? item.Volume : undefined) ??
+              item[`volume${idx + 1}`] ??
+              (idx === 0 ? item.volume : undefined) ??
+              // Fallback to sequential keys in the object
+              item[Object.keys(item)[idx + 1]] ??
+              item[Object.keys(item)[idx + 2]] ??
+              0;
+          });
+
           return transformed;
         });
-        
       }
     }
 

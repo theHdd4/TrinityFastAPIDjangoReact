@@ -429,162 +429,38 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
     } else if (safeData.graphLayout.numberOfGraphsInRow === 1 && chartConfigs.length > 1) {
       // Keep only the first chart when switching to 1 graph per row
       setChartConfigs(prev => prev.slice(0, 1));
-      
+
+      // Helper to remove indices greater than 0 from any state object
+      const cleanupState = <T extends Record<string, any>>(setter: React.Dispatch<React.SetStateAction<T>>) => {
+        setter(prev => {
+          const newState: Record<string, any> = { ...prev };
+          Object.keys(newState).forEach(key => {
+            const keyNum = parseInt(key);
+            if (keyNum > 0) delete newState[keyNum];
+          });
+          return newState as T;
+        });
+      };
+
       // Clean up states for removed charts
-      setChartFiltersVisible(prev => {
-        const newState = { ...prev };
-        Object.keys(newState).forEach(key => {
-          const keyNum = parseInt(key);
-          if (keyNum > 0) {
-            delete newState[keyNum];
-          }
-        });
-        return newState;
-      });
-      
-      setChartConfigCollapsed(prev => {
-        const newState = { ...prev };
-        Object.keys(newState).forEach(key => {
-          const keyNum = parseInt(key);
-          if (keyNum > 0) {
-            delete newState[keyNum];
-          }
-        });
-        return newState;
-      });
-      
-      setChartOptions(prev => {
-        const newState = { ...prev };
-        Object.keys(newState).forEach(key => {
-          const keyNum = parseInt(key);
-          if (keyNum > 0) {
-            delete newState[keyNum];
-          }
-        });
-        return newState;
-      });
-      
-      setIsLoading(prev => {
-        const newState = { ...prev };
-        Object.keys(newState).forEach(key => {
-          const keyNum = parseInt(key);
-          if (keyNum > 0) {
-            delete newState[keyNum];
-          }
-        });
-        return newState;
-      });
-      
-      // Clean up chart data for removed charts
-      setChartDataSets(prev => {
-        const newState = { ...prev };
-        Object.keys(newState).forEach(key => {
-          const keyNum = parseInt(key);
-          if (keyNum > 0) {
-            delete newState[keyNum];
-          }
-        });
-        return newState;
-      });
-      
-      setChartFilters(prev => {
-        const newState = { ...prev };
-        Object.keys(newState).forEach(key => {
-          const keyNum = parseInt(key);
-          if (keyNum > 0) {
-            delete newState[keyNum];
-          }
-        });
-        return newState;
-      });
-      
-      setAppliedFilters(prev => {
-        const newState = { ...prev };
-        Object.keys(newState).forEach(key => {
-          const keyNum = parseInt(key);
-          if (keyNum > 0) {
-            delete newState[keyNum];
-          }
-        });
-        return newState;
-      });
-      
-      setOriginalChartData(prev => {
-        const newState = { ...prev };
-        Object.keys(newState).forEach(key => {
-          const keyNum = parseInt(key);
-          if (keyNum > 0) {
-            delete newState[keyNum];
-          }
-        });
-        return newState;
-      });
-      
-      setChartGenerated(prev => {
-        const newState = { ...prev };
-        Object.keys(newState).forEach(key => {
-          const keyNum = parseInt(key);
-          if (keyNum > 0) {
-            delete newState[keyNum];
-          }
-        });
-        return newState;
-      });
-      
-      setChartThemes(prev => {
-        const newState = { ...prev };
-        Object.keys(newState).forEach(key => {
-          const keyNum = parseInt(key);
-          if (keyNum > 0) {
-            delete newState[keyNum];
-          }
-        });
-        return newState;
-      });
-      
-      setChartSortCounters(prev => {
-        const newState = { ...prev };
-        Object.keys(newState).forEach(key => {
-          const keyNum = parseInt(key);
-          if (keyNum > 0) {
-            delete newState[keyNum];
-          }
-        });
-        return newState;
-      });
-
-      setChartSettingsVisible(prev => {
-        const newState = { ...prev };
-        Object.keys(newState).forEach(key => {
-          const keyNum = parseInt(key);
-          if (keyNum > 0) {
-            delete newState[keyNum];
-          }
-        });
-        return newState;
-      });
-
-      setChartNotes(prev => {
-        const newState = { ...prev };
-        Object.keys(newState).forEach(key => {
-          const keyNum = parseInt(key);
-          if (keyNum > 0) {
-            delete newState[keyNum];
-          }
-        });
-        return newState;
-      });
-
-      setShowUniqueToggles(prev => {
-        const newState = { ...prev };
-        Object.keys(newState).forEach(key => {
-          const keyNum = parseInt(key);
-          if (keyNum > 0) {
-            delete newState[keyNum];
-          }
-        });
-        return newState;
-      });
+      cleanupState(setChartFiltersVisible);
+      cleanupState(setChartConfigCollapsed);
+      cleanupState(setChartOptions);
+      cleanupState(setIsLoading);
+      cleanupState(setChartDataSets);
+      cleanupState(setChartFilters);
+      cleanupState(setAppliedFilters);
+      cleanupState(setOriginalChartData);
+      cleanupState(setChartGenerated);
+      cleanupState(setChartThemes);
+      cleanupState(setChartSortCounters);
+      cleanupState(setChartSettingsVisible);
+      cleanupState(setChartNotes);
+      cleanupState(setShowUniqueToggles);
+      cleanupState(setCardSelectedIdentifiers);
+      cleanupState(setOriginalDimensionsPerCard);
+      cleanupState(setShowFilterCrossButtons);
+      cleanupState(setDataSummaryCollapsed);
 
       Object.keys(chartGenerationTimeouts.current).forEach(key => {
         const keyNum = parseInt(key);
@@ -593,50 +469,6 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
           if (timeout) clearTimeout(timeout);
           delete chartGenerationTimeouts.current[key];
         }
-      });
-      
-      setCardSelectedIdentifiers(prev => {
-        const newState = { ...prev };
-        Object.keys(newState).forEach(key => {
-          const keyNum = parseInt(key);
-          if (keyNum > 0) {
-            delete newState[keyNum];
-          }
-        });
-        return newState;
-      });
-      
-      setOriginalDimensionsPerCard(prev => {
-        const newState = { ...prev };
-        Object.keys(newState).forEach(key => {
-          const keyNum = parseInt(key);
-          if (keyNum > 0) {
-            delete newState[keyNum];
-          }
-        });
-        return newState;
-      });
-      
-      setShowFilterCrossButtons(prev => {
-        const newState = { ...prev };
-        Object.keys(newState).forEach(key => {
-          const keyNum = parseInt(key);
-          if (keyNum > 0) {
-            delete newState[keyNum];
-          }
-        });
-        return newState;
-      });
-      
-      setDataSummaryCollapsed(prev => {
-        const newState = { ...prev };
-        Object.keys(newState).forEach(key => {
-          const keyNum = parseInt(key);
-          if (keyNum > 0) {
-            delete newState[keyNum];
-          }
-        });
-        return newState;
       });
     }
   }, [safeData.graphLayout.numberOfGraphsInRow, safeData.columnClassifierConfig?.dimensions]);
