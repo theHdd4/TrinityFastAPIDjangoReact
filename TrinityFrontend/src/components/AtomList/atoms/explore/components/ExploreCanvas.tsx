@@ -1680,9 +1680,9 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                   <BarChart3 className="w-3 h-3 text-pink-600" />
                 </div>
                 <span className="font-semibold text-sm text-gray-800">Chart Configuration</span>
+                <span className="ml-2 text-xs text-gray-500 whitespace-nowrap">&lt;Right click to change chart type&gt;</span>
               </div>
-              <div className="h-px bg-gradient-to-r from-pink-200 to-transparent flex-1 ml-3"></div>
-              <div className="flex items-center space-x-2">
+              <div className="flex items-center space-x-2 ml-auto">
                 <Button
                   variant="outline"
                   size="sm"
@@ -1944,10 +1944,10 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                     }}
                   >
                     <SelectTrigger
-                      className="w-32 h-8 ml-2 pr-2 text-xs leading-none [&>span:last-child>svg]:w-3 [&>span:last-child>svg]:h-3"
+                      className="w-48 h-8 ml-2 pr-2 text-xs leading-none whitespace-nowrap [&>span:last-child>svg]:w-3 [&>span:last-child>svg]:h-3"
                       disabled={isLoadingColumns}
                     >
-                      <SelectValue placeholder="Segregate Field Values" className="truncate" />
+                      <SelectValue placeholder="Segregate Field Values" className="whitespace-nowrap" />
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="aggregate">Show Aggregate</SelectItem>
