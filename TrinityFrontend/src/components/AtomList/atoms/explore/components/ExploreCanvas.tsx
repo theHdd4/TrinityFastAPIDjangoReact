@@ -552,6 +552,48 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
         });
         return newState;
       });
+
+      setChartSettingsVisible(prev => {
+        const newState = { ...prev };
+        Object.keys(newState).forEach(key => {
+          const keyNum = parseInt(key);
+          if (keyNum > 0) {
+            delete newState[keyNum];
+          }
+        });
+        return newState;
+      });
+
+      setChartNotes(prev => {
+        const newState = { ...prev };
+        Object.keys(newState).forEach(key => {
+          const keyNum = parseInt(key);
+          if (keyNum > 0) {
+            delete newState[keyNum];
+          }
+        });
+        return newState;
+      });
+
+      setShowUniqueToggles(prev => {
+        const newState = { ...prev };
+        Object.keys(newState).forEach(key => {
+          const keyNum = parseInt(key);
+          if (keyNum > 0) {
+            delete newState[keyNum];
+          }
+        });
+        return newState;
+      });
+
+      Object.keys(chartGenerationTimeouts.current).forEach(key => {
+        const keyNum = parseInt(key);
+        if (keyNum > 0) {
+          const timeout = chartGenerationTimeouts.current[key];
+          if (timeout) clearTimeout(timeout);
+          delete chartGenerationTimeouts.current[key];
+        }
+      });
       
       setCardSelectedIdentifiers(prev => {
         const newState = { ...prev };
