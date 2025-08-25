@@ -1636,17 +1636,30 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
   const renderChartComponent = (index: number) => {
     const config = chartConfigs[index] || chartConfigs[0];
     const isSettingsVisible = chartSettingsVisible[index] || false;
+
+    // Remove any empty Y-axis selections and preserve their labels
+    const validYAxes = config.yAxes
+      .map((yAxis: string, idx: number) => ({
+        field: yAxis,
+        label: config.yAxisLabels[idx] || yAxis || '',
+      }))
+      .filter(({ field }) => field && field.trim() !== '');
+
     const rendererProps = {
-      key: `chart-${index}-${config.chartType}-${chartThemes[index] || 'default'}-${chartDataSets[index]?.length || 0}-${Object.keys(chartFilters[index] || {}).length}-${appliedFilters[index] ? 'filtered' : 'unfiltered'}-theme-${chartThemes[index] || 'default'}-sort-${config.sortOrder || 'none'}-yaxes-${config.yAxes.join('-')}`,
+      key: `chart-${index}-${config.chartType}-${chartThemes[index] || 'default'}-${
+        chartDataSets[index]?.length || 0
+      }-${Object.keys(chartFilters[index] || {}).length}-${appliedFilters[index] ? 'filtered' : 'unfiltered'}-theme-${
+        chartThemes[index] || 'default'
+      }-sort-${config.sortOrder || 'none'}-yaxes-${config.yAxes.join('-')}`,
       type: config.chartType as 'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart',
       data: chartDataSets[index] || [],
       xField: config.xAxis || undefined,
-      yField: config.yAxes[0] || undefined,
+      yField: validYAxes[0]?.field,
       title: config.title,
       xAxisLabel: config.xAxisLabel || config.xAxis || '',
-      yAxisLabel: config.yAxisLabels[0] || config.yAxes[0] || '',
-      yFields: config.yAxes,
-      yAxisLabels: config.yAxes.map((yAxis: string, idx: number) => config.yAxisLabels[idx] || yAxis || ''),
+      yAxisLabel: validYAxes[0]?.label || '',
+      yFields: validYAxes.map((y) => y.field),
+      yAxisLabels: validYAxes.map((y) => y.label),
       legendField:
         config.legendField && config.legendField !== 'aggregate'
           ? config.legendField
@@ -1666,7 +1679,7 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
       showLegend: chartOptions[index]?.legend,
       showAxisLabels: chartOptions[index]?.axisLabels,
       showDataLabels: chartOptions[index]?.dataLabels,
-      showGrid: chartOptions[index]?.grid
+      showGrid: chartOptions[index]?.grid,
     } as const;
     
     return (

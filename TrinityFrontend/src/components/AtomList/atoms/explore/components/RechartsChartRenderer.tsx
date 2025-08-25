@@ -303,18 +303,18 @@ const CustomPieLabel = ({ cx, cy, midAngle, innerRadius, outerRadius, percent, n
   );
 };
 
-const RechartsChartRenderer: React.FC<Props> = ({ 
-  type, 
-  data, 
-  xField, 
-  yField, 
-  yFields, 
-  width = 400, 
+const RechartsChartRenderer: React.FC<Props> = ({
+  type,
+  data,
+  xField,
+  yField: yFieldProp,
+  yFields: yFieldsProp,
+  width = 400,
   height = 300,
   title,
   xAxisLabel,
   yAxisLabel,
-  yAxisLabels,
+  yAxisLabels: yAxisLabelsProp,
   legendField,
   colors,
   enableScroll = false,
@@ -333,6 +333,11 @@ const RechartsChartRenderer: React.FC<Props> = ({
   showGrid: propShowGrid, // External control for grid visibility
   chartsPerRow
 }) => {
+
+  // Sanitize Y-axis props to ensure we only work with valid selections
+  const yFields = (yFieldsProp || []).filter((field) => field && field.trim() !== '');
+  const yAxisLabels = yFields.map((field, idx) => yAxisLabelsProp?.[idx] || field);
+  const yField = yFieldProp || yFields[0];
 
   // State for color theme - simplified approach
   const [selectedTheme, setSelectedTheme] = useState<string>('default');
