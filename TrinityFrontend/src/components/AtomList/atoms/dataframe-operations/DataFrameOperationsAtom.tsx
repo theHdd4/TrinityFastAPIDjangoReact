@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent } from '@/components/ui/card';
-import { Settings, BarChart3, Eye, Table } from 'lucide-react';
 import DataFrameOperationsCanvas from './components/DataFrameOperationsCanvas';
 import DataFrameOperationsSettings from './components/DataFrameOperationsSettings';
 import DataFrameOperationsVisualisation from './components/DataFrameOperationsVisualisation';
@@ -144,18 +143,7 @@ const DataFrameOperationsAtom: React.FC<Props> = ({ atomId }) => {
   return (
     <ErrorBoundary>
       <div className="w-full h-full bg-gradient-to-br from-green-50 via-white to-green-50 rounded-xl border border-green-200 shadow-lg overflow-hidden">
-        <div className="bg-gradient-to-r from-green-500 to-green-600 text-white p-4 flex-shrink-0">
-          <div className="flex items-center space-x-3">
-            <div className="w-10 h-10 bg-white/20 rounded-lg flex items-center justify-center backdrop-blur-sm">
-              <Table className="w-5 h-5" />
-            </div>
-            <div>
-              <h2 className="text-lg font-semibold">DataFrame Operations</h2>
-              <p className="text-green-100 text-sm">Excel-like operations on data frames with editing, filtering, sorting</p>
-            </div>
-          </div>
-        </div>
-        <div className="flex-1 h-[calc(100%-80px)]">
+        <div className="h-full">
           {fileSelected && data && data.headers && data.rows && data.headers.length > 0 && data.rows.length > 0 ? (
             <div className="h-full">
               {/* File name above the table, small font */}
