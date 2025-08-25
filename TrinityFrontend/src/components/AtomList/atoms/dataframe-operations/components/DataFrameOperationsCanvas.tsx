@@ -1,9 +1,6 @@
 import React, { useState, useMemo, useRef, useCallback, useEffect } from 'react';
-import axios from 'axios';
-import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -35,6 +32,7 @@ import {
   filterRows as apiFilter,
 } from '../services/dataframeOperationsApi';
 import { toast } from '@/components/ui/use-toast';
+import '@/Templates/Table/table.css';
 
 interface DataFrameOperationsCanvasProps {
   data: DataFrameData | null;
@@ -763,7 +761,6 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
       {/* Shift the table upwards to use the freed space */}
       {/* Move the pagination controls so they are always visible directly below the table */}
       <div className="h-full flex flex-col bg-background">
-        <div className="flex-shrink-0 p-4 border-b border-border bg-card" />
         {/* Controls section */}
         <div className="flex-shrink-0 p-4 border-b border-border bg-card/50">
           <div className="flex items-center justify-between">
@@ -805,16 +802,20 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
               </div>
             </div>
           ) : (
-            <Table className="border-collapse w-full">
-              <TableHeader className="bg-gradient-to-r from-gray-50 to-green-50 border-b-2 border-gray-100">
-                <TableRow className="bg-gradient-to-r from-gray-50 to-green-50 border-b-2 border-gray-100">
+            <div className="table-wrapper">
+              <div className="table-edge-left" />
+              <div className="table-edge-right" />
+              <div className="table-overflow">
+                <Table className="table-base">
+              <TableHeader className="table-header">
+                <TableRow className="table-header-row">
                   {settings.showRowNumbers && (
-                    <TableHead className="w-16 text-center font-bold text-gray-800 text-center py-4 bg-white border-r border-gray-200">#</TableHead>
+                    <TableHead className="table-header-cell w-16 text-center">#</TableHead>
                   )}
                   {Array.isArray(data?.headers) && data.headers.map((header, colIdx) => (
                     <TableHead
                       key={header + '-' + colIdx}
-                      className={`font-bold text-gray-800 text-center py-4 bg-white border-r border-gray-200 ${selectedColumn === header ? 'border-2 border-blue-500' : ''}`}
+                      className={`table-header-cell text-center bg-white border-r border-gray-200 ${selectedColumn === header ? 'border-2 border-blue-500' : ''}`}
                       draggable
                       onDragStart={() => handleDragStart(header)}
                       onDragOver={e => handleDragOver(e, header)}
@@ -875,15 +876,15 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                       )}
                     </TableHead>
                   ))}
-                  <TableHead className="w-8 bg-white border-l border-gray-200" />
+                  <TableHead className="table-header-cell w-8" />
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {paginatedRows.map((row, rowIndex) => (
-                  <TableRow key={rowIndex} className="hover:bg-green-50 border-b border-green-200">
+                  <TableRow key={rowIndex} className="table-row">
                     {settings.showRowNumbers && (
                       <TableCell
-                        className="w-16 text-center bg-white border-r border-gray-200 text-xs text-gray-700 font-medium px-2 py-2"
+                        className="table-cell w-16 text-center text-xs font-medium"
                         onContextMenu={e => {
                           e.preventDefault();
                           setRowContextMenu({ x: e.clientX, y: e.clientY, rowIdx: startIndex + rowIndex });
@@ -899,7 +900,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                       return (
                         <TableCell
                           key={colIdx}
-                          className={`py-4 text-center font-medium text-gray-700 bg-white border-r border-gray-200 min-w-[120px] ${selectedCell?.row === rowIndex && selectedCell?.col === column ? 'border border-blue-400' : ''}`}
+                          className={`table-cell text-center font-medium min-w-[120px] ${selectedCell?.row === rowIndex && selectedCell?.col === column ? 'border border-blue-400' : ''}`}
                           onClick={() => setSelectedCell({ row: rowIndex, col: column })}
                           onDoubleClick={() => {
                             // Always allow cell editing regardless of enableEditing setting
@@ -936,12 +937,14 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                         </TableCell>
                       );
                     })}
-                    <TableCell className="w-8 bg-green-50 border-l border-green-200">
+                    <TableCell className="table-cell w-8">
                     </TableCell>
                   </TableRow>
                 ))}
               </TableBody>
             </Table>
+          </div>
+        </div>
           )}
           {totalPages > 1 && (
             <div className="flex flex-col items-center py-4">
