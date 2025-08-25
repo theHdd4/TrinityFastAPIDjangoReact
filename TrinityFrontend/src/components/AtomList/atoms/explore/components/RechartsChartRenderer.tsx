@@ -1302,22 +1302,28 @@ const RechartsChartRenderer: React.FC<Props> = ({
     // Final validation for dual Y-axes
     const hasDualYAxes = yKeys.length > 1 || (yFields && yFields.length > 1);
 
-    // CRITICAL FIX: Transform data for single-axis bar charts when data has generic keys
+    // CRITICAL FIX: Transform data for bar charts when data has generic keys
+    // Now also supports dual Y-axes by mapping both Y fields when available
     let transformedChartData = chartDataForRendering;
     if (type === 'bar_chart' && xField && yField && chartDataForRendering.length > 0) {
       const firstItem = chartDataForRendering[0];
       const availableKeys = Object.keys(firstItem);
-      
+
       // Check if data has generic keys OR if the field names don't match what we expect
-      const needsTransformation = availableKeys.includes('x') || availableKeys.includes('y') || availableKeys.includes('name') || availableKeys.includes('value') || 
-                                 (xField && !availableKeys.includes(xField)) || (yField && !availableKeys.includes(yField));
-      
+      const needsTransformation =
+        availableKeys.includes('x') ||
+        availableKeys.includes('y') ||
+        availableKeys.includes('name') ||
+        availableKeys.includes('value') ||
+        (xField && !availableKeys.includes(xField)) ||
+        (yField && !availableKeys.includes(yField)) ||
+        (yFields && yFields.length > 1 && !yFields.every(f => availableKeys.includes(f)));
+
       if (needsTransformation) {
-        
         transformedChartData = chartDataForRendering.map((item: any) => {
           const transformed: any = {};
-          
-          // Map keys to actual field names
+
+          // Map keys to actual field names for X-axis
           if (item.x !== undefined) {
             transformed[xField] = item.x;
           } else if (item.name !== undefined) {
@@ -1331,7 +1337,8 @@ const RechartsChartRenderer: React.FC<Props> = ({
           } else {
             transformed[xField] = item[Object.keys(item)[0]];
           }
-          
+
+          // Map primary Y field
           if (item.y !== undefined) {
             transformed[yField] = item.y;
           } else if (item.value !== undefined) {
@@ -1343,10 +1350,34 @@ const RechartsChartRenderer: React.FC<Props> = ({
           } else {
             transformed[yField] = item[Object.keys(item)[1]] || item[Object.keys(item)[0]];
           }
-          
+
+          // Map secondary Y field when present
+          if (yFields && yFields.length > 1) {
+            const secondField = yFields[1];
+            if (item[secondField] !== undefined) {
+              transformed[secondField] = item[secondField];
+            } else if (item.y1 !== undefined) {
+              transformed[secondField] = item.y1;
+            } else if (item.y2 !== undefined) {
+              transformed[secondField] = item.y2;
+            } else if (item.value2 !== undefined) {
+              transformed[secondField] = item.value2;
+            } else {
+              const otherKeys = Object.keys(item).filter(
+                k => k !== 'x' && k !== 'y' && k !== xField && k !== yField
+              );
+              transformed[secondField] = item[otherKeys[0]];
+            }
+          }
+
           return transformed;
         });
-        
+
+        // Ensure yKeys reflect the provided fields after transformation
+        if (yFields && yFields.length > 0) {
+          yKey = yFields[0];
+          yKeys = yFields;
+        }
       }
     }
 
