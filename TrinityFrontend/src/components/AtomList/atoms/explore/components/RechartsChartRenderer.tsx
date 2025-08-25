@@ -338,6 +338,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
   const yFields = (yFieldsProp || []).filter((field) => field && field.trim() !== '');
   const yAxisLabels = yFields.map((field, idx) => yAxisLabelsProp?.[idx] || field);
   const yField = yFieldProp || yFields[0];
+  let yKeys: string[] = yFields.length > 0 ? yFields : (yField ? [yField] : []);
 
   // State for color theme - simplified approach
   const [selectedTheme, setSelectedTheme] = useState<string>('default');
@@ -1113,7 +1114,6 @@ const RechartsChartRenderer: React.FC<Props> = ({
     const firstItem = chartDataForRendering[0];
     let xKey = xField;
     let yKey = yField;
-    let yKeys: string[] = yFields || [];
     
 
     // Auto-detect keys based on data structure and chart type
@@ -1316,7 +1316,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
       // Determine if any expected fields are missing (case-insensitive check)
       const hasField = (key: string) =>
         availableKeys.some(k => k.toLowerCase() === key.toLowerCase());
-      const expectedFields = [xField, ...(yFields || [])];
+      const expectedFields = Array.from(new Set([xField, yField, ...yFields]));
       const needsTransformation = expectedFields.some(field => !hasField(field));
 
       if (needsTransformation) {

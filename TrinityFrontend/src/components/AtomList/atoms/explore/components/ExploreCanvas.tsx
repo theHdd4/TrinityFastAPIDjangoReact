@@ -1647,8 +1647,10 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
       title: config.title,
       xAxisLabel: config.xAxisLabel || config.xAxis || '',
       yAxisLabel: validYAxes[0]?.label || '',
-      yFields: validYAxes.map((y) => y.field),
-      yAxisLabels: validYAxes.map((y) => y.label),
+      ...(validYAxes.length > 1 && {
+        yFields: validYAxes.map((y) => y.field),
+        yAxisLabels: validYAxes.map((y) => y.label),
+      }),
       legendField:
         config.legendField && config.legendField !== 'aggregate'
           ? config.legendField
