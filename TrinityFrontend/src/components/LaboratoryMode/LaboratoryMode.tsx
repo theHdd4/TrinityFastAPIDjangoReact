@@ -19,9 +19,9 @@ const LaboratoryMode = () => {
   const [selectedAtomId, setSelectedAtomId] = useState<string>();
   const [selectedCardId, setSelectedCardId] = useState<string>();
   const [cardExhibited, setCardExhibited] = useState<boolean>(false);
-  const [auxActive, setAuxActive] = useState<'settings' | 'frames' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showFloatingNavigationList, setShowFloatingNavigationList] = useState(true);
+  const [auxActive, setAuxActive] = useState<string | null>(null);
   const { toast } = useToast();
   const { cards, setCards } = useExhibitionStore();
   const setLabCards = useLaboratoryStore(state => state.setCards);
@@ -51,7 +51,7 @@ const LaboratoryMode = () => {
           try {
             const labConfig = {
               cards: last.state,
-              exhibitedCards: last.state.filter((c: any) => c.isExhibited),
+              exhibitedCards: (last.state || []).filter((c: any) => c.isExhibited),
               timestamp: new Date().toISOString(),
             };
             await fetch(`${REGISTRY_API}/projects/${proj.id}/`, {
@@ -101,7 +101,7 @@ const LaboratoryMode = () => {
   const handleSave = async () => {
     if (!canEdit) return;
     try {
-      const exhibitedCards = cards.filter(card => card.isExhibited);
+      const exhibitedCards = (cards || []).filter(card => card.isExhibited);
 
       setCards(cards);
       

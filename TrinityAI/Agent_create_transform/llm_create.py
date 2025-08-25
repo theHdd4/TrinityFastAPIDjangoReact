@@ -21,7 +21,7 @@ from .ai_logic import (
 )
 
 logger = logging.getLogger(__name__)
-ALLOWED_KEYS = {"success", "message", "create_transform_json", "session_id", "suggestions"}
+ALLOWED_KEYS = {"success", "message", "json", "session_id", "suggestions"}
 
 
 class SmartCreateTransformAgent:
@@ -70,8 +70,8 @@ class SmartCreateTransformAgent:
             
             files_loaded = 0
             for obj in objects:
-                # We are primarily interested in files with the .arrow extension
-                if not obj.object_name.endswith('.arrow'):
+                # Accept multiple file formats like the groupby agent
+                if not any(obj.object_name.endswith(ext) for ext in ['.arrow', '.parquet', '.feather', '.csv']):
                     continue
 
                 filename = os.path.basename(obj.object_name)
@@ -90,13 +90,14 @@ class SmartCreateTransformAgent:
                     response.release_conn()
 
                 table = None
-                # --- Simplified Reading Logic ---
+                # --- Enhanced Reading Logic ---
                 # Define a list of reading functions to try in order of likelihood.
                 # Each function takes a bytes buffer and returns a PyArrow Table.
                 readers = [
                     ("Parquet", lambda buffer: pq.read_table(buffer)),
                     ("Feather", lambda buffer: pf.read_table(buffer)),
-                    ("Arrow IPC", lambda buffer: pa.ipc.open_stream(buffer).read_all())
+                    ("Arrow IPC", lambda buffer: pa.ipc.open_stream(buffer).read_all()),
+                    ("CSV", lambda buffer: pa.csv.read_csv(buffer))
                 ]
 
                 for format_name, reader_func in readers:
@@ -229,35 +230,145 @@ class SmartCreateTransformAgent:
         result["session_id"] = session_id
         filtered = {k: v for k, v in result.items() if k in ALLOWED_KEYS}
         
-        # If success and create_transform_json exists, ensure it has all required fields
-        if filtered.get("success") and "create_transform_json" in filtered:
-            create_config = filtered["create_transform_json"]
+        # If success and json exists, ensure it has all required fields
+        if filtered.get("success") and "json" in filtered:
+            json_data = filtered["json"]
             
-            # Auto-generate missing required fields for backend compatibility
-            if "bucket_name" not in create_config:
-                create_config["bucket_name"] = "trinity"
+            # Handle both list and single object formats
+            if isinstance(json_data, list):
+                # Process each item in the list
+                for config in json_data:
+                    if isinstance(config, dict):
+                        # Auto-generate missing required fields for backend compatibility
+                        if "bucket_name" not in config:
+                            config["bucket_name"] = "trinity"
+                            
+                        # 🔧 CRITICAL FIX: Convert all column names to lowercase for backend compatibility
+                        # Convert operation columns to lowercase
+                        for key, value in config.items():
+                            if key.endswith(('_0', '_1', '_2', '_3', '_4', '_5')) and not key.endswith('_rename'):
+                                if isinstance(value, str):
+                                    # Convert comma-separated columns to lowercase
+                                    columns = [col.strip().lower() for col in value.split(',')]
+                                    config[key] = ','.join(columns)
+            elif isinstance(json_data, dict):
+                # Handle single object format
+                config = json_data
+                # Auto-generate missing required fields for backend compatibility
+                if "bucket_name" not in config:
+                    config["bucket_name"] = "trinity"
+                    
+                # 🔧 CRITICAL FIX: Convert all column names to lowercase for backend compatibility
+                # Convert operation columns to lowercase
+                for key, value in config.items():
+                    if key.endswith(('_0', '_1', '_2', '_3', '_4', '_5')) and not key.endswith('_rename'):
+                        if isinstance(value, str):
+                            # Convert comma-separated columns to lowercase
+                            columns = [col.strip().lower() for col in value.split(',')]
+                            config[key] = ','.join(columns)
                 
-            # Ensure identifiers is always an array
-            if "identifiers" not in create_config:
-                create_config["identifiers"] = []
-            elif not isinstance(create_config["identifiers"], list):
-                create_config["identifiers"] = [create_config["identifiers"]] if create_config["identifiers"] else []
+            # 🔍 STRICT VALIDATION: Only return success=true when ALL required fields are present and valid
+            if isinstance(json_data, list):
+                for config in json_data:
+                    if isinstance(config, dict):
+                        # Check if all required fields are present and valid
+                        required_fields = ["bucket_name", "object_name"]
+                        missing_fields = [field for field in required_fields if field not in config or not config[field]]
+                        
+                        if missing_fields:
+                            logger.warning(f"Missing or empty required fields: {missing_fields}")
+                            # Set success to false if any required field is missing
+                            filtered["success"] = False
+                            filtered["message"] = f"Missing required fields: {', '.join(missing_fields)}"
+                            filtered["suggestions"] = [f"Please provide: {', '.join(missing_fields)}"]
+                            # Remove the incomplete json
+                            filtered.pop("json", None)
+                            return filtered
+                        
+                        # Validate that at least one operation exists
+                        operation_keys = [key for key in config.keys() if key.endswith(('_0', '_1', '_2', '_3', '_4', '_5')) and not key.endswith('_rename')]
+                        if not operation_keys:
+                            logger.warning("No operations found in configuration")
+                            filtered["success"] = False
+                            filtered["message"] = "No operations found in configuration"
+                            filtered["suggestions"] = ["Please specify at least one operation"]
+                            filtered.pop("json", None)
+                            return filtered
+                        
+                        # Validate that each operation has a corresponding rename
+                        for op_key in operation_keys:
+                            rename_key = f"{op_key}_rename"
+                            if rename_key not in config or not config[rename_key]:
+                                logger.warning(f"Missing rename for operation {op_key}")
+                                filtered["success"] = False
+                                filtered["message"] = f"Missing rename for operation {op_key}"
+                                filtered["suggestions"] = [f"Please provide rename for {op_key}"]
+                                filtered.pop("json", None)
+                                return filtered
+                            
+                            # Validate operation columns are not empty
+                            if not config[op_key] or config[op_key].strip() == "":
+                                logger.warning(f"Operation {op_key} has no columns")
+                                filtered["success"] = False
+                                filtered["message"] = f"Operation {op_key} has no columns"
+                                filtered["suggestions"] = [f"Please specify columns for {op_key}"]
+                                filtered.pop("json", None)
+                                return filtered
+                            
+            elif isinstance(json_data, dict):
+                # Handle single object validation
+                config = json_data
+                required_fields = ["bucket_name", "object_name"]
+                missing_fields = [field for field in required_fields if field not in config or not config[field]]
                 
-            # 🔧 CRITICAL FIX: Convert all column names to lowercase for backend compatibility
-            if "identifiers" in create_config and create_config["identifiers"]:
-                create_config["identifiers"] = [col.lower() for col in create_config["identifiers"]]
+                if missing_fields:
+                    logger.warning(f"Missing or empty required fields: {missing_fields}")
+                    filtered["success"] = False
+                    filtered["message"] = f"Missing required fields: {', '.join(missing_fields)}"
+                    filtered["suggestions"] = [f"Please provide: {', '.join(missing_fields)}"]
+                    filtered.pop("json", None)
+                    return filtered
                 
-            if "operations" in create_config and create_config["operations"]:
-                # Convert operation column names to lowercase
-                for op in create_config["operations"]:
-                    if "source_columns" in op and op["source_columns"]:
-                        op["source_columns"] = [col.lower() for col in op["source_columns"]]
+                # Validate that at least one operation exists
+                operation_keys = [key for key in config.keys() if key.endswith(('_0', '_1', '_2', '_3', '_4', '_5')) and not key.endswith('_rename')]
+                if not operation_keys:
+                    logger.warning("No operations found in configuration")
+                    filtered["success"] = False
+                    filtered["message"] = "No operations found in configuration"
+                    filtered["suggestions"] = ["Please specify at least one operation"]
+                    filtered.pop("json", None)
+                    return filtered
                 
-        elif filtered.get("success") and "create_transform_json" not in filtered:
-            filtered["create_transform_json"] = {}
+                # Validate that each operation has a corresponding rename
+                for op_key in operation_keys:
+                    rename_key = f"{op_key}_rename"
+                    if rename_key not in config or not config[rename_key]:
+                        logger.warning(f"Missing rename for operation {op_key}")
+                        filtered["success"] = False
+                        filtered["message"] = f"Missing rename for operation {op_key}"
+                        filtered["suggestions"] = [f"Please provide rename for {op_key}"]
+                        filtered.pop("json", None)
+                        return filtered
+                    
+                    # Validate operation columns are not empty
+                    if not config[op_key] or config[op_key].strip() == "":
+                        logger.warning(f"Operation {op_key} has no columns")
+                        filtered["success"] = False
+                        filtered["message"] = f"Operation {op_key} has no columns"
+                        filtered["suggestions"] = ["Please specify columns for {op_key}"]
+                        filtered.pop("json", None)
+                        return filtered
+                
+        elif filtered.get("success") and "json" not in filtered:
+            # If success=true but no json, this is invalid
+            logger.warning("Success=true but no json provided")
+            filtered["success"] = False
+            filtered["message"] = "Configuration incomplete - missing json"
+            filtered["suggestions"] = ["Please provide complete configuration"]
+            return filtered
             
         if not filtered.get("success"):
-            filtered.pop("create_transform_json", None)
+            filtered.pop("json", None)
             
         for k in ["success", "message", "suggestions"]:
             filtered.setdefault(k, False if k == "success" else ([] if k == "suggestions" else ""))

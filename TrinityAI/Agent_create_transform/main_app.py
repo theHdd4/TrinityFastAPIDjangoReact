@@ -41,20 +41,47 @@ agent = SmartCreateTransformAgent(
     "minio123",
     "trinity",
     "",
-    {},  # supported_operations
-    """
-{
-  "bucket_name": "trinity",
-  "object_names": "your_file.csv",
-  "identifiers": ["col1", "col2"],
-  "operations": [
     {
-      "type": "add",
-      "source_columns": ["col1", "col2"],
-      "rename_to": "new_column_name"
-    }
-  ]
-}
+        "add": "Add multiple numeric columns together (e.g., volume + sales_value)",
+        "subtract": "Subtract columns (first column minus others, e.g., revenue - cost)",
+        "multiply": "Multiply multiple numeric columns together (e.g., price * quantity)",
+        "divide": "Divide columns (first column divided by others, e.g., revenue / volume)",
+        "power": "Raise a column to a specified power (e.g., volume^2)",
+        "sqrt": "Calculate square root of a numeric column",
+        "log": "Calculate natural logarithm of a numeric column",
+        "exp": "Calculate exponential of a numeric column",
+        "residual": "Calculate residuals from STL decomposition for time series",
+        "dummy": "Create dummy variables from categorical columns (e.g., market categories)",
+        "seasonality": "Extract seasonal component using STL for time series data",
+        "trend": "Extract trend component using STL for time series data",
+        "rpi": "Calculate relative price index (price / average_price)",
+        "percentile": "Calculate percentile rank of a numeric column",
+        "zscore": "Calculate z-score normalization of a numeric column",
+        "rolling_mean": "Calculate rolling average with specified window",
+        "rolling_sum": "Calculate rolling sum with specified window",
+        "lag": "Create lagged version of a column (previous period value)",
+        "diff": "Calculate difference between consecutive values",
+        "pct_change": "Calculate percentage change between consecutive values"
+    },  # supported_operations
+    """
+[
+  {
+    "bucket_name": "trinity",
+    "object_name": "exact_file_name.extension",
+    "add_1": "column1,column2",
+    "add_1_rename": "new_column_name",
+    "multiply_1": "column3,column4",
+    "multiply_1_rename": "product_column",
+    "add_2": "column5,column6",
+    "add_2_rename": "sum_of_columns"
+  }
+]
+
+## Operation Examples:
+## - "add_1": "volume,salesvalue" → "add_1_rename": "total_volume_sales"
+## - "multiply_1": "price,quantity" → "multiply_1_rename": "total_revenue"
+## - "subtract_1": "revenue,cost" → "subtract_1_rename": "profit_margin"
+## - "divide_1": "revenue,volume" → "divide_1_rename": "price_per_unit"
 """
 )
 

@@ -34,9 +34,9 @@ from .schemas import (
     FilteredModel,
     ModelFilterRequest,
     ModelVariablesResponse,
-    WeightedEnsembleRequest,
-    ComboResult,
-    WeightedEnsembleResponse,
+    VariableContribution,
+    WeightedEnsembleRequest,ComboResult,WeightedEnsembleResponse,
+    ModelPerformanceMetrics, ActualVsPredicted,    
     GenericModelSelectionRequest,
     SavedModelResponse,
 )

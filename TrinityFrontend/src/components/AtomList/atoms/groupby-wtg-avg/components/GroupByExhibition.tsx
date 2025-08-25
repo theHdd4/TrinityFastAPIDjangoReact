@@ -13,9 +13,41 @@ const GroupByExhibition: React.FC<GroupByExhibitionProps> = ({ settings, onPerfo
   const { toast } = useToast();
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  
+  // 🔧 CRITICAL FIX: Force re-render when AI results change
+  const [refreshKey, setRefreshKey] = React.useState(0);
+  
+  React.useEffect(() => {
+    if (settings.groupbyResults?.unsaved_data && 
+        Array.isArray(settings.groupbyResults.unsaved_data) && 
+        settings.groupbyResults.unsaved_data.length > 0) {
+      console.log('🔄 AI results detected in GroupByExhibition, forcing refresh');
+      setRefreshKey(prev => prev + 1);
+    }
+  }, [settings.groupbyResults?.unsaved_data]);
 
-  const hasResults = !!settings.groupbyResults?.result_file;
-  const resultShape = settings.groupbyResults?.result_shape;
+  // 🔧 CRITICAL FIX: Check for both file-based results and AI results
+  const hasFileResults = !!settings.groupbyResults?.result_file;
+  const hasAIResults = !!settings.groupbyResults?.unsaved_data && Array.isArray(settings.groupbyResults.unsaved_data) && settings.groupbyResults.unsaved_data.length > 0;
+  const hasResults = hasFileResults || hasAIResults;
+  
+  // 🔧 DEBUG: Log what we're detecting (only when results change)
+  React.useEffect(() => {
+    if (hasAIResults || hasFileResults) {
+      console.log('🔍 GroupByExhibition Results Detected:', {
+        hasFileResults,
+        hasAIResults,
+        hasResults,
+        unsavedDataLength: settings.groupbyResults?.unsaved_data?.length,
+        resultFile: settings.groupbyResults?.result_file
+      });
+    }
+  }, [hasAIResults, hasFileResults, hasResults]);
+  
+  // Use AI results if available, otherwise fallback to file results
+  const resultShape = hasAIResults 
+    ? [settings.groupbyResults.unsaved_data.length, Object.keys(settings.groupbyResults.unsaved_data[0] || {}).length]
+    : settings.groupbyResults?.result_shape;
 
   const handleExport = async (type: 'csv' | 'excel') => {
     if (!hasResults) {
@@ -29,22 +61,51 @@ const GroupByExhibition: React.FC<GroupByExhibitionProps> = ({ settings, onPerfo
     setLoading(true);
     setError(null);
     try {
-      const endpoint = type === 'csv' ? 'export_csv' : 'export_excel';
-      const url = `${GROUPBY_API}/${endpoint}?object_name=${encodeURIComponent(settings.groupbyResults.result_file)}`;
-      const response = await fetch(url);
-      if (!response.ok) throw new Error(`Export failed: ${response.statusText}`);
-      const blob = await response.blob();
+      if (hasAIResults) {
+        // 🔧 CRITICAL FIX: Export AI results directly
+        const dataToExport = settings.groupbyResults.unsaved_data;
+        const headers = Object.keys(dataToExport[0] || {});
+        const csvContent = [
+          headers.join(','),
+          ...dataToExport.map(row => 
+            headers.map(header => {
+              const value = row[header];
+              if (value === null || value === undefined || value === '') return '';
+              return typeof value === 'string' ? `"${value}"` : value;
+            }).join(',')
+          )
+        ].join('\n');
 
-      const a = document.createElement('a');
-      a.href = window.URL.createObjectURL(blob);
-      a.download = type === 'csv'
-        ? `groupby_result_${new Date().toISOString().split('T')[0]}.csv`
-        : `groupby_result_${new Date().toISOString().split('T')[0]}.xlsx`;
-      document.body.appendChild(a);
-      a.click();
-      window.URL.revokeObjectURL(a.href);
-      document.body.removeChild(a);
-      toast({ title: 'Export Successful', description: 'File downloaded successfully.' });
+        const blob = new Blob([csvContent], { type: type === 'csv' ? 'text/csv' : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+        const a = document.createElement('a');
+        a.href = window.URL.createObjectURL(blob);
+        a.download = type === 'csv'
+          ? `groupby_ai_result_${new Date().toISOString().split('T')[0]}.csv`
+          : `groupby_ai_result_${new Date().toISOString().split('T')[0]}.xlsx`;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(a.href);
+        document.body.removeChild(a);
+        toast({ title: 'Export Successful', description: 'AI results exported successfully.' });
+      } else {
+        // Fallback to file-based export
+        const endpoint = type === 'csv' ? 'export_csv' : 'export_excel';
+        const url = `${GROUPBY_API}/${endpoint}?object_name=${encodeURIComponent(settings.groupbyResults.result_file)}`;
+        const response = await fetch(url);
+        if (!response.ok) throw new Error(`Export failed: ${response.statusText}`);
+        const blob = await response.blob();
+
+        const a = document.createElement('a');
+        a.href = window.URL.createObjectURL(blob);
+        a.download = type === 'csv'
+          ? `groupby_result_${new Date().toISOString().split('T')[0]}.csv`
+          : `groupby_result_${new Date().toISOString().split('T')[0]}.xlsx`;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(a.href);
+        document.body.removeChild(a);
+        toast({ title: 'Export Successful', description: 'File downloaded successfully.' });
+      }
     } catch (err: any) {
       setError(err instanceof Error ? err.message : 'Export failed');
       toast({ title: 'Export Failed', description: error || 'Export failed', variant: 'destructive' });
@@ -54,14 +115,17 @@ const GroupByExhibition: React.FC<GroupByExhibitionProps> = ({ settings, onPerfo
   };
 
   return (
-    <div className="w-full h-full p-6 bg-gradient-to-br from-slate-50 to-blue-50 overflow-y-auto">
+    <div key={refreshKey} className="w-full h-full p-6 bg-gradient-to-br from-slate-50 to-blue-50 overflow-y-auto">
       {!hasResults ? (
         <div className="bg-gray-50 p-8 rounded-lg text-center">
           <div className="text-gray-500 mb-4">
             <Download className="w-12 h-12 mx-auto mb-3 text-gray-400" />
             <p className="text-lg font-medium text-gray-700 mb-2">No Results Available</p>
             <p className="text-sm text-gray-500">
-              Perform a group-by operation first to export your results as CSV or Excel files.
+              {hasAIResults 
+                ? 'AI results are available but need to be processed. Check the main interface for results display.'
+                : 'Perform a group-by operation first to export your results as CSV or Excel files.'
+              }
             </p>
           </div>
         </div>
@@ -102,6 +166,46 @@ const GroupByExhibition: React.FC<GroupByExhibitionProps> = ({ settings, onPerfo
               <p className="text-sm text-blue-700">
                 Shape: {resultShape[0]} rows × {resultShape[1]} columns
               </p>
+            </div>
+          )}
+
+          {/* 🔧 CRITICAL FIX: Show AI results preview */}
+          {hasAIResults && (
+            <div className="bg-green-50 p-4 rounded-lg border border-green-200">
+              <div className="flex items-center space-x-2 mb-4">
+                <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                <span className="text-sm font-medium text-green-900">AI Results Preview</span>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-green-200">
+                      {Object.keys(settings.groupbyResults.unsaved_data[0] || {}).map((header, index) => (
+                        <th key={index} className="text-left p-2 font-medium text-green-800">
+                          {header}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {settings.groupbyResults.unsaved_data.slice(0, 5).map((row, rowIndex) => (
+                      <tr key={rowIndex} className="border-b border-green-100">
+                        {Object.keys(settings.groupbyResults.unsaved_data[0] || {}).map((header, colIndex) => (
+                          <td key={colIndex} className="p-2 text-green-700">
+                            {row[header] !== null && row[header] !== undefined && row[header] !== '' 
+                              ? (typeof row[header] === 'number' ? row[header].toLocaleString() : String(row[header]))
+                              : <span className="italic text-green-500">null</span>
+                            }
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <div className="text-xs text-green-600 mt-2">
+                  Showing first 5 rows of {settings.groupbyResults.unsaved_data.length.toLocaleString()} total rows
+                </div>
+              </div>
             </div>
           )}
         </div>
