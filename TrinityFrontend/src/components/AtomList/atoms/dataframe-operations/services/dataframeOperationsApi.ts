@@ -34,16 +34,16 @@ export function updateCell(dfId: string, row_idx: number, column: string, value:
   return postJSON(`${DATAFRAME_OPERATIONS_API}/update_cell`, { df_id: dfId, row_idx, column, value });
 }
 
-export function insertRow(dfId: string, row: any = {}) {
-  return postJSON(`${DATAFRAME_OPERATIONS_API}/insert_row`, { df_id: dfId, row });
+export function insertRow(dfId: string, row: any = {}, index?: number) {
+  return postJSON(`${DATAFRAME_OPERATIONS_API}/insert_row`, { df_id: dfId, row, index });
 }
 
 export function deleteRow(dfId: string, index: number) {
   return postJSON(`${DATAFRAME_OPERATIONS_API}/delete_row`, { df_id: dfId, index });
 }
 
-export function insertColumn(dfId: string, column: string, value: any = null) {
-  return postJSON(`${DATAFRAME_OPERATIONS_API}/insert_column`, { df_id: dfId, column, value });
+export function insertColumn(dfId: string, column: string, value: any = null, index?: number) {
+  return postJSON(`${DATAFRAME_OPERATIONS_API}/insert_column`, { df_id: dfId, column, value, index });
 }
 
 export function deleteColumn(dfId: string, column: string) {

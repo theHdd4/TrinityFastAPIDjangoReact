@@ -14,13 +14,13 @@ Body: `{ "df_id": "<id>", "column": "Country", "value": "India" }`
 Body: `{ "df_id": "<id>", "column": "Date", "direction": "asc" }`
 
 ### POST `/insert_row`
-Body: `{ "df_id": "<id>", "row": {"A":1} }`
+Body: `{ "df_id": "<id>", "row": {"A":1}, "index": 5 }` *(optional `index` inserts at position)*
 
 ### POST `/delete_row`
 Body: `{ "df_id": "<id>", "index": 10 }`
 
 ### POST `/insert_column`
-Body: `{ "df_id": "<id>", "column": "NewCol", "value": 0 }`
+Body: `{ "df_id": "<id>", "column": "NewCol", "value": 0, "index": 3 }` *(optional `index` inserts at position)*
 
 ### POST `/delete_column`
 Body: `{ "df_id": "<id>", "column": "OldCol" }`

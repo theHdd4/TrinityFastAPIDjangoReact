@@ -189,9 +189,19 @@ async def sort_dataframe(df_id: str = Body(...), column: str = Body(...), direct
 
 
 @router.post("/insert_row")
-async def insert_row(df_id: str = Body(...), row: Dict[str, Any] = Body(...)):
+async def insert_row(
+    df_id: str = Body(...),
+    row: Dict[str, Any] = Body(...),
+    index: int | None = Body(None),
+):
     df = _get_df(df_id)
-    df = pd.concat([df, pd.DataFrame([row])], ignore_index=True)
+    new_row = pd.DataFrame([row], columns=df.columns)
+    if index is None or index >= len(df):
+        df = pd.concat([df, new_row], ignore_index=True)
+    else:
+        upper = df.iloc[:index]
+        lower = df.iloc[index:]
+        df = pd.concat([upper, new_row, lower], ignore_index=True)
     SESSIONS[df_id] = df
     return _df_payload(df, df_id)
 
@@ -208,9 +218,17 @@ async def delete_row(df_id: str = Body(...), index: int = Body(...)):
 
 
 @router.post("/insert_column")
-async def insert_column(df_id: str = Body(...), column: str = Body(...), value: Any = Body(None)):
+async def insert_column(
+    df_id: str = Body(...),
+    column: str = Body(...),
+    value: Any = Body(None),
+    index: int | None = Body(None),
+):
     df = _get_df(df_id)
-    df[column] = value
+    if index is None or index >= len(df.columns):
+        df[column] = value
+    else:
+        df.insert(index, column, value)
     SESSIONS[df_id] = df
     return _df_payload(df, df_id)
 

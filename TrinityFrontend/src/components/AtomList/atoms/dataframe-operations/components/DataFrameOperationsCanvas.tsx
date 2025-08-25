@@ -484,7 +484,7 @@ const handleCellEdit = async (rowIndex: number, column: string, newValue: string
     resetSaveSuccess();
     if (!data || !fileId) return;
     try {
-      const resp = await apiInsertRow(fileId, {});
+      const resp = await apiInsertRow(fileId, {}, data.rows.length);
       const columnTypes: any = {};
       resp.headers.forEach(h => {
         const t = resp.types[h];
@@ -509,7 +509,7 @@ const handleCellEdit = async (rowIndex: number, column: string, newValue: string
     if (!data || !fileId) return;
     const newColumnName = `Column_${data.headers.length + 1}`;
     try {
-      const resp = await apiInsertColumn(fileId, newColumnName, '');
+      const resp = await apiInsertColumn(fileId, newColumnName, '', data.headers.length);
       const columnTypes: any = {};
       resp.headers.forEach(h => {
         const t = resp.types[h];
@@ -638,36 +638,29 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
   // Add a ref to each column header and store its bounding rect when right-clicked
 
   // 1. Fix column insert/delete logic
-  const handleInsertColumn = (colIdx: number) => {
-    if (!data) return;
-    // Generate a visually blank unique key ("", " ", "  ", ...)
-    let newColKey = '';
-    while (data.headers.includes(newColKey)) {
-      newColKey += ' ';
-    }
-    // Insert the new (blank-looking) key into headers
-    const originalHeaders = [...data.headers];
-    const newHeaders = [...data.headers];
-    newHeaders.splice(colIdx, 0, newColKey);
-    // Add blank value for each row
-    const newRows = data.rows.map(row => {
-      const newRow: any = {};
-      newHeaders.forEach((h, i) => {
-        if (i === colIdx) {
-          newRow[h] = '';
-        } else if (i < colIdx) {
-          newRow[h] = row[originalHeaders[i]];
-        } else {
-          newRow[h] = row[originalHeaders[i - 1]];
-        }
+  const handleInsertColumn = async (colIdx: number) => {
+    resetSaveSuccess();
+    if (!data || !fileId) return;
+    const newColKey = getNextColKey(data.headers);
+    try {
+      const resp = await apiInsertColumn(fileId, newColKey, '', colIdx + 1);
+      const columnTypes: any = {};
+      resp.headers.forEach(h => {
+        const t = resp.types[h];
+        columnTypes[h] = t.includes('float') || t.includes('int') ? 'number' : 'text';
       });
-      return newRow;
-    });
-    // Add to columnTypes
-    const newColumnTypes: { [key: string]: 'number' | 'date' | 'text' } = { ...data.columnTypes };
-    newColumnTypes[newColKey] = 'text';
-    onDataChange({ ...data, headers: newHeaders, rows: newRows, columnTypes: newColumnTypes });
-  
+      onDataChange({
+        headers: resp.headers,
+        rows: resp.rows,
+        fileName: data.fileName,
+        columnTypes,
+        pinnedColumns: data.pinnedColumns,
+        frozenColumns: data.frozenColumns,
+        cellColors: data.cellColors,
+      });
+    } catch (e) {
+      console.error(e);
+    }
   };
 
   const handleDeleteColumn = async (colIdx: number) => {
@@ -701,8 +694,9 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
     if (!data || !fileId) return;
     const newRow: any = {};
     data.headers.forEach(h => { newRow[h] = ''; });
+    const index = position === 'above' ? rowIdx : rowIdx + 1;
     try {
-      const resp = await apiInsertRow(fileId, newRow);
+      const resp = await apiInsertRow(fileId, newRow, index);
       const columnTypes: any = {};
       resp.headers.forEach(h => {
         const t = resp.types[h];
