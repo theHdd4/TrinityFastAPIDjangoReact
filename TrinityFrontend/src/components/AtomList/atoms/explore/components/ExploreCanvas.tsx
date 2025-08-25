@@ -542,17 +542,6 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
         return newState;
       });
       
-      setChartSortCounters(prev => {
-        const newState = { ...prev };
-        Object.keys(newState).forEach(key => {
-          const keyNum = parseInt(key);
-          if (keyNum > 0) {
-            delete newState[keyNum];
-          }
-        });
-        return newState;
-      });
-      
       setCardSelectedIdentifiers(prev => {
         const newState = { ...prev };
         Object.keys(newState).forEach(key => {
