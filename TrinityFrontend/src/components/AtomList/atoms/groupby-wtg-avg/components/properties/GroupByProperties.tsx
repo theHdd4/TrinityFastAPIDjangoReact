@@ -90,6 +90,19 @@ const GroupByProperties: React.FC<GroupByPropertiesProps> = ({ atomId }) => {
     }
   }, [settings.selectedMeasureNames]);
 
+  // 🔧 CRITICAL FIX: Automatically switch to Exhibition tab when AI results are available
+  useEffect(() => {
+    const hasAIResults = settings.groupbyResults && 
+                        settings.groupbyResults.unsaved_data && 
+                        Array.isArray(settings.groupbyResults.unsaved_data) && 
+                        settings.groupbyResults.unsaved_data.length > 0;
+    
+    if (hasAIResults) {
+      console.log('🔄 AI results detected, switching to Exhibition tab');
+      setTab('exhibition');
+    }
+  }, [settings.groupbyResults?.unsaved_data, settings.groupbyResults?.result_file]);
+
   // ------------------------------
   // Drag helpers
   // ------------------------------

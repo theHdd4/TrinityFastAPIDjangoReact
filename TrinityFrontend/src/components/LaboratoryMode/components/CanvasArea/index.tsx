@@ -27,6 +27,7 @@ import DataFrameOperationsAtom from '@/components/AtomList/atoms/dataframe-opera
 import ScopeSelectorAtom from '@/components/AtomList/atoms/scope-selector/ScopeSelectorAtom';
 import CreateColumnAtom from '@/components/AtomList/atoms/createcolumn/CreateColumnAtom';
 import GroupByAtom from '@/components/AtomList/atoms/groupby-wtg-avg/GroupByAtom';
+import CorrelationAtom from '@/components/AtomList/atoms/correlation/CorrelationAtom';
 import ChartMakerAtom from '@/components/AtomList/atoms/chart-maker/ChartMakerAtom';
 import BuildModelFeatureBasedAtom from '@/components/AtomList/atoms/build-model-feature-based/BuildModelFeatureBasedAtom';
 import ExploreAtom from '@/components/AtomList/atoms/explore/ExploreAtom';
@@ -1213,6 +1214,8 @@ const handleAddDragLeave = (e: React.DragEvent) => {
                           <BuildModelFeatureBasedAtom atomId={atom.id} />
                        ) : atom.atomId === 'scope-selector' ? (
                         <ScopeSelectorAtom atomId={atom.id} />
+                      ) : atom.atomId === 'correlation' ? (
+                        <CorrelationAtom atomId={atom.id} />
                       ) : (
                         <div>
                           <h4 className="font-semibold text-gray-900 mb-1 text-sm">{atom.title}</h4>
