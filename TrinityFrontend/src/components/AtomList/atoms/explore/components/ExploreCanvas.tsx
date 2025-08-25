@@ -11,7 +11,7 @@ import { Switch } from '@/components/ui/switch';
 import { BarChart3, Settings, Filter, Eye, EyeOff, Edit3, Palette, ChevronDown, ChevronUp, X, Plus, RotateCcw, Database, Maximize2 } from 'lucide-react';
 import { ExploreData } from '../ExploreAtom';
 import RechartsChartRenderer from './RechartsChartRenderer';
-import { EXPLORE_API } from '@/lib/api';
+import { EXPLORE_API, TEXT_API } from '@/lib/api';
 import { toast } from '@/components/ui/use-toast';
 import './ExploreCanvas.css';
 import ChatBubble from '../../chart-maker/components/ChatBubble';
@@ -24,6 +24,8 @@ const CHART_COLORS = [
   '#458EE2', '#6BA4E8', '#91BAEE',
   '#F5F5F5', '#E0E0E0', '#C5C5C5'
 ];
+
+const CHART_FONT = `'Inter', 'Segoe UI', sans-serif`;
 
 interface ExploreCanvasProps {
   data: ExploreData;
@@ -71,6 +73,67 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
       chartGenerationTimeouts.current[chartIndex] = null;
     }, delay);
   };
+
+  const getTextId = (index: number) => {
+    const base = (safeData.dataframe || 'explore').replace(/[^a-z0-9-_]/gi, '_').toLowerCase();
+    return `${base}-chart-${index}`;
+  };
+
+  const fetchChartNote = async (index: number) => {
+    const textId = getTextId(index);
+    try {
+      const res = await fetch(`${TEXT_API}/text/${textId}`);
+      if (res.ok) {
+        const data = await res.json();
+        setChartNotes(prev => ({ ...prev, [index]: data?.spec?.content?.value || '' }));
+      }
+    } catch (err) {
+      console.error('Failed to fetch note', err);
+    }
+  };
+
+  const saveChartNote = async (index: number) => {
+    const textId = getTextId(index);
+    const value = chartNotes[index] || '';
+    const payload = {
+      textId,
+      appId: 'explore',
+      type: 'widget',
+      name: 'chart-note',
+      spec: { content: { format: 'plain', value } }
+    };
+    try {
+      let res = await fetch(`${TEXT_API}/text/${textId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      if (res.status === 404) {
+        res = await fetch(`${TEXT_API}/text`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+      }
+      if (!res.ok) {
+        throw new Error(`Failed to save note: ${res.status}`);
+      }
+    } catch (err) {
+      console.error('Error saving note', err);
+      toast({ description: 'Failed to save note', variant: 'destructive' });
+    }
+  };
+
+  const handleNoteChange = (index: number, value: string) => {
+    setChartNotes(prev => ({ ...prev, [index]: value }));
+  };
+
+  const handleNoteKeyDown = (index: number, e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      saveChartNote(index);
+    }
+  };
   
   // State for dropdown positioning
   const [dropdownPosition, setDropdownPosition] = useState<{ top: number; left: number } | null>(null);
@@ -101,8 +164,10 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
   const [chartGenerated, setChartGenerated] = useState<{ [chartIndex: number]: boolean }>(data.chartGenerated || {});
   const [chartThemes, setChartThemes] = useState<{ [chartIndex: number]: string }>({});
   const [chartOptions, setChartOptions] = useState<{ [chartIndex: number]: { grid: boolean; legend: boolean; axisLabels: boolean; dataLabels: boolean } }>({});
+  const [chartNotes, setChartNotes] = useState<{ [chartIndex: number]: string }>({});
   const [dateRanges, setDateRanges] = useState<{ [columnName: string]: { min_date: string; max_date: string } }>({});
-  
+  const [showUniqueToggles, setShowUniqueToggles] = useState<{ [chartIndex: number]: boolean }>({});
+
   // Debouncing mechanism to prevent multiple chart generations
   const chartGenerationTimeouts = useRef<{ [chartIndex: number]: NodeJS.Timeout | null }>({});
 
@@ -135,36 +200,19 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
     appliedFilters: {},
     chartDataSets: {},
     chartGenerated: {},
+    chartNotes: {},
     ...data
   };
 
   useEffect(() => {
-    if (data.chartFilters && data.chartFilters !== chartFilters) {
-      setChartFilters(data.chartFilters);
-    }
-    if (data.chartThemes && data.chartThemes !== chartThemes) {
-      setChartThemes(data.chartThemes);
-    }
-    if (data.chartOptions && data.chartOptions !== chartOptions) {
-      setChartOptions(data.chartOptions);
-    }
-    if (data.appliedFilters && data.appliedFilters !== appliedFilters) {
-      setAppliedFilters(data.appliedFilters);
-    }
-    if (data.chartDataSets && data.chartDataSets !== chartDataSets) {
-      setChartDataSets(data.chartDataSets);
-    }
-    if (data.chartGenerated && data.chartGenerated !== chartGenerated) {
-      setChartGenerated(data.chartGenerated);
-    }
-  }, [
-    data.chartFilters,
-    data.chartThemes,
-    data.chartOptions,
-    data.appliedFilters,
-    data.chartDataSets,
-    data.chartGenerated,
-  ]);
+    if (safeData.chartFilters) setChartFilters(safeData.chartFilters);
+    if (safeData.chartThemes) setChartThemes(safeData.chartThemes);
+    if (safeData.chartOptions) setChartOptions(safeData.chartOptions);
+    if (safeData.appliedFilters) setAppliedFilters(safeData.appliedFilters);
+    if (safeData.chartDataSets) setChartDataSets(safeData.chartDataSets);
+    if (safeData.chartGenerated) setChartGenerated(safeData.chartGenerated);
+    if (safeData.chartNotes) setChartNotes(safeData.chartNotes);
+  }, []);
 
   // Multi-chart state
   const [chartConfigs, setChartConfigs] = useState(
@@ -204,6 +252,7 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
       chartDataSets,
       chartGenerated,
       appliedFilters,
+      chartNotes,
       xAxis: primaryConfig.xAxis || '',
       yAxis: primaryConfig.yAxes?.[0] || '',
       xAxisLabel: primaryConfig.xAxisLabel || '',
@@ -219,11 +268,12 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
     chartConfigs,
     chartFilters,
     chartThemes,
-      chartOptions,
-      chartDataSets,
-      chartGenerated,
-      appliedFilters,
-    ]);
+    chartOptions,
+    chartDataSets,
+    chartGenerated,
+    appliedFilters,
+    chartNotes,
+  ]);
 
   // Auto-generate charts on mount if data and configs exist
   useEffect(() => {
@@ -234,6 +284,11 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    chartConfigs.forEach((_, idx) => fetchChartNote(idx));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chartConfigs.length, safeData.dataframe]);
 
   const openChartTypeTray = (e: React.MouseEvent, index: number) => {
     e.preventDefault();
@@ -953,6 +1008,20 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
     });
 
     setShowUniqueToggles(prev => {
+      const newState = { ...prev };
+      delete newState[index];
+      Object.keys(newState).forEach(key => {
+        const keyNum = parseInt(key);
+        if (keyNum > index) {
+          newState[keyNum - 1] = newState[keyNum];
+          delete newState[keyNum];
+        }
+      });
+      return newState;
+    });
+
+    // Clean up chart notes
+    setChartNotes(prev => {
       const newState = { ...prev };
       delete newState[index];
       Object.keys(newState).forEach(key => {
@@ -1700,6 +1769,7 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                   >
                     <SelectTrigger className="w-24 h-8 text-xs leading-none" disabled={isLoadingColumns}>
                       <SelectValue
+                        className="truncate"
                         placeholder={
                           isLoadingColumns
                             ? "Loading..."
@@ -1763,6 +1833,7 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                             >
                               <SelectTrigger className="w-24 h-8 text-xs leading-none" disabled={isLoadingColumns}>
                                 <SelectValue
+                                  className="truncate"
                                   placeholder={
                                     isLoadingColumns
                                       ? "Loading..."
@@ -1873,7 +1944,7 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                     }}
                   >
                     <SelectTrigger
-                      className="w-40 h-8 ml-2 pr-2 text-xs leading-none [&>span:last-child>svg]:w-3 [&>span:last-child>svg]:h-3"
+                      className="w-32 h-8 ml-2 pr-2 text-xs leading-none [&>span:last-child>svg]:w-3 [&>span:last-child>svg]:h-3"
                       disabled={isLoadingColumns}
                     >
                       <SelectValue placeholder="Segregate Field Values" className="truncate" />
@@ -2320,16 +2391,17 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                 
                 {/* Chart Renderer */}
                 {!isChartLoading(index) && (
+                  <>
                   <div className="w-full h-full min-w-0 flex-shrink-0" style={{ height: 'calc(100% - 60px)' }}>
                     {/* Check if chart data exists and has valid structure */}
                     {(!chartDataSets[index] || (Array.isArray(chartDataSets[index]) && chartDataSets[index].length === 0)) ? (
                       <div className="text-center p-4 border-2 border-dashed border-gray-300 rounded-lg h-full flex items-center justify-center">
                         <div className="text-gray-500 text-sm">
-                          {config.xAxis && config.yAxes && config.yAxes.length > 0 && config.yAxes.every(y => y) ? 
-                            (chartDataSets[index] && chartDataSets[index].length === 0 ? 
-                              'No data available for the selected filters. Try adjusting your filter criteria.' : 
+                          {config.xAxis && config.yAxes && config.yAxes.length > 0 && config.yAxes.every(y => y) ?
+                            (chartDataSets[index] && chartDataSets[index].length === 0 ?
+                              'No data available for the selected filters. Try adjusting your filter criteria.' :
                               `Chart ready: ${config.xAxis} vs ${config.yAxes.filter(y => y).join(', ')}`
-                            ) : 
+                            ) :
                             'Select X and Y axes to generate chart'
                           }
                         </div>
@@ -2380,6 +2452,15 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                       </div>
                     )}
                   </div>
+                  <Input
+                    placeholder="Add note"
+                    value={chartNotes[index] || ''}
+                    onChange={(e) => handleNoteChange(index, e.target.value)}
+                    onKeyDown={(e) => handleNoteKeyDown(index, e)}
+                    style={{ fontFamily: CHART_FONT }}
+                    className="mt-2 w-full text-sm"
+                  />
+                  </>
                 )}
               </div>
             </div>
