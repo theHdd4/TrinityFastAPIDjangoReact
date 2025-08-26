@@ -137,14 +137,10 @@ const DataFrameOperationsAtom: React.FC<Props> = ({ atomId }) => {
 
   return (
     <ErrorBoundary>
-      <div className="w-full h-full bg-gradient-to-br from-green-50 via-white to-green-50 rounded-xl border border-green-200 shadow-lg overflow-hidden">
+      <div className="w-full h-full bg-white rounded-xl border border-slate-200 shadow-lg overflow-hidden">
         <div className="h-full">
           {fileSelected && data && data.headers && data.rows && data.headers.length > 0 && data.rows.length > 0 ? (
             <div className="h-full">
-              {/* File name above the table, small font */}
-              <div className="px-6 pt-2 pb-1">
-                <span className="text-xs font-medium text-gray-600" style={{ fontSize: '0.85rem' }}>{data.fileName}</span>
-              </div>
               {viewMode === 'table' && (
                 <DataFrameOperationsCanvas 
                   data={data} 
@@ -157,7 +153,7 @@ const DataFrameOperationsAtom: React.FC<Props> = ({ atomId }) => {
                 />
               )}
               {viewMode === 'chart' && chartConfig && (
-                <div className="flex items-center justify-center h-full text-green-800 text-lg font-semibold">
+                <div className="flex items-center justify-center h-full text-gray-800 text-lg font-semibold">
                   [Chart will be rendered here]
                 </div>
               )}

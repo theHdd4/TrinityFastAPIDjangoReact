@@ -826,14 +826,23 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
         className="hidden"
       />
       
-      {/* File name above table, small font, only if present */}
-      {/* Remove the file name display from the card (delete the block that renders data.fileName) */}
-      {/* Shift the table upwards to use the freed space */}
-      {/* Move the pagination controls so they are always visible directly below the table */}
-      <div className="h-full flex flex-col bg-background">
+      <div className="h-full flex flex-col">
+        {data?.fileName && (
+          <div className="border-b border-blue-200 bg-blue-50">
+            <div className="flex items-center px-6 py-4">
+              <div className="relative">
+                <div className="flex items-center space-x-2 px-5 py-3 rounded-t-xl text-sm font-medium border-t border-l border-r border-slate-200 bg-white -mb-px shadow-lg">
+                  <FileText className="w-4 h-4" />
+                  <span>{data.fileName.split('/').pop()}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+        <div className="p-4 flex-1 overflow-hidden">
+          <div className="mx-auto max-w-screen-2xl rounded-2xl border border-slate-200 bg-white shadow-sm flex flex-col h-full">
         {/* Controls section */}
-        <div className="flex-shrink-0 p-4 border-b border-border bg-card/50">
-          <div className="flex items-center justify-between">
+        <div className="flex-shrink-0 flex items-center justify-between border-b border-slate-200 px-5 py-3">
             <div className="flex items-center space-x-4">
               <div className="relative">
                 <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
@@ -863,7 +872,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
         </div>
 
         {/* Table section - Excel-like appearance */}
-        <div className="flex-1 overflow-auto bg-white">
+        <div className="flex-1 overflow-auto">
           {/* Placeholder for when no data is loaded */}
           {data && !Array.isArray(data.headers) || data.headers.length === 0 ? (
             <div className="flex flex-1 items-center justify-center bg-gray-50">
@@ -1067,8 +1076,9 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
             </div>
           )}
         </div>
-      </div>
-      {contextMenu && data && typeof contextMenu.col === 'string' && (
+        </div>
+        </div>
+        {contextMenu && data && typeof contextMenu.col === 'string' && (
         <div
           id="df-ops-context-menu"
           style={{ position: 'fixed', top: contextMenu.y, left: contextMenu.x, zIndex: 1000, background: 'white', border: '1px solid #ddd', borderRadius: 6, boxShadow: '0 2px 8px #0001', minWidth: 200 }}

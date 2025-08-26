@@ -106,7 +106,7 @@ const DataFrameOperationsProperties: React.FC<Props> = ({ atomId }) => {
   };
 
   return (
-    <div className="w-80 bg-white border-l border-green-200 flex flex-col">
+    <div className="w-80 bg-white border-l border-slate-200 flex flex-col">
       <Tabs value={tab} onValueChange={setTab} className="w-full">
         <TabsList className="grid w-full grid-cols-3 mx-4 my-4">
           <TabsTrigger value="inputs" className="text-xs">
@@ -130,7 +130,7 @@ const DataFrameOperationsProperties: React.FC<Props> = ({ atomId }) => {
               selectedFile={selectedFile}
               onFileSelect={handleFileSelect}
             />
-            {loading && <div className="text-green-700 text-xs p-2">Loading data...</div>}
+            {loading && <div className="text-slate-700 text-xs p-2">Loading data...</div>}
             {error && <div className="text-red-600 text-xs p-2">{error}</div>}
           </TabsContent>
           <TabsContent value="charts">
