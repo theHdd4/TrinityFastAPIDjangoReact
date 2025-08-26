@@ -45,7 +45,6 @@ interface Props {
 
 const DataFrameOperationsAtom: React.FC<Props> = ({ atomId }) => {
   const cards = useLaboratoryStore(state => state.cards);
-  console.log('Cards:', cards);
   const atom = cards.flatMap(card => card.atoms).find(a => a.id === atomId);
   const updateSettings = useLaboratoryStore(state => state.updateAtomSettings);
   const settings: DataFrameSettings = atom?.settings || {
@@ -67,8 +66,6 @@ const DataFrameOperationsAtom: React.FC<Props> = ({ atomId }) => {
       setOriginalData(JSON.parse(JSON.stringify(data)));
     }
   }, [data, originalData]);
-  console.log('DataFrameOperationsAtom atom:', atom);
-  console.log('DataFrameOperationsAtom data:', data);
   const [fileId, setFileId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<'table' | 'chart'>('table');
   const [chartConfig, setChartConfig] = useState<any>(null);
@@ -100,7 +97,6 @@ const DataFrameOperationsAtom: React.FC<Props> = ({ atomId }) => {
     if (data) {
       mergedSettings.tableData = data;
     }
-    console.log('handleSettingsChange called with:', newSettings, 'mergedSettings:', mergedSettings);
     updateSettings(atomId, mergedSettings);
   };
 
@@ -137,8 +133,6 @@ const DataFrameOperationsAtom: React.FC<Props> = ({ atomId }) => {
   // Only show table/chart after file selection (like concat atom)
   const fileSelected = settings.selectedFile;
 
-  // Log the data passed to DataFrameOperationsCanvas
-  console.log('Data passed to DataFrameOperationsCanvas:', data);
 
   return (
     <ErrorBoundary>

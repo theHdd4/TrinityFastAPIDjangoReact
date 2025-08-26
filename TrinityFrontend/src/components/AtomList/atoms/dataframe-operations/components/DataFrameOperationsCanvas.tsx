@@ -53,7 +53,7 @@ function safeToString(val: any): string {
   if (val === undefined || val === null) return '';
   try {
     return val.toString();
-  } catch {
+  } catch {/* empty */
     return '';
   }
 }
@@ -150,7 +150,7 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
       });
       const data = await res.json();
       setSavedFiles(data.files || []);
-    } catch (e) {
+    } catch {/* empty */
       // Optionally handle error
     }
   };
@@ -312,7 +312,7 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
       setUploadError(null);
       onDataUpload(newData, resp.df_id);
       setCurrentPage(1);
-    } catch (e) {
+    } catch {/* empty */
       setUploadError('Error parsing file');
     }
   }, [onDataUpload]);
@@ -361,8 +361,7 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
         cellColors: data.cellColors,
       });
       onSettingsChange({ sortColumns: [{ column, direction }] });
-    } catch (e) {
-      console.error(e);
+    } catch {/* empty */
     }
   };
 
@@ -391,8 +390,7 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
       });
       onSettingsChange({ filters: { ...settings.filters, [column]: value } });
       setCurrentPage(1);
-    } catch (e) {
-      console.error(e);
+    } catch {/* empty */
     }
   };
 
@@ -424,8 +422,7 @@ const commitHeaderEdit = async (colIdx: number, value?: string) => {
       frozenColumns: data.frozenColumns,
       cellColors: data.cellColors,
     });
-  } catch (e) {
-    console.error(e);
+  } catch {/* empty */
   }
   setEditingHeader(null);
 };
@@ -451,8 +448,7 @@ const handleCellEdit = async (rowIndex: number, column: string, newValue: string
         frozenColumns: data.frozenColumns,
         cellColors: data.cellColors
       });
-    } catch (e) {
-      console.error(e);
+    } catch {/* empty */
     }
   };
 
@@ -477,8 +473,7 @@ const handleCellEdit = async (rowIndex: number, column: string, newValue: string
         frozenColumns: data.frozenColumns,
         cellColors: data.cellColors,
       });
-    } catch (e) {
-      console.error(e);
+    } catch {/* empty */
     }
   };
 
@@ -502,8 +497,7 @@ const handleCellEdit = async (rowIndex: number, column: string, newValue: string
         frozenColumns: data.frozenColumns,
         cellColors: data.cellColors,
       });
-    } catch (e) {
-      console.error(e);
+    } catch {/* empty */
     }
   };
 
@@ -557,8 +551,7 @@ const handleCellEdit = async (rowIndex: number, column: string, newValue: string
           frozenColumns: data.frozenColumns,
           cellColors: data.cellColors,
         });
-      } catch (e) {
-        console.error(e);
+      } catch {/* empty */
       }
     }
     setDraggedCol(null);
@@ -641,9 +634,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
     if (!data || !fileId) return;
     const newColKey = getNextColKey(data.headers);
     try {
-      console.log('Triggering API: insert_column');
       const resp = await apiInsertColumn(fileId, colIdx, newColKey, '');
-      console.log('Insert Column Response', resp);
       const columnTypes: any = {};
       resp.headers.forEach(h => {
         const t = resp.types[h];
@@ -658,8 +649,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
         frozenColumns: data.frozenColumns,
         cellColors: data.cellColors,
       });
-    } catch (e) {
-      console.error(e);
+    } catch {/* empty */
     }
   };
 
@@ -669,9 +659,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
     if (colIdx < 0 || colIdx >= data.headers.length) return;
     const col = data.headers[colIdx];
     try {
-      console.log('Triggering API: delete_column');
       const resp = await apiDeleteColumn(fileId, col);
-      console.log('Delete Column Response', resp);
       const columnTypes: any = {};
       resp.headers.forEach(h => {
         const t = resp.types[h];
@@ -686,8 +674,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
         frozenColumns: data.frozenColumns,
         cellColors: data.cellColors,
       });
-    } catch (e) {
-      console.error(e);
+    } catch {/* empty */
     }
   };
 
@@ -700,9 +687,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
       newName += '_copy';
     }
     try {
-      console.log('Triggering API: duplicate_column');
       const resp = await apiDuplicateColumn(fileId, col, newName);
-      console.log('Duplicate Column Response', resp);
       const columnTypes: any = {};
       resp.headers.forEach(h => {
         const t = resp.types[h];
@@ -717,8 +702,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
         frozenColumns: data.frozenColumns,
         cellColors: data.cellColors,
       });
-    } catch (e) {
-      console.error(e);
+    } catch {/* empty */
     }
   };
 
@@ -726,9 +710,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
   const handleInsertRow = async (position: 'above' | 'below', rowIdx: number) => {
     if (!data || !fileId) return;
     try {
-      console.log('Triggering API: insert_row');
       const resp = await apiInsertRow(fileId, rowIdx, position);
-      console.log('Insert Row Response', resp);
       const columnTypes: any = {};
       resp.headers.forEach(h => {
         const t = resp.types[h];
@@ -743,17 +725,14 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
         frozenColumns: data.frozenColumns,
         cellColors: data.cellColors,
       });
-    } catch (e) {
-      console.error(e);
+    } catch {/* empty */
     }
   };
 
   const handleDuplicateRow = async (rowIdx: number) => {
     if (!data || !fileId) return;
     try {
-      console.log('Triggering API: duplicate_row');
       const resp = await apiDuplicateRow(fileId, rowIdx);
-      console.log('Duplicate Row Response', resp);
       const columnTypes: any = {};
       resp.headers.forEach(h => {
         const t = resp.types[h];
@@ -768,8 +747,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
         frozenColumns: data.frozenColumns,
         cellColors: data.cellColors,
       });
-    } catch (e) {
-      console.error(e);
+    } catch {/* empty */
     }
   };
 
@@ -791,17 +769,14 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
         frozenColumns: data.frozenColumns,
         cellColors: data.cellColors,
       });
-    } catch (e) {
-      console.error(e);
+    } catch {/* empty */
     }
   };
 
   const handleDeleteRow = async (rowIdx: number) => {
     if (!data || !fileId) return;
     try {
-      console.log('Triggering API: delete_row');
       const resp = await apiDeleteRow(fileId, rowIdx);
-      console.log('Delete Row Response', resp);
       const columnTypes: any = {};
       resp.headers.forEach(h => {
         const t = resp.types[h];
@@ -816,8 +791,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
         frozenColumns: data.frozenColumns,
         cellColors: data.cellColors,
       });
-    } catch (e) {
-      console.error(e);
+    } catch {/* empty */
     }
   };
 
