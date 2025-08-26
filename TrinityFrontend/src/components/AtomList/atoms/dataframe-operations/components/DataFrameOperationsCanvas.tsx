@@ -89,7 +89,6 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
   onClearAll,
   fileId
 }) => {
-  console.log('Rendering DataFrameOperationsCanvas', data ? data.headers : null);
   const [currentPage, setCurrentPage] = useState(1);
 
   const [editingCell, setEditingCell] = useState<{row: number, col: string} | null>(null);
@@ -229,80 +228,36 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
 
   // Process and filter data
   const processedData = useMemo(() => {
-    console.log('processedData useMemo: settings.filters =', settings.filters);
     if (!data || !Array.isArray(data.headers) || !Array.isArray(data.rows)) {
       return { filteredRows: [], totalRows: 0, uniqueValues: {} };
     }
 
     let filteredRows = [...data.rows];
 
-    // Apply search filter
+    // Apply search filter locally
     if (settings?.searchTerm?.trim()) {
       const term = settings.searchTerm.trim();
       const termLower = term.toLowerCase();
       const exactRegex = new RegExp(`^(?:${term.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&')})$`, 'i');
-      // decorate rows with ranking score then sort
       filteredRows = filteredRows
         .map((row, idx) => {
           let score = 0;
           for (const col of data.headers) {
             const valStr = safeToString(row[col]);
             if (exactRegex.test(valStr.trim())) { score = 2; break; }
-            if (valStr.toLowerCase().includes(termLower)) { score = Math.max(score,1); }
+            if (valStr.toLowerCase().includes(termLower)) { score = Math.max(score, 1); }
           }
-          return { row, idx, score }; // keep original idx for stable sort
+          return { row, idx, score };
         })
         .sort((a, b) => {
-          if (b.row === undefined) return 0;
-          if (a.score !== b.score) return b.score - a.score; // higher score first
-          return a.idx - b.idx; // stable
+          if (a.score !== b.score) return b.score - a.score;
+          return a.idx - b.idx;
         })
         .map(item => item.row);
     }
 
-    // Apply column filters
-    Object.entries(settings?.filters || {}).forEach(([column, filterValues]) => {
-      if (!filterValues || (Array.isArray(filterValues) && filterValues.length === 0)) {
-        // Skip columns with no filter
-        return;
-      }
-      if (Array.isArray(filterValues) && filterValues.length > 0) {
-        // Categorical filter
-        filteredRows = filteredRows.filter(row => {
-          return filterValues.includes(safeToString(row[column]));
-        });
-      } else if (filterValues && typeof filterValues === 'object' && filterValues.type === 'range' && Array.isArray(filterValues.value)) {
-        // Numeric range filter
-        const [min, max] = filterValues.value;
-        filteredRows = filteredRows.filter(row => {
-          const val = Number(row[column]);
-          return !isNaN(val) && val >= min && val <= max;
-        });
-      }
-    });
-
-    // Apply sorting
-    if (Array.isArray(settings?.sortColumns) && settings.sortColumns.length > 0) {
-      // Only sort by the first column in sortColumns
-      const sort = settings.sortColumns[0];
-      if (sort) {
-        filteredRows.sort((a, b) => {
-          const aVal = a[sort.column];
-          const bVal = b[sort.column];
-          if (aVal === bVal) return 0;
-          let comparison = 0;
-          if (typeof aVal === 'number' && typeof bVal === 'number') {
-            comparison = aVal - bVal;
-          } else {
-            comparison = safeToString(aVal).localeCompare(safeToString(bVal));
-          }
-          return sort.direction === 'desc' ? -comparison : comparison;
-        });
-      }
-    }
-
-    // Get unique values for filtering
-    const uniqueValues: {[key: string]: string[]} = {};
+    // Unique values for filter UI
+    const uniqueValues: { [key: string]: string[] } = {};
     data.headers.forEach(header => {
       const values = Array.from(new Set(data.rows.map(row => safeToString(row[header]))))
         .filter(val => val !== '')
@@ -311,7 +266,7 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
     });
 
     return { filteredRows, totalRows: filteredRows.length, uniqueValues };
-  }, [data, settings]);
+  }, [data, settings.searchTerm]);
 
   // Pagination
   const totalPages = Math.ceil(processedData.totalRows / (settings.rowsPerPage || 15));
@@ -640,9 +595,7 @@ const handleClearSort = () => {
 const handleClearFilter = (col: string) => {
   if (!data) return;
   const newFilters = { ...settings.filters };
-  console.log('handleClearFilter called for column:', col, 'before:', newFilters);
   delete newFilters[col];
-  console.log('after delete:', newFilters);
   // Trigger parent to update filters only (avoids accidentally sending stale copies of other settings)
   onSettingsChange({ filters: { ...newFilters } });
   setFilterRange(null); // Reset numeric filter range UI
@@ -1241,8 +1194,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                           onMouseDown={e => { 
                             e.preventDefault(); 
                             e.stopPropagation(); 
-                            console.log('Clear Filter button clicked for column:', contextMenu.col);
-                            handleClearFilter(contextMenu.col); 
+                              handleClearFilter(contextMenu.col);
                             setContextMenu(null); 
                             setOpenDropdown(null); 
                           }}
@@ -1275,8 +1227,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                       onMouseDown={e => { 
                         e.preventDefault(); 
                         e.stopPropagation(); 
-                        console.log('Clear Filter button clicked for column:', contextMenu.col);
-                        handleClearFilter(contextMenu.col); 
+                        handleClearFilter(contextMenu.col);
                         setContextMenu(null); 
                         setOpenDropdown(null); 
                       }}
