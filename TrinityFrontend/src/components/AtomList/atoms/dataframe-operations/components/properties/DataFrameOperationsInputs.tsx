@@ -18,7 +18,7 @@ const DataFrameOperationsInputs = ({ data, settings, selectedFile, onFileSelect 
       .catch(() => setFrames([]));
   }, []);
 
-  const handleFileChange = async (val: string) => {
+  const handleFileChange = (val: string) => {
     setError(null);
     const fileId = val;
     const frame = frames.find(f => f.object_name === fileId) || null;
@@ -26,18 +26,9 @@ const DataFrameOperationsInputs = ({ data, settings, selectedFile, onFileSelect 
     if (!fileId || !frame) {
       setError('Please select a valid file.');
       setSelectedFrame(null);
-      return; // Do NOT call onFileSelect
+      return;
     }
-    try {
-      // Try fetching the dataframe to check if it exists and is valid
-      const res = await fetch(`${DATAFRAME_OPERATIONS_API}/cached_dataframe?object_name=${encodeURIComponent(fileId)}`);
-      if (!res.ok) throw new Error('Failed to fetch dataframe');
-      onFileSelect(fileId); // Only call if valid
-    } catch (err: any) {
-      setError('Failed to fetch dataframe. Please ensure the file exists and is accessible.');
-      setSelectedFrame(null);
-      // Do NOT call onFileSelect with empty string here, just leave selection as is
-    }
+    onFileSelect(fileId);
   };
 
   return (
@@ -63,3 +54,4 @@ const DataFrameOperationsInputs = ({ data, settings, selectedFile, onFileSelect 
 };
 
 export default DataFrameOperationsInputs; 
+
