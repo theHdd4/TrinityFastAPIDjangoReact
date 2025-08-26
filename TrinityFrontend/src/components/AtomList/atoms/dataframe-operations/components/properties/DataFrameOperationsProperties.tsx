@@ -106,43 +106,41 @@ const DataFrameOperationsProperties: React.FC<Props> = ({ atomId }) => {
   };
 
   return (
-    <div className="w-80 h-full bg-white border-l border-green-200 flex flex-col">
-      <div className="flex-1 overflow-y-auto overflow-x-hidden scrollbar-thin scrollbar-thumb-green-200">
-        <Tabs value={tab} onValueChange={setTab} className="w-full">
-          <TabsList className="grid w-full grid-cols-3 mx-4 my-4">
-            <TabsTrigger value="inputs" className="text-xs">
-              <Database className="w-3 h-3 mr-1" />
-              Inputs
-            </TabsTrigger>
-            <TabsTrigger value="charts" className="text-xs">
-              <BarChart3 className="w-3 h-3 mr-1" />
-              Charts
-            </TabsTrigger>
-            <TabsTrigger value="exhibition" className="text-xs">
-              <Eye className="w-3 h-3 mr-1" />
-              Exhibition
-            </TabsTrigger>
-          </TabsList>
-          <div className="px-4">
-            <TabsContent value="inputs">
-              <DataFrameOperationsInputs
-                data={data}
-                settings={settings}
-                selectedFile={selectedFile}
-                onFileSelect={handleFileSelect}
-              />
-              {loading && <div className="text-green-700 text-xs p-2">Loading data...</div>}
-              {error && <div className="text-red-600 text-xs p-2">{error}</div>}
-            </TabsContent>
-            <TabsContent value="charts">
-              <DataFrameOperationsCharts data={data} settings={settings} />
-            </TabsContent>
-            <TabsContent value="exhibition">
-              <DataFrameOperationsExhibition data={(settings as any).tableData || data} />
-            </TabsContent>
-          </div>
-        </Tabs>
-      </div>
+    <div className="w-80 bg-white border-l border-green-200 flex flex-col">
+      <Tabs value={tab} onValueChange={setTab} className="w-full">
+        <TabsList className="grid w-full grid-cols-3 mx-4 my-4">
+          <TabsTrigger value="inputs" className="text-xs">
+            <Database className="w-3 h-3 mr-1" />
+            Inputs
+          </TabsTrigger>
+          <TabsTrigger value="charts" className="text-xs">
+            <BarChart3 className="w-3 h-3 mr-1" />
+            Charts
+          </TabsTrigger>
+          <TabsTrigger value="exhibition" className="text-xs">
+            <Eye className="w-3 h-3 mr-1" />
+            Exhibition
+          </TabsTrigger>
+        </TabsList>
+        <div className="px-4">
+          <TabsContent value="inputs">
+            <DataFrameOperationsInputs
+              data={data}
+              settings={settings}
+              selectedFile={selectedFile}
+              onFileSelect={handleFileSelect}
+            />
+            {loading && <div className="text-green-700 text-xs p-2">Loading data...</div>}
+            {error && <div className="text-red-600 text-xs p-2">{error}</div>}
+          </TabsContent>
+          <TabsContent value="charts">
+            <DataFrameOperationsCharts data={data} settings={settings} />
+          </TabsContent>
+          <TabsContent value="exhibition">
+            <DataFrameOperationsExhibition data={(settings as any).tableData || data} />
+          </TabsContent>
+        </div>
+      </Tabs>
     </div>
   );
 };

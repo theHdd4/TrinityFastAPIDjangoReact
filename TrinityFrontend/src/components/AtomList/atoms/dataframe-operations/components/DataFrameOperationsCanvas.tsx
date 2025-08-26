@@ -350,10 +350,8 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
     setIsDragOver(false);
   }, []);
 
-  const handleSort = async (column: string) => {
+  const handleSort = async (column: string, direction: 'asc' | 'desc') => {
     if (!data || !fileId) return;
-    const existingSort = settings.sortColumns.find(s => s.column === column);
-    const direction: 'asc' | 'desc' = existingSort && existingSort.direction === 'asc' ? 'desc' : 'asc';
     try {
       const resp = await apiSort(fileId, column, direction);
       const columnTypes: any = {};
@@ -587,8 +585,7 @@ const handleContextMenu = (e: React.MouseEvent, col: string) => {
 const handleSortAsc = (colIdx: number) => {
   if (!data) return;
   const col = data.headers[colIdx];
-  // Update settings to only sort by this column ascending
-  onSettingsChange({ sortColumns: [{ column: col, direction: 'asc' }] });
+  handleSort(col, 'asc');
   setContextMenu(null);
   setOpenDropdown(null);
 };
@@ -596,8 +593,7 @@ const handleSortAsc = (colIdx: number) => {
 const handleSortDesc = (colIdx: number) => {
   if (!data) return;
   const col = data.headers[colIdx];
-  // Update settings to only sort by this column descending
-  onSettingsChange({ sortColumns: [{ column: col, direction: 'desc' }] });
+  handleSort(col, 'desc');
   setContextMenu(null);
   setOpenDropdown(null);
 };
