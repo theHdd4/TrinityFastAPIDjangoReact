@@ -88,24 +88,23 @@ const DataFrameOperationsAtom: React.FC<Props> = ({ atomId }) => {
 
   // In handleSettingsChange, update settings without overwriting tableData
   const handleSettingsChange = (newSettings: Partial<DataFrameSettings>) => {
-    let mergedSettings = { ...settings, ...newSettings };
-    if ('filters' in newSettings) {
-      // If filters is present, fully replace it (do not merge with old filters)
+    const current = useLaboratoryStore.getState().getAtom(atomId)?.settings as DataFrameSettings;
+    let mergedSettings = { ...(current || {}), ...newSettings };
+    if ("filters" in newSettings) {
       mergedSettings.filters = newSettings.filters;
     }
-    if (data && (!mergedSettings.selectedColumns || mergedSettings.selectedColumns.length === 0)) {
-      mergedSettings.selectedColumns = data.headers;
+    if (current?.tableData && (!mergedSettings.selectedColumns || mergedSettings.selectedColumns.length === 0)) {
+      mergedSettings.selectedColumns = current.tableData.headers;
     }
     updateSettings(atomId, mergedSettings);
   };
 
   // In handleDataChange, always update tableData and selectedColumns
   const handleDataChange = (newData: DataFrameData) => {
-    // Deep clone to ensure new references for Zustand/React
     const clonedData = JSON.parse(JSON.stringify(newData));
-    // Merge with existing settings to preserve properties like selectedFile
+    const current = useLaboratoryStore.getState().getAtom(atomId)?.settings as DataFrameSettings;
     updateSettings(atomId, {
-      ...settings,
+      ...(current || {}),
       tableData: clonedData,
       selectedColumns: [...clonedData.headers],
     });

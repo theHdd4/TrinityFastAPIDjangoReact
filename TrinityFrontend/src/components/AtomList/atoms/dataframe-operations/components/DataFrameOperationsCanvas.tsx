@@ -374,7 +374,7 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
         frozenColumns: data.frozenColumns,
         cellColors: data.cellColors,
       });
-      onSettingsChange({ sortColumns: [{ column, direction }] });
+      onSettingsChange({ sortColumns: [{ column, direction }], fileId: resp.df_id });
     } catch (err) {
       handleApiError('Sort failed', err);
     } finally {
@@ -412,7 +412,7 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
         frozenColumns: data.frozenColumns,
         cellColors: data.cellColors,
       });
-      onSettingsChange({ filters: { ...settings.filters, [column]: selectedValues } });
+      onSettingsChange({ filters: { ...settings.filters, [column]: selectedValues }, fileId: resp.df_id });
       setCurrentPage(1);
     } catch (err) {
       handleApiError('Filter failed', err);
@@ -596,7 +596,8 @@ const commitHeaderEdit = async (colIdx: number, value?: string) => {
 
 const handleContextMenu = (e: React.MouseEvent, col: string) => {
   e.preventDefault();
-  setContextMenu({ x: e.clientX, y: e.clientY, col, colIdx: data?.headers.indexOf(col) || -1 });
+  const idx = data ? data.headers.indexOf(col) : -1;
+  setContextMenu({ x: e.clientX, y: e.clientY, col, colIdx: idx });
 };
 
 const handleSortAsc = (colIdx: number) => {
