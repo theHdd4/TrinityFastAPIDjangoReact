@@ -936,7 +936,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
         className="hidden"
       />
       
-      <div className="h-full flex flex-col">
+      <div className="flex flex-col">
         {data?.fileName && (
           <div className="border-b border-blue-200 bg-blue-50">
             <div className="flex items-center px-6 py-4">
@@ -949,8 +949,8 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
             </div>
           </div>
         )}
-        <div className="p-4 flex-1 overflow-hidden">
-          <div className="mx-auto max-w-screen-2xl rounded-2xl border border-slate-200 bg-white shadow-sm flex flex-col h-full">
+        <div className="p-4 overflow-hidden">
+          <div className="mx-auto max-w-screen-2xl rounded-2xl border border-slate-200 bg-white shadow-sm flex flex-col">
         {/* Controls section */}
         <div className="flex-shrink-0 flex items-center justify-between border-b border-slate-200 px-5 py-3">
             <div className="flex items-center space-x-4">
@@ -981,7 +981,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
           </div>
 
           {/* Table section - Excel-like appearance */}
-          <div className="flex-1 overflow-auto">
+          <div className="overflow-auto">
             {/* Placeholder for when no data is loaded */}
             {!data || !Array.isArray(data.headers) || data.headers.length === 0 ? (
               <div className="flex flex-1 items-center justify-center bg-gray-50">
@@ -999,7 +999,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                       Operation Loading...
                     </div>
                   )}
-                  <Table className="table-base table-fixed" style={{ tableLayout: 'fixed' }}>
+                  <Table className="table-base">
               <TableHeader className="table-header">
                 <TableRow className="table-header-row">
                   {settings.showRowNumbers && (
@@ -1010,7 +1010,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                       key={header + '-' + colIdx}
                       data-col={header}
                       className={`table-header-cell text-center bg-white border-r border-gray-200 relative ${selectedColumn === header ? 'border-2 border-black' : ''}`}
-                      style={{ width: settings.columnWidths?.[header], minWidth: settings.columnWidths?.[header] }}
+                      style={settings.columnWidths?.[header] ? { width: settings.columnWidths[header], minWidth: settings.columnWidths[header] } : undefined}
                       draggable
                       onDragStart={() => handleDragStart(header)}
                       onDragOver={e => handleDragOver(e, header)}
@@ -1101,14 +1101,14 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                     {(data.headers || []).map((column, colIdx) => {
                       const cellValue = row[column];
                       const isEditing = editingCell?.row === rowIndex && editingCell?.col === column;
-                      return (
-                        <TableCell
-                          key={colIdx}
-                          data-col={column}
-                          className={`table-cell text-center font-medium ${selectedCell?.row === rowIndex && selectedCell?.col === column ? 'border border-blue-400' : selectedColumn === column ? 'border border-black' : ''}`}
-                          style={{ width: settings.columnWidths?.[column], minWidth: settings.columnWidths?.[column] }}
-                          onClick={() => handleCellClick(rowIndex, column)}
-                          onDoubleClick={() => {
+                        return (
+                          <TableCell
+                            key={colIdx}
+                            data-col={column}
+                            className={`table-cell text-center font-medium ${selectedCell?.row === rowIndex && selectedCell?.col === column ? 'border border-blue-400' : selectedColumn === column ? 'border border-black' : ''}`}
+                            style={settings.columnWidths?.[column] ? { width: settings.columnWidths[column], minWidth: settings.columnWidths[column] } : undefined}
+                            onClick={() => handleCellClick(rowIndex, column)}
+                            onDoubleClick={() => {
                             // Always allow cell editing regardless of enableEditing setting
                             setEditingCell({ row: rowIndex, col: column });
                             setEditingCellValue(safeToString(row[column]));
