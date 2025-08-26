@@ -11,8 +11,8 @@ import DataFrameOperationsExhibition from '../DataFrameOperationsExhibition';
 import DataFrameOperationsInputs from './DataFrameOperationsInputs';
 import DataFrameOperationsCharts from './DataFrameOperationsCharts';
 import { DataFrameData } from '../../DataFrameOperationsAtom';
-import axios from 'axios';
 import { DATAFRAME_OPERATIONS_API, VALIDATE_API } from '@/lib/api';
+import { loadDataframe } from '../services/dataframeOperationsApi';
 
 // Define DataFrameOperationsSettings interface and default settings locally
 export interface DataFrameOperationsSettings {
@@ -71,29 +71,21 @@ const DataFrameOperationsProperties: React.FC<Props> = ({ atomId }) => {
       const frames = Array.isArray(framesData.files) ? framesData.files : [];
       const foundFrame = frames.find((f: any) => f.object_name === fileId);
       setSelectedFrame(foundFrame || null);
-      // Fetch the file's data as CSV text (not JSON!)
+      // Fetch the file and load it via the API to obtain a session id
       const res = await fetch(`${DATAFRAME_OPERATIONS_API}/cached_dataframe?object_name=${encodeURIComponent(fileId)}`);
       if (!res.ok) throw new Error('Failed to fetch dataframe');
-      const text = await res.text();
-      const [headerLine, ...rows] = text.trim().split(/\r?\n/);
-      const headers = headerLine.split(',');
-      const rowLines = Array.isArray(rows) ? rows : [];
-      const dataRows = rowLines.map(r => {
-        const vals = r.split(',');
-        const obj: Record<string, string> = {};
-        headers.forEach((h, i) => {
-          obj[h] = vals[i];
-        });
-        return obj;
-      });
+      const blob = await res.blob();
+      const file = new File([blob], fileId, { type: 'text/csv' });
+      const resp = await loadDataframe(file);
+
       const columnTypes: Record<string, string> = {};
-      headers.forEach(h => {
-        const hasNumbers = dataRows.some(row => !isNaN(Number(row[h])) && row[h] !== '');
-        columnTypes[h] = hasNumbers ? 'number' : 'text';
+      resp.headers.forEach(h => {
+        const t = resp.types[h];
+        columnTypes[h] = t.includes('float') || t.includes('int') ? 'number' : 'text';
       });
-      const newData = {
-        headers,
-        rows: dataRows,
+      const newData: DataFrameData = {
+        headers: resp.headers,
+        rows: resp.rows,
         fileName: foundFrame ? foundFrame.csv_name.split('/').pop() : fileId,
         columnTypes,
         pinnedColumns: [],
@@ -103,15 +95,17 @@ const DataFrameOperationsProperties: React.FC<Props> = ({ atomId }) => {
       updateSettings(atomId, {
         ...settings,
         selectedFile: fileId,
-        selectedColumns: headers,
+        selectedColumns: resp.headers,
         searchTerm: '',
         filters: {},
         data: newData,
-        tableData: newData, // <--- add this line for canvas to read
+        tableData: newData,
+        fileId: resp.df_id,
       });
       setLoading(false);
     } catch (err: any) {
-      setError('Failed to fetch or parse dataframe.');
+      console.error('Failed to fetch or load dataframe', err);
+      setError('Failed to fetch or load dataframe.');
       setLoading(false);
     }
   };
