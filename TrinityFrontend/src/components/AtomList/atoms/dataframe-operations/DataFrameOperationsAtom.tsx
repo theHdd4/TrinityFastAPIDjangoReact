@@ -37,6 +37,7 @@ export interface DataFrameSettings {
   uploadedFile?: string; // Added for file upload
   selectedFile?: string; // Added for file selection
   tableData?: DataFrameData; // Added for table data
+  fileId?: string | null; // Persist backend dataframe id
 }
 
 interface Props {
@@ -54,7 +55,8 @@ const DataFrameOperationsAtom: React.FC<Props> = ({ atomId }) => {
     filters: {},
     selectedColumns: [],
     showRowNumbers: true,
-    enableEditing: true
+    enableEditing: true,
+    fileId: null,
   };
   // Always use tableData as the source of truth
   const data = settings.tableData || null;
@@ -66,19 +68,18 @@ const DataFrameOperationsAtom: React.FC<Props> = ({ atomId }) => {
       setOriginalData(JSON.parse(JSON.stringify(data)));
     }
   }, [data, originalData]);
-  const [fileId, setFileId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<'table' | 'chart'>('table');
   const [chartConfig, setChartConfig] = useState<any>(null);
 
   // Update handleDataUpload to always set selectedColumns to newData.headers
   const handleDataUpload = (newData: DataFrameData, backendFileId?: string) => {
-    if (backendFileId) setFileId(backendFileId);
     setOriginalData(JSON.parse(JSON.stringify(newData)));
-    const newSettings = { 
+    const newSettings: DataFrameSettings = {
       ...settings,
       selectedColumns: newData.headers,
       searchTerm: '',
-      filters: {}
+      filters: {},
+      fileId: backendFileId || settings.fileId || null,
     };
     updateSettings(atomId, newSettings);
   };
@@ -152,7 +153,7 @@ const DataFrameOperationsAtom: React.FC<Props> = ({ atomId }) => {
                   onDataUpload={handleDataUpload}
                   onDataChange={handleDataChange}
                   onClearAll={handleReset}
-                  fileId={fileId}
+                  fileId={settings.fileId || null}
                 />
               )}
               {viewMode === 'chart' && chartConfig && (

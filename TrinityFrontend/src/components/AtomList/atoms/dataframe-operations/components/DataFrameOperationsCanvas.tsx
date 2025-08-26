@@ -80,6 +80,15 @@ function getNextColKey(headers: string[]): string {
   return key;
 }
 
+// Generic error handler for API operations
+function handleApiError(action: string, err: unknown) {
+  toast({
+    title: action,
+    description: err instanceof Error ? err.message : String(err),
+    variant: 'destructive',
+  });
+}
+
 const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
   data,
   settings,
@@ -346,7 +355,6 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
     const direction: 'asc' | 'desc' = existingSort && existingSort.direction === 'asc' ? 'desc' : 'asc';
     try {
       const resp = await apiSort(fileId, column, direction);
-      console.log('Sort Response', resp);
       const columnTypes: any = {};
       resp.headers.forEach(h => {
         const t = resp.types[h];
@@ -362,7 +370,8 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
         cellColors: data.cellColors,
       });
       onSettingsChange({ sortColumns: [{ column, direction }] });
-    } catch {/* empty */
+    } catch (err) {
+      handleApiError('Sort failed', err);
     }
   };
 
@@ -375,7 +384,6 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
     if (value === null) return;
     try {
       const resp = await apiFilter(fileId, column, value);
-      console.log('Filter Rows Response', resp);
       const columnTypes: any = {};
       resp.headers.forEach(h => {
         const t = resp.types[h];
@@ -392,7 +400,8 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
       });
       onSettingsChange({ filters: { ...settings.filters, [column]: value } });
       setCurrentPage(1);
-    } catch {/* empty */
+    } catch (err) {
+      handleApiError('Filter failed', err);
     }
   };
 
@@ -410,7 +419,6 @@ const commitHeaderEdit = async (colIdx: number, value?: string) => {
   if (newHeader === oldHeader) { setEditingHeader(null); return; }
   try {
     const resp = await apiRenameColumn(fileId, oldHeader, newHeader);
-    console.log('Rename Column Response', resp);
     const columnTypes: any = {};
     resp.headers.forEach(h => {
       const t = resp.types[h];
@@ -425,19 +433,19 @@ const commitHeaderEdit = async (colIdx: number, value?: string) => {
       frozenColumns: data.frozenColumns,
       cellColors: data.cellColors,
     });
-  } catch {/* empty */
+  } catch (err) {
+    handleApiError('Rename column failed', err);
   }
   setEditingHeader(null);
 };
 
 // Original immediate update util (kept for programmatic usage)
-const handleCellEdit = async (rowIndex: number, column: string, newValue: string) => {
+  const handleCellEdit = async (rowIndex: number, column: string, newValue: string) => {
     resetSaveSuccess();
     if (!data || !fileId) return;
     const globalRowIndex = startIndex + rowIndex;
     try {
       const resp = await apiEditCell(fileId, globalRowIndex, column, newValue);
-      console.log('Edit Cell Response', resp);
       const columnTypes: any = {};
       resp.headers.forEach(h => {
         const t = resp.types[h];
@@ -452,7 +460,8 @@ const handleCellEdit = async (rowIndex: number, column: string, newValue: string
         frozenColumns: data.frozenColumns,
         cellColors: data.cellColors
       });
-    } catch {/* empty */
+    } catch (err) {
+      handleApiError('Edit cell failed', err);
     }
   };
 
@@ -463,7 +472,6 @@ const handleCellEdit = async (rowIndex: number, column: string, newValue: string
     const dir: 'above' | 'below' = data.rows.length > 0 ? 'below' : 'above';
     try {
       const resp = await apiInsertRow(fileId, idx, dir);
-      console.log('Insert Row Response', resp);
       const columnTypes: any = {};
       resp.headers.forEach(h => {
         const t = resp.types[h];
@@ -478,7 +486,8 @@ const handleCellEdit = async (rowIndex: number, column: string, newValue: string
         frozenColumns: data.frozenColumns,
         cellColors: data.cellColors,
       });
-    } catch {/* empty */
+    } catch (err) {
+      handleApiError('Insert row failed', err);
     }
   };
 
@@ -488,7 +497,6 @@ const handleCellEdit = async (rowIndex: number, column: string, newValue: string
     const newColumnName = `Column_${data.headers.length + 1}`;
     try {
       const resp = await apiInsertColumn(fileId, data.headers.length, newColumnName, '');
-      console.log('Insert Column Response', resp);
       const columnTypes: any = {};
       resp.headers.forEach(h => {
         const t = resp.types[h];
@@ -503,7 +511,8 @@ const handleCellEdit = async (rowIndex: number, column: string, newValue: string
         frozenColumns: data.frozenColumns,
         cellColors: data.cellColors,
       });
-    } catch {/* empty */
+    } catch (err) {
+      handleApiError('Insert column failed', err);
     }
   };
 
@@ -543,7 +552,6 @@ const handleCellEdit = async (rowIndex: number, column: string, newValue: string
       const toIndex = data.headers.indexOf(draggedCol);
       try {
         const resp = await apiMoveColumn(fileId, draggedCol, toIndex);
-        console.log('Move Column Response', resp);
         const columnTypes: any = {};
         resp.headers.forEach(h => {
           const t = resp.types[h];
@@ -558,7 +566,8 @@ const handleCellEdit = async (rowIndex: number, column: string, newValue: string
           frozenColumns: data.frozenColumns,
           cellColors: data.cellColors,
         });
-      } catch {/* empty */
+      } catch (err) {
+        handleApiError('Move column failed', err);
       }
     }
     setDraggedCol(null);
@@ -642,7 +651,6 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
     const newColKey = getNextColKey(data.headers);
     try {
       const resp = await apiInsertColumn(fileId, colIdx, newColKey, '');
-      console.log('Insert Column Response', resp);
       const columnTypes: any = {};
       resp.headers.forEach(h => {
         const t = resp.types[h];
@@ -657,7 +665,8 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
         frozenColumns: data.frozenColumns,
         cellColors: data.cellColors,
       });
-    } catch {/* empty */
+    } catch (err) {
+      handleApiError('Insert column failed', err);
     }
   };
 
@@ -668,7 +677,6 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
     const col = data.headers[colIdx];
     try {
       const resp = await apiDeleteColumn(fileId, col);
-      console.log('Delete Column Response', resp);
       const columnTypes: any = {};
       resp.headers.forEach(h => {
         const t = resp.types[h];
@@ -683,7 +691,8 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
         frozenColumns: data.frozenColumns,
         cellColors: data.cellColors,
       });
-    } catch {/* empty */
+    } catch (err) {
+      handleApiError('Delete column failed', err);
     }
   };
 
@@ -697,7 +706,6 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
     }
     try {
       const resp = await apiDuplicateColumn(fileId, col, newName);
-      console.log('Duplicate Column Response', resp);
       const columnTypes: any = {};
       resp.headers.forEach(h => {
         const t = resp.types[h];
@@ -712,7 +720,8 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
         frozenColumns: data.frozenColumns,
         cellColors: data.cellColors,
       });
-    } catch {/* empty */
+    } catch (err) {
+      handleApiError('Duplicate column failed', err);
     }
   };
 
@@ -721,7 +730,6 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
     if (!data || !fileId) return;
     try {
       const resp = await apiInsertRow(fileId, rowIdx, position);
-      console.log('Insert Row Response', resp);
       const columnTypes: any = {};
       resp.headers.forEach(h => {
         const t = resp.types[h];
@@ -736,7 +744,8 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
         frozenColumns: data.frozenColumns,
         cellColors: data.cellColors,
       });
-    } catch {/* empty */
+    } catch (err) {
+      handleApiError('Insert row failed', err);
     }
   };
 
@@ -744,7 +753,6 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
     if (!data || !fileId) return;
     try {
       const resp = await apiDuplicateRow(fileId, rowIdx);
-      console.log('Duplicate Row Response', resp);
       const columnTypes: any = {};
       resp.headers.forEach(h => {
         const t = resp.types[h];
@@ -759,7 +767,8 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
         frozenColumns: data.frozenColumns,
         cellColors: data.cellColors,
       });
-    } catch {/* empty */
+    } catch (err) {
+      handleApiError('Duplicate row failed', err);
     }
   };
 
@@ -767,7 +776,6 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
     if (!data || !fileId) return;
     try {
       const resp = await apiRetypeColumn(fileId, col, newType === 'text' ? 'string' : newType);
-      console.log('Retype Column Response', resp);
       const columnTypes: any = {};
       resp.headers.forEach(h => {
         const t = resp.types[h];
@@ -782,7 +790,8 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
         frozenColumns: data.frozenColumns,
         cellColors: data.cellColors,
       });
-    } catch {/* empty */
+    } catch (err) {
+      handleApiError('Retype column failed', err);
     }
   };
 
@@ -790,7 +799,6 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
     if (!data || !fileId) return;
     try {
       const resp = await apiDeleteRow(fileId, rowIdx);
-      console.log('Delete Row Response', resp);
       const columnTypes: any = {};
       resp.headers.forEach(h => {
         const t = resp.types[h];
@@ -805,7 +813,8 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
         frozenColumns: data.frozenColumns,
         cellColors: data.cellColors,
       });
-    } catch {/* empty */
+    } catch (err) {
+      handleApiError('Delete row failed', err);
     }
   };
 
