@@ -937,7 +937,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                   {Array.isArray(data?.headers) && data.headers.map((header, colIdx) => (
                     <TableHead
                       key={header + '-' + colIdx}
-                      className={`table-header-cell text-center bg-white border-r border-gray-200 ${selectedColumn === header ? 'border-2 border-blue-500' : ''}`}
+                      className={`table-header-cell text-center bg-white border-r border-gray-200 ${selectedColumn === header ? 'border-2 border-black' : ''}`}
                       draggable
                       onDragStart={() => handleDragStart(header)}
                       onDragOver={e => handleDragOver(e, header)}
@@ -1022,7 +1022,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                       return (
                         <TableCell
                           key={colIdx}
-                          className={`table-cell text-center font-medium min-w-[120px] ${selectedCell?.row === rowIndex && selectedCell?.col === column ? 'border border-blue-400' : ''}`}
+                          className={`table-cell text-center font-medium min-w-[120px] ${selectedCell?.row === rowIndex && selectedCell?.col === column ? 'border border-blue-400' : selectedColumn === column ? 'border border-black' : ''}`}
                           onClick={() => setSelectedCell({ row: rowIndex, col: column })}
                           onDoubleClick={() => {
                             // Always allow cell editing regardless of enableEditing setting
@@ -1254,20 +1254,22 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                           />
                           <span className="text-xs">{max}</span>
                         </div>
-                        <button
-                          className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100 border border-gray-200 rounded mt-2"
-                          onClick={() => { handleColumnFilter(contextMenu.col, range as [number, number]); setContextMenu(null); setOpenDropdown(null); }}
-                        >Apply Filter</button>
-                        <button
-                          className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100 border border-gray-200 rounded"
-                          onClick={e => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            handleClearFilter(contextMenu.col);
-                            setContextMenu(null);
-                            setOpenDropdown(null);
-                          }}
-                        >Clear Filter</button>
+                        <div className="flex items-center gap-2 mt-2">
+                          <button
+                            className="px-2 py-1 text-xs rounded bg-blue-600 hover:bg-blue-700 text-white"
+                            onClick={() => { handleColumnFilter(contextMenu.col, range as [number, number]); setContextMenu(null); setOpenDropdown(null); }}
+                          >Apply Filter</button>
+                          <button
+                            className="px-2 py-1 text-xs rounded bg-blue-600 hover:bg-blue-700 text-white"
+                            onClick={e => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              handleClearFilter(contextMenu.col);
+                              setContextMenu(null);
+                              setOpenDropdown(null);
+                            }}
+                          >Clear Filter</button>
+                        </div>
                       </div>
                     );
                   })()
@@ -1291,16 +1293,18 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                         <span className="truncate">{value}</span>
                       </label>
                     ))}
-                    <button
-                      className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100 border border-gray-200 rounded mt-2"
-                      onClick={e => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        handleClearFilter(contextMenu.col);
-                        setContextMenu(null);
-                        setOpenDropdown(null);
-                      }}
-                    >Clear Filter</button>
+                    <div className="mt-2">
+                      <button
+                        className="px-2 py-1 text-xs rounded bg-blue-600 hover:bg-blue-700 text-white"
+                        onClick={e => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          handleClearFilter(contextMenu.col);
+                          setContextMenu(null);
+                          setOpenDropdown(null);
+                        }}
+                      >Clear Filter</button>
+                    </div>
                   </div>
                 )}
               </div>

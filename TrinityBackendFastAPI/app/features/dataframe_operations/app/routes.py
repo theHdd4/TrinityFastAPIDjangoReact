@@ -274,7 +274,7 @@ async def duplicate_row(df_id: str = Body(...), index: int = Body(...)):
     df = _get_df(df_id)
     try:
         row = df.iloc[[index]]
-        df = pd.concat([df.iloc[: index + 1], row, df.iloc[index + 1 :]]).reset_index(drop=True)
+        df = pd.concat([df.iloc[: index], row, df.iloc[index :]]).reset_index(drop=True)
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
     SESSIONS[df_id] = df
@@ -289,7 +289,7 @@ async def duplicate_column(df_id: str = Body(...), name: str = Body(...), new_na
     df = _get_df(df_id)
     try:
         idx = df.columns.get_loc(name)
-        df.insert(idx + 1, new_name, df[name])
+        df.insert(idx, new_name, df[name])
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
     SESSIONS[df_id] = df
