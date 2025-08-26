@@ -37,6 +37,7 @@ export interface DataFrameSettings {
   uploadedFile?: string; // Added for file upload
   selectedFile?: string; // Added for file selection
   tableData?: DataFrameData; // Added for table data
+  fileId?: string | null; // Persist backend dataframe id
 }
 
 interface Props {
@@ -45,7 +46,6 @@ interface Props {
 
 const DataFrameOperationsAtom: React.FC<Props> = ({ atomId }) => {
   const cards = useLaboratoryStore(state => state.cards);
-  console.log('Cards:', cards);
   const atom = cards.flatMap(card => card.atoms).find(a => a.id === atomId);
   const updateSettings = useLaboratoryStore(state => state.updateAtomSettings);
   const settings: DataFrameSettings = atom?.settings || {
@@ -55,7 +55,8 @@ const DataFrameOperationsAtom: React.FC<Props> = ({ atomId }) => {
     filters: {},
     selectedColumns: [],
     showRowNumbers: true,
-    enableEditing: true
+    enableEditing: true,
+    fileId: null,
   };
   // Always use tableData as the source of truth
   const data = settings.tableData || null;
@@ -67,21 +68,18 @@ const DataFrameOperationsAtom: React.FC<Props> = ({ atomId }) => {
       setOriginalData(JSON.parse(JSON.stringify(data)));
     }
   }, [data, originalData]);
-  console.log('DataFrameOperationsAtom atom:', atom);
-  console.log('DataFrameOperationsAtom data:', data);
-  const [fileId, setFileId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<'table' | 'chart'>('table');
   const [chartConfig, setChartConfig] = useState<any>(null);
 
   // Update handleDataUpload to always set selectedColumns to newData.headers
   const handleDataUpload = (newData: DataFrameData, backendFileId?: string) => {
-    if (backendFileId) setFileId(backendFileId);
     setOriginalData(JSON.parse(JSON.stringify(newData)));
-    const newSettings = { 
+    const newSettings: DataFrameSettings = {
       ...settings,
       selectedColumns: newData.headers,
       searchTerm: '',
-      filters: {}
+      filters: {},
+      fileId: backendFileId || settings.fileId || null,
     };
     updateSettings(atomId, newSettings);
   };
@@ -100,12 +98,11 @@ const DataFrameOperationsAtom: React.FC<Props> = ({ atomId }) => {
     if (data) {
       mergedSettings.tableData = data;
     }
-    console.log('handleSettingsChange called with:', newSettings, 'mergedSettings:', mergedSettings);
     updateSettings(atomId, mergedSettings);
   };
 
   // In handleDataChange, always update tableData and selectedColumns
-  const handleDataChange = (newData: DataFrameData) => {
+  const handleDataChange = (newData: DataFrameData, newFileId?: string) => {
     // Deep clone to ensure new references for Zustand/React
     const clonedData = JSON.parse(JSON.stringify(newData));
     // Merge with existing settings to preserve properties like selectedFile
@@ -113,6 +110,7 @@ const DataFrameOperationsAtom: React.FC<Props> = ({ atomId }) => {
       ...settings,
       tableData: clonedData,
       selectedColumns: [...clonedData.headers],
+      fileId: newFileId || settings.fileId || null,
     });
   };
 
@@ -137,8 +135,6 @@ const DataFrameOperationsAtom: React.FC<Props> = ({ atomId }) => {
   // Only show table/chart after file selection (like concat atom)
   const fileSelected = settings.selectedFile;
 
-  // Log the data passed to DataFrameOperationsCanvas
-  console.log('Data passed to DataFrameOperationsCanvas:', data);
 
   return (
     <ErrorBoundary>
@@ -158,7 +154,7 @@ const DataFrameOperationsAtom: React.FC<Props> = ({ atomId }) => {
                   onDataUpload={handleDataUpload}
                   onDataChange={handleDataChange}
                   onClearAll={handleReset}
-                  fileId={fileId}
+                  fileId={settings.fileId || null}
                 />
               )}
               {viewMode === 'chart' && chartConfig && (
