@@ -11,8 +11,8 @@ import DataFrameOperationsExhibition from '../DataFrameOperationsExhibition';
 import DataFrameOperationsInputs from './DataFrameOperationsInputs';
 import DataFrameOperationsCharts from './DataFrameOperationsCharts';
 import { DataFrameData } from '../../DataFrameOperationsAtom';
-import { DATAFRAME_OPERATIONS_API, VALIDATE_API } from '@/lib/api';
-import { loadDataframe } from '../../services/dataframeOperationsApi';
+import { VALIDATE_API } from '@/lib/api';
+import { loadDataframeByKey } from '../../services/dataframeOperationsApi';
 
 // Define DataFrameOperationsSettings interface and default settings locally
 export interface DataFrameOperationsSettings {
@@ -71,12 +71,7 @@ const DataFrameOperationsProperties: React.FC<Props> = ({ atomId }) => {
       const frames = Array.isArray(framesData.files) ? framesData.files : [];
       const foundFrame = frames.find((f: any) => f.object_name === fileId);
       setSelectedFrame(foundFrame || null);
-      // Fetch the file and load it via the API to obtain a session id
-      const res = await fetch(`${DATAFRAME_OPERATIONS_API}/cached_dataframe?object_name=${encodeURIComponent(fileId)}`);
-      if (!res.ok) throw new Error('Failed to fetch dataframe');
-      const blob = await res.blob();
-      const file = new File([blob], fileId, { type: 'text/csv' });
-      const resp = await loadDataframe(file);
+      const resp = await loadDataframeByKey(fileId);
 
       const columnTypes: Record<string, string> = {};
       resp.headers.forEach(h => {

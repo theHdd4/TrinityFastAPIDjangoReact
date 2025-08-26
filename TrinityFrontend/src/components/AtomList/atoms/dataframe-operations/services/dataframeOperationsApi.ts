@@ -49,6 +49,11 @@ export async function loadDataframe(file: File): Promise<DataFrameResponse> {
   return data;
 }
 
+export function loadDataframeByKey(objectName: string): Promise<DataFrameResponse> {
+  console.log('[DataFrameOperationsAPI] load by key', objectName);
+  return postJSON(`${DATAFRAME_OPERATIONS_API}/load_cached`, { object_name: objectName });
+}
+
 export function editCell(dfId: string, row: number, column: string, value: any) {
   return postJSON(`${DATAFRAME_OPERATIONS_API}/edit_cell`, { df_id: dfId, row, column, value });
 }
