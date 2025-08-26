@@ -194,13 +194,16 @@ async def insert_row(
     index: int = Body(...),
     direction: str = Body("below"),
 ):
+    print(f"/insert_row called df_id={df_id}, index={index}, direction={direction}", flush=True)
     df = _get_df(df_id)
     empty = {col: None for col in df.columns}
     insert_at = index if direction == "above" else index + 1
     insert_at = max(0, min(insert_at, len(df)))
     df = pd.concat([df.iloc[:insert_at], pd.DataFrame([empty]), df.iloc[insert_at:]]).reset_index(drop=True)
     SESSIONS[df_id] = df
-    return _df_payload(df, df_id)
+    result = _df_payload(df, df_id)
+    print("/insert_row response", result, flush=True)
+    return result
 
 
 @router.post("/delete_row")
@@ -221,13 +224,16 @@ async def insert_column(
     name: str = Body(...),
     default: Any = Body(None),
 ):
+    print(f"/insert_column called df_id={df_id}, index={index}, name={name}, default={default}", flush=True)
     df = _get_df(df_id)
     if index >= len(df.columns):
         df[name] = default
     else:
         df.insert(index, name, default)
     SESSIONS[df_id] = df
-    return _df_payload(df, df_id)
+    result = _df_payload(df, df_id)
+    print("/insert_column response", result, flush=True)
+    return result
 
 
 @router.post("/delete_column")
