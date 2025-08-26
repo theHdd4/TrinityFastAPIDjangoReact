@@ -44,7 +44,7 @@ interface DataFrameOperationsCanvasProps {
   settings: DataFrameSettings;
   onSettingsChange: (settings: Partial<DataFrameSettings>) => void;
   onDataUpload: (data: DataFrameData, backendFileId?: string) => void;
-  onDataChange: (data: DataFrameData) => void;
+  onDataChange: (data: DataFrameData, newFileId?: string) => void;
   onClearAll: () => void;
   fileId?: string | null;
 }
@@ -350,11 +350,16 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
   }, []);
 
   const handleSort = async (column: string) => {
-    if (!data || !fileId) return;
+    if (!data || !fileId) {
+      console.warn('Sort skipped: missing data or fileId');
+      return;
+    }
     const existingSort = settings.sortColumns.find(s => s.column === column);
     const direction: 'asc' | 'desc' = existingSort && existingSort.direction === 'asc' ? 'desc' : 'asc';
     try {
+      console.log('Sort Request', { fileId, column, direction });
       const resp = await apiSort(fileId, column, direction);
+      console.log('Sort Response', resp);
       const columnTypes: any = {};
       resp.headers.forEach(h => {
         const t = resp.types[h];
@@ -368,22 +373,28 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
         pinnedColumns: data.pinnedColumns,
         frozenColumns: data.frozenColumns,
         cellColors: data.cellColors,
-      });
+      }, resp.df_id);
       onSettingsChange({ sortColumns: [{ column, direction }] });
     } catch (err) {
+      console.error('Sort Error', err);
       handleApiError('Sort failed', err);
     }
   };
 
   const handleColumnFilter = async (column: string, selectedValues: string[] | [number, number]) => {
-    if (!data || !fileId) return;
+    if (!data || !fileId) {
+      console.warn('Filter skipped: missing data or fileId');
+      return;
+    }
     let value: any = null;
     if (Array.isArray(selectedValues) && selectedValues.length > 0) {
       value = selectedValues[0];
     }
     if (value === null) return;
     try {
+      console.log('Filter Request', { fileId, column, value });
       const resp = await apiFilter(fileId, column, value);
+      console.log('Filter Response', resp);
       const columnTypes: any = {};
       resp.headers.forEach(h => {
         const t = resp.types[h];
@@ -397,10 +408,11 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
         pinnedColumns: data.pinnedColumns,
         frozenColumns: data.frozenColumns,
         cellColors: data.cellColors,
-      });
+      }, resp.df_id);
       onSettingsChange({ filters: { ...settings.filters, [column]: value } });
       setCurrentPage(1);
     } catch (err) {
+      console.error('Filter Error', err);
       handleApiError('Filter failed', err);
     }
   };
@@ -413,12 +425,14 @@ const commitCellEdit = (rowIndex: number, column: string) => {
 
 // Helper to commit a header edit
 const commitHeaderEdit = async (colIdx: number, value?: string) => {
-  if (!data || !fileId) { setEditingHeader(null); return; }
+  if (!data || !fileId) { console.warn('Rename skipped: missing data or fileId'); setEditingHeader(null); return; }
   const newHeader = value !== undefined ? value : editingHeaderValue;
   const oldHeader = data.headers[colIdx];
   if (newHeader === oldHeader) { setEditingHeader(null); return; }
   try {
+    console.log('Rename Column Request', { fileId, oldHeader, newHeader });
     const resp = await apiRenameColumn(fileId, oldHeader, newHeader);
+    console.log('Rename Column Response', resp);
     const columnTypes: any = {};
     resp.headers.forEach(h => {
       const t = resp.types[h];
@@ -432,7 +446,7 @@ const commitHeaderEdit = async (colIdx: number, value?: string) => {
       pinnedColumns: data.pinnedColumns,
       frozenColumns: data.frozenColumns,
       cellColors: data.cellColors,
-    });
+    }, resp.df_id);
   } catch (err) {
     handleApiError('Rename column failed', err);
   }
@@ -445,7 +459,9 @@ const commitHeaderEdit = async (colIdx: number, value?: string) => {
     if (!data || !fileId) return;
     const globalRowIndex = startIndex + rowIndex;
     try {
-      const resp = await apiEditCell(fileId, globalRowIndex, column, newValue);
+    console.log('Edit Cell Request', { fileId, row: globalRowIndex, column, value: newValue });
+    const resp = await apiEditCell(fileId, globalRowIndex, column, newValue);
+    console.log('Edit Cell Response', resp);
       const columnTypes: any = {};
       resp.headers.forEach(h => {
         const t = resp.types[h];
@@ -459,7 +475,7 @@ const commitHeaderEdit = async (colIdx: number, value?: string) => {
         pinnedColumns: data.pinnedColumns,
         frozenColumns: data.frozenColumns,
         cellColors: data.cellColors
-      });
+      }, resp.df_id);
     } catch (err) {
       handleApiError('Edit cell failed', err);
     }
@@ -467,11 +483,16 @@ const commitHeaderEdit = async (colIdx: number, value?: string) => {
 
   const handleAddRow = async () => {
     resetSaveSuccess();
-    if (!data || !fileId) return;
+    if (!data || !fileId) {
+      console.warn('Add row skipped: missing data or fileId');
+      return;
+    }
     const idx = data.rows.length > 0 ? data.rows.length - 1 : 0;
     const dir: 'above' | 'below' = data.rows.length > 0 ? 'below' : 'above';
     try {
+      console.log('Add Row Request', { fileId, idx, dir });
       const resp = await apiInsertRow(fileId, idx, dir);
+      console.log('Add Row Response', resp);
       const columnTypes: any = {};
       resp.headers.forEach(h => {
         const t = resp.types[h];
@@ -485,18 +506,24 @@ const commitHeaderEdit = async (colIdx: number, value?: string) => {
         pinnedColumns: data.pinnedColumns,
         frozenColumns: data.frozenColumns,
         cellColors: data.cellColors,
-      });
+      }, resp.df_id);
     } catch (err) {
+      console.error('Add Row Error', err);
       handleApiError('Insert row failed', err);
     }
   };
 
   const handleAddColumn = async () => {
     resetSaveSuccess();
-    if (!data || !fileId) return;
+    if (!data || !fileId) {
+      console.warn('Add column skipped: missing data or fileId');
+      return;
+    }
     const newColumnName = `Column_${data.headers.length + 1}`;
     try {
+      console.log('Add Column Request', { fileId, index: data.headers.length, name: newColumnName });
       const resp = await apiInsertColumn(fileId, data.headers.length, newColumnName, '');
+      console.log('Add Column Response', resp);
       const columnTypes: any = {};
       resp.headers.forEach(h => {
         const t = resp.types[h];
@@ -510,8 +537,9 @@ const commitHeaderEdit = async (colIdx: number, value?: string) => {
         pinnedColumns: data.pinnedColumns,
         frozenColumns: data.frozenColumns,
         cellColors: data.cellColors,
-      });
+      }, resp.df_id);
     } catch (err) {
+      console.error('Add Column Error', err);
       handleApiError('Insert column failed', err);
     }
   };
@@ -551,7 +579,9 @@ const commitHeaderEdit = async (colIdx: number, value?: string) => {
     if (draggedCol && data && fileId) {
       const toIndex = data.headers.indexOf(draggedCol);
       try {
+        console.log('Move Column Request', { fileId, from: draggedCol, toIndex });
         const resp = await apiMoveColumn(fileId, draggedCol, toIndex);
+        console.log('Move Column Response', resp);
         const columnTypes: any = {};
         resp.headers.forEach(h => {
           const t = resp.types[h];
@@ -565,8 +595,9 @@ const commitHeaderEdit = async (colIdx: number, value?: string) => {
           pinnedColumns: data.pinnedColumns,
           frozenColumns: data.frozenColumns,
           cellColors: data.cellColors,
-        });
+        }, resp.df_id);
       } catch (err) {
+        console.error('Move Column Error', err);
         handleApiError('Move column failed', err);
       }
     }
@@ -647,10 +678,15 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
   // 1. Fix column insert/delete logic
   const handleInsertColumn = async (colIdx: number) => {
     resetSaveSuccess();
-    if (!data || !fileId) return;
+    if (!data || !fileId) {
+      console.warn('Insert column skipped: missing data or fileId');
+      return;
+    }
     const newColKey = getNextColKey(data.headers);
     try {
+      console.log('Insert Column Request', { fileId, colIdx, name: newColKey });
       const resp = await apiInsertColumn(fileId, colIdx, newColKey, '');
+      console.log('Insert Column Response', resp);
       const columnTypes: any = {};
       resp.headers.forEach(h => {
         const t = resp.types[h];
@@ -664,19 +700,25 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
         pinnedColumns: data.pinnedColumns,
         frozenColumns: data.frozenColumns,
         cellColors: data.cellColors,
-      });
+      }, resp.df_id);
     } catch (err) {
+      console.error('Insert Column Error', err);
       handleApiError('Insert column failed', err);
     }
   };
 
   const handleDeleteColumn = async (colIdx: number) => {
     resetSaveSuccess();
-    if (!data || !fileId) return;
+    if (!data || !fileId) {
+      console.warn('Delete column skipped: missing data or fileId');
+      return;
+    }
     if (colIdx < 0 || colIdx >= data.headers.length) return;
     const col = data.headers[colIdx];
     try {
+      console.log('Delete Column Request', { fileId, col });
       const resp = await apiDeleteColumn(fileId, col);
+      console.log('Delete Column Response', resp);
       const columnTypes: any = {};
       resp.headers.forEach(h => {
         const t = resp.types[h];
@@ -690,22 +732,28 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
         pinnedColumns: data.pinnedColumns,
         frozenColumns: data.frozenColumns,
         cellColors: data.cellColors,
-      });
+      }, resp.df_id);
     } catch (err) {
+      console.error('Delete Column Error', err);
       handleApiError('Delete column failed', err);
     }
   };
 
   const handleDuplicateColumn = async (colIdx: number) => {
     resetSaveSuccess();
-    if (!data || !fileId) return;
+    if (!data || !fileId) {
+      console.warn('Duplicate column skipped: missing data or fileId');
+      return;
+    }
     const col = data.headers[colIdx];
     let newName = `${col}_copy`;
     while (data.headers.includes(newName)) {
       newName += '_copy';
     }
     try {
+      console.log('Duplicate Column Request', { fileId, col, newName });
       const resp = await apiDuplicateColumn(fileId, col, newName);
+      console.log('Duplicate Column Response', resp);
       const columnTypes: any = {};
       resp.headers.forEach(h => {
         const t = resp.types[h];
@@ -719,17 +767,23 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
         pinnedColumns: data.pinnedColumns,
         frozenColumns: data.frozenColumns,
         cellColors: data.cellColors,
-      });
+      }, resp.df_id);
     } catch (err) {
+      console.error('Duplicate Column Error', err);
       handleApiError('Duplicate column failed', err);
     }
   };
 
   // Row insert / delete handlers
   const handleInsertRow = async (position: 'above' | 'below', rowIdx: number) => {
-    if (!data || !fileId) return;
+    if (!data || !fileId) {
+      console.warn('Insert row skipped: missing data or fileId');
+      return;
+    }
     try {
+      console.log('Insert Row Request', { fileId, rowIdx, position });
       const resp = await apiInsertRow(fileId, rowIdx, position);
+      console.log('Insert Row Response', resp);
       const columnTypes: any = {};
       resp.headers.forEach(h => {
         const t = resp.types[h];
@@ -743,16 +797,22 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
         pinnedColumns: data.pinnedColumns,
         frozenColumns: data.frozenColumns,
         cellColors: data.cellColors,
-      });
+      }, resp.df_id);
     } catch (err) {
+      console.error('Insert Row Error', err);
       handleApiError('Insert row failed', err);
     }
   };
 
   const handleDuplicateRow = async (rowIdx: number) => {
-    if (!data || !fileId) return;
+    if (!data || !fileId) {
+      console.warn('Duplicate row skipped: missing data or fileId');
+      return;
+    }
     try {
+      console.log('Duplicate Row Request', { fileId, rowIdx });
       const resp = await apiDuplicateRow(fileId, rowIdx);
+      console.log('Duplicate Row Response', resp);
       const columnTypes: any = {};
       resp.headers.forEach(h => {
         const t = resp.types[h];
@@ -766,16 +826,22 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
         pinnedColumns: data.pinnedColumns,
         frozenColumns: data.frozenColumns,
         cellColors: data.cellColors,
-      });
+      }, resp.df_id);
     } catch (err) {
+      console.error('Duplicate Row Error', err);
       handleApiError('Duplicate row failed', err);
     }
   };
 
   const handleRetypeColumn = async (col: string, newType: 'number' | 'text') => {
-    if (!data || !fileId) return;
+    if (!data || !fileId) {
+      console.warn('Retype column skipped: missing data or fileId');
+      return;
+    }
     try {
+      console.log('Retype Column Request', { fileId, col, newType });
       const resp = await apiRetypeColumn(fileId, col, newType === 'text' ? 'string' : newType);
+      console.log('Retype Column Response', resp);
       const columnTypes: any = {};
       resp.headers.forEach(h => {
         const t = resp.types[h];
@@ -789,16 +855,22 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
         pinnedColumns: data.pinnedColumns,
         frozenColumns: data.frozenColumns,
         cellColors: data.cellColors,
-      });
+      }, resp.df_id);
     } catch (err) {
+      console.error('Retype Column Error', err);
       handleApiError('Retype column failed', err);
     }
   };
 
   const handleDeleteRow = async (rowIdx: number) => {
-    if (!data || !fileId) return;
+    if (!data || !fileId) {
+      console.warn('Delete row skipped: missing data or fileId');
+      return;
+    }
     try {
+      console.log('Delete Row Request', { fileId, rowIdx });
       const resp = await apiDeleteRow(fileId, rowIdx);
+      console.log('Delete Row Response', resp);
       const columnTypes: any = {};
       resp.headers.forEach(h => {
         const t = resp.types[h];
@@ -812,8 +884,9 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
         pinnedColumns: data.pinnedColumns,
         frozenColumns: data.frozenColumns,
         cellColors: data.cellColors,
-      });
+      }, resp.df_id);
     } catch (err) {
+      console.error('Delete Row Error', err);
       handleApiError('Delete row failed', err);
     }
   };

@@ -102,7 +102,7 @@ const DataFrameOperationsAtom: React.FC<Props> = ({ atomId }) => {
   };
 
   // In handleDataChange, always update tableData and selectedColumns
-  const handleDataChange = (newData: DataFrameData) => {
+  const handleDataChange = (newData: DataFrameData, newFileId?: string) => {
     // Deep clone to ensure new references for Zustand/React
     const clonedData = JSON.parse(JSON.stringify(newData));
     // Merge with existing settings to preserve properties like selectedFile
@@ -110,6 +110,7 @@ const DataFrameOperationsAtom: React.FC<Props> = ({ atomId }) => {
       ...settings,
       tableData: clonedData,
       selectedColumns: [...clonedData.headers],
+      fileId: newFileId || settings.fileId || null,
     });
   };
 
