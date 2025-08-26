@@ -643,7 +643,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
     if (!data || !fileId) return;
     const newColKey = getNextColKey(data.headers);
     try {
-      const resp = await apiInsertColumn(fileId, newColKey, '', colIdx + 1);
+      const resp = await apiInsertColumn(fileId, newColKey, '', colIdx);
       const columnTypes: any = {};
       resp.headers.forEach(h => {
         const t = resp.types[h];
