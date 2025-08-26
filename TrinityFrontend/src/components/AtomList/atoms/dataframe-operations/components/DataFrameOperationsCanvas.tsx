@@ -643,6 +643,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
     try {
       console.log('Triggering API: insert_column');
       const resp = await apiInsertColumn(fileId, colIdx, newColKey, '');
+      console.log('Insert Column Response', resp);
       const columnTypes: any = {};
       resp.headers.forEach(h => {
         const t = resp.types[h];
@@ -670,6 +671,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
     try {
       console.log('Triggering API: delete_column');
       const resp = await apiDeleteColumn(fileId, col);
+      console.log('Delete Column Response', resp);
       const columnTypes: any = {};
       resp.headers.forEach(h => {
         const t = resp.types[h];
@@ -700,6 +702,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
     try {
       console.log('Triggering API: duplicate_column');
       const resp = await apiDuplicateColumn(fileId, col, newName);
+      console.log('Duplicate Column Response', resp);
       const columnTypes: any = {};
       resp.headers.forEach(h => {
         const t = resp.types[h];
@@ -725,6 +728,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
     try {
       console.log('Triggering API: insert_row');
       const resp = await apiInsertRow(fileId, rowIdx, position);
+      console.log('Insert Row Response', resp);
       const columnTypes: any = {};
       resp.headers.forEach(h => {
         const t = resp.types[h];
@@ -749,6 +753,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
     try {
       console.log('Triggering API: duplicate_row');
       const resp = await apiDuplicateRow(fileId, rowIdx);
+      console.log('Duplicate Row Response', resp);
       const columnTypes: any = {};
       resp.headers.forEach(h => {
         const t = resp.types[h];
@@ -796,6 +801,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
     try {
       console.log('Triggering API: delete_row');
       const resp = await apiDeleteRow(fileId, rowIdx);
+      console.log('Delete Row Response', resp);
       const columnTypes: any = {};
       resp.headers.forEach(h => {
         const t = resp.types[h];
