@@ -907,28 +907,27 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
               </Button>
             </div>
           </div>
-        </div>
 
-        {/* Table section - Excel-like appearance */}
-        <div className="flex-1 overflow-auto">
-          {/* Placeholder for when no data is loaded */}
-          {data && !Array.isArray(data.headers) || data.headers.length === 0 ? (
-            <div className="flex flex-1 items-center justify-center bg-gray-50">
-              <div className="border border-gray-200 bg-white rounded-lg p-4 text-center max-w-md w-full mx-auto">
-                <p className="p-4 text-center text-gray-500">No results to display. Upload a CSV or Excel file to see results here.</p>
+          {/* Table section - Excel-like appearance */}
+          <div className="flex-1 overflow-auto">
+            {/* Placeholder for when no data is loaded */}
+            {!data || !Array.isArray(data.headers) || data.headers.length === 0 ? (
+              <div className="flex flex-1 items-center justify-center bg-gray-50">
+                <div className="border border-gray-200 bg-white rounded-lg p-4 text-center max-w-md w-full mx-auto">
+                  <p className="p-4 text-center text-gray-500">No results to display. Upload a CSV or Excel file to see results here.</p>
+                </div>
               </div>
-            </div>
-          ) : (
-            <div className="table-wrapper">
-              <div className="table-edge-left" />
-              <div className="table-edge-right" />
-              <div className="table-overflow relative">
-                {operationLoading && (
-                  <div className="absolute inset-0 bg-white/70 flex items-center justify-center z-10 text-sm text-slate-700">
-                    Operation Loading...
-                  </div>
-                )}
-                <Table className="table-base">
+            ) : (
+              <div className="table-wrapper">
+                <div className="table-edge-left" />
+                <div className="table-edge-right" />
+                <div className="table-overflow relative">
+                  {operationLoading && (
+                    <div className="absolute inset-0 bg-white/70 flex items-center justify-center z-10 text-sm text-slate-700">
+                      Operation Loading...
+                    </div>
+                  )}
+                  <Table className="table-base">
               <TableHeader className="table-header">
                 <TableRow className="table-header-row">
                   {settings.showRowNumbers && (
