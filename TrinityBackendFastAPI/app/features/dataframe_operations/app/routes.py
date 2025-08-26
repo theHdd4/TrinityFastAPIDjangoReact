@@ -168,24 +168,30 @@ async def load_dataframe(file: UploadFile = File(...)):
 
 @router.post("/filter_rows")
 async def filter_rows(df_id: str = Body(...), column: str = Body(...), value: Any = Body(...)):
+    print(f"/filter_rows called df_id={df_id}, column={column}, value={value}", flush=True)
     df = _get_df(df_id)
     try:
         df = df[df[column] == value]
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
     SESSIONS[df_id] = df
-    return _df_payload(df, df_id)
+    result = _df_payload(df, df_id)
+    print("/filter_rows response", result, flush=True)
+    return result
 
 
 @router.post("/sort")
 async def sort_dataframe(df_id: str = Body(...), column: str = Body(...), direction: str = Body("asc")):
+    print(f"/sort called df_id={df_id}, column={column}, direction={direction}", flush=True)
     df = _get_df(df_id)
     try:
         df = df.sort_values(by=column, ascending=direction == "asc").reset_index(drop=True)
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
     SESSIONS[df_id] = df
-    return _df_payload(df, df_id)
+    result = _df_payload(df, df_id)
+    print("/sort response", result, flush=True)
+    return result
 
 
 @router.post("/insert_row")
@@ -208,13 +214,16 @@ async def insert_row(
 
 @router.post("/delete_row")
 async def delete_row(df_id: str = Body(...), index: int = Body(...)):
+    print(f"/delete_row called df_id={df_id}, index={index}", flush=True)
     df = _get_df(df_id)
     try:
         df = df.drop(index).reset_index(drop=True)
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
     SESSIONS[df_id] = df
-    return _df_payload(df, df_id)
+    result = _df_payload(df, df_id)
+    print("/delete_row response", result, flush=True)
+    return result
 
 
 @router.post("/insert_column")
@@ -238,36 +247,46 @@ async def insert_column(
 
 @router.post("/delete_column")
 async def delete_column(df_id: str = Body(...), name: str = Body(...)):
+    print(f"/delete_column called df_id={df_id}, name={name}", flush=True)
     df = _get_df(df_id)
     try:
         df = df.drop(columns=[name])
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
     SESSIONS[df_id] = df
-    return _df_payload(df, df_id)
+    result = _df_payload(df, df_id)
+    print("/delete_column response", result, flush=True)
+    return result
 
 
 @router.post("/edit_cell")
 async def edit_cell(df_id: str = Body(...), row: int = Body(...), column: str = Body(...), value: Any = Body(...)):
+    print(f"/edit_cell called df_id={df_id}, row={row}, column={column}, value={value}", flush=True)
     df = _get_df(df_id)
     try:
         df.at[row, column] = value
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
     SESSIONS[df_id] = df
-    return _df_payload(df, df_id)
+    result = _df_payload(df, df_id)
+    print("/edit_cell response", result, flush=True)
+    return result
 
 
 @router.post("/rename_column")
 async def rename_column(df_id: str = Body(...), old_name: str = Body(...), new_name: str = Body(...)):
+    print(f"/rename_column called df_id={df_id}, old_name={old_name}, new_name={new_name}", flush=True)
     df = _get_df(df_id)
     df = df.rename(columns={old_name: new_name})
     SESSIONS[df_id] = df
-    return _df_payload(df, df_id)
+    result = _df_payload(df, df_id)
+    print("/rename_column response", result, flush=True)
+    return result
 
 
 @router.post("/duplicate_row")
 async def duplicate_row(df_id: str = Body(...), index: int = Body(...)):
+    print(f"/duplicate_row called df_id={df_id}, index={index}", flush=True)
     df = _get_df(df_id)
     try:
         row = df.iloc[[index]]
@@ -275,11 +294,14 @@ async def duplicate_row(df_id: str = Body(...), index: int = Body(...)):
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
     SESSIONS[df_id] = df
-    return _df_payload(df, df_id)
+    result = _df_payload(df, df_id)
+    print("/duplicate_row response", result, flush=True)
+    return result
 
 
 @router.post("/duplicate_column")
 async def duplicate_column(df_id: str = Body(...), name: str = Body(...), new_name: str = Body(...)):
+    print(f"/duplicate_column called df_id={df_id}, name={name}, new_name={new_name}", flush=True)
     df = _get_df(df_id)
     try:
         idx = df.columns.get_loc(name)
@@ -287,11 +309,14 @@ async def duplicate_column(df_id: str = Body(...), name: str = Body(...), new_na
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
     SESSIONS[df_id] = df
-    return _df_payload(df, df_id)
+    result = _df_payload(df, df_id)
+    print("/duplicate_column response", result, flush=True)
+    return result
 
 
 @router.post("/move_column")
 async def move_column(df_id: str = Body(...), from_col: str = Body(..., alias="from"), to_index: int = Body(...)):
+    print(f"/move_column called df_id={df_id}, from_col={from_col}, to_index={to_index}", flush=True)
     df = _get_df(df_id)
     try:
         col = df.pop(from_col)
@@ -299,11 +324,14 @@ async def move_column(df_id: str = Body(...), from_col: str = Body(..., alias="f
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
     SESSIONS[df_id] = df
-    return _df_payload(df, df_id)
+    result = _df_payload(df, df_id)
+    print("/move_column response", result, flush=True)
+    return result
 
 
 @router.post("/retype_column")
 async def retype_column(df_id: str = Body(...), name: str = Body(...), new_type: str = Body(...)):
+    print(f"/retype_column called df_id={df_id}, name={name}, new_type={new_type}", flush=True)
     df = _get_df(df_id)
     try:
         if new_type == "number":
@@ -315,7 +343,9 @@ async def retype_column(df_id: str = Body(...), name: str = Body(...), new_type:
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
     SESSIONS[df_id] = df
-    return _df_payload(df, df_id)
+    result = _df_payload(df, df_id)
+    print("/retype_column response", result, flush=True)
+    return result
 
 
 @router.get("/preview")
