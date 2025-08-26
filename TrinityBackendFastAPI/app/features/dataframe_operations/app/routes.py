@@ -1,9 +1,7 @@
 from fastapi import APIRouter, Response, Body, HTTPException, UploadFile, File
 import os
 from minio import Minio
-from minio.error import S3Error
 from urllib.parse import unquote
-import redis
 import pyarrow as pa
 import pyarrow.ipc as ipc
 import pandas as pd
@@ -11,10 +9,11 @@ import numpy as np
 import io
 import uuid
 from typing import Dict, Any, List
+from app.DataStorageRetrieval.arrow_client import download_dataframe
 
 router = APIRouter()
 
-# Self-contained MinIO/Redis config (match feature-overview)
+# Self-contained MinIO config (match feature-overview)
 MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "minio:9000")
 MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY", "admin_dev")
 MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY", "pass_dev")
@@ -23,9 +22,6 @@ CLIENT_NAME = os.getenv("CLIENT_NAME", "default_client")
 APP_NAME = os.getenv("APP_NAME", "default_app")
 PROJECT_NAME = os.getenv("PROJECT_NAME", "default_project")
 OBJECT_PREFIX = f"{CLIENT_NAME}/{APP_NAME}/{PROJECT_NAME}/"
-REDIS_HOST = os.getenv("REDIS_HOST", "redis")
-REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))
-REDIS_DB = int(os.getenv("REDIS_DB", 0))
 
 minio_client = Minio(
     MINIO_ENDPOINT,
@@ -33,7 +29,6 @@ minio_client = Minio(
     secret_key=MINIO_SECRET_KEY,
     secure=False
 )
-redis_client = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=REDIS_DB)
 
 # In-memory storage for dataframe sessions
 SESSIONS: Dict[str, pd.DataFrame] = {}
@@ -60,37 +55,15 @@ def _df_payload(df: pd.DataFrame, df_id: str) -> Dict[str, Any]:
 
 
 def _fetch_df_from_object(object_name: str) -> pd.DataFrame:
-    """Fetch a DataFrame from Redis or MinIO given an object key."""
+    """Fetch a DataFrame from the Flight server or MinIO given an object key."""
     object_name = unquote(object_name)
     if not (object_name.endswith('.arrow') or object_name.endswith('.csv')):
         raise HTTPException(status_code=400, detail="Invalid object_name format")
     try:
-        redis_bytes = redis_client.get(object_name)
-        if redis_bytes:
-            if object_name.endswith('.arrow'):
-                reader = ipc.open_file(pa.BufferReader(redis_bytes))
-                table = reader.read_all()
-                return table.to_pandas()
-            return pd.read_csv(io.BytesIO(redis_bytes))
+        return download_dataframe(object_name)
     except Exception as e:
-        print(f"[DFOPS] Redis error: {e}")
-    try:
-        obj = minio_client.get_object(MINIO_BUCKET, object_name)
-        data = obj.read()
-        if object_name.endswith('.arrow'):
-            reader = ipc.open_file(pa.BufferReader(data))
-            table = reader.read_all()
-            df = table.to_pandas()
-        else:
-            df = pd.read_csv(io.BytesIO(data))
-        redis_client.setex(object_name, 3600, data)
-        return df
-    except S3Error as e:
-        print(f"[DFOPS] MinIO S3Error: {e}")
+        print(f"[DFOPS] Flight/MinIO fetch error: {e}")
         raise HTTPException(status_code=404, detail="Not Found")
-    except Exception as e:
-        print(f"[DFOPS] MinIO error: {e}")
-        raise HTTPException(status_code=500, detail="Internal Server Error")
 
 @router.get("/test_alive")
 async def test_alive():
@@ -142,7 +115,6 @@ async def save_dataframe(
             length=len(arrow_bytes),
             content_type="application/octet-stream",
         )
-        redis_client.setex(filename, 3600, arrow_bytes)
         return {
             "result_file": filename,
             "shape": df.shape,
