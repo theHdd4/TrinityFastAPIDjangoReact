@@ -1,12 +1,7 @@
-import React, { useRef } from 'react';
-import { Card } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Upload, Settings, Database, Eye, BarChart3 } from 'lucide-react';
+import React from 'react';
+import { Database, Eye, BarChart3 } from 'lucide-react';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import DataFrameOperationsSettings from '../DataFrameOperationsSettings';
-import DataFrameOperationsVisualisation from '../DataFrameOperationsVisualisation';
 import DataFrameOperationsExhibition from '../DataFrameOperationsExhibition';
 import DataFrameOperationsInputs from './DataFrameOperationsInputs';
 import DataFrameOperationsCharts from './DataFrameOperationsCharts';
@@ -106,42 +101,40 @@ const DataFrameOperationsProperties: React.FC<Props> = ({ atomId }) => {
   };
 
   return (
-    <div className="w-80 bg-white border-l border-slate-200 flex flex-col">
-      <Tabs value={tab} onValueChange={setTab} className="w-full">
-        <TabsList className="grid w-full grid-cols-3 mx-4 my-4">
-          <TabsTrigger value="inputs" className="text-xs">
-            <Database className="w-3 h-3 mr-1" />
-            Inputs
-          </TabsTrigger>
-          <TabsTrigger value="charts" className="text-xs">
-            <BarChart3 className="w-3 h-3 mr-1" />
-            Charts
-          </TabsTrigger>
-          <TabsTrigger value="exhibition" className="text-xs">
-            <Eye className="w-3 h-3 mr-1" />
-            Exhibition
-          </TabsTrigger>
-        </TabsList>
-        <div className="px-4">
-          <TabsContent value="inputs">
-            <DataFrameOperationsInputs
-              data={data}
-              settings={settings}
-              selectedFile={selectedFile}
-              onFileSelect={handleFileSelect}
-            />
-            {loading && <div className="text-slate-700 text-xs p-2">Loading data...</div>}
-            {error && <div className="text-red-600 text-xs p-2">{error}</div>}
-          </TabsContent>
-          <TabsContent value="charts">
-            <DataFrameOperationsCharts data={data} settings={settings} />
-          </TabsContent>
-          <TabsContent value="exhibition">
-            <DataFrameOperationsExhibition data={(settings as any).tableData || data} />
-          </TabsContent>
-        </div>
-      </Tabs>
-    </div>
+    <Tabs value={tab} onValueChange={setTab} className="w-full">
+      <TabsList className="grid w-full grid-cols-3 mx-4 my-4">
+        <TabsTrigger value="inputs" className="text-xs">
+          <Database className="w-3 h-3 mr-1" />
+          Inputs
+        </TabsTrigger>
+        <TabsTrigger value="charts" className="text-xs">
+          <BarChart3 className="w-3 h-3 mr-1" />
+          Charts
+        </TabsTrigger>
+        <TabsTrigger value="exhibition" className="text-xs">
+          <Eye className="w-3 h-3 mr-1" />
+          Exhibition
+        </TabsTrigger>
+      </TabsList>
+      <div className="px-4">
+        <TabsContent value="inputs">
+          <DataFrameOperationsInputs
+            data={data}
+            settings={settings}
+            selectedFile={selectedFile}
+            onFileSelect={handleFileSelect}
+          />
+          {loading && <div className="text-slate-700 text-xs p-2">Loading data...</div>}
+          {error && <div className="text-red-600 text-xs p-2">{error}</div>}
+        </TabsContent>
+        <TabsContent value="charts">
+          <DataFrameOperationsCharts data={data} settings={settings} />
+        </TabsContent>
+        <TabsContent value="exhibition">
+          <DataFrameOperationsExhibition data={(settings as any).tableData || data} />
+        </TabsContent>
+      </div>
+    </Tabs>
   );
 };
 

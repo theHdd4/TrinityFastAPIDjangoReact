@@ -170,6 +170,20 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
       document.removeEventListener('mouseup', handleMouseUp);
     };
   }, [resizingCol, resizingRow, settings.columnWidths, settings.rowHeights, onSettingsChange]);
+
+  // Clear column selection when clicking outside the selected column
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (selectedColumn) {
+        const target = e.target as HTMLElement;
+        if (!target.closest(`[data-col="${selectedColumn}"]`)) {
+          setSelectedColumn(null);
+        }
+      }
+    };
+    document.addEventListener('click', handleClickOutside);
+    return () => document.removeEventListener('click', handleClickOutside);
+  }, [selectedColumn]);
   // 1. Add state for filter range
   const [filterRange, setFilterRange] = useState<{ min: number; max: number; value: [number, number] } | null>(null);
 
@@ -985,7 +999,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                       Operation Loading...
                     </div>
                   )}
-                  <Table className="table-base">
+                  <Table className="table-base table-fixed" style={{ tableLayout: 'fixed' }}>
               <TableHeader className="table-header">
                 <TableRow className="table-header-row">
                   {settings.showRowNumbers && (
@@ -994,8 +1008,9 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                   {Array.isArray(data?.headers) && data.headers.map((header, colIdx) => (
                     <TableHead
                       key={header + '-' + colIdx}
+                      data-col={header}
                       className={`table-header-cell text-center bg-white border-r border-gray-200 relative ${selectedColumn === header ? 'border-2 border-black' : ''}`}
-                      style={{ width: settings.columnWidths?.[header] }}
+                      style={{ width: settings.columnWidths?.[header], minWidth: settings.columnWidths?.[header] }}
                       draggable
                       onDragStart={() => handleDragStart(header)}
                       onDragOver={e => handleDragOver(e, header)}
@@ -1089,9 +1104,10 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                       return (
                         <TableCell
                           key={colIdx}
-                          className={`table-cell text-center font-medium min-w-[120px] ${selectedCell?.row === rowIndex && selectedCell?.col === column ? 'border border-blue-400' : selectedColumn === column ? 'border border-black' : ''}`}
-                          style={{ width: settings.columnWidths?.[column] }}
-                          onClick={() => setSelectedCell({ row: rowIndex, col: column })}
+                          data-col={column}
+                          className={`table-cell text-center font-medium ${selectedCell?.row === rowIndex && selectedCell?.col === column ? 'border border-blue-400' : selectedColumn === column ? 'border border-black' : ''}`}
+                          style={{ width: settings.columnWidths?.[column], minWidth: settings.columnWidths?.[column] }}
+                          onClick={() => handleCellClick(rowIndex, column)}
                           onDoubleClick={() => {
                             // Always allow cell editing regardless of enableEditing setting
                             setEditingCell({ row: rowIndex, col: column });
