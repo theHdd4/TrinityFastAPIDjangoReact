@@ -191,17 +191,14 @@ async def sort_dataframe(df_id: str = Body(...), column: str = Body(...), direct
 @router.post("/insert_row")
 async def insert_row(
     df_id: str = Body(...),
-    row: Dict[str, Any] = Body(...),
-    index: int | None = Body(None),
+    index: int = Body(...),
+    direction: str = Body("below"),
 ):
     df = _get_df(df_id)
-    new_row = pd.DataFrame([row], columns=df.columns)
-    if index is None or index >= len(df):
-        df = pd.concat([df, new_row], ignore_index=True)
-    else:
-        upper = df.iloc[:index]
-        lower = df.iloc[index:]
-        df = pd.concat([upper, new_row, lower], ignore_index=True)
+    empty = {col: None for col in df.columns}
+    insert_at = index if direction == "above" else index + 1
+    insert_at = max(0, min(insert_at, len(df)))
+    df = pd.concat([df.iloc[:insert_at], pd.DataFrame([empty]), df.iloc[insert_at:]]).reset_index(drop=True)
     SESSIONS[df_id] = df
     return _df_payload(df, df_id)
 
@@ -220,35 +217,35 @@ async def delete_row(df_id: str = Body(...), index: int = Body(...)):
 @router.post("/insert_column")
 async def insert_column(
     df_id: str = Body(...),
-    column: str = Body(...),
-    value: Any = Body(None),
-    index: int | None = Body(None),
+    index: int = Body(...),
+    name: str = Body(...),
+    default: Any = Body(None),
 ):
     df = _get_df(df_id)
-    if index is None or index >= len(df.columns):
-        df[column] = value
+    if index >= len(df.columns):
+        df[name] = default
     else:
-        df.insert(index, column, value)
+        df.insert(index, name, default)
     SESSIONS[df_id] = df
     return _df_payload(df, df_id)
 
 
 @router.post("/delete_column")
-async def delete_column(df_id: str = Body(...), column: str = Body(...)):
+async def delete_column(df_id: str = Body(...), name: str = Body(...)):
     df = _get_df(df_id)
     try:
-        df = df.drop(columns=[column])
+        df = df.drop(columns=[name])
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
     SESSIONS[df_id] = df
     return _df_payload(df, df_id)
 
 
-@router.post("/update_cell")
-async def update_cell(df_id: str = Body(...), row_idx: int = Body(...), column: str = Body(...), value: Any = Body(...)):
+@router.post("/edit_cell")
+async def edit_cell(df_id: str = Body(...), row: int = Body(...), column: str = Body(...), value: Any = Body(...)):
     df = _get_df(df_id)
     try:
-        df.at[row_idx, column] = value
+        df.at[row, column] = value
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
     SESSIONS[df_id] = df
@@ -256,9 +253,61 @@ async def update_cell(df_id: str = Body(...), row_idx: int = Body(...), column: 
 
 
 @router.post("/rename_column")
-async def rename_column(df_id: str = Body(...), old: str = Body(...), new: str = Body(...)):
+async def rename_column(df_id: str = Body(...), old_name: str = Body(...), new_name: str = Body(...)):
     df = _get_df(df_id)
-    df = df.rename(columns={old: new})
+    df = df.rename(columns={old_name: new_name})
+    SESSIONS[df_id] = df
+    return _df_payload(df, df_id)
+
+
+@router.post("/duplicate_row")
+async def duplicate_row(df_id: str = Body(...), index: int = Body(...)):
+    df = _get_df(df_id)
+    try:
+        row = df.iloc[[index]]
+        df = pd.concat([df.iloc[: index + 1], row, df.iloc[index + 1 :]]).reset_index(drop=True)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    SESSIONS[df_id] = df
+    return _df_payload(df, df_id)
+
+
+@router.post("/duplicate_column")
+async def duplicate_column(df_id: str = Body(...), name: str = Body(...), new_name: str = Body(...)):
+    df = _get_df(df_id)
+    try:
+        idx = df.columns.get_loc(name)
+        df.insert(idx + 1, new_name, df[name])
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    SESSIONS[df_id] = df
+    return _df_payload(df, df_id)
+
+
+@router.post("/move_column")
+async def move_column(df_id: str = Body(...), from_col: str = Body(..., alias="from"), to_index: int = Body(...)):
+    df = _get_df(df_id)
+    try:
+        col = df.pop(from_col)
+        df.insert(to_index, from_col, col)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    SESSIONS[df_id] = df
+    return _df_payload(df, df_id)
+
+
+@router.post("/retype_column")
+async def retype_column(df_id: str = Body(...), name: str = Body(...), new_type: str = Body(...)):
+    df = _get_df(df_id)
+    try:
+        if new_type == "number":
+            df[name] = pd.to_numeric(df[name], errors="coerce")
+        elif new_type in ["string", "text"]:
+            df[name] = df[name].astype(str)
+        else:
+            df[name] = df[name].astype(new_type)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
     SESSIONS[df_id] = df
     return _df_payload(df, df_id)
 
@@ -296,10 +345,11 @@ async def ai_execute(df_id: str = Body(...), operations: List[Dict[str, Any]] = 
         elif name == "sort":
             df = df.sort_values(by=params.get("column"), ascending=params.get("direction", "asc") == "asc")
         elif name == "insert_column":
-            df[params.get("column")] = params.get("value")
+            idx = params.get("index", len(df.columns))
+            df.insert(idx, params.get("name"), params.get("default"))
         elif name == "delete_row":
             df = df.drop(params.get("index")).reset_index(drop=True)
-        elif name == "update_cell":
-            df.at[params.get("row_idx"), params.get("column")] = params.get("value")
+        elif name == "edit_cell":
+            df.at[params.get("row"), params.get("column")] = params.get("value")
     SESSIONS[df_id] = df.reset_index(drop=True)
     return _df_payload(SESSIONS[df_id], df_id)

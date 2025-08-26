@@ -14,22 +14,34 @@ Body: `{ "df_id": "<id>", "column": "Country", "value": "India" }`
 Body: `{ "df_id": "<id>", "column": "Date", "direction": "asc" }`
 
 ### POST `/insert_row`
-Body: `{ "df_id": "<id>", "row": {"A":1}, "index": 5 }` *(optional `index` inserts at position)*
+Body: `{ "df_id": "<id>", "index": 4, "direction": "below" }`
 
 ### POST `/delete_row`
 Body: `{ "df_id": "<id>", "index": 10 }`
 
+### POST `/duplicate_row`
+Body: `{ "df_id": "<id>", "index": 7 }`
+
 ### POST `/insert_column`
-Body: `{ "df_id": "<id>", "column": "NewCol", "value": 0, "index": 3 }` *(optional `index` inserts at position)*
+Body: `{ "df_id": "<id>", "index": 3, "name": "New Col", "default": "" }`
 
 ### POST `/delete_column`
-Body: `{ "df_id": "<id>", "column": "OldCol" }`
+Body: `{ "df_id": "<id>", "name": "OldCol" }`
 
-### POST `/update_cell`
-Body: `{ "df_id": "<id>", "row_idx": 0, "column": "Sales", "value": 1000 }`
+### POST `/duplicate_column`
+Body: `{ "df_id": "<id>", "name": "Revenue", "new_name": "Revenue_copy" }`
+
+### POST `/move_column`
+Body: `{ "df_id": "<id>", "from": "Date", "to_index": 1 }`
+
+### POST `/retype_column`
+Body: `{ "df_id": "<id>", "name": "Amount", "new_type": "number" }`
+
+### POST `/edit_cell`
+Body: `{ "df_id": "<id>", "row": 0, "column": "Sales", "value": 1000 }`
 
 ### POST `/rename_column`
-Body: `{ "df_id": "<id>", "old": "Revenue", "new": "Sales" }`
+Body: `{ "df_id": "<id>", "old_name": "Revenue", "new_name": "Sales" }`
 
 ### GET `/preview`
 Query: `df_id`, `n` (optional) – returns first rows for preview.

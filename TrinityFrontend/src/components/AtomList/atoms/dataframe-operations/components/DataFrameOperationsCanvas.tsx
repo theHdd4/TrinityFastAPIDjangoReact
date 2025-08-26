@@ -23,13 +23,18 @@ import { DataFrameData, DataFrameSettings } from '../DataFrameOperationsAtom';
 import { DATAFRAME_OPERATIONS_API, VALIDATE_API } from '@/lib/api';
 import {
   loadDataframe,
-  updateCell as apiUpdateCell,
+  editCell as apiEditCell,
   insertRow as apiInsertRow,
   deleteRow as apiDeleteRow,
   insertColumn as apiInsertColumn,
   deleteColumn as apiDeleteColumn,
   sortDataframe as apiSort,
   filterRows as apiFilter,
+  renameColumn as apiRenameColumn,
+  duplicateRow as apiDuplicateRow,
+  duplicateColumn as apiDuplicateColumn,
+  moveColumn as apiMoveColumn,
+  retypeColumn as apiRetypeColumn,
 } from '../services/dataframeOperationsApi';
 import { toast } from '@/components/ui/use-toast';
 import '@/Templates/Table/table.css';
@@ -433,24 +438,30 @@ const commitCellEdit = (rowIndex: number, column: string) => {
 };
 
 // Helper to commit a header edit
-const commitHeaderEdit = (colIdx: number, value?: string) => {
-  if (!data) { setEditingHeader(null); return; }
+const commitHeaderEdit = async (colIdx: number, value?: string) => {
+  if (!data || !fileId) { setEditingHeader(null); return; }
   const newHeader = value !== undefined ? value : editingHeaderValue;
-  const latestHeaders = [...data.headers];
-  if (newHeader === latestHeaders[colIdx]) { setEditingHeader(null); return; }
-  latestHeaders[colIdx] = newHeader;
-  const newRows = data.rows.map(row => {
-    const newRow: any = {};
-    Object.entries(row).forEach(([k, v], i) => {
-      newRow[i === colIdx ? newHeader : k] = v;
+  const oldHeader = data.headers[colIdx];
+  if (newHeader === oldHeader) { setEditingHeader(null); return; }
+  try {
+    const resp = await apiRenameColumn(fileId, oldHeader, newHeader);
+    const columnTypes: any = {};
+    resp.headers.forEach(h => {
+      const t = resp.types[h];
+      columnTypes[h] = t.includes('float') || t.includes('int') ? 'number' : 'text';
     });
-    return newRow;
-  });
-  const newColumnTypes: any = {};
-  Object.entries(data.columnTypes).forEach(([k, v], i) => {
-    newColumnTypes[i === colIdx ? newHeader : k] = v;
-  });
-  onDataChange({ ...data, headers: latestHeaders, rows: newRows, columnTypes: newColumnTypes });
+    onDataChange({
+      headers: resp.headers,
+      rows: resp.rows,
+      fileName: data.fileName,
+      columnTypes,
+      pinnedColumns: data.pinnedColumns,
+      frozenColumns: data.frozenColumns,
+      cellColors: data.cellColors,
+    });
+  } catch (e) {
+    console.error(e);
+  }
   setEditingHeader(null);
 };
 
@@ -460,7 +471,7 @@ const handleCellEdit = async (rowIndex: number, column: string, newValue: string
     if (!data || !fileId) return;
     const globalRowIndex = startIndex + rowIndex;
     try {
-      const resp = await apiUpdateCell(fileId, globalRowIndex, column, newValue);
+      const resp = await apiEditCell(fileId, globalRowIndex, column, newValue);
       const columnTypes: any = {};
       resp.headers.forEach(h => {
         const t = resp.types[h];
@@ -483,8 +494,10 @@ const handleCellEdit = async (rowIndex: number, column: string, newValue: string
   const handleAddRow = async () => {
     resetSaveSuccess();
     if (!data || !fileId) return;
+    const idx = data.rows.length > 0 ? data.rows.length - 1 : 0;
+    const dir: 'above' | 'below' = data.rows.length > 0 ? 'below' : 'above';
     try {
-      const resp = await apiInsertRow(fileId, {}, data.rows.length);
+      const resp = await apiInsertRow(fileId, idx, dir);
       const columnTypes: any = {};
       resp.headers.forEach(h => {
         const t = resp.types[h];
@@ -509,7 +522,7 @@ const handleCellEdit = async (rowIndex: number, column: string, newValue: string
     if (!data || !fileId) return;
     const newColumnName = `Column_${data.headers.length + 1}`;
     try {
-      const resp = await apiInsertColumn(fileId, newColumnName, '', data.headers.length);
+      const resp = await apiInsertColumn(fileId, data.headers.length, newColumnName, '');
       const columnTypes: any = {};
       resp.headers.forEach(h => {
         const t = resp.types[h];
@@ -560,7 +573,29 @@ const handleCellEdit = async (rowIndex: number, column: string, newValue: string
     }
   };
 
-  const handleDragEnd = () => {
+  const handleDragEnd = async () => {
+    if (draggedCol && data && fileId) {
+      const toIndex = data.headers.indexOf(draggedCol);
+      try {
+        const resp = await apiMoveColumn(fileId, draggedCol, toIndex);
+        const columnTypes: any = {};
+        resp.headers.forEach(h => {
+          const t = resp.types[h];
+          columnTypes[h] = t.includes('float') || t.includes('int') ? 'number' : 'text';
+        });
+        onDataChange({
+          headers: resp.headers,
+          rows: resp.rows,
+          fileName: data.fileName,
+          columnTypes,
+          pinnedColumns: data.pinnedColumns,
+          frozenColumns: data.frozenColumns,
+          cellColors: data.cellColors,
+        });
+      } catch (e) {
+        console.error(e);
+      }
+    }
     setDraggedCol(null);
   };
 
@@ -643,7 +678,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
     if (!data || !fileId) return;
     const newColKey = getNextColKey(data.headers);
     try {
-      const resp = await apiInsertColumn(fileId, newColKey, '', colIdx);
+      const resp = await apiInsertColumn(fileId, colIdx, newColKey, '');
       const columnTypes: any = {};
       resp.headers.forEach(h => {
         const t = resp.types[h];
@@ -689,14 +724,86 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
     }
   };
 
+  const handleDuplicateColumn = async (colIdx: number) => {
+    resetSaveSuccess();
+    if (!data || !fileId) return;
+    const col = data.headers[colIdx];
+    let newName = `${col}_copy`;
+    while (data.headers.includes(newName)) {
+      newName += '_copy';
+    }
+    try {
+      const resp = await apiDuplicateColumn(fileId, col, newName);
+      const columnTypes: any = {};
+      resp.headers.forEach(h => {
+        const t = resp.types[h];
+        columnTypes[h] = t.includes('float') || t.includes('int') ? 'number' : 'text';
+      });
+      onDataChange({
+        headers: resp.headers,
+        rows: resp.rows,
+        fileName: data.fileName,
+        columnTypes,
+        pinnedColumns: data.pinnedColumns,
+        frozenColumns: data.frozenColumns,
+        cellColors: data.cellColors,
+      });
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
   // Row insert / delete handlers
   const handleInsertRow = async (position: 'above' | 'below', rowIdx: number) => {
     if (!data || !fileId) return;
-    const newRow: any = {};
-    data.headers.forEach(h => { newRow[h] = ''; });
-    const index = position === 'above' ? rowIdx : rowIdx + 1;
     try {
-      const resp = await apiInsertRow(fileId, newRow, index);
+      const resp = await apiInsertRow(fileId, rowIdx, position);
+      const columnTypes: any = {};
+      resp.headers.forEach(h => {
+        const t = resp.types[h];
+        columnTypes[h] = t.includes('float') || t.includes('int') ? 'number' : 'text';
+      });
+      onDataChange({
+        headers: resp.headers,
+        rows: resp.rows,
+        fileName: data.fileName,
+        columnTypes,
+        pinnedColumns: data.pinnedColumns,
+        frozenColumns: data.frozenColumns,
+        cellColors: data.cellColors,
+      });
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleDuplicateRow = async (rowIdx: number) => {
+    if (!data || !fileId) return;
+    try {
+      const resp = await apiDuplicateRow(fileId, rowIdx);
+      const columnTypes: any = {};
+      resp.headers.forEach(h => {
+        const t = resp.types[h];
+        columnTypes[h] = t.includes('float') || t.includes('int') ? 'number' : 'text';
+      });
+      onDataChange({
+        headers: resp.headers,
+        rows: resp.rows,
+        fileName: data.fileName,
+        columnTypes,
+        pinnedColumns: data.pinnedColumns,
+        frozenColumns: data.frozenColumns,
+        cellColors: data.cellColors,
+      });
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleRetypeColumn = async (col: string, newType: 'number' | 'text') => {
+    if (!data || !fileId) return;
+    try {
+      const resp = await apiRetypeColumn(fileId, col, newType === 'text' ? 'string' : newType);
       const columnTypes: any = {};
       resp.headers.forEach(h => {
         const t = resp.types[h];
@@ -1181,8 +1288,17 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
           </div>
           {/* Insert */}
           <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onMouseDown={() => { handleInsertColumn(contextMenu.colIdx); setContextMenu(null); }}>Insert</button>
+          {/* Duplicate */}
+          <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onMouseDown={() => { handleDuplicateColumn(contextMenu.colIdx); setContextMenu(null); }}>Duplicate</button>
           {/* Delete */}
           <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onMouseDown={() => { handleDeleteColumn(contextMenu.colIdx); setContextMenu(null); }}>Delete</button>
+          {/* Retype */}
+          {data && data.columnTypes[contextMenu.col] !== 'number' && (
+            <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onMouseDown={() => { handleRetypeColumn(contextMenu.col, 'number'); setContextMenu(null); }}>Convert to Number</button>
+          )}
+          {data && data.columnTypes[contextMenu.col] !== 'text' && (
+            <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onMouseDown={() => { handleRetypeColumn(contextMenu.col, 'text'); setContextMenu(null); }}>Convert to Text</button>
+          )}
           <div className="px-3 py-2 text-xs text-gray-400">Right-click to close</div>
         </div>
       )}
@@ -1193,6 +1309,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
         >
           <div className="px-3 py-2 text-xs font-semibold border-b border-gray-200" style={{color:'#222'}}>Row: {rowContextMenu.rowIdx + 1}</div>
           <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onMouseDown={e => { e.preventDefault(); e.stopPropagation(); handleInsertRow('above', rowContextMenu.rowIdx); setRowContextMenu(null); }}>Insert</button>
+          <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onMouseDown={e => { e.preventDefault(); e.stopPropagation(); handleDuplicateRow(rowContextMenu.rowIdx); setRowContextMenu(null); }}>Duplicate</button>
           <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onMouseDown={e => { e.preventDefault(); e.stopPropagation(); handleDeleteRow(rowContextMenu.rowIdx); setRowContextMenu(null); }}>Delete</button>
           <div className="px-3 py-2 text-xs text-gray-400">Right-click to close</div>
         </div>

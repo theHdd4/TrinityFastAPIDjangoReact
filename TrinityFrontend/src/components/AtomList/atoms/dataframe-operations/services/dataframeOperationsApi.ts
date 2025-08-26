@@ -30,24 +30,44 @@ export async function loadDataframe(file: File): Promise<DataFrameResponse> {
   return res.json();
 }
 
-export function updateCell(dfId: string, row_idx: number, column: string, value: any) {
-  return postJSON(`${DATAFRAME_OPERATIONS_API}/update_cell`, { df_id: dfId, row_idx, column, value });
+export function editCell(dfId: string, row: number, column: string, value: any) {
+  return postJSON(`${DATAFRAME_OPERATIONS_API}/edit_cell`, { df_id: dfId, row, column, value });
 }
 
-export function insertRow(dfId: string, row: any = {}, index?: number) {
-  return postJSON(`${DATAFRAME_OPERATIONS_API}/insert_row`, { df_id: dfId, row, index });
+export function insertRow(dfId: string, index: number, direction: 'above' | 'below') {
+  return postJSON(`${DATAFRAME_OPERATIONS_API}/insert_row`, { df_id: dfId, index, direction });
 }
 
 export function deleteRow(dfId: string, index: number) {
   return postJSON(`${DATAFRAME_OPERATIONS_API}/delete_row`, { df_id: dfId, index });
 }
 
-export function insertColumn(dfId: string, column: string, value: any = null, index?: number) {
-  return postJSON(`${DATAFRAME_OPERATIONS_API}/insert_column`, { df_id: dfId, column, value, index });
+export function duplicateRow(dfId: string, index: number) {
+  return postJSON(`${DATAFRAME_OPERATIONS_API}/duplicate_row`, { df_id: dfId, index });
 }
 
-export function deleteColumn(dfId: string, column: string) {
-  return postJSON(`${DATAFRAME_OPERATIONS_API}/delete_column`, { df_id: dfId, column });
+export function insertColumn(dfId: string, index: number, name: string, def: any = '') {
+  return postJSON(`${DATAFRAME_OPERATIONS_API}/insert_column`, { df_id: dfId, index, name, default: def });
+}
+
+export function deleteColumn(dfId: string, name: string) {
+  return postJSON(`${DATAFRAME_OPERATIONS_API}/delete_column`, { df_id: dfId, name });
+}
+
+export function duplicateColumn(dfId: string, name: string, new_name: string) {
+  return postJSON(`${DATAFRAME_OPERATIONS_API}/duplicate_column`, { df_id: dfId, name, new_name });
+}
+
+export function moveColumn(dfId: string, from: string, to_index: number) {
+  return postJSON(`${DATAFRAME_OPERATIONS_API}/move_column`, { df_id: dfId, from, to_index });
+}
+
+export function retypeColumn(dfId: string, name: string, new_type: string) {
+  return postJSON(`${DATAFRAME_OPERATIONS_API}/retype_column`, { df_id: dfId, name, new_type });
+}
+
+export function renameColumn(dfId: string, old_name: string, new_name: string) {
+  return postJSON(`${DATAFRAME_OPERATIONS_API}/rename_column`, { df_id: dfId, old_name, new_name });
 }
 
 export function sortDataframe(dfId: string, column: string, direction: 'asc' | 'desc') {
