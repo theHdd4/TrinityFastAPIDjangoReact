@@ -39,6 +39,8 @@ export interface DataFrameSettings {
   selectedFile?: string; // Added for file selection
   tableData?: DataFrameData; // Added for table data
   fileId?: string | null; // Persist backend dataframe id
+  columnWidths: { [key: string]: number };
+  rowHeights: { [key: number]: number };
 }
 
 interface Props {
@@ -58,6 +60,8 @@ const DataFrameOperationsAtom: React.FC<Props> = ({ atomId }) => {
     showRowNumbers: true,
     enableEditing: true,
     fileId: null,
+    columnWidths: {},
+    rowHeights: {},
   };
   // Always use tableData as the source of truth
   const data = settings.tableData || null;
@@ -82,6 +86,8 @@ const DataFrameOperationsAtom: React.FC<Props> = ({ atomId }) => {
       searchTerm: '',
       filters: {},
       fileId: backendFileId || settings.fileId || null,
+      columnWidths: {},
+      rowHeights: {},
     };
     updateSettings(atomId, newSettings);
   };
@@ -123,7 +129,9 @@ const DataFrameOperationsAtom: React.FC<Props> = ({ atomId }) => {
         sortColumns: [],
         rowsPerPage: 15,
         showRowNumbers: true,
-        enableEditing: true
+        enableEditing: true,
+        columnWidths: {},
+        rowHeights: {},
       });
     }
   };

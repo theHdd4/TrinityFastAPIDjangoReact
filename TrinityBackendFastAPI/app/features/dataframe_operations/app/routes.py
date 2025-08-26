@@ -89,7 +89,7 @@ async def save_dataframe(
     csv_data: str = Body(..., embed=True),
     filename: str = Body(..., embed=True)
 ):
-    """Save a dataframe (CSV) to MinIO and place it under the Dataframe Operations folder."""
+    """Save a dataframe (CSV) to MinIO under a `dataframe operations` folder using the original file name."""
     try:
         df = pd.read_csv(io.StringIO(csv_data))
 
@@ -102,7 +102,8 @@ async def save_dataframe(
 
         # Determine current prefix and ensure folder exists
         prefix = await get_object_prefix()
-        dfops_prefix = f"{prefix}Dataframe Operations/"
+        # Place results inside a dedicated "dataframe operations" folder
+        dfops_prefix = f"{prefix}dataframe operations/"
         try:
             minio_client.stat_object(MINIO_BUCKET, dfops_prefix)
         except S3Error:

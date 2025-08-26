@@ -124,6 +124,52 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
 
   // Ref to store header cell elements for context-menu positioning
   const headerRefs = useRef<{ [key: string]: HTMLTableCellElement | null }>({});
+  const rowRefs = useRef<{ [key: number]: HTMLTableRowElement | null }>({});
+  const [resizingCol, setResizingCol] = useState<{ key: string; startX: number; startWidth: number } | null>(null);
+  const [resizingRow, setResizingRow] = useState<{ index: number; startY: number; startHeight: number } | null>(null);
+
+  const startColResize = (key: string, e: React.MouseEvent) => {
+    e.preventDefault();
+    const startWidth = headerRefs.current[key]?.offsetWidth || 0;
+    setResizingCol({ key, startX: e.clientX, startWidth });
+  };
+
+  const startRowResize = (index: number, e: React.MouseEvent) => {
+    e.preventDefault();
+    const startHeight = rowRefs.current[index]?.offsetHeight || 0;
+    setResizingRow({ index, startY: e.clientY, startHeight });
+  };
+
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (resizingCol) {
+        const delta = e.clientX - resizingCol.startX;
+        const newWidth = Math.max(resizingCol.startWidth + delta, 30);
+        onSettingsChange({
+          columnWidths: { ...(settings.columnWidths || {}), [resizingCol.key]: newWidth }
+        });
+      }
+      if (resizingRow) {
+        const deltaY = e.clientY - resizingRow.startY;
+        const newHeight = Math.max(resizingRow.startHeight + deltaY, 20);
+        onSettingsChange({
+          rowHeights: { ...(settings.rowHeights || {}), [resizingRow.index]: newHeight }
+        });
+      }
+    };
+    const handleMouseUp = () => {
+      if (resizingCol) setResizingCol(null);
+      if (resizingRow) setResizingRow(null);
+    };
+    if (resizingCol || resizingRow) {
+      document.addEventListener('mousemove', handleMouseMove);
+      document.addEventListener('mouseup', handleMouseUp);
+    }
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [resizingCol, resizingRow, settings.columnWidths, settings.rowHeights, onSettingsChange]);
   // 1. Add state for filter range
   const [filterRange, setFilterRange] = useState<{ min: number; max: number; value: [number, number] } | null>(null);
 
@@ -177,7 +223,10 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
     setSaveSuccess(false);
     try {
       const csv_data = toCSV();
-      const filename = `dataframe_ops_${data?.fileName?.replace(/\.[^/.]+$/, '') || 'file'}_${Date.now()}`;
+      let filename = data?.fileName || `dataframe_${Date.now()}.arrow`;
+      if (!filename.endsWith('.arrow')) {
+        filename = filename.replace(/\.[^/.]+$/, '') + '.arrow';
+      }
       const response = await fetch(`${DATAFRAME_OPERATIONS_API}/save`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -191,6 +240,11 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
       if (saveSuccessTimeout.current) clearTimeout(saveSuccessTimeout.current);
       saveSuccessTimeout.current = setTimeout(() => setSaveSuccess(false), 2000);
       fetchSavedDataFrames(); // Refresh the saved dataframes list in the UI
+      onSettingsChange({
+        tableData: data,
+        columnWidths: settings.columnWidths,
+        rowHeights: settings.rowHeights,
+      });
       toast({
         title: 'DataFrame Saved',
         description: `${filename} saved successfully.`,
@@ -940,7 +994,8 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                   {Array.isArray(data?.headers) && data.headers.map((header, colIdx) => (
                     <TableHead
                       key={header + '-' + colIdx}
-                      className={`table-header-cell text-center bg-white border-r border-gray-200 ${selectedColumn === header ? 'border-2 border-black' : ''}`}
+                      className={`table-header-cell text-center bg-white border-r border-gray-200 relative ${selectedColumn === header ? 'border-2 border-black' : ''}`}
+                      style={{ width: settings.columnWidths?.[header] }}
                       draggable
                       onDragStart={() => handleDragStart(header)}
                       onDragOver={e => handleDragOver(e, header)}
@@ -999,6 +1054,10 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                           {headerDisplayNames[header] ?? header}
                         </div>
                       )}
+                      <div
+                        className="absolute top-0 right-0 h-full w-1 cursor-col-resize"
+                        onMouseDown={e => startColResize(header, e)}
+                      />
                     </TableHead>
                   ))}
                   <TableHead className="table-header-cell w-8" />
@@ -1006,7 +1065,12 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
               </TableHeader>
               <TableBody>
                 {paginatedRows.map((row, rowIndex) => (
-                  <TableRow key={rowIndex} className="table-row">
+                  <TableRow
+                    key={rowIndex}
+                    className="table-row relative"
+                    ref={el => { if (rowRefs.current) rowRefs.current[startIndex + rowIndex] = el; }}
+                    style={{ height: settings.rowHeights?.[startIndex + rowIndex] }}
+                  >
                     {settings.showRowNumbers && (
                       <TableCell
                         className="table-cell w-16 text-center text-xs font-medium"
@@ -1026,6 +1090,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                         <TableCell
                           key={colIdx}
                           className={`table-cell text-center font-medium min-w-[120px] ${selectedCell?.row === rowIndex && selectedCell?.col === column ? 'border border-blue-400' : selectedColumn === column ? 'border border-black' : ''}`}
+                          style={{ width: settings.columnWidths?.[column] }}
                           onClick={() => setSelectedCell({ row: rowIndex, col: column })}
                           onDoubleClick={() => {
                             // Always allow cell editing regardless of enableEditing setting
@@ -1064,6 +1129,10 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                     })}
                     <TableCell className="table-cell w-8">
                     </TableCell>
+                    <div
+                      className="absolute bottom-0 left-0 w-full h-1 cursor-row-resize"
+                      onMouseDown={e => startRowResize(startIndex + rowIndex, e)}
+                    />
                   </TableRow>
                 ))}
               </TableBody>
