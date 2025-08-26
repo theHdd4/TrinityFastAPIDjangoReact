@@ -170,14 +170,15 @@ const DataFrameOperationsAtom: React.FC<Props> = ({ atomId }) => {
           {fileSelected && data && data.headers && data.rows && data.headers.length > 0 && data.rows.length > 0 ? (
             <div className="h-full">
               {viewMode === 'table' && (
-                <DataFrameOperationsCanvas 
-                  data={data} 
+                <DataFrameOperationsCanvas
+                  data={data}
                   settings={settings}
                   onSettingsChange={handleSettingsChange}
                   onDataUpload={handleDataUpload}
                   onDataChange={handleDataChange}
                   onClearAll={handleReset}
                   fileId={settings.fileId || null}
+                  originalData={originalData}
                 />
               )}
               {viewMode === 'chart' && chartConfig && (

@@ -48,6 +48,7 @@ interface DataFrameOperationsCanvasProps {
   onDataChange: (data: DataFrameData) => void;
   onClearAll: () => void;
   fileId?: string | null;
+  originalData?: DataFrameData | null;
 }
 
 function safeToString(val: any): string {
@@ -98,7 +99,8 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
   onDataUpload,
   onDataChange,
   onClearAll,
-  fileId
+  fileId,
+  originalData
 }) => {
   const [currentPage, setCurrentPage] = useState(1);
 
@@ -280,17 +282,18 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
         .map(item => item.row);
     }
 
-    // Unique values for filter UI
+    // Unique values for filter UI (use originalData if available)
+    const sourceRows = originalData?.rows || data.rows;
     const uniqueValues: { [key: string]: string[] } = {};
     data.headers.forEach(header => {
-      const values = Array.from(new Set(data.rows.map(row => safeToString(row[header]))))
+      const values = Array.from(new Set(sourceRows.map(row => safeToString(row[header]))))
         .filter(val => val !== '')
         .sort();
       uniqueValues[header] = values.slice(0, 50);
     });
 
     return { filteredRows, totalRows: filteredRows.length, uniqueValues };
-  }, [data, settings.searchTerm]);
+  }, [data, originalData, settings.searchTerm]);
 
   // Pagination
   const totalPages = Math.ceil(processedData.totalRows / (settings.rowsPerPage || 15));

@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Response, Body, HTTPException, UploadFile, File
 import os
 from minio import Minio
+from minio.error import S3Error
 from urllib.parse import unquote
 import pyarrow as pa
 import pyarrow.ipc as ipc
@@ -10,6 +11,7 @@ import io
 import uuid
 from typing import Dict, Any, List
 from app.DataStorageRetrieval.arrow_client import download_dataframe
+from app.features.data_upload_validate.app.routes import get_object_prefix
 
 router = APIRouter()
 
@@ -18,10 +20,6 @@ MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "minio:9000")
 MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY", "admin_dev")
 MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY", "pass_dev")
 MINIO_BUCKET = os.getenv("MINIO_BUCKET", "trinity")
-CLIENT_NAME = os.getenv("CLIENT_NAME", "default_client")
-APP_NAME = os.getenv("APP_NAME", "default_app")
-PROJECT_NAME = os.getenv("PROJECT_NAME", "default_project")
-OBJECT_PREFIX = f"{CLIENT_NAME}/{APP_NAME}/{PROJECT_NAME}/"
 
 minio_client = Minio(
     MINIO_ENDPOINT,
@@ -91,18 +89,28 @@ async def save_dataframe(
     csv_data: str = Body(..., embed=True),
     filename: str = Body(..., embed=True)
 ):
-    """
-    Save a dataframe (CSV) to MinIO as Arrow file and return file info.
-    """
+    """Save a dataframe (CSV) to MinIO and place it under the Dataframe Operations folder."""
     try:
         df = pd.read_csv(io.StringIO(csv_data))
+
+        # Generate a filename if none supplied
         if not filename:
             df_id = str(uuid.uuid4())[:8]
             filename = f"{df_id}_dataframe_ops.arrow"
-        if not filename.endswith('.arrow'):
-            filename += '.arrow'
-        if not filename.startswith(OBJECT_PREFIX):
-            filename = OBJECT_PREFIX + filename
+        if not filename.endswith(".arrow"):
+            filename += ".arrow"
+
+        # Determine current prefix and ensure folder exists
+        prefix = await get_object_prefix()
+        dfops_prefix = f"{prefix}Dataframe Operations/"
+        try:
+            minio_client.stat_object(MINIO_BUCKET, dfops_prefix)
+        except S3Error:
+            minio_client.put_object(MINIO_BUCKET, dfops_prefix, io.BytesIO(b""), 0)
+
+        object_name = f"{dfops_prefix}{filename}"
+
+        # Convert to Arrow and upload
         table = pa.Table.from_pandas(df)
         arrow_buffer = pa.BufferOutputStream()
         with ipc.new_file(arrow_buffer, table.schema) as writer:
@@ -110,16 +118,17 @@ async def save_dataframe(
         arrow_bytes = arrow_buffer.getvalue().to_pybytes()
         minio_client.put_object(
             MINIO_BUCKET,
-            filename,
+            object_name,
             data=io.BytesIO(arrow_bytes),
             length=len(arrow_bytes),
             content_type="application/octet-stream",
         )
+
         return {
-            "result_file": filename,
+            "result_file": object_name,
             "shape": df.shape,
             "columns": list(df.columns),
-            "message": "DataFrame saved successfully"
+            "message": "DataFrame saved successfully",
         }
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
