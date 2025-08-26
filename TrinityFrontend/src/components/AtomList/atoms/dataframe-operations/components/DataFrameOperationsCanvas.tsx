@@ -668,6 +668,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
     if (colIdx < 0 || colIdx >= data.headers.length) return;
     const col = data.headers[colIdx];
     try {
+      console.log('Triggering API: delete_column');
       const resp = await apiDeleteColumn(fileId, col);
       const columnTypes: any = {};
       resp.headers.forEach(h => {
@@ -697,6 +698,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
       newName += '_copy';
     }
     try {
+      console.log('Triggering API: duplicate_column');
       const resp = await apiDuplicateColumn(fileId, col, newName);
       const columnTypes: any = {};
       resp.headers.forEach(h => {
@@ -745,6 +747,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
   const handleDuplicateRow = async (rowIdx: number) => {
     if (!data || !fileId) return;
     try {
+      console.log('Triggering API: duplicate_row');
       const resp = await apiDuplicateRow(fileId, rowIdx);
       const columnTypes: any = {};
       resp.headers.forEach(h => {
@@ -791,6 +794,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
   const handleDeleteRow = async (rowIdx: number) => {
     if (!data || !fileId) return;
     try {
+      console.log('Triggering API: delete_row');
       const resp = await apiDeleteRow(fileId, rowIdx);
       const columnTypes: any = {};
       resp.headers.forEach(h => {
@@ -1250,11 +1254,35 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
             )}
           </div>
           {/* Insert */}
-          <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleInsertColumn(contextMenu.colIdx); setContextMenu(null); }}>Insert</button>
+          <button
+            className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100"
+            onClick={e => {
+              e.preventDefault();
+              e.stopPropagation();
+              handleInsertColumn(contextMenu.colIdx);
+              setContextMenu(null);
+            }}
+          >Insert</button>
           {/* Duplicate */}
-          <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleDuplicateColumn(contextMenu.colIdx); setContextMenu(null); }}>Duplicate</button>
+          <button
+            className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100"
+            onClick={e => {
+              e.preventDefault();
+              e.stopPropagation();
+              handleDuplicateColumn(contextMenu.colIdx);
+              setContextMenu(null);
+            }}
+          >Duplicate</button>
           {/* Delete */}
-          <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleDeleteColumn(contextMenu.colIdx); setContextMenu(null); }}>Delete</button>
+          <button
+            className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100"
+            onClick={e => {
+              e.preventDefault();
+              e.stopPropagation();
+              handleDeleteColumn(contextMenu.colIdx);
+              setContextMenu(null);
+            }}
+          >Delete</button>
           {/* Retype */}
           {data && data.columnTypes[contextMenu.col] !== 'number' && (
             <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleRetypeColumn(contextMenu.col, 'number'); setContextMenu(null); }}>Convert to Number</button>
