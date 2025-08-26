@@ -7,6 +7,7 @@ import redis
 import pyarrow as pa
 import pyarrow.ipc as ipc
 import pandas as pd
+import numpy as np
 import io
 import uuid
 from typing import Dict, Any, List
@@ -46,10 +47,13 @@ def _get_df(df_id: str) -> pd.DataFrame:
 
 
 def _df_payload(df: pd.DataFrame, df_id: str) -> Dict[str, Any]:
+    safe_df = df.replace([np.inf, -np.inf], np.nan)
+    head = safe_df.head(100)
+    rows = head.where(pd.notnull(head), None).to_dict(orient="records")
     return {
         "df_id": df_id,
         "headers": list(df.columns),
-        "rows": df.head(100).to_dict(orient="records"),
+        "rows": rows,
         "types": {col: str(df[col].dtype) for col in df.columns},
         "row_count": len(df),
         "column_count": len(df.columns),
