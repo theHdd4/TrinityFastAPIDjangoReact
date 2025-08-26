@@ -12,7 +12,7 @@ import DataFrameOperationsInputs from './DataFrameOperationsInputs';
 import DataFrameOperationsCharts from './DataFrameOperationsCharts';
 import { DataFrameData } from '../../DataFrameOperationsAtom';
 import { DATAFRAME_OPERATIONS_API, VALIDATE_API } from '@/lib/api';
-import { loadDataframe } from '../services/dataframeOperationsApi';
+import { loadDataframe } from '../../services/dataframeOperationsApi';
 
 // Define DataFrameOperationsSettings interface and default settings locally
 export interface DataFrameOperationsSettings {
