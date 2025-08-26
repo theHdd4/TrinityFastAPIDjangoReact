@@ -1,0 +1,219 @@
+import asyncio
+from datetime import datetime
+from io import BytesIO
+from typing import Dict, List, Any
+import logging
+
+import pandas as pd
+
+from ..config import (
+    minio_client,
+    MINIO_OUTPUT_BUCKET,
+    flat_aggregations_collection,
+    hierarchical_aggregations_collection,
+)
+
+logger = logging.getLogger(__name__)
+
+# ────────────────────────────────────────────────────────────────────────────
+def _pct(val, base):
+    """Calculate percent uplift safely"""
+    return (val / base * 100) if base else None
+
+async def _csv_to_minio_async(df: pd.DataFrame, key: str):
+    """Async version of CSV upload to MinIO — runs in thread pool."""
+    def _upload_csv():
+        buf = BytesIO()
+        df.to_csv(buf, index=False)
+        buf.seek(0)
+        minio_client.put_object(
+            MINIO_OUTPUT_BUCKET,
+            key,
+            data=buf,
+            length=buf.getbuffer().nbytes,
+            content_type="text/csv",
+        )
+    
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(None, _upload_csv)
+
+def _row_to_json(row: pd.Series, id_cols: List[str], feat_set: set) -> Dict[str, Any]:
+    """Convert aggregated DataFrame row to the structured JSON block."""
+    id_map = {c: row[c] for c in id_cols}
+    base_f = {k: row[f"b_{k}"] for k in feat_set}
+    scen_f = {k: row[f"s_{k}"] for k in feat_set}
+    delt_f = {k: row[f"d_{k}"] for k in feat_set}
+    pct_f  = {k: row[f"p_{k}"] for k in feat_set}
+    return {
+        "identifiers": id_map,
+        "baseline":   {"prediction": row["baseline_pred"], "features": base_f},
+        "scenario":   {"prediction": row["scenario_pred"], "features": scen_f},
+        "delta":      {"prediction": row["delta_pred"],   "features": delt_f},
+        "pct_uplift": {"prediction": row["pct_pred"],     "features": pct_f},
+    }
+
+# ────────────────────────────────────────────────────────────────────────────
+class AggregationService:
+    """Async aggregation service handling concurrency and granular Mongo storage."""
+
+    @classmethod
+    async def aggregate_and_store(
+        cls,
+        result_rows: List[Dict[str, Any]],
+        payload: Any,  # Changed from Dict to Any to accept RunRequest
+        run_id: str,
+    ) -> Dict[str, Any]:
+        try:
+            logger.info(f"Starting aggregation for run_id: {run_id}")
+            # Filter rows by payload identifiers
+            def _row_allowed(r):
+                for spec in payload.identifiers.values():  # Changed from payload["identifiers"] to payload.identifiers
+                    col, vals = spec.column, set(spec.values)  # Changed from spec["column"] to spec.column
+                    if r["identifiers"].get(col) not in vals:
+                        return False
+                return True
+
+            filtered = [r for r in result_rows if _row_allowed(r)]
+            if not filtered:
+                raise ValueError("No clusters match the requested identifiers")
+            # Build DataFrame
+            feat_set = {f for r in filtered for f in r["baseline"]["features"]}
+            df = pd.DataFrame([
+                {**r["identifiers"],
+                 "baseline_pred": r["baseline"]["prediction"],
+                 "scenario_pred": r["scenario"]["prediction"],
+                 **{f"b_{k}": r["baseline"]["features"].get(k, 0.0) for k in feat_set},
+                 **{f"s_{k}": r["scenario"]["features"].get(k, 0.0) for k in feat_set}}
+                for r in filtered
+            ])
+            individuals_json = filtered
+            # Flat and hierarchical
+            flat_out = await cls._process_flat_aggregations(df, payload, feat_set)
+            hier_list = await cls._process_hierarchical_aggregations(df, payload, feat_set)
+            # Store docs
+            await asyncio.gather(
+                cls._store_flat_aggregations(flat_out, payload, run_id, feat_set),
+                cls._store_hierarchical_aggregations(hier_list, payload, run_id, feat_set)
+            )
+            # CSVs
+            await cls._generate_csv_files(df, hier_list, run_id, feat_set, [spec.column for spec in payload.identifiers.values()])  # Changed from spec["column"] to spec.column
+            logger.info(f"✅ Aggregation completed for run_id: {run_id}")
+            return {"flat": flat_out, "hierarchy": hier_list, "individuals": individuals_json}
+        except Exception as e:
+            logger.error(f"❌ Aggregation failed for run_id {run_id}: {e}")
+            raise
+
+    @classmethod
+    async def _process_flat_aggregations(
+        cls, df: pd.DataFrame, payload: Any, feat_set: set  # Changed from Dict to Any
+    ) -> Dict[str, List[Dict[str, Any]]]:
+        """Compute flat aggregations for all model results, regardless of user filters."""
+        sum_cols = ["baseline_pred", "scenario_pred"] + [f"{p}_{k}" for p in ("b","s") for k in feat_set]
+        out: Dict[str, List[Dict[str, Any]]] = {}
+        for key, spec in payload.identifiers.items():  # Changed from payload["identifiers"] to payload.identifiers
+            col = spec.column  # Changed from spec["column"] to spec.column
+            # Use entire DataFrame for flat aggregation
+            g = df.groupby([col], dropna=False)[sum_cols].sum().reset_index()
+            g = cls._recalculate_metrics(g, feat_set)
+            out[key] = [_row_to_json(row, [col], feat_set) for _, row in g.iterrows()]
+        return out
+
+    @classmethod
+    async def _process_hierarchical_aggregations(
+        cls, df: pd.DataFrame, payload: Any, feat_set: set  # Changed from Dict to Any
+    ) -> List[Dict[str, Any]]:
+        id_cols = [spec.column for spec in payload.identifiers.values()]  # Changed from spec["column"] to spec.column
+        sum_cols = ["baseline_pred", "scenario_pred"] + [f"{p}_{k}" for p in ("b","s") for k in feat_set]
+        dfg = df.groupby(id_cols, dropna=False)[sum_cols].sum().reset_index()
+        dfg = cls._recalculate_metrics(dfg, feat_set)
+        return [_row_to_json(row, id_cols, feat_set) for _, row in dfg.iterrows()]
+
+    @classmethod
+    def _recalculate_metrics(cls, df: pd.DataFrame, feat_set: set) -> pd.DataFrame:
+        df = df.copy()
+        df["delta_pred"] = df["scenario_pred"] - df["baseline_pred"]
+        df["pct_pred"] = df.apply(lambda r: _pct(r["delta_pred"], r["baseline_pred"]), axis=1)
+        for f in feat_set:
+            df[f"d_{f}"] = df[f"s_{f}"] - df[f"b_{f}"]
+            df[f"p_{f}"] = df.apply(lambda r: _pct(r[f"d_{f}"], r[f"b_{f}"]), axis=1)
+        return df
+
+    @classmethod
+    async def _generate_csv_files(
+        cls, df: pd.DataFrame, hier_list: List[Dict[str, Any]], run_id: str, feat_set: set, id_cols: List[str]
+    ):
+        try:
+            indiv_df = cls._recalculate_metrics(df, feat_set)
+            sum_cols = ["baseline_pred", "scenario_pred"] + [f"{p}_{k}" for p in ("b","s") for k in feat_set]
+            flat_df = df.groupby(id_cols)[sum_cols].sum().reset_index()
+            flat_df = cls._recalculate_metrics(flat_df, feat_set)
+            hier_records = []
+            for rec in hier_list:
+                base = rec["baseline"]
+                scen = rec["scenario"]
+                delt = rec["delta"]
+                pct = rec["pct_uplift"]
+                row = {**rec["identifiers"],
+                       "baseline_pred": base["prediction"],
+                       "scenario_pred": scen["prediction"],
+                       "delta_pred": delt["prediction"],
+                       "pct_pred": pct["prediction"]}
+                for f in feat_set:
+                    row[f"baseline_{f}"] = base["features"].get(f)
+                    row[f"scenario_{f}"] = scen["features"].get(f)
+                    row[f"delta_{f}"] = delt["features"].get(f)
+                    row[f"pct_{f}"] = pct["features"].get(f)
+                hier_records.append(row)
+            hier_df = pd.DataFrame(hier_records)
+            await asyncio.gather(
+                _csv_to_minio_async(indiv_df, f"scenario-outputs/{run_id}_indiv.csv"),
+                _csv_to_minio_async(flat_df, f"scenario-outputs/{run_id}_flat.csv"),
+                _csv_to_minio_async(hier_df, f"scenario-outputs/{run_id}_hier.csv")
+            )
+        except Exception as e:
+            logger.error(f"Error generating CSVs for {run_id}: {e}")
+
+    @classmethod
+    async def _store_flat_aggregations(
+        cls, flat_out: Dict[str, List[Dict[str, Any]]], payload: Any, run_id: str, feat_set: set  # Changed from Dict to Any
+    ):
+        docs = []
+        for key, lst in flat_out.items():
+            col = payload.identifiers[key].column  # Changed from payload["identifiers"][key]["column"] to payload.identifiers[key].column
+            for rec in lst:
+                docs.append({
+                    "run_id": run_id,
+                    "aggregation_type": "flat",
+                    "identifier_type": key,
+                    "identifiers": {"column": col, "value": rec["identifiers"][col]},
+                    "features_included": list(feat_set),
+                    "result": rec,
+                    "created_at": datetime.utcnow(),
+                })
+        if docs:
+            await flat_aggregations_collection.insert_many(docs)
+
+    @classmethod
+    async def _store_hierarchical_aggregations(
+        cls, hier_list: List[Dict[str, Any]], payload: Any, run_id: str, feat_set: set  # Changed from Dict to Any
+    ):
+        docs = []
+        for rec in hier_list:
+            docs.append({
+                "run_id": run_id,
+                "aggregation_type": "hierarchy",
+                "identifiers": rec["identifiers"],
+                "features_included": list(feat_set),
+                "result": rec,
+                "created_at": datetime.utcnow(),
+            })
+        if docs:
+            await hierarchical_aggregations_collection.insert_many(docs)
+
+    @classmethod
+    async def get_flat_aggregations(cls, run_id: str) -> List[Dict]:
+        return await flat_aggregations_collection.find({"run_id": run_id}, {"_id": 0}).to_list(None)
+
+    @classmethod
+    async def get_hierarchical_aggregations(cls, run_id: str) -> List[Dict]:
+        return await hierarchical_aggregations_collection.find({"run_id": run_id}, {"_id": 0})

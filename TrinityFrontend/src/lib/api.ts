@@ -139,6 +139,10 @@ export const BUILD_MODEL_API =
   normalizeUrl(import.meta.env.VITE_BUILD_MODEL_API) ||
   `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/build-model-feature-based`;
 
+export const SCENARIO_PLANNER_API =
+  normalizeUrl(import.meta.env.VITE_SCENARIO_PLANNER_API) ||
+  `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/scenario`;
+
 // Debug logging for clustering API
 console.log('Clustering API Configuration:', {
   isDevStack,

@@ -10,7 +10,11 @@ const ScenarioPlannerAtom: React.FC<Props> = ({ atomId }) => {
   // Use the same pattern as ClusteringAtom - direct store subscription
   const atom = useLaboratoryStore(state => state.getAtom(atomId));
   const updateSettings = useLaboratoryStore(state => state.updateAtomSettings);
-  const settings: ScenarioPlannerSettings = (atom?.settings as ScenarioPlannerSettings) || { ...DEFAULT_SCENARIO_PLANNER_SETTINGS };
+  
+  // Get settings with proper fallback and ensure reactivity
+  const settings: ScenarioPlannerSettings = React.useMemo(() => {
+    return (atom?.settings as ScenarioPlannerSettings) || { ...DEFAULT_SCENARIO_PLANNER_SETTINGS };
+  }, [atom?.settings]);
 
   return (
     <div className="w-full h-full bg-white rounded-lg overflow-hidden flex flex-col">

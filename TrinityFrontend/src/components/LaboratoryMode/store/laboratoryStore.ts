@@ -471,6 +471,7 @@ export const DEFAULT_CLUSTERING_SETTINGS: ClusteringSettings = {
 
 export interface ScenarioPlannerSettings {
   selectedScenario: string;
+  allScenarios: string[];
   identifiers: Array<{
     id: string;
     name: string;
@@ -511,10 +512,24 @@ export interface ScenarioPlannerSettings {
   }>;
   selectedResultScenario: string;
   selectedView: string;
+  scenarioData?: {
+    selectedDataFile?: string;
+    objectName?: string;
+    allColumns?: string[];
+    availableIdentifiers?: string[];
+    availableMeasures?: string[];
+    selectedIdentifiers?: string[];
+    selectedMeasures?: string[];
+    outputPath?: string;
+    outputFilename?: string;
+  };
+  backendIdentifiers?: any;
+  backendFeatures?: any;
 }
 
 export const DEFAULT_SCENARIO_PLANNER_SETTINGS: ScenarioPlannerSettings = {
-  selectedScenario: 'base-case',
+  selectedScenario: 'scenario-1',
+  allScenarios: ['scenario-1', 'scenario-2'],
   identifiers: [
     {
       id: 'identifier-1',
@@ -558,6 +573,9 @@ export const DEFAULT_SCENARIO_PLANNER_SETTINGS: ScenarioPlannerSettings = {
     { id: 'feature-2', name: 'Feature 2', selected: true },
     { id: 'feature-3', name: 'Feature 3', selected: true },
     { id: 'feature-4', name: 'Feature 4', selected: true },
+    { id: 'feature-5', name: 'Feature 5', selected: false },
+    { id: 'feature-6', name: 'Feature 6', selected: false },
+    { id: 'feature-7', name: 'Feature 7', selected: false },
   ],
   outputs: [
     { id: 'output-1', name: 'Output 1', selected: true },
@@ -574,7 +592,18 @@ export const DEFAULT_SCENARIO_PLANNER_SETTINGS: ScenarioPlannerSettings = {
     { id: 'view-3', name: 'View 3', selectedCombinations: [] },
   ],
   selectedResultScenario: 'scenario-1',
-  selectedView: 'view-1'
+  selectedView: 'view-1',
+  scenarioData: {
+    selectedDataFile: '',
+    objectName: '',
+    allColumns: [],
+    availableIdentifiers: [],
+    availableMeasures: [],
+    selectedIdentifiers: [],
+    selectedMeasures: [],
+    outputPath: '',
+    outputFilename: ''
+  }
 };
 
 export interface DroppedAtom {
@@ -611,15 +640,35 @@ export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
   },
 
   updateAtomSettings: (atomId: string, settings: any) => {
+    console.log('=== Store: updateAtomSettings called ===');
+    console.log('Store: atomId:', atomId);
+    console.log('Store: settings to update:', settings);
+    console.log('Store: resultViews in settings:', settings.resultViews);
+    
     set((state) => {
       const updatedCards = state.cards.map((card) => ({
         ...card,
         atoms: card.atoms.map((atom) =>
           atom.id === atomId
-            ? { ...atom, settings: { ...(atom.settings || {}), ...settings } }
+            ? { 
+                ...atom, 
+                settings: { 
+                  ...(atom.settings || {}), 
+                  ...settings,
+                  // Ensure resultViews is properly updated
+                  ...(settings.resultViews && { resultViews: settings.resultViews })
+                } 
+              }
             : atom,
         ),
       }));
+      
+      // Debug: Log the updated atom settings
+      const updatedAtom = updatedCards.flatMap(card => card.atoms).find(atom => atom.id === atomId);
+      console.log('Store: Updated atom settings:', updatedAtom?.settings);
+      console.log('Store: Updated resultViews:', updatedAtom?.settings?.resultViews);
+      console.log('=== Store: updateAtomSettings completed ===');
+      
       return { cards: updatedCards };
     });
   },

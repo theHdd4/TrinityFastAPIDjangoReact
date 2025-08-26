@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useLaboratoryStore, DEFAULT_SCENARIO_PLANNER_SETTINGS, ScenarioPlannerSettings as SettingsType } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { ScenarioPlannerSettings } from '../ScenarioPlannerSettings';
-import ScenarioPlannerVisualisation from '../ScenarioPlannerVisualisation';
+import ScenarioPlannerInputFiles from '../ScenarioPlannerInputFiles';
 import { ScenarioPlannerExhibition } from '../ScenarioPlannerExhibition';
 
 interface ScenarioPlannerPropertiesProps {
@@ -33,10 +33,10 @@ export const ScenarioPlannerProperties: React.FC<ScenarioPlannerPropertiesProps>
 
   return (
     <div className="h-full flex flex-col">
-      <Tabs defaultValue="settings" className="flex-1 flex flex-col">
+              <Tabs defaultValue="inputfiles" className="flex-1 flex flex-col">
         <TabsList className="grid w-full grid-cols-3">
+          <TabsTrigger value="inputfiles">Input Files</TabsTrigger>
           <TabsTrigger value="settings">Settings</TabsTrigger>
-          <TabsTrigger value="visualisation">Visualisation</TabsTrigger>
           <TabsTrigger value="exhibition">Exhibition</TabsTrigger>
         </TabsList>
         
@@ -47,8 +47,8 @@ export const ScenarioPlannerProperties: React.FC<ScenarioPlannerPropertiesProps>
           />
         </TabsContent>
         
-        <TabsContent value="visualisation" className="flex-1 mt-0">
-          <ScenarioPlannerVisualisation data={settings} />
+        <TabsContent value="inputfiles" className="flex-1 mt-0">
+          <ScenarioPlannerInputFiles atomId={atomId} />
         </TabsContent>
         
         <TabsContent value="exhibition" className="flex-1 mt-0">
