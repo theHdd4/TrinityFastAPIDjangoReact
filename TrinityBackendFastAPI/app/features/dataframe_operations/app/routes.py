@@ -148,7 +148,14 @@ async def filter_rows(df_id: str = Body(...), column: str = Body(...), value: An
     print(f"/filter_rows called df_id={df_id}, column={column}, value={value}", flush=True)
     df = _get_df(df_id)
     try:
-        df = df[df[column] == value]
+        if isinstance(value, dict):
+            min_v = value.get("min")
+            max_v = value.get("max")
+            df = df[df[column].between(min_v, max_v)]
+        elif isinstance(value, list):
+            df = df[df[column].isin(value)]
+        else:
+            df = df[df[column] == value]
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
     SESSIONS[df_id] = df

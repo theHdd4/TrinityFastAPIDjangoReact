@@ -84,7 +84,7 @@ const DataFrameOperationsAtom: React.FC<Props> = ({ atomId }) => {
     updateSettings(atomId, newSettings);
   };
 
-  // In handleSettingsChange, always update tableData and selectedColumns if headers are present
+  // In handleSettingsChange, update settings without overwriting tableData
   const handleSettingsChange = (newSettings: Partial<DataFrameSettings>) => {
     let mergedSettings = { ...settings, ...newSettings };
     if ('filters' in newSettings) {
@@ -93,10 +93,6 @@ const DataFrameOperationsAtom: React.FC<Props> = ({ atomId }) => {
     }
     if (data && (!mergedSettings.selectedColumns || mergedSettings.selectedColumns.length === 0)) {
       mergedSettings.selectedColumns = data.headers;
-    }
-    // Always update tableData if data is present
-    if (data) {
-      mergedSettings.tableData = data;
     }
     updateSettings(atomId, mergedSettings);
   };

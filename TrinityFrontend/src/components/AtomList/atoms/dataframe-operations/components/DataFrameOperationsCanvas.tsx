@@ -21,7 +21,7 @@ import {
 } from 'lucide-react';
 import { DataFrameData, DataFrameSettings } from '../DataFrameOperationsAtom';
 import { DATAFRAME_OPERATIONS_API, VALIDATE_API } from '@/lib/api';
-import {
+  import {
   loadDataframe,
   editCell as apiEditCell,
   insertRow as apiInsertRow,
@@ -35,6 +35,7 @@ import {
   duplicateColumn as apiDuplicateColumn,
   moveColumn as apiMoveColumn,
   retypeColumn as apiRetypeColumn,
+  loadDataframeByKey,
 } from '../services/dataframeOperationsApi';
 import { toast } from '@/components/ui/use-toast';
 import '@/Templates/Table/table.css';
@@ -139,6 +140,9 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
   // Add local state for raw min/max input in the component
   const [filterMinInput, setFilterMinInput] = useState<string | number>('');
   const [filterMaxInput, setFilterMaxInput] = useState<string | number>('');
+
+  // Loading indicator for server-side operations
+  const [operationLoading, setOperationLoading] = useState(false);
 
 
   // Helper to convert current table to CSV
@@ -352,7 +356,9 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
 
   const handleSort = async (column: string, direction: 'asc' | 'desc') => {
     if (!data || !fileId) return;
+    setOperationLoading(true);
     try {
+      console.log('[DataFrameOperations] sort', column, direction);
       const resp = await apiSort(fileId, column, direction);
       const columnTypes: any = {};
       resp.headers.forEach(h => {
@@ -371,17 +377,26 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
       onSettingsChange({ sortColumns: [{ column, direction }] });
     } catch (err) {
       handleApiError('Sort failed', err);
+    } finally {
+      setOperationLoading(false);
     }
   };
 
   const handleColumnFilter = async (column: string, selectedValues: string[] | [number, number]) => {
     if (!data || !fileId) return;
+    setOperationLoading(true);
     let value: any = null;
-    if (Array.isArray(selectedValues) && selectedValues.length > 0) {
-      value = selectedValues[0];
+    if (Array.isArray(selectedValues)) {
+      if (typeof selectedValues[0] === 'number') {
+        value = { min: selectedValues[0], max: selectedValues[1] };
+      } else {
+        value = selectedValues;
+      }
+    } else {
+      value = selectedValues;
     }
-    if (value === null) return;
     try {
+      console.log('[DataFrameOperations] filter', column, value);
       const resp = await apiFilter(fileId, column, value);
       const columnTypes: any = {};
       resp.headers.forEach(h => {
@@ -397,10 +412,12 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
         frozenColumns: data.frozenColumns,
         cellColors: data.cellColors,
       });
-      onSettingsChange({ filters: { ...settings.filters, [column]: value } });
+      onSettingsChange({ filters: { ...settings.filters, [column]: selectedValues } });
       setCurrentPage(1);
     } catch (err) {
       handleApiError('Filter failed', err);
+    } finally {
+      setOperationLoading(false);
     }
   };
 
@@ -608,15 +625,36 @@ const handleClearSort = () => {
 };
 
 // Update handleClearFilter to accept a column name (string)
-const handleClearFilter = (col: string) => {
-  if (!data) return;
+const handleClearFilter = async (col: string) => {
+  if (!data || !settings.selectedFile) return;
   const newFilters = { ...settings.filters };
   delete newFilters[col];
-  // Trigger parent to update filters only (avoids accidentally sending stale copies of other settings)
-  onSettingsChange({ filters: { ...newFilters } });
+  try {
+    setOperationLoading(true);
+    console.log('[DataFrameOperations] clear filter', col);
+    const resp = await loadDataframeByKey(settings.selectedFile);
+    const columnTypes: any = {};
+    resp.headers.forEach(h => {
+      const t = resp.types[h];
+      columnTypes[h] = t.includes('float') || t.includes('int') ? 'number' : 'text';
+    });
+    onDataChange({
+      headers: resp.headers,
+      rows: resp.rows,
+      fileName: data.fileName,
+      columnTypes,
+      pinnedColumns: data.pinnedColumns,
+      frozenColumns: data.frozenColumns,
+      cellColors: data.cellColors,
+    });
+    onSettingsChange({ filters: { ...newFilters }, fileId: resp.df_id });
+  } catch (err) {
+    handleApiError('Clear filter failed', err);
+  } finally {
+    setOperationLoading(false);
+  }
   setFilterRange(null); // Reset numeric filter range UI
   setCurrentPage(1);
-  // Optionally reset local filterMinInput/filterMaxInput if needed
   setFilterMinInput('');
   setFilterMaxInput('');
 };
@@ -884,7 +922,12 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
             <div className="table-wrapper">
               <div className="table-edge-left" />
               <div className="table-edge-right" />
-              <div className="table-overflow">
+              <div className="table-overflow relative">
+                {operationLoading && (
+                  <div className="absolute inset-0 bg-white/70 flex items-center justify-center z-10 text-sm text-slate-700">
+                    Operation Loading...
+                  </div>
+                )}
                 <Table className="table-base">
               <TableHeader className="table-header">
                 <TableRow className="table-header-row">
@@ -1234,10 +1277,10 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                       <label key={value} className="flex items-center space-x-2 text-xs cursor-pointer" style={{userSelect:'none'}} onMouseDown={e => e.stopPropagation()}>
                         <input
                           type="checkbox"
-                          checked={filters[contextMenu.col]?.includes(value) ?? false}
+                          checked={Array.isArray(filters[contextMenu.col]) && filters[contextMenu.col].includes(value)}
                           onMouseDown={e => e.stopPropagation()}
                           onChange={e => {
-                            const currentFilters = filters[contextMenu.col] || [];
+                            const currentFilters = Array.isArray(filters[contextMenu.col]) ? filters[contextMenu.col] : [];
                             const newFilters = e.target.checked
                               ? [...currentFilters, value]
                               : currentFilters.filter(v => v !== value);
