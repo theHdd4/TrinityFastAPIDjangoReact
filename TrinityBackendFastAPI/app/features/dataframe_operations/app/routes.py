@@ -48,7 +48,7 @@ def _get_df(df_id: str) -> pd.DataFrame:
 
 def _df_payload(df: pd.DataFrame, df_id: str) -> Dict[str, Any]:
     safe_df = df.replace([np.inf, -np.inf], np.nan)
-    head = safe_df.head(100)
+    head = safe_df.head(100).astype(object)
     rows = head.where(pd.notnull(head), None).to_dict(orient="records")
     return {
         "df_id": df_id,
