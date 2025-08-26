@@ -507,7 +507,6 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
             aiMessage: data.message,
             operationCompleted: false,
             // Auto-populate the CreateColumn interface - EXACTLY like GroupBy
-            operations: operations,
             dataSource: cfg.object_name || '', // Note: AI uses object_name (singular)
             bucketName: cfg.bucket_name || 'trinity',
             selectedIdentifiers: cfg.identifiers || [],

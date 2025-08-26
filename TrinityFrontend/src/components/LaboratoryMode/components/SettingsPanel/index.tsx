@@ -34,6 +34,7 @@ import DataFrameOperationsProperties from '@/components/AtomList/atoms/dataframe
 import CorrelationProperties from '@/components/AtomList/atoms/correlation/components/properties/CorrelationProperties';
 import ChartMakerProperties from '@/components/AtomList/atoms/chart-maker/components/properties/ChartMakerProperties';
 import ExploreProperties from '@/components/AtomList/atoms/explore/components/properties/ExploreProperties';
+
 import AtomSettingsTabs from "./AtomSettingsTabs";
 
 interface SettingsPanelProps {
@@ -121,6 +122,10 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
             <DataUploadValidateProperties atomId={selectedAtomId} />
           ) : selectedAtomId && atom?.atomId === 'feature-overview' ? (
             <FeatureOverviewProperties atomId={selectedAtomId} />
+          ) : selectedAtomId && atom?.atomId === 'groupby-wtg-avg' ? (
+            <GroupByProperties atomId={selectedAtomId} />
+          ) : selectedAtomId && atom?.atomId === 'create-column' ? (
+            <CreateColumnProperties atomId={selectedAtomId} />
           ) : selectedAtomId && atom?.atomId === 'explore' ? (
             <ExploreProperties atomId={selectedAtomId} />
           ) : selectedAtomId && atom?.atomId === 'chart-maker' ? (
