@@ -11,6 +11,7 @@ import {
 } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { Button } from '@/components/ui/button';
 import ErrorBoundary from '@/components/ErrorBoundary';
+import { loadDataframeByKey } from './services/dataframeOperationsApi';
 
 export interface DataFrameRow {
   [key: string]: string | number | null;
@@ -60,6 +61,7 @@ const DataFrameOperationsAtom: React.FC<Props> = ({ atomId }) => {
   };
   // Always use tableData as the source of truth
   const data = settings.tableData || null;
+  const [loading, setLoading] = useState(false);
 
   // 1. Store the original uploaded data
   const [originalData, setOriginalData] = useState<DataFrameData | null>(null);
@@ -129,6 +131,37 @@ const DataFrameOperationsAtom: React.FC<Props> = ({ atomId }) => {
 
   // Only show table/chart after file selection (like concat atom)
   const fileSelected = settings.selectedFile;
+
+  // Automatically load dataframe if a file is selected but no table data exists
+  useEffect(() => {
+    if (!settings.selectedFile || settings.tableData || loading) return;
+    setLoading(true);
+    loadDataframeByKey(settings.selectedFile)
+      .then(resp => {
+        const columnTypes: Record<string, string> = {};
+        resp.headers.forEach(h => {
+          const t = resp.types[h];
+          columnTypes[h] = t.includes('float') || t.includes('int') ? 'number' : 'text';
+        });
+        const fileName = settings.selectedFile!.split('/').pop() || settings.selectedFile!;
+        const newData: DataFrameData = {
+          headers: resp.headers,
+          rows: resp.rows,
+          fileName,
+          columnTypes,
+          pinnedColumns: [],
+          frozenColumns: 0,
+          cellColors: {},
+        };
+        updateSettings(atomId, {
+          tableData: newData,
+          selectedColumns: resp.headers,
+          fileId: resp.df_id,
+        });
+      })
+      .catch(err => console.error('[DataFrameOperations] auto-load failed', err))
+      .finally(() => setLoading(false));
+  }, [settings.selectedFile, settings.tableData, loading, atomId, updateSettings]);
 
 
   return (
