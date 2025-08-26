@@ -1,19 +1,19 @@
 from fastapi import APIRouter, Response, Body, HTTPException, UploadFile, File
 import os
 from minio import Minio
-from minio.error import S3Error
 from urllib.parse import unquote
-import redis
 import pyarrow as pa
 import pyarrow.ipc as ipc
 import pandas as pd
+import numpy as np
 import io
 import uuid
 from typing import Dict, Any, List
+from app.DataStorageRetrieval.arrow_client import download_dataframe
 
 router = APIRouter()
 
-# Self-contained MinIO/Redis config (match feature-overview)
+# Self-contained MinIO config (match feature-overview)
 MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "minio:9000")
 MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY", "admin_dev")
 MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY", "pass_dev")
@@ -22,9 +22,6 @@ CLIENT_NAME = os.getenv("CLIENT_NAME", "default_client")
 APP_NAME = os.getenv("APP_NAME", "default_app")
 PROJECT_NAME = os.getenv("PROJECT_NAME", "default_project")
 OBJECT_PREFIX = f"{CLIENT_NAME}/{APP_NAME}/{PROJECT_NAME}/"
-REDIS_HOST = os.getenv("REDIS_HOST", "redis")
-REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))
-REDIS_DB = int(os.getenv("REDIS_DB", 0))
 
 minio_client = Minio(
     MINIO_ENDPOINT,
@@ -32,7 +29,6 @@ minio_client = Minio(
     secret_key=MINIO_SECRET_KEY,
     secure=False
 )
-redis_client = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=REDIS_DB)
 
 # In-memory storage for dataframe sessions
 SESSIONS: Dict[str, pd.DataFrame] = {}
@@ -46,14 +42,28 @@ def _get_df(df_id: str) -> pd.DataFrame:
 
 
 def _df_payload(df: pd.DataFrame, df_id: str) -> Dict[str, Any]:
+    safe_df = df.replace([np.inf, -np.inf], np.nan).astype(object)
+    rows = safe_df.where(pd.notnull(safe_df), None).to_dict(orient="records")
     return {
         "df_id": df_id,
         "headers": list(df.columns),
-        "rows": df.head(100).to_dict(orient="records"),
+        "rows": rows,
         "types": {col: str(df[col].dtype) for col in df.columns},
         "row_count": len(df),
         "column_count": len(df.columns),
     }
+
+
+def _fetch_df_from_object(object_name: str) -> pd.DataFrame:
+    """Fetch a DataFrame from the Flight server or MinIO given an object key."""
+    object_name = unquote(object_name)
+    if not (object_name.endswith('.arrow') or object_name.endswith('.csv')):
+        raise HTTPException(status_code=400, detail="Invalid object_name format")
+    try:
+        return download_dataframe(object_name)
+    except Exception as e:
+        print(f"[DFOPS] Flight/MinIO fetch error: {e}")
+        raise HTTPException(status_code=404, detail="Not Found")
 
 @router.get("/test_alive")
 async def test_alive():
@@ -63,50 +73,18 @@ async def test_alive():
 @router.get("/cached_dataframe")
 async def cached_dataframe(object_name: str):
     print("[DFOPS] --- /cached_dataframe called ---")
-    object_name = unquote(object_name)
-    print(f"[DFOPS] object_name received: {object_name}")
-    print(f"[DFOPS] ENV: MINIO_ENDPOINT={MINIO_ENDPOINT}, MINIO_ACCESS_KEY={MINIO_ACCESS_KEY}, MINIO_SECRET_KEY={MINIO_SECRET_KEY}, MINIO_BUCKET={MINIO_BUCKET}")
-    print(f"[DFOPS] ENV: CLIENT_NAME={CLIENT_NAME}, APP_NAME={APP_NAME}, PROJECT_NAME={PROJECT_NAME}, OBJECT_PREFIX={OBJECT_PREFIX}")
-    print(f"[DFOPS] Will fetch: bucket={MINIO_BUCKET}, object_name={object_name}")
-    # For now, accept any object_name that ends with .arrow or .csv
-    # This allows flexibility while the environment variables are being set up
-    if not (object_name.endswith('.arrow') or object_name.endswith('.csv')):
-        print(f"[DFOPS] object_name does not end with .arrow or .csv: {object_name}")
-        return Response(content='{"detail": "Invalid object_name format"}', status_code=400, media_type="application/json")
-    # Try Redis first
-    try:
-        redis_bytes = redis_client.get(object_name)
-        if redis_bytes:
-            print("[DFOPS] Found in Redis")
-            if object_name.endswith('.arrow'):
-                reader = ipc.open_file(pa.BufferReader(redis_bytes))
-                table = reader.read_all()
-                df = table.to_pandas()
-            else:
-                df = pd.read_csv(io.BytesIO(redis_bytes))
-            return Response(content=df.to_csv(index=False), media_type="text/csv")
-        else:
-            print("[DFOPS] Not found in Redis, trying MinIO")
-    except Exception as e:
-        print(f"[DFOPS] Redis error: {e}")
-    # Try MinIO
-    try:
-        obj = minio_client.get_object(MINIO_BUCKET, object_name)
-        data = obj.read()
-        if object_name.endswith('.arrow'):
-            reader = ipc.open_file(pa.BufferReader(data))
-            table = reader.read_all()
-            df = table.to_pandas()
-        else:
-            df = pd.read_csv(io.BytesIO(data))
-        print("[DFOPS] Found in MinIO")
-        return Response(content=df.to_csv(index=False), media_type="text/csv")
-    except S3Error as e:
-        print(f"[DFOPS] MinIO S3Error: {e}")
-        return Response(content='{"detail": "Not Found"}', status_code=404, media_type="application/json")
-    except Exception as e:
-        print(f"[DFOPS] MinIO error: {e}")
-        return Response(content='{"detail": "Internal Server Error"}', status_code=500, media_type="application/json")
+    df = _fetch_df_from_object(object_name)
+    return Response(content=df.to_csv(index=False), media_type="text/csv")
+
+
+@router.post("/load_cached")
+async def load_cached_dataframe(object_name: str = Body(..., embed=True)):
+    """Load a cached dataframe by object key and create a session."""
+    print(f"[DFOPS] /load_cached called object_name={object_name}")
+    df = _fetch_df_from_object(object_name)
+    df_id = str(uuid.uuid4())
+    SESSIONS[df_id] = df
+    return _df_payload(df, df_id)
 
 @router.post("/save")
 async def save_dataframe(
@@ -137,7 +115,6 @@ async def save_dataframe(
             length=len(arrow_bytes),
             content_type="application/octet-stream",
         )
-        redis_client.setex(filename, 3600, arrow_bytes)
         return {
             "result_file": filename,
             "shape": df.shape,

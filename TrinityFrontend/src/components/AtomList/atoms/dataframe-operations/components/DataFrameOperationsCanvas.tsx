@@ -82,6 +82,7 @@ function getNextColKey(headers: string[]): string {
 
 // Generic error handler for API operations
 function handleApiError(action: string, err: unknown) {
+  console.error(`[DataFrameOperations] ${action}:`, err);
   toast({
     title: action,
     description: err instanceof Error ? err.message : String(err),
