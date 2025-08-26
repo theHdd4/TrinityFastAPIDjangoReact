@@ -4,7 +4,7 @@ import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { VALIDATE_API, DATAFRAME_OPERATIONS_API } from '@/lib/api';
 
-interface Frame { object_name: string; csv_name: string; }
+interface Frame { object_name: string; csv_name: string; arrow_name?: string }
 
 const DataFrameOperationsInputs = ({ data, settings, selectedFile, onFileSelect }: any) => {
   const [frames, setFrames] = useState<Frame[]>([]);
@@ -14,7 +14,11 @@ const DataFrameOperationsInputs = ({ data, settings, selectedFile, onFileSelect 
   useEffect(() => {
     fetch(`${VALIDATE_API}/list_saved_dataframes`)
       .then(r => r.json())
-      .then(d => setFrames(Array.isArray(d.files) ? d.files : []))
+      .then(d =>
+        setFrames(
+          Array.isArray(d.files) ? d.files.filter((f: Frame) => !!f.arrow_name) : []
+        )
+      )
       .catch(() => setFrames([]));
   }, []);
 
@@ -42,7 +46,7 @@ const DataFrameOperationsInputs = ({ data, settings, selectedFile, onFileSelect 
           <SelectContent>
             {(Array.isArray(frames) ? frames : []).map(f => (
               <SelectItem key={f.object_name} value={f.object_name}>
-                {f.csv_name.split('/').pop()}
+                {(f.arrow_name || f.csv_name).split('/').pop()}
               </SelectItem>
             ))}
           </SelectContent>
