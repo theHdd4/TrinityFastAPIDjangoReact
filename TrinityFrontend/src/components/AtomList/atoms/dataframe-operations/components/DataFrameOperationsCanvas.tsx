@@ -209,11 +209,21 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
   // 2. Add effect to close dropdowns on outside click or right-click
   useEffect(() => {
     const handleClick = (e: MouseEvent) => {
+      const cm = document.getElementById('df-ops-context-menu');
+      const rcm = document.getElementById('df-ops-row-context-menu');
+      if (cm?.contains(e.target as Node) || rcm?.contains(e.target as Node)) {
+        return;
+      }
       setOpenDropdown(null);
       setContextMenu(null);
       setRowContextMenu(null);
     };
     const handleContextMenu = (e: MouseEvent) => {
+      const cm = document.getElementById('df-ops-context-menu');
+      const rcm = document.getElementById('df-ops-row-context-menu');
+      if (cm?.contains(e.target as Node) || rcm?.contains(e.target as Node)) {
+        return;
+      }
       setOpenDropdown(null);
     };
     if (openDropdown || contextMenu || rowContextMenu) {
@@ -631,6 +641,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
     if (!data || !fileId) return;
     const newColKey = getNextColKey(data.headers);
     try {
+      console.log('Triggering API: insert_column');
       const resp = await apiInsertColumn(fileId, colIdx, newColKey, '');
       const columnTypes: any = {};
       resp.headers.forEach(h => {
@@ -710,6 +721,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
   const handleInsertRow = async (position: 'above' | 'below', rowIdx: number) => {
     if (!data || !fileId) return;
     try {
+      console.log('Triggering API: insert_row');
       const resp = await apiInsertRow(fileId, rowIdx, position);
       const columnTypes: any = {};
       resp.headers.forEach(h => {
@@ -1060,19 +1072,19 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
           <div className="px-3 py-2 text-xs font-semibold border-b border-gray-200" style={{color:'#222'}}>Column: {contextMenu.col}</div>
           {/* Sort */}
           <div className="relative group">
-            <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onMouseDown={e => { e.stopPropagation(); setOpenDropdown(openDropdown === 'sort' ? null : 'sort'); }}>
+            <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={e => { e.stopPropagation(); setOpenDropdown(openDropdown === 'sort' ? null : 'sort'); }}>
               Sort <span style={{fontSize:'10px',marginLeft:4}}>▶</span>
             </button>
             {openDropdown === 'sort' && (
               <div className="absolute left-full top-0 bg-white border border-gray-200 rounded shadow-md min-w-[160px] z-50">
-                <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onMouseDown={() => { handleSortAsc(contextMenu.colIdx); setContextMenu(null); setOpenDropdown(null); }}>Sort Ascending</button>
-                <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onMouseDown={() => { handleSortDesc(contextMenu.colIdx); setContextMenu(null); setOpenDropdown(null); }}>Sort Descending</button>
+                <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleSortAsc(contextMenu.colIdx); setContextMenu(null); setOpenDropdown(null); }}>Sort Ascending</button>
+                <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleSortDesc(contextMenu.colIdx); setContextMenu(null); setOpenDropdown(null); }}>Sort Descending</button>
               </div>
             )}
           </div>
           {/* Filter */}
           <div className="relative group">
-            <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onMouseDown={e => { e.stopPropagation(); setOpenDropdown(openDropdown === 'filter' ? null : 'filter'); }}>
+            <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={e => { e.stopPropagation(); setOpenDropdown(openDropdown === 'filter' ? null : 'filter'); }}>
               Filter <span style={{fontSize:'10px',marginLeft:4}}>▶</span>
             </button>
             {openDropdown === 'filter' && (
@@ -1187,16 +1199,16 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                         </div>
                         <button
                           className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100 border border-gray-200 rounded mt-2"
-                          onMouseDown={() => { handleColumnFilter(contextMenu.col, range as [number, number]); setContextMenu(null); setOpenDropdown(null); }}
+                          onClick={() => { handleColumnFilter(contextMenu.col, range as [number, number]); setContextMenu(null); setOpenDropdown(null); }}
                         >Apply Filter</button>
                         <button
                           className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100 border border-gray-200 rounded"
-                          onMouseDown={e => { 
-                            e.preventDefault(); 
-                            e.stopPropagation(); 
-                              handleClearFilter(contextMenu.col);
-                            setContextMenu(null); 
-                            setOpenDropdown(null); 
+                          onClick={e => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            handleClearFilter(contextMenu.col);
+                            setContextMenu(null);
+                            setOpenDropdown(null);
                           }}
                         >Clear Filter</button>
                       </div>
@@ -1224,12 +1236,12 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                     ))}
                     <button
                       className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100 border border-gray-200 rounded mt-2"
-                      onMouseDown={e => { 
-                        e.preventDefault(); 
-                        e.stopPropagation(); 
+                      onClick={e => {
+                        e.preventDefault();
+                        e.stopPropagation();
                         handleClearFilter(contextMenu.col);
-                        setContextMenu(null); 
-                        setOpenDropdown(null); 
+                        setContextMenu(null);
+                        setOpenDropdown(null);
                       }}
                     >Clear Filter</button>
                   </div>
@@ -1238,17 +1250,17 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
             )}
           </div>
           {/* Insert */}
-          <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onMouseDown={() => { handleInsertColumn(contextMenu.colIdx); setContextMenu(null); }}>Insert</button>
+          <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleInsertColumn(contextMenu.colIdx); setContextMenu(null); }}>Insert</button>
           {/* Duplicate */}
-          <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onMouseDown={() => { handleDuplicateColumn(contextMenu.colIdx); setContextMenu(null); }}>Duplicate</button>
+          <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleDuplicateColumn(contextMenu.colIdx); setContextMenu(null); }}>Duplicate</button>
           {/* Delete */}
-          <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onMouseDown={() => { handleDeleteColumn(contextMenu.colIdx); setContextMenu(null); }}>Delete</button>
+          <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleDeleteColumn(contextMenu.colIdx); setContextMenu(null); }}>Delete</button>
           {/* Retype */}
           {data && data.columnTypes[contextMenu.col] !== 'number' && (
-            <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onMouseDown={() => { handleRetypeColumn(contextMenu.col, 'number'); setContextMenu(null); }}>Convert to Number</button>
+            <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleRetypeColumn(contextMenu.col, 'number'); setContextMenu(null); }}>Convert to Number</button>
           )}
           {data && data.columnTypes[contextMenu.col] !== 'text' && (
-            <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onMouseDown={() => { handleRetypeColumn(contextMenu.col, 'text'); setContextMenu(null); }}>Convert to Text</button>
+            <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleRetypeColumn(contextMenu.col, 'text'); setContextMenu(null); }}>Convert to Text</button>
           )}
           <div className="px-3 py-2 text-xs text-gray-400">Right-click to close</div>
         </div>
@@ -1259,9 +1271,9 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
           style={{ position: 'fixed', top: rowContextMenu.y, left: rowContextMenu.x, zIndex: 1000, background: 'white', border: '1px solid #ddd', borderRadius: 6, boxShadow: '0 2px 8px #0001', minWidth: 140 }}
         >
           <div className="px-3 py-2 text-xs font-semibold border-b border-gray-200" style={{color:'#222'}}>Row: {rowContextMenu.rowIdx + 1}</div>
-          <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onMouseDown={e => { e.preventDefault(); e.stopPropagation(); handleInsertRow('above', rowContextMenu.rowIdx); setRowContextMenu(null); }}>Insert</button>
-          <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onMouseDown={e => { e.preventDefault(); e.stopPropagation(); handleDuplicateRow(rowContextMenu.rowIdx); setRowContextMenu(null); }}>Duplicate</button>
-          <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onMouseDown={e => { e.preventDefault(); e.stopPropagation(); handleDeleteRow(rowContextMenu.rowIdx); setRowContextMenu(null); }}>Delete</button>
+          <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={e => { e.preventDefault(); e.stopPropagation(); handleInsertRow('above', rowContextMenu.rowIdx); setRowContextMenu(null); }}>Insert</button>
+          <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={e => { e.preventDefault(); e.stopPropagation(); handleDuplicateRow(rowContextMenu.rowIdx); setRowContextMenu(null); }}>Duplicate</button>
+          <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={e => { e.preventDefault(); e.stopPropagation(); handleDeleteRow(rowContextMenu.rowIdx); setRowContextMenu(null); }}>Delete</button>
           <div className="px-3 py-2 text-xs text-gray-400">Right-click to close</div>
         </div>
       )}
