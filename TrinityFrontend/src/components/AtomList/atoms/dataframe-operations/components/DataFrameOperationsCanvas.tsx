@@ -1357,6 +1357,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
           <div className="px-3 py-2 text-xs text-gray-400">Right-click to close</div>
         </div>
       )}
+      </div>
     </>
   );
 };
