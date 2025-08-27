@@ -12,22 +12,30 @@ interface ScenarioPlannerPropertiesProps {
 export const ScenarioPlannerProperties: React.FC<ScenarioPlannerPropertiesProps> = ({ atomId }) => {
   const atom = useLaboratoryStore(state => state.getAtom(atomId));
   const updateSettings = useLaboratoryStore(state => state.updateAtomSettings);
-  const [settings, setSettings] = React.useState<SettingsType>({ ...DEFAULT_SCENARIO_PLANNER_SETTINGS });
-
-  // Update local settings when store changes
-  useEffect(() => {
+  
+  // ✅ FIXED: Use useMemo to create persistent settings that don't reset on re-render
+  const settings: SettingsType = React.useMemo(() => {
     if (atom?.settings) {
-      setSettings(atom.settings as SettingsType);
+      return atom.settings as SettingsType;
     } else {
-      setSettings({ ...DEFAULT_SCENARIO_PLANNER_SETTINGS });
+      return { ...DEFAULT_SCENARIO_PLANNER_SETTINGS };
     }
   }, [atom?.settings]);
 
+  // ✅ REMOVED: Local state that was causing the reset issue
+  // const [settings, setSettings] = React.useState<SettingsType>({ ...DEFAULT_SCENARIO_PLANNER_SETTINGS });
+
+  // ✅ REMOVED: useEffect that was updating local state unnecessarily
+  // useEffect(() => {
+  //   if (atom?.settings) {
+  //     setSettings(atom.settings as SettingsType);
+  //   } else {
+  //     setSettings({ ...DEFAULT_SCENARIO_PLANNER_SETTINGS });
+  //   }
+  // }, [atom?.settings]);
+
   const handleDataChange = (newData: Partial<SettingsType>) => {
-    const updatedSettings = { ...settings, ...newData };
-    
-    // Update both local state and store
-    setSettings(updatedSettings);
+    // ✅ FIXED: Update store directly without local state
     updateSettings(atomId, newData);
   };
 

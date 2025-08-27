@@ -215,6 +215,8 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
   const [loadingIdentifiers, setLoadingIdentifiers] = useState(false);
   const [loadingFeatures, setLoadingFeatures] = useState(false);
   
+  // Removed unused refs to simplify the solution
+  
   // Read identifiers and features from shared store (data prop)
   const backendIdentifiers = data.backendIdentifiers || null;
   const backendFeatures = data.backendFeatures || null;
@@ -224,8 +226,154 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
     backendIdentifiers: !!backendIdentifiers,
     backendFeatures: !!backendFeatures,
     identifiersCount: backendIdentifiers?.identifier_columns?.length || 0,
-    featuresCount: backendFeatures?.all_unique_features?.length || 0
+    featuresCount: backendFeatures?.all_unique_features?.length || 0,
+    hasIdentifiers: !!data.identifiers?.length,
+    hasFeatures: !!data.features?.length,
+    hasCombinations: !!data.combinations?.length,
+    // ✅ NEW: Check if data is real or dummy
+    hasRealData: data.identifiers?.some(id => 
+      id.name && id.name !== 'Identifier 1' && id.name !== 'Identifier 2'
+    ) || false
   });
+
+  // Restore state from store when component mounts or data changes
+  useEffect(() => {
+    console.log('🔄 Settings: Checking for state restoration...');
+    
+    if (backendIdentifiers && backendFeatures) {
+      console.log('✅ Settings: Backend data available, checking if state needs restoration');
+      
+      // Check if we need to restore identifiers and features from backend data
+      const needsRestoration = !data.identifiers?.length || !data.features?.length;
+      
+      if (needsRestoration) {
+        console.log('🔄 Settings: Restoring state from backend data...');
+        // The sync useEffect will handle this automatically
+      } else {
+        console.log('✅ Settings: State already restored, no action needed');
+      }
+    } else {
+      console.log('⏳ Settings: Waiting for backend data...');
+    }
+  }, [backendIdentifiers, backendFeatures, data.identifiers, data.features]);
+  
+  // ✅ FIXED: Prevent unnecessary data clearing when switching tabs
+  useEffect(() => {
+    console.log('🔄 Settings: Component mounted/updated, checking data persistence...');
+    
+    // If we have existing data, preserve it
+    if (data.identifiers?.length && data.features?.length) {
+      console.log('✅ Settings: Existing data found, preserving state');
+      return; // Don't clear existing data
+    }
+    
+    // Only clear if we have no data at all
+    if (!data.identifiers?.length && !data.features?.length) {
+      console.log('⚠️ Settings: No existing data, this is a fresh start');
+    }
+  }, []); // Only run on mount
+  
+  // ✅ IMPROVED: Prevent unnecessary backend data fetching if we already have real data
+  useEffect(() => {
+    if (backendIdentifiers && backendFeatures) {
+      // ✅ FIXED: Check if we already have meaningful data (not dummy data from default settings)
+      const hasRealData = data.identifiers?.some(id => 
+        id.name && 
+        // Check for dummy identifiers from default settings
+        id.name !== 'Identifier 1' && 
+        id.name !== 'Identifier 2' && 
+        id.name !== 'Identifier 3' && 
+        id.name !== 'Identifier 4' &&
+        id.name !== 'identifier-1' && 
+        id.name !== 'identifier-2' &&
+        id.name !== 'identifier-3' &&
+        id.name !== 'identifier-4' &&
+        !id.name.startsWith('Identifier') && // Generic check
+        !id.name.startsWith('identifier-') && // Generic check
+        // Check for dummy values
+        !id.values?.some(val => 
+          val.name && (
+            val.name.startsWith('Identifier 1-') ||
+            val.name.startsWith('Identifier 2-') ||
+            val.name.startsWith('Identifier 3-') ||
+            val.name.startsWith('Identifier 4-') ||
+            val.name.startsWith('1a') ||
+            val.name.startsWith('2a') ||
+            val.name.startsWith('3a') ||
+            val.name.startsWith('4a')
+          )
+        )
+      );
+      
+      if (hasRealData) {
+        console.log('✅ Settings: Real data already exists, skipping backend sync');
+        return; // Don't overwrite existing real data
+      }
+      
+      console.log('🔄 Settings: No real data exists, backend sync will proceed');
+    }
+      }, [backendIdentifiers, backendFeatures, data.identifiers]);
+    
+    // ✅ RESTORED & IMPROVED: Auto-refresh reference values when reference method or period changes
+    useEffect(() => {
+      // Only trigger if we have real data and reference values are already loaded
+      const hasRealData = data.identifiers?.some(id => 
+        id.name && 
+        id.name !== 'Identifier 1' && 
+        id.name !== 'Identifier 2' && 
+        id.name !== 'Identifier 3' && 
+        id.name !== 'Identifier 4' &&
+        id.name !== 'identifier-1' && 
+        id.name !== 'identifier-2' &&
+        id.name !== 'identifier-3' &&
+        id.name !== 'identifier-4' &&
+        !id.name.startsWith('Identifier') && 
+        !id.name.startsWith('identifier-')
+      );
+      
+      if (hasRealData && data.combinations?.length > 0) {
+        console.log('🔄 Reference settings changed, triggering auto-refresh of reference values');
+        
+        // Notify parent component to refresh reference values
+        if (onDataChange) {
+          // Set a flag to indicate reference values need refresh
+          onDataChange({
+            referenceValuesNeedRefresh: true,
+            lastReferenceMethod: data.referenceMethod,
+            lastReferencePeriod: data.referencePeriod
+          });
+        }
+      }
+    }, [data.referenceMethod, data.referencePeriod, data.identifiers, data.combinations]); // Removed onDataChange to prevent infinite loops
+    
+    // ✅ RESTORED & IMPROVED: Manual refresh function for user control
+    const handleManualRefresh = () => {
+      if (onDataChange) {
+        onDataChange({
+          referenceValuesNeedRefresh: true,
+          lastReferenceMethod: data.referenceMethod,
+          lastReferencePeriod: data.referencePeriod
+        });
+        
+        toast({
+          title: "Manual Refresh Triggered",
+          description: "Reference values will be refreshed with current settings",
+          variant: "default",
+        });
+      }
+    };
+    
+    // ✅ NEW: Debug logging to see what's happening with data
+  useEffect(() => {
+    console.log('🔍 Settings Debug - Current state:', {
+      hasBackendIdentifiers: !!backendIdentifiers,
+      hasBackendFeatures: !!backendFeatures,
+      currentIdentifiers: data.identifiers?.map(id => ({ id: id.id, name: id.name })),
+      currentFeatures: data.features?.map(f => ({ id: f.id, name: f.name })),
+      backendIdentifierColumns: backendIdentifiers?.identifier_columns,
+      backendFeaturesList: backendFeatures?.all_unique_features
+    });
+  }, [backendIdentifiers, backendFeatures, data.identifiers, data.features]);
   
   const [openSections, setOpenSections] = useState({
     identifier1: true,
@@ -383,7 +531,7 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
   //   fetchFeatures();
   // }, []);
 
-  // Sync backend data with frontend settings when data changes
+  // ✅ FIXED: Sync backend data with frontend settings when data changes
   useEffect(() => {
     console.log('🔄 Sync useEffect triggered:', {
       hasBackendIdentifiers: !!backendIdentifiers,
@@ -391,6 +539,42 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
       identifierColumns: backendIdentifiers?.identifier_columns,
       allFeatures: backendFeatures?.all_unique_features
     });
+
+    // ✅ FIXED: Check if we have REAL data (not dummy data from default settings)
+    const hasRealCurrentData = data.identifiers?.some(id => 
+      id.name && 
+      // Check for dummy identifiers from default settings
+      id.name !== 'Identifier 1' && 
+      id.name !== 'Identifier 2' && 
+      id.name !== 'Identifier 3' && 
+      id.name !== 'Identifier 4' &&
+      id.name !== 'identifier-1' && 
+      id.name !== 'identifier-2' &&
+      id.name !== 'identifier-3' &&
+      id.name !== 'identifier-4' &&
+      !id.name.startsWith('Identifier') && // Generic check
+      !id.name.startsWith('identifier-') && // Generic check
+      // Check for dummy values
+      !id.values?.some(val => 
+        val.name && (
+          val.name.startsWith('Identifier 1-') ||
+          val.name.startsWith('Identifier 2-') ||
+          val.name.startsWith('Identifier 3-') ||
+          val.name.startsWith('Identifier 4-') ||
+          val.name.startsWith('1a') ||
+          val.name.startsWith('2a') ||
+          val.name.startsWith('3a') ||
+          val.name.startsWith('4a')
+        )
+      )
+    );
+    
+    if (hasRealCurrentData) {
+      console.log('✅ Real data already exists, skipping backend sync to preserve user selections');
+      return;
+    } else {
+      console.log('🔄 Dummy data detected, backend sync will proceed to load real data');
+    }
 
     if (backendIdentifiers && backendFeatures && 
         backendIdentifiers.identifier_columns && 
@@ -420,7 +604,7 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
         console.log('✅ New identifiers created:', newIdentifiers);
         console.log('✅ New features created:', newFeatures);
 
-        // Only update if we have new data and it's actually different to prevent infinite loop
+        // ✅ IMPROVED: Only update if we have new data and it's actually different to prevent infinite loop
         const currentIdentifiers = data.identifiers || [];
         const currentFeatures = data.features || [];
         
@@ -446,9 +630,9 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
         backendFeatures: backendFeatures
       });
     }
-  }, [backendIdentifiers, backendFeatures]); // Remove onDataChange from dependencies to prevent infinite loop
+  }, [backendIdentifiers, backendFeatures, data.identifiers]); // Added data.identifiers to prevent unnecessary syncs
 
-  // Regenerate combinations when identifiers change (after backend sync)
+  // ✅ FIXED: Regenerate combinations when identifiers change (after backend sync)
   useEffect(() => {
     if (data.identifiers && data.identifiers.length > 0) {
       console.log('🔄 Identifiers changed, regenerating combinations...');
@@ -475,34 +659,34 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
         console.log('⏳ Waiting for real identifiers from backend...');
       }
     }
-  }, [data.identifiers]); // Remove onDataChange from dependencies to prevent infinite loop
+  }, [data.identifiers]); // Simplified dependencies to prevent infinite loops
 
   // Initialize filters when aggregated views change
   useEffect(() => {
     if (aggregatedViews && Array.isArray(aggregatedViews)) {
       try {
-        const allIdentifiers = new Set<string>();
-        aggregatedViews.forEach(view => {
+    const allIdentifiers = new Set<string>();
+    aggregatedViews.forEach(view => {
           if (view && view.identifierOrder && Array.isArray(view.identifierOrder)) {
-            view.identifierOrder.forEach(identifierId => {
+      view.identifierOrder.forEach(identifierId => {
               if (identifierId) {
-                allIdentifiers.add(identifierId);
+        allIdentifiers.add(identifierId);
               }
-            });
+      });
           }
-        });
+    });
 
-        setIdentifierFilters(prev => {
-          const newFilters: Record<string, string[]> = {};
-          allIdentifiers.forEach(identifierId => {
-            if (identifierId in prev) {
-              newFilters[identifierId] = prev[identifierId];
-            } else {
-              newFilters[identifierId] = [];
-            }
-          });
-          return newFilters;
-        });
+    setIdentifierFilters(prev => {
+      const newFilters: Record<string, string[]> = {};
+      allIdentifiers.forEach(identifierId => {
+        if (identifierId in prev) {
+          newFilters[identifierId] = prev[identifierId];
+        } else {
+          newFilters[identifierId] = [];
+        }
+      });
+      return newFilters;
+    });
       } catch (error) {
         console.error('Error initializing filters:', error);
       }
@@ -513,13 +697,13 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
   useEffect(() => {
     if (data.identifiers && Array.isArray(data.identifiers)) {
       try {
-        const newUniqueValues: Record<string, string[]> = {};
-        data.identifiers.forEach(identifier => {
+    const newUniqueValues: Record<string, string[]> = {};
+    data.identifiers.forEach(identifier => {
           if (identifier && identifier.id && identifier.values && Array.isArray(identifier.values)) {
             newUniqueValues[identifier.id] = identifier.values.map(value => value.id).filter(Boolean);
           }
-        });
-        setUniqueValues(newUniqueValues);
+    });
+    setUniqueValues(newUniqueValues);
       } catch (error) {
         console.error('Error initializing unique values:', error);
       }
@@ -530,14 +714,14 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
   useEffect(() => {
     if (data.resultViews && Array.isArray(data.resultViews) && data.resultViews.length > 0) {
       try {
-        // Convert resultViews to aggregatedViews format
-        const syncedViews = data.resultViews.map(view => ({
+      // Convert resultViews to aggregatedViews format
+      const syncedViews = data.resultViews.map(view => ({
           id: view.id || `view-${Date.now()}`,
           name: view.name || 'Unnamed View',
-          identifierOrder: [],
-          selectedIdentifiers: {}
-        }));
-        setAggregatedViews(syncedViews);
+        identifierOrder: [],
+        selectedIdentifiers: {}
+      }));
+      setAggregatedViews(syncedViews);
       } catch (error) {
         console.error('Error syncing aggregated views:', error);
       }
@@ -927,7 +1111,15 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
           <Card className="p-2">
             <Collapsible open={openSections.referenceSettings} onOpenChange={() => toggleSection('referenceSettings')}>
               <CollapsibleTrigger className="flex items-center justify-between w-full p-2 hover:bg-gray-50 rounded-md">
+                  <div className="flex items-center space-x-2">
                 <span className="font-medium text-sm">Reference Settings</span>
+                    {/* ✅ RESTORED: Visual indicator when refresh is needed */}
+                    {data.referenceValuesNeedRefresh && (
+                      <Badge variant="destructive" className="text-xs px-2 py-0.5">
+                        Refresh Needed
+                      </Badge>
+                    )}
+                  </div>
                 {openSections.referenceSettings ? (
                   <ChevronDown className="h-4 w-4" />
                 ) : (
@@ -948,40 +1140,20 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
             </CollapsibleTrigger>
             <CollapsibleContent className="px-2 py-2">
               <div className="space-y-2">
-                        {data.referenceMethod && (
-                <div className="flex items-center space-x-2">
-                            <Checkbox 
-                              id="reference-mean"
-                              checked={data.referenceMethod === "mean"}
-                              onCheckedChange={(checked) => {
-                                if (checked === true) {
-                                  onDataChange({ referenceMethod: "mean" });
-                                }
-                              }}
-                              className="data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600 data-[state=checked]:text-white"
-                            />
-                            <label htmlFor="reference-mean" className="text-sm text-foreground cursor-pointer">
-                              Mean
-                            </label>
-                </div>
-                        )}
-                        {data.referenceMethod && (
-                <div className="flex items-center space-x-2">
-                            <Checkbox 
-                              id="reference-median"
-                              checked={data.referenceMethod === "median"}
-                              onCheckedChange={(checked) => {
-                                if (checked === true) {
-                                  onDataChange({ referenceMethod: "median" });
-                                }
-                              }}
-                              className="data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600 data-[state=checked]:text-white"
-                            />
-                            <label htmlFor="reference-median" className="text-sm text-foreground cursor-pointer">
-                              Median
-                            </label>
-                </div>
-                        )}
+                <Select 
+                  value={data.referenceMethod || 'period-mean'} 
+                  onValueChange={(value: 'period-mean' | 'period-median' | 'mean' | 'median') => onDataChange({ referenceMethod: value })}
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Select method" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="period-mean">Period Mean</SelectItem>
+                    <SelectItem value="period-median">Period Median</SelectItem>
+                    <SelectItem value="mean">Mean</SelectItem>
+                    <SelectItem value="median">Median</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
             </CollapsibleContent>
           </Collapsible>
@@ -997,9 +1169,58 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
                       )}
             </CollapsibleTrigger>
             <CollapsibleContent className="px-2 py-2">
-                      <div className="text-sm text-gray-600">
-                        From: {data.referencePeriod?.from || 'N/A'}<br/>
-                        To: {data.referencePeriod?.to || 'N/A'}
+              <div className="space-y-3">
+                <div className="space-y-2">
+                  <label htmlFor="reference-start-date" className="text-sm font-medium text-gray-700">
+                    Start Date:
+                  </label>
+                  <input
+                    id="reference-start-date"
+                    type="text"
+                    value={data.referencePeriod?.from || ''}
+                    onChange={(e) => onDataChange({
+                      referencePeriod: {
+                        ...data.referencePeriod,
+                        from: e.target.value
+                      }
+                    })}
+                    placeholder="01-JAN-2020"
+                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  />
+                </div>
+                
+                <div className="space-y-2">
+                  <label htmlFor="reference-end-date" className="text-sm font-medium text-gray-700">
+                    End Date:
+                  </label>
+                  <input
+                    id="reference-end-date"
+                    type="text"
+                    value={data.referencePeriod?.to || ''}
+                    onChange={(e) => onDataChange({
+                      referencePeriod: {
+                        ...data.referencePeriod,
+                        to: e.target.value
+                      }
+                    })}
+                    placeholder="30-MAR-2024"
+                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                      />
+                  </div>
+                  
+                                    {/* ✅ RESTORED: Manual Refresh Button */}
+                  <div className="pt-2">
+                    <Button
+                      onClick={handleManualRefresh}
+                      variant="outline"
+                      size="sm"
+                      className="w-full"
+                      disabled={!data.identifiers?.length || !data.combinations?.length}
+                    >
+                      <RefreshCw className="h-4 w-4 mr-2" />
+                      Refresh Reference Values
+                    </Button>
+                  </div>
                 </div>
                     </CollapsibleContent>
                   </Collapsible>

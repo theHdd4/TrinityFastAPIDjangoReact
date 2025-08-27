@@ -500,7 +500,7 @@ export interface ScenarioPlannerSettings {
       reference: number;
     }>;
   }>;
-  referenceMethod: 'mean' | 'median' | 'mode';
+  referenceMethod: 'period-mean' | 'mean' | 'period-median' | 'median';
   referencePeriod: {
     from: string;
     to: string;
@@ -525,6 +525,13 @@ export interface ScenarioPlannerSettings {
   };
   backendIdentifiers?: any;
   backendFeatures?: any;
+  // ✅ NEW: Properties for auto-refresh functionality
+  referenceValuesNeedRefresh?: boolean;
+  lastReferenceMethod?: 'period-mean' | 'mean' | 'period-median' | 'median';
+  lastReferencePeriod?: {
+    from: string;
+    to: string;
+  };
 }
 
 export const DEFAULT_SCENARIO_PLANNER_SETTINGS: ScenarioPlannerSettings = {
@@ -584,8 +591,8 @@ export const DEFAULT_SCENARIO_PLANNER_SETTINGS: ScenarioPlannerSettings = {
     { id: 'output-4', name: 'Output 4', selected: true },
   ],
   combinations: [],
-  referenceMethod: 'mean',
-  referencePeriod: { from: '01-JAN-2020', to: '30-MAR-2025' },
+  referenceMethod: 'period-mean',
+  referencePeriod: { from: '01-JAN-2020', to: '30-MAR-2024' },
   resultViews: [
     { id: 'view-1', name: 'View 1', selectedCombinations: [] },
     { id: 'view-2', name: 'View 2', selectedCombinations: [] },
@@ -603,7 +610,11 @@ export const DEFAULT_SCENARIO_PLANNER_SETTINGS: ScenarioPlannerSettings = {
     selectedMeasures: [],
     outputPath: '',
     outputFilename: ''
-  }
+  },
+  // ✅ NEW: Default values for auto-refresh functionality
+  referenceValuesNeedRefresh: false,
+  lastReferenceMethod: 'period-mean',
+  lastReferencePeriod: { from: '01-JAN-2020', to: '30-MAR-2024' }
 };
 
 export interface DroppedAtom {

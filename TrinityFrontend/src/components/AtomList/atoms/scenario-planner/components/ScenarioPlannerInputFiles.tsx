@@ -31,7 +31,7 @@ const ScenarioPlannerInputFiles: React.FC<Props> = ({ atomId, onCacheInitialized
   const [loading, setLoading] = useState(false);
   const [initializingCache, setInitializingCache] = useState(false);
 
-  // Fetch available files when component mounts - only once
+  // Fetch available files and restore selected file when component mounts
   useEffect(() => {
     const fetchFiles = async () => {
       setLoading(true);
@@ -46,6 +46,19 @@ const ScenarioPlannerInputFiles: React.FC<Props> = ({ atomId, onCacheInitialized
           const files = Array.isArray(data.files) ? data.files : [];
           console.log('Processed files:', files);
           setAvailableFiles(files);
+          
+          // Restore selected file from store if it exists
+          const savedFile = scenarioData.selectedDataFile;
+          if (savedFile && files.some(file => file.object_name === savedFile)) {
+            console.log('🔄 Restoring selected file from store:', savedFile);
+            setSelectedFile(savedFile);
+            
+            // Also restore the cache if the file was previously initialized
+            if (settings.backendIdentifiers && settings.backendFeatures) {
+              console.log('🔄 Restoring backend data from store');
+              // The backend data is already in the store, so we don't need to re-fetch
+            }
+          }
         } else {
           console.error('Failed to fetch files:', response.status, response.statusText);
         }
@@ -57,7 +70,18 @@ const ScenarioPlannerInputFiles: React.FC<Props> = ({ atomId, onCacheInitialized
     };
 
     fetchFiles();
-  }, []); // Only run once on mount
+  }, [scenarioData.selectedDataFile, settings.backendIdentifiers, settings.backendFeatures]); // Re-run when store data changes
+
+  // Restore selected file from store when component mounts (if files are already available)
+  useEffect(() => {
+    if (availableFiles.length > 0 && scenarioData.selectedDataFile) {
+      const savedFile = scenarioData.selectedDataFile;
+      if (availableFiles.some(file => file.object_name === savedFile)) {
+        console.log('🔄 Restoring selected file from store (files already available):', savedFile);
+        setSelectedFile(savedFile);
+      }
+    }
+  }, [availableFiles, scenarioData.selectedDataFile]);
 
   // Fetch identifiers from backend
   const fetchIdentifiers = async (fileName: string) => {
@@ -295,9 +319,19 @@ const ScenarioPlannerInputFiles: React.FC<Props> = ({ atomId, onCacheInitialized
       </Card>
 
       {/* Selected File Info */}
-                  {selectedFile && (
-              <Card className="p-4 bg-blue-50 border border-blue-200">
-                <div className="flex items-center justify-between">
+      {selectedFile && (
+        <Card className="p-4 bg-blue-50 border border-blue-200">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-2">
+              <span className="text-sm font-medium text-blue-800">
+                📁 Selected: {selectedFile}
+              </span>
+              {scenarioData.selectedDataFile === selectedFile && (
+                <Badge variant="secondary" className="text-xs">
+                  🔄 Restored from previous session
+                </Badge>
+              )}
+            </div>
                   <div className="flex-1">
                     <h4 className="font-medium text-blue-900">Selected File</h4>
                     <p className="text-sm text-blue-700">{selectedFile}</p>
