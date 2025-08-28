@@ -17,6 +17,7 @@ import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { useResponsiveChartLayout } from '@/hooks/useResponsiveChartLayout';
 import { migrateLegacyChart, DEFAULT_TRACE_COLORS } from '../utils/traceUtils';
 import ChatBubble from './ChatBubble';
+import AtomAIChatBot from '@/components/TrinityAI/AtomAIChatBot';
 
 // Extend ChartData type to include uniqueValuesByColumn for type safety
 interface ChartDataWithUniqueValues extends ChartData {
@@ -24,6 +25,7 @@ interface ChartDataWithUniqueValues extends ChartData {
 }
 
 interface ChartMakerCanvasProps {
+  atomId: string;
   charts: ChartMakerConfig[];
   data: ChartData | null;
   onChartTypeChange?: (chartId: string, newType: ChartMakerConfig['type']) => void;
@@ -32,7 +34,7 @@ interface ChartMakerCanvasProps {
   isFullWidthMode?: boolean; // When atom list and global properties tabs are hidden
 }
 
-const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onChartTypeChange, onChartFilterChange, onTraceFilterChange, isFullWidthMode = false }) => {
+const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ atomId, charts, data, onChartTypeChange, onChartFilterChange, onTraceFilterChange, isFullWidthMode = false }) => {
   const typedData = data as ChartDataWithUniqueValues | null;
   const [fullscreenChart, setFullscreenChart] = useState<ChartMakerConfig | null>(null);
   const [fullscreenIndex, setFullscreenIndex] = useState<number | null>(null);
@@ -1095,6 +1097,34 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
           </defs>
           <rect width="100%" height="100%" fill="url(#grid)" />
         </svg>
+      </div>
+
+      {/* Header with chart count and AI assistant */}
+      <div className="relative z-10 flex items-center justify-between p-4 border-b border-gray-200 bg-white/90 backdrop-blur-sm">
+        <div className="flex items-center space-x-2">
+          <BarChart3 className="w-5 h-5 text-gray-600" />
+          <span className="text-sm font-medium text-gray-700">
+            {charts.length === 0 ? 'No Charts' : `${charts.length} Chart${charts.length === 1 ? '' : 's'}`}
+          </span>
+        </div>
+        <div className="flex items-center space-x-2">
+          {/* <AtomAIChatBot
+            atomId={atomId}
+            atomType="chart-maker"
+            atomTitle="Chart Maker"
+            className="mr-2"
+          /> */}
+          {/* <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setFullscreenChart(charts[0] || null)}
+            disabled={charts.length === 0}
+            className="text-xs"
+          >
+            <Maximize2 className="w-3 h-3 mr-1" />
+            Fullscreen
+          </Button> */}
+        </div>
       </div>
       
       <div className="relative z-10 p-6 overflow-hidden">

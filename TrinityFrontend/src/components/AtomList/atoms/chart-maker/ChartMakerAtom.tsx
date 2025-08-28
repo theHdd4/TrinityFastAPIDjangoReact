@@ -443,6 +443,7 @@ const ChartMakerAtom: React.FC<Props> = ({ atomId }) => {
   return (
     <div className="w-full h-full min-h-[28rem]">
       <ChartMakerCanvas 
+        atomId={atomId}
         charts={chartsToShow}
         data={settings.uploadedData}
         onChartTypeChange={handleChartTypeChange}

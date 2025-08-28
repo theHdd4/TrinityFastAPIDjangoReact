@@ -18,6 +18,8 @@ class ChartMakerService:
         # In-memory storage for uploaded files
         # In production, this should use a proper storage solution
         self.file_storage: Dict[str, pd.DataFrame] = {}
+        # Track file metadata including names and sources
+        self.file_metadata: Dict[str, Dict[str, str]] = {}
     
     def read_file(self, file_bytes: bytes, filename: str) -> pd.DataFrame:
         """Read file from bytes and return DataFrame"""
@@ -37,10 +39,15 @@ class ChartMakerService:
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"Error reading file: {str(e)}")
     
-    def store_file(self, df: pd.DataFrame) -> str:
+    def store_file(self, df: pd.DataFrame, filename: str = None, data_source: str = None) -> str:
         """Store DataFrame and return file_id"""
         file_id = str(uuid.uuid4())
         self.file_storage[file_id] = df
+        # Store metadata
+        self.file_metadata[file_id] = {
+            "filename": filename or f"file_{file_id}",
+            "data_source": data_source or "uploaded_file"
+        }
         return file_id
     
     def get_file(self, file_id: str) -> pd.DataFrame:
@@ -49,15 +56,34 @@ class ChartMakerService:
             raise HTTPException(status_code=404, detail=f"File with id {file_id} not found")
         return self.file_storage[file_id]
     
+    def get_file_metadata(self, file_id: str) -> Dict[str, str]:
+        """Get file metadata by file_id"""
+        if file_id not in self.file_metadata:
+            return {"filename": f"file_{file_id}", "data_source": "unknown"}
+        return self.file_metadata[file_id]
+    
     def load_saved_dataframe(self, object_name: str) -> str:
         """Load a saved dataframe from Arrow Flight and return file_id"""
         try:
+            print(f"🔍 ===== LOAD SAVED DATAFRAME SERVICE =====")
+            print(f"📥 Object name: {object_name}")
+            
             # Download dataframe from Arrow Flight using the object name as path
+            print("🚀 Downloading dataframe from Arrow Flight...")
             df = download_dataframe(object_name)
+            print(f"✅ Dataframe downloaded: {len(df)} rows, {len(df.columns)} columns")
+            print(f"📋 Columns: {list(df.columns)}")
+            
             # Store it and return file_id
-            file_id = self.store_file(df)
+            print("💾 Storing dataframe in local storage...")
+            file_id = self.store_file(df, filename=object_name, data_source="arrow_flight")
+            print(f"✅ Dataframe stored with file ID: {file_id}")
+            print(f"🔍 ===== END SERVICE LOG =====")
+            
             return file_id
         except Exception as e:
+            print(f"❌ Error in load_saved_dataframe: {e}")
+            print(f"🔍 ===== END SERVICE LOG =====")
             raise HTTPException(status_code=404, detail=f"Error loading saved dataframe {object_name}: {str(e)}")
     
     def get_all_columns(self, df: pd.DataFrame) -> List[str]:
@@ -121,14 +147,23 @@ class ChartMakerService:
 
     def generate_chart_config(self, request: ChartRequest) -> ChartResponse:
         """Generate recharts configuration from chart request"""
+        print(f"🔍 ===== GENERATE CHART CONFIG SERVICE =====")
+        print(f"📥 Request file_id: {request.file_id}")
+        print(f"📊 Chart type: {request.chart_type}")
+        print(f"📈 Traces count: {len(request.traces)}")
+        
         df = self.get_file(request.file_id)
+        print(f"✅ File loaded: {len(df)} rows, {len(df.columns)} columns")
+        print(f"📋 Available columns: {list(df.columns)}")
         
         # Check if any trace has filters (advanced mode)
         has_trace_filters = any(trace.filters for trace in request.traces)
+        print(f"🔍 Has trace filters: {has_trace_filters}")
         
         # Create a copy of traces to avoid modifying the original request
         traces_copy = []
         for i, trace in enumerate(request.traces):
+            print(f"📊 Trace {i+1}: X='{trace.x_column}', Y='{trace.y_column}', Type='{trace.chart_type}', Agg='{trace.aggregation}'")
             trace_copy = ChartTrace(
                 x_column=trace.x_column,
                 y_column=trace.y_column,
@@ -143,13 +178,19 @@ class ChartMakerService:
         
         if has_trace_filters:
             # Advanced mode: Process each trace with its own filters
+            print("🚀 Processing multi-trace data with individual filters...")
             processed_data = self._process_multi_trace_data(df, traces_copy)
         else:
             # Legacy mode: Apply chart-level filters
+            print("🚀 Processing single-trace data...")
             if request.filters:
+                print(f"🔍 Applying chart-level filters: {request.filters}")
                 df = self.apply_filters(df, request.filters)
+                print(f"✅ Filters applied: {len(df)} rows remaining")
             chart_data = self._convert_numpy_types(df.to_dict('records'))
             processed_data = self._process_chart_data(chart_data, traces_copy)
+        
+        print(f"✅ Data processed: {len(processed_data)} rows")
         
         # Generate recharts data keys using the updated column names from data processing
         recharts_traces = []
@@ -177,6 +218,7 @@ class ChartMakerService:
                 fillOpacity=trace.style.fillOpacity if trace.style else (0.6 if request.chart_type == "area" else None)
             )
             recharts_traces.append(recharts_trace)
+            print(f"📊 Recharts trace {i+1}: dataKey='{dataKey}', name='{recharts_trace.name}', color='{color}'")
         
         # Set up axis configurations
         x_axis_config = request.x_axis or RechartsAxisConfig(
@@ -196,6 +238,9 @@ class ChartMakerService:
                 dataKey=traces_copy[0].y_column if traces_copy else None,
                 type="number"
             )
+        
+        print(f"📊 X-axis config: dataKey='{x_axis_config.dataKey}', type='{x_axis_config.type}'")
+        print(f"📊 Y-axis config: dataKey='{y_axis_config.dataKey}', type='{y_axis_config.type}'")
         
         # Create final recharts configuration
         chart_config = RechartsConfig(
@@ -224,10 +269,20 @@ class ChartMakerService:
             "trace_filters_used": has_trace_filters
         }
         
+        # Get file metadata for response
+        file_metadata = self.get_file_metadata(request.file_id)
+        
+        print(f"✅ Chart config generated successfully")
+        print(f"📊 Chart ID: {chart_id}")
+        print(f"📈 Data summary: {data_summary}")
+        print(f"🔍 ===== END SERVICE LOG =====")
+        
         return ChartResponse(
             chart_id=chart_id,
             chart_config=chart_config,
-            data_summary=data_summary
+            data_summary=data_summary,
+            file_name=file_metadata["filename"],
+            data_source=file_metadata["data_source"]
         )
     
     def _process_multi_trace_data(self, df: pd.DataFrame, traces: List[ChartTrace]) -> List[Dict[str, Any]]:

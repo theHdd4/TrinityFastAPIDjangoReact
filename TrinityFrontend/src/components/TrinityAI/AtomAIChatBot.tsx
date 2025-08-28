@@ -5,7 +5,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Sparkles, Bot, User, X, MessageSquare, Send, Plus, RotateCcw } from 'lucide-react';
-import { TRINITY_AI_API, CONCAT_API, MERGE_API, CREATECOLUMN_API, GROUPBY_API, FEATURE_OVERVIEW_API, VALIDATE_API } from '@/lib/api';
+import { TRINITY_AI_API, CONCAT_API, MERGE_API, CREATECOLUMN_API, GROUPBY_API, FEATURE_OVERVIEW_API, VALIDATE_API, CHART_MAKER_API } from '@/lib/api';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 
 interface Message {
@@ -36,6 +36,7 @@ const PERFORM_ENDPOINTS: Record<string, string> = {
   concat: `${CONCAT_API}/perform`,
   'create-column': `${CREATECOLUMN_API}/perform`,
   'groupby-wtg-avg': `${GROUPBY_API}/run`,
+  'chart-maker': `${CHART_MAKER_API}/generate`,
 };
 
 import { cn } from '@/lib/utils';
@@ -507,7 +508,6 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
             aiMessage: data.message,
             operationCompleted: false,
             // Auto-populate the CreateColumn interface - EXACTLY like GroupBy
-            operations: operations,
             dataSource: cfg.object_name || '', // Note: AI uses object_name (singular)
             bucketName: cfg.bucket_name || 'trinity',
             selectedIdentifiers: cfg.identifiers || [],
@@ -1156,6 +1156,362 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
               operationCompleted: false
             });
           }
+                 } else if (atomType === 'chart-maker' && data.chart_json) {
+          // 🔧 SIMPLIFIED LOGIC: chart_json is always a list
+          // Single chart: chart_json contains 1 chart configuration
+          // Two charts: chart_json contains 2 chart configurations
+          
+          console.log('🔍 ===== CHART MAKER AI RESPONSE =====');
+          console.log('📝 User Prompt:', userMsg.content);
+          
+          // 🔧 UNIFIED APPROACH: chart_json is always an array
+          const chartsList = Array.isArray(data.chart_json) ? data.chart_json : [data.chart_json];
+          const numberOfCharts = chartsList.length;
+          
+          console.log('📊 Charts in chart_json:', numberOfCharts);
+          console.log('🔍 ===== END CHART ANALYSIS =====');
+          
+          // 🔧 GET TARGET FILE: Use the exact keys from LLM response
+          let targetFile = '';
+          
+          // Priority 1: Use AI-provided file name (exact keys from LLM)
+          if (data.file_name || data.data_source) {
+            targetFile = data.file_name || data.data_source;
+            console.log('🎯 Using AI-provided file name:', targetFile);
+          } else {
+            console.log('⚠️ No file name found in AI response');
+          }
+          
+          if (!targetFile) {
+            // No file found - show error and don't proceed
+            const errorMsg: Message = {
+              id: (Date.now() + 1).toString(),
+              content: `❌ Cannot proceed: No valid file found for chart generation\n\nAI provided: ${data.file_name || 'N/A'}\nContext: ${data.file_context?.available_files?.join(', ') || 'N/A'}\n\n💡 Please ensure you have selected a data file before using AI Chart Maker.`,
+              sender: 'ai',
+              timestamp: new Date(),
+            };
+            setMessages(prev => [...prev, errorMsg]);
+            return;
+          }
+          
+          // 🔧 CREATE CHART CONFIGURATIONS: chart_json is always a list
+          let charts: any[] = [];
+          
+          console.log('🔧 Processing charts from chart_json list...');
+          
+          charts = chartsList.map((chartConfig: any, index: number) => {
+            const chartType = chartConfig.chart_type || 'bar';
+            const traces = chartConfig.traces || [];
+            const title = chartConfig.title || `Chart ${index + 1}`;
+            
+            return {
+              id: `ai_chart_${chartConfig.chart_id || index + 1}_${Date.now()}`,
+              title: title,
+              type: chartType as 'line' | 'bar' | 'area' | 'pie' | 'scatter',
+              xAxis: traces[0]?.x_column || '',
+              yAxis: traces[0]?.y_column || '',
+              filters: {},
+              chartRendered: false,
+              isAdvancedMode: traces.length > 1,
+              traces: traces.map((trace: any, traceIndex: number) => ({
+                id: `trace_${traceIndex}`,
+                x_column: trace.x_column || '', // 🔧 FIX: Use correct property name
+                y_column: trace.y_column || '', // 🔧 FIX: Use correct property name
+                yAxis: trace.y_column || '', // Keep for backward compatibility
+                name: trace.name || `Trace ${traceIndex + 1}`,
+                color: trace.color || undefined,
+                aggregation: trace.aggregation || 'sum',
+                filters: {}
+              }))
+            };
+          });
+          
+          console.log('🔧 Processed charts:', charts.length);
+          
+          // 🔧 CRITICAL FIX: Update atom settings with the AI configuration AND load data
+          updateAtomSettings(atomId, { 
+            aiConfig: data,
+            aiMessage: data.message,
+            // Add the AI-generated charts to the charts array
+            charts: charts,
+            // 🔧 CRITICAL: Set proper data source and file ID for chart rendering
+            dataSource: targetFile,
+            fileId: targetFile,
+            // Set the first chart as active
+            currentChart: charts[0],
+            // Mark that AI has configured the chart(s)
+            aiConfigured: true,
+            // Set multiple charts configuration based on list length
+            multipleCharts: numberOfCharts > 1,
+            numberOfCharts: numberOfCharts,
+            // Set chart type and basic settings for first chart
+            chartType: charts[0].type,
+            chartTitle: charts[0].title,
+            xAxisColumn: charts[0].xAxis,
+            yAxisColumn: charts[0].yAxis,
+            // 🔧 CRITICAL: Set chart rendering state to trigger data loading
+            chartRendered: false,
+            chartLoading: false
+          });
+          
+          // 🔧 CRITICAL FIX: Connect to actual file system and load real data
+          try {
+            console.log('🔄 Connecting AI chart to actual file system...');
+            
+            // 🔧 STEP 1: Load the actual file data using the chart-maker backend
+            console.log('📥 Loading actual file data from backend:', targetFile);
+            
+            // Call the chart-maker backend to load the saved dataframe
+            const loadResponse = await fetch(`${CHART_MAKER_API}/load-saved-dataframe`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ object_name: targetFile })
+            });
+            
+            if (loadResponse.ok) {
+              const fileData = await loadResponse.json();
+              console.log('✅ File data loaded successfully:', fileData);
+              
+              // 🔧 STEP 2: Update atom settings with REAL file data
+              updateAtomSettings(atomId, {
+                dataSource: targetFile,
+                fileId: fileData.file_id,
+                uploadedData: {
+                  columns: fileData.columns,
+                  rows: fileData.sample_data,
+                  numeric_columns: fileData.numeric_columns,
+                  categorical_columns: fileData.categorical_columns,
+                  unique_values: fileData.unique_values,
+                  file_id: fileData.file_id,
+                  row_count: fileData.row_count
+                },
+                chartRendered: false, // Will be rendered when chart is generated
+                chartLoading: false
+              });
+              
+              // 🔧 STEP 3: Generate charts using the backend - UNIFIED APPROACH
+              console.log('🚀 Generating charts with backend data...');
+              
+              // Generate each chart separately by calling FastAPI multiple times
+              const generatedCharts = [];
+              
+              for (let i = 0; i < charts.length; i++) {
+                const chart = charts[i];
+                const chartType = chart.type;
+                const traces = chart.traces || [];
+                const title = chart.title;
+                
+                console.log(`📊 Generating chart ${i + 1}/${charts.length}: ${title} (${chartType})`);
+                
+                const chartRequest = {
+                  file_id: fileData.file_id,
+                  chart_type: chartType,
+                  traces: traces.map(trace => ({
+                    x_column: trace.x_column || chart.xAxis,
+                    y_column: trace.y_column || chart.yAxis,
+                    name: trace.name || `Trace ${traces.indexOf(trace) + 1}`,
+                    chart_type: trace.chart_type || chartType,
+                    aggregation: trace.aggregation || 'sum'
+                  })),
+                  title: title
+                };
+                
+                console.log(`📊 Chart ${i + 1} request payload:`, chartRequest);
+                
+                try {
+                  const chartResponse = await fetch(`${CHART_MAKER_API}/charts`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(chartRequest)
+                  });
+                  
+                  if (chartResponse.ok) {
+                    const chartResult = await chartResponse.json();
+                    console.log(`✅ Chart ${i + 1} generated successfully:`, chartResult);
+                    
+                    // Update chart configuration with backend-generated chart
+                    const updatedChart = {
+                      ...chart,
+                      chartConfig: chartResult.chart_config,
+                      filteredData: chartResult.chart_config.data,
+                      chartRendered: true,
+                      chartLoading: false,
+                      lastUpdateTime: Date.now()
+                    };
+                    
+                    generatedCharts.push(updatedChart);
+                    
+                  } else {
+                    console.error(`❌ Chart ${i + 1} generation failed:`, chartResponse.status);
+                    
+                    // Try to get detailed error message
+                    let errorDetail = chartResponse.statusText;
+                    try {
+                      const errorData = await chartResponse.json();
+                      errorDetail = errorData.detail || errorData.message || chartResponse.statusText;
+                    } catch (e) {
+                      // If we can't parse error response, use status text
+                    }
+                    
+                    // Add error message for this specific chart
+                    const errorMsg: Message = {
+                      id: (Date.now() + i).toString(),
+                      content: `⚠️ Chart ${i + 1} generation failed: ${chartResponse.status}\n\nError: ${errorDetail}\n\nChart: ${title} (${chartType})\n\n💡 This chart may need manual generation.`,
+                      sender: 'ai',
+                      timestamp: new Date(),
+                    };
+                    setMessages(prev => [...prev, errorMsg]);
+                    
+                    // Add failed chart with error state
+                    generatedCharts.push({
+                      ...chart,
+                      chartRendered: false,
+                      chartLoading: false,
+                      error: errorDetail
+                    });
+                  }
+                } catch (error) {
+                  console.error(`❌ Error generating chart ${i + 1}:`, error);
+                  
+                  // Add error message for this specific chart
+                  const errorMsg: Message = {
+                    id: (Date.now() + i).toString(),
+                    content: `❌ Error generating chart ${i + 1}: ${error.message || 'Unknown error occurred'}\n\nChart: ${title} (${chartType})\n\n💡 This chart may need manual generation.`,
+                    sender: 'ai',
+                    timestamp: new Date(),
+                  };
+                  setMessages(prev => [...prev, errorMsg]);
+                  
+                  // Add failed chart with error state
+                  generatedCharts.push({
+                    ...chart,
+                    chartRendered: false,
+                    chartLoading: false,
+                    error: error.message || 'Unknown error'
+                  });
+                }
+              }
+              
+              // 🔧 STEP 4: Update atom settings with all generated charts
+              updateAtomSettings(atomId, {
+                charts: generatedCharts,
+                currentChart: generatedCharts[0] || charts[0],
+                chartRendered: generatedCharts.some(chart => chart.chartRendered),
+                chartLoading: false
+              });
+              
+              console.log('🎉 Charts processed:', generatedCharts.length);
+              
+              // 🔧 CLEANED UP: Show only essential success information
+              const successCount = generatedCharts.filter(chart => chart.chartRendered).length;
+              const totalCount = generatedCharts.length;
+              
+              if (totalCount > 1) {
+                // Multiple charts - simple success message
+                const successMsg: Message = {
+                  id: (Date.now() + 3).toString(),
+                  content: `✅ ${successCount}/${totalCount} charts generated successfully!\n\n💡 Use the 2-chart layout option to view them simultaneously.`,
+                  sender: 'ai',
+                  timestamp: new Date(),
+                };
+                setMessages(prev => [...prev, successMsg]);
+              } else {
+                // Single chart - simple success message
+                const successMsg: Message = {
+                  id: (Date.now() + 3).toString(),
+                  content: `✅ Chart generated successfully with real data!`,
+                  sender: 'ai',
+                  timestamp: new Date(),
+                };
+                setMessages(prev => [...prev, successMsg]);
+              }
+              
+            } else {
+              console.error('❌ Failed to load file data:', loadResponse.status);
+              
+              // Try to get detailed error message
+              let errorDetail = loadResponse.statusText;
+              try {
+                const errorData = await loadResponse.json();
+                errorDetail = errorData.detail || errorData.message || loadResponse.statusText;
+              } catch (e) {
+                // If we can't parse error response, use status text
+              }
+              
+              // Fallback to manual rendering
+              updateAtomSettings(atomId, {
+                chartRendered: false,
+                chartLoading: false
+              });
+              
+              const errorMsg: Message = {
+                id: (Date.now() + 1).toString(),
+                content: `⚠️ Failed to load file data: ${errorDetail}\n\n💡 Please ensure the file exists and try again.`,
+                sender: 'ai',
+                timestamp: new Date(),
+              };
+              setMessages(prev => [...prev, errorMsg]);
+            }
+            
+          } catch (error) {
+            console.error('❌ Error in AI chart setup:', error);
+            
+            // Fallback to manual rendering
+            updateAtomSettings(atomId, {
+              chartRendered: false,
+              chartLoading: false
+            });
+            
+            const errorMsg: Message = {
+              id: (Date.now() + 1).toString(),
+              content: `❌ Error setting up chart: ${error.message || 'Unknown error occurred'}\n\n💡 Please try generating the chart manually.`,
+              sender: 'ai',
+              timestamp: new Date(),
+            };
+            setMessages(prev => [...prev, errorMsg]);
+          }
+          
+          // 🔧 CLEANED UP: Show only LLM suggestions for better user experience
+          let aiContent = '';
+          
+          if (numberOfCharts > 1) {
+            // Multiple charts - show LLM suggestions
+            aiContent = `💡 ${data.message || 'Multiple chart configuration completed successfully'}\n\n`;
+            
+            // Add LLM suggestions if available
+            if (data.suggestions && Array.isArray(data.suggestions)) {
+              aiContent += `${data.suggestions.join('\n')}\n\n`;
+            }
+            
+            // Add next steps if available
+            if (data.next_steps && Array.isArray(data.next_steps)) {
+              aiContent += `🎯 Next Steps:\n${data.next_steps.join('\n')}`;
+            }
+            
+          } else {
+            // Single chart - show LLM suggestions
+            aiContent = `💡 ${data.message || 'Chart configuration completed successfully'}\n\n`;
+            
+            // Add LLM suggestions if available
+            if (data.suggestions && Array.isArray(data.suggestions)) {
+              aiContent += `${data.suggestions.join('\n')}\n\n`;
+            }
+            
+            // Add next steps if available
+            if (data.next_steps && Array.isArray(data.next_steps)) {
+              aiContent += `🎯 Next Steps:\n${data.next_steps.join('\n')}`;
+            }
+          }
+          
+          // Single clean message with LLM suggestions
+          const aiMsg: Message = {
+            id: (Date.now() + 1).toString(),
+            content: aiContent,
+            sender: 'ai',
+            timestamp: new Date(),
+          };
+          setMessages(prev => [...prev, aiMsg]);
+          
         }
       } else {
         // Handle AI suggestions when complete info is not available
