@@ -7,3 +7,12 @@ Potential Prognosis: Without trimming or clearing these cached items, repeated D
 Implemented Changes:
 - Added a safe storage helper (`saveCurrentProject`) that strips in-memory DataFrame data and catches quota errors. When storage is full, it now purges heavy cache keys before retrying, preventing the `QuotaExceededError` and allowing projects to reopen reliably.
 - Laboratory saves now strip large DataFrame results before sending them to the backend, and the server sanitizes DataFrame-operation atoms before writing to MongoDB so only configuration (not the data itself) is persisted and retrieved.
+
+Issue: Saving a DataFrame from the DataFrame Operations atom produced the original, unmodified dataset.
+
+Reason: The save routine reused the original file name and cached rows, so MinIO persisted the untouched source file instead of the edited table.
+
+Potential Prognosis: Users could believe their changes were stored, but reopening the file would reveal stale data, causing confusion or accidental loss of work.
+
+Implemented Changes:
+- The save handler now captures the latest table state and names files using the pattern `DF_OPS_{SerialNumber}_{FileName}` inside the `dataframe operations` folder so each save writes a distinct, updated Arrow file.

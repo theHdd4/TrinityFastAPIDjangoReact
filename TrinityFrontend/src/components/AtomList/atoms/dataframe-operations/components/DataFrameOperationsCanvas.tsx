@@ -231,16 +231,31 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
     }
   };
 
+  // Load existing saved files once so we can compute the next DF_OPS serial
+  useEffect(() => {
+    fetchSavedDataFrames();
+  }, []);
+
   const handleSaveDataFrame = async () => {
     setSaveLoading(true);
     setSaveError(null);
     setSaveSuccess(false);
     try {
+      if (!data) throw new Error('No DataFrame loaded');
+
       const csv_data = toCSV();
-      let filename = data?.fileName || `dataframe_${Date.now()}.arrow`;
-      if (!filename.endsWith('.arrow')) {
-        filename = filename.replace(/\.[^/.]+$/, '') + '.arrow';
-      }
+
+      // Determine next serial number for DF_OPS files
+      const maxSerial = savedFiles.reduce((max, f) => {
+        const m = f.object_name?.match(/dataframe operations\/DF_OPS_(\d+)_/);
+        return m ? Math.max(max, parseInt(m[1], 10)) : max;
+      }, 0);
+      const nextSerial = maxSerial + 1;
+
+      // Base name from current file without extension
+      const baseName = data.fileName ? data.fileName.replace(/\.[^/.]+$/, '') : `dataframe_${Date.now()}`;
+      const filename = `DF_OPS_${nextSerial}_${baseName}.arrow`;
+
       const response = await fetch(`${DATAFRAME_OPERATIONS_API}/save`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -255,7 +270,7 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
       saveSuccessTimeout.current = setTimeout(() => setSaveSuccess(false), 2000);
       fetchSavedDataFrames(); // Refresh the saved dataframes list in the UI
       onSettingsChange({
-        tableData: data,
+        tableData: { ...data, fileName: filename },
         columnWidths: settings.columnWidths,
         rowHeights: settings.rowHeights,
       });
