@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef, useCallback, useEffect, useLayoutEffect } from 'react';
+import React, { useState, useMemo, useRef, useCallback, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -208,30 +208,6 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
     return () => el.removeEventListener('wheel', listener);
   }, [handleInnerScroll]);
 
-  // Lock the scroll container height to the table's height while
-  // excluding stray absolutely-positioned blocks (e.g., resize handles)
-  useLayoutEffect(() => {
-    const container = scrollContainerRef.current;
-    const table = tableRef.current;
-    if (!container) return;
-
-    if (!table) {
-      container.style.height = '';
-      return;
-    }
-
-    // Remove any resize handles that were left outside the table
-    container
-      .querySelectorAll('.cursor-col-resize, .cursor-row-resize')
-      .forEach(node => {
-        if (table && !table.contains(node)) {
-          node.parentElement?.removeChild(node);
-        }
-      });
-
-    const { height } = table.getBoundingClientRect();
-    container.style.height = `${height}px`;
-  }, [data, settings.rendered]);
   // 1. Add state for filter range
   const [filterRange, setFilterRange] = useState<{ min: number; max: number; value: [number, number] } | null>(null);
 
@@ -1044,7 +1020,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
           </div>
 
           {/* Table section - Excel-like appearance */}
-        <div ref={scrollContainerRef} className="flex-1 overflow-auto">
+        <div ref={scrollContainerRef} className="flex-1 overflow-y-auto min-h-0">
             {/* Placeholder for when no data is loaded */}
             {!data || !Array.isArray(data.headers) || data.headers.length === 0 ? (
               <div className="flex flex-1 items-center justify-center bg-gray-50">
