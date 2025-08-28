@@ -121,6 +121,8 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
   // 1. Add a ref to track the currently editing cell/header
   const editingCellRef = useRef<{ row: number; col: string } | null>(null);
   const editingHeaderRef = useRef<string | null>(null);
+  // Ref for the scrollable table area so we can forward scroll events
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
 
   // Ref to store header cell elements for context-menu positioning
   const headerRefs = useRef<{ [key: string]: HTMLTableCellElement | null }>({});
@@ -184,6 +186,18 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
     document.addEventListener('click', handleClickOutside);
     return () => document.removeEventListener('click', handleClickOutside);
   }, [selectedColumn]);
+  // Forward scroll events to the window when the internal container can't scroll further
+  const handleInnerScroll = useCallback((e: React.WheelEvent<HTMLDivElement>) => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    const { scrollTop, scrollHeight, clientHeight } = el;
+    const atTop = scrollTop === 0;
+    const atBottom = scrollTop + clientHeight >= scrollHeight;
+    if ((e.deltaY < 0 && atTop) || (e.deltaY > 0 && atBottom)) {
+      e.preventDefault();
+      window.scrollBy({ top: e.deltaY, behavior: 'auto' });
+    }
+  }, []);
   // 1. Add state for filter range
   const [filterRange, setFilterRange] = useState<{ min: number; max: number; value: [number, number] } | null>(null);
 
@@ -996,7 +1010,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
           </div>
 
           {/* Table section - Excel-like appearance */}
-        <div className="flex-1 overflow-auto">
+        <div ref={scrollContainerRef} onWheel={handleInnerScroll} className="flex-1 overflow-auto">
             {/* Placeholder for when no data is loaded */}
             {!data || !Array.isArray(data.headers) || data.headers.length === 0 ? (
               <div className="flex flex-1 items-center justify-center bg-gray-50">
