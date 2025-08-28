@@ -1124,7 +1124,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                           {headerDisplayNames[header] ?? header}
                         </div>
                       )}
-                      <div
+                      <span
                         className="absolute top-0 right-0 h-full w-1 cursor-col-resize"
                         onMouseDown={e => startColResize(header, e)}
                       />
@@ -1199,7 +1199,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                       );
                     })}
                     <TableCell className="relative w-8 p-0">
-                      <div
+                      <span
                         className="absolute inset-x-0 bottom-0 h-1 cursor-row-resize"
                         onMouseDown={e => startRowResize(startIndex + rowIndex, e)}
                       />
