@@ -19,11 +19,11 @@ Implemented Changes:
 
 Issue: Uploading a file in the DataFrame Operations atom caused a phantom scroll area with extra whitespace below the table.
 
-Reason: The table's scroll region was never re-measured after file uploads. The wrapper retained the previous table's height, so the scroll area extended far beyond the new content.
+Reason: A JavaScript height lock mis-measured the scroll region after uploads. When the browser produced stray blocks the `scrollHeight` ballooned and the explicit height created a large blank area.
 
 Potential Prognosis: Repeated uploads would continue to reserve stale space, confusing users with persistent blank areas and awkward scrolling.
 
 Implemented Changes:
-- Reworked the canvas to separate a wrapper and scroll container with `min-h-0` flex layouts.
-- Added a `ResizeObserver` that re-measures the scroll container after each render and clamps its height to the wrapper, resetting scroll position to eliminate phantom whitespace.
+- Dropped the JS height lock and `ResizeObserver`.
+- Let flexbox with `min-h-0` and `overflow-auto` make the center column the only scroller so its height follows content naturally.
 - Corrected invalid table markup by moving the row-resize handle into the final `<td>` so the absolutely positioned handle stays scoped within the row and no longer creates stray whitespace.
