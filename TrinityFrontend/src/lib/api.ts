@@ -126,6 +126,10 @@ export const DATAFRAME_OPERATIONS_API =
   normalizeUrl(import.meta.env.VITE_DATAFRAME_OPERATIONS_API) ||
   `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/dataframe-operations`;
 
+export const DATAFRAME_OPERATIONS_V1_API =
+  normalizeUrl(import.meta.env.VITE_DATAFRAME_OPERATIONS_V1_API) ||
+  `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/dataframe-operations-v1`;
+
 export const CORRELATION_API =
   normalizeUrl(import.meta.env.VITE_CORRELATION_API) ||
   `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/correlation`;

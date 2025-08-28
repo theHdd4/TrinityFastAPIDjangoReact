@@ -4,7 +4,7 @@ function stripCards(cards: any[]): any[] {
   return cards.map(card => ({
     ...card,
     atoms: card.atoms.map((atom: any) => {
-      if (atom.type === 'dataframe-operations' && atom.settings) {
+      if ((atom.type === 'dataframe-operations' || atom.type === 'dataframe-operations-v1') && atom.settings) {
         const { tableData, data, ...rest } = atom.settings;
         return { ...atom, settings: rest };
       }
