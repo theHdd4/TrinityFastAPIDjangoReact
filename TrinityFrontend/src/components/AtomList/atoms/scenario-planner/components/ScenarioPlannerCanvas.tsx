@@ -10,6 +10,7 @@ import { Trash2 } from 'lucide-react';
 import { ScenarioPlannerSettings } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { useToast } from '@/hooks/use-toast';
+import ScenarioResultsChart from './ScenarioResultsChart';
 
 interface ScenarioPlannerCanvasProps {
   atomId: string;
@@ -22,10 +23,107 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
   settings, 
   onSettingsChange 
 }) => {
+  const { toast } = useToast();
 
   const [combinationInputs, setCombinationInputs] = useState<{[key: string]: {[featureId: string]: {input: string; change: string}}}>({}); 
   const [loadingReference, setLoadingReference] = useState<string | null>(null); // Track which combination is loading reference
   const [loadedReferenceCombinations, setLoadedReferenceCombinations] = useState<Set<string>>(new Set()); // Track which combinations have reference values loaded
+  const [runningScenario, setRunningScenario] = useState(false);
+
+  // ✅ NEW: Process individual results for chart display - filtered by selected view
+  const processedChartData = useMemo(() => {
+    if (!settings?.scenarioResults?.individuals || !settings?.selectedView) return [];
+    
+    // Get the selected aggregated view configuration
+    const selectedAggregatedView = settings.aggregatedViews?.find(v => v.id === settings.selectedView);
+    
+    console.log('🔍 Processing chart data for selected view:', {
+      selectedView: settings.selectedView,
+      selectedAggregatedView: selectedAggregatedView,
+      totalIndividuals: settings.scenarioResults.individuals.length
+    });
+    
+    // Filter individuals based on the selected view's identifier configuration
+    const filteredIndividuals = settings.scenarioResults.individuals.filter((individual: any) => {
+      if (!selectedAggregatedView || !individual.identifiers) return false;
+      
+      // Check if this individual matches the selected view's identifier configuration
+      for (const identifierId of selectedAggregatedView.identifierOrder) {
+        const selectedValues = selectedAggregatedView.selectedIdentifiers[identifierId] || [];
+        const individualValue = individual.identifiers[identifierId];
+        
+        // If this identifier has selected values, check if individual's value is included
+        if (selectedValues.length > 0 && !selectedValues.includes(individualValue)) {
+          return false; // This individual doesn't match the view's filter
+        }
+      }
+      
+      return true; // This individual matches the view's configuration
+    });
+    
+    console.log('🔍 Filtered individuals for chart:', {
+      originalCount: settings.scenarioResults.individuals.length,
+      filteredCount: filteredIndividuals.length,
+      filteredData: filteredIndividuals
+    });
+    
+    return filteredIndividuals.map((individual: any, index: number) => {
+      // Debug: Log the structure of each individual
+      if (index === 0) {
+        console.log('🔍 Sample individual structure:', {
+          individual,
+          prediction: individual.prediction,
+          scenario: individual.scenario,
+          pct_uplift: individual.pct_uplift,
+          pct_uplift_type: typeof individual.pct_uplift
+        });
+      }
+      
+      // Create combination label from identifiers (only show identifiers that are in the selected view)
+      const relevantIdentifiers = selectedAggregatedView?.identifierOrder.reduce((acc: any, identifierId: string) => {
+        if (individual.identifiers[identifierId]) {
+          acc[identifierId] = individual.identifiers[identifierId];
+        }
+        return acc;
+      }, {}) || individual.identifiers;
+      
+      const identifierParts = Object.entries(relevantIdentifiers)
+        .map(([key, value]) => `${key}: ${value}`)
+        .join(', ');
+      
+      // Extract the correct values based on the actual data structure
+      let prediction = 0;
+      let pct_uplift = 0;
+      
+      // Handle prediction
+      if (individual.scenario?.prediction) {
+        prediction = individual.scenario.prediction;
+      } else if (typeof individual.prediction === 'number') {
+        prediction = individual.prediction;
+      }
+      
+      // Handle pct_uplift
+      if (individual.pct_uplift?.prediction) {
+        pct_uplift = individual.pct_uplift.prediction * 100; // Convert to percentage
+      } else if (typeof individual.pct_uplift === 'number') {
+        pct_uplift = individual.pct_uplift;
+      }
+      
+      console.log(`🔍 Processed individual ${index}:`, {
+        combinationLabel: identifierParts,
+        prediction,
+        pct_uplift
+      });
+      
+      return {
+        identifiers: individual.identifiers || {},
+        prediction,
+        pct_uplift,
+        combinationLabel: identifierParts || 'Unknown',
+        run_id: individual.run_id || settings.scenarioResults?.runId || ''
+      };
+    });
+  }, [settings?.scenarioResults?.individuals, settings?.scenarioResults?.runId, settings?.selectedView, settings?.aggregatedViews]);
   
   // ✅ NEW: State for ORIGINAL reference values (never changes)
   const [originalReferenceValues, setOriginalReferenceValues] = useState<{
@@ -33,12 +131,6 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
       [featureId: string]: number;
     };
   }>({});
-
-  // ✅ NEW: State for running scenario
-  const [runningScenario, setRunningScenario] = useState(false);
-  
-  // Use toast for notifications
-  const { toast } = useToast();
   
   // Use a ref to track which scenarios have been cleared to prevent infinite loops
   const clearedScenariosRef = useRef<Set<string>>(new Set());
@@ -1488,6 +1580,8 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
                 </Button>
               </div>
             </div>
+
+
             
             <Tabs defaultValue="scenario-1" className="mb-6">
               <TabsList className="flex w-fit mb-4 p-1.5 bg-gray-100 rounded-lg border border-gray-200 shadow-sm">
@@ -1526,7 +1620,37 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
               {settings?.resultViews?.map((view) => (
                 <TabsContent key={view.id} value={view.id} className="mt-4">
                   {view.id === 'view-1' ? (
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-6">
+                      {/* ✅ Individual Results Chart for View 1 */}
+                      {processedChartData.length > 0 && (
+                        <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm">
+                          <div className="mb-4">
+                            <div className="flex items-center justify-between">
+                              <div>
+                                <h4 className="text-lg font-semibold text-gray-800 mb-2">Individual Scenario Results</h4>
+                                <p className="text-sm text-gray-600">
+                                  Showing prediction values for each combination with percentage uplift
+                                </p>
+                              </div>
+                              <div className="text-right">
+                                <Badge variant="outline" className="text-xs text-blue-600 bg-blue-50 border-blue-200">
+                                  📊 View: {settings.aggregatedViews?.find(v => v.id === settings.selectedView)?.name || settings.selectedView}
+                                </Badge>
+                                <p className="text-xs text-gray-500 mt-1">
+                                  {processedChartData.length} result{processedChartData.length !== 1 ? 's' : ''} filtered
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+                          <ScenarioResultsChart 
+                            data={processedChartData} 
+                            width={900} 
+                            height={450} 
+                          />
+                        </div>
+                      )}
+                      
+                      <div className="grid grid-cols-2 gap-4">
                       {selectedOutputs?.slice(0, 4).map((output, index) => (
                         <div key={output.id} className="bg-white border border-gray-200 rounded-xl p-5 overflow-hidden shadow-sm hover:shadow-md transition-shadow duration-200">
                           <div className="flex items-center justify-between mb-3">
@@ -1566,6 +1690,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
                           </div>
                         </div>
                       )) || []}
+                      </div>
                     </div>
                   ) : (
                     <div className="text-center py-12">
