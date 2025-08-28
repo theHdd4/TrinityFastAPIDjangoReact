@@ -23,8 +23,10 @@ async def save_dataframe(
             filename = f"{df_id}_dataframe_ops.arrow"
         if not filename.endswith('.arrow'):
             filename += '.arrow'
-        if not filename.startswith(OBJECT_PREFIX):
-            filename = OBJECT_PREFIX + filename
+
+        # Store result inside dedicated "dataframe operations" folder
+        object_name = f"{OBJECT_PREFIX}dataframe operations/{filename}" if not filename.startswith(OBJECT_PREFIX) else filename
+
         table = pa.Table.from_pandas(df)
         arrow_buffer = pa.BufferOutputStream()
         with ipc.new_file(arrow_buffer, table.schema) as writer:
@@ -32,14 +34,14 @@ async def save_dataframe(
         arrow_bytes = arrow_buffer.getvalue().to_pybytes()
         minio_client.put_object(
             MINIO_BUCKET,
-            filename,
+            object_name,
             data=io.BytesIO(arrow_bytes),
             length=len(arrow_bytes),
             content_type="application/octet-stream",
         )
-        redis_client.setex(filename, 3600, arrow_bytes)
+        redis_client.setex(object_name, 3600, arrow_bytes)
         return {
-            "result_file": filename,
+            "result_file": object_name,
             "shape": df.shape,
             "columns": list(df.columns),
             "message": "DataFrame saved successfully"

@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef, useCallback, useEffect } from 'react';
+import React, { useState, useMemo, useRef, useCallback, useEffect, useLayoutEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -108,6 +108,7 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
   const [editingHeader, setEditingHeader] = useState<number | null>(null);
   const [isDragOver, setIsDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
   const [saving, setSaving] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [draggedCol, setDraggedCol] = useState<string | null>(null);
@@ -231,16 +232,31 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
     }
   };
 
+  // Load existing saved files once so we can compute the next DF_OPS serial
+  useEffect(() => {
+    fetchSavedDataFrames();
+  }, []);
+
   const handleSaveDataFrame = async () => {
     setSaveLoading(true);
     setSaveError(null);
     setSaveSuccess(false);
     try {
+      if (!data) throw new Error('No DataFrame loaded');
+
       const csv_data = toCSV();
-      let filename = data?.fileName || `dataframe_${Date.now()}.arrow`;
-      if (!filename.endsWith('.arrow')) {
-        filename = filename.replace(/\.[^/.]+$/, '') + '.arrow';
-      }
+
+      // Determine next serial number for DF_OPS files
+      const maxSerial = savedFiles.reduce((max, f) => {
+        const m = f.object_name?.match(/dataframe operations\/DF_OPS_(\d+)_/);
+        return m ? Math.max(max, parseInt(m[1], 10)) : max;
+      }, 0);
+      const nextSerial = maxSerial + 1;
+
+      // Base name from current file without extension
+      const baseName = data.fileName ? data.fileName.replace(/\.[^/.]+$/, '') : `dataframe_${Date.now()}`;
+      const filename = `DF_OPS_${nextSerial}_${baseName}.arrow`;
+
       const response = await fetch(`${DATAFRAME_OPERATIONS_API}/save`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -255,7 +271,7 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
       saveSuccessTimeout.current = setTimeout(() => setSaveSuccess(false), 2000);
       fetchSavedDataFrames(); // Refresh the saved dataframes list in the UI
       onSettingsChange({
-        tableData: data,
+        tableData: { ...data, fileName: filename },
         columnWidths: settings.columnWidths,
         rowHeights: settings.rowHeights,
       });
@@ -926,6 +942,16 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
   };
 
 
+  useLayoutEffect(() => {
+    if (!data) return;
+    const el = containerRef.current;
+    if (el) {
+      // Reset any phantom scroll area after heavy table mount
+      el.style.height = 'auto';
+      el.scrollTop = 0;
+    }
+  }, [data]);
+
   return (
     <>
       <input
@@ -935,8 +961,8 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
         onChange={handleFileUpload}
         className="hidden"
       />
-      
-      <div className="flex flex-col">
+
+      <div ref={containerRef} className="flex flex-col h-full">
         {data?.fileName && (
           <div className="border-b border-blue-200 bg-blue-50">
             <div className="flex items-center px-6 py-4">
@@ -949,8 +975,8 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
             </div>
           </div>
         )}
-        <div className="p-4 overflow-hidden">
-          <div className="mx-auto max-w-screen-2xl rounded-2xl border border-slate-200 bg-white shadow-sm flex flex-col">
+        <div className="flex-1 p-4 overflow-hidden">
+          <div className="mx-auto max-w-screen-2xl rounded-2xl border border-slate-200 bg-white shadow-sm flex flex-col h-full">
         {/* Controls section */}
         <div className="flex-shrink-0 flex items-center justify-between border-b border-slate-200 px-5 py-3">
             <div className="flex items-center space-x-4">
@@ -981,7 +1007,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
           </div>
 
           {/* Table section - Excel-like appearance */}
-          <div className="overflow-auto">
+          <div className="flex-1 overflow-auto">
             {/* Placeholder for when no data is loaded */}
             {!data || !Array.isArray(data.headers) || data.headers.length === 0 ? (
               <div className="flex flex-1 items-center justify-center bg-gray-50">

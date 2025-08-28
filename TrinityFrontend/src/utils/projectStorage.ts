@@ -32,3 +32,32 @@ export function serializeProject(project: any): string {
 }
 
 export { stripCards as sanitizeCards };
+
+// Safely persist the current project to localStorage. If the storage
+// quota is exceeded we clear large cached entries and retry once.
+export function saveCurrentProject(project: any): void {
+  const serialized = serializeProject(project);
+  try {
+    localStorage.setItem('current-project', serialized);
+  } catch (e: unknown) {
+    if (
+      e instanceof DOMException &&
+      (e.name === 'QuotaExceededError' || e.name === 'NS_ERROR_DOM_QUOTA_REACHED')
+    ) {
+      // Remove heavy cached items to free space and retry
+      [
+        'laboratory-config',
+        'laboratory-layout-cards',
+        'workflow-canvas-molecules',
+        'workflow-selected-atoms',
+      ].forEach(key => localStorage.removeItem(key));
+      try {
+        localStorage.setItem('current-project', serialized);
+      } catch (err) {
+        console.warn('Unable to save current project to localStorage:', err);
+      }
+    } else {
+      throw e;
+    }
+  }
+}

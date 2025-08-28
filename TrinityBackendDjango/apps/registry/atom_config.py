@@ -79,6 +79,10 @@ def save_atom_list_configuration(
                 atom_id = atom.get("atomId") or atom.get("title") or "unknown"
                 atom_title = atom.get("title") or atom_id
                 atom_settings = atom.get("settings", {})
+                if atom.get("atomId") == "dataframe-operations":
+                    atom_settings = {
+                        k: v for k, v in atom_settings.items() if k not in {"tableData", "data"}
+                    }
                 version_hash = hashlib.sha256(
                     json.dumps(atom_settings, sort_keys=True).encode()
                 ).hexdigest()

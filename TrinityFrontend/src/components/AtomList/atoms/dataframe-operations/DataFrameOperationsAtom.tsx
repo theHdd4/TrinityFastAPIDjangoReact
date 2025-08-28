@@ -174,9 +174,9 @@ const DataFrameOperationsAtom: React.FC<Props> = ({ atomId }) => {
   return (
     <ErrorBoundary>
       <div className="w-full h-full bg-white rounded-xl border border-slate-200 shadow-lg overflow-hidden">
-        <div className="h-full">
+        <div className="h-full flex flex-col">
           {fileSelected && data && data.headers && data.rows && data.headers.length > 0 && data.rows.length > 0 ? (
-            <div className="h-full">
+            <div className="h-full flex flex-col">
               {viewMode === 'table' && (
                 <DataFrameOperationsCanvas
                   data={data}
