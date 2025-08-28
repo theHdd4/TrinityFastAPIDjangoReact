@@ -778,11 +778,12 @@ const handleAddDragLeave = (e: React.DragEvent) => {
     if (current) {
       try {
         const proj = JSON.parse(current);
+        const sanitized = sanitizeLabConfig({ cards: updated });
         await fetch(`${REGISTRY_API}/projects/${proj.id}/`, {
           method: 'PATCH',
           credentials: 'include',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ state: { laboratory_config: { cards: updated } } }),
+          body: JSON.stringify({ state: { laboratory_config: sanitized } }),
         });
       } catch {
         /* ignore */
