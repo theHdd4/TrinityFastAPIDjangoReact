@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef, useCallback, useEffect } from 'react';
+import React, { useState, useMemo, useRef, useCallback, useEffect, useLayoutEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -108,6 +108,7 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
   const [editingHeader, setEditingHeader] = useState<number | null>(null);
   const [isDragOver, setIsDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
   const [saving, setSaving] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [draggedCol, setDraggedCol] = useState<string | null>(null);
@@ -941,6 +942,16 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
   };
 
 
+  useLayoutEffect(() => {
+    if (!data) return;
+    const el = containerRef.current;
+    if (el) {
+      // Reset any phantom scroll area after heavy table mount
+      el.style.height = 'auto';
+      el.scrollTop = 0;
+    }
+  }, [data]);
+
   return (
     <>
       <input
@@ -950,8 +961,8 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
         onChange={handleFileUpload}
         className="hidden"
       />
-      
-      <div className="flex flex-col">
+
+      <div ref={containerRef} className="flex flex-col h-full">
         {data?.fileName && (
           <div className="border-b border-blue-200 bg-blue-50">
             <div className="flex items-center px-6 py-4">
@@ -964,8 +975,8 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
             </div>
           </div>
         )}
-        <div className="p-4 overflow-hidden">
-          <div className="mx-auto max-w-screen-2xl rounded-2xl border border-slate-200 bg-white shadow-sm flex flex-col">
+        <div className="flex-1 p-4 overflow-hidden">
+          <div className="mx-auto max-w-screen-2xl rounded-2xl border border-slate-200 bg-white shadow-sm flex flex-col h-full">
         {/* Controls section */}
         <div className="flex-shrink-0 flex items-center justify-between border-b border-slate-200 px-5 py-3">
             <div className="flex items-center space-x-4">
@@ -996,7 +1007,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
           </div>
 
           {/* Table section - Excel-like appearance */}
-          <div className="overflow-auto">
+          <div className="flex-1 overflow-auto">
             {/* Placeholder for when no data is loaded */}
             {!data || !Array.isArray(data.headers) || data.headers.length === 0 ? (
               <div className="flex flex-1 items-center justify-center bg-gray-50">
