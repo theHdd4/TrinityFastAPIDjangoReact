@@ -1,12 +1,12 @@
 import React, { useEffect, useState } from 'react';
 import { Card } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { VALIDATE_API, DATAFRAME_OPERATIONS_V1_API } from '@/lib/api';
+import { VALIDATE_API } from '@/lib/api';
 
 interface Frame { object_name: string; csv_name: string; arrow_name?: string }
 
-const DataFrameOperationsInputs = ({ data, settings, selectedFile, onFileSelect }: any) => {
+const DataFrameOperationsInputs = ({ selectedFile, onFileSelect, onRender, loading }: any) => {
   const [frames, setFrames] = useState<Frame[]>([]);
   const [selectedFrame, setSelectedFrame] = useState<Frame | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -52,6 +52,9 @@ const DataFrameOperationsInputs = ({ data, settings, selectedFile, onFileSelect 
           </SelectContent>
         </Select>
         {error && <div className="text-red-600 text-xs p-2">{error}</div>}
+        <Button className="mt-2" onClick={onRender} disabled={!selectedFile || loading}>
+          {loading ? 'Rendering...' : 'Render DataFrame'}
+        </Button>
       </Card>
     </div>
   );

@@ -20,6 +20,7 @@ export interface DataFrameOperationsSettings {
   enableEditing: boolean;
   uploadedFile?: string;
   selectedFile?: string;
+  rendered?: boolean;
 }
 
 export const DEFAULT_DATAFRAME_OPERATIONS_SETTINGS: DataFrameOperationsSettings = {
@@ -31,6 +32,7 @@ export const DEFAULT_DATAFRAME_OPERATIONS_SETTINGS: DataFrameOperationsSettings 
   showRowNumbers: true,
   enableEditing: true,
   selectedFile: '',
+  rendered: false,
 };
 
 // Extend DataFrameOperationsSettings type to include tableData
@@ -54,20 +56,35 @@ const DataFrameOperationsProperties: React.FC<Props> = ({ atomId }) => {
   const [error, setError] = React.useState<string | null>(null);
   const [selectedFrame, setSelectedFrame] = React.useState<any>(null);
 
-  // Fetch and load data when a file is selected
+  // Handle file selection only (no render yet)
   const handleFileSelect = async (fileId: string) => {
     setSelectedFile(fileId);
-    setLoading(true);
     setError(null);
     try {
-      // Fetch the list of frames to get csv_name for display
       const framesRes = await fetch(`${VALIDATE_API}/list_saved_dataframes`);
       const framesData = await framesRes.json();
       const frames = Array.isArray(framesData.files) ? framesData.files : [];
       const foundFrame = frames.find((f: any) => f.object_name === fileId);
       setSelectedFrame(foundFrame || null);
-      const resp = await loadDataframeByKey(fileId);
+      updateSettings(atomId, {
+        ...settings,
+        selectedFile: fileId,
+        tableData: undefined,
+        data: undefined,
+        rendered: false,
+      });
+    } catch (err) {
+      console.error('Failed to fetch dataframe list', err);
+    }
+  };
 
+  // Render the selected dataframe on demand
+  const handleRenderDataframe = async () => {
+    if (!selectedFile) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const resp = await loadDataframeByKey(selectedFile);
       const columnTypes: Record<string, string> = {};
       resp.headers.forEach(h => {
         const t = resp.types[h];
@@ -76,7 +93,7 @@ const DataFrameOperationsProperties: React.FC<Props> = ({ atomId }) => {
       const newData: DataFrameData = {
         headers: resp.headers,
         rows: resp.rows,
-        fileName: foundFrame ? foundFrame.csv_name.split('/').pop() : fileId,
+        fileName: selectedFrame ? selectedFrame.csv_name.split('/').pop() : selectedFile,
         columnTypes,
         pinnedColumns: [],
         frozenColumns: 0,
@@ -84,18 +101,18 @@ const DataFrameOperationsProperties: React.FC<Props> = ({ atomId }) => {
       };
       updateSettings(atomId, {
         ...settings,
-        selectedFile: fileId,
         selectedColumns: resp.headers,
         searchTerm: '',
         filters: {},
         data: newData,
         tableData: newData,
         fileId: resp.df_id,
+        rendered: true,
       });
-      setLoading(false);
     } catch (err: any) {
       console.error('Failed to fetch or load dataframe', err);
       setError('Failed to fetch or load dataframe.');
+    } finally {
       setLoading(false);
     }
   };
@@ -119,10 +136,10 @@ const DataFrameOperationsProperties: React.FC<Props> = ({ atomId }) => {
       <div className="px-4">
         <TabsContent value="inputs">
           <DataFrameOperationsInputs
-            data={data}
-            settings={settings}
             selectedFile={selectedFile}
             onFileSelect={handleFileSelect}
+            onRender={handleRenderDataframe}
+            loading={loading}
           />
           {loading && <div className="text-slate-700 text-xs p-2">Loading data...</div>}
           {error && <div className="text-red-600 text-xs p-2">{error}</div>}

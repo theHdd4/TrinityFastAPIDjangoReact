@@ -303,6 +303,7 @@ export interface DataFrameOperationsSettings {
   selectedFile?: string;
   tableData?: any;
   data?: any;
+  rendered?: boolean;
 }
 
 export const DEFAULT_DATAFRAME_OPERATIONS_SETTINGS: DataFrameOperationsSettings = {
@@ -316,6 +317,7 @@ export const DEFAULT_DATAFRAME_OPERATIONS_SETTINGS: DataFrameOperationsSettings 
   selectedFile: '',
   tableData: undefined,
   data: undefined,
+  rendered: false,
 };
 
 export interface ChartData {

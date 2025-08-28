@@ -11,7 +11,6 @@ import {
 } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { Button } from '@/components/ui/button';
 import ErrorBoundary from '@/components/ErrorBoundary';
-import { loadDataframeByKey } from './services/dataframeOperationsApi';
 
 export interface DataFrameRow {
   [key: string]: string | number | null;
@@ -41,6 +40,7 @@ export interface DataFrameSettings {
   fileId?: string | null; // Persist backend dataframe id
   columnWidths: { [key: string]: number };
   rowHeights: { [key: number]: number };
+  rendered?: boolean;
 }
 
 interface Props {
@@ -62,10 +62,10 @@ const DataFrameOperationsAtom: React.FC<Props> = ({ atomId }) => {
     fileId: null,
     columnWidths: {},
     rowHeights: {},
+    rendered: false,
   };
   // Always use tableData as the source of truth
   const data = settings.tableData || null;
-  const [loading, setLoading] = useState(false);
 
   // 1. Store the original uploaded data
   const [originalData, setOriginalData] = useState<DataFrameData | null>(null);
@@ -139,43 +139,11 @@ const DataFrameOperationsAtom: React.FC<Props> = ({ atomId }) => {
   // Only show table/chart after file selection (like concat atom)
   const fileSelected = settings.selectedFile;
 
-  // Automatically load dataframe if a file is selected but no table data exists
-  useEffect(() => {
-    if (!settings.selectedFile || settings.tableData || loading) return;
-    setLoading(true);
-    loadDataframeByKey(settings.selectedFile)
-      .then(resp => {
-        const columnTypes: Record<string, string> = {};
-        resp.headers.forEach(h => {
-          const t = resp.types[h];
-          columnTypes[h] = t.includes('float') || t.includes('int') ? 'number' : 'text';
-        });
-        const fileName = settings.selectedFile!.split('/').pop() || settings.selectedFile!;
-        const newData: DataFrameData = {
-          headers: resp.headers,
-          rows: resp.rows,
-          fileName,
-          columnTypes,
-          pinnedColumns: [],
-          frozenColumns: 0,
-          cellColors: {},
-        };
-        updateSettings(atomId, {
-          tableData: newData,
-          selectedColumns: resp.headers,
-          fileId: resp.df_id,
-        });
-      })
-      .catch(err => console.error('[DataFrameOperations] auto-load failed', err))
-      .finally(() => setLoading(false));
-  }, [settings.selectedFile, settings.tableData, loading, atomId, updateSettings]);
-
-
   return (
     <ErrorBoundary>
       <div className="w-full h-full bg-white rounded-xl border border-slate-200 shadow-lg overflow-hidden flex flex-col min-h-0">
         <div className="h-full flex flex-col min-h-0">
-          {fileSelected && data && data.headers && data.rows && data.headers.length > 0 && data.rows.length > 0 ? (
+          {fileSelected && settings.rendered && data && data.headers && data.rows && data.headers.length > 0 && data.rows.length > 0 ? (
             <div className="h-full flex flex-col min-h-0">
               {viewMode === 'table' && (
                 <DataFrameOperationsCanvas
@@ -199,7 +167,11 @@ const DataFrameOperationsAtom: React.FC<Props> = ({ atomId }) => {
             <div className="p-4 w-full h-full flex items-center justify-center">
               <Card>
                 <CardContent className="p-4">
-                  <p className="text-gray-500">No DataFrame available. Upload a CSV or Excel file to see results here.</p>
+                  <p className="text-gray-500">
+                    {!fileSelected
+                      ? 'No DataFrame available. Upload a CSV or Excel file to see results here.'
+                      : 'Select a dataframe and click "Render DataFrame" in the Properties panel.'}
+                  </p>
                 </CardContent>
               </Card>
             </div>
