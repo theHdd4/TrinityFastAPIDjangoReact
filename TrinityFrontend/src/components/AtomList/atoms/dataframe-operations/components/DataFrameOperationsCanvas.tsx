@@ -945,11 +945,15 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
   useLayoutEffect(() => {
     if (!data) return;
     const el = containerRef.current;
-    if (el) {
-      // Reset any phantom scroll area after heavy table mount
-      el.style.height = 'auto';
-      el.scrollTop = 0;
-    }
+    if (!el) return;
+    // React safety net – re-measure and lock the scroll container
+    // so that no phantom whitespace remains after uploads/render
+    el.style.overflowY = 'hidden';
+    el.style.height = 'auto';
+    const height = el.scrollHeight;
+    el.style.height = `${height}px`;
+    el.scrollTop = 0;
+    el.style.overflowY = 'auto';
   }, [data]);
 
   return (
