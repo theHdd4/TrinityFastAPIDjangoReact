@@ -155,7 +155,7 @@
 .explore-chart-settings {
   width: 100%;
   max-width: 100%;
-  overflow: hidden;
+  overflow: visible;
   min-width: 0;
 }
 
@@ -168,6 +168,25 @@
   display: flex;
   align-items: center;
   justify-content: center;
+}
+
+/* Scrollable container for multiple pie charts */
+.pie-chart-container {
+  scrollbar-color: #cbd5e1 transparent;
+  scrollbar-width: thin;
+}
+
+.pie-chart-container::-webkit-scrollbar {
+  width: 6px;
+}
+
+.pie-chart-container::-webkit-scrollbar-thumb {
+  background-color: #cbd5e1;
+  border-radius: 9999px;
+}
+
+.pie-chart-container::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 /* Additional responsive behavior for chart components */

@@ -772,6 +772,7 @@ async def chart_data_multidim(explore_atom_id: str):
     measures_config = operations.get("measures_config", {})
     x_axis = operations.get("x_axis", group_by[0] if group_by else None)
     weight_column = operations.get("weight_column", None)
+    sort_order = operations.get("sort_order")
     
     # Initialize chart metadata for legend-based charts
     chart_metadata = {}
@@ -878,14 +879,7 @@ async def chart_data_multidim(explore_atom_id: str):
         print(f"📊 Cache status: {'HIT' if cache_hit else 'MISS'}")
         print(f"🔍 Debug: df columns: {list(df.columns)}")
         print(f"🔍 Debug: df head: {df.head(2).to_dict('records')}")
-        
-        # Performance optimization: Sample data for large datasets
-        if len(df) > 100000:  # If more than 100k rows
-            print(f"📊 Large dataset detected ({len(df)} rows), sampling for faster processing...")
-            sample_size = min(100000, len(df))
-            df = df.sample(n=sample_size, random_state=42)
-            print(f"📊 Sampled to {len(df)} rows for faster processing")
-        
+
         print(f"⏱️ Data fetch completed at: {datetime.now()}")
         
     except Exception as e:
@@ -1314,115 +1308,76 @@ async def chart_data_multidim(explore_atom_id: str):
         else:
             # Single measure line chart with legend field support
             if line_id_cols:
-                # Use chart maker service for proper pivoting when legend field is specified
+                # Determine the legend field from group columns
+                legend_field = None
+                for col in line_id_cols:
+                    if col != actual_x_axis:
+                        legend_field = col
+                        break
+                if not legend_field and line_id_cols:
+                    legend_field = line_id_cols[0]
+
+                # Try to use chart maker service for pivoting
                 try:
-                    # Check if we have a legend field in the group_by (excluding x_axis)
-                    legend_field = None
-                    for col in line_id_cols:
-                        if col != actual_x_axis:
-                            legend_field = col
-                            break
-                    
-                    if legend_field:
-                        print(f"🔍 Backend: Using chart maker service for legend-based pivoting")
-                        print(f"🔍 Backend: X-axis: {actual_x_axis}, Y-axis: {actual_measure}, Legend: {legend_field}")
-                        print(f"🔍 Backend: Grouped result sample: {grouped_result.head(2).to_dict('records')}")
-                        
-                        # Use the chart maker service's pivoting method
-                        try:
-                            pivoted_data, unique_legend_values = chart_service._pivot_data_for_legend(
-                                grouped_result,
-                                actual_x_axis,
-                                actual_measure,
-                                legend_field,
-                                agg_type if agg_type != "null" else "sum"
-                            )
-                            
-                            chart_data = pivoted_data
-                            print(f"✅ Chart maker service pivoting: {len(chart_data)} data points with {len(unique_legend_values)} legend values")
-                            print(f"🔍 Backend: Legend values: {unique_legend_values}")
-                            print(f"🔍 Backend: Pivoted data sample: {chart_data[:2] if chart_data else 'No data'}")
-                            
-                            # Add metadata to help frontend understand this is pivoted data
-                            chart_metadata = {
-                                "is_pivoted": True,
-                                "legend_field": legend_field,
-                                "legend_values": unique_legend_values,
-                                "x_axis": actual_x_axis,
-                                "y_axis": actual_measure
-                            }
-                        except Exception as e:
-                            print(f"❌ Chart maker service pivoting failed: {e}")
-                            # Fallback to manual pivoting
-                            raise e
-                    else:
-                        # Fallback to manual pivoting
-                        pivot_data = {}
-                        
-                        for line_name in grouped_result['line_id'].unique():
-                            line_data = grouped_result[grouped_result['line_id'] == line_name].sort_values(actual_x_axis)
-                            
-                            for _, row in line_data.iterrows():
-                                x_value = str(row[actual_x_axis])
-                                y_value = row[actual_measure]
-                                
-                                if pd.api.types.is_numeric_dtype(grouped_result[actual_measure]):
-                                    y_value = float(y_value) if pd.notna(y_value) else 0
-                                else:
-                                    y_value = str(y_value) if pd.notna(y_value) else "Unknown"
-                                
-                                if x_value not in pivot_data:
-                                    pivot_data[x_value] = {actual_x_axis: x_value}
-                                
-                                # Use the actual legend field column name as the key
-                                legend_key = line_id_cols[0]
-                                pivot_data[x_value][legend_key] = y_value
-                        
-                        # Convert to list and sort by X-axis
-                        chart_data = list(pivot_data.values())
-                        try:
-                            # Try to sort numerically if possible
-                            chart_data.sort(key=lambda x: float(x[actual_x_axis]) if str(x[actual_x_axis]).replace('.', '').replace('-', '').isdigit() else x[actual_x_axis])
-                        except (ValueError, TypeError):
-                            # Fall back to string sorting
-                            chart_data.sort(key=lambda x: str(x[actual_x_axis]))
-                        
-                        print(f"✅ Manual legend-based line chart: {len(chart_data)} data points generated with {len(line_id_cols)} legend fields")
-                        
+                    pivoted_data, unique_legend_values = chart_service._pivot_data_for_legend(
+                        grouped_result,
+                        actual_x_axis,
+                        actual_measure,
+                        legend_field,
+                        agg_type if agg_type != "null" else "sum"
+                    )
+
+                    chart_data = pivoted_data
+                    chart_metadata = {
+                        "is_pivoted": True,
+                        "legend_field": legend_field,
+                        "legend_values": unique_legend_values,
+                        "x_axis": actual_x_axis,
+                        "y_axis": actual_measure
+                    }
+                    print(
+                        f"✅ Chart maker service pivoting: {len(chart_data)} data points with {len(unique_legend_values)} legend values"
+                    )
                 except Exception as e:
                     print(f"⚠️ Chart maker service pivoting failed, falling back to manual method: {e}")
-                    # Fallback to manual pivoting
-                    pivot_data = {}
-                    
-                    for line_name in grouped_result['line_id'].unique():
-                        line_data = grouped_result[grouped_result['line_id'] == line_name].sort_values(actual_x_axis)
-                        
-                        for _, row in line_data.iterrows():
-                            x_value = str(row[actual_x_axis])
-                            y_value = row[actual_measure]
-                            
-                            if pd.api.types.is_numeric_dtype(grouped_result[actual_measure]):
-                                y_value = float(y_value) if pd.notna(y_value) else 0
-                            else:
-                                y_value = str(y_value) if pd.notna(y_value) else "Unknown"
-                            
-                            if x_value not in pivot_data:
-                                pivot_data[x_value] = {actual_x_axis: x_value}
-                            
-                            # Use the actual legend field column name as the key
-                            legend_key = line_id_cols[0]
-                            pivot_data[x_value][legend_key] = y_value
-                    
-                    # Convert to list and sort by X-axis
+                    # Manual pivoting by legend values
+                    pivot_data: Dict[str, Dict[str, Any]] = {}
+                    legend_values: List[str] = []
+
+                    for _, row in grouped_result.sort_values(actual_x_axis).iterrows():
+                        x_value = str(row[actual_x_axis])
+                        legend_val = str(row[legend_field]) if legend_field in row else str(row.get("line_id", "Unknown"))
+                        y_value = row[actual_measure]
+
+                        if pd.api.types.is_numeric_dtype(grouped_result[actual_measure]):
+                            y_value = float(y_value) if pd.notna(y_value) else 0
+                        else:
+                            y_value = str(y_value) if pd.notna(y_value) else "Unknown"
+
+                        if x_value not in pivot_data:
+                            pivot_data[x_value] = {actual_x_axis: x_value}
+
+                        pivot_data[x_value][legend_val] = y_value
+                        if legend_val not in legend_values:
+                            legend_values.append(legend_val)
+
                     chart_data = list(pivot_data.values())
                     try:
-                        # Try to sort numerically if possible
-                        chart_data.sort(key=lambda x: float(x[actual_x_axis]) if str(x[actual_x_axis]).replace('.', '').replace('-', '').isdigit() else x[actual_x_axis])
+                        chart_data.sort(
+                            key=lambda x: float(x[actual_x_axis])
+                            if str(x[actual_x_axis]).replace('.', '').replace('-', '').isdigit()
+                            else x[actual_x_axis]
+                        )
                     except (ValueError, TypeError):
-                        # Fall back to string sorting
                         chart_data.sort(key=lambda x: str(x[actual_x_axis]))
-                    
-                    print(f"✅ Fallback manual legend-based line chart: {len(chart_data)} data points generated")
+
+                    chart_metadata = {
+                        "legend_field": legend_field,
+                        "legend_values": legend_values,
+                    }
+                    print(
+                        f"✅ Fallback manual legend-based line chart: {len(chart_data)} data points generated with {len(legend_values)} legend values"
+                    )
             else:
                 # Fallback to original logic for non-legend charts
                 for line_name in grouped_result['line_id'].unique():
@@ -1449,14 +1404,17 @@ async def chart_data_multidim(explore_atom_id: str):
         print(f"🔍 Backend: Processing BAR CHART branch")
         # Bar chart specific processing
         chart_data = []
-        
+
         # Check if we have multiple measures for dual Y-axes
         if len(multiple_measures) > 1:
             print(f"🔍 Backend: Generating bar chart with multiple measures for dual Y-axes")
-            
-            # Sort by the first measure value (descending) for better bar chart visualization
+
             first_measure_col = multiple_measures[0]['column']
-            sorted_result = grouped_result.sort_values(first_measure_col, ascending=False)
+            sorted_result = grouped_result
+            if sort_order == "asc":
+                sorted_result = grouped_result.sort_values(first_measure_col, ascending=True)
+            elif sort_order == "desc":
+                sorted_result = grouped_result.sort_values(first_measure_col, ascending=False)
             
             for _, row in sorted_result.iterrows():
                 # Create bar chart data point with actual field names
@@ -1487,44 +1445,78 @@ async def chart_data_multidim(explore_atom_id: str):
             
         else:
             # Single measure bar chart (existing logic)
-            # Sort by measure value (descending) for better bar chart visualization
-            sorted_result = grouped_result.sort_values(actual_measure, ascending=False)
-            
-            for _, row in sorted_result.iterrows():
-                # Create bar chart data point
-                # Handle both numeric and categorical Y-axis values
-                y_value = row[actual_measure]
-                if pd.api.types.is_numeric_dtype(grouped_result[actual_measure]):
-                    y_value = float(y_value) if pd.notna(y_value) else 0
-                else:
-                    y_value = str(y_value) if pd.notna(y_value) else "Unknown"
-                
-                data_point = {
-                    actual_group_cols[0] if actual_group_cols else "category": str(row[actual_group_cols[0]]) if actual_group_cols else "Category",
-                    actual_measure: y_value,
-                    "category": str(row[actual_group_cols[0]]) if actual_group_cols else "Category"
+            sorted_result = grouped_result
+            if sort_order == "asc":
+                sorted_result = grouped_result.sort_values(actual_measure, ascending=True)
+            elif sort_order == "desc":
+                sorted_result = grouped_result.sort_values(actual_measure, ascending=False)
+
+            if len(actual_group_cols) > 1:
+                # Legend field present - pivot so each unique legend value becomes its own bar series
+                legend_field = actual_group_cols[1]
+                pivot_data = {}
+                legend_values = []
+
+                for _, row in sorted_result.iterrows():
+                    x_val = str(row[actual_group_cols[0]]) if actual_group_cols else "Category"
+                    legend_val = str(row[legend_field])
+                    y_val = row[actual_measure]
+                    if pd.api.types.is_numeric_dtype(grouped_result[actual_measure]):
+                        y_val = float(y_val) if pd.notna(y_val) else 0
+                    else:
+                        y_val = str(y_val) if pd.notna(y_val) else "Unknown"
+
+                    if x_val not in pivot_data:
+                        pivot_data[x_val] = {actual_group_cols[0]: x_val, "category": x_val}
+                    pivot_data[x_val][legend_val] = y_val
+                    if legend_val not in legend_values:
+                        legend_values.append(legend_val)
+
+                chart_data = list(pivot_data.values())
+                chart_metadata = {
+                    "legend_field": legend_field,
+                    "legend_values": legend_values
                 }
-                
-                # Add additional grouping dimensions as labels if available
-                if len(actual_group_cols) > 1:
-                    data_point["label"] = " | ".join([str(row[col]) for col in actual_group_cols[1:]])
-                
-                chart_data.append(data_point)
-            
-            print(f"✅ Bar chart: {len(chart_data)} bars generated")
+                print(f"✅ Bar chart with legend field '{legend_field}': {len(chart_data)} bars generated")
+            else:
+                for _, row in sorted_result.iterrows():
+                    # Create bar chart data point
+                    # Handle both numeric and categorical Y-axis values
+                    y_value = row[actual_measure]
+                    if pd.api.types.is_numeric_dtype(grouped_result[actual_measure]):
+                        y_value = float(y_value) if pd.notna(y_value) else 0
+                    else:
+                        y_value = str(y_value) if pd.notna(y_value) else "Unknown"
+
+                    data_point = {
+                        actual_group_cols[0] if actual_group_cols else "category": str(row[actual_group_cols[0]]) if actual_group_cols else "Category",
+                        actual_measure: y_value,
+                        "category": str(row[actual_group_cols[0]]) if actual_group_cols else "Category"
+                    }
+
+                    # Add additional grouping dimensions as labels if available
+                    if len(actual_group_cols) > 1:
+                        data_point["label"] = " | ".join([str(row[col]) for col in actual_group_cols[1:]])
+
+                    chart_data.append(data_point)
+
+                print(f"✅ Bar chart: {len(chart_data)} bars generated")
 
     elif chart_type == "stacked_bar_chart":
         print(f"🔍 Backend: Processing STACKED BAR CHART branch")
         # Stacked bar chart specific processing
         chart_data = []
-        
+
         # Check if we have multiple measures for stacked bars
         if len(multiple_measures) > 1:
             print(f"🔍 Backend: Generating stacked bar chart with multiple measures")
-            
-            # Sort by the first measure value (descending) for better stacked bar chart visualization
+
             first_measure_col = multiple_measures[0]['column']
-            sorted_result = grouped_result.sort_values(first_measure_col, ascending=False)
+            sorted_result = grouped_result
+            if sort_order == "asc":
+                sorted_result = grouped_result.sort_values(first_measure_col, ascending=True)
+            elif sort_order == "desc":
+                sorted_result = grouped_result.sort_values(first_measure_col, ascending=False)
             
             for _, row in sorted_result.iterrows():
                 # Create stacked bar chart data point with actual field names
@@ -1557,8 +1549,11 @@ async def chart_data_multidim(explore_atom_id: str):
             
         else:
             # Single measure stacked bar chart (same as regular bar chart but with stacking capability)
-            # Sort by measure value (descending) for better stacked bar chart visualization
-            sorted_result = grouped_result.sort_values(actual_measure, ascending=False)
+            sorted_result = grouped_result
+            if sort_order == "asc":
+                sorted_result = grouped_result.sort_values(actual_measure, ascending=True)
+            elif sort_order == "desc":
+                sorted_result = grouped_result.sort_values(actual_measure, ascending=False)
             
             for _, row in sorted_result.iterrows():
                 # Create stacked bar chart data point
@@ -1628,29 +1623,56 @@ async def chart_data_multidim(explore_atom_id: str):
             # Single measure pie chart (existing logic)
             # Sort by measure value (descending) for better pie chart visualization
             sorted_result = grouped_result.sort_values(actual_measure, ascending=False)
-            
-            for _, row in sorted_result.iterrows():
-                # Create pie chart data point
-                # Handle both numeric and categorical Y-axis values
-                value = row[actual_measure]
-                if pd.api.types.is_numeric_dtype(grouped_result[actual_measure]):
-                    value = float(value) if pd.notna(value) else 0
-                else:
-                    value = str(value) if pd.notna(value) else "Unknown"
-                
-                data_point = {
-                    "label": str(row[actual_group_cols[0]]) if actual_group_cols else "Category",
-                    "value": value,
-                    "category": str(row[actual_group_cols[0]]) if actual_group_cols else "Category"
+
+            if len(actual_group_cols) > 1:
+                # Legend field present - build separate pie data for each legend value
+                legend_field = actual_group_cols[1]
+                pie_data = {}
+                legend_values = []
+
+                for _, row in sorted_result.iterrows():
+                    x_val = str(row[actual_group_cols[0]]) if actual_group_cols else "Category"
+                    legend_val = str(row[legend_field])
+                    y_val = row[actual_measure]
+                    if pd.api.types.is_numeric_dtype(grouped_result[actual_measure]):
+                        y_val = float(y_val) if pd.notna(y_val) else 0
+                    else:
+                        y_val = str(y_val) if pd.notna(y_val) else "Unknown"
+
+                    if legend_val not in pie_data:
+                        pie_data[legend_val] = []
+                        legend_values.append(legend_val)
+                    pie_data[legend_val].append({actual_group_cols[0]: x_val, actual_measure: y_val})
+
+                chart_data = pie_data
+                chart_metadata = {
+                    "legend_field": legend_field,
+                    "legend_values": legend_values
                 }
-                
-                # Add additional grouping dimensions as labels if available
-                if len(actual_group_cols) > 1:
-                    data_point["full_label"] = " | ".join([str(row[col]) for col in actual_group_cols])
-                
-                chart_data.append(data_point)
-            
-            print(f"✅ Pie chart: {len(chart_data)} slices generated")
+                print(f"✅ Pie charts generated for legend field '{legend_field}' with {len(legend_values)} unique values")
+            else:
+                for _, row in sorted_result.iterrows():
+                    # Create pie chart data point
+                    # Handle both numeric and categorical Y-axis values
+                    value = row[actual_measure]
+                    if pd.api.types.is_numeric_dtype(grouped_result[actual_measure]):
+                        value = float(value) if pd.notna(value) else 0
+                    else:
+                        value = str(value) if pd.notna(value) else "Unknown"
+
+                    data_point = {
+                        "label": str(row[actual_group_cols[0]]) if actual_group_cols else "Category",
+                        "value": value,
+                        "category": str(row[actual_group_cols[0]]) if actual_group_cols else "Category"
+                    }
+
+                    # Add additional grouping dimensions as labels if available
+                    if len(actual_group_cols) > 1:
+                        data_point["full_label"] = " | ".join([str(row[col]) for col in actual_group_cols])
+
+                    chart_data.append(data_point)
+
+                print(f"✅ Pie chart: {len(chart_data)} slices generated")
 
     else:
         print(f"🔍 Backend: Processing DEFAULT/ELSE branch for chart_type: {chart_type}")
@@ -1720,7 +1742,15 @@ async def chart_data_multidim(explore_atom_id: str):
     # Prepare data for saving and returning
     print(f"⏱️ Chart data generation completed at: {datetime.now()}")
     print(f"🔍 Debug: chart_data length: {len(chart_data) if chart_data else 0}")
-    print(f"🔍 Debug: chart_data sample: {chart_data[:2] if chart_data else 'No data'}")
+    if chart_data:
+        if isinstance(chart_data, dict):
+            sample_keys = list(chart_data)[:2]
+            sample = {k: chart_data[k] for k in sample_keys}
+        else:
+            sample = chart_data[:2]
+        print(f"🔍 Debug: chart_data sample: {sample}")
+    else:
+        print("🔍 Debug: chart_data sample: No data")
     converted_chart_data = convert_numpy_types(chart_data)
     print(f"🔍 Debug: converted_chart_data length: {len(converted_chart_data) if converted_chart_data else 0}")
     
@@ -1803,20 +1833,24 @@ async def chart_data_multidim(explore_atom_id: str):
         
         print(f"🔍 Backend: Final recharts_data for stacked bar:", recharts_data[:2] if recharts_data else "No data")
     elif chart_type == "pie_chart":
-        # Pie chart data: Handle both single and dual Y-axes
-        recharts_data = []
-        for item in converted_chart_data:
-            if isinstance(item, dict):
-                # Check if this is dual Y-axes data (has actual measure names as fields)
-                if len(multiple_measures) > 1:
-                    # Dual Y-axes: Keep the original structure with actual field names
-                    recharts_data.append(item)
+        # Pie chart data: Handle both single and dual Y-axes and legend-based multiple pies
+        if isinstance(converted_chart_data, dict):
+            # Data already structured by legend value -> list of slices
+            recharts_data = converted_chart_data
+        else:
+            recharts_data = []
+            for item in converted_chart_data:
+                if isinstance(item, dict):
+                    # Check if this is dual Y-axes data (has actual measure names as fields)
+                    if len(multiple_measures) > 1:
+                        # Dual Y-axes: Keep the original structure with actual field names
+                        recharts_data.append(item)
+                    else:
+                        # Single Y-axis: Preserve original field names for pie charts
+                        # This fixes the issue where original field names were being converted to generic keys
+                        recharts_data.append(item)  # Keep the original structure with actual field names
                 else:
-                    # Single Y-axis: Preserve original field names for pie charts
-                    # This fixes the issue where original field names were being converted to generic keys
-                    recharts_data.append(item)  # Keep the original structure with actual field names
-            else:
-                recharts_data.append(item)
+                    recharts_data.append(item)
     else:
         # For other chart types, use the data as is
         recharts_data = converted_chart_data

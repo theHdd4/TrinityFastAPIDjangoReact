@@ -8,12 +8,24 @@ import { Label } from '@/components/ui/label';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Switch } from '@/components/ui/switch';
-import { BarChart3, LineChart, PieChart, ScatterChartIcon as ScatterIcon, Settings, Filter, Eye, EyeOff, Edit3, Palette, ChevronDown, ChevronUp, X, Plus, RotateCcw } from 'lucide-react';
+import { BarChart3, Settings, Filter, Eye, EyeOff, Edit3, Palette, ChevronDown, ChevronUp, X, Plus, RotateCcw, Database, Maximize2 } from 'lucide-react';
 import { ExploreData } from '../ExploreAtom';
 import RechartsChartRenderer from './RechartsChartRenderer';
-import { EXPLORE_API } from '@/lib/api';
+import { EXPLORE_API, TEXT_API } from '@/lib/api';
 import { toast } from '@/components/ui/use-toast';
 import './ExploreCanvas.css';
+import ChatBubble from '../../chart-maker/components/ChatBubble';
+import { Dialog, DialogContent, DialogTrigger } from '@/components/ui/dialog';
+
+// Chart color palette using specified base colors and lighter shades
+const CHART_COLORS = [
+  '#FFBD59', '#FFC878', '#FFD897',
+  '#41C185', '#5CD29A', '#78E3AF',
+  '#458EE2', '#6BA4E8', '#91BAEE',
+  '#F5F5F5', '#E0E0E0', '#C5C5C5'
+];
+
+const CHART_FONT = `'Inter', 'Segoe UI', sans-serif`;
 
 interface ExploreCanvasProps {
   data: ExploreData;
@@ -25,18 +37,12 @@ interface ExploreCanvasProps {
 interface ChartData {
   status: string;
   chart_type: string;
-  data: any[];
+  data: any; // can be array or object depending on chart type
   metadata: any;
 }
 
-const chartTypes = [
-  { id: 'bar_chart', name: 'Bar Chart', icon: BarChart3 },
-  { id: 'line_chart', name: 'Line Chart', icon: LineChart },
-  { id: 'pie_chart', name: 'Pie Chart', icon: PieChart }
-];
-
 const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataChange, onChartDataChange }) => {
-  const [chartDataSets, setChartDataSets] = useState<{ [idx: number]: any[] }>({});
+  const [chartDataSets, setChartDataSets] = useState<{ [idx: number]: any }>(data.chartDataSets || {});
   const svgRef = useRef<SVGSVGElement>(null);
   const [chartData, setChartData] = useState<ChartData | null>(null);
   const [isLoading, setIsLoading] = useState<{ [chartIndex: number]: boolean }>({});
@@ -63,10 +69,70 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
     
     // Set new timeout
     chartGenerationTimeouts.current[chartIndex] = setTimeout(() => {
-      console.log('🔍 ExploreCanvas: Executing debounced chart generation for index:', chartIndex);
       generateChart(chartIndex, false, config);
       chartGenerationTimeouts.current[chartIndex] = null;
     }, delay);
+  };
+
+  const getTextId = (index: number) => {
+    const base = (safeData.dataframe || 'explore').replace(/[^a-z0-9-_]/gi, '_').toLowerCase();
+    return `${base}-chart-${index}`;
+  };
+
+  const fetchChartNote = async (index: number) => {
+    const textId = getTextId(index);
+    try {
+      const res = await fetch(`${TEXT_API}/text/${textId}`);
+      if (res.ok) {
+        const data = await res.json();
+        setChartNotes(prev => ({ ...prev, [index]: data?.spec?.content?.value || '' }));
+      }
+    } catch (err) {
+      console.error('Failed to fetch note', err);
+    }
+  };
+
+  const saveChartNote = async (index: number) => {
+    const textId = getTextId(index);
+    const value = chartNotes[index] || '';
+    const payload = {
+      textId,
+      appId: 'explore',
+      type: 'widget',
+      name: 'chart-note',
+      spec: { content: { format: 'plain', value } }
+    };
+    try {
+      let res = await fetch(`${TEXT_API}/text/${textId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      if (res.status === 404) {
+        res = await fetch(`${TEXT_API}/text`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+      }
+      if (!res.ok) {
+        throw new Error(`Failed to save note: ${res.status}`);
+      }
+    } catch (err) {
+      console.error('Error saving note', err);
+      toast({ description: 'Failed to save note', variant: 'destructive' });
+    }
+  };
+
+  const handleNoteChange = (index: number, value: string) => {
+    setChartNotes(prev => ({ ...prev, [index]: value }));
+  };
+
+  const handleNoteKeyDown = (index: number, e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      saveChartNote(index);
+    }
   };
   
   // State for dropdown positioning
@@ -80,7 +146,6 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
 
   const [chartSettingsVisible, setChartSettingsVisible] = useState<{ [key: number]: boolean }>({});
   const [chartFiltersVisible, setChartFiltersVisible] = useState<{ [key: number]: boolean }>({});
-
   const [isLoadingColumnSummary, setIsLoadingColumnSummary] = useState(false);
   
   // Per-card collapse states
@@ -89,19 +154,20 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
   
   // Filter state for each chart - now supports arrays for multi-selection
   const [chartFilters, setChartFilters] = useState<{ [chartIndex: number]: { [identifier: string]: string[] } }>({});
-  
+
   // Unique values for each identifier
   const [identifierUniqueValues, setIdentifierUniqueValues] = useState<{ [identifier: string]: string[] }>({});
   const [loadingUniqueValues, setLoadingUniqueValues] = useState<{ [identifier: string]: boolean }>({});
   const [openDropdowns, setOpenDropdowns] = useState<{ [key: string]: boolean }>({});
   const [appliedFilters, setAppliedFilters] = useState<{ [chartIndex: number]: boolean }>({});
-  const [originalChartData, setOriginalChartData] = useState<{ [chartIndex: number]: any[] }>({});
-  const [chartGenerated, setChartGenerated] = useState<{ [chartIndex: number]: boolean }>({});
+  const [originalChartData, setOriginalChartData] = useState<{ [chartIndex: number]: any }>({});
+  const [chartGenerated, setChartGenerated] = useState<{ [chartIndex: number]: boolean }>(data.chartGenerated || {});
   const [chartThemes, setChartThemes] = useState<{ [chartIndex: number]: string }>({});
   const [chartOptions, setChartOptions] = useState<{ [chartIndex: number]: { grid: boolean; legend: boolean; axisLabels: boolean; dataLabels: boolean } }>({});
-  const [chartSortCounters, setChartSortCounters] = useState<{ [chartIndex: number]: number }>({});
+  const [chartNotes, setChartNotes] = useState<{ [chartIndex: number]: string }>({});
   const [dateRanges, setDateRanges] = useState<{ [columnName: string]: { min_date: string; max_date: string } }>({});
-  
+  const [showUniqueToggles, setShowUniqueToggles] = useState<{ [chartIndex: number]: boolean }>({});
+
   // Debouncing mechanism to prevent multiple chart generations
   const chartGenerationTimeouts = useRef<{ [chartIndex: number]: NodeJS.Timeout | null }>({});
 
@@ -120,39 +186,185 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
     selectedIdentifiers: {},
     allColumns: [],
     numericalColumns: [],
+    fallbackDimensions: [],
+    fallbackMeasures: [],
     dataframe: '',
     aggregation: 'no_aggregation', // Default to no aggregation
     weightColumn: '',
     dateFilters: [],
     filterUnique: false, // Default to false
+    chartConfigs: [],
+    chartFilters: {},
+    chartThemes: {},
+    chartOptions: {},
+    appliedFilters: {},
+    chartDataSets: {},
+    chartGenerated: {},
+    chartNotes: {},
     ...data
   };
 
+  useEffect(() => {
+    if (safeData.chartFilters) setChartFilters(safeData.chartFilters);
+    if (safeData.chartThemes) setChartThemes(safeData.chartThemes);
+    if (safeData.chartOptions) setChartOptions(safeData.chartOptions);
+    if (safeData.appliedFilters) setAppliedFilters(safeData.appliedFilters);
+    if (safeData.chartDataSets) setChartDataSets(safeData.chartDataSets);
+    if (safeData.chartGenerated) setChartGenerated(safeData.chartGenerated);
+    if (safeData.chartNotes) setChartNotes(safeData.chartNotes);
+  }, []);
+
   // Multi-chart state
-  const [chartConfigs, setChartConfigs] = useState([
-    {
-      xAxis: safeData.xAxis || '',
-      yAxes: [safeData.yAxis || ''], // Array to support multiple Y-axes
-      xAxisLabel: safeData.xAxisLabel || '',
-      yAxisLabels: [safeData.yAxisLabel || ''], // Array to support multiple Y-axis labels
-      chartType: safeData.chartType || 'line_chart',
-      aggregation: safeData.aggregation || 'no_aggregation', // Default to no aggregation
-      weightColumn: safeData.weightColumn || '',
-      title: safeData.title || '',
-      legendField: safeData.legendField || '', // Field to use for creating multiple lines/series
-    }
+  const [chartConfigs, setChartConfigs] = useState(
+    safeData.chartConfigs && Array.isArray(safeData.chartConfigs) && safeData.chartConfigs.length > 0
+      ? safeData.chartConfigs
+      : [
+          {
+            xAxis: safeData.xAxis || '',
+            yAxes: [safeData.yAxis || ''], // Array to support multiple Y-axes
+            xAxisLabel: safeData.xAxisLabel || '',
+            yAxisLabels: [safeData.yAxisLabel || ''], // Array to support multiple Y-axis labels
+            chartType: safeData.chartType || 'line_chart',
+            aggregation: safeData.aggregation || 'no_aggregation', // Default to no aggregation
+            weightColumn: safeData.weightColumn || '',
+            title: safeData.title || '',
+            legendField: safeData.legendField || '', // Field to use for creating multiple lines/series
+            sortOrder: null,
+          },
+        ]
+  );
+
+  const [chatBubble, setChatBubble] = useState({
+    visible: false,
+    chartIndex: null as number | null,
+    anchor: { x: 0, y: 0 }
+  });
+  const [chatBubbleShouldRender, setChatBubbleShouldRender] = useState(false);
+
+  // Persist chart state changes to parent atom settings for saving/loading
+  useEffect(() => {
+    const primaryConfig = chartConfigs[0] || {};
+    onDataChange({
+      chartConfigs,
+      chartFilters,
+      chartThemes,
+      chartOptions,
+      chartDataSets,
+      chartGenerated,
+      appliedFilters,
+      chartNotes,
+      xAxis: primaryConfig.xAxis || '',
+      yAxis: primaryConfig.yAxes?.[0] || '',
+      xAxisLabel: primaryConfig.xAxisLabel || '',
+      yAxisLabel: primaryConfig.yAxisLabels?.[0] || '',
+      chartType: primaryConfig.chartType || 'line_chart',
+      legendField: primaryConfig.legendField || '',
+      aggregation: primaryConfig.aggregation || 'no_aggregation',
+      weightColumn: primaryConfig.weightColumn || '',
+      title: primaryConfig.title || '',
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    chartConfigs,
+    chartFilters,
+    chartThemes,
+    chartOptions,
+    chartDataSets,
+    chartGenerated,
+    appliedFilters,
+    chartNotes,
   ]);
+
+  // Auto-generate charts on mount if data and configs exist
+  useEffect(() => {
+    chartConfigs.forEach((cfg, index) => {
+      if (!chartDataSets[index] && cfg.xAxis && hasValidYAxes(cfg.yAxes)) {
+        safeTriggerChartGeneration(index, cfg, 0);
+      }
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    chartConfigs.forEach((_, idx) => fetchChartNote(idx));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chartConfigs.length, safeData.dataframe]);
+
+  const openChartTypeTray = (e: React.MouseEvent, index: number) => {
+    e.preventDefault();
+    setChatBubble({ visible: true, chartIndex: index, anchor: { x: e.clientX, y: e.clientY } });
+    setChatBubbleShouldRender(true);
+  };
+
+  const handleChartTypeSelect = (type: string) => {
+    if (chatBubble.chartIndex !== null) {
+      const newConfigs = [...chartConfigs];
+      const mappedType = `${type}_chart` as typeof newConfigs[number]['chartType'];
+
+      // Reset legendField and notify when pie charts don't support segregation
+      let legendField = newConfigs[chatBubble.chartIndex].legendField;
+      if (mappedType === 'pie_chart' && legendField && legendField !== 'aggregate') {
+        legendField = 'aggregate';
+        toast({ description: 'Segregation of Field Value is not allowed for pie chart' });
+      }
+
+      newConfigs[chatBubble.chartIndex] = {
+        ...newConfigs[chatBubble.chartIndex],
+        chartType: mappedType,
+        legendField
+      };
+      setChartConfigs(newConfigs);
+      const cfg = newConfigs[chatBubble.chartIndex];
+      if (cfg.xAxis && hasValidYAxes(cfg.yAxes)) {
+        safeTriggerChartGeneration(chatBubble.chartIndex, cfg, 100);
+      }
+    }
+    setChatBubble(prev => ({ ...prev, visible: false }));
+  };
+
+  const closeChatBubble = () => setChatBubble(prev => ({ ...prev, visible: false }));
+  const handleBubbleExited = () => setChatBubbleShouldRender(false);
+
+  const handleOverlayClick = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setOpenDropdowns({});
+    closeChatBubble();
+    setChatBubbleShouldRender(false);
+  };
+
+  const overlayVisible =
+    chatBubble.visible ||
+    chatBubbleShouldRender;
+
+  useEffect(() => {
+    const handleClickOutside = () => {
+      setOpenDropdowns({});
+      closeChatBubble();
+      setChatBubbleShouldRender(false);
+    };
+    if (
+      Object.values(openDropdowns).some(Boolean) ||
+      chatBubble.visible
+    ) {
+      document.addEventListener('click', handleClickOutside);
+    }
+    return () => document.removeEventListener('click', handleClickOutside);
+  }, [openDropdowns, chatBubble.visible]);
 
   // Initialize data summary collapse state
   useEffect(() => {
     setDataSummaryCollapsed({ 0: false });
     
-    // Initialize chart options for the first chart
-    setChartOptions({ 0: { grid: true, legend: true, axisLabels: true, dataLabels: true } });
-    setChartSortCounters({ 0: 0 });
-    
+    // Initialize chart options for the first chart if not provided
+    if (!chartOptions[0]) {
+      setChartOptions({ 0: { grid: true, legend: true, axisLabels: true, dataLabels: true } });
+    }
+
     // Initialize loading state for the first chart
-    setIsLoading({ 0: false });
+    if (!isLoading[0]) {
+      setIsLoading({ 0: false });
+    }
     
     // Cleanup function to clear any pending chart generation timeouts
     return () => {
@@ -164,9 +376,6 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
 
   // Update chartConfigs if layout changes
   useEffect(() => {
-    // Hide all filters when layout changes
-    hideAllFilters();
-    
     if (safeData.graphLayout.numberOfGraphsInRow === 2 && chartConfigs.length === 1) {
       // Add a second chart card while preserving the first one
       setChartConfigs(prev => [
@@ -181,6 +390,7 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
           weightColumn: '',
           title: '',
           legendField: '', // Field to use for creating multiple lines/series
+          sortOrder: null,
         }
       ]);
       
@@ -207,6 +417,11 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
       
       // Initialize loading state for new chart
       setIsLoading(prev => ({
+        ...prev,
+        [newChartIndex]: false
+      }));
+
+      setShowUniqueToggles(prev => ({
         ...prev,
         [newChartIndex]: false
       }));
@@ -327,17 +542,6 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
         return newState;
       });
       
-      setChartSortCounters(prev => {
-        const newState = { ...prev };
-        Object.keys(newState).forEach(key => {
-          const keyNum = parseInt(key);
-          if (keyNum > 0) {
-            delete newState[keyNum];
-          }
-        });
-        return newState;
-      });
-      
       setCardSelectedIdentifiers(prev => {
         const newState = { ...prev };
         Object.keys(newState).forEach(key => {
@@ -384,11 +588,6 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
     }
   }, [safeData.graphLayout.numberOfGraphsInRow, safeData.columnClassifierConfig?.dimensions]);
 
-  // Hide all filters whenever graph layout changes from settings
-  useEffect(() => {
-    hideAllFilters();
-  }, [safeData.graphLayout.numberOfGraphsInRow]);
-
   // Notify parent component when chart data changes
   useEffect(() => {
     if (onChartDataChange) {
@@ -415,10 +614,7 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
           return true;
         });
         const filteredCount = allIdentifiers.length;
-        if (originalCount !== filteredCount) {
-          console.log('🔍 ExploreCanvas: Filtered allIdentifiers:', originalCount, '->', filteredCount);
-        }
-      }
+              }
       
       // Fetch unique values for each identifier
       allIdentifiers.forEach(identifier => {
@@ -479,6 +675,7 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
           weightColumn: '',
           title: '',
           legendField: '', // Field to use for creating multiple lines/series
+          sortOrder: null,
         }
       ]);
       
@@ -510,6 +707,12 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
       
       // Initialize loading states for new charts
       setIsLoading(prev => ({
+        ...prev,
+        [newChartIndex]: false,
+        [newChartIndex + 1]: false
+      }));
+
+      setShowUniqueToggles(prev => ({
         ...prev,
         [newChartIndex]: false,
         [newChartIndex + 1]: false
@@ -555,6 +758,11 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
       
       // Initialize loading state for new chart
       setIsLoading(prev => ({
+        ...prev,
+        [newChartIndex]: false
+      }));
+
+      setShowUniqueToggles(prev => ({
         ...prev,
         [newChartIndex]: false
       }));
@@ -787,6 +995,33 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
       });
       return newState;
     });
+
+    setShowUniqueToggles(prev => {
+      const newState = { ...prev };
+      delete newState[index];
+      Object.keys(newState).forEach(key => {
+        const keyNum = parseInt(key);
+        if (keyNum > index) {
+          newState[keyNum - 1] = newState[keyNum];
+          delete newState[keyNum];
+        }
+      });
+      return newState;
+    });
+
+    // Clean up chart notes
+    setChartNotes(prev => {
+      const newState = { ...prev };
+      delete newState[index];
+      Object.keys(newState).forEach(key => {
+        const keyNum = parseInt(key);
+        if (keyNum > index) {
+          newState[keyNum - 1] = newState[keyNum];
+          delete newState[keyNum];
+        }
+      });
+      return newState;
+    });
   };
 
   // Toggle chart settings visibility
@@ -803,6 +1038,10 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
       ...prev,
       [index]: !prev[index]
     }));
+
+    if (!cardSelectedIdentifiers[index]) {
+      initializeCardDimensions(index);
+    }
   };
 
   // Toggle functions for per-card collapse states
@@ -850,13 +1089,11 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
       }
 
       const result = await response.json();
-      console.log('Explore atom created:', result);
       
       // Update the dataframe reference
       onDataChange({ dataframe: result.explore_atom_id });
       
     } catch (err) {
-      console.error('Error creating explore atom:', err);
       setError(err instanceof Error ? err.message : 'Unknown error occurred');
     } finally {
       setIsLoading(prev => ({ ...prev, 0: false }));
@@ -870,62 +1107,58 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
   const handleFilterChange = (dimensionId: string, values: string[]) => {
     const currentFilters = safeData.dateFilters || [];
     const updatedFilters = currentFilters.filter(f => f.column !== dimensionId);
-    
+
     if (values.length > 0) {
       updatedFilters.push({ column: dimensionId, values });
     }
-    
-    onDataChange({ dateFilters: updatedFilters });
+
+    const updatedChartFilters: { [chartIndex: number]: { [identifier: string]: string[] } } = {};
+    chartConfigs.forEach((_, idx) => {
+      const existing = chartFilters[idx] || {};
+      const chartFilter = { ...existing };
+      if (values.length > 0) {
+        chartFilter[dimensionId] = values;
+      } else {
+        delete chartFilter[dimensionId];
+      }
+      updatedChartFilters[idx] = chartFilter;
+    });
+
+    setChartFilters(updatedChartFilters);
+
+    onDataChange({ dateFilters: updatedFilters, chartFilters: updatedChartFilters });
   };
   
   // Multi-selection filter handler
-  const handleMultiSelectFilterChange = (chartIndex: number, identifier: string, values: string[]) => {
-    console.log(`🔍 ExploreCanvas: handleMultiSelectFilterChange called for chart ${chartIndex}, identifier ${identifier} with values:`, values);
-    console.log(`🔍 ExploreCanvas: Previous state for chart ${chartIndex}:`, chartFilters[chartIndex]);
-    
+  const handleMultiSelectFilterChange = (
+    chartIndex: number,
+    identifier: string,
+    values: string[] | null
+  ) => {
     setChartFilters(prev => {
       const newState = {
         ...prev,
         [chartIndex]: {
           ...prev[chartIndex],
-          [identifier]: values
-        }
+          [identifier]: values,
+        },
       };
-      console.log(`🔍 ExploreCanvas: New chartFilters state for chart ${chartIndex}:`, newState[chartIndex]);
       return newState;
     });
-    
+
     // Don't regenerate chart immediately - let user apply multiple filters first
-    console.log('🔍 ExploreCanvas: Filter changed for', identifier, ':', values);
   };
   
   // Apply filters and regenerate chart
   const applyFilters = (chartIndex: number) => {
     if (chartConfigs[chartIndex]?.xAxis && hasValidYAxes(chartConfigs[chartIndex]?.yAxes)) {
-      console.log('🔍 ExploreCanvas: Applying filters and regenerating chart for index:', chartIndex);
-      console.log('🔍 ExploreCanvas: Chart type:', chartConfigs[chartIndex]?.chartType);
-      console.log('🔍 ExploreCanvas: Current filters for chart:', chartFilters[chartIndex]);
-      console.log('🔍 ExploreCanvas: X-axis:', chartConfigs[chartIndex]?.xAxis);
-      console.log('🔍 ExploreCanvas: Y-axes:', chartConfigs[chartIndex]?.yAxes);
-      
-      // Set applied filters state
+      // Mark filters as applied so UI can reflect active filtering
       setAppliedFilters(prev => ({ ...prev, [chartIndex]: true }));
-      
-      // Clear any existing chart data for this index to force regeneration
-      setChartDataSets(prev => {
-        const newData = { ...prev };
-        delete newData[chartIndex];
-        console.log('🔍 ExploreCanvas: Cleared chart data for index:', chartIndex);
-        return newData;
-      });
-      
-      // Generate chart with filters
-      console.log('🔍 ExploreCanvas: Calling generateChart with filters for index:', chartIndex);
+
+      // Regenerate the chart with the currently selected filters.
+      // We intentionally keep the previous chart data while the new data
+      // loads so the chart doesn't disappear if the request fails.
       generateChart(chartIndex, false);
-    } else {
-      console.log('🔍 ExploreCanvas: Cannot apply filters - missing X or Y axis configuration');
-      console.log('🔍 ExploreCanvas: X-axis:', chartConfigs[chartIndex]?.xAxis);
-      console.log('🔍 ExploreCanvas: Y-axes:', chartConfigs[chartIndex]?.yAxes);
     }
   };
   
@@ -964,14 +1197,12 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
     
     // Restore original chart data if available
     if (originalChartData[chartIndex]) {
-      console.log('🔍 ExploreCanvas: Restoring original chart data for index:', chartIndex);
       setChartDataSets(prev => ({
         ...prev,
         [chartIndex]: originalChartData[chartIndex]
       }));
     } else if (chartConfigs[chartIndex]?.xAxis && hasValidYAxes(chartConfigs[chartIndex]?.yAxes)) {
       // If no original data available, regenerate chart without filters
-      console.log('🔍 ExploreCanvas: No original data, regenerating chart for index:', chartIndex);
       generateChart(chartIndex, true); // Pass true to indicate reset mode
     }
   };
@@ -999,11 +1230,9 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
             ...prev,
             [identifier]: columnSummary.unique_values
           }));
-          console.log(`🔍 ExploreCanvas: Fetched unique values for ${identifier}:`, columnSummary.unique_values);
         }
       }
     } catch (error) {
-      console.error(`Error fetching unique values for ${identifier}:`, error);
     } finally {
       // Clear loading state
       setLoadingUniqueValues(prev => ({ ...prev, [identifier]: false }));
@@ -1012,11 +1241,7 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
 
   // Generate chart data
   const generateChart = async (index: number, resetMode: boolean = false, customConfig?: any) => {
-    console.log('🔍 ExploreCanvas: generateChart function called with index:', index);
     const config = customConfig || chartConfigs[index];
-    console.log('🔍 ExploreCanvas: Chart config for index', index, ':', config);
-    console.log('🔍 ExploreCanvas: Using custom config:', !!customConfig);
-    console.log('🔍 ExploreCanvas: Custom config details:', customConfig);
     
     try {
       setIsLoading(prev => ({ ...prev, [index]: true }));
@@ -1032,60 +1257,50 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
         return;
       }
 
-      // Check if column classifier config is available
-      if (!safeData.columnClassifierConfig) {
-        setError('No column classifier configuration available. Please configure column classifier first.');
-        return;
-      }
-      
-      // Check if we have any available columns from column classifier config
+      // Check if we have any available columns for chart generation
       const hasAvailableColumns = allAvailableColumns.length > 0;
-      
-      console.log('🔍 ExploreCanvas: Chart generation - allAvailableColumns:', allAvailableColumns);
-      console.log('🔍 ExploreCanvas: Chart generation - hasAvailableColumns:', hasAvailableColumns);
-      
+
+
       if (!hasAvailableColumns) {
-        setError('No columns available from column classifier configuration. Please ensure column classifier is properly configured.');
+        setError('No columns available for chart generation.');
         return;
       }
 
       // Allow both identifiers and measures for X and Y axes
-      console.log('🔍 ExploreCanvas: Generating chart with config:', config);
-      console.log('🔍 ExploreCanvas: X-axis:', config.xAxis);
-              console.log('🔍 ExploreCanvas: Y-axes:', config.yAxes);
-      console.log('🔍 ExploreCanvas: Legend field:', config.legendField);
-      
-      const dimensions = Object.keys(safeData.columnClassifierConfig?.dimensions || {});
-      const measures = safeData.columnClassifierConfig?.measures || [];
-      console.log('🔍 ExploreCanvas: Available dimensions from config:', dimensions);
-      console.log('🔍 ExploreCanvas: Available measures from config:', measures);
-      
-      // Only use column classifier config - no fallback
-      console.log('🔍 ExploreCanvas: Using column classifier config for chart generation');
-      const availableColumns = [...dimensions, ...measures];
-      console.log('🔍 ExploreCanvas: Available columns from column classifier:', availableColumns);
-      
 
+      const dimensions = safeData.columnClassifierConfig
+        ? Object.keys(safeData.columnClassifierConfig.dimensions || {})
+        : safeData.fallbackDimensions || [];
+      const measures = safeData.columnClassifierConfig
+        ? safeData.columnClassifierConfig.measures || []
+        : safeData.fallbackMeasures || [];
+
+      const availableColumns = [...dimensions, ...measures];
+
+      // Prepare filters from chart filters early so we can include filter columns as dimensions
+      const chartFiltersData = resetMode ? {} : (chartFilters[index] || {});
 
       // Create explore atom with flexible structure - both X and Y can be identifiers or measures
+      // Include legend field and filter columns so backend can filter correctly
+      const dimensionColumns = new Set<string>([config.xAxis]);
+      if (config.legendField && config.legendField !== 'aggregate') {
+        dimensionColumns.add(config.legendField);
+      }
+      Object.keys(chartFiltersData).forEach(col => dimensionColumns.add(col));
+
       const selectedDimensions = {
-        [safeData.dataframe]: {
-          [config.xAxis]: [config.xAxis] // X-axis can be identifier or measure
-        }
+        [safeData.dataframe]: Array.from(dimensionColumns).reduce(
+          (acc, col) => ({ ...acc, [col]: [col] }),
+          {} as { [key: string]: string[] }
+        )
       };
 
       const selectedMeasures = {
         [safeData.dataframe]: config.yAxes.filter(y => y) // Y-axes can be identifiers or measures
       };
 
-
-
-
-
       // Create explore atom
-      console.log('🔍 ExploreCanvas: Creating explore atom with dimensions:', selectedDimensions);
-      console.log('🔍 ExploreCanvas: Creating explore atom with measures:', selectedMeasures);
-      
+
       const createResponse = await fetch(`${EXPLORE_API}/select-dimensions-and-measures`, {
         method: 'POST',
         headers: {
@@ -1099,22 +1314,18 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
         })
       });
 
-      console.log('🔍 ExploreCanvas: Create explore atom response status:', createResponse.status);
       
       if (!createResponse.ok) {
         const errorText = await createResponse.text();
-        console.error('🔍 ExploreCanvas: Failed to create explore atom:', errorText);
         throw new Error(`Failed to create explore atom: ${createResponse.status} - ${errorText}`);
       }
 
       const createResult = await createResponse.json();
       const exploreAtomId = createResult.explore_atom_id;
-      console.log('🔍 ExploreCanvas: Created explore atom with ID:', exploreAtomId);
       
 
 
       // Prepare filters from chart filters
-      const chartFiltersData = resetMode ? {} : (chartFilters[index] || {});
       const filtersList = Object.entries(chartFiltersData)
         .filter(([identifier, values]) => Array.isArray(values) && values.length > 0)
         .map(([identifier, values]) => ({
@@ -1122,42 +1333,36 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
           values: values
         }));
       
-      console.log('🔍 ExploreCanvas: Chart filters for index', index, ':', chartFiltersData);
-      console.log('🔍 ExploreCanvas: Filters list:', filtersList);
-      console.log('🔍 ExploreCanvas: Reset mode:', resetMode);
       
       // Specify operations for the chart - flexible for both identifiers and measures
       // Handle multiple Y-axes
       const measuresConfig: { [key: string]: string } = {};
-      console.log('🔍 ExploreCanvas: Building measures config for Y-axes:', config.yAxes);
       config.yAxes.forEach((yAxis: string, index: number) => {
         if (yAxis && yAxis.trim()) {
           measuresConfig[yAxis] = config.aggregation || 'no_aggregation';
-          console.log('🔍 ExploreCanvas: Added measure config for Y-axis:', yAxis, 'with aggregation:', config.aggregation || 'no_aggregation');
         }
       });
-      console.log('🔍 ExploreCanvas: Final measures config:', measuresConfig);
       
       const operationsPayload = {
         file_key: safeData.dataframe,
         filters: filtersList, // Use chart filters instead of dateFilters
-        group_by: config.legendField ? [config.xAxis, config.legendField] : [config.xAxis],
+        group_by:
+          config.legendField && config.legendField !== 'aggregate'
+            ? [config.legendField, config.xAxis]
+            : [config.xAxis],
         measures_config: measuresConfig,
         chart_type: config.chartType,
         x_axis: config.xAxis,
-        weight_column: config.weightColumn || null
+        weight_column: config.weightColumn || null,
+        sort_order: config.sortOrder || null
       };
       
-      console.log('🔍 ExploreCanvas: Operations payload:', operationsPayload);
-      console.log('🔍 ExploreCanvas: Chart type being sent to API:', config.chartType);
-      console.log('🔍 ExploreCanvas: Group by fields:', config.legendField ? [config.xAxis, config.legendField] : [config.xAxis]);
 
 
 
 
 
       // Specify operations
-      console.log('🔍 ExploreCanvas: Specifying operations for explore atom ID:', exploreAtomId);
       const operationsResponse = await fetch(`${EXPLORE_API}/specify-operations`, {
         method: 'POST',
         headers: {
@@ -1169,102 +1374,48 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
         })
       });
 
-      console.log('🔍 ExploreCanvas: Operations response status:', operationsResponse.status);
       
       if (!operationsResponse.ok) {
         const errorText = await operationsResponse.text();
-        console.error('🔍 ExploreCanvas: Operations specification failed:', errorText);
         throw new Error(`Operations specification failed: ${operationsResponse.status} - ${errorText}`);
       }
       
       const operationsResult = await operationsResponse.json();
-      console.log('🔍 ExploreCanvas: Operations result:', operationsResult);
 
       // Get the chart data
-      console.log('🔍 ExploreCanvas: Fetching chart data for explore atom ID:', exploreAtomId);
       const chartResponse = await fetch(`${EXPLORE_API}/chart-data-multidim/${exploreAtomId}`);
       
-      console.log('🔍 ExploreCanvas: Chart data response status:', chartResponse.status);
       
       if (!chartResponse.ok) {
         const errorText = await chartResponse.text();
-        console.error('🔍 ExploreCanvas: Chart data fetch failed:', errorText);
         throw new Error(`Chart data fetch failed: ${chartResponse.status} - ${errorText}`);
       }
 
       const result = await chartResponse.json();
-      console.log('🔍 ExploreCanvas: Chart data response:', result);
-      console.log('🔍 ExploreCanvas: Raw result.data:', result.data);
-      console.log('🔍 ExploreCanvas: Raw result.data[0]:', result.data?.[0]);
-      console.log('🔍 ExploreCanvas: Raw result.data keys:', result.data?.[0] ? Object.keys(result.data[0]) : 'No data');
       
       const chartData = result.data || [];
-      
-      console.log('🔍 ExploreCanvas: Chart generation result:', result);
-      console.log('🔍 ExploreCanvas: Chart data for index', index, ':', chartData);
-      console.log('🔍 ExploreCanvas: Chart data length:', chartData.length);
-      console.log('🔍 ExploreCanvas: Chart data type:', typeof chartData);
-      console.log('🔍 ExploreCanvas: Chart data is array:', Array.isArray(chartData));
-      
-      // Verify that chart data contains the expected Y-axes
-      if (chartData.length > 0) {
-        const firstItem = chartData[0];
-        const availableKeys = Object.keys(firstItem);
-        console.log('🔍 ExploreCanvas: Available keys in chart data:', availableKeys);
-        console.log('🔍 ExploreCanvas: Expected Y-axes:', config.yAxes);
-        const missingYAxes = config.yAxes.filter(yAxis => yAxis && !availableKeys.includes(yAxis));
-        if (missingYAxes.length > 0) {
-          console.warn('🔍 ExploreCanvas: Missing Y-axes in chart data:', missingYAxes);
-        }
-      }
-      
-      // Check if chart data has the expected structure
-      if (chartData.length > 0) {
-        console.log('🔍 ExploreCanvas: First chart data item:', chartData[0]);
-        console.log('🔍 ExploreCanvas: Chart data keys:', Object.keys(chartData[0] || {}));
-        console.log('🔍 ExploreCanvas: Chart data structure:', JSON.stringify(chartData[0], null, 2));
-      } else {
-        console.log('🔍 ExploreCanvas: No chart data returned - this might be due to filters or no matching data');
-        console.log('🔍 ExploreCanvas: Full result object:', JSON.stringify(result, null, 2));
-        // If no data is returned, we should still update the chart data sets to trigger a re-render
-        // This will show the "No data available" message
-      }
-      
-      console.log('🔍 ExploreCanvas: Raw chart data structure:', chartData);
-      console.log('🔍 ExploreCanvas: Chart data length:', chartData?.length);
-      console.log('🔍 ExploreCanvas: Chart data keys:', chartData?.[0] ? Object.keys(chartData[0]) : []);
-      console.log('🔍 ExploreCanvas: Legend field in config:', config.legendField);
-      console.log('🔍 ExploreCanvas: Legend field values in data:', config.legendField ? [...new Set(chartData?.map(item => item[config.legendField]) || [])] : 'N/A');
-      
+
+
       setChartDataSets(prev => {
         const newData = {
           ...prev,
           [index]: chartData
         };
-
-        console.log('🔍 ExploreCanvas: Updated chart data sets:', newData);
-        console.log('🔍 ExploreCanvas: Chart data for index', index, 'after update:', newData[index]);
-        console.log('🔍 ExploreCanvas: Chart data length after update:', newData[index]?.length);
-        console.log('🔍 ExploreCanvas: Chart data keys after update:', newData[index] ? Object.keys(newData[index][0] || {}) : []);
-        console.log('🔍 ExploreCanvas: Y-axes in config when updating data:', config.yAxes);
-        console.log('🔍 ExploreCanvas: Chart data structure check:', newData[index]?.[0]);
-        
         // Store original data if no filters are applied
-        const hasFilters = chartFilters[index] && Object.keys(chartFilters[index]).some(key => 
+        const hasFilters = chartFilters[index] && Object.keys(chartFilters[index]).some(key =>
           Array.isArray(chartFilters[index][key]) && chartFilters[index][key].length > 0
         );
-        
+
         if (!hasFilters) {
           setOriginalChartData(prev => ({
             ...prev,
             [index]: chartData
           }));
-          console.log('🔍 ExploreCanvas: Stored original chart data for index:', index);
         }
-        
+
         // Force a re-render by updating the chart data state as well
         setChartData(result);
-        
+
         return newData;
       });
       
@@ -1286,7 +1437,9 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
 
 
   // Get selected dimensions and measures
-  const selectedDimensions = safeData.dimensions || [];
+  const selectedDimensions = safeData.selectedIdentifiers
+    ? Object.keys(safeData.selectedIdentifiers)
+    : (safeData.dimensions || []);
   const selectedMeasures = safeData.measures || [];
   const dimensionsWithIdentifiers = safeData.columnClassifierConfig?.dimensions || {};
   
@@ -1296,66 +1449,60 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
   const [isLoadingColumns, setIsLoadingColumns] = useState(false);
   
   // Combine all available columns for both X and Y axis dropdowns
-  // Only use column classifier config - no fallback
-  const allAvailableColumns = [...availableIdentifiers, ...availableMeasures];
+  // Deduplicate to avoid repeated entries
+  const allAvailableColumns = Array.from(new Set([...availableIdentifiers, ...availableMeasures]));
   
 
   
-    // Use column classifier config as the primary source for dimensions, identifiers, and measures
+  // Load available columns using column classifier config when available, falling back to column summary data
   useEffect(() => {
-
-    
     if (!safeData.dataframe) {
-      
       return;
     }
-    
+
     setIsLoadingColumns(true);
-    
+
     try {
-      // Extract identifiers and measures from column classifier config
-      const columnClassifierIdentifiers = safeData.columnClassifierConfig?.identifiers || [];
-      const columnClassifierMeasures = safeData.columnClassifierConfig?.measures || [];
-      
+      const identifiers = safeData.columnClassifierConfig?.identifiers?.length
+        ? safeData.columnClassifierConfig.identifiers
+        : safeData.fallbackDimensions?.length
+          ? safeData.fallbackDimensions
+          : safeData.allColumns || [];
 
-      
-      // Set the available columns from column classifier config
-      setAvailableIdentifiers(columnClassifierIdentifiers);
-      setAvailableMeasures(columnClassifierMeasures);
-      
+      const measures = safeData.columnClassifierConfig?.measures?.length
+        ? safeData.columnClassifierConfig.measures
+        : safeData.fallbackMeasures?.length
+          ? safeData.fallbackMeasures
+          : safeData.allColumns || [];
 
-      
+      setAvailableIdentifiers(identifiers);
+      setAvailableMeasures(measures);
     } catch (error) {
-      console.error('Error loading column classifier config:', error);
+      // Fall back to all columns if something goes wrong
+      setAvailableIdentifiers(safeData.allColumns || []);
+      setAvailableMeasures(safeData.allColumns || []);
     } finally {
       setIsLoadingColumns(false);
     }
-  }, [safeData.dataframe, safeData.columnClassifierConfig]);
+  }, [
+    safeData.dataframe,
+    safeData.columnClassifierConfig,
+    safeData.fallbackDimensions,
+    safeData.fallbackMeasures,
+    safeData.allColumns,
+  ]);
+
+  // Log available columns for debugging
   
-  // Column classifier config is now the primary source - no fallback needed
-  
-  console.log('🔍 ExploreCanvas: Selected dimensions:', selectedDimensions);
-  console.log('🔍 ExploreCanvas: Column classifier config dimensions:', dimensionsWithIdentifiers);
-  console.log('🔍 ExploreCanvas: Available identifiers:', availableIdentifiers);
-  console.log('🔍 ExploreCanvas: Available measures:', availableMeasures);
-  console.log('🔍 ExploreCanvas: All available columns for dropdowns:', allAvailableColumns);
-  console.log('🔍 ExploreCanvas: Column classifier config:', safeData.columnClassifierConfig);
-  console.log('🔍 ExploreCanvas: Column classifier dimensions:', safeData.columnClassifierConfig?.dimensions);
-  console.log('🔍 ExploreCanvas: Column classifier measures:', safeData.columnClassifierConfig?.measures);
 
   // Sample dimensions with identifiers for the filter UI - ONLY show selected dimensions
-  console.log('🔍 ExploreCanvas: selectedDimensions:', selectedDimensions);
-  console.log('🔍 ExploreCanvas: selectedDimensions type:', typeof selectedDimensions);
-  console.log('🔍 ExploreCanvas: selectedDimensions is array:', Array.isArray(selectedDimensions));
   
   // Only process dimensions that exist in the column classifier config
   const availableDimensionKeys = Object.keys(dimensionsWithIdentifiers);
-  console.log('🔍 ExploreCanvas: Available dimension keys from column classifier:', availableDimensionKeys);
   
   // Filter selectedDimensions to only include those that exist in column classifier config
   const validSelectedDimensions = Array.isArray(selectedDimensions) ? 
     selectedDimensions.filter(dimension => availableDimensionKeys.includes(dimension)) : [];
-  console.log('🔍 ExploreCanvas: Valid selected dimensions:', validSelectedDimensions);
   
   const sampleDimensions = validSelectedDimensions.length > 0 ? validSelectedDimensions.map(dimension => {
     // Since we've already filtered to valid dimensions, we can directly access them
@@ -1369,23 +1516,14 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
         if (colInfo && typeof colInfo.unique_count === 'number') {
           // Only include identifiers with more than 1 unique value
           const hasMultipleValues = colInfo.unique_count > 1;
-          if (!hasMultipleValues) {
-            console.log('🔍 ExploreCanvas: Filtering out identifier', identifier, 'with only', colInfo.unique_count, 'unique values');
-          }
-          return hasMultipleValues;
+                    return hasMultipleValues;
         }
         // If we can't determine unique count, include it (fallback behavior)
-        console.log('🔍 ExploreCanvas: Could not determine unique count for identifier', identifier, '- including it as fallback');
         return true;
       });
       const filteredCount = identifiers.length;
-      if (originalCount !== filteredCount) {
-        console.log('🔍 ExploreCanvas: Filtered identifiers for dimension', dimension, ':', originalCount, '->', filteredCount);
-      }
-    }
+          }
     
-    console.log('🔍 ExploreCanvas: Processing dimension:', dimension);
-    console.log('🔍 ExploreCanvas: Identifiers for dimension (after filtering):', identifiers);
     
     return {
       id: dimension,
@@ -1394,38 +1532,24 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
     };
   }).filter(dimension => dimension.identifiers.length > 0) : [];
   
-  console.log('🔍 ExploreCanvas: Final sample dimensions for filters:', sampleDimensions);
 
   // Render identifier chip for filter UI
   const renderIdentifierChip = (dimensionId: string, identifier: string) => {
-    const selectedFilters = safeData.dateFilters?.find(f => f.column === `${dimensionId}_${identifier}`)?.values || [];
+    const selectedFilters = chartFilters[0]?.[`${dimensionId}_${identifier}`] || [];
     
     const getUniqueValues = (dimId: string, ident: string) => {
       // Look up unique values from column summary if available
       if (Array.isArray(safeData.columnSummary)) {
         const colInfo: any = safeData.columnSummary.find((c: any) => c.column === ident);
         if (colInfo && Array.isArray(colInfo.unique_values)) {
-          console.log('🔍 ExploreCanvas: Found column info for', ident, ':', colInfo);
-          console.log('🔍 ExploreCanvas: Unique values count:', colInfo.unique_values.length);
-          console.log('🔍 ExploreCanvas: Is numerical:', colInfo.is_numerical);
-          console.log('🔍 ExploreCanvas: Data type:', colInfo.data_type);
           
           // For numerical columns, show all unique values (up to 1000)
           // For non-numerical columns, limit to 200 to avoid huge dropdowns
           const maxValues = colInfo.is_numerical ? 1000 : 200;
           const uniqueValues = colInfo.unique_values.slice(0, maxValues);
           
-          console.log('🔍 ExploreCanvas: Returning', uniqueValues.length, 'values for', ident);
-          console.log('🔍 ExploreCanvas: First few values:', uniqueValues.slice(0, 5));
           return uniqueValues;
-        } else {
-          console.log('🔍 ExploreCanvas: Column info not found or no unique values for', ident);
-          console.log('🔍 ExploreCanvas: Available columns:', safeData.columnSummary.map((c: any) => c.column));
-        }
-      } else {
-        console.log('🔍 ExploreCanvas: No column summary available');
-      }
-      return [];
+        }       }       return [];
     };
 
     const uniqueValues = getUniqueValues(dimensionId, identifier);
@@ -1435,7 +1559,7 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
         <Select 
           value={selectedFilters.length > 0 ? selectedFilters[0] : ''}
           onValueChange={(value) => {
-            const currentFilters = safeData.dateFilters?.find(f => f.column === `${dimensionId}_${identifier}`)?.values || [];
+            const currentFilters = chartFilters[0]?.[`${dimensionId}_${identifier}`] || [];
             const newFilters = currentFilters.includes(value) 
               ? currentFilters.filter(f => f !== value)
               : [...currentFilters, value];
@@ -1463,7 +1587,6 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
               const isNumericalColumn = colInfo?.is_numerical || false;
               
               // Debug: Log the value to see if it contains "#"
-              console.log('🔍 ExploreCanvas: Filter dropdown value:', value, 'for column:', identifier);
               
               // Clean the value to remove any "#" symbols that might be part of the data
               const cleanValue = value.replace(/#/g, '');
@@ -1502,353 +1625,329 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
   const renderChartComponent = (index: number) => {
     const config = chartConfigs[index] || chartConfigs[0];
     const isSettingsVisible = chartSettingsVisible[index] || false;
-    
-    // Debug logging for chart rendering
-    console.log('🔍 ExploreCanvas: Rendering chart with data:', chartDataSets[index]);
-    console.log('🔍 ExploreCanvas: Chart type:', config.chartType);
-    console.log('🔍 ExploreCanvas: Data length:', chartDataSets[index]?.length);
-    console.log('🔍 ExploreCanvas: Chart config for renderer:', {
-      chartType: config.chartType,
-      yAxes: config.yAxes,
-      yAxisLabels: config.yAxisLabels,
-      dataLength: chartDataSets[index]?.length
-    });
+    const rendererProps = {
+      key: `chart-${index}-${config.chartType}-${chartThemes[index] || 'default'}-${chartDataSets[index]?.length || 0}-${Object.keys(chartFilters[index] || {}).length}-${appliedFilters[index] ? 'filtered' : 'unfiltered'}-theme-${chartThemes[index] || 'default'}-sort-${config.sortOrder || 'none'}-yaxes-${config.yAxes.join('-')}`,
+      type: config.chartType as 'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart',
+      data: chartDataSets[index] || [],
+      xField: config.xAxis || undefined,
+      yField: config.yAxes[0] || undefined,
+      title: config.title,
+      xAxisLabel: config.xAxisLabel || config.xAxis || '',
+      yAxisLabel: config.yAxisLabels[0] || config.yAxes[0] || '',
+      yFields: config.yAxes,
+      yAxisLabels: config.yAxes.map((yAxis: string, idx: number) => config.yAxisLabels[idx] || yAxis || ''),
+      legendField:
+        config.legendField && config.legendField !== 'aggregate'
+          ? config.legendField
+          : undefined,
+      chartsPerRow: safeData.graphLayout.numberOfGraphsInRow,
+      colors: CHART_COLORS,
+      theme: chartThemes[index] || 'default',
+      enableScroll: false,
+      onThemeChange: (theme: string) => handleChartThemeChange(index, theme),
+      onGridToggle: (enabled: boolean) => handleChartGridToggle(index, enabled),
+      onLegendToggle: (enabled: boolean) => handleChartLegendToggle(index, enabled),
+      onAxisLabelsToggle: (enabled: boolean) => handleChartAxisLabelsToggle(index, enabled),
+      onDataLabelsToggle: (enabled: boolean) => handleChartDataLabelsToggle(index, enabled),
+      onSave: () => handleChartSave(index),
+      sortOrder: config.sortOrder || null,
+      onSortChange: (order) => handleSortOrderChange(index, order),
+      showLegend: chartOptions[index]?.legend,
+      showAxisLabels: chartOptions[index]?.axisLabels,
+      showDataLabels: chartOptions[index]?.dataLabels,
+      showGrid: chartOptions[index]?.grid
+    } as const;
     
     return (
       <div key={index} className="relative h-full w-full min-w-0 explore-chart-card">
         <Card className="border-pink-200 h-full w-full explore-chart-card">
           <CardContent className="p-4 flex flex-col h-full w-full min-w-0 explore-chart-content">
                         {/* Chart Configuration Header with Toggle */}
-            <div className="flex items-center justify-between mb-4 p-3 bg-gray-50 rounded-lg">
+            <div className="flex items-center mb-4 p-3 bg-gray-50 rounded-lg" onContextMenu={(e) => openChartTypeTray(e, index)}>
               <div className="flex items-center space-x-2">
                 <div className="flex items-center justify-center w-6 h-6 bg-pink-100 rounded-md">
                   <BarChart3 className="w-3 h-3 text-pink-600" />
                 </div>
                 <span className="font-semibold text-sm text-gray-800">Chart Configuration</span>
-                <div className="h-px bg-gradient-to-r from-pink-200 to-transparent flex-1 ml-3"></div>
+                <span className="ml-2 text-xs text-gray-500 whitespace-nowrap">&lt;Right click to change chart type&gt;</span>
               </div>
-              <button
-                onClick={() => toggleChartConfigCollapsed(index)}
-                className="p-2 hover:bg-pink-100 rounded-lg transition-colors"
-                aria-label={chartConfigCollapsed[index] ? 'Expand chart configuration' : 'Collapse chart configuration'}
-              >
-                {chartConfigCollapsed[index] ? (
-                  <ChevronDown className="w-5 h-5 text-pink-600" />
-                ) : (
-                  <ChevronUp className="w-5 h-5 text-pink-600" />
-                )}
-              </button>
-            </div>
-
-            {/* Collapsible Chart Configuration Area */}
-            <div className={`transition-all duration-300 ease-in-out min-w-0 w-full explore-chart-config ${chartConfigCollapsed[index] ? 'max-h-0 opacity-0 overflow-hidden' : 'max-h-none opacity-100'}`}>
-              {/* Top row: Chart Type Icons and Action Icons */}
-              <div className="flex items-center justify-between mb-3 p-3 bg-gray-50 rounded-lg min-w-0 w-full explore-chart-config">
-                {/* Left side: Chart Type Icons */}
-                <div className="flex items-center space-x-2 min-w-0">
-                  {Array.isArray(chartTypes) ? chartTypes.map((type) => {
-                    const Icon = type.icon;
-                    return (
-                      <div key={type.id} className="relative group/chart-type">
-                        <Button
-                          variant={config.chartType === type.id ? "default" : "outline"}
-                          size="sm"
-                          className={`h-8 w-8 p-0 hover:group ${
-                            config.chartType === type.id 
-                              ? 'bg-blue-500 text-white hover:bg-blue-600' 
-                              : 'hover:bg-blue-50'
-                          }`}
-                          onClick={() => {
-                            handleChartConfigChange('chartType', type.id);
-                            // Update the chart config
-                            const newConfigs = [...chartConfigs];
-                            newConfigs[index] = { ...newConfigs[index], chartType: type.id };
-                            setChartConfigs(newConfigs);
-                            
-                            // Regenerate chart when chart type changes to ensure proper rendering
-                            if (config.xAxis && hasValidYAxes(config.yAxes)) {
-                              console.log('🔍 ExploreCanvas: Chart type changed to:', type.id, '- regenerating chart');
-                              const newConfig = { ...newConfigs[index], chartType: type.id };
-                              safeTriggerChartGeneration(index, newConfig, 100);
-                            }
-                          }}
-                        >
-                          <Icon className="w-3 h-3" />
-                        </Button>
-                        {/* Tooltip */}
-                        <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 bg-gray-900 text-white text-xs rounded opacity-0 group-hover/chart-type:opacity-100 transition-opacity duration-200 pointer-events-none whitespace-nowrap z-10">
-                          {type.name}
-                        </div>
-                      </div>
-                    );
-                  }) : null}
-                </div>
-
-                {/* Right side: Action Icons */}
-                <div className="flex items-center space-x-2 min-w-0 flex-shrink-0">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="h-8 w-8 p-0"
-                    onClick={() => toggleChartSettings(index)}
-                  >
-                    <Settings className="w-3 h-3" />
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="h-8 w-8 p-0"
-                    onClick={() => toggleChartFilters(index)}
-                  >
-                    <Filter className="w-3 h-3" />
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="h-8 w-8 p-0 text-red-500 hover:text-red-700 hover:bg-red-50"
-                    onClick={() => deleteChart(index)}
-                  >
-                    <X className="w-3 h-3" />
-                  </Button>
-                </div>
-              </div>
-
-              {/* Bottom row: Axis Selectors and Legend Field */}
-              <div className="flex items-center space-x-2 mb-3 p-3 bg-gray-50 rounded-lg min-w-0 w-full explore-axis-selectors">
-                <Select 
-                  value={config.xAxis}
-                  onValueChange={(value) => {
-                    console.log('🔍 ExploreCanvas: X-axis selected:', value);
-                    const newConfigs = [...chartConfigs];
-                    newConfigs[index] = { ...newConfigs[index], xAxis: value };
-                    setChartConfigs(newConfigs);
-                    
-                    // Only trigger chart generation when both X and Y axes are available
-                    if (value && hasValidYAxes(config.yAxes)) {
-                      console.log('🔍 ExploreCanvas: X-axis updated, checking if chart generation is needed...');
-                      console.log('🔍 ExploreCanvas: X-axis:', value);
-                      console.log('🔍 ExploreCanvas: Y-axes:', config.yAxes);
-                      
-                      // Create the new config for chart generation
-                      const newConfig = { ...newConfigs[index], xAxis: value };
-                      
-                      // Only generate chart if we have valid data
-                      if (newConfig.xAxis && hasValidYAxes(newConfig.yAxes)) {
-                        console.log('🔍 ExploreCanvas: All axes selected, auto-generating chart with debouncing');
-                        safeTriggerChartGeneration(index, newConfig, 100);
-                      }
-                    }
-                  }}
+              <div className="flex items-center space-x-2 ml-auto">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 w-8 p-0"
+                  onClick={() => toggleChartSettings(index)}
                 >
-                  <SelectTrigger className="w-32 h-8 text-xs" disabled={isLoadingColumns}>
-                    <SelectValue placeholder={
-                      isLoadingColumns ? "Loading..." : 
-                      allAvailableColumns.length === 0 ? "No column classifier config" : 
-                      "Select X-Axis"
-                    } />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {Array.isArray(allAvailableColumns) ? allAvailableColumns.map((column, idx) => (
-                      <SelectItem key={idx} value={column}>
-                        <div className="flex items-center space-x-2">
-                          <span>{column}</span>
-                          {availableIdentifiers.includes(column) && (
-                            <span className="text-xs text-blue-600 bg-blue-50 px-1 rounded">ID</span>
-                          )}
-                          {availableMeasures.includes(column) && (
-                            <span className="text-xs text-green-600 bg-blue-50 px-1 rounded">M</span>
-                          )}
-                        </div>
-                      </SelectItem>
-                    )) : (
-                      <div className="text-xs text-gray-500 p-2">No column classifier config</div>
-                    )}
-                  </SelectContent>
-                </Select>
-                
-                <div className="flex items-center gap-1">
-                  {Array.isArray(config.yAxes) ? config.yAxes.map((yAxis, yAxisIndex) => (
-                    <div key={yAxisIndex} className="flex items-center gap-1">
-                      <Select 
-                        value={yAxis}
-                        onValueChange={(value) => {
-                          console.log('🔍 ExploreCanvas: Y-axis selected:', value);
-                          const newConfigs = [...chartConfigs];
-                          
-                          // Update the Y-axis value
-                          const updatedYAxes = Array.isArray(newConfigs[index].yAxes) ? 
-                            newConfigs[index].yAxes.map((_, i) => (i === yAxisIndex ? value : _)) : 
-                            [value];
-                          
-                          newConfigs[index] = {
-                            ...newConfigs[index],
-                            yAxes: updatedYAxes
-                          };
-                          
-                          setChartConfigs(newConfigs);
-                          
-                          // Only trigger chart generation once when both X and Y axes are available
-                          if (value && config.xAxis) {
-                            console.log('🔍 ExploreCanvas: Y-axis updated, checking if chart generation is needed...');
-                            console.log('🔍 ExploreCanvas: X-axis:', config.xAxis);
-                            console.log('🔍 ExploreCanvas: Updated Y-axes:', updatedYAxes);
-                            
-                            // Create the new config for chart generation
-                            const newConfig = { 
-                              ...newConfigs[index],
-                              yAxes: updatedYAxes
-                            };
-                            
-                            // Only generate chart if we have valid data and haven't already triggered generation
-                            const validYAxes = newConfig.yAxes.filter(y => y && y.trim() !== '');
-                            if (newConfig.xAxis && validYAxes.length > 0) {
-                              console.log('🔍 ExploreCanvas: All axes selected, auto-generating chart with debouncing');
-                              console.log('🔍 ExploreCanvas: Valid Y-axes:', validYAxes);
-                              safeTriggerChartGeneration(index, newConfig, 100);
-                            }
-                          }
-                        }}
-                      >
-                        <SelectTrigger className="w-32 h-8 text-xs" disabled={isLoadingColumns}>
-                          <SelectValue placeholder={
-                            isLoadingColumns ? "Loading..." : 
-                            allAvailableColumns.length === 0 ? "No column classifier config" : 
-                            "Select Y-Axis"
-                          } />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {Array.isArray(allAvailableColumns) ? allAvailableColumns.map((column, idx) => (
-                            <SelectItem key={idx} value={column}>
-                              <div className="flex items-center space-x-2">
-                                <span>{column}</span>
-                                {availableIdentifiers.includes(column) && (
-                                  <span className="text-xs text-blue-600 bg-blue-50 px-1 rounded">ID</span>
-                                )}
-                                {availableMeasures.includes(column) && (
-                                  <span className="text-xs text-green-600 bg-blue-50 px-1 rounded">M</span>
-                                )}
-                              </div>
-                            </SelectItem>
-                          )) : (
-                            <div className="text-xs text-gray-500 p-2">No column classifier config</div>
-                          )}
-                        </SelectContent>
-                      </Select>
-                      {/* Remove button for additional Y-axes (not the first one) */}
-                      {yAxisIndex > 0 && (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="h-8 w-8 p-0 text-red-500 hover:text-red-700 hover:bg-red-50"
-                          onClick={() => {
-                            const newConfigs = [...chartConfigs];
-                            newConfigs[index] = {
-                              ...newConfigs[index],
-                              yAxes: newConfigs[index].yAxes.filter((_, i) => i !== yAxisIndex),
-                              yAxisLabels: newConfigs[index].yAxisLabels.filter((_, i) => i !== yAxisIndex)
-                            };
-                            setChartConfigs(newConfigs);
-                            
-                            // Clear chart data when Y-axis is removed to force re-render
-                            setChartDataSets(prev => {
-                              const newData = { ...prev };
-                              delete newData[index];
-                              console.log('🔍 ExploreCanvas: Cleared chart data for index', index, 'after Y-axis removal');
-                              return newData;
-                            });
-                            
-                            // Regenerate chart when Y-axis is removed to update display
-                            if (newConfigs[index].xAxis && hasValidYAxes(newConfigs[index].yAxes)) {
-                              console.log('🔍 ExploreCanvas: Y-axis removed - regenerating chart automatically');
-                              console.log('🔍 ExploreCanvas: New config after Y-axis removal:', newConfigs[index]);
-                              console.log('🔍 ExploreCanvas: Y-axes after removal:', newConfigs[index].yAxes);
-                              safeTriggerChartGeneration(index, newConfigs[index], 100);
-                            } else {
-                              console.log('🔍 ExploreCanvas: Cannot regenerate chart - missing X or Y axis after removal');
-                              console.log('🔍 ExploreCanvas: X-axis:', newConfigs[index].xAxis);
-                              console.log('🔍 ExploreCanvas: Y-axes:', newConfigs[index].yAxes);
-                            }
-                          }}
-                        >
-                          <X className="w-3 h-3" />
-                        </Button>
-                      )}
-                    </div>
-                  )) : null}
-                  {/* Plus Button for adding additional Y-axis dropdowns - only show if less than 2 Y-axes */}
-                  {Array.isArray(config.yAxes) && config.yAxes.length < 2 && (
+                  <Settings className="w-3 h-3" />
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 w-8 p-0"
+                  onClick={() => toggleChartFilters(index)}
+                >
+                  <Filter className="w-3 h-3" />
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 w-8 p-0 text-red-500 hover:text-red-700 hover:bg-red-50"
+                  onClick={() => deleteChart(index)}
+                >
+                  <X className="w-3 h-3" />
+                </Button>
+                <Dialog>
+                  <DialogTrigger asChild>
                     <Button
                       variant="outline"
                       size="sm"
                       className="h-8 w-8 p-0"
-                      onClick={() => {
-                        const newConfigs = [...chartConfigs];
-                        newConfigs[index] = {
-                          ...newConfigs[index],
-                          yAxes: [...newConfigs[index].yAxes, ''],
-                          yAxisLabels: [...newConfigs[index].yAxisLabels, '']
-                        };
-                        setChartConfigs(newConfigs);
-                      }}
+                      aria-label="Full screen"
                     >
-                      <Plus className="w-3 h-3" />
+                      <Maximize2 className="w-3 h-3" />
                     </Button>
+                  </DialogTrigger>
+                  <DialogContent className="max-w-4xl">
+                    <div className="h-[500px] w-full">
+                      <RechartsChartRenderer {...rendererProps} />
+                    </div>
+                  </DialogContent>
+                </Dialog>
+                <button
+                  onClick={() => toggleChartConfigCollapsed(index)}
+                  className="p-2 hover:bg-pink-100 rounded-lg transition-colors"
+                  aria-label={chartConfigCollapsed[index] ? 'Expand chart configuration' : 'Collapse chart configuration'}
+                >
+                  {chartConfigCollapsed[index] ? (
+                    <ChevronDown className="w-5 h-5 text-pink-600" />
+                  ) : (
+                    <ChevronUp className="w-5 h-5 text-pink-600" />
                   )}
+                </button>
               </div>
-              
-                {/* Legend Field Selection - Clean version without icons */}
-                <div className="flex items-center ml-4 border-l border-gray-200 pl-4">
-                  <Select 
-                    value={config.legendField || 'no_legend'}
+            </div>
+
+            {/* Collapsible Chart Configuration Area */}
+            <div className={`transition-all duration-300 ease-in-out min-w-0 w-full explore-chart-config ${chartConfigCollapsed[index] ? 'max-h-0 opacity-0 overflow-hidden' : 'max-h-none opacity-100'}`}>
+              {/* Axis Selectors */}
+              <div
+                className="flex items-center mb-3 p-3 pr-2 bg-gray-50 rounded-lg min-w-0 w-full explore-axis-selectors"
+                onContextMenu={(e) => openChartTypeTray(e, index)}
+                style={{ position: 'relative', zIndex: 40 }}
+              >
+                <div className="flex items-center space-x-2">
+                  <Select
+                    value={config.xAxis}
                     onValueChange={(value) => {
-                      console.log('🔍 ExploreCanvas: Legend field selected:', value);
                       const newConfigs = [...chartConfigs];
-                      // Convert 'no_legend' back to empty string for storage
-                      const actualValue = value === 'no_legend' ? '' : value;
-                      newConfigs[index] = { ...newConfigs[index], legendField: actualValue };
+                      newConfigs[index] = { ...newConfigs[index], xAxis: value };
                       setChartConfigs(newConfigs);
-                      
-                      // Only trigger chart generation when legend field is selected and all axes are available
-                      if (actualValue && config.xAxis && hasValidYAxes(config.yAxes)) {
-                        console.log('🔍 ExploreCanvas: Legend field selected, checking if chart generation is needed...');
-                        console.log('🔍 ExploreCanvas: X-axis:', config.xAxis);
-                        console.log('🔍 ExploreCanvas: Y-axes:', config.yAxes);
-                        console.log('🔍 ExploreCanvas: Legend field:', actualValue);
-                        
+
+                      // Only trigger chart generation when both X and Y axes are available
+                      if (value && hasValidYAxes(config.yAxes)) {
+
                         // Create the new config for chart generation
-                        const newConfig = { ...newConfigs[index], legendField: actualValue };
-                        
+                        const newConfig = { ...newConfigs[index], xAxis: value };
+
                         // Only generate chart if we have valid data
                         if (newConfig.xAxis && hasValidYAxes(newConfig.yAxes)) {
-                          console.log('🔍 ExploreCanvas: All conditions met, auto-generating chart with debouncing');
                           safeTriggerChartGeneration(index, newConfig, 100);
                         }
                       }
                     }}
                   >
-                    <SelectTrigger className="w-28 h-8 text-xs" disabled={isLoadingColumns}>
-                      <SelectValue placeholder="Legend" />
+                    <SelectTrigger className="w-24 h-8 text-xs leading-none" disabled={isLoadingColumns}>
+                      <SelectValue
+                        className="truncate"
+                        placeholder={
+                          isLoadingColumns
+                            ? "Loading..."
+                            : allAvailableColumns.length === 0
+                            ? "No column classifier config"
+                            : "x-axis"
+                        }
+                      />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="no_legend">
-                        <div className="flex items-center space-x-2">
-                          <span className="text-gray-500">No Legend</span>
+                      {Array.isArray(allAvailableColumns) ? (
+                        allAvailableColumns.map((column, idx) => (
+                          <SelectItem key={idx} value={column}>
+                            {column}
+                          </SelectItem>
+                        ))
+                      ) : (
+                        <div className="text-xs text-gray-500 p-2">
+                          No column classifier config
                         </div>
-                      </SelectItem>
-                      {Array.isArray(allAvailableColumns) ? allAvailableColumns.map((column, idx) => (
-                        <SelectItem key={idx} value={column}>
-                          <div className="flex items-center space-x-2">
-                            <span>{column}</span>
-                            {availableIdentifiers.includes(column) && (
-                              <span className="text-xs text-blue-600 bg-blue-50 px-1 rounded">ID</span>
-                            )}
-                            {availableMeasures.includes(column) && (
-                              <span className="text-xs text-green-600 bg-blue-50 px-1 rounded">M</span>
+                      )}
+                    </SelectContent>
+                  </Select>
+
+                  <div className="flex items-center gap-1">
+                    {Array.isArray(config.yAxes)
+                      ? config.yAxes.map((yAxis, yAxisIndex) => (
+                          <div key={yAxisIndex} className="flex items-center gap-1">
+                            <Select
+                              value={yAxis}
+                              onValueChange={(value) => {
+                                const newConfigs = [...chartConfigs];
+
+                                // Update the Y-axis value
+                                const updatedYAxes = Array.isArray(newConfigs[index].yAxes)
+                                  ? newConfigs[index].yAxes.map((_, i) => (i === yAxisIndex ? value : _))
+                                  : [value];
+
+                                newConfigs[index] = {
+                                  ...newConfigs[index],
+                                  yAxes: updatedYAxes,
+                                };
+
+                                setChartConfigs(newConfigs);
+
+                                // Only trigger chart generation once when both X and Y axes are available
+                                if (value && config.xAxis) {
+                                  // Create the new config for chart generation
+                                  const newConfig = {
+                                    ...newConfigs[index],
+                                    yAxes: updatedYAxes,
+                                  };
+
+                                  // Only generate chart if we have valid data and haven't already triggered generation
+                                  const validYAxes = newConfig.yAxes.filter((y) => y && y.trim() !== '');
+                                  if (newConfig.xAxis && validYAxes.length > 0) {
+                                    safeTriggerChartGeneration(index, newConfig, 100);
+                                  }
+                                }
+                              }}
+                            >
+                              <SelectTrigger className="w-24 h-8 text-xs leading-none" disabled={isLoadingColumns}>
+                                <SelectValue
+                                  className="truncate"
+                                  placeholder={
+                                    isLoadingColumns
+                                      ? "Loading..."
+                                      : allAvailableColumns.length === 0
+                                      ? "No column classifier config"
+                                      : "y-axis"
+                                  }
+                                />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {Array.isArray(allAvailableColumns) ? (
+                                  allAvailableColumns.map((column, idx) => (
+                                    <SelectItem key={idx} value={column}>
+                                      {column}
+                                    </SelectItem>
+                                  ))
+                                ) : (
+                                  <div className="text-xs text-gray-500 p-2">
+                                    No column classifier config
+                                  </div>
+                                )}
+                              </SelectContent>
+                            </Select>
+                            {/* Remove button for additional Y-axes (not the first one) */}
+                            {yAxisIndex > 0 && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="h-8 w-8 p-0 text-red-500 hover:text-red-700 hover:bg-red-50"
+                                onClick={() => {
+                                  const newConfigs = [...chartConfigs];
+                                  newConfigs[index] = {
+                                    ...newConfigs[index],
+                                    yAxes: newConfigs[index].yAxes.filter((_, i) => i !== yAxisIndex),
+                                    yAxisLabels: newConfigs[index].yAxisLabels.filter((_, i) => i !== yAxisIndex),
+                                  };
+                                  setChartConfigs(newConfigs);
+
+                                  // Clear chart data when Y-axis is removed to force re-render
+                                  setChartDataSets((prev) => {
+                                    const newData = { ...prev };
+                                    delete newData[index];
+                                    return newData;
+                                  });
+
+                                  // Regenerate chart when Y-axis is removed to update display
+                                  if (newConfigs[index].xAxis && hasValidYAxes(newConfigs[index].yAxes)) {
+                                    safeTriggerChartGeneration(index, newConfigs[index], 100);
+                                  }
+                                }}
+                              >
+                                <X className="w-3 h-3" />
+                              </Button>
                             )}
                           </div>
-                        </SelectItem>
-                      )) : (
-                        <div className="text-xs text-gray-500 p-2">No column classifier config</div>
+                        ))
+                      : null}
+                    {/* Plus Button for adding additional Y-axis dropdowns - only show if less than 2 Y-axes */}
+                    {Array.isArray(config.yAxes) && config.yAxes.length < 2 && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-8 w-8 p-0"
+                        onClick={() => {
+                          const newConfigs = [...chartConfigs];
+                          newConfigs[index] = {
+                            ...newConfigs[index],
+                            yAxes: [...newConfigs[index].yAxes, ''],
+                            yAxisLabels: [...newConfigs[index].yAxisLabels, ''],
+                          };
+                          setChartConfigs(newConfigs);
+                        }}
+                      >
+                        <Plus className="w-3 h-3" />
+                      </Button>
+                    )}
+                  </div>
+                </div>
+
+                <div className="ml-auto">
+                  <Select
+                    value={config.legendField || ''}
+                    onValueChange={(value) => {
+                      const newConfigs = [...chartConfigs];
+                      if (
+                        newConfigs[index].chartType === 'pie_chart' &&
+                        value !== 'aggregate'
+                      ) {
+                        newConfigs[index] = {
+                          ...newConfigs[index],
+                          legendField: 'aggregate'
+                        };
+                        setChartConfigs(newConfigs);
+                        toast({ description: 'Segregation of Field Value is not allowed for pie chart' });
+                        if (config.xAxis && hasValidYAxes(config.yAxes)) {
+                          safeTriggerChartGeneration(index, newConfigs[index], 100);
+                        }
+                        return;
+                      }
+                      newConfigs[index] = {
+                        ...newConfigs[index],
+                        legendField: value
+                      };
+                      setChartConfigs(newConfigs);
+                      if (config.xAxis && hasValidYAxes(config.yAxes)) {
+                        safeTriggerChartGeneration(index, newConfigs[index], 100);
+                      }
+                    }}
+                  >
+                    <SelectTrigger
+                      className="w-48 h-8 ml-2 pr-2 text-xs leading-none whitespace-nowrap [&>span:last-child>svg]:w-3 [&>span:last-child>svg]:h-3"
+                      disabled={isLoadingColumns}
+                    >
+                      <SelectValue placeholder="Segregate Field Values" className="whitespace-nowrap" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="aggregate">Show Aggregate</SelectItem>
+                      {Array.isArray(availableIdentifiers) && availableIdentifiers.length > 0 ? (
+                        availableIdentifiers.map((column, idx) => (
+                          <SelectItem key={idx} value={column}>
+                            {column}
+                          </SelectItem>
+                        ))
+                      ) : (
+                        <div className="text-xs text-gray-500 p-2">No categorical columns</div>
                       )}
                     </SelectContent>
                   </Select>
@@ -1860,7 +1959,11 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
 
             {/* Individual Chart Settings Panel */}
             {isSettingsVisible && (
-              <div className="mb-4 p-3 bg-blue-50 rounded-lg border border-blue-200 min-w-0 w-full explore-chart-settings">
+              <div
+                className="mb-4 p-3 bg-blue-50 rounded-lg border border-blue-200 min-w-0 w-full explore-chart-settings"
+                onClick={(e) => e.stopPropagation()}
+                style={{ position: 'relative', zIndex: 50 }}
+              >
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 min-w-0 w-full explore-chart-settings">
                   <div>
                     <Label className="text-xs text-gray-600">Chart Title</Label>
@@ -1870,11 +1973,10 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                         const newConfigs = [...chartConfigs];
                         newConfigs[index] = { ...newConfigs[index], title: e.target.value };
                         setChartConfigs(newConfigs);
-                        
-                                                                         // Regenerate chart when title changes to update display
-                        if (config.xAxis && hasValidYAxes(config.yAxes)) {
-                          console.log('🔍 ExploreCanvas: Chart title changed - regenerating chart automatically');
-                          const newConfig = { ...newConfigs[index], title: e.target.value };
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && config.xAxis && hasValidYAxes(config.yAxes)) {
+                          const newConfig = { ...chartConfigs[index], title: e.currentTarget.value };
                           safeTriggerChartGeneration(index, newConfig, 100);
                         }
                       }}
@@ -1886,18 +1988,17 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                     <Label className="text-xs text-gray-600">X-Axis Label</Label>
                     <Input
                       value={config.xAxisLabel || ''}
-                                                onChange={(e) => {
-                            const newConfigs = [...chartConfigs];
-                            newConfigs[index] = { ...newConfigs[index], xAxisLabel: e.target.value };
-                            setChartConfigs(newConfigs);
-                            
-                                                                                 // Regenerate chart when X-axis label changes to update display
-                          if (config.xAxis && hasValidYAxes(config.yAxes)) {
-                            console.log('🔍 ExploreCanvas: X-axis label changed - regenerating chart automatically');
-                            const newConfig = { ...newConfigs[index], xAxisLabel: e.target.value };
-                            safeTriggerChartGeneration(index, newConfig, 100);
-                          }
-                          }}
+                      onChange={(e) => {
+                        const newConfigs = [...chartConfigs];
+                        newConfigs[index] = { ...newConfigs[index], xAxisLabel: e.target.value };
+                        setChartConfigs(newConfigs);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && config.xAxis && hasValidYAxes(config.yAxes)) {
+                          const newConfig = { ...chartConfigs[index], xAxisLabel: e.currentTarget.value };
+                          safeTriggerChartGeneration(index, newConfig, 100);
+                        }
+                      }}
                       className="h-8 text-xs"
                       placeholder="X label"
                     />
@@ -1916,17 +2017,15 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                               yAxisLabels: Array.isArray(newConfigs[index].yAxisLabels) ? newConfigs[index].yAxisLabels.map((_, i) => (i === yAxisIndex ? e.target.value : _)) : []
                             };
                             setChartConfigs(newConfigs);
-                            
-                                                                                 // Regenerate chart when Y-axis label changes to update display
-                          if (config.xAxis && hasValidYAxes(config.yAxes)) {
-                            console.log('🔍 ExploreCanvas: Y-axis label changed - regenerating chart automatically');
-                            const newConfig = { 
-                              ...newConfigs[index],
-                              yAxisLabels: Array.isArray(newConfigs[index].yAxisLabels) ? 
-                                newConfigs[index].yAxisLabels.map((_, i) => (i === yAxisIndex ? e.target.value : _)) : []
-                            };
-                            safeTriggerChartGeneration(index, newConfig, 100);
-                          }
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' && config.xAxis && hasValidYAxes(config.yAxes)) {
+                              const updatedLabels = Array.isArray(config.yAxisLabels)
+                                ? config.yAxisLabels.map((label, i) => (i === yAxisIndex ? e.currentTarget.value : label))
+                                : [];
+                              const newConfig = { ...chartConfigs[index], yAxisLabels: updatedLabels };
+                              safeTriggerChartGeneration(index, newConfig, 100);
+                            }
                           }}
                           className="h-8 text-xs"
                           placeholder={`Y${yAxisIndex + 1} label`}
@@ -1947,7 +2046,6 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                           
                           // Regenerate chart when aggregation changes
                           if (config.xAxis && hasValidYAxes(config.yAxes)) {
-                            console.log('🔍 ExploreCanvas: Aggregation changed to:', value, '- regenerating chart');
                             const newConfig = { ...newConfigs[index], aggregation: value };
                             safeTriggerChartGeneration(index, newConfig, 100);
                           }
@@ -1974,13 +2072,15 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
 
             {/* Individual Chart Filters Panel */}
             {chartFiltersVisible[index] && (
-              <div 
+              <div
                 className={`mb-4 p-3 rounded-lg border relative group transition-all duration-200 cursor-pointer hover:shadow-sm hover:border-blue-300 min-w-0 ${
-                  showFilterCrossButtons[index] 
-                    ? 'bg-blue-100 border-2 border-blue-400 shadow-md' 
+                  showFilterCrossButtons[index]
+                    ? 'bg-blue-100 border-2 border-blue-400 shadow-md'
                     : 'bg-blue-50 border border-blue-200'
                 }`}
                 onDoubleClick={() => toggleFilterCrossButtons(index)}
+                onClick={(e) => e.stopPropagation()}
+                style={{ position: 'relative', zIndex: 30 }}
               >
                 {/* Double-click hint removed from top-right */}
                 
@@ -2010,10 +2110,7 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                               return true;
                             });
                             const filteredCount = dimensionIdentifiers.length;
-                            if (originalCount !== filteredCount) {
-                              console.log('🔍 ExploreCanvas: Filtered chart filters for dimension', dimensionId, ':', originalCount, '->', filteredCount);
-                            }
-                          }
+                                                      }
                           
                           if (dimensionIdentifiers.length === 0) return null;
                           
@@ -2103,24 +2200,20 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                                       onClick={(e) => e.stopPropagation()}
                                     >
                                   <div className="p-0.5">
-                                    {/* Debug info - removed console.log from JSX */}
                                     <label className="flex items-center space-x-2 py-0.5 px-1 hover:bg-gray-50 cursor-pointer">
                                       <input
                                         type="checkbox"
                                         checked={chartFilters[index]?.[identifier] !== null && (chartFilters[index]?.[identifier]?.length || 0) === 0}
                                         onChange={() => {
-                                          console.log(`🔍 "All" checkbox clicked for ${identifier}. Current state:`, chartFilters[index]?.[identifier]);
                                           const currentValues = chartFilters[index]?.[identifier] || [];
                                           const allValues = identifierUniqueValues[identifier] || [];
                                           
                                           if (currentValues.length === 0) {
                                             // "All" is currently selected, deselect it by deselecting all individual options
-                                            console.log(`🔍 Deselecting "All" for ${identifier}, deselecting all individual options`);
                                             // Set to null to represent "no options selected"
                                             handleMultiSelectFilterChange(index, identifier, null);
                                           } else {
                                             // "All" is not selected (either null or specific values), select it
-                                            console.log(`🔍 Selecting "All" for ${identifier}, selecting all individual options`);
                                             handleMultiSelectFilterChange(index, identifier, []);
                                           }
                                         }}
@@ -2137,7 +2230,6 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                                             const currentValues = chartFilters[index]?.[identifier] || [];
                                             const allValues = identifierUniqueValues[identifier] || [];
                                             
-                                            console.log(`🔍 Individual checkbox clicked for ${identifier}: ${value}. Current values:`, currentValues, 'All values:', allValues);
                                             
                                             if (e.target.checked) {
                                                 // Adding a value
@@ -2152,12 +2244,10 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                                                 } else {
                                                   newValues = [...currentValues, value];
                                                 }
-                                                console.log(`🔍 Adding value ${value} to filter ${identifier}. New values:`, newValues);
                                                 
                                                 // Check if all values are now selected (including this new one)
                                                 if (newValues.length === allValues.length) {
                                                   // All values are selected, automatically select "All"
-                                                  console.log(`🔍 All values selected for ${identifier}, automatically selecting "All"`);
                                                   handleMultiSelectFilterChange(index, identifier, []);
                                                 } else {
                                                   // Keep the filter with the new values
@@ -2166,28 +2256,23 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                                               } else {
                                                 // Removing a value
                                                 const newValues = currentValues.filter(v => v !== value);
-                                                console.log(`🔍 Removing value ${value} from filter ${identifier}. Remaining values:`, newValues);
                                               
                                                 // If we're removing a value and currently showing "All" (empty array),
                                                 // we need to start with all values and then remove this one
                                                 if (currentValues.length === 0) {
                                                   // Currently showing "All", so start with all values and remove this one
                                                   const allValuesExceptThis = allValues.filter(v => v !== value);
-                                                  console.log(`🔍 Was showing "All", now filtering with:`, allValuesExceptThis);
                                                   handleMultiSelectFilterChange(index, identifier, allValuesExceptThis);
                                                 } else if (currentValues === null) {
                                                   // Currently in "none selected" state, stay in that state
-                                                  console.log(`🔍 Already in "none selected" state for ${identifier}`);
                                                   handleMultiSelectFilterChange(index, identifier, null);
                                                 } else {
                                                   // Already filtering, just remove this value
                                                   if (newValues.length === 0) {
                                                     // No values left, show "All"
-                                                    console.log(`🔍 No values left for ${identifier}, setting to "All"`);
                                                     handleMultiSelectFilterChange(index, identifier, []);
                                                   } else {
                                                     // Keep the filter with remaining values
-                                                    console.log(`🔍 Keeping filter for ${identifier} with values:`, newValues);
                                                     handleMultiSelectFilterChange(index, identifier, newValues);
                                                   }
                                                 }
@@ -2261,7 +2346,7 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
             )}
 
             {/* Chart Status Indicator */}
-                            {config.xAxis && hasValidYAxes(config.yAxes) && !isChartLoading(index) && !chartDataSets[index] && (
+                            {config.xAxis && hasValidYAxes(config.yAxes) && !isChartLoading(index) && !chartDataSets[index] && !error && (
               <div className="mb-3 p-2 bg-blue-50 border border-blue-200 rounded-lg min-w-0">
                 <div className="flex items-center space-x-2 text-xs text-blue-700 min-w-0">
                   <div className="w-3 h-3 border-2 border-blue-300 border-t-blue-600 rounded-full animate-spin"></div>
@@ -2271,15 +2356,15 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
             )}
             
             {/* Chart Display */}
-            <div 
-              className="bg-white border border-gray-200 rounded-lg p-6 cursor-pointer hover:border-pink-300 transition-colors relative flex-1 overflow-hidden flex-shrink-0 flex items-center justify-center"
-              style={{ 
-                minHeight: '300px', 
-                height: (chartDataSets[index] && chartDataSets[index].length > 0) ? '400px' : '300px',
-                maxHeight: (chartDataSets[index] && chartDataSets[index].length > 0) ? '500px' : '300px'
+            <div
+              className="bg-white border border-gray-200 rounded-lg p-6 cursor-pointer hover:border-pink-300 transition-colors relative flex-1 overflow-y-auto flex-shrink-0 flex items-start justify-center"
+              style={{
+                minHeight: '300px',
+                height: chartDataSets[index] ? 'auto' : '300px',
+                maxHeight: '500px'
               }}
             >
-              <div className="h-full w-full flex flex-col min-w-0 overflow-hidden">
+              <div className="h-full w-full flex flex-col min-w-0">
                 
 
                 
@@ -2295,94 +2380,76 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                 
                 {/* Chart Renderer */}
                 {!isChartLoading(index) && (
+                  <>
                   <div className="w-full h-full min-w-0 flex-shrink-0" style={{ height: 'calc(100% - 60px)' }}>
                     {/* Check if chart data exists and has valid structure */}
-                    {(!chartDataSets[index] || chartDataSets[index].length === 0 || !Array.isArray(chartDataSets[index])) ? (
+                    {(!chartDataSets[index] || (Array.isArray(chartDataSets[index]) && chartDataSets[index].length === 0)) ? (
                       <div className="text-center p-4 border-2 border-dashed border-gray-300 rounded-lg h-full flex items-center justify-center">
                         <div className="text-gray-500 text-sm">
-                          {config.xAxis && config.yAxes && config.yAxes.length > 0 && config.yAxes.every(y => y) ? 
-                            (chartDataSets[index] && chartDataSets[index].length === 0 ? 
-                              'No data available for the selected filters. Try adjusting your filter criteria.' : 
+                          {config.xAxis && config.yAxes && config.yAxes.length > 0 && config.yAxes.every(y => y) ?
+                            (chartDataSets[index] && chartDataSets[index].length === 0 ?
+                              'No data available for the selected filters. Try adjusting your filter criteria.' :
                               `Chart ready: ${config.xAxis} vs ${config.yAxes.filter(y => y).join(', ')}`
-                            ) : 
+                            ) :
                             'Select X and Y axes to generate chart'
                           }
                         </div>
                       </div>
                     ) : (
-                      <div className="w-full h-full min-w-0 overflow-hidden flex-shrink-0 flex items-center justify-center explore-chart-area" style={{ 
-                        minHeight: config.chartType === 'pie_chart' ? '450px' : '400px', 
-                        height: config.chartType === 'pie_chart' ? '500px' : '400px',
-                        maxWidth: '100%'
-                      }}>
+                      <div
+                        className={`w-full min-w-0 flex-shrink-0 explore-chart-area ${
+                          config.chartType === 'pie_chart'
+                            ? 'pie-chart-container overflow-y-auto pr-2'
+                            : 'h-full overflow-hidden flex items-center justify-center'
+                        }`}
+                        style={{
+                          minHeight: config.chartType === 'pie_chart' ? '450px' : '400px',
+                          height: config.chartType === 'pie_chart' ? '450px' : '400px',
+                          maxWidth: '100%'
+                        }}
+                      >
                         {/* Only render the chart if we have valid xAxis and yAxes */}
                         {(() => {
-                          const hasValidAxes = config.xAxis && config.yAxes && config.yAxes.length > 0 && config.yAxes.every(y => y);
-                          const yAxesString = config.yAxes.join(',');
-                          console.log('🔍 ExploreCanvas: Chart rendering condition check:', {
-                            index,
-                            xAxis: config.xAxis,
-                            yAxes: config.yAxes,
-                            yAxesString,
-                            hasValidAxes,
-                            chartData: chartDataSets[index],
-                            chartDataLength: chartDataSets[index]?.length || 0
-                          });
-                          return hasValidAxes;
-                        })() ? (
-                          <RechartsChartRenderer
-                            key={`chart-${index}-${config.chartType}-${chartThemes[index] || 'default'}-${chartDataSets[index]?.length || 0}-${Object.keys(chartFilters[index] || {}).length}-${appliedFilters[index] ? 'filtered' : 'unfiltered'}-theme-${chartThemes[index] || 'default'}-sort-${chartSortCounters[index] || 0}-yaxes-${config.yAxes.join('-')}`}
-                            type={config.chartType as 'bar_chart' | 'line_chart' | 'pie_chart'}
-                            data={chartDataSets[index] || []}
-                            xField={config.xAxis || undefined}
-                            yField={config.yAxes[0] || undefined}
-                            title={config.title}
-                            xAxisLabel={config.xAxisLabel || config.xAxis || ''}
-                            yAxisLabel={config.yAxisLabels[0] || config.yAxes[0] || ''}
-                            yFields={config.yAxes}
-                            yAxisLabels={config.yAxes.map((yAxis: string, idx: number) => 
-                              config.yAxisLabels[idx] || yAxis || ''
-                            )}
-                            legendField={config.legendField || undefined}
-                            // Add debugging props to help troubleshoot
-                            data-testid={`chart-${index}`}
-                            data-yaxes={JSON.stringify(config.yAxes)}
-                            data-yaxislabels={JSON.stringify(config.yAxisLabels)}
-                            data-legendfield={config.legendField || 'undefined'}
-                            data-chartdata={JSON.stringify(chartDataSets[index] || [])}
-                            data-chartdatalength={chartDataSets[index]?.length || 0}
-                            theme={chartThemes[index] || 'default'}
-                            enableScroll={false}
-                            onThemeChange={(theme) => handleChartThemeChange(index, theme)}
-                            onGridToggle={(enabled) => handleChartGridToggle(index, enabled)}
-                            onLegendToggle={(enabled) => handleChartLegendToggle(index, enabled)}
-                            onAxisLabelsToggle={(enabled) => handleChartAxisLabelsToggle(index, enabled)}
-                            onDataLabelsToggle={(enabled) => handleChartDataLabelsToggle(index, enabled)}
-                            onSave={() => handleChartSave(index)}
-                            onSortChange={(chartIndex) => {
-                              console.log('🔄 ExploreCanvas: Sort change detected for chart', chartIndex);
-                              console.log('🔄 Current chartDataSets:', chartDataSets);
-                              console.log('🔄 Updating sort counter for chart', index);
-                              setChartSortCounters(prev => ({
-                                ...prev,
-                                [index]: (prev[index] || 0) + 1
-                              }));
-                            }}
-                            showLegend={chartOptions[index]?.legend}
-                            showAxisLabels={chartOptions[index]?.axisLabels}
-                            showDataLabels={chartOptions[index]?.dataLabels}
-                            showGrid={chartOptions[index]?.grid}
-                          />
-                        ) : (
-                          <div className="text-center p-4 border-2 border-dashed border-gray-300 rounded-lg h-full flex items-center justify-center">
-                            <div className="text-gray-500 text-sm">
-                              Select X and Y axes to generate chart
+                          const hasValidAxes =
+                            config.xAxis &&
+                            config.yAxes &&
+                            config.yAxes.length > 0 &&
+                            config.yAxes.every((y) => y);
+                          if (!hasValidAxes) {
+                            return (
+                              <div className="text-center p-4 border-2 border-dashed border-gray-300 rounded-lg h-full flex items-center justify-center">
+                                <div className="text-gray-500 text-sm">
+                                  {config.xAxis && config.yAxes && config.yAxes.length > 0 && config.yAxes.every(y => y) ? (
+                                    chartDataSets[index] && chartDataSets[index].length === 0 ? (
+                                      'No data available for the selected filters. Try adjusting your filter criteria.'
+                                    ) : (
+                                      `Chart ready: ${config.xAxis} vs ${config.yAxes.filter(y => y).join(', ')}`
+                                    )
+                                  ) : (
+                                    'Select X and Y axes to generate chart'
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          }
+                          return (
+                            <div className="relative w-full h-full">
+                              <RechartsChartRenderer {...rendererProps} />
                             </div>
-                          </div>
-                        )}
+                          );
+                        })()}
                       </div>
                     )}
                   </div>
+                  <Input
+                    placeholder="Add note"
+                    value={chartNotes[index] || ''}
+                    onChange={(e) => handleNoteChange(index, e.target.value)}
+                    onKeyDown={(e) => handleNoteKeyDown(index, e)}
+                    style={{ fontFamily: CHART_FONT }}
+                    className="mt-2 w-full text-sm"
+                  />
+                  </>
                 )}
               </div>
             </div>
@@ -2466,7 +2533,6 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
       
       return null;
     } catch (error) {
-      console.warn('Error parsing date:', value, error);
       return null;
     }
   };
@@ -2517,7 +2583,6 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
               return `${formatDate(minDate)} - ${formatDate(maxDate)}`;
             }
           } catch (error) {
-            console.warn('Error parsing fetched date range:', error);
           }
         }
         
@@ -2528,7 +2593,6 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
           .sort((a, b) => a!.getTime() - b!.getTime());
         
         if (dates.length === 0) {
-          console.warn('No valid dates found for column:', columnName, 'Values:', values);
           return 'Invalid dates';
         }
         
@@ -2568,7 +2632,6 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
       }
       
     } catch (error) {
-      console.error('Error formatting time column values:', error);
       return 'Format error';
     }
   };
@@ -2604,11 +2667,7 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
             const summary = await response.json();
             const summaryData = Array.isArray(summary.summary) ? summary.summary.filter(Boolean) : [];
             onDataChange({ columnSummary: summaryData });
-          } else {
-            console.warn('ExploreCanvas - Column summary not found for:', safeData.dataframe);
-          }
-        } catch (error) {
-          console.error('ExploreCanvas - Error fetching column summary:', error);
+          }         } catch (error) {
         }
       };
       fetchColumnSummary();
@@ -2618,7 +2677,6 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
   // Also fetch column summary when filters are displayed but no summary is available
   useEffect(() => {
     if (isApplied && sampleDimensions.length > 0 && summaryList.length === 0 && safeData.dataframe) {
-      console.log('🔍 ExploreCanvas: Fetching column summary for filters');
       setIsLoadingColumnSummary(true);
       const fetchColumnSummary = async () => {
         try {
@@ -2627,12 +2685,7 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
             const summary = await response.json();
             const summaryData = Array.isArray(summary.summary) ? summary.summary.filter(Boolean) : [];
             onDataChange({ columnSummary: summaryData });
-            console.log('🔍 ExploreCanvas: Column summary fetched for filters:', summaryData.length, 'columns');
-          } else {
-            console.warn('ExploreCanvas - Column summary not found for filters:', safeData.dataframe);
-          }
-        } catch (error) {
-          console.error('ExploreCanvas - Error fetching column summary for filters:', error);
+          }         } catch (error) {
         } finally {
           setIsLoadingColumnSummary(false);
         }
@@ -2710,11 +2763,38 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
     }));
   };
 
+  // Handle sort order change for charts
+  const handleSortOrderChange = (chartIndex: number, order: 'asc' | 'desc' | null) => {
+    const newConfigs = [...chartConfigs];
+    newConfigs[chartIndex] = { ...newConfigs[chartIndex], sortOrder: order };
+    setChartConfigs(newConfigs);
+    safeTriggerChartGeneration(chartIndex, newConfigs[chartIndex], 100);
+  };
+
   // Handle save action for charts
   const handleChartSave = (chartIndex: number) => {
-    // Implement save functionality here
-    console.log(`Saving chart ${chartIndex}`);
-    // Success message removed - unnecessary notification popup
+    const config = chartConfigs[chartIndex];
+    if (!config) return;
+    const filters = chartFilters[chartIndex] || {};
+    onDataChange({
+      chartConfigs,
+      chartFilters,
+      chartThemes,
+      chartOptions,
+      chartDataSets,
+      chartGenerated,
+      appliedFilters,
+      xAxis: config.xAxis,
+      yAxis: config.yAxes?.[0] || '',
+      xAxisLabel: config.xAxisLabel || '',
+      yAxisLabel: config.yAxisLabels?.[0] || '',
+      chartType: config.chartType,
+      legendField: config.legendField,
+      aggregation: config.aggregation,
+      weightColumn: config.weightColumn,
+      title: config.title,
+      filters,
+    });
   };
 
   // Helper function to fetch date range for a specific column
@@ -2736,7 +2816,6 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
         }
       }
     } catch (error) {
-      console.warn('Failed to fetch date range for column:', columnName, error);
     }
   };
 
@@ -2883,10 +2962,7 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
             return true;
           });
           const filteredCount = identifiers.length;
-          if (originalCount !== filteredCount) {
-            console.log('🔍 ExploreCanvas: Filtered card dimensions for dimension', dimensionId, ':', originalCount, '->', filteredCount);
-          }
-        }
+                  }
         
         allIdentifiers[dimensionId] = identifiers;
       });
@@ -2903,15 +2979,6 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
         [chartIndex]: allIdentifiers
       }));
     }
-  };
-
-  // Hide all filters when layout changes
-  const hideAllFilters = () => {
-    const newFilterVisibility: { [key: number]: boolean } = {};
-    chartConfigs.forEach((_, index) => {
-      newFilterVisibility[index] = false;
-    });
-    setChartFiltersVisible(newFilterVisibility);
   };
 
   // Reset a card's filters back to original state
@@ -2938,262 +3005,277 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
     }
   }, [safeData.columnClassifierConfig, safeData.columnSummary]);
   
-  // Re-initialize all existing cards when column summary changes (to apply filtering)
+  // Re-initialize all existing cards when column summary or dimensions change (to apply filtering)
   useEffect(() => {
-    if (safeData.columnSummary && Object.keys(cardSelectedIdentifiers).length > 0) {
-      // Re-initialize all existing cards with filtered identifiers
+    if (
+      (safeData.columnSummary || safeData.columnClassifierConfig?.dimensions) &&
+      Object.keys(cardSelectedIdentifiers).length > 0
+    ) {
+      // Re-initialize all existing cards with updated identifiers
       Object.keys(cardSelectedIdentifiers).forEach(chartIndex => {
         initializeCardDimensions(parseInt(chartIndex));
       });
     }
-  }, [safeData.columnSummary]);
+  }, [safeData.columnSummary, safeData.columnClassifierConfig?.dimensions]);
 
   // Debug: Log initial filter state
   useEffect(() => {
-    console.log('🔍 ExploreCanvas: Initial chartFilters state:', chartFilters);
-    console.log('🔍 ExploreCanvas: chartFilters keys:', Object.keys(chartFilters));
     Object.entries(chartFilters).forEach(([chartIndex, filters]) => {
-      console.log(`🔍 ExploreCanvas: Chart ${chartIndex} filters:`, filters);
       Object.entries(filters).forEach(([identifier, values]) => {
-        console.log(`🔍 ExploreCanvas: Chart ${chartIndex}, Filter ${identifier}:`, values, 'length:', values?.length);
       });
     });
   }, [chartFilters]);
 
   return (
     <div className="h-full flex flex-col space-y-4 p-4 min-h-0">
-      {/* Data Summary Table Section - styled like Feature Overview */}
-      {summaryList.length > 0 && safeData.showDataSummary && (
-        <Card className="border-gray-200 bg-white shadow-sm mb-6">
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center space-x-2">
-                <div className="flex items-center justify-center w-6 h-6 bg-gray-100 rounded-md">
-                  <BarChart3 className="w-3 h-3 text-gray-600" />
-                </div>
-                <span className="font-semibold text-sm text-gray-800">DataFrame Summary</span>
-                <div className="h-px bg-gradient-to-r from-gray-200 to-transparent flex-1 ml-3"></div>
-              </div>
-              <div className="flex items-center gap-4">
-                {/* Toggle button for "Fetch columns with more than one unique value" */}
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-gray-500">Fetch columns with more than one unique value</span>
-                  <Switch
-                    checked={safeData.filterUnique || false}
-                    onCheckedChange={(val) => {
-                      onDataChange({ filterUnique: val });
-                    }}
-                    className="data-[state=checked]:bg-[#458EE2]"
-                  />
-                </div>
-                {/* Collapse/Expand button */}
-                <button
-                  onClick={() => toggleDataSummaryCollapsed(0)}
-                  className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
-                  aria-label={dataSummaryCollapsed[0] ? 'Expand data summary' : 'Collapse data summary'}
-                >
-                  {dataSummaryCollapsed[0] ? (
-                    <ChevronDown className="w-5 h-5 text-gray-600" />
-                  ) : (
-                    <ChevronUp className="w-5 h-5 text-gray-600" />
-                  )}
-                </button>
-              </div>
+      {!safeData.dataframe ? (
+        <div className="flex-1 flex items-center justify-center">
+          <div className="text-center">
+            <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-3">
+              <Database className="w-6 h-6 text-blue-600" />
             </div>
-
-            <div className={`transition-all duration-300 ease-in-out ${dataSummaryCollapsed[0] ? 'max-h-0 opacity-0 overflow-hidden' : 'max-h-none opacity-100'}`}>
-              <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
-                {/* Transposed Table Layout - Matching Column Classifier Column Overview */}
-                <div className="overflow-x-auto">
-                  <div className="min-w-max">
-                    <div className="grid grid-rows-4 gap-0">
-                      {/* Row 1: Column Names */}
-                      <div className="flex bg-white border-b border-gray-200">
-                        <div className="w-40 font-bold text-black bg-gray-100 border-r border-gray-300 flex items-center justify-center sticky left-0 z-10">
-                          Columns
-                        </div>
-                        {Array.isArray(summaryList) ? summaryList.map((col, index) => (
-                          <div
-                            key={index}
-                            className="w-32 text-sm font-semibold text-black border-r border-gray-200 flex items-center justify-center"
-                          >
-                            {col.column}
-                          </div>
-                        )) : null}
-                      </div>
-
-                      {/* Row 2: Data Types */}
-                      <div className="flex bg-white border-b border-gray-200">
-                        <div className="w-40 font-bold text-black bg-gray-100 border-r border-gray-300 flex items-center justify-center sticky left-0 z-10">
-                          Data Type
-                        </div>
-                        {Array.isArray(summaryList) ? summaryList.map((col, index) => (
-                          <div
-                            key={index}
-                            className="w-32 text-sm border-r border-gray-200 flex items-center justify-center"
-                          >
-                            <Badge
-                              className="p-0 text-xs font-medium bg-gray-50 text-black"
-                            >
-                              {col.data_type}
-                            </Badge>
-                          </div>
-                        )) : null}
-                      </div>
-
-                      {/* Row 3: Unique Counts */}
-                      <div className="flex bg-gray-50 border-b border-gray-200">
-                        <div className="w-40 font-bold text-black bg-gray-100 border-r border-gray-300 flex items-center justify-center sticky left-0 z-10">
-                          Unique Counts
-                        </div>
-                        {Array.isArray(summaryList) ? summaryList.map((col, index) => (
-                          <div
-                            key={index}
-                            className="w-32 text-sm text-black border-r border-gray-200 flex items-center justify-center font-medium"
-                          >
-                            {col.unique_count}
-                          </div>
-                        )) : null}
-                      </div>
-
-                      {/* Row 4: Unique Values */}
-                      <div className="flex bg-white">
-                        <div className="w-40 font-bold text-black bg-gray-100 border-r border-gray-300 flex items-center justify-center sticky left-0 z-10 py-1">
-                          Unique Values
-                        </div>
-                        {Array.isArray(summaryList) ? summaryList.map((col, index) => (
-                          <div
-                            key={index}
-                            className="w-32 text-sm border-r border-gray-200 flex items-center justify-center py-1"
-                          >
-                            <div className="flex flex-col gap-px items-center">
-                              {(() => {
-                                // Check if this is a time column
-                                const isTime = isTimeColumn(col.column, col.data_type);
-                                
-                                if (isTime) {
-                                  // For time columns, use the new formatTimeColumnValues function
-                                  const formattedValues = formatTimeColumnValues(col.column, col.unique_values, col.data_type);
-                                  return (
-                                    <Badge className="p-0 text-xs bg-gray-50 text-black">
-                                      {formattedValues}
-                                    </Badge>
-                                  );
-                                } else {
-                                  // For non-time columns, show first 2 values + count
-                                  const visibleValues = Array.isArray(col.unique_values) ? col.unique_values.slice(0, 2) : [];
-                                  const hiddenCount = Array.isArray(col.unique_values) ? col.unique_values.length - 2 : 0;
-                                  
-                                  return (
-                                    <>
-                                      {visibleValues.map((val, i) => (
-                                        <Badge
-                                          key={i}
-                                          className="p-0 text-xs bg-gray-50 text-black"
-                                        >
-                                          {String(val)}
-                                        </Badge>
-                                      ))}
-                                      {hiddenCount > 0 && (
-                                        <Tooltip>
-                                          <TooltipTrigger asChild>
-                                            <span className="flex items-center gap-0.5 text-xs text-gray-600 font-medium cursor-pointer">
-                                              +{hiddenCount}
-                                            </span>
-                                          </TooltipTrigger>
-                                          <TooltipContent className="text-xs max-w-xs whitespace-pre-wrap">
-                                            {Array.isArray(col.unique_values) ? col.unique_values
-                                              .slice(2)
-                                              .map(val => String(val))
-                                              .join(', ') : ''}
-                                          </TooltipContent>
-                                        </Tooltip>
-                                      )}
-                                    </>
-                                  );
-                                }
-                              })()}
-                              {Array.isArray(col.unique_values) && col.unique_values.length === 0 && (
-                                <span className="text-xs text-gray-500 italic font-medium">
-                                  No values
-                                </span>
-                              )}
-                            </div>
-                          </div>
-                        )) : null}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Show configuration message when atom is not applied but data summary is shown */}
-      {safeData.showDataSummary && summaryList.length > 0 && !isApplied && (
-        <div className="flex items-center justify-center py-8">
+            <h3 className="text-lg font-medium text-gray-900 mb-2">Select Dataframe</h3>
+            <p className="text-sm text-gray-600">Choose a saved dataframe in the Settings tab to start exploring.</p>
+          </div>
+        </div>
+      ) : !(isApplied || safeData.applied) ? (
+        <div className="flex-1 flex items-center justify-center">
           <div className="text-center">
             <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-3">
               <BarChart3 className="w-6 h-6 text-blue-600" />
             </div>
             <h3 className="text-lg font-medium text-gray-900 mb-2">Configure Explore Settings</h3>
-            <p className="text-sm text-gray-600 mb-4">
-              Go to the Settings tab to configure dimensions, measures, and chart layout, then click "Apply Settings"
-            </p>
-            <div className="flex items-center justify-center space-x-2 text-xs text-gray-500">
-              <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
-              <span>Data summary table is visible</span>
-            </div>
+            <p className="text-sm text-gray-600">Go to the Settings tab to configure dimensions, measures, and chart layout, then click "Apply Settings"</p>
           </div>
         </div>
-      )}
+      ) : (
+        <>
+          {summaryList.length > 0 && safeData.showDataSummary && (
+            <Card className="border-gray-200 bg-white shadow-sm mb-6">
+              <CardContent className="p-4">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center space-x-2">
+                    <div className="flex items-center justify-center w-6 h-6 bg-gray-100 rounded-md">
+                      <BarChart3 className="w-3 h-3 text-gray-600" />
+                    </div>
+                    <span className="font-semibold text-sm text-gray-800">DataFrame Summary</span>
+                    <div className="h-px bg-gradient-to-r from-gray-200 to-transparent flex-1 ml-3"></div>
+                  </div>
+                  <div className="flex items-center gap-4">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-gray-500">Fetch columns with more than one unique value</span>
+                      <Switch
+                        checked={safeData.filterUnique || false}
+                        onCheckedChange={(val) => {
+                          onDataChange({ filterUnique: val });
+                        }}
+                        className="data-[state=checked]:bg-[#458EE2]"
+                      />
+                    </div>
+                    <button
+                      onClick={() => toggleDataSummaryCollapsed(0)}
+                      className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                      aria-label={dataSummaryCollapsed[0] ? 'Expand data summary' : 'Collapse data summary'}
+                    >
+                      {dataSummaryCollapsed[0] ? (
+                        <ChevronDown className="w-5 h-5 text-gray-600" />
+                      ) : (
+                        <ChevronUp className="w-5 h-5 text-gray-600" />
+                      )}
+                    </button>
+                  </div>
+                </div>
 
+                <div className={`transition-all duration-300 ease-in-out ${dataSummaryCollapsed[0] ? 'max-h-0 opacity-0 overflow-hidden' : 'max-h-none opacity-100'}`}>
+                  <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+                    <div className="overflow-x-auto">
+                      <div className="min-w-max">
+                        <div className="grid grid-rows-4 gap-0">
+                          <div className="flex bg-white border-b border-gray-200">
+                            <div className="w-40 font-bold text-black bg-gray-100 border-r border-gray-300 flex items-center justify-center sticky left-0 z-10">
+                              Columns
+                            </div>
+                            {Array.isArray(summaryList) ? summaryList.map((col, index) => (
+                              <div
+                                key={index}
+                                className="w-32 text-sm font-semibold text-black border-r border-gray-200 flex items-center justify-center"
+                              >
+                                {col.column}
+                              </div>
+                            )) : null}
+                          </div>
 
+                          <div className="flex bg-white border-b border-gray-200">
+                            <div className="w-40 font-bold text-black bg-gray-100 border-r border-gray-300 flex items-center justify-center sticky left-0 z-10">
+                              Data Type
+                            </div>
+                            {Array.isArray(summaryList) ? summaryList.map((col, index) => (
+                              <div
+                                key={index}
+                                className="w-32 text-sm border-r border-gray-200 flex items-center justify-center"
+                              >
+                                <Badge className="p-0 text-xs font-medium bg-gray-50 text-black">
+                                  {col.data_type}
+                                </Badge>
+                              </div>
+                            )) : null}
+                          </div>
 
-      {/* Multi-Graph Layout with Plus Button */}
-      {safeData.dataframe && (isApplied || safeData.applied) && safeData.graphLayout.numberOfGraphsInRow > 0 && (
-        <div className="flex-1 explore-chart-container">
-          {safeData.graphLayout.numberOfGraphsInRow === 1 ? (
-            // 1 graph per row: Simple vertical layout with plus button
-            <div className="space-y-4">
-              {Array.isArray(chartConfigs) ? chartConfigs.map((_, index) => renderChartComponent(index)) : null}
-              
-              {/* Plus Button - Always visible for 1 graph per row */}
-              <div className="flex justify-center">
-                <Button
-                  onClick={addChart}
-                  className="w-8 h-8 rounded-full bg-gray-200 hover:bg-gray-300 text-black border-0 shadow-sm"
-                  size="sm"
-                >
-                  <Plus className="w-4 h-4" />
-                </Button>
-              </div>
-            </div>
-          ) : (
-            // 2+ graphs per row: Grid layout with centered plus button
-            <div className="space-y-4">
-              <div 
-                className="explore-chart-grid gap-6"
-                style={{
-                  gridTemplateColumns: `repeat(${safeData.graphLayout.numberOfGraphsInRow}, 1fr)`
-                }}
-              >
-                {Array.isArray(chartConfigs) ? chartConfigs.map((_, index) => renderChartComponent(index)) : null}
-              </div>
-              {/* Plus Button - Always centered below the grid */}
-              <div className="flex justify-center">
-                <Button
-                  onClick={addChart}
-                  className="w-8 h-8 rounded-full bg-gray-200 hover:bg-gray-300 text-black border-0 shadow-sm"
-                  size="sm"
-                >
-                  <Plus className="w-4 h-4" />
-                </Button>
-              </div>
+                          <div className="flex bg-gray-50 border-b border-gray-200">
+                            <div className="w-40 font-bold text-black bg-gray-100 border-r border-gray-300 flex items-center justify-center sticky left-0 z-10">
+                              Unique Counts
+                            </div>
+                            {Array.isArray(summaryList) ? summaryList.map((col, index) => (
+                              <div
+                                key={index}
+                                className="w-32 text-sm text-black border-r border-gray-200 flex items-center justify-center font-medium"
+                              >
+                                {col.unique_count}
+                              </div>
+                            )) : null}
+                          </div>
+
+                          <div className="flex bg-white">
+                            <div className="w-40 font-bold text-black bg-gray-100 border-r border-gray-300 flex items-center justify-center sticky left-0 z-10 py-1">
+                              Unique Values
+                            </div>
+                            {Array.isArray(summaryList) ? summaryList.map((col, index) => (
+                              <div
+                                key={index}
+                                className="w-32 text-sm border-r border-gray-200 flex items-center justify-center py-1"
+                              >
+                                <div className="flex flex-col gap-px items-center">
+                                  {(() => {
+                                    const isTime = isTimeColumn(col.column, col.data_type);
+
+                                    if (isTime) {
+                                      const formattedValues = formatTimeColumnValues(col.column, col.unique_values, col.data_type);
+                                      return (
+                                        <Badge className="p-0 text-xs bg-gray-50 text-black">
+                                          {formattedValues}
+                                        </Badge>
+                                      );
+                                    } else {
+                                      const visibleValues = Array.isArray(col.unique_values) ? col.unique_values.slice(0, 2) : [];
+                                      const hiddenCount = Array.isArray(col.unique_values) ? col.unique_values.length - 2 : 0;
+
+                                      return (
+                                        <>
+                                          {visibleValues.map((val, i) => (
+                                            <Badge key={i} className="p-0 text-xs bg-gray-50 text-black">
+                                              {String(val)}
+                                            </Badge>
+                                          ))}
+                                          {hiddenCount > 0 && (
+                                            <Tooltip>
+                                              <TooltipTrigger asChild>
+                                                <span className="flex items-center gap-0.5 text-xs text-gray-600 font-medium cursor-pointer">
+                                                  +{hiddenCount}
+                                                </span>
+                                              </TooltipTrigger>
+                                              <TooltipContent className="text-xs max-w-xs whitespace-pre-wrap">
+                                                {Array.isArray(col.unique_values) ? col.unique_values
+                                                  .slice(2)
+                                                  .map(val => String(val))
+                                                  .join(', ') : ''}
+                                              </TooltipContent>
+                                            </Tooltip>
+                                          )}
+                                        </>
+                                      );
+                                    }
+                                  })()}
+                                  {Array.isArray(col.unique_values) && col.unique_values.length === 0 && (
+                                    <span className="text-xs text-gray-500 italic font-medium">
+                                      No values
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            )) : null}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {safeData.graphLayout.numberOfGraphsInRow > 0 && (
+            <div className="flex-1 explore-chart-container">
+              {safeData.graphLayout.numberOfGraphsInRow === 1 ? (
+                <div className="space-y-4">
+                  {Array.isArray(chartConfigs) ? chartConfigs.map((_, index) => renderChartComponent(index)) : null}
+                  <div className="flex justify-center">
+                    <Button
+                      onClick={addChart}
+                      className="w-8 h-8 rounded-full bg-gray-200 hover:bg-gray-300 text-black border-0 shadow-sm"
+                      size="sm"
+                    >
+                      <Plus className="w-4 h-4" />
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  <div
+                    className="explore-chart-grid gap-6"
+                    style={{ gridTemplateColumns: `repeat(${safeData.graphLayout.numberOfGraphsInRow}, 1fr)` }}
+                  >
+                    {Array.isArray(chartConfigs) ? chartConfigs.map((_, index) => renderChartComponent(index)) : null}
+                  </div>
+                  <div className="flex justify-center">
+                    <Button
+                      onClick={addChart}
+                      className="w-8 h-8 rounded-full bg-gray-200 hover:bg-gray-300 text-black border-0 shadow-sm"
+                      size="sm"
+                    >
+                      <Plus className="w-4 h-4" />
+                    </Button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
+        </>
+      )}
+      {overlayVisible && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            zIndex: 3000,
+            background: 'transparent'
+          }}
+          onMouseDown={handleOverlayClick}
+        />
+      )}
+      {chatBubbleShouldRender && (
+        <div
+          style={{
+            position: 'fixed',
+            left: chatBubble.anchor.x,
+            top: chatBubble.anchor.y,
+            transform: 'translate(-50%, 0)',
+            zIndex: 4000
+          }}
+          onMouseDown={e => {
+            e.preventDefault();
+            e.stopPropagation();
+          }}
+        >
+          <ChatBubble
+            visible={chatBubble.visible}
+            chartType={chartConfigs[chatBubble.chartIndex ?? 0]?.chartType.replace('_chart', '') || 'line'}
+            onChartTypeSelect={handleChartTypeSelect}
+            onClose={closeChatBubble}
+            onExited={handleBubbleExited}
+          />
         </div>
       )}
     </div>

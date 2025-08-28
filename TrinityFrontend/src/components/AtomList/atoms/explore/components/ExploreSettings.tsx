@@ -4,13 +4,12 @@ import { Button } from '@/components/ui/button';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Switch } from '@/components/ui/switch';
 import { DateRange } from 'react-day-picker';
 import { EXPLORE_API } from '@/lib/api';
-import { CalendarIcon, Database, BarChart3, Info, Filter, ChevronDown, ChevronUp, ChevronRight } from 'lucide-react';
+import { CalendarIcon, Database, BarChart3, Info, Filter, ChevronDown, ChevronUp, ChevronRight, Plus, Minus } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Separator } from '@/components/ui/separator';
 import { format } from 'date-fns';
 import { EnhancedCalendar } from '@/components/ui/enhanced-calendar';
 
@@ -27,6 +26,7 @@ interface ColumnSummary {
   data_type: string;
   unique_count: number;
   unique_values: string[];
+  is_numerical?: boolean;
 }
 
 interface ColumnClassifierConfig {
@@ -44,7 +44,7 @@ const ExploreSettings = ({ data, settings, onDataChange, onApply }) => {
     to: new Date('2025-03-30'),
   });
   const [availableDateRange, setAvailableDateRange] = useState<DateRangeData | null>(null);
-  const [graphLayout, setGraphLayout] = useState(defaultGraphLayout);
+  const [graphLayout, setGraphLayout] = useState(data.graphLayout || defaultGraphLayout);
   const [fromOpen, setFromOpen] = useState(false);
   const [toOpen, setToOpen] = useState(false);
   const [isLoadingDateRange, setIsLoadingDateRange] = useState(false);
@@ -64,6 +64,10 @@ const ExploreSettings = ({ data, settings, onDataChange, onApply }) => {
   const [selectedDimensions, setSelectedDimensions] = useState<string[]>([]);
   const [selectedIdentifiers, setSelectedIdentifiers] = useState<{ [dimensionId: string]: string[] }>({});
   const [expandedDimensions, setExpandedDimensions] = useState<string[]>([]);
+
+  // Settings panel filter selection state
+  const [showFilterSelector, setShowFilterSelector] = useState(false);
+  const [selectedFilterColumns, setSelectedFilterColumns] = useState<string[]>([]);
 
   // Prevent rendering if basic data is not available
   if (!data || !settings) {
@@ -105,6 +109,11 @@ const ExploreSettings = ({ data, settings, onDataChange, onApply }) => {
     }
   }, [data, data?.columnClassifierConfig]);
 
+  // Keep local graph layout in sync with external data
+  useEffect(() => {
+    setGraphLayout(data.graphLayout || defaultGraphLayout);
+  }, [data.graphLayout]);
+
   // Automatically populate selectedIdentifiers on component load if not already set
   useEffect(() => {
     if (columnClassifierConfig?.dimensions && 
@@ -119,56 +128,93 @@ const ExploreSettings = ({ data, settings, onDataChange, onApply }) => {
 
   // Fetch column names if data source is available
   useEffect(() => {
-    if (settings?.dataSource && !columnNames.length) {
+    if (data?.dataframe && !columnNames.length) {
       fetchColumnNames();
     }
-  }, [settings?.dataSource, columnNames.length]);
+  }, [data?.dataframe, columnNames.length]);
 
   // Fetch date range if data source is available
   useEffect(() => {
-    if (settings?.dataSource && !availableDateRange) {
+    if (data?.dataframe && !availableDateRange) {
       fetchDateRange();
     }
-  }, [settings?.dataSource, availableDateRange]);
+  }, [data?.dataframe, availableDateRange]);
 
   const fetchColumnNames = async () => {
-    if (!settings?.dataSource) return;
+    if (!data?.dataframe) return;
     
     setIsLoadingColumns(true);
     try {
-      const response = await fetch(`${EXPLORE_API}/columns?object_name=${encodeURIComponent(settings.dataSource)}`);
+      const response = await fetch(`${EXPLORE_API}/columns?object_name=${encodeURIComponent(data.dataframe)}`);
       if (response.ok) {
         const result = await response.json();
         if (result.columns) {
           setColumnNames(result.columns);
-          console.log('🔍 ExploreSettings: Fetched columns:', result.columns);
         }
       }
     } catch (error) {
-      console.error('Error fetching columns:', error);
     } finally {
       setIsLoadingColumns(false);
     }
   };
 
   const fetchDateRange = async () => {
-    if (!settings?.dataSource) return;
+    if (!data?.dataframe) return;
     
     setIsLoadingDateRange(true);
     try {
-      const response = await fetch(`${EXPLORE_API}/get-date-range?data_source=${encodeURIComponent(settings.dataSource)}`);
+      const response = await fetch(`${EXPLORE_API}/get-date-range?data_source=${encodeURIComponent(data.dataframe)}`);
       if (response.ok) {
         const result = await response.json();
         if (result.status === 'success' && result.date_range) {
           setAvailableDateRange(result.date_range);
-          console.log('🔍 ExploreSettings: Fetched date range:', result.date_range);
         }
       }
     } catch (error) {
-      console.error('Error fetching date range:', error);
     } finally {
       setIsLoadingDateRange(false);
     }
+  };
+
+  const existingDims = Object.values(data.columnClassifierConfig?.dimensions || {})
+    .flat();
+  const categoricalColumns = Array.isArray(data.columnSummary)
+    ? data.columnSummary
+        .filter((col: any) => !col.is_numerical && !existingDims.includes(col.column))
+        .map((col: any) => col.column)
+    : [];
+
+  const handleAddFilters = () => {
+    if (selectedFilterColumns.length === 0) return;
+    const currentConfig = data.columnClassifierConfig || { identifiers: [], measures: [], dimensions: {} };
+    const newDims = { ...currentConfig.dimensions };
+    selectedFilterColumns.forEach(col => {
+      newDims[col] = [col];
+    });
+    const updatedConfig = { ...currentConfig, dimensions: newDims };
+    const newSelectedIdentifiers = {
+      ...(data.selectedIdentifiers || {}),
+      ...selectedFilterColumns.reduce((acc, col) => ({ ...acc, [col]: [col] }), {})
+    };
+
+    // Update parent data without resetting applied state so filters appear immediately
+    onDataChange({
+      columnClassifierConfig: updatedConfig,
+      selectedIdentifiers: newSelectedIdentifiers,
+      dimensions: Array.from(new Set([...(data.dimensions || []), ...selectedFilterColumns]))
+    });
+
+    // Keep local dimension and identifier state in sync
+    setSelectedDimensions(prev =>
+      Array.from(new Set([...prev, ...selectedFilterColumns]))
+    );
+    setSelectedIdentifiers(prev => ({
+      ...prev,
+      ...selectedFilterColumns.reduce((acc, col) => ({ ...acc, [col]: [col] }), {})
+    }));
+
+    setSelectedFilterColumns([]);
+    setShowFilterSelector(false);
   };
 
   // Handle apply button click
@@ -185,9 +231,34 @@ const ExploreSettings = ({ data, settings, onDataChange, onApply }) => {
       selectedIdentifiers: selectedIdentifiers, // Add selectedIdentifiers at the top level
       applied: true // Mark as applied so charts show the filters
     };
-    
+
     onDataChange(updatedData);
     onApply();
+  };
+
+  const handleNumberOfChartsChange = (delta: number) => {
+    const newNumber = Math.max(1, Math.min(2, graphLayout.numberOfGraphsInRow + delta));
+    if (newNumber === graphLayout.numberOfGraphsInRow) return;
+
+    const newGraphLayout = {
+      numberOfGraphsInRow: newNumber,
+      rows: 1
+    };
+    setGraphLayout(newGraphLayout);
+
+    let updatedSelectedIdentifiers = { ...selectedIdentifiers };
+    if (columnClassifierConfig?.dimensions) {
+      Object.keys(columnClassifierConfig.dimensions).forEach(dimensionId => {
+        updatedSelectedIdentifiers[dimensionId] = columnClassifierConfig.dimensions[dimensionId] || [];
+      });
+      setSelectedIdentifiers(updatedSelectedIdentifiers);
+    }
+
+    onDataChange({
+      graphLayout: newGraphLayout,
+      selectedIdentifiers: updatedSelectedIdentifiers,
+      applied: false
+    });
   };
 
   // Don't show loading state - allow rendering without column classifier config
@@ -196,53 +267,71 @@ const ExploreSettings = ({ data, settings, onDataChange, onApply }) => {
   return (
     <div className="space-y-6 p-4">
       <Card className="p-6 space-y-6">
-        {/* Graph Layout Section */}
+        {/* Chart Configuration Section */}
         <div className="space-y-4">
           <div className="flex items-center space-x-2">
             <BarChart3 className="w-5 h-5 text-blue-600" />
-            <h3 className="text-base font-semibold text-gray-900">Graph Layout</h3>
+            <h3 className="text-base font-semibold text-gray-900">Chart Configuration</h3>
           </div>
-          
+
           <div className="space-y-3">
-            <Label className="text-sm font-medium text-gray-700">Number of Graphs per Row</Label>
-            <Select
-              value={graphLayout.numberOfGraphsInRow > 0 ? graphLayout.numberOfGraphsInRow.toString() : ""}
-              onValueChange={(value) => {
-                const newGraphLayout = {
-                  numberOfGraphsInRow: parseInt(value),
-                  rows: 1
-                };
-                setGraphLayout(newGraphLayout);
-                
-                // Automatically populate selectedIdentifiers with all available identifiers from each dimension
-                let updatedSelectedIdentifiers = { ...selectedIdentifiers };
-                if (columnClassifierConfig?.dimensions) {
-                  Object.keys(columnClassifierConfig.dimensions).forEach(dimensionId => {
-                    updatedSelectedIdentifiers[dimensionId] = columnClassifierConfig.dimensions[dimensionId] || [];
-                  });
-                  setSelectedIdentifiers(updatedSelectedIdentifiers);
-                }
-                
-                // Immediately apply graph layout changes and show chart cards
-                const updatedData = {
-                  ...data,
-                  graphLayout: newGraphLayout,
-                  selectedIdentifiers: updatedSelectedIdentifiers,
-                  applied: true // Mark as applied so chart cards appear immediately
-                };
-                onDataChange(updatedData);
-                onApply(); // Call onApply to ensure the changes are properly applied
-              }}
-            >
-              <SelectTrigger className="w-full">
-                <SelectValue placeholder="Select" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="1">1 graph per row</SelectItem>
-                <SelectItem value="2">2 graphs per row</SelectItem>
-              </SelectContent>
-            </Select>
+            <Label className="text-sm font-medium text-gray-700">Number of Charts (Max 2)</Label>
+            <div className="flex items-center gap-2 mt-1">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => handleNumberOfChartsChange(-1)}
+                disabled={graphLayout.numberOfGraphsInRow <= 1}
+              >
+                <Minus className="w-3 h-3" />
+              </Button>
+              <span className="w-8 text-center font-medium">{graphLayout.numberOfGraphsInRow}</span>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => handleNumberOfChartsChange(1)}
+                disabled={graphLayout.numberOfGraphsInRow >= 2}
+              >
+                <Plus className="w-3 h-3" />
+              </Button>
+            </div>
           </div>
+        </div>
+        {/* Add Filter Toggle */}
+        <div className="space-y-4">
+          <div className="flex items-center space-x-2">
+            <Filter className="w-5 h-5 text-blue-600" />
+            <h3 className="text-base font-semibold text-gray-900">Add Filters</h3>
+          </div>
+          <div className="flex items-center space-x-2">
+            <Switch
+              id="show-filter-selector"
+              checked={showFilterSelector}
+              onCheckedChange={setShowFilterSelector}
+            />
+            <Label htmlFor="show-filter-selector">Select Additional Filters</Label>
+          </div>
+          {showFilterSelector && (
+            <div className="space-y-2">
+              <div className="max-h-40 overflow-y-auto space-y-2">
+                {categoricalColumns.map(col => (
+                  <div key={col} className="flex items-center space-x-2">
+                    <Checkbox
+                      id={`col-${col}`}
+                      checked={selectedFilterColumns.includes(col)}
+                      onCheckedChange={(checked) => {
+                        setSelectedFilterColumns(prev =>
+                          checked ? [...prev, col] : prev.filter(c => c !== col)
+                        );
+                      }}
+                    />
+                    <Label htmlFor={`col-${col}`}>{col}</Label>
+                  </div>
+                ))}
+              </div>
+              <Button size="sm" onClick={handleAddFilters}>Add Filter</Button>
+            </div>
+          )}
         </div>
 
       </Card>

@@ -165,7 +165,6 @@ ${chartData && chartData.data && Array.isArray(chartData.data) ?
           throw new Error(`Unsupported format: ${format}`);
       }
     } catch (error) {
-      console.error('Export failed:', error);
       alert(`Export failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
     } finally {
       setExporting(null);

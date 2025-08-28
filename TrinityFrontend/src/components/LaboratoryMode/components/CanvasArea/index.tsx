@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { safeStringify } from '@/utils/safeStringify';
+import { sanitizeLabConfig } from '@/utils/projectStorage';
 import { Card, Card as AtomBox } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
@@ -27,8 +28,10 @@ import DataFrameOperationsAtom from '@/components/AtomList/atoms/dataframe-opera
 import ScopeSelectorAtom from '@/components/AtomList/atoms/scope-selector/ScopeSelectorAtom';
 import CreateColumnAtom from '@/components/AtomList/atoms/createcolumn/CreateColumnAtom';
 import GroupByAtom from '@/components/AtomList/atoms/groupby-wtg-avg/GroupByAtom';
+import CorrelationAtom from '@/components/AtomList/atoms/correlation/CorrelationAtom';
 import ChartMakerAtom from '@/components/AtomList/atoms/chart-maker/ChartMakerAtom';
 import BuildModelFeatureBasedAtom from '@/components/AtomList/atoms/build-model-feature-based/BuildModelFeatureBasedAtom';
+import ExploreAtom from '@/components/AtomList/atoms/explore/ExploreAtom';
 import { fetchDimensionMapping } from '@/lib/dimensions';
 
 import {
@@ -42,6 +45,8 @@ import {
   DEFAULT_CHART_MAKER_SETTINGS,
   DataUploadSettings,
   ColumnClassifierColumn,
+  DEFAULT_EXPLORE_SETTINGS,
+  DEFAULT_EXPLORE_DATA,
 } from '../../store/laboratoryStore';
 import { deriveWorkflowMolecules, WorkflowMolecule } from './helpers';
 
@@ -463,7 +468,7 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
                   }
                 }
                 if (data.state && data.state.laboratory_config) {
-                  const cfg = data.state.laboratory_config;
+                  const cfg = sanitizeLabConfig(data.state.laboratory_config);
                   localStorage.setItem(STORAGE_KEY, safeStringify(cfg.cards));
                   localStorage.setItem('laboratory-config', safeStringify(cfg));
                   if (!storedAtoms && data.state.workflow_selected_atoms) {
@@ -548,8 +553,10 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
             ? { ...DEFAULT_TEXTBOX_SETTINGS }
             : atom.id === 'data-upload-validate'
             ? { ...DEFAULT_DATAUPLOAD_SETTINGS }
-            : atom.id === 'feature-overview'
+          : atom.id === 'feature-overview'
             ? { ...DEFAULT_FEATURE_OVERVIEW_SETTINGS }
+            : atom.id === 'explore'
+            ? { data: { ...DEFAULT_EXPLORE_DATA }, settings: { ...DEFAULT_EXPLORE_SETTINGS } }
             : atom.id === 'chart-maker'
             ? { ...DEFAULT_CHART_MAKER_SETTINGS }
             : undefined,
@@ -615,6 +622,8 @@ const addNewCardWithAtom = (
         ? { ...DEFAULT_DATAUPLOAD_SETTINGS }
         : atomId === 'feature-overview'
         ? { ...DEFAULT_FEATURE_OVERVIEW_SETTINGS }
+        : atomId === 'explore'
+        ? { data: { ...DEFAULT_EXPLORE_DATA }, settings: { ...DEFAULT_EXPLORE_SETTINGS } }
         : atomId === 'chart-maker'
         ? { ...DEFAULT_CHART_MAKER_SETTINGS }
         : undefined,
@@ -715,6 +724,10 @@ const handleAddDragLeave = (e: React.DragEvent) => {
           ? { ...DEFAULT_FEATURE_OVERVIEW_SETTINGS }
           : info.id === 'dataframe-operations'
           ? { ...DEFAULT_DATAFRAME_OPERATIONS_SETTINGS }
+          : info.id === 'chart-maker'
+          ? { ...DEFAULT_CHART_MAKER_SETTINGS }
+          : info.id === 'explore'
+          ? { data: { ...DEFAULT_EXPLORE_DATA }, settings: { ...DEFAULT_EXPLORE_SETTINGS } }
           : undefined,
     };
     setLayoutCards(
@@ -1182,6 +1195,8 @@ const handleAddDragLeave = (e: React.DragEvent) => {
                         <DataUploadValidateAtom atomId={atom.id} />
                       ) : atom.atomId === 'feature-overview' ? (
                         <FeatureOverviewAtom atomId={atom.id} />
+                      ) : atom.atomId === 'explore' ? (
+                        <ExploreAtom atomId={atom.id} />
                       ) : atom.atomId === 'chart-maker' ? (
                         <ChartMakerAtom atomId={atom.id} />
                       ) : atom.atomId === 'concat' ? (
@@ -1200,6 +1215,8 @@ const handleAddDragLeave = (e: React.DragEvent) => {
                           <BuildModelFeatureBasedAtom atomId={atom.id} />
                        ) : atom.atomId === 'scope-selector' ? (
                         <ScopeSelectorAtom atomId={atom.id} />
+                      ) : atom.atomId === 'correlation' ? (
+                        <CorrelationAtom atomId={atom.id} />
                       ) : (
                         <div>
                           <h4 className="font-semibold text-gray-900 mb-1 text-sm">{atom.title}</h4>
