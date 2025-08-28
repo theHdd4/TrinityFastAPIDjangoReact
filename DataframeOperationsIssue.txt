@@ -26,3 +26,4 @@ Potential Prognosis: Repeated uploads would continue to reserve stale space, con
 Implemented Changes:
 - Reworked the canvas to separate a wrapper and scroll container with `min-h-0` flex layouts.
 - Added a `ResizeObserver` that re-measures the scroll container after each render and clamps its height to the wrapper, resetting scroll position to eliminate phantom whitespace.
+- Corrected invalid table markup by moving the row-resize handle into the final `<td>` so the absolutely positioned handle stays scoped within the row and no longer creates stray whitespace.

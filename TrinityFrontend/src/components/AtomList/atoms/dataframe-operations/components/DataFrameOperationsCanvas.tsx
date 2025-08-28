@@ -1181,12 +1181,12 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                         </TableCell>
                       );
                     })}
-                    <TableCell className="table-cell w-8">
+                    <TableCell className="relative w-8 p-0">
+                      <div
+                        className="absolute inset-x-0 bottom-0 h-1 cursor-row-resize"
+                        onMouseDown={e => startRowResize(startIndex + rowIndex, e)}
+                      />
                     </TableCell>
-                    <div
-                      className="absolute bottom-0 left-0 w-full h-1 cursor-row-resize"
-                      onMouseDown={e => startRowResize(startIndex + rowIndex, e)}
-                    />
                   </TableRow>
                 ))}
               </TableBody>
