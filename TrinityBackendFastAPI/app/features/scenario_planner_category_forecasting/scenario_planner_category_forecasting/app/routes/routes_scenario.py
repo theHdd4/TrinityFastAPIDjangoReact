@@ -599,6 +599,17 @@ async def run_scenario(
     try:
         run_id = str(uuid.uuid4())
         logger.info("⏳ Scenario run %s started", run_id)
+        
+        # ✅ DEBUG: Print the received payload
+        logger.info("🔍 === RECEIVED PAYLOAD ===")
+        logger.info("🔍 Payload type: %s", type(payload))
+        logger.info("🔍 Clusters count: %d", len(payload.clusters) if payload.clusters else 0)
+        logger.info("🔍 Identifiers count: %d", len(payload.identifiers) if payload.identifiers else 0)
+        logger.info("🔍 Identifiers content: %s", payload.identifiers)
+        if payload.identifiers:
+            for key, spec in payload.identifiers.items():
+                logger.info("🔍 Identifier %s: column=%s, values=%s", key, spec.column, spec.values)
+        logger.info("=== RECEIVED PAYLOAD COMPLETED ===")
 
         # ✅ Check if dataset is cached (no file key needed)
         df = DataService.get_current_d0_dataframe()

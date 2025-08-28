@@ -122,7 +122,20 @@ class AggregationService:
     async def _process_hierarchical_aggregations(
         cls, df: pd.DataFrame, payload: Any, feat_set: set  # Changed from Dict to Any
     ) -> List[Dict[str, Any]]:
+        logger.info("🔍 === HIERARCHICAL AGGREGATIONS DEBUG ===")
+        logger.info("🔍 Payload identifiers: %s", payload.identifiers)
+        logger.info("🔍 Payload identifiers type: %s", type(payload.identifiers))
+        logger.info("🔍 Payload identifiers length: %d", len(payload.identifiers) if payload.identifiers else 0)
+        
         id_cols = [spec.column for spec in payload.identifiers.values()]  # Changed from spec["column"] to spec.column
+        logger.info("🔍 Generated id_cols: %s", id_cols)
+        logger.info("🔍 id_cols length: %d", len(id_cols))
+        
+        if not id_cols:
+            logger.error("❌ NO ID_COLS - THIS WILL CAUSE THE GROUPBY ERROR!")
+            raise ValueError("No identifier columns found for hierarchical aggregation. Check that payload.identifiers is populated correctly.")
+        
+        logger.info("=== HIERARCHICAL AGGREGATIONS DEBUG COMPLETED ===")
         sum_cols = ["baseline_pred", "scenario_pred"] + [f"{p}_{k}" for p in ("b","s") for k in feat_set]
         dfg = df.groupby(id_cols, dropna=False)[sum_cols].sum().reset_index()
         dfg = cls._recalculate_metrics(dfg, feat_set)

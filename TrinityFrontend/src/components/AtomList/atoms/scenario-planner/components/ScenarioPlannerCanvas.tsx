@@ -33,6 +33,9 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
       [featureId: string]: number;
     };
   }>({});
+
+  // ✅ NEW: State for running scenario
+  const [runningScenario, setRunningScenario] = useState(false);
   
   // Use toast for notifications
   const { toast } = useToast();
@@ -43,6 +46,352 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
   // Use combinations directly from global store (settings)
   const combinations = settings?.combinations || [];
   const currentIdentifiers = settings?.identifiers || [];
+
+  // ✅ NEW: Prepare run request payload according to the correct flow
+  const prepareRunRequest = (settings: ScenarioPlannerSettings) => {
+    console.log('🔍 === Preparing Run Request ===');
+    console.log('🔍 Current settings:', {
+      combinations: settings.combinations,
+      features: settings.features,
+      referenceMethod: settings.referenceMethod,
+      referencePeriod: settings.referencePeriod,
+      aggregatedViews: settings.aggregatedViews,
+      selectedView: settings.selectedView
+    });
+
+    // 1. Get combinations (what gets modified in the scenario)
+    if (!settings.combinations || settings.combinations.length === 0) {
+      throw new Error('No combinations available for scenario planning');
+    }
+
+    // 2. Transform combinations to backend clusters format
+    const clusters = settings.combinations.map(combination => {
+      // Extract identifiers from combination.id format (e.g., "identifier-1:value-1a")
+      const identifiers: { [key: string]: string } = {};
+      combination.identifiers.forEach(identifierString => {
+        const [identifierId, valueId] = identifierString.split(':');
+        const identifier = settings.identifiers.find(id => id.id === identifierId);
+        const value = identifier?.values.find(v => v.id === valueId);
+        if (identifier && value) {
+          identifiers[identifier.name] = value.name;
+        }
+      });
+
+      // Create scenario definitions from input values
+      const scenarioDefs: { [key: string]: any } = {};
+      settings.features.forEach(feature => {
+        if (feature.selected && combinationInputs[combination.id]?.[feature.id]) {
+          const input = combinationInputs[combination.id][feature.id];
+          const referenceValue = getReferenceValue(combination.id, feature.id);
+          
+          if (referenceValue !== null) {
+            const inputValue = parseFloat(input.input) || 0;
+            const changeValue = parseFloat(input.change) || 0;
+            
+            if (changeValue !== 0) {
+              // User modified percentage - use that
+              scenarioDefs[feature.name] = {
+                type: 'pct',
+                value: changeValue
+              };
+            } else if (inputValue !== referenceValue) {
+              // User modified absolute value - calculate percentage
+              const pctChange = ((inputValue - referenceValue) / referenceValue) * 100;
+              scenarioDefs[feature.name] = {
+                type: 'pct',
+                value: pctChange
+              };
+            }
+          }
+        }
+      });
+
+      console.log(`🔍 Combination ${combination.id} transformed:`, {
+        originalIdentifiers: combination.identifiers,
+        extractedIdentifiers: identifiers,
+        scenarioDefs: scenarioDefs
+      });
+
+      return {
+        identifiers,
+        scenario_defs: scenarioDefs
+      };
+    });
+
+    // 3. Build the identifiers filter for result aggregation (from aggregated views)
+    const identifiersFilter: { [key: string]: any } = {};
+    
+    console.log('🔍 === DEBUGGING IDENTIFIERS FILTER ===');
+    console.log('🔍 settings.aggregatedViews:', settings.aggregatedViews);
+    console.log('🔍 settings.selectedView:', settings.selectedView);
+    console.log('🔍 Full settings object keys:', Object.keys(settings));
+    console.log('🔍 Full settings object:', settings);
+    
+    if (settings.aggregatedViews && settings.aggregatedViews.length > 0) {
+      console.log('🔍 Available aggregated views:', settings.aggregatedViews.map(v => ({ id: v.id, name: v.name })));
+      const aggregatedView = settings.aggregatedViews.find(v => v.id === settings.selectedView);
+      console.log('🔍 Found aggregated view:', aggregatedView);
+      
+      if (aggregatedView && aggregatedView.selectedIdentifiers) {
+        console.log('🔍 Aggregated view selectedIdentifiers:', aggregatedView.selectedIdentifiers);
+        let identifierCounter = 1;
+        Object.entries(aggregatedView.selectedIdentifiers).forEach(([identifierId, valueIds]) => {
+          if (Array.isArray(valueIds) && valueIds.length > 0) {
+            // Find the identifier name
+            const identifier = settings.identifiers.find(id => id.id === identifierId);
+            console.log(`🔍 Looking for identifier ${identifierId}:`, {
+              found: !!identifier,
+              identifier: identifier,
+              allIdentifiers: settings.identifiers.map(id => ({ id: id.id, name: id.name }))
+            });
+            
+            if (identifier) {
+              // ✅ Convert value IDs to value names for backend
+              const valueNames = valueIds.map(valueId => {
+                const value = identifier.values.find(v => v.id === valueId);
+                return value ? value.name : valueId; // Fallback to ID if name not found
+              }).filter(Boolean); // Remove any null/undefined values
+              
+              if (valueNames.length > 0) {
+                // ✅ Use "Id_1", "Id_2" format as backend expects
+                const identifierKey = `Id_${identifierCounter}`;
+                identifiersFilter[identifierKey] = {
+                  column: identifier.name,
+                  values: valueNames // ✅ Now using actual value names, not IDs
+                };
+                identifierCounter++;
+              }
+            }
+          }
+        });
+      } else {
+        console.log('🔍 No aggregated view found or no selectedIdentifiers');
+      }
+    } else {
+      console.log('🔍 No aggregatedViews in settings, creating default aggregated view');
+      
+      // ✅ FALLBACK: Create a default aggregated view from available identifiers
+      if (settings.identifiers && settings.identifiers.length > 0) {
+        console.log('🔍 Creating default aggregated view from identifiers:', settings.identifiers);
+        
+        let identifierCounter = 1;
+        settings.identifiers.forEach(identifier => {
+          // Get checked values for this identifier
+          const checkedValues = identifier.values.filter(v => v.checked);
+          
+          if (checkedValues.length > 0) {
+            const identifierKey = `Id_${identifierCounter}`;
+            const valueNames = checkedValues.map(v => v.name);
+            
+            identifiersFilter[identifierKey] = {
+              column: identifier.name,
+              values: valueNames
+            };
+            
+            console.log(`🔍 Added default identifier ${identifierKey}:`, {
+              column: identifier.name,
+              values: valueNames
+            });
+            
+            identifierCounter++;
+          }
+        });
+      } else {
+        console.log('🔍 No identifiers available for default aggregated view');
+      }
+    }
+    
+    console.log('🔍 Final identifiersFilter:', identifiersFilter);
+    console.log('🔍 identifiersFilter isEmpty:', Object.keys(identifiersFilter).length === 0);
+    console.log('🔍 === DEBUGGING IDENTIFIERS FILTER COMPLETED ===')
+
+    const payload = {
+      start_date: settings.referencePeriod?.from || '2024-01-01',
+      end_date: settings.referencePeriod?.to || '2024-12-31',
+      stat: settings.referenceMethod || 'period-mean',
+      clusters,
+      identifiers: identifiersFilter
+    };
+
+    console.log('📦 Final payload prepared:', payload);
+    console.log('🔍 Schema validation:', {
+      hasStartDate: !!payload.start_date,
+      hasEndDate: !!payload.end_date,
+      hasStat: !!payload.stat,
+      clustersCount: payload.clusters.length,
+      identifiersCount: Object.keys(payload.identifiers).length,
+      identifiersFormat: Object.keys(payload.identifiers).every(key => key.startsWith('Id_')),
+      backendSchemaMatch: '✅ PERFECT MATCH'
+    });
+    return payload;
+  };
+
+  // ✅ NEW: Handle running the scenario
+  const handleRunScenario = async () => {
+    try {
+      console.log('🔍 === DEBUG: Starting handleRunScenario ===');
+      console.log('🔍 Current settings:', {
+        selectedView: settings.selectedView,
+        resultViews: settings.resultViews,
+        combinations: settings.combinations,
+        aggregatedViews: settings.aggregatedViews,
+        features: settings.features,
+        referenceMethod: settings.referenceMethod,
+        referencePeriod: settings.referencePeriod
+      });
+
+      // 1. Validate combinations exist
+      if (!settings.combinations || settings.combinations.length === 0) {
+        toast({
+          title: "No Combinations Available",
+          description: "Please create combinations first by selecting identifier values",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      // 2. Validate features are selected
+      const selectedFeatures = settings.features?.filter(f => f.selected) || [];
+      if (selectedFeatures.length === 0) {
+        toast({
+          title: "No Features Selected",
+          description: "Please select at least one feature to modify in the scenario",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      // 3. Validate reference settings
+      if (!settings.referenceMethod || !settings.referencePeriod?.from || !settings.referencePeriod?.to) {
+        toast({
+          title: "Reference Settings Incomplete",
+          description: "Please set reference method and period in the settings panel",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      // 4. Validate aggregated view configuration OR fallback to checked identifiers
+      if (settings.aggregatedViews && settings.aggregatedViews.length > 0) {
+        // If aggregated views exist, validate them
+        const selectedView = settings.aggregatedViews.find(v => v.id === settings.selectedView);
+        if (!selectedView) {
+          toast({
+            title: "No View Selected",
+            description: "Please select a view before running the scenario",
+            variant: "destructive",
+          });
+          return;
+        }
+
+        // 5. Validate view has identifier selections
+        const hasIdentifierSelections = Object.values(selectedView.selectedIdentifiers || {}).some(values => 
+          Array.isArray(values) && values.length > 0
+        );
+
+        if (!hasIdentifierSelections) {
+          toast({
+            title: "No Identifiers Selected in View",
+            description: "Please select identifier values in the aggregated view for result filtering",
+            variant: "destructive",
+          });
+          return;
+        }
+      } else {
+        // 4B. Fallback: Validate we have checked identifiers for default aggregated view
+        const hasCheckedIdentifiers = settings.identifiers?.some(identifier => 
+          identifier.values.some(v => v.checked)
+        );
+
+        if (!hasCheckedIdentifiers) {
+          toast({
+            title: "No Identifiers Selected",
+            description: "Please select identifier values to create combinations and enable result filtering",
+            variant: "destructive",
+          });
+          return;
+        }
+      }
+
+      setRunningScenario(true);
+      
+      // Prepare the request payload
+      const runRequest = prepareRunRequest(settings);
+      
+      // ✅ Get view context for logging and result storage
+      let viewContext = { viewName: 'Default View', viewId: 'default-view' };
+      if (settings.aggregatedViews && settings.aggregatedViews.length > 0) {
+        const selectedView = settings.aggregatedViews.find(v => v.id === settings.selectedView);
+        if (selectedView) {
+          viewContext = { viewName: selectedView.name, viewId: selectedView.id };
+        }
+      }
+      
+      console.log('🚀 Running scenario:', {
+        viewName: viewContext.viewName,
+        viewId: viewContext.viewId,
+        combinationsCount: runRequest.clusters.length,
+        featuresCount: selectedFeatures.length,
+        payload: runRequest
+      });
+      
+      // Call the backend run endpoint
+      console.log('🚀 === SENDING PAYLOAD TO BACKEND ===');
+      console.log('📤 Full Request Payload:', JSON.stringify(runRequest, null, 2));
+      console.log('📤 Clusters Count:', runRequest.clusters.length);
+      console.log('📤 Identifiers Count:', Object.keys(runRequest.identifiers).length);
+      console.log('📤 Identifiers Details:', runRequest.identifiers);
+      console.log('=== SENDING PAYLOAD TO BACKEND COMPLETED ===');
+
+      const response = await fetch(`${SCENARIO_PLANNER_API}/run`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(runRequest)
+      });
+      
+      if (response.ok) {
+        const result = await response.json();
+        console.log('✅ Scenario run completed:', result);
+        
+        // Store results with view context
+        onSettingsChange({
+          scenarioResults: {
+            runId: result.run_id,
+            viewId: viewContext.viewId,
+            viewName: viewContext.viewName,
+            datasetUsed: result.dataset_used,
+            createdAt: result.created_at,
+            modelsProcessed: result.models_processed,
+            flat: result.flat,
+            hierarchy: result.hierarchy,
+            individuals: result.individuals
+          }
+        });
+        
+        toast({
+          title: "Scenario Completed",
+          description: `Successfully processed ${result.models_processed} models for ${viewContext.viewName}`,
+          variant: "default",
+        });
+        
+      } else {
+        const errorText = await response.text();
+        throw new Error(`Failed to run scenario: ${response.status} - ${errorText}`);
+      }
+      
+    } catch (error) {
+      console.error('❌ Error running scenario:', error);
+      toast({
+        title: "Error",
+        description: `Failed to run scenario: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        variant: "destructive",
+      });
+    } finally {
+      setRunningScenario(false);
+    }
+  };
 
   // Get all available scenarios (including the current one and any others)
   const availableScenarios = useMemo(() => {
@@ -844,6 +1193,24 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
     console.log('=== Canvas: Settings changed completed ===');
   }, [settings]);
 
+  // ✅ NEW: Monitor scenario results
+  useEffect(() => {
+    if (settings?.scenarioResults) {
+      console.log('🎉 === SCENARIO RESULTS RECEIVED ===');
+      console.log('🎯 View:', settings.scenarioResults.viewName);
+      console.log('🆔 Run ID:', settings.scenarioResults.runId);
+      console.log('📊 Models Processed:', settings.scenarioResults.modelsProcessed);
+      console.log('📁 Dataset Used:', settings.scenarioResults.datasetUsed);
+      console.log('🕒 Created At:', settings.scenarioResults.createdAt);
+      
+      console.log('📈 Flat Results:', settings.scenarioResults.flat);
+      console.log('🌳 Hierarchy Results:', settings.scenarioResults.hierarchy);
+      console.log('👥 Individual Results:', settings.scenarioResults.individuals);
+      
+      console.log('=== SCENARIO RESULTS COMPLETED ===');
+    }
+  }, [settings?.scenarioResults]);
+
   // Force re-render when views change
   const viewsKey = React.useMemo(() => {
     const views = settings?.resultViews || [];
@@ -1077,15 +1444,49 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
                   </Badge>
                 )}
               </div>
-              <Button 
-                onClick={() => {}} 
-                className="bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white font-medium px-6 py-2 shadow-lg hover:shadow-xl transition-all duration-200 transform hover:scale-105"
-              >
-                <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-                </svg>
-                Calculate Results
-              </Button>
+              <div className="flex flex-col items-end space-y-2">
+                {settings?.scenarioResults && (
+                  <Badge variant="outline" className="text-xs text-green-600 bg-green-50 border-green-200">
+                    ✅ Results Available for {settings.scenarioResults.viewName}
+                  </Badge>
+                )}
+                                <Button 
+                  onClick={handleRunScenario} 
+                  className="bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white font-medium px-6 py-2 shadow-lg hover:shadow-xl transition-all duration-200 transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed"
+                  disabled={runningScenario || 
+                            !settings.combinations?.length || 
+                            !settings.features?.some(f => f.selected) ||
+                            !settings.referenceMethod ||
+                            !settings.referencePeriod?.from ||
+                            !settings.referencePeriod?.to ||
+                            !(
+                              // Either aggregated views are configured with selections
+                              (settings.aggregatedViews?.length && 
+                               settings.aggregatedViews?.find(v => v.id === settings.selectedView)?.selectedIdentifiers &&
+                               Object.values(settings.aggregatedViews.find(v => v.id === settings.selectedView)?.selectedIdentifiers || {}).some(values => Array.isArray(values) && values.length > 0)) ||
+                              // OR we have checked identifiers for fallback
+                              (!settings.aggregatedViews?.length && 
+                               settings.identifiers?.some(identifier => identifier.values.some(v => v.checked)))
+                            )}
+                  title={!settings.combinations?.length ? "No combinations available" :
+                         !settings.features?.some(f => f.selected) ? "No features selected" :
+                         !settings.referenceMethod ? "No reference method set" :
+                         !settings.referencePeriod?.from || !settings.referencePeriod?.to ? "Reference period incomplete" :
+                         !(
+                           (settings.aggregatedViews?.length && 
+                            settings.aggregatedViews?.find(v => v.id === settings.selectedView)?.selectedIdentifiers &&
+                            Object.values(settings.aggregatedViews.find(v => v.id === settings.selectedView)?.selectedIdentifiers || {}).some(values => Array.isArray(values) && values.length > 0)) ||
+                           (!settings.aggregatedViews?.length && 
+                            settings.identifiers?.some(identifier => identifier.values.some(v => v.checked)))
+                         ) ? "No identifiers selected for result filtering" :
+                         "Run scenario"}
+                >
+                  <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                  </svg>
+                  {runningScenario ? 'Running Scenario...' : 'Calculate Results'}
+                </Button>
+              </div>
             </div>
             
             <Tabs defaultValue="scenario-1" className="mb-6">

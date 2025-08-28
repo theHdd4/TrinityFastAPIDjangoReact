@@ -389,34 +389,8 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
     combinationSelection: true,
   });
 
-  // State for managing aggregated views
-  const [aggregatedViews, setAggregatedViews] = useState<AggregatedView[]>([
-    {
-      id: 'view-1',
-      name: 'View 1',
-      identifierOrder: ['identifier-1', 'identifier-2'],
-      selectedIdentifiers: {
-        'identifier-1': ['1a', '1b'],
-        'identifier-2': ['2a']
-      }
-    },
-    {
-      id: 'view-2',
-      name: 'View 2',
-      identifierOrder: ['identifier-3'],
-      selectedIdentifiers: {
-        'identifier-3': ['3a']
-      }
-    },
-    {
-      id: 'view-3',
-      name: 'View 3',
-      identifierOrder: ['identifier-4'],
-      selectedIdentifiers: {
-        'identifier-4': ['4a']
-      }
-    }
-  ]);
+  // State for managing aggregated views - will be populated from backend data
+  const [aggregatedViews, setAggregatedViews] = useState<AggregatedView[]>([]);
 
   // State for managing identifier filters (clustering-style)
   const [identifierFilters, setIdentifierFilters] = useState<Record<string, string[]>>({});
@@ -728,6 +702,83 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
     }
   }, [data.resultViews]);
 
+     // ✅ NEW: Initialize aggregated views when backend identifiers are loaded
+   useEffect(() => {
+     if (data.identifiers && data.identifiers.length > 0 && aggregatedViews.length === 0) {
+       console.log('🔄 Initializing aggregated views with backend identifiers:', data.identifiers);
+       
+       // Create default aggregated views with real backend identifiers and default selections
+       const defaultViews: AggregatedView[] = [
+         {
+           id: 'view-1',
+           name: 'View 1',
+           identifierOrder: data.identifiers.slice(0, 2).map(id => id.id),
+           selectedIdentifiers: (() => {
+             const selections: Record<string, string[]> = {};
+             // Add all available values for first 2 identifiers as default
+             data.identifiers.slice(0, 2).forEach(identifier => {
+               if (identifier.values && identifier.values.length > 0) {
+                 selections[identifier.id] = identifier.values.map(v => v.id);
+               }
+             });
+             return selections;
+           })()
+         },
+         {
+           id: 'view-2',
+           name: 'View 2', 
+           identifierOrder: data.identifiers.slice(0, 1).map(id => id.id),
+           selectedIdentifiers: (() => {
+             const selections: Record<string, string[]> = {};
+             // Add all available values for first identifier as default
+             if (data.identifiers.length > 0) {
+               const identifier = data.identifiers[0];
+               if (identifier.values && identifier.values.length > 0) {
+                 selections[identifier.id] = identifier.values.map(v => v.id);
+               }
+             }
+             return selections;
+           })()
+         },
+         {
+           id: 'view-3',
+           name: 'View 3',
+           identifierOrder: data.identifiers.slice(1, 2).map(id => id.id),
+           selectedIdentifiers: (() => {
+             const selections: Record<string, string[]> = {};
+             // Add all available values for second identifier as default
+             if (data.identifiers.length > 1) {
+               const identifier = data.identifiers[1];
+               if (identifier.values && identifier.values.length > 0) {
+                 selections[identifier.id] = identifier.values.map(v => v.id);
+               }
+             }
+             return selections;
+           })()
+         }
+       ];
+       
+       console.log('🔄 Created default aggregated views with selections:', defaultViews);
+       setAggregatedViews(defaultViews);
+     }
+   }, [data.identifiers, aggregatedViews.length]);
+
+     // ✅ NEW: Save aggregatedViews to global store whenever they change
+   useEffect(() => {
+     if (aggregatedViews && aggregatedViews.length > 0) {
+       console.log('🔄 Saving aggregatedViews to global store:', aggregatedViews);
+       console.log('🔄 Current aggregatedViews selectedIdentifiers:', 
+         aggregatedViews.map(view => ({
+           id: view.id,
+           name: view.name,
+           selectedIdentifiers: view.selectedIdentifiers,
+           identifierOrder: view.identifierOrder
+         }))
+       );
+       onDataChange({ aggregatedViews: aggregatedViews });
+     }
+   }, [aggregatedViews]); // ✅ FIXED: Removed onDataChange to prevent infinite loop
+
   // Helper function to capitalize first letter
   const capitalizeFirstLetter = (str: string) => {
     return str.charAt(0).toUpperCase() + str.slice(1);
@@ -781,38 +832,51 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
     ));
   };
 
-  // Toggle identifier selection
-  const toggleIdentifierSelection = (viewId: string, identifierId: string, valueId: string) => {
-    setAggregatedViews(prev => prev.map(view => {
-      if (view.id === viewId) {
-        let newSelected: string[];
-        
-        if (valueId === "selectAll") {
-          // Select all values for this identifier
-          const identifier = data.identifiers.find(id => id.id === identifierId);
-          newSelected = identifier ? identifier.values.map(v => v.id) : [];
-        } else if (valueId === "clearAll") {
-          // Clear all values for this identifier
-          newSelected = [];
-        } else {
-          // Toggle individual value
-          const currentSelected = view.selectedIdentifiers[identifierId] || [];
-          newSelected = currentSelected.includes(valueId)
-            ? currentSelected.filter(id => id !== valueId)
-            : [...currentSelected, valueId];
-        }
-        
-        return {
-          ...view,
-          selectedIdentifiers: {
-            ...view.selectedIdentifiers,
-            [identifierId]: newSelected
-          }
-        };
-      }
-      return view;
-    }));
-  };
+     // Toggle identifier selection
+   const toggleIdentifierSelection = (viewId: string, identifierId: string, valueId: string) => {
+     console.log('🔄 toggleIdentifierSelection called:', { viewId, identifierId, valueId });
+     
+     setAggregatedViews(prev => {
+       const updated = prev.map(view => {
+         if (view.id === viewId) {
+           let newSelected: string[];
+           
+           if (valueId === "selectAll") {
+             // Select all values for this identifier
+             const identifier = data.identifiers.find(id => id.id === identifierId);
+             newSelected = identifier ? identifier.values.map(v => v.id) : [];
+             console.log('🔄 Selecting all values for', identifierId, ':', newSelected);
+           } else if (valueId === "clearAll") {
+             // Clear all values for this identifier
+             newSelected = [];
+             console.log('🔄 Clearing all values for', identifierId);
+           } else {
+             // Toggle individual value
+             const currentSelected = view.selectedIdentifiers[identifierId] || [];
+             newSelected = currentSelected.includes(valueId)
+               ? currentSelected.filter(id => id !== valueId)
+               : [...currentSelected, valueId];
+             console.log('🔄 Toggling value', valueId, 'for', identifierId, '. New selected:', newSelected);
+           }
+           
+           const updatedView = {
+             ...view,
+             selectedIdentifiers: {
+               ...view.selectedIdentifiers,
+               [identifierId]: newSelected
+             }
+           };
+           
+           console.log('🔄 Updated view:', updatedView);
+           return updatedView;
+         }
+         return view;
+       });
+       
+       console.log('🔄 All updated aggregated views:', updated);
+       return updated;
+     });
+   };
 
   // Handle drag end for reordering identifiers
   const handleDragEnd = (event: DragEndEvent, viewId: string) => {

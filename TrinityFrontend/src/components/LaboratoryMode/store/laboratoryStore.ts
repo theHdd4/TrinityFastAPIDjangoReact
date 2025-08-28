@@ -532,6 +532,25 @@ export interface ScenarioPlannerSettings {
     from: string;
     to: string;
   };
+  // ✅ NEW: Properties for scenario results
+  scenarioResults?: {
+    runId: string;
+    viewId: string;
+    viewName: string;
+    datasetUsed: string;
+    createdAt: string;
+    modelsProcessed: number;
+    flat: any;
+    hierarchy: any[];
+    individuals: any[];
+  };
+  // ✅ NEW: Properties for aggregated views (identifier filtering)
+  aggregatedViews?: Array<{
+    id: string;
+    name: string;
+    identifierOrder: string[];
+    selectedIdentifiers: Record<string, string[]>;
+  }>;
 }
 
 export const DEFAULT_SCENARIO_PLANNER_SETTINGS: ScenarioPlannerSettings = {
@@ -614,7 +633,11 @@ export const DEFAULT_SCENARIO_PLANNER_SETTINGS: ScenarioPlannerSettings = {
   // ✅ NEW: Default values for auto-refresh functionality
   referenceValuesNeedRefresh: false,
   lastReferenceMethod: 'period-mean',
-  lastReferencePeriod: { from: '01-JAN-2020', to: '30-MAR-2024' }
+  lastReferencePeriod: { from: '01-JAN-2020', to: '30-MAR-2024' },
+  // ✅ NEW: Default values for aggregated views - will be populated when backend data loads
+  aggregatedViews: [],
+  // ✅ NEW: Default values for scenario results
+  scenarioResults: undefined
 };
 
 export interface DroppedAtom {
