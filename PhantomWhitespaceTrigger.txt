@@ -1,3 +1,5 @@
 Trigger Event: Clicking "Render DataFrame" after selecting a file in the DataFrame Operations atom.
 
 Explanation: The render action mounts the table canvas, which locks its height to the canvas's scrollHeight using a JavaScript routine. When the DOM still contains stray blocks (such as resize handles), the measured scrollHeight is much larger than the table content. The fixed height is then applied to the canvas, expanding the page layout and creating a phantom whitespace region below the component. This whitespace can be reached only when scrolling outside the canvas because the canvas captures its own wheel events.
+
+Mitigation: Before fixing the height, remove any stray resize handles outside the table and measure the table's bounding box instead of the container's scrollHeight. This ensures the locked height matches the visible table content and prevents phantom whitespace.

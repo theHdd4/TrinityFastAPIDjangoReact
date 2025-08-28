@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef, useCallback, useEffect } from 'react';
+import React, { useState, useMemo, useRef, useCallback, useEffect, useLayoutEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -123,6 +123,7 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
   const editingHeaderRef = useRef<string | null>(null);
   // Ref for the scrollable table area so we can forward scroll events
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const tableRef = useRef<HTMLTableElement>(null);
 
   // Ref to store header cell elements for context-menu positioning
   const headerRefs = useRef<{ [key: string]: HTMLTableCellElement | null }>({});
@@ -206,6 +207,31 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
     el.addEventListener('wheel', listener, { passive: false });
     return () => el.removeEventListener('wheel', listener);
   }, [handleInnerScroll]);
+
+  // Lock the scroll container height to the table's height while
+  // excluding stray absolutely-positioned blocks (e.g., resize handles)
+  useLayoutEffect(() => {
+    const container = scrollContainerRef.current;
+    const table = tableRef.current;
+    if (!container) return;
+
+    if (!table) {
+      container.style.height = '';
+      return;
+    }
+
+    // Remove any resize handles that were left outside the table
+    container
+      .querySelectorAll('.cursor-col-resize, .cursor-row-resize')
+      .forEach(node => {
+        if (table && !table.contains(node)) {
+          node.parentElement?.removeChild(node);
+        }
+      });
+
+    const { height } = table.getBoundingClientRect();
+    container.style.height = `${height}px`;
+  }, [data, settings.rendered]);
   // 1. Add state for filter range
   const [filterRange, setFilterRange] = useState<{ min: number; max: number; value: [number, number] } | null>(null);
 
@@ -1036,7 +1062,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                       Operation Loading...
                     </div>
                   )}
-                  <Table className="table-base">
+                  <Table ref={tableRef} className="table-base">
               <TableHeader className="table-header">
                 <TableRow className="table-header-row">
                   {settings.showRowNumbers && (
