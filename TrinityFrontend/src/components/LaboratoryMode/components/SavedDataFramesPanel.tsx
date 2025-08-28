@@ -118,7 +118,11 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle }) => {
             console.log(
               `📁 SavedDataFramesPanel looking in MinIO bucket "${data.bucket}" folder "${data.prefix}" via ${data.env_source} (CLIENT_NAME=${data.environment?.CLIENT_NAME} APP_NAME=${data.environment?.APP_NAME} PROJECT_NAME=${data.environment?.PROJECT_NAME})`
             );
-            setFiles(Array.isArray(data.files) ? data.files : []);
+            setFiles(
+              Array.isArray(data.files)
+                ? data.files.filter((f: Frame) => !!f.arrow_name)
+                : []
+            );
           } else {
             setFiles([]);
           }
@@ -183,6 +187,7 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle }) => {
   const buildTree = (frames: Frame[], pref: string): TreeNode[] => {
     const root: any = { children: {} };
     frames.forEach(f => {
+      if (!f.arrow_name) return; // skip placeholder objects like directories
       const rel = f.object_name.startsWith(pref)
         ? f.object_name.slice(pref.length)
         : f.object_name;

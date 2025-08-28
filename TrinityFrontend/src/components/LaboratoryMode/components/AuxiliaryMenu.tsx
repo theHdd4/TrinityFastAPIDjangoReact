@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import SettingsPanel from './SettingsPanel';
+import SettingsPanel from './SettingsPanel/';
 import SavedDataFramesPanel from './SavedDataFramesPanel';
 import { Sliders, Database } from 'lucide-react';
 

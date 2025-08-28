@@ -1,9 +1,6 @@
 import React, { useState, useMemo, useRef, useCallback, useEffect } from 'react';
-import axios from 'axios';
-import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -24,23 +21,41 @@ import {
 } from 'lucide-react';
 import { DataFrameData, DataFrameSettings } from '../DataFrameOperationsAtom';
 import { DATAFRAME_OPERATIONS_API, VALIDATE_API } from '@/lib/api';
+  import {
+  loadDataframe,
+  editCell as apiEditCell,
+  insertRow as apiInsertRow,
+  deleteRow as apiDeleteRow,
+  insertColumn as apiInsertColumn,
+  deleteColumn as apiDeleteColumn,
+  sortDataframe as apiSort,
+  filterRows as apiFilter,
+  renameColumn as apiRenameColumn,
+  duplicateRow as apiDuplicateRow,
+  duplicateColumn as apiDuplicateColumn,
+  moveColumn as apiMoveColumn,
+  retypeColumn as apiRetypeColumn,
+  loadDataframeByKey,
+} from '../services/dataframeOperationsApi';
 import { toast } from '@/components/ui/use-toast';
+import '@/Templates/Table/table.css';
 
 interface DataFrameOperationsCanvasProps {
   data: DataFrameData | null;
   settings: DataFrameSettings;
   onSettingsChange: (settings: Partial<DataFrameSettings>) => void;
-  onDataUpload: (data: DataFrameData) => void;
+  onDataUpload: (data: DataFrameData, backendFileId?: string) => void;
   onDataChange: (data: DataFrameData) => void;
   onClearAll: () => void;
   fileId?: string | null;
+  originalData?: DataFrameData | null;
 }
 
 function safeToString(val: any): string {
   if (val === undefined || val === null) return '';
   try {
     return val.toString();
-  } catch {
+  } catch {/* empty */
     return '';
   }
 }
@@ -67,6 +82,16 @@ function getNextColKey(headers: string[]): string {
   return key;
 }
 
+// Generic error handler for API operations
+function handleApiError(action: string, err: unknown) {
+  console.error(`[DataFrameOperations] ${action}:`, err);
+  toast({
+    title: action,
+    description: err instanceof Error ? err.message : String(err),
+    variant: 'destructive',
+  });
+}
+
 const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
   data,
   settings,
@@ -74,9 +99,9 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
   onDataUpload,
   onDataChange,
   onClearAll,
-  fileId
+  fileId,
+  originalData
 }) => {
-  console.log('Rendering DataFrameOperationsCanvas', data ? data.headers : null);
   const [currentPage, setCurrentPage] = useState(1);
 
   const [editingCell, setEditingCell] = useState<{row: number, col: string} | null>(null);
@@ -99,6 +124,66 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
 
   // Ref to store header cell elements for context-menu positioning
   const headerRefs = useRef<{ [key: string]: HTMLTableCellElement | null }>({});
+  const rowRefs = useRef<{ [key: number]: HTMLTableRowElement | null }>({});
+  const [resizingCol, setResizingCol] = useState<{ key: string; startX: number; startWidth: number } | null>(null);
+  const [resizingRow, setResizingRow] = useState<{ index: number; startY: number; startHeight: number } | null>(null);
+
+  const startColResize = (key: string, e: React.MouseEvent) => {
+    e.preventDefault();
+    const startWidth = headerRefs.current[key]?.offsetWidth || 0;
+    setResizingCol({ key, startX: e.clientX, startWidth });
+  };
+
+  const startRowResize = (index: number, e: React.MouseEvent) => {
+    e.preventDefault();
+    const startHeight = rowRefs.current[index]?.offsetHeight || 0;
+    setResizingRow({ index, startY: e.clientY, startHeight });
+  };
+
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (resizingCol) {
+        const delta = e.clientX - resizingCol.startX;
+        const newWidth = Math.max(resizingCol.startWidth + delta, 30);
+        onSettingsChange({
+          columnWidths: { ...(settings.columnWidths || {}), [resizingCol.key]: newWidth }
+        });
+      }
+      if (resizingRow) {
+        const deltaY = e.clientY - resizingRow.startY;
+        const newHeight = Math.max(resizingRow.startHeight + deltaY, 20);
+        onSettingsChange({
+          rowHeights: { ...(settings.rowHeights || {}), [resizingRow.index]: newHeight }
+        });
+      }
+    };
+    const handleMouseUp = () => {
+      if (resizingCol) setResizingCol(null);
+      if (resizingRow) setResizingRow(null);
+    };
+    if (resizingCol || resizingRow) {
+      document.addEventListener('mousemove', handleMouseMove);
+      document.addEventListener('mouseup', handleMouseUp);
+    }
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [resizingCol, resizingRow, settings.columnWidths, settings.rowHeights, onSettingsChange]);
+
+  // Clear column selection when clicking outside the selected column
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (selectedColumn) {
+        const target = e.target as HTMLElement;
+        if (!target.closest(`[data-col="${selectedColumn}"]`)) {
+          setSelectedColumn(null);
+        }
+      }
+    };
+    document.addEventListener('click', handleClickOutside);
+    return () => document.removeEventListener('click', handleClickOutside);
+  }, [selectedColumn]);
   // 1. Add state for filter range
   const [filterRange, setFilterRange] = useState<{ min: number; max: number; value: [number, number] } | null>(null);
 
@@ -117,6 +202,9 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
   // Add local state for raw min/max input in the component
   const [filterMinInput, setFilterMinInput] = useState<string | number>('');
   const [filterMaxInput, setFilterMaxInput] = useState<string | number>('');
+
+  // Loading indicator for server-side operations
+  const [operationLoading, setOperationLoading] = useState(false);
 
 
   // Helper to convert current table to CSV
@@ -138,7 +226,7 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
       });
       const data = await res.json();
       setSavedFiles(data.files || []);
-    } catch (e) {
+    } catch {/* empty */
       // Optionally handle error
     }
   };
@@ -149,7 +237,10 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
     setSaveSuccess(false);
     try {
       const csv_data = toCSV();
-      const filename = `dataframe_ops_${data?.fileName?.replace(/\.[^/.]+$/, '') || 'file'}_${Date.now()}`;
+      let filename = data?.fileName || `dataframe_${Date.now()}.arrow`;
+      if (!filename.endsWith('.arrow')) {
+        filename = filename.replace(/\.[^/.]+$/, '') + '.arrow';
+      }
       const response = await fetch(`${DATAFRAME_OPERATIONS_API}/save`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -163,6 +254,11 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
       if (saveSuccessTimeout.current) clearTimeout(saveSuccessTimeout.current);
       saveSuccessTimeout.current = setTimeout(() => setSaveSuccess(false), 2000);
       fetchSavedDataFrames(); // Refresh the saved dataframes list in the UI
+      onSettingsChange({
+        tableData: data,
+        columnWidths: settings.columnWidths,
+        rowHeights: settings.rowHeights,
+      });
       toast({
         title: 'DataFrame Saved',
         description: `${filename} saved successfully.`,
@@ -197,11 +293,21 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
   // 2. Add effect to close dropdowns on outside click or right-click
   useEffect(() => {
     const handleClick = (e: MouseEvent) => {
+      const cm = document.getElementById('df-ops-context-menu');
+      const rcm = document.getElementById('df-ops-row-context-menu');
+      if (cm?.contains(e.target as Node) || rcm?.contains(e.target as Node)) {
+        return;
+      }
       setOpenDropdown(null);
       setContextMenu(null);
       setRowContextMenu(null);
     };
     const handleContextMenu = (e: MouseEvent) => {
+      const cm = document.getElementById('df-ops-context-menu');
+      const rcm = document.getElementById('df-ops-row-context-menu');
+      if (cm?.contains(e.target as Node) || rcm?.contains(e.target as Node)) {
+        return;
+      }
       setOpenDropdown(null);
     };
     if (openDropdown || contextMenu || rowContextMenu) {
@@ -216,89 +322,46 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
 
   // Process and filter data
   const processedData = useMemo(() => {
-    console.log('processedData useMemo: settings.filters =', settings.filters);
     if (!data || !Array.isArray(data.headers) || !Array.isArray(data.rows)) {
       return { filteredRows: [], totalRows: 0, uniqueValues: {} };
     }
 
     let filteredRows = [...data.rows];
 
-    // Apply search filter
+    // Apply search filter locally
     if (settings?.searchTerm?.trim()) {
       const term = settings.searchTerm.trim();
       const termLower = term.toLowerCase();
       const exactRegex = new RegExp(`^(?:${term.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&')})$`, 'i');
-      // decorate rows with ranking score then sort
       filteredRows = filteredRows
         .map((row, idx) => {
           let score = 0;
           for (const col of data.headers) {
             const valStr = safeToString(row[col]);
             if (exactRegex.test(valStr.trim())) { score = 2; break; }
-            if (valStr.toLowerCase().includes(termLower)) { score = Math.max(score,1); }
+            if (valStr.toLowerCase().includes(termLower)) { score = Math.max(score, 1); }
           }
-          return { row, idx, score }; // keep original idx for stable sort
+          return { row, idx, score };
         })
         .sort((a, b) => {
-          if (b.row === undefined) return 0;
-          if (a.score !== b.score) return b.score - a.score; // higher score first
-          return a.idx - b.idx; // stable
+          if (a.score !== b.score) return b.score - a.score;
+          return a.idx - b.idx;
         })
         .map(item => item.row);
     }
 
-    // Apply column filters
-    Object.entries(settings?.filters || {}).forEach(([column, filterValues]) => {
-      if (!filterValues || (Array.isArray(filterValues) && filterValues.length === 0)) {
-        // Skip columns with no filter
-        return;
-      }
-      if (Array.isArray(filterValues) && filterValues.length > 0) {
-        // Categorical filter
-        filteredRows = filteredRows.filter(row => {
-          return filterValues.includes(safeToString(row[column]));
-        });
-      } else if (filterValues && typeof filterValues === 'object' && filterValues.type === 'range' && Array.isArray(filterValues.value)) {
-        // Numeric range filter
-        const [min, max] = filterValues.value;
-        filteredRows = filteredRows.filter(row => {
-          const val = Number(row[column]);
-          return !isNaN(val) && val >= min && val <= max;
-        });
-      }
-    });
-
-    // Apply sorting
-    if (Array.isArray(settings?.sortColumns) && settings.sortColumns.length > 0) {
-      // Only sort by the first column in sortColumns
-      const sort = settings.sortColumns[0];
-      if (sort) {
-        filteredRows.sort((a, b) => {
-          const aVal = a[sort.column];
-          const bVal = b[sort.column];
-          if (aVal === bVal) return 0;
-          let comparison = 0;
-          if (typeof aVal === 'number' && typeof bVal === 'number') {
-            comparison = aVal - bVal;
-          } else {
-            comparison = safeToString(aVal).localeCompare(safeToString(bVal));
-          }
-          return sort.direction === 'desc' ? -comparison : comparison;
-        });
-      }
-    }
-
-    // Get unique values for filtering
-    const uniqueValues: {[key: string]: string[]} = {};
+    // Unique values for filter UI (use originalData if available)
+    const sourceRows = originalData?.rows || data.rows;
+    const uniqueValues: { [key: string]: string[] } = {};
     data.headers.forEach(header => {
-      const values = Array.from(new Set(data.rows.map(row => safeToString(row[header]))))
+      const values = Array.from(new Set(sourceRows.map(row => safeToString(row[header]))))
         .filter(val => val !== '')
         .sort();
       uniqueValues[header] = values.slice(0, 50);
     });
 
     return { filteredRows, totalRows: filteredRows.length, uniqueValues };
-  }, [data, settings]);
+  }, [data, originalData, settings.searchTerm]);
 
   // Pagination
   const totalPages = Math.ceil(processedData.totalRows / (settings.rowsPerPage || 15));
@@ -312,55 +375,31 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
   const startIndex = (currentPage - 1) * (settings.rowsPerPage || 15);
   const paginatedRows = processedData.filteredRows.slice(startIndex, startIndex + (settings.rowsPerPage || 15));
 
-  const handleFileUpload = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      try {
-        const text = e.target?.result as string;
-        const lines = text.split('\n').filter(line => line.trim());
-        if (lines.length === 0) {
-          setUploadError('File is empty');
-          return;
-        }
-
-        const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, ''));
-        const rows = lines.slice(1).map((line) => {
-          const values = line.split(',').map(v => v.trim().replace(/"/g, ''));
-          const row: any = {};
-          headers.forEach((header, i) => {
-            const value = values[i] || '';
-            row[header] = !isNaN(parseFloat(value)) && isFinite(parseFloat(value)) ? parseFloat(value) : value;
-          });
-          return row;
-        }).filter(row => Object.values(row).some(v => v !== null && v !== ''));
-
-        const columnTypes: any = {};
-        headers.forEach(header => {
-          const hasNumbers = rows.some(row => typeof row[header] === 'number');
-          columnTypes[header] = hasNumbers ? 'number' : 'text';
-        });
-
-        const newData: DataFrameData = {
-          headers,
-          rows,
-          fileName: file.name,
-          columnTypes,
-          pinnedColumns: [],
-          frozenColumns: 0,
-          cellColors: {}
-        };
-
-        setUploadError(null);
-        onDataUpload(newData);
-        setCurrentPage(1);
-      } catch (error) {
-        setUploadError('Error parsing file');
-      }
-    };
-    reader.readAsText(file);
+    try {
+      const resp = await loadDataframe(file);
+      const columnTypes: any = {};
+      resp.headers.forEach(h => {
+        const t = resp.types[h];
+        columnTypes[h] = t.includes('float') || t.includes('int') ? 'number' : 'text';
+      });
+      const newData: DataFrameData = {
+        headers: resp.headers,
+        rows: resp.rows,
+        fileName: file.name,
+        columnTypes,
+        pinnedColumns: [],
+        frozenColumns: 0,
+        cellColors: {}
+      };
+      setUploadError(null);
+      onDataUpload(newData, resp.df_id);
+      setCurrentPage(1);
+    } catch {/* empty */
+      setUploadError('Error parsing file');
+    }
   }, [onDataUpload]);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
@@ -386,37 +425,71 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
     setIsDragOver(false);
   }, []);
 
-  const handleSort = (column: string) => {
-    const existingSort = settings.sortColumns.find(s => s.column === column);
-    let newSortColumns;
-    
-    if (existingSort) {
-      if (existingSort.direction === 'asc') {
-        newSortColumns = settings.sortColumns.map(s => 
-          s.column === column ? { ...s, direction: 'desc' as const } : s
-        );
-      } else {
-        newSortColumns = settings.sortColumns.filter(s => s.column !== column);
-      }
-    } else {
-      newSortColumns = [...settings.sortColumns, { column, direction: 'asc' as const }];
+  const handleSort = async (column: string, direction: 'asc' | 'desc') => {
+    if (!data || !fileId) return;
+    setOperationLoading(true);
+    try {
+      console.log('[DataFrameOperations] sort', column, direction);
+      const resp = await apiSort(fileId, column, direction);
+      const columnTypes: any = {};
+      resp.headers.forEach(h => {
+        const t = resp.types[h];
+        columnTypes[h] = t.includes('float') || t.includes('int') ? 'number' : 'text';
+      });
+      onDataChange({
+        headers: resp.headers,
+        rows: resp.rows,
+        fileName: data.fileName,
+        columnTypes,
+        pinnedColumns: data.pinnedColumns,
+        frozenColumns: data.frozenColumns,
+        cellColors: data.cellColors,
+      });
+      onSettingsChange({ sortColumns: [{ column, direction }], fileId: resp.df_id });
+    } catch (err) {
+      handleApiError('Sort failed', err);
+    } finally {
+      setOperationLoading(false);
     }
-    
-    onSettingsChange({ sortColumns: newSortColumns });
   };
 
-  const handleColumnFilter = (column: string, selectedValues: string[] | [number, number]) => {
-    const newFilters = { ...settings.filters };
-    if (Array.isArray(selectedValues) && selectedValues.length === 2 && typeof selectedValues[0] === 'number' && typeof selectedValues[1] === 'number') {
-      // Numeric range filter
-      newFilters[column] = { type: 'range', value: selectedValues };
-    } else if (Array.isArray(selectedValues) && selectedValues.length > 0) {
-      newFilters[column] = selectedValues;
+  const handleColumnFilter = async (column: string, selectedValues: string[] | [number, number]) => {
+    if (!data || !fileId) return;
+    setOperationLoading(true);
+    let value: any = null;
+    if (Array.isArray(selectedValues)) {
+      if (typeof selectedValues[0] === 'number') {
+        value = { min: selectedValues[0], max: selectedValues[1] };
+      } else {
+        value = selectedValues;
+      }
     } else {
-      delete newFilters[column];
+      value = selectedValues;
     }
-    onSettingsChange({ filters: newFilters });
-    setCurrentPage(1);
+    try {
+      console.log('[DataFrameOperations] filter', column, value);
+      const resp = await apiFilter(fileId, column, value);
+      const columnTypes: any = {};
+      resp.headers.forEach(h => {
+        const t = resp.types[h];
+        columnTypes[h] = t.includes('float') || t.includes('int') ? 'number' : 'text';
+      });
+      onDataChange({
+        headers: resp.headers,
+        rows: resp.rows,
+        fileName: data.fileName,
+        columnTypes,
+        pinnedColumns: data.pinnedColumns,
+        frozenColumns: data.frozenColumns,
+        cellColors: data.cellColors,
+      });
+      onSettingsChange({ filters: { ...settings.filters, [column]: selectedValues }, fileId: resp.df_id });
+      setCurrentPage(1);
+    } catch (err) {
+      handleApiError('Filter failed', err);
+    } finally {
+      setOperationLoading(false);
+    }
   };
 
 // Helper to commit a cell edit after user finishes editing
@@ -426,85 +499,108 @@ const commitCellEdit = (rowIndex: number, column: string) => {
 };
 
 // Helper to commit a header edit
-const commitHeaderEdit = (colIdx: number, value?: string) => {
-  if (!data) { setEditingHeader(null); return; }
+const commitHeaderEdit = async (colIdx: number, value?: string) => {
+  if (!data || !fileId) { setEditingHeader(null); return; }
   const newHeader = value !== undefined ? value : editingHeaderValue;
-  const latestHeaders = [...data.headers];
-  if (newHeader === latestHeaders[colIdx]) { setEditingHeader(null); return; }
-  latestHeaders[colIdx] = newHeader;
-  const newRows = data.rows.map(row => {
-    const newRow: any = {};
-    Object.entries(row).forEach(([k, v], i) => {
-      newRow[i === colIdx ? newHeader : k] = v;
+  const oldHeader = data.headers[colIdx];
+  if (newHeader === oldHeader) { setEditingHeader(null); return; }
+  try {
+    const resp = await apiRenameColumn(fileId, oldHeader, newHeader);
+    const columnTypes: any = {};
+    resp.headers.forEach(h => {
+      const t = resp.types[h];
+      columnTypes[h] = t.includes('float') || t.includes('int') ? 'number' : 'text';
     });
-    return newRow;
-  });
-  const newColumnTypes: any = {};
-  Object.entries(data.columnTypes).forEach(([k, v], i) => {
-    newColumnTypes[i === colIdx ? newHeader : k] = v;
-  });
-  onDataChange({ ...data, headers: latestHeaders, rows: newRows, columnTypes: newColumnTypes });
+    onDataChange({
+      headers: resp.headers,
+      rows: resp.rows,
+      fileName: data.fileName,
+      columnTypes,
+      pinnedColumns: data.pinnedColumns,
+      frozenColumns: data.frozenColumns,
+      cellColors: data.cellColors,
+    });
+  } catch (err) {
+    handleApiError('Rename column failed', err);
+  }
   setEditingHeader(null);
 };
 
 // Original immediate update util (kept for programmatic usage)
-const handleCellEdit = (rowIndex: number, column: string, newValue: string) => {
+  const handleCellEdit = async (rowIndex: number, column: string, newValue: string) => {
     resetSaveSuccess();
-    if (!data) return;
-    
-    const updatedRows = [...data.rows];
+    if (!data || !fileId) return;
     const globalRowIndex = startIndex + rowIndex;
-    
-    let parsedValue: any = newValue;
-    if (data.columnTypes[column] === 'number' && newValue) {
-      const numValue = parseFloat(newValue);
-      if (!isNaN(numValue)) {
-        parsedValue = numValue;
-      }
+    try {
+      const resp = await apiEditCell(fileId, globalRowIndex, column, newValue);
+      const columnTypes: any = {};
+      resp.headers.forEach(h => {
+        const t = resp.types[h];
+        columnTypes[h] = t.includes('float') || t.includes('int') ? 'number' : 'text';
+      });
+      onDataChange({
+        headers: resp.headers,
+        rows: resp.rows,
+        fileName: data.fileName,
+        columnTypes,
+        pinnedColumns: data.pinnedColumns,
+        frozenColumns: data.frozenColumns,
+        cellColors: data.cellColors
+      });
+    } catch (err) {
+      handleApiError('Edit cell failed', err);
     }
-    
-    updatedRows[globalRowIndex] = {
-      ...updatedRows[globalRowIndex],
-      [column]: parsedValue
-    };
-
-    onDataChange({
-      ...data,
-      rows: updatedRows
-    });
   };
 
-  const handleAddRow = () => {
+  const handleAddRow = async () => {
     resetSaveSuccess();
-    if (!data) return;
-    const newRow: any = {};
-    data.headers.forEach(header => {
-      newRow[header] = data.columnTypes[header] === 'number' ? 0 : '';
-    });
-    
-    onDataChange({
-      ...data,
-      rows: [...data.rows, newRow]
-    });
+    if (!data || !fileId) return;
+    const idx = data.rows.length > 0 ? data.rows.length - 1 : 0;
+    const dir: 'above' | 'below' = data.rows.length > 0 ? 'below' : 'above';
+    try {
+      const resp = await apiInsertRow(fileId, idx, dir);
+      const columnTypes: any = {};
+      resp.headers.forEach(h => {
+        const t = resp.types[h];
+        columnTypes[h] = t.includes('float') || t.includes('int') ? 'number' : 'text';
+      });
+      onDataChange({
+        headers: resp.headers,
+        rows: resp.rows,
+        fileName: data.fileName,
+        columnTypes,
+        pinnedColumns: data.pinnedColumns,
+        frozenColumns: data.frozenColumns,
+        cellColors: data.cellColors,
+      });
+    } catch (err) {
+      handleApiError('Insert row failed', err);
+    }
   };
 
-  const handleAddColumn = () => {
+  const handleAddColumn = async () => {
     resetSaveSuccess();
-    if (!data) return;
+    if (!data || !fileId) return;
     const newColumnName = `Column_${data.headers.length + 1}`;
-    
-    onDataChange({
-      ...data,
-      headers: [...data.headers, newColumnName],
-      columnTypes: {
-        ...data.columnTypes,
-        [newColumnName]: 'text'
-      },
-      rows: data.rows.map(row => ({
-        ...row,
-        [newColumnName]: ''
-      }))
-    });
+    try {
+      const resp = await apiInsertColumn(fileId, data.headers.length, newColumnName, '');
+      const columnTypes: any = {};
+      resp.headers.forEach(h => {
+        const t = resp.types[h];
+        columnTypes[h] = t.includes('float') || t.includes('int') ? 'number' : 'text';
+      });
+      onDataChange({
+        headers: resp.headers,
+        rows: resp.rows,
+        fileName: data.fileName,
+        columnTypes,
+        pinnedColumns: data.pinnedColumns,
+        frozenColumns: data.frozenColumns,
+        cellColors: data.cellColors,
+      });
+    } catch (err) {
+      handleApiError('Insert column failed', err);
+    }
   };
 
   
@@ -538,7 +634,29 @@ const handleCellEdit = (rowIndex: number, column: string, newValue: string) => {
     }
   };
 
-  const handleDragEnd = () => {
+  const handleDragEnd = async () => {
+    if (draggedCol && data && fileId) {
+      const toIndex = data.headers.indexOf(draggedCol);
+      try {
+        const resp = await apiMoveColumn(fileId, draggedCol, toIndex);
+        const columnTypes: any = {};
+        resp.headers.forEach(h => {
+          const t = resp.types[h];
+          columnTypes[h] = t.includes('float') || t.includes('int') ? 'number' : 'text';
+        });
+        onDataChange({
+          headers: resp.headers,
+          rows: resp.rows,
+          fileName: data.fileName,
+          columnTypes,
+          pinnedColumns: data.pinnedColumns,
+          frozenColumns: data.frozenColumns,
+          cellColors: data.cellColors,
+        });
+      } catch (err) {
+        handleApiError('Move column failed', err);
+      }
+    }
     setDraggedCol(null);
   };
 
@@ -549,14 +667,14 @@ const handleCellEdit = (rowIndex: number, column: string, newValue: string) => {
 
 const handleContextMenu = (e: React.MouseEvent, col: string) => {
   e.preventDefault();
-  setContextMenu({ x: e.clientX, y: e.clientY, col, colIdx: data?.headers.indexOf(col) || -1 });
+  const idx = data ? data.headers.indexOf(col) : -1;
+  setContextMenu({ x: e.clientX, y: e.clientY, col, colIdx: idx });
 };
 
 const handleSortAsc = (colIdx: number) => {
   if (!data) return;
   const col = data.headers[colIdx];
-  // Update settings to only sort by this column ascending
-  onSettingsChange({ sortColumns: [{ column: col, direction: 'asc' }] });
+  handleSort(col, 'asc');
   setContextMenu(null);
   setOpenDropdown(null);
 };
@@ -564,8 +682,7 @@ const handleSortAsc = (colIdx: number) => {
 const handleSortDesc = (colIdx: number) => {
   if (!data) return;
   const col = data.headers[colIdx];
-  // Update settings to only sort by this column descending
-  onSettingsChange({ sortColumns: [{ column: col, direction: 'desc' }] });
+  handleSort(col, 'desc');
   setContextMenu(null);
   setOpenDropdown(null);
 };
@@ -580,17 +697,36 @@ const handleClearSort = () => {
 };
 
 // Update handleClearFilter to accept a column name (string)
-const handleClearFilter = (col: string) => {
-  if (!data) return;
+const handleClearFilter = async (col: string) => {
+  if (!data || !settings.selectedFile) return;
   const newFilters = { ...settings.filters };
-  console.log('handleClearFilter called for column:', col, 'before:', newFilters);
   delete newFilters[col];
-  console.log('after delete:', newFilters);
-  // Trigger parent to update filters only (avoids accidentally sending stale copies of other settings)
-  onSettingsChange({ filters: { ...newFilters } });
+  try {
+    setOperationLoading(true);
+    console.log('[DataFrameOperations] clear filter', col);
+    const resp = await loadDataframeByKey(settings.selectedFile);
+    const columnTypes: any = {};
+    resp.headers.forEach(h => {
+      const t = resp.types[h];
+      columnTypes[h] = t.includes('float') || t.includes('int') ? 'number' : 'text';
+    });
+    onDataChange({
+      headers: resp.headers,
+      rows: resp.rows,
+      fileName: data.fileName,
+      columnTypes,
+      pinnedColumns: data.pinnedColumns,
+      frozenColumns: data.frozenColumns,
+      cellColors: data.cellColors,
+    });
+    onSettingsChange({ filters: { ...newFilters }, fileId: resp.df_id });
+  } catch (err) {
+    handleApiError('Clear filter failed', err);
+  } finally {
+    setOperationLoading(false);
+  }
   setFilterRange(null); // Reset numeric filter range UI
   setCurrentPage(1);
-  // Optionally reset local filterMinInput/filterMaxInput if needed
   setFilterMinInput('');
   setFilterMaxInput('');
 };
@@ -616,74 +752,177 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
   // Add a ref to each column header and store its bounding rect when right-clicked
 
   // 1. Fix column insert/delete logic
-  const handleInsertColumn = (colIdx: number) => {
-    if (!data) return;
-    // Generate a visually blank unique key ("", " ", "  ", ...)
-    let newColKey = '';
-    while (data.headers.includes(newColKey)) {
-      newColKey += ' ';
-    }
-    // Insert the new (blank-looking) key into headers
-    const originalHeaders = [...data.headers];
-    const newHeaders = [...data.headers];
-    newHeaders.splice(colIdx, 0, newColKey);
-    // Add blank value for each row
-    const newRows = data.rows.map(row => {
-      const newRow: any = {};
-      newHeaders.forEach((h, i) => {
-        if (i === colIdx) {
-          newRow[h] = '';
-        } else if (i < colIdx) {
-          newRow[h] = row[originalHeaders[i]];
-        } else {
-          newRow[h] = row[originalHeaders[i - 1]];
-        }
+  const handleInsertColumn = async (colIdx: number) => {
+    resetSaveSuccess();
+    if (!data || !fileId) return;
+    const newColKey = getNextColKey(data.headers);
+    try {
+      const resp = await apiInsertColumn(fileId, colIdx, newColKey, '');
+      const columnTypes: any = {};
+      resp.headers.forEach(h => {
+        const t = resp.types[h];
+        columnTypes[h] = t.includes('float') || t.includes('int') ? 'number' : 'text';
       });
-      return newRow;
-    });
-    // Add to columnTypes
-    const newColumnTypes: { [key: string]: 'number' | 'date' | 'text' } = { ...data.columnTypes };
-    newColumnTypes[newColKey] = 'text';
-    onDataChange({ ...data, headers: newHeaders, rows: newRows, columnTypes: newColumnTypes });
-  
+      onDataChange({
+        headers: resp.headers,
+        rows: resp.rows,
+        fileName: data.fileName,
+        columnTypes,
+        pinnedColumns: data.pinnedColumns,
+        frozenColumns: data.frozenColumns,
+        cellColors: data.cellColors,
+      });
+    } catch (err) {
+      handleApiError('Insert column failed', err);
+    }
   };
 
-  const handleDeleteColumn = (colIdx: number) => {
-    if (!data) return;
+  const handleDeleteColumn = async (colIdx: number) => {
+    resetSaveSuccess();
+    if (!data || !fileId) return;
     if (colIdx < 0 || colIdx >= data.headers.length) return;
     const col = data.headers[colIdx];
-    const newHeaders = data.headers.filter((_, i) => i !== colIdx);
-    const newRows = data.rows.map(row => {
-      const newRow: any = {};
-      newHeaders.forEach(h => {
-        newRow[h] = row[h];
+    try {
+      const resp = await apiDeleteColumn(fileId, col);
+      const columnTypes: any = {};
+      resp.headers.forEach(h => {
+        const t = resp.types[h];
+        columnTypes[h] = t.includes('float') || t.includes('int') ? 'number' : 'text';
       });
-      return newRow;
-    });
-    const newColumnTypes = { ...data.columnTypes };
-    delete newColumnTypes[col];
-    onDataChange({ ...data, headers: newHeaders, rows: newRows, columnTypes: newColumnTypes });
-  
+      onDataChange({
+        headers: resp.headers,
+        rows: resp.rows,
+        fileName: data.fileName,
+        columnTypes,
+        pinnedColumns: data.pinnedColumns,
+        frozenColumns: data.frozenColumns,
+        cellColors: data.cellColors,
+      });
+    } catch (err) {
+      handleApiError('Delete column failed', err);
+    }
+  };
+
+  const handleDuplicateColumn = async (colIdx: number) => {
+    resetSaveSuccess();
+    if (!data || !fileId) return;
+    const col = data.headers[colIdx];
+    let newName = `${col}_copy`;
+    while (data.headers.includes(newName)) {
+      newName += '_copy';
+    }
+    try {
+      const resp = await apiDuplicateColumn(fileId, col, newName);
+      const columnTypes: any = {};
+      resp.headers.forEach(h => {
+        const t = resp.types[h];
+        columnTypes[h] = t.includes('float') || t.includes('int') ? 'number' : 'text';
+      });
+      onDataChange({
+        headers: resp.headers,
+        rows: resp.rows,
+        fileName: data.fileName,
+        columnTypes,
+        pinnedColumns: data.pinnedColumns,
+        frozenColumns: data.frozenColumns,
+        cellColors: data.cellColors,
+      });
+    } catch (err) {
+      handleApiError('Duplicate column failed', err);
+    }
   };
 
   // Row insert / delete handlers
-  const handleInsertRow = (position: 'above' | 'below', rowIdx: number) => {
-    if (!data) return;
-    const idx = Math.max(0, Math.min(rowIdx, data.rows.length - 1));
-    const newRow: any = {};
-    data.headers.forEach(h => {
-      newRow[h] = '';
-    });
-    const newRows = [...data.rows];
-    newRows.splice(position === 'above' ? idx : idx + 1, 0, newRow);
-    onDataChange({ ...data, rows: newRows });
+  const handleInsertRow = async (position: 'above' | 'below', rowIdx: number) => {
+    if (!data || !fileId) return;
+    try {
+      const resp = await apiInsertRow(fileId, rowIdx, position);
+      const columnTypes: any = {};
+      resp.headers.forEach(h => {
+        const t = resp.types[h];
+        columnTypes[h] = t.includes('float') || t.includes('int') ? 'number' : 'text';
+      });
+      onDataChange({
+        headers: resp.headers,
+        rows: resp.rows,
+        fileName: data.fileName,
+        columnTypes,
+        pinnedColumns: data.pinnedColumns,
+        frozenColumns: data.frozenColumns,
+        cellColors: data.cellColors,
+      });
+    } catch (err) {
+      handleApiError('Insert row failed', err);
+    }
   };
 
-  const handleDeleteRow = (rowIdx: number) => {
-    if (!data) return;
-    if (rowIdx < 0 || rowIdx >= data.rows.length) return;
-    const newRows = data.rows.filter((_, i) => i !== rowIdx);
-    onDataChange({ ...data, rows: newRows });
+  const handleDuplicateRow = async (rowIdx: number) => {
+    if (!data || !fileId) return;
+    try {
+      const resp = await apiDuplicateRow(fileId, rowIdx);
+      const columnTypes: any = {};
+      resp.headers.forEach(h => {
+        const t = resp.types[h];
+        columnTypes[h] = t.includes('float') || t.includes('int') ? 'number' : 'text';
+      });
+      onDataChange({
+        headers: resp.headers,
+        rows: resp.rows,
+        fileName: data.fileName,
+        columnTypes,
+        pinnedColumns: data.pinnedColumns,
+        frozenColumns: data.frozenColumns,
+        cellColors: data.cellColors,
+      });
+    } catch (err) {
+      handleApiError('Duplicate row failed', err);
+    }
+  };
+
+  const handleRetypeColumn = async (col: string, newType: 'number' | 'text') => {
+    if (!data || !fileId) return;
+    try {
+      const resp = await apiRetypeColumn(fileId, col, newType === 'text' ? 'string' : newType);
+      const columnTypes: any = {};
+      resp.headers.forEach(h => {
+        const t = resp.types[h];
+        columnTypes[h] = t.includes('float') || t.includes('int') ? 'number' : 'text';
+      });
+      onDataChange({
+        headers: resp.headers,
+        rows: resp.rows,
+        fileName: data.fileName,
+        columnTypes,
+        pinnedColumns: data.pinnedColumns,
+        frozenColumns: data.frozenColumns,
+        cellColors: data.cellColors,
+      });
+    } catch (err) {
+      handleApiError('Retype column failed', err);
+    }
+  };
+
+  const handleDeleteRow = async (rowIdx: number) => {
+    if (!data || !fileId) return;
+    try {
+      const resp = await apiDeleteRow(fileId, rowIdx);
+      const columnTypes: any = {};
+      resp.headers.forEach(h => {
+        const t = resp.types[h];
+        columnTypes[h] = t.includes('float') || t.includes('int') ? 'number' : 'text';
+      });
+      onDataChange({
+        headers: resp.headers,
+        rows: resp.rows,
+        fileName: data.fileName,
+        columnTypes,
+        pinnedColumns: data.pinnedColumns,
+        frozenColumns: data.frozenColumns,
+        cellColors: data.cellColors,
+      });
+    } catch (err) {
+      handleApiError('Delete row failed', err);
+    }
   };
 
 
@@ -697,15 +936,23 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
         className="hidden"
       />
       
-      {/* File name above table, small font, only if present */}
-      {/* Remove the file name display from the card (delete the block that renders data.fileName) */}
-      {/* Shift the table upwards to use the freed space */}
-      {/* Move the pagination controls so they are always visible directly below the table */}
-      <div className="h-full flex flex-col bg-background">
-        <div className="flex-shrink-0 p-4 border-b border-border bg-card" />
+      <div className="flex flex-col">
+        {data?.fileName && (
+          <div className="border-b border-blue-200 bg-blue-50">
+            <div className="flex items-center px-6 py-4">
+              <div className="relative">
+                <div className="flex items-center space-x-2 px-5 py-3 rounded-t-xl text-sm font-medium border-t border-l border-r border-slate-200 bg-white -mb-px shadow-lg">
+                  <FileText className="w-4 h-4" />
+                  <span>{data.fileName.split('/').pop()}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+        <div className="p-4 overflow-hidden">
+          <div className="mx-auto max-w-screen-2xl rounded-2xl border border-slate-200 bg-white shadow-sm flex flex-col">
         {/* Controls section */}
-        <div className="flex-shrink-0 p-4 border-b border-border bg-card/50">
-          <div className="flex items-center justify-between">
+        <div className="flex-shrink-0 flex items-center justify-between border-b border-slate-200 px-5 py-3">
             <div className="flex items-center space-x-4">
               <div className="relative">
                 <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
@@ -732,28 +979,38 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
               </Button>
             </div>
           </div>
-        </div>
 
-        {/* Table section - Excel-like appearance */}
-        <div className="flex-1 overflow-auto bg-white">
-          {/* Placeholder for when no data is loaded */}
-          {data && !Array.isArray(data.headers) || data.headers.length === 0 ? (
-            <div className="flex flex-1 items-center justify-center bg-gray-50">
-              <div className="border border-gray-200 bg-white rounded-lg p-4 text-center max-w-md w-full mx-auto">
-                <p className="p-4 text-center text-gray-500">No results to display. Upload a CSV or Excel file to see results here.</p>
+          {/* Table section - Excel-like appearance */}
+          <div className="overflow-auto">
+            {/* Placeholder for when no data is loaded */}
+            {!data || !Array.isArray(data.headers) || data.headers.length === 0 ? (
+              <div className="flex flex-1 items-center justify-center bg-gray-50">
+                <div className="border border-gray-200 bg-white rounded-lg p-4 text-center max-w-md w-full mx-auto">
+                  <p className="p-4 text-center text-gray-500">No results to display. Upload a CSV or Excel file to see results here.</p>
+                </div>
               </div>
-            </div>
-          ) : (
-            <Table className="border-collapse w-full">
-              <TableHeader className="bg-gradient-to-r from-gray-50 to-green-50 border-b-2 border-gray-100">
-                <TableRow className="bg-gradient-to-r from-gray-50 to-green-50 border-b-2 border-gray-100">
+            ) : (
+              <div className="table-wrapper">
+                <div className="table-edge-left" />
+                <div className="table-edge-right" />
+                <div className="table-overflow relative">
+                  {operationLoading && (
+                    <div className="absolute inset-0 bg-white/70 flex items-center justify-center z-10 text-sm text-slate-700">
+                      Operation Loading...
+                    </div>
+                  )}
+                  <Table className="table-base">
+              <TableHeader className="table-header">
+                <TableRow className="table-header-row">
                   {settings.showRowNumbers && (
-                    <TableHead className="w-16 text-center font-bold text-gray-800 text-center py-4 bg-white border-r border-gray-200">#</TableHead>
+                    <TableHead className="table-header-cell w-16 text-center">#</TableHead>
                   )}
                   {Array.isArray(data?.headers) && data.headers.map((header, colIdx) => (
                     <TableHead
                       key={header + '-' + colIdx}
-                      className={`font-bold text-gray-800 text-center py-4 bg-white border-r border-gray-200 ${selectedColumn === header ? 'border-2 border-blue-500' : ''}`}
+                      data-col={header}
+                      className={`table-header-cell text-center bg-white border-r border-gray-200 relative ${selectedColumn === header ? 'border-2 border-black' : ''}`}
+                      style={settings.columnWidths?.[header] ? { width: settings.columnWidths[header], minWidth: settings.columnWidths[header] } : undefined}
                       draggable
                       onDragStart={() => handleDragStart(header)}
                       onDragOver={e => handleDragOver(e, header)}
@@ -812,17 +1069,26 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                           {headerDisplayNames[header] ?? header}
                         </div>
                       )}
+                      <div
+                        className="absolute top-0 right-0 h-full w-1 cursor-col-resize"
+                        onMouseDown={e => startColResize(header, e)}
+                      />
                     </TableHead>
                   ))}
-                  <TableHead className="w-8 bg-white border-l border-gray-200" />
+                  <TableHead className="table-header-cell w-8" />
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {paginatedRows.map((row, rowIndex) => (
-                  <TableRow key={rowIndex} className="hover:bg-green-50 border-b border-green-200">
+                  <TableRow
+                    key={rowIndex}
+                    className="table-row relative"
+                    ref={el => { if (rowRefs.current) rowRefs.current[startIndex + rowIndex] = el; }}
+                    style={{ height: settings.rowHeights?.[startIndex + rowIndex] }}
+                  >
                     {settings.showRowNumbers && (
                       <TableCell
-                        className="w-16 text-center bg-white border-r border-gray-200 text-xs text-gray-700 font-medium px-2 py-2"
+                        className="table-cell w-16 text-center text-xs font-medium"
                         onContextMenu={e => {
                           e.preventDefault();
                           setRowContextMenu({ x: e.clientX, y: e.clientY, rowIdx: startIndex + rowIndex });
@@ -835,12 +1101,14 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                     {(data.headers || []).map((column, colIdx) => {
                       const cellValue = row[column];
                       const isEditing = editingCell?.row === rowIndex && editingCell?.col === column;
-                      return (
-                        <TableCell
-                          key={colIdx}
-                          className={`py-4 text-center font-medium text-gray-700 bg-white border-r border-gray-200 min-w-[120px] ${selectedCell?.row === rowIndex && selectedCell?.col === column ? 'border border-blue-400' : ''}`}
-                          onClick={() => setSelectedCell({ row: rowIndex, col: column })}
-                          onDoubleClick={() => {
+                        return (
+                          <TableCell
+                            key={colIdx}
+                            data-col={column}
+                            className={`table-cell text-center font-medium ${selectedCell?.row === rowIndex && selectedCell?.col === column ? 'border border-blue-400' : selectedColumn === column ? 'border border-black' : ''}`}
+                            style={settings.columnWidths?.[column] ? { width: settings.columnWidths[column], minWidth: settings.columnWidths[column] } : undefined}
+                            onClick={() => handleCellClick(rowIndex, column)}
+                            onDoubleClick={() => {
                             // Always allow cell editing regardless of enableEditing setting
                             setEditingCell({ row: rowIndex, col: column });
                             setEditingCellValue(safeToString(row[column]));
@@ -875,12 +1143,18 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                         </TableCell>
                       );
                     })}
-                    <TableCell className="w-8 bg-green-50 border-l border-green-200">
+                    <TableCell className="table-cell w-8">
                     </TableCell>
+                    <div
+                      className="absolute bottom-0 left-0 w-full h-1 cursor-row-resize"
+                      onMouseDown={e => startRowResize(startIndex + rowIndex, e)}
+                    />
                   </TableRow>
                 ))}
               </TableBody>
             </Table>
+          </div>
+        </div>
           )}
           {totalPages > 1 && (
             <div className="flex flex-col items-center py-4">
@@ -933,8 +1207,9 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
             </div>
           )}
         </div>
-      </div>
-      {contextMenu && data && typeof contextMenu.col === 'string' && (
+        </div>
+        </div>
+        {contextMenu && data && typeof contextMenu.col === 'string' && (
         <div
           id="df-ops-context-menu"
           style={{ position: 'fixed', top: contextMenu.y, left: contextMenu.x, zIndex: 1000, background: 'white', border: '1px solid #ddd', borderRadius: 6, boxShadow: '0 2px 8px #0001', minWidth: 200 }}
@@ -942,19 +1217,19 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
           <div className="px-3 py-2 text-xs font-semibold border-b border-gray-200" style={{color:'#222'}}>Column: {contextMenu.col}</div>
           {/* Sort */}
           <div className="relative group">
-            <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onMouseDown={e => { e.stopPropagation(); setOpenDropdown(openDropdown === 'sort' ? null : 'sort'); }}>
+            <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={e => { e.stopPropagation(); setOpenDropdown(openDropdown === 'sort' ? null : 'sort'); }}>
               Sort <span style={{fontSize:'10px',marginLeft:4}}>▶</span>
             </button>
             {openDropdown === 'sort' && (
               <div className="absolute left-full top-0 bg-white border border-gray-200 rounded shadow-md min-w-[160px] z-50">
-                <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onMouseDown={() => { handleSortAsc(contextMenu.colIdx); setContextMenu(null); setOpenDropdown(null); }}>Sort Ascending</button>
-                <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onMouseDown={() => { handleSortDesc(contextMenu.colIdx); setContextMenu(null); setOpenDropdown(null); }}>Sort Descending</button>
+                <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleSortAsc(contextMenu.colIdx); setContextMenu(null); setOpenDropdown(null); }}>Sort Ascending</button>
+                <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleSortDesc(contextMenu.colIdx); setContextMenu(null); setOpenDropdown(null); }}>Sort Descending</button>
               </div>
             )}
           </div>
           {/* Filter */}
           <div className="relative group">
-            <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onMouseDown={e => { e.stopPropagation(); setOpenDropdown(openDropdown === 'filter' ? null : 'filter'); }}>
+            <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={e => { e.stopPropagation(); setOpenDropdown(openDropdown === 'filter' ? null : 'filter'); }}>
               Filter <span style={{fontSize:'10px',marginLeft:4}}>▶</span>
             </button>
             {openDropdown === 'filter' && (
@@ -1067,21 +1342,22 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                           />
                           <span className="text-xs">{max}</span>
                         </div>
-                        <button
-                          className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100 border border-gray-200 rounded mt-2"
-                          onMouseDown={() => { handleColumnFilter(contextMenu.col, range as [number, number]); setContextMenu(null); setOpenDropdown(null); }}
-                        >Apply Filter</button>
-                        <button
-                          className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100 border border-gray-200 rounded"
-                          onMouseDown={e => { 
-                            e.preventDefault(); 
-                            e.stopPropagation(); 
-                            console.log('Clear Filter button clicked for column:', contextMenu.col);
-                            handleClearFilter(contextMenu.col); 
-                            setContextMenu(null); 
-                            setOpenDropdown(null); 
-                          }}
-                        >Clear Filter</button>
+                        <div className="flex items-center gap-2 mt-2">
+                          <button
+                            className="px-2 py-1 text-xs rounded bg-blue-600 hover:bg-blue-700 text-white"
+                            onClick={() => { handleColumnFilter(contextMenu.col, range as [number, number]); setContextMenu(null); setOpenDropdown(null); }}
+                          >Apply Filter</button>
+                          <button
+                            className="px-2 py-1 text-xs rounded bg-blue-600 hover:bg-blue-700 text-white"
+                            onClick={e => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              handleClearFilter(contextMenu.col);
+                              setContextMenu(null);
+                              setOpenDropdown(null);
+                            }}
+                          >Clear Filter</button>
+                        </div>
                       </div>
                     );
                   })()
@@ -1091,10 +1367,10 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                       <label key={value} className="flex items-center space-x-2 text-xs cursor-pointer" style={{userSelect:'none'}} onMouseDown={e => e.stopPropagation()}>
                         <input
                           type="checkbox"
-                          checked={filters[contextMenu.col]?.includes(value) ?? false}
+                          checked={Array.isArray(filters[contextMenu.col]) && filters[contextMenu.col].includes(value)}
                           onMouseDown={e => e.stopPropagation()}
                           onChange={e => {
-                            const currentFilters = filters[contextMenu.col] || [];
+                            const currentFilters = Array.isArray(filters[contextMenu.col]) ? filters[contextMenu.col] : [];
                             const newFilters = e.target.checked
                               ? [...currentFilters, value]
                               : currentFilters.filter(v => v !== value);
@@ -1105,26 +1381,60 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                         <span className="truncate">{value}</span>
                       </label>
                     ))}
-                    <button
-                      className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100 border border-gray-200 rounded mt-2"
-                      onMouseDown={e => { 
-                        e.preventDefault(); 
-                        e.stopPropagation(); 
-                        console.log('Clear Filter button clicked for column:', contextMenu.col);
-                        handleClearFilter(contextMenu.col); 
-                        setContextMenu(null); 
-                        setOpenDropdown(null); 
-                      }}
-                    >Clear Filter</button>
+                    <div className="mt-2">
+                      <button
+                        className="px-2 py-1 text-xs rounded bg-blue-600 hover:bg-blue-700 text-white"
+                        onClick={e => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          handleClearFilter(contextMenu.col);
+                          setContextMenu(null);
+                          setOpenDropdown(null);
+                        }}
+                      >Clear Filter</button>
+                    </div>
                   </div>
                 )}
               </div>
             )}
           </div>
           {/* Insert */}
-          <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onMouseDown={() => { handleInsertColumn(contextMenu.colIdx); setContextMenu(null); }}>Insert</button>
+          <button
+            className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100"
+            onClick={e => {
+              e.preventDefault();
+              e.stopPropagation();
+              handleInsertColumn(contextMenu.colIdx);
+              setContextMenu(null);
+            }}
+          >Insert</button>
+          {/* Duplicate */}
+          <button
+            className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100"
+            onClick={e => {
+              e.preventDefault();
+              e.stopPropagation();
+              handleDuplicateColumn(contextMenu.colIdx);
+              setContextMenu(null);
+            }}
+          >Duplicate</button>
           {/* Delete */}
-          <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onMouseDown={() => { handleDeleteColumn(contextMenu.colIdx); setContextMenu(null); }}>Delete</button>
+          <button
+            className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100"
+            onClick={e => {
+              e.preventDefault();
+              e.stopPropagation();
+              handleDeleteColumn(contextMenu.colIdx);
+              setContextMenu(null);
+            }}
+          >Delete</button>
+          {/* Retype */}
+          {data && data.columnTypes[contextMenu.col] !== 'number' && (
+            <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleRetypeColumn(contextMenu.col, 'number'); setContextMenu(null); }}>Convert to Number</button>
+          )}
+          {data && data.columnTypes[contextMenu.col] !== 'text' && (
+            <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleRetypeColumn(contextMenu.col, 'text'); setContextMenu(null); }}>Convert to Text</button>
+          )}
           <div className="px-3 py-2 text-xs text-gray-400">Right-click to close</div>
         </div>
       )}
@@ -1134,11 +1444,13 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
           style={{ position: 'fixed', top: rowContextMenu.y, left: rowContextMenu.x, zIndex: 1000, background: 'white', border: '1px solid #ddd', borderRadius: 6, boxShadow: '0 2px 8px #0001', minWidth: 140 }}
         >
           <div className="px-3 py-2 text-xs font-semibold border-b border-gray-200" style={{color:'#222'}}>Row: {rowContextMenu.rowIdx + 1}</div>
-          <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onMouseDown={e => { e.preventDefault(); e.stopPropagation(); handleInsertRow('above', rowContextMenu.rowIdx); setRowContextMenu(null); }}>Insert</button>
-          <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onMouseDown={e => { e.preventDefault(); e.stopPropagation(); handleDeleteRow(rowContextMenu.rowIdx); setRowContextMenu(null); }}>Delete</button>
+          <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={e => { e.preventDefault(); e.stopPropagation(); handleInsertRow('above', rowContextMenu.rowIdx); setRowContextMenu(null); }}>Insert</button>
+          <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={e => { e.preventDefault(); e.stopPropagation(); handleDuplicateRow(rowContextMenu.rowIdx); setRowContextMenu(null); }}>Duplicate</button>
+          <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={e => { e.preventDefault(); e.stopPropagation(); handleDeleteRow(rowContextMenu.rowIdx); setRowContextMenu(null); }}>Delete</button>
           <div className="px-3 py-2 text-xs text-gray-400">Right-click to close</div>
         </div>
       )}
+      </div>
     </>
   );
 };

@@ -2,6 +2,7 @@
 
 from functools import lru_cache
 from typing import Optional
+import os
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -24,9 +25,9 @@ class Settings(BaseSettings):
     # Application Configuration
     app_name: str = "Scope Selection API"
     app_version: str = "1.0.0"
-    debug: bool = False
-    host: str = "127.0.0.1"
-    port: int = 8012
+    debug: bool = os.getenv("DEBUG", "false").lower() == "true"
+    host: str = os.getenv("HOST", "127.0.0.1")
+    port: int = int(os.getenv("PORT", "8012"))
     
     # API Configuration
     api_prefix: str = "/api/v1"
