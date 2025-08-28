@@ -17,7 +17,7 @@ import { REGISTRY_API, CLASSIFIER_API } from '@/lib/api';
 import { fetchDimensionMapping } from '@/lib/dimensions';
 import { molecules } from '@/components/MoleculeList/data/molecules';
 import { safeStringify } from '@/utils/safeStringify';
-import { serializeProject, sanitizeLabConfig } from '@/utils/projectStorage';
+import { saveCurrentProject, sanitizeLabConfig } from '@/utils/projectStorage';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { useExhibitionStore } from '@/components/ExhibitionMode/store/exhibitionStore';
 import { useAuth } from '@/contexts/AuthContext';
@@ -170,7 +170,7 @@ const Projects = () => {
       });
       if (res.ok) {
         const project = await res.json();
-        localStorage.setItem('current-project', serializeProject(project));
+        saveCurrentProject(project);
 
         try {
           const envRes = await fetch(`${REGISTRY_API}/projects/${project.id}/`, {
@@ -279,7 +279,7 @@ const Projects = () => {
           try {
             const obj = JSON.parse(stored);
             if (obj && obj.id === updated.id) {
-              localStorage.setItem('current-project', serializeProject(updated));
+              saveCurrentProject(updated);
             }
           } catch {
             /* ignore */
@@ -324,7 +324,7 @@ const Projects = () => {
   };
 
   const openProject = async (project: Project) => {
-    localStorage.setItem('current-project', serializeProject(project));
+    saveCurrentProject(project);
     resetLaboratory();
     resetExhibition();
     try {
