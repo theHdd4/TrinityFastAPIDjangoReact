@@ -123,6 +123,7 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
   const editingHeaderRef = useRef<string | null>(null);
   // Ref for the scrollable table area so we can forward scroll events
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const innerWrapperRef = useRef<HTMLDivElement>(null);
   const tableRef = useRef<HTMLTableElement>(null);
 
   // Ref to store header cell elements for context-menu positioning
@@ -187,26 +188,19 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
     document.addEventListener('click', handleClickOutside);
     return () => document.removeEventListener('click', handleClickOutside);
   }, [selectedColumn]);
-  // Forward scroll events to the window when the internal container can't scroll further
-  const handleInnerScroll = useCallback((e: WheelEvent) => {
-    const el = scrollContainerRef.current;
-    if (!el) return;
-    const { scrollTop, scrollHeight, clientHeight } = el;
-    const atTop = scrollTop === 0;
-    const atBottom = scrollTop + clientHeight >= scrollHeight;
-    if ((e.deltaY < 0 && atTop) || (e.deltaY > 0 && atBottom)) {
-      e.preventDefault();
-      window.scrollBy({ top: e.deltaY, behavior: 'auto' });
-    }
-  }, []);
-
+  // Measure the inner wrapper to lock the scroll container height
   useEffect(() => {
-    const el = scrollContainerRef.current;
-    if (!el) return;
-    const listener = (e: WheelEvent) => handleInnerScroll(e);
-    el.addEventListener('wheel', listener, { passive: false });
-    return () => el.removeEventListener('wheel', listener);
-  }, [handleInnerScroll]);
+    const container = scrollContainerRef.current;
+    const inner = innerWrapperRef.current;
+    if (!container || !inner) return;
+    let frame = requestAnimationFrame(() => {
+      frame = requestAnimationFrame(() => {
+        const height = inner.getBoundingClientRect().height;
+        container.style.height = `${height}px`;
+      });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [data, settings]);
 
   // 1. Add state for filter range
   const [filterRange, setFilterRange] = useState<{ min: number; max: number; value: [number, number] } | null>(null);
@@ -1021,6 +1015,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
 
           {/* Table section - Excel-like appearance */}
         <div ref={scrollContainerRef} className="flex-1 overflow-y-auto min-h-0">
+          <div ref={innerWrapperRef}>
             {/* Placeholder for when no data is loaded */}
             {!data || !Array.isArray(data.headers) || data.headers.length === 0 ? (
               <div className="flex flex-1 items-center justify-center bg-gray-50">
