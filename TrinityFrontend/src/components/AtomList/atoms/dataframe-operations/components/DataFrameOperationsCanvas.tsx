@@ -108,7 +108,8 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
   const [editingHeader, setEditingHeader] = useState<number | null>(null);
   const [isDragOver, setIsDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
+  const wrapperRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
   const [saving, setSaving] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [draggedCol, setDraggedCol] = useState<string | null>(null);
@@ -944,16 +945,23 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
 
   useLayoutEffect(() => {
     if (!data) return;
-    const el = containerRef.current;
-    if (!el) return;
-    // React safety net – re-measure and lock the scroll container
-    // so that no phantom whitespace remains after uploads/render
-    el.style.overflowY = 'hidden';
-    el.style.height = 'auto';
-    const height = el.scrollHeight;
-    el.style.height = `${height}px`;
-    el.scrollTop = 0;
-    el.style.overflowY = 'auto';
+    const wrapper = wrapperRef.current;
+    const scroller = scrollRef.current;
+    if (!wrapper || !scroller) return;
+
+    const lockScroll = () => {
+      scroller.style.height = 'auto';
+      const max = wrapper.clientHeight;
+      const full = scroller.scrollHeight;
+      scroller.style.height = `${Math.min(full, max)}px`;
+      scroller.scrollTop = 0;
+    };
+
+    lockScroll();
+    const ro = new ResizeObserver(lockScroll);
+    ro.observe(scroller);
+    ro.observe(wrapper);
+    return () => ro.disconnect();
   }, [data]);
 
   return (
@@ -966,7 +974,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
         className="hidden"
       />
 
-      <div ref={containerRef} className="flex flex-col h-full">
+      <div ref={wrapperRef} className="flex flex-col h-full min-h-0">
         {data?.fileName && (
           <div className="border-b border-blue-200 bg-blue-50">
             <div className="flex items-center px-6 py-4">
@@ -1011,7 +1019,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
           </div>
 
           {/* Table section - Excel-like appearance */}
-          <div className="flex-1 overflow-auto">
+          <div ref={scrollRef} className="flex-1 overflow-auto">
             {/* Placeholder for when no data is loaded */}
             {!data || !Array.isArray(data.headers) || data.headers.length === 0 ? (
               <div className="flex flex-1 items-center justify-center bg-gray-50">

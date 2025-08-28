@@ -19,9 +19,10 @@ Implemented Changes:
 
 Issue: Uploading a file in the DataFrame Operations atom caused a phantom scroll area with extra whitespace below the table.
 
-Reason: The canvas wrapper kept an inflated height after the heavy table mounted, leaving a large empty layout box even though the visible content was smaller.
+Reason: The table's scroll region was never re-measured after file uploads. The wrapper retained the previous table's height, so the scroll area extended far beyond the new content.
 
-Potential Prognosis: Repeated uploads would continue to expand the layout, confusing users with persistent blank space and awkward scrolling.
+Potential Prognosis: Repeated uploads would continue to reserve stale space, confusing users with persistent blank areas and awkward scrolling.
 
 Implemented Changes:
-- The canvas and atom wrappers now use a strict flex layout (`h-full`, `flex-1`, and `overflow-auto`) and a layout effect resets container height and scroll after each upload, removing the phantom whitespace and keeping the UI stable.
+- Reworked the canvas to separate a wrapper and scroll container with `min-h-0` flex layouts.
+- Added a `ResizeObserver` that re-measures the scroll container after each render and clamps its height to the wrapper, resetting scroll position to eliminate phantom whitespace.
