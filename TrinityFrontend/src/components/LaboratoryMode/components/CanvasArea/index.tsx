@@ -39,7 +39,7 @@ import {
   LayoutCard,
   DroppedAtom,
   DEFAULT_TEXTBOX_SETTINGS,
-  DEFAULT_DATAUPLOAD_SETTINGS,
+  createDefaultDataUploadSettings,
   DEFAULT_FEATURE_OVERVIEW_SETTINGS,
   DEFAULT_DATAFRAME_OPERATIONS_SETTINGS,
   DEFAULT_CHART_MAKER_SETTINGS,
@@ -552,8 +552,8 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
           atom.id === 'text-box'
             ? { ...DEFAULT_TEXTBOX_SETTINGS }
             : atom.id === 'data-upload-validate'
-            ? { ...DEFAULT_DATAUPLOAD_SETTINGS }
-          : atom.id === 'feature-overview'
+            ? createDefaultDataUploadSettings()
+            : atom.id === 'feature-overview'
             ? { ...DEFAULT_FEATURE_OVERVIEW_SETTINGS }
             : atom.id === 'explore'
             ? { data: { ...DEFAULT_EXPLORE_DATA }, settings: { ...DEFAULT_EXPLORE_SETTINGS } }
@@ -619,7 +619,7 @@ const addNewCardWithAtom = (
       atomId === 'text-box'
         ? { ...DEFAULT_TEXTBOX_SETTINGS }
         : atomId === 'data-upload-validate'
-        ? { ...DEFAULT_DATAUPLOAD_SETTINGS }
+        ? createDefaultDataUploadSettings()
         : atomId === 'feature-overview'
         ? { ...DEFAULT_FEATURE_OVERVIEW_SETTINGS }
         : atomId === 'explore'
@@ -719,7 +719,7 @@ const handleAddDragLeave = (e: React.DragEvent) => {
         info.id === 'text-box'
           ? { ...DEFAULT_TEXTBOX_SETTINGS }
           : info.id === 'data-upload-validate'
-          ? { ...DEFAULT_DATAUPLOAD_SETTINGS }
+          ? createDefaultDataUploadSettings()
           : info.id === 'feature-overview'
           ? { ...DEFAULT_FEATURE_OVERVIEW_SETTINGS }
           : info.id === 'dataframe-operations'
@@ -778,11 +778,12 @@ const handleAddDragLeave = (e: React.DragEvent) => {
     if (current) {
       try {
         const proj = JSON.parse(current);
+        const sanitized = sanitizeLabConfig({ cards: updated });
         await fetch(`${REGISTRY_API}/projects/${proj.id}/`, {
           method: 'PATCH',
           credentials: 'include',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ state: { laboratory_config: { cards: updated } } }),
+          body: JSON.stringify({ state: { laboratory_config: sanitized } }),
         });
       } catch {
         /* ignore */

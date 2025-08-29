@@ -53,6 +53,8 @@ export interface DataUploadSettings {
   fileMappings?: Record<string, string>;
   /** Map of displayed master file names to the original names known by the backend */
   fileKeyMap?: Record<string, string>;
+  /** Map of uploaded file display names to the stored MinIO object path */
+  filePathMap?: Record<string, string>;
 }
 
 export const DEFAULT_DATAUPLOAD_SETTINGS: DataUploadSettings = {
@@ -69,7 +71,25 @@ export const DEFAULT_DATAUPLOAD_SETTINGS: DataUploadSettings = {
   validations: {},
   fileMappings: {},
   fileKeyMap: {},
+  filePathMap: {},
 };
+
+export const createDefaultDataUploadSettings = (): DataUploadSettings => ({
+  masterFile: "",
+  fileValidation: true,
+  bypassMasterUpload: false,
+  columnConfig: {},
+  frequency: "monthly",
+  dimensions: {},
+  measures: {},
+  uploadedFiles: [],
+  validatorId: undefined,
+  requiredFiles: [],
+  validations: {},
+  fileMappings: {},
+  fileKeyMap: {},
+  filePathMap: {},
+});
 
 export interface FeatureOverviewSettings {
   selectedColumns: string[];

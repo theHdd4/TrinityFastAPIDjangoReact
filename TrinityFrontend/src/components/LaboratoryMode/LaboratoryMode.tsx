@@ -55,12 +55,15 @@ const LaboratoryMode = () => {
               exhibitedCards: (last.state || []).filter((c: any) => c.isExhibited),
               timestamp: new Date().toISOString(),
             };
+            const sanitized = sanitizeLabConfig(labConfig);
             await fetch(`${REGISTRY_API}/projects/${proj.id}/`, {
               method: 'PATCH',
               credentials: 'include',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ state: { laboratory_config: labConfig } }),
+              body: JSON.stringify({ state: { laboratory_config: sanitized } }),
             }).catch(() => {});
+            localStorage.setItem('laboratory-layout-cards', safeStringify(sanitized.cards));
+            localStorage.setItem('laboratory-config', safeStringify(sanitized));
             await fetch(`${LAB_ACTIONS_API}/${last.id}/`, { method: 'DELETE', credentials: 'include' }).catch(() => {});
             toast({ title: 'Undo', description: 'Last change reverted' });
           } catch (storageError) {
@@ -110,8 +113,9 @@ const LaboratoryMode = () => {
       const labConfig = {
         cards,
         exhibitedCards,
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
       };
+      const sanitized = sanitizeLabConfig(labConfig);
 
       const current = localStorage.getItem('current-project');
       if (current) {
@@ -122,10 +126,9 @@ const LaboratoryMode = () => {
             headers: { 'Content-Type': 'application/json' },
             credentials: 'include',
             body: JSON.stringify({
-              state: { laboratory_config: labConfig },
+              state: { laboratory_config: sanitized },
             }),
           });
-          const sanitized = sanitizeLabConfig(labConfig);
           localStorage.setItem('laboratory-layout-cards', safeStringify(sanitized.cards));
           localStorage.setItem('laboratory-config', safeStringify(sanitized));
         } catch (apiError) {

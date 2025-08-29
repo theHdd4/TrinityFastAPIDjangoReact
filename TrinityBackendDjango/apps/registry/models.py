@@ -56,6 +56,39 @@ class Project(models.Model):
         return f"{self.name} ({self.owner.username})"
 
 
+class Template(models.Model):
+    """A reusable project template stored in the registry."""
+
+    name = models.CharField(max_length=150)
+    slug = models.SlugField(max_length=150)
+    description = models.TextField(blank=True)
+    owner = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name="templates"
+    )
+    app = models.ForeignKey(
+        App, on_delete=models.PROTECT, related_name="templates"
+    )
+    state = models.JSONField(blank=True, null=True)
+    base_project = models.JSONField(
+        help_text="Serialized details of the project this template was created from."
+    )
+    template_projects = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="Serialized details of projects created from this template.",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    history = HistoricalRecords()
+
+    class Meta:
+        db_table = "registry_templates"
+        ordering = ["-updated_at"]
+
+    def __str__(self):
+        return f"Template {self.name} ({self.owner.username})"
+
+
 class Session(models.Model):
     """
     Tracks an interactive session on a Project (e.g., in Workflow or Lab mode).
