@@ -5,12 +5,21 @@ from django.utils.text import slugify
 import os
 from apps.accounts.views import CsrfExemptSessionAuthentication
 from apps.accounts.utils import save_env_var, get_env_dict, load_env_vars
-from .models import App, Project, Session, LaboratoryAction, ArrowDataset, RegistryEnvironment
+from .models import (
+    App,
+    Project,
+    Template,
+    Session,
+    LaboratoryAction,
+    ArrowDataset,
+    RegistryEnvironment,
+)
 from .atom_config import save_atom_list_configuration, load_atom_list_configuration
 from common.minio_utils import copy_prefix
 from .serializers import (
     AppSerializer,
     ProjectSerializer,
+    TemplateSerializer,
     SessionSerializer,
     LaboratoryActionSerializer,
     ArrowDatasetSerializer,
@@ -302,6 +311,156 @@ class ProjectViewSet(viewsets.ModelViewSet):
 
         serializer = self.get_serializer(new_project)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["post"])
+    def save_template(self, request, pk=None):
+        """Persist the project as a reusable template."""
+        if not self._can_edit(request.user):
+            return Response({"detail": "Permission denied."}, status=status.HTTP_403_FORBIDDEN)
+        project = self.get_object()
+        serialized = ProjectSerializer(project).data
+        template = Template.objects.create(
+            name=f"{project.name} Template",
+            slug=slugify(f"{project.slug}-template"),
+            description=project.description,
+            owner=request.user,
+            app=project.app,
+            state=project.state,
+            base_project=serialized,
+        )
+        return Response(TemplateSerializer(template).data, status=status.HTTP_201_CREATED)
+
+
+class TemplateViewSet(viewsets.ModelViewSet):
+    queryset = Template.objects.select_related("owner", "app").all()
+    serializer_class = TemplateSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    authentication_classes = [CsrfExemptSessionAuthentication]
+
+    def get_queryset(self):
+        user = self.request.user
+        qs = self.queryset
+        if not user.is_staff:
+            try:
+                from apps.roles.models import UserRole
+
+                roles = UserRole.objects.filter(user=user)
+                allowed = set()
+                for role in roles:
+                    allowed.update(role.allowed_apps or [])
+                qs = qs.filter(app_id__in=allowed) if allowed else Template.objects.none()
+            except Exception:
+                return Template.objects.none()
+        app_param = self.request.query_params.get("app")
+        if app_param:
+            if app_param.isdigit():
+                qs = qs.filter(app__id=app_param)
+            else:
+                qs = qs.filter(app__slug=app_param)
+        return qs
+
+    def _can_edit(self, user):
+        perms = [
+            "permissions.workflow_edit",
+            "permissions.laboratory_edit",
+            "permissions.exhibition_edit",
+        ]
+        return user.is_staff or any(user.has_perm(p) for p in perms)
+
+    @action(detail=True, methods=["post"])
+    def use(self, request, pk=None):
+        """Create a new project from the given template."""
+        if not self._can_edit(request.user):
+            return Response({"detail": "Permission denied."}, status=status.HTTP_403_FORBIDDEN)
+        template = self.get_object()
+        base_id = template.base_project.get("id")
+        try:
+            source = Project.objects.get(id=base_id)
+        except Project.DoesNotExist:
+            return Response({"detail": "Base project not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        base_name = f"{template.name} Project"
+        name = base_name
+        counter = 1
+        while Project.objects.filter(owner=request.user, app=template.app, name=name).exists():
+            name = f"{base_name} {counter}"
+            counter += 1
+        slug_base = slugify(name)
+        slug_val = slug_base
+        counter = 1
+        while Project.objects.filter(owner=request.user, slug=slug_val).exists():
+            slug_val = f"{slug_base}-{counter}"
+            counter += 1
+
+        new_project = Project.objects.create(
+            name=name,
+            slug=slug_val,
+            description=template.description,
+            owner=request.user,
+            app=template.app,
+            state=template.state,
+        )
+
+        for mode in ["lab", "workflow", "exhibition"]:
+            cfg = load_atom_list_configuration(source, mode)
+            if cfg and cfg.get("cards"):
+                save_atom_list_configuration(new_project, mode, cfg["cards"])
+
+        tenant = os.getenv("CLIENT_NAME", "default_client").replace(" ", "_")
+        app_slug = template.app.slug
+        old_prefix = f"{tenant}/{app_slug}/{source.name}"
+        new_prefix = f"{tenant}/{app_slug}/{new_project.name}"
+        copy_prefix(old_prefix, new_prefix)
+
+        for ds in source.arrow_datasets.all():
+            def _replace(path: str) -> str:
+                return path.replace(old_prefix, new_prefix, 1) if path else path
+
+            ArrowDataset.objects.create(
+                project=new_project,
+                atom_id=ds.atom_id,
+                file_key=_replace(ds.file_key),
+                arrow_object=_replace(ds.arrow_object),
+                flight_path=_replace(ds.flight_path),
+                original_csv=_replace(ds.original_csv),
+                descriptor=ds.descriptor,
+            )
+
+        try:
+            env_src = RegistryEnvironment.objects.get(
+                client_name=tenant, app_name=app_slug, project_name=source.name
+            )
+            env = env_src.envvars or {}
+            env.update(
+                {
+                    "CLIENT_NAME": tenant,
+                    "APP_NAME": app_slug,
+                    "PROJECT_NAME": new_project.name,
+                    "PROJECT_ID": f"{new_project.name}_{new_project.id}",
+                }
+            )
+            RegistryEnvironment.objects.update_or_create(
+                client_name=tenant,
+                app_name=app_slug,
+                project_name=new_project.name,
+                defaults={
+                    "envvars": env,
+                    "identifiers": env_src.identifiers,
+                    "measures": env_src.measures,
+                    "dimensions": env_src.dimensions,
+                },
+            )
+        except RegistryEnvironment.DoesNotExist:
+            pass
+
+        template.template_projects = (template.template_projects or []) + [
+            ProjectSerializer(new_project).data
+        ]
+        template.save(update_fields=["template_projects"])
+
+        return Response(
+            ProjectSerializer(new_project).data, status=status.HTTP_201_CREATED
+        )
 
 
 class SessionViewSet(viewsets.ModelViewSet):

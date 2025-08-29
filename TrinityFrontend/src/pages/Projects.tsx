@@ -20,7 +20,8 @@ import {
   Bookmark,
   Grid3X3,
   List,
-  Search
+  Search,
+  Info
 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import {
@@ -42,11 +43,9 @@ interface Template {
   id: string;
   name: string;
   description?: string;
-  appTemplate: string;
   createdAt: Date;
   usageCount: number;
-  tags: string[];
-  sourceProjectId: string;
+  baseProject: any;
 }
 
 const Projects = () => {
@@ -140,15 +139,30 @@ const Projects = () => {
 
     loadProjects();
 
-    const savedTemplates = localStorage.getItem('trinity-templates');
-    if (savedTemplates) {
-      const parsed = JSON.parse(savedTemplates).map((t: any) => ({
-        ...t,
-        createdAt: new Date(t.createdAt)
-      }));
-      const filteredTemplates = parsed.filter((t: Template) => t.appTemplate === selectedApp);
-      setTemplates(filteredTemplates);
-    }
+    const loadTemplates = async () => {
+      if (!appId) return;
+      try {
+        const res = await fetch(`${REGISTRY_API}/templates/?app=${appId}`, {
+          credentials: 'include'
+        });
+        if (res.ok) {
+          const data = await res.json();
+          const parsed = data.map((t: any) => ({
+            id: t.id?.toString() || '',
+            name: t.name,
+            description: t.description,
+            createdAt: new Date(t.created_at),
+            usageCount: t.usage_count || 0,
+            baseProject: t.base_project
+          }));
+          setTemplates(parsed);
+        }
+      } catch (err) {
+        console.error('Templates load error', err);
+      }
+    };
+
+    loadTemplates();
   }, [appId, selectedApp]);
 
   const createNewProject = async () => {
@@ -215,34 +229,59 @@ const Projects = () => {
     }
   };
 
-  const saveProjectAsTemplate = (project: Project) => {
-    const template: Template = {
-      id: Date.now().toString(),
-      name: `${project.name} Template`,
-      description: project.description || `Template based on ${project.name}`,
-      appTemplate: project.appTemplate,
-      createdAt: new Date(),
-      usageCount: 0,
-      tags: ['custom', appDetails.title.toLowerCase()],
-      sourceProjectId: project.id
-    };
-    const updated = [...templates, template];
-    setTemplates(updated);
-    const all = JSON.parse(localStorage.getItem('trinity-templates') || '[]');
-    localStorage.setItem('trinity-templates', JSON.stringify([...all, template]));
+  const saveProjectAsTemplate = async (project: Project) => {
+    try {
+      const res = await fetch(`${REGISTRY_API}/projects/${project.id}/save_template/`, {
+        method: 'POST',
+        credentials: 'include'
+      });
+      if (res.ok) {
+        const t = await res.json();
+        const template: Template = {
+          id: t.id?.toString() || '',
+          name: t.name,
+          description: t.description,
+          createdAt: new Date(t.created_at),
+          usageCount: t.usage_count || 0,
+          baseProject: t.base_project
+        };
+        setTemplates([...templates, template]);
+      }
+    } catch (err) {
+      console.error('Save template error', err);
+    }
   };
 
-  const createProjectFromTemplate = (template: Template) => {
-    const base = projects.find(p => p.id === template.sourceProjectId);
-    if (!base) return;
-    duplicateProject(base);
-    const updatedTemplate = { ...template, usageCount: template.usageCount + 1 };
-    const updatedTemplates = templates.map(t => t.id === template.id ? updatedTemplate : t);
-    setTemplates(updatedTemplates);
-    const all = JSON.parse(localStorage.getItem('trinity-templates') || '[]').map((t: Template) =>
-      t.id === template.id ? updatedTemplate : t
-    );
-    localStorage.setItem('trinity-templates', JSON.stringify(all));
+  const createProjectFromTemplate = async (template: Template) => {
+    try {
+      const res = await fetch(`${REGISTRY_API}/templates/${template.id}/use/`, {
+        method: 'POST',
+        credentials: 'include'
+      });
+      if (res.ok) {
+        const p = await res.json();
+        const newProject: Project = {
+          id: p.id?.toString() || '',
+          name: p.name,
+          lastModified: new Date(p.updated_at),
+          description: p.description,
+          appTemplate: selectedApp || 'blank'
+        };
+        setProjects([...projects, newProject]);
+        const updatedTemplates = templates.map(t =>
+          t.id === template.id ? { ...t, usageCount: t.usageCount + 1 } : t
+        );
+        setTemplates(updatedTemplates);
+        localStorage.setItem('current-project', JSON.stringify(newProject));
+        navigate('/');
+      }
+    } catch (err) {
+      console.error('Use template error', err);
+    }
+  };
+
+  const showTemplateDetails = (template: Template) => {
+    alert(`Template based on: ${template.baseProject?.name || 'Unknown'}\nDescription: ${template.description || ''}`);
   };
 
   const formatDate = (date: Date) => {
@@ -261,8 +300,7 @@ const Projects = () => {
 
   const filteredTemplates = templates.filter(t =>
     t.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    t.description?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    t.tags.some(tag => tag.toLowerCase().includes(searchQuery.toLowerCase()))
+    t.description?.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
   return (
@@ -476,7 +514,6 @@ const Projects = () => {
                   className="group cursor-pointer hover:shadow-xl transition-all duration-500 border-0 bg-white hover:bg-gradient-to-br hover:from-white hover:to-gray-50/30 overflow-hidden transform hover:-translate-y-1"
                   onMouseEnter={() => setHoveredTemplate(template.id)}
                   onMouseLeave={() => setHoveredTemplate(null)}
-                  onClick={() => createProjectFromTemplate(template)}
                 >
                   <div className={viewMode === 'grid' ? 'p-6 flex flex-col h-56 relative' : 'p-6 flex items-center space-x-6 relative'}>
                     <div className={`absolute ${viewMode === 'grid' ? 'top-0 left-0 w-full h-1' : 'left-0 top-0 w-1 h-full'} bg-gradient-to-r from-amber-400 to-orange-500 opacity-60`} />
@@ -490,65 +527,32 @@ const Projects = () => {
                             {template.usageCount} uses
                           </Badge>
                           {hoveredTemplate === template.id && (
-                            <DropdownMenu>
-                              <DropdownMenuTrigger asChild>
-                                <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
-                                  <MoreHorizontal className="w-4 h-4" />
-                                </Button>
-                              </DropdownMenuTrigger>
-                              <DropdownMenuContent align="end">
-                                <DropdownMenuItem onClick={() => createProjectFromTemplate(template)}>
-                                  <Plus className="w-4 h-4 mr-2" />
-                                  Create Project
-                                </DropdownMenuItem>
-                                <DropdownMenuItem>
-                                  <Edit3 className="w-4 h-4 mr-2" />
-                                  Edit Template
-                                </DropdownMenuItem>
-                                <DropdownMenuItem>
-                                  <Copy className="w-4 h-4 mr-2" />
-                                  Duplicate
-                                </DropdownMenuItem>
-                              </DropdownMenuContent>
-                            </DropdownMenu>
+                            <div className="flex items-center space-x-1">
+                              <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={(e)=>{e.stopPropagation(); showTemplateDetails(template);}}>
+                                <Info className="w-4 h-4" />
+                              </Button>
+                              <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={(e)=>{e.stopPropagation(); createProjectFromTemplate(template);}}>
+                                <Plus className="w-4 h-4" />
+                              </Button>
+                            </div>
                           )}
                         </div>
                       )}
                     </div>
-                    <div className={viewMode === 'grid' ? 'flex-1' : 'flex-1 ml-4'}>
+                    <div className={viewMode === 'grid' ? 'flex-1' : 'flex-1 ml-4'} onClick={() => createProjectFromTemplate(template)}>
                       <h3 className={`${viewMode === 'grid' ? 'text-xl' : 'text-lg'} font-semibold text-gray-900 mb-2 group-hover:text-gray-700 transition-colors duration-300 line-clamp-2`}>{template.name}</h3>
                       <p className="text-sm text-gray-600 mb-4 line-clamp-2 leading-relaxed">{template.description}</p>
                       <div className="flex items-center justify-between">
-                        <div className="flex flex-wrap gap-1 mb-2">
-                          {template.tags.slice(0,2).map((tag, i) => (
-                            <Badge key={i} variant="outline" className="text-xs">{tag}</Badge>
-                          ))}
-                          {template.tags.length > 2 && (
-                            <Badge variant="outline" className="text-xs">+{template.tags.length - 2}</Badge>
-                          )}
-                        </div>
+                        <span className="text-xs text-gray-500">{template.usageCount} uses</span>
                         {viewMode === 'list' && hoveredTemplate === template.id && (
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
-                                <MoreHorizontal className="w-4 h-4" />
-                              </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end">
-                              <DropdownMenuItem onClick={() => createProjectFromTemplate(template)}>
-                                <Plus className="w-4 h-4 mr-2" />
-                                Create Project
-                              </DropdownMenuItem>
-                              <DropdownMenuItem>
-                                <Edit3 className="w-4 h-4 mr-2" />
-                                Edit Template
-                              </DropdownMenuItem>
-                              <DropdownMenuItem>
-                                <Copy className="w-4 h-4 mr-2" />
-                                Duplicate
-                              </DropdownMenuItem>
-                            </DropdownMenuContent>
-                          </DropdownMenu>
+                          <div className="flex items-center space-x-1">
+                            <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={(e)=>{e.stopPropagation(); showTemplateDetails(template);}}>
+                              <Info className="w-4 h-4" />
+                            </Button>
+                            <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={(e)=>{e.stopPropagation(); createProjectFromTemplate(template);}}>
+                              <Plus className="w-4 h-4" />
+                            </Button>
+                          </div>
                         )}
                       </div>
                     </div>
