@@ -7,6 +7,7 @@ from app.features.concat.endpoint import router as concat_router
 from app.features.merge.endpoint import router as merge_router
 from app.features.column_classifier.endpoint import router as column_classifier_router
 from app.features.dataframe_operations.endpoint import router as dataframe_operations_router
+from app.features.dataframe_operations_v1.endpoint import router as dataframe_operations_v1_router
 from app.features.createcolumn.endpoint import router as create_router
 from app.features.groupby_weighted_avg.endpoint import router as groupby_router
 from app.features.project_state.endpoint import router as project_state_router
@@ -32,6 +33,11 @@ api_router.include_router(
     dataframe_operations_router,
     prefix="/dataframe-operations",
     tags=["DataFrame Operations"],
+)
+api_router.include_router(
+    dataframe_operations_v1_router,
+    prefix="/dataframe-operations-v1",
+    tags=["DataFrame Operations v1"],
 )
 api_router.include_router(create_router)
 api_router.include_router(groupby_router)

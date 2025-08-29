@@ -60,6 +60,7 @@ import readPresentationSummarize from '@/components/AtomList/atoms/read-presenta
 import basePriceEstimator from '@/components/AtomList/atoms/base-price-estimator';
 import promoEstimator from '@/components/AtomList/atoms/promo-estimator';
 import dataframeOperations from '@/components/AtomList/atoms/dataframe-operations';
+import dataframeOperationsV1 from '@/components/AtomList/atoms/dataframe-operations-v1';
 
 export interface Atom {
   id: string;
@@ -103,7 +104,8 @@ export const atomCategories: AtomCategory[] = [
       rowOperations,
       columnClassifier,
       createColumn,
-      dataframeOperations
+      dataframeOperations,
+      dataframeOperationsV1
     ]
   },
   {

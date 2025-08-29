@@ -20,7 +20,7 @@ import {
   ChevronDown, ChevronUp, X, PlusCircle, MinusCircle, Save
 } from 'lucide-react';
 import { DataFrameData, DataFrameSettings } from '../DataFrameOperationsAtom';
-import { DATAFRAME_OPERATIONS_API, VALIDATE_API } from '@/lib/api';
+import { DATAFRAME_OPERATIONS_V1_API, VALIDATE_API } from '@/lib/api';
   import {
   loadDataframe,
   editCell as apiEditCell,
@@ -274,7 +274,7 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
       const baseName = data.fileName ? data.fileName.replace(/\.[^/.]+$/, '') : `dataframe_${Date.now()}`;
       const filename = `DF_OPS_${nextSerial}_${baseName}.arrow`;
 
-      const response = await fetch(`${DATAFRAME_OPERATIONS_API}/save`, {
+      const response = await fetch(`${DATAFRAME_OPERATIONS_V1_API}/save`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ csv_data, filename }),
@@ -958,8 +958,9 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
     }
   };
 
+
   return (
-    <div className="flex flex-col h-full min-h-0 overflow-hidden">
+    <>
       <input
         ref={fileInputRef}
         type="file"
@@ -968,6 +969,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
         className="hidden"
       />
 
+      <div className="flex flex-col h-full min-h-0 overflow-hidden">
         {data?.fileName && (
           <div className="border-b border-blue-200 bg-blue-50">
             <div className="flex items-center px-6 py-4">
@@ -1241,7 +1243,6 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
         </div>
         </div>
         </div>
-        </div>
         {contextMenu && data && typeof contextMenu.col === 'string' && (
         <div
           id="df-ops-context-menu"
@@ -1483,7 +1484,9 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
           <div className="px-3 py-2 text-xs text-gray-400">Right-click to close</div>
         </div>
       )}
-    </div>
+      </div>
+      </div>
+    </>
   );
 };
 

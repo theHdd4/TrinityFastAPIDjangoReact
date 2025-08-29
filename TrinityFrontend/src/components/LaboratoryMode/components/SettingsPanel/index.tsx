@@ -31,6 +31,7 @@ import BuildModelFeatureBasedPropertiesPanel from '@/components/AtomList/atoms/b
 import MergeProperties from '@/components/AtomList/atoms/merge/components/properties/MergeProperties';
 import ColumnClassifierProperties from '@/components/AtomList/atoms/column-classifier/components/properties/ColumnClassifierProperties';
 import DataFrameOperationsProperties from '@/components/AtomList/atoms/dataframe-operations/components/properties/DataFrameOperationsProperties';
+import DataFrameOperationsV1Properties from '@/components/AtomList/atoms/dataframe-operations-v1/components/properties/DataFrameOperationsProperties';
 import CorrelationProperties from '@/components/AtomList/atoms/correlation/components/properties/CorrelationProperties';
 import ChartMakerProperties from '@/components/AtomList/atoms/chart-maker/components/properties/ChartMakerProperties';
 import ExploreProperties from '@/components/AtomList/atoms/explore/components/properties/ExploreProperties';
@@ -71,6 +72,8 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
       : atom?.atomId === 'feature-overview'
       ? { ...DEFAULT_FEATURE_OVERVIEW_SETTINGS }
       : atom?.atomId === 'dataframe-operations'
+      ? { ...DEFAULT_DATAFRAME_OPERATIONS_SETTINGS }
+      : atom?.atomId === 'dataframe-operations-v1'
       ? { ...DEFAULT_DATAFRAME_OPERATIONS_SETTINGS }
       : atom?.atomId === 'chart-maker'
       ? { ...DEFAULT_CHART_MAKER_SETTINGS }
@@ -137,6 +140,8 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
             <ColumnClassifierProperties atomId={selectedAtomId} />
           ) : selectedAtomId && atom?.atomId === 'dataframe-operations' ? (
             <DataFrameOperationsProperties atomId={selectedAtomId} />
+          ) : selectedAtomId && atom?.atomId === 'dataframe-operations-v1' ? (
+            <DataFrameOperationsV1Properties atomId={selectedAtomId} />
           ) : selectedAtomId && atom?.atomId === 'correlation' ? (
             <CorrelationProperties atomId={selectedAtomId} />
           ) : (

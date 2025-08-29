@@ -25,6 +25,7 @@ import ConcatAtom from '@/components/AtomList/atoms/concat/ConcatAtom';
 import MergeAtom from '@/components/AtomList/atoms/merge/MergeAtom';
 import ColumnClassifierAtom from '@/components/AtomList/atoms/column-classifier/ColumnClassifierAtom';
 import DataFrameOperationsAtom from '@/components/AtomList/atoms/dataframe-operations/DataFrameOperationsAtom';
+import DataFrameOperationsV1Atom from '@/components/AtomList/atoms/dataframe-operations-v1/DataFrameOperationsAtom';
 import ScopeSelectorAtom from '@/components/AtomList/atoms/scope-selector/ScopeSelectorAtom';
 import CreateColumnAtom from '@/components/AtomList/atoms/createcolumn/CreateColumnAtom';
 import GroupByAtom from '@/components/AtomList/atoms/groupby-wtg-avg/GroupByAtom';
@@ -724,6 +725,8 @@ const handleAddDragLeave = (e: React.DragEvent) => {
           ? { ...DEFAULT_FEATURE_OVERVIEW_SETTINGS }
           : info.id === 'dataframe-operations'
           ? { ...DEFAULT_DATAFRAME_OPERATIONS_SETTINGS }
+          : info.id === 'dataframe-operations-v1'
+          ? { ...DEFAULT_DATAFRAME_OPERATIONS_SETTINGS }
           : info.id === 'chart-maker'
           ? { ...DEFAULT_CHART_MAKER_SETTINGS }
           : info.id === 'explore'
@@ -1208,6 +1211,8 @@ const handleAddDragLeave = (e: React.DragEvent) => {
                         <ColumnClassifierAtom atomId={atom.id} />
                       ) : atom.atomId === 'dataframe-operations' ? (
                         <DataFrameOperationsAtom atomId={atom.id} />
+                      ) : atom.atomId === 'dataframe-operations-v1' ? (
+                        <DataFrameOperationsV1Atom atomId={atom.id} />
                       ) : atom.atomId === 'create-column' ? (
                         <CreateColumnAtom atomId={atom.id} />
                       ) : atom.atomId === 'groupby-wtg-avg' ? (
