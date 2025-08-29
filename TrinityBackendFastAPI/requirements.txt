@@ -5,6 +5,7 @@ redis
 boto3
 pandas
 polars>=0.20.0
+numba
 minio
 motor
 python-multipart
