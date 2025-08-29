@@ -8,7 +8,7 @@ import {
   Calendar,
   Pencil,
   Trash,
-  Copy,
+  Copy as CopyIcon,
   Target,
   BarChart3,
   Zap
@@ -457,7 +457,7 @@ const Projects = () => {
                   </div>
                   <div className="flex items-center space-x-2">
                     <button onClick={(e) => duplicateProject(project.id, e)} className="p-1" title="Duplicate">
-                      <Copy className="w-4 h-4 text-gray-500 hover:text-gray-700" />
+                      <CopyIcon className="w-4 h-4 text-gray-500 hover:text-gray-700" />
                     </button>
                     <button onClick={(e) => startRename(project, e)} className="p-1" title="Rename">
                       <Pencil className="w-4 h-4 text-gray-500 hover:text-gray-700" />
