@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from django.contrib.auth import get_user_model
-from .models import App, Project, Session, LaboratoryAction, ArrowDataset
+from .models import App, Project, Session, LaboratoryAction, ArrowDataset, Template
 
 User = get_user_model()
 
@@ -64,3 +64,40 @@ class ArrowDatasetSerializer(serializers.ModelSerializer):
             "created_at",
         ]
         read_only_fields = ["id", "created_at"]
+
+
+class TemplateSerializer(serializers.ModelSerializer):
+    owner = serializers.SlugRelatedField(
+        slug_field="username",
+        queryset=User.objects.all(),
+        required=False,
+        default=serializers.CurrentUserDefault(),
+    )
+    usage_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Template
+        fields = [
+            "id",
+            "name",
+            "slug",
+            "description",
+            "owner",
+            "app",
+            "state",
+            "base_project",
+            "template_projects",
+            "usage_count",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = [
+            "id",
+            "template_projects",
+            "usage_count",
+            "created_at",
+            "updated_at",
+        ]
+
+    def get_usage_count(self, obj):
+        return len(obj.template_projects or [])
