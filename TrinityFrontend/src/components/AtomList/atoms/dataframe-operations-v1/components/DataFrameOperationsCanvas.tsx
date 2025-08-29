@@ -1485,6 +1485,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
         </div>
       )}
       </div>
+      </div>
     </>
   );
 };
