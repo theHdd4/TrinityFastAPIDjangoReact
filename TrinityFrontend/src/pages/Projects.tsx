@@ -370,9 +370,6 @@ const Projects = () => {
     }
   };
 
-  const showTemplateDetails = (template: Template) => {
-    alert(`Template based on: ${template.baseProject?.name || 'Unknown'}\nDescription: ${template.description || ''}`);
-  };
 
   const formatDate = (date: Date) => {
     const now = new Date();
@@ -714,22 +711,13 @@ const Projects = () => {
                                   </Button>
                                 </DropdownMenuTrigger>
                                 <DropdownMenuContent align="end">
-                                  <DropdownMenuItem
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      showTemplateDetails(template);
-                                    }}
-                                  >
-                                    <Info className="w-4 h-4 mr-2" />
-                                    Show Details
-                                  </DropdownMenuItem>
-                                  <DropdownMenuItem
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      createProjectFromTemplate(template);
-                                    }}
-                                  >
-                                    <Plus className="w-4 h-4 mr-2" />
+                                <DropdownMenuItem
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    createProjectFromTemplate(template);
+                                  }}
+                                >
+                                  <Plus className="w-4 h-4 mr-2" />
                                     Create Project
                                   </DropdownMenuItem>
                                   <DropdownMenuItem
@@ -814,15 +802,6 @@ const Projects = () => {
                                 </Button>
                               </DropdownMenuTrigger>
                               <DropdownMenuContent align="end">
-                                <DropdownMenuItem
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    showTemplateDetails(template);
-                                  }}
-                                >
-                                  <Info className="w-4 h-4 mr-2" />
-                                  Show Details
-                                </DropdownMenuItem>
                                 <DropdownMenuItem
                                   onClick={(e) => {
                                     e.stopPropagation();
