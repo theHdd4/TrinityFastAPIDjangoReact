@@ -12,7 +12,7 @@ interface FileRow {
 }
 
 interface UploadSectionProps {
-  uploadedFiles: File[];
+  uploadedFiles: { name: string; path: string; size: number }[];
   files: FileRow[];
   validationResults: Record<string, string>;
   validationDetails: Record<string, any[]>;

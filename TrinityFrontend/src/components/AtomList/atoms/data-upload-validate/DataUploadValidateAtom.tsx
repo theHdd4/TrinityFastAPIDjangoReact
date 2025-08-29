@@ -20,6 +20,12 @@ import { logSessionState, updateSessionState, addNavigationItem } from '@/lib/se
 import UploadSection from './components/upload/UploadSection';
 import RequiredFilesSection from './components/required-files/RequiredFilesSection';
 
+interface UploadedFileRef {
+  name: string;
+  path: string;
+  size: number;
+}
+
 interface Props {
   atomId: string;
 }
@@ -33,7 +39,7 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
   const { toast } = useToast();
   const { user } = useAuth();
 
-  const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
+  const [uploadedFiles, setUploadedFiles] = useState<UploadedFileRef[]>([]);
   const [isDragOver, setIsDragOver] = useState(false);
   const [openSections, setOpenSections] = useState<string[]>(['setting1', 'fileValidation']);
   const [openFile, setOpenFile] = useState<string | null>(null);
@@ -49,24 +55,50 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
     setFileAssignments(settings.fileMappings || {});
   }, [settings.fileMappings]);
 
-  const handleFileUpload = (files: File[]) => {
-    setUploadedFiles((prev) => [...prev, ...files]);
+  const handleFileUpload = async (files: File[]) => {
+    const uploaded: UploadedFileRef[] = [];
+    for (const file of files) {
+      const form = new FormData();
+      form.append('file', file);
+      try {
+        const res = await fetch(`${VALIDATE_API}/upload-file`, {
+          method: 'POST',
+          body: form,
+        });
+        if (res.ok) {
+          const data = await res.json();
+          uploaded.push({ name: file.name, path: data.file_path, size: file.size });
+        } else {
+          toast({ title: `Failed to upload ${file.name}`, variant: 'destructive' });
+        }
+      } catch {
+        toast({ title: `Failed to upload ${file.name}`, variant: 'destructive' });
+      }
+    }
+
+    if (uploaded.length === 0) return;
+
+    setUploadedFiles((prev) => [...prev, ...uploaded]);
     updateSettings(atomId, {
-      uploadedFiles: [...(settings.uploadedFiles || []), ...files.map((f) => f.name)],
+      uploadedFiles: [...(settings.uploadedFiles || []), ...uploaded.map((f) => f.name)],
       fileMappings: {
         ...fileAssignments,
         ...Object.fromEntries(
-          files.map(f => [
+          uploaded.map(f => [
             f.name,
             settings.bypassMasterUpload ? f.name : settings.requiredFiles?.[0] || ''
           ])
         )
+      },
+      filePathMap: {
+        ...(settings.filePathMap || {}),
+        ...Object.fromEntries(uploaded.map(f => [f.name, f.path]))
       }
     });
     setFileAssignments(prev => ({
       ...prev,
       ...Object.fromEntries(
-        files.map(f => [
+        uploaded.map(f => [
           f.name,
           settings.bypassMasterUpload ? f.name : settings.requiredFiles?.[0] || ''
         ])
@@ -78,7 +110,7 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
     e.preventDefault();
     setIsDragOver(false);
     const files = Array.from(e.dataTransfer.files);
-    handleFileUpload(files);
+    void handleFileUpload(files);
   };
 
   const handleDragOver = (e: React.DragEvent) => {
@@ -94,7 +126,7 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
       const files = Array.from(e.target.files);
-      handleFileUpload(files);
+      void handleFileUpload(files);
       // allow selecting the same file again by resetting the input value
       e.target.value = '';
     }
@@ -129,10 +161,16 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
     const original = newFileKeyMap[oldName] || oldName;
     newFileKeyMap[newName] = original;
     delete newFileKeyMap[oldName];
+    const newFilePathMap = { ...(settings.filePathMap || {}) } as Record<string, string>;
+    if (newFilePathMap[oldName]) {
+      newFilePathMap[newName] = newFilePathMap[oldName];
+      delete newFilePathMap[oldName];
+    }
     updateSettings(atomId, {
       validations: newValidations,
       columnConfig: newColumnConfig,
       fileKeyMap: newFileKeyMap,
+      filePathMap: newFilePathMap,
     });
     if (openFile === oldName) setOpenFile(newName);
     setRenameTarget(null);
@@ -142,8 +180,13 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
     setUploadedFiles(prev => prev.filter(f => f.name !== name));
     const newUploads = (settings.uploadedFiles || []).filter(n => n !== name);
     const { [name]: _, ...restAssignments } = fileAssignments;
+    const { [name]: __, ...restPaths } = settings.filePathMap || {};
     setFileAssignments(restAssignments);
-    updateSettings(atomId, { uploadedFiles: newUploads, fileMappings: restAssignments });
+    updateSettings(atomId, {
+      uploadedFiles: newUploads,
+      fileMappings: restAssignments,
+      filePathMap: restPaths,
+    });
     setValidationResults(prev => {
       const { [name]: _, ...rest } = prev;
       return rest;
@@ -190,7 +233,8 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
     if (!settings.validatorId) return;
     const form = new FormData();
     form.append('validator_atom_id', settings.validatorId);
-    uploadedFiles.forEach(f => form.append('files', f));
+    const paths = uploadedFiles.map(f => f.path);
+    form.append('file_paths', JSON.stringify(paths));
     const keys = uploadedFiles.map(f => {
       const assigned = fileAssignments[f.name] || '';
       return settings.fileKeyMap?.[assigned] || assigned;
@@ -352,7 +396,8 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
         /* ignore */
       }
     }
-    uploadedFiles.forEach(f => form.append('files', f));
+    const paths = uploadedFiles.map(f => f.path);
+    form.append('file_paths', JSON.stringify(paths));
     const keys = uploadedFiles.map(f => {
       const assigned = fileAssignments[f.name] || '';
       return settings.fileKeyMap?.[assigned] || assigned;
