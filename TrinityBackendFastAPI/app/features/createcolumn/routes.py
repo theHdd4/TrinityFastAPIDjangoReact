@@ -1,18 +1,15 @@
 # app/routes.py
 
-from fastapi import APIRouter, Form, HTTPException
+from fastapi import APIRouter, Form, HTTPException, Query
 from fastapi.responses import Response
-from datetime import datetime
 
 import json
-import numpy as np
 # from .create.base import calculate_residuals, compute_rpi, apply_stl_outlier
 from .create.base import calculate_residuals, compute_rpi, apply_stl_outlier
 
-from .deps import get_minio_df,fetch_measures_list,fetch_measures_list_with_context,get_column_classifications_collection,get_create_settings_collection,minio_client, MINIO_BUCKET, redis_client
+from .deps import get_minio_df,fetch_measures_list,get_column_classifications_collection,get_create_settings_collection,minio_client, MINIO_BUCKET, redis_client
 from app.features.data_upload_validate.app.routes import get_object_prefix
-from app.core.utils import get_env_vars
-from .mongodb_saver import save_create_data,save_create_data_settings,save_createandtransform_configs,get_createandtransform_config_from_mongo
+from .mongodb_saver import save_create_data,save_create_data_settings
 import io
 from sklearn.preprocessing import StandardScaler
 from sklearn.preprocessing import MinMaxScaler
@@ -83,7 +80,13 @@ async def perform_create(
     identifiers: str = Form(None),
 ):
     try:
-        df = get_minio_df(bucket_name, object_names)
+        # 🔧 CRITICAL FIX: Resolve the full MinIO object path
+        prefix = await get_object_prefix()
+        full_object_path = f"{prefix}{object_names}" if not object_names.startswith(prefix) else object_names
+        
+        print(f"🔧 File path resolution: original={object_names}, prefix={prefix}, full_path={full_object_path}")
+        
+        df = get_minio_df(bucket_name, full_object_path)
         df.columns = df.columns.str.strip().str.lower()
         # Only clean string columns, not all columns
         for col in df.select_dtypes(include='object').columns:
@@ -416,36 +419,33 @@ async def perform_create(
             raise ValueError(
                 "No new columns were created. This may be due to missing required columns (e.g., 'PPU' for RPI, or selected columns not present in your file for dummy). Please check your column selection and input data.")
 
-        # Convert DataFrame to CSV for preview
-        csv_data = df.to_csv(index=False)
-        
-        # Prepare operation details for MongoDB saving
-        operation_details = {
-            "operations": [
-                {
-                    "operation_type": op,
-                    "columns": columns,
-                    "rename": rename_val
-                }
-                for op, columns, rename_val in op_items
-            ],
-            "new_columns": new_cols_total,
-            "identifiers_used": identifiers_list
-        }
+
+        # Save result file using object_names only
+        create_key = f"{object_names}_create.csv"
+        csv_bytes = df.to_csv(index=False).encode("utf-8")
+        minio_client.put_object(
+            bucket_name=bucket_name,
+            object_name=create_key,
+            data=io.BytesIO(csv_bytes),
+            length=len(csv_bytes),
+            content_type="text/csv",
+        )
+        # 🔧 CRITICAL FIX: Return actual data like GroupBy does
+        # Convert DataFrame to list of dictionaries for JSON serialization
+        results_data = df.to_dict('records')
         
         return {
             "status": "SUCCESS", 
             "new_columns": new_cols_total,
+            "result_file": create_key,
+            "row_count": len(df),
+            "columns": list(df.columns),
+            "results": results_data,  # ← KEY: Actual data included like GroupBy!
             "createResults": {
+                "result_file": create_key,
                 "result_shape": [len(df), len(df.columns)],
                 "new_columns": new_cols_total
-            },
-            "preview_data": {
-                "data": csv_data,
-                "row_count": len(df),
-                "columns": list(df.columns)
-            },
-            "operation_details": operation_details
+            }
         }
     except Exception as e:
         return {"status": "FAILURE", "error": str(e)}
@@ -458,7 +458,13 @@ async def get_create_data(
     bucket_name: str = Query(...)
 ):
     try:
-        create_key = f"{object_names}_create.csv"
+        # 🔧 CRITICAL FIX: Resolve the full MinIO object path
+        prefix = await get_object_prefix()
+        full_object_path = f"{prefix}{object_names}" if not object_names.startswith(prefix) else object_names
+        create_key = f"{full_object_path}_create.csv"
+        
+        print(f"🔧 File path resolution for results: original={object_names}, prefix={prefix}, full_path={full_object_path}, create_key={create_key}")
+        
         create_obj = minio_client.get_object(bucket_name, create_key)
         create_df = pd.read_csv(io.BytesIO(create_obj.read()))
         clean_df = create_df.replace({np.nan: None, np.inf: None, -np.inf: None})
@@ -477,36 +483,20 @@ from fastapi import Body
 @router.post("/save")
 async def save_createcolumn_dataframe(
     csv_data: str = Body(..., embed=True),
-    filename: str = Body(..., embed=True),
-    validator_atom_id: str = Body("", embed=True),
-    file_key: str = Body("", embed=True),
-    operation_details: str = Body("{}", embed=True),
-    user_id: str = Body("", embed=True),
-    client_name: str = Body("", embed=True),
-    app_name: str = Body("", embed=True),
-    project_name: str = Body("", embed=True),
-    project_id: int = Body(None, embed=True)
+    filename: str = Body(..., embed=True)
 ):
     """
-    Save a created column dataframe (CSV) to MinIO as Arrow file and save operation details to MongoDB.
+    Save a created column dataframe (CSV) to MinIO as Arrow file and return file info.
     """
     import pandas as pd
     import pyarrow as pa
     import pyarrow.ipc as ipc
     import io
     import uuid
-    import json
 
     try:
         # Parse CSV to DataFrame
         df = pd.read_csv(io.StringIO(csv_data))
-        
-        # Parse operation details
-        try:
-            operation_data = json.loads(operation_details) if operation_details else {}
-        except json.JSONDecodeError:
-            operation_data = {"operations": [], "new_columns": []}
-        
         # Generate unique file key if not provided
         if not filename:
             file_id = str(uuid.uuid4())[:8]
@@ -532,122 +522,15 @@ async def save_createcolumn_dataframe(
         )
         # Cache in Redis for 1 hour
         redis_client.setex(filename, 3600, arrow_bytes)
-        
-        # Save operation details to MongoDB if required parameters are provided
-        mongo_result = None
-        print(f"🔍 DEBUG: client_name = {client_name}")
-        print(f"🔍 DEBUG: app_name = {app_name}")
-        print(f"🔍 DEBUG: project_name = {project_name}")
-        print(f"🔍 DEBUG: user_id = {user_id}")
-        print(f"🔍 DEBUG: project_id = {project_id}")
-        
-        if client_name:  # Use client_name directly
-            print(f"🔍 DEBUG: client_name provided, proceeding with MongoDB save")
-            
-            mongo_data = {
-                "operations": operation_data.get("operations", []),
-                # "new_columns": operation_data.get("new_columns", []),
-                "result_file": filename,
-                "shape": df.shape,
-                "columns": list(df.columns),
-                "timestamp": datetime.now().isoformat(),
-            }
-            
-            print(f"🔍 DEBUG: mongo_data = {mongo_data}")
-            
-            mongo_result = await save_createandtransform_configs(
-                client_name=client_name,
-                app_name=app_name,
-                project_name=project_name,
-                operation_data=mongo_data,
-                user_id=user_id,
-                project_id=project_id
-            )
-            
-            print(f"🔍 DEBUG: mongo_result = {mongo_result}")
-        else:
-            print(f"🔍 DEBUG: client_id not provided, skipping MongoDB save")
-        
         return {
             "result_file": filename,
             "shape": df.shape,
             "columns": list(df.columns),
-            "message": "DataFrame saved successfully",
-            "mongodb_saved": mongo_result.get("status") == "success" if mongo_result else False,
-            "mongo_id": mongo_result.get("mongo_id") if mongo_result else None
+            "message": "DataFrame saved successfully"
         }
     except Exception as e:
         print(f"⚠️ save_createcolumn_dataframe error: {e}")
         raise HTTPException(status_code=400, detail=str(e))
-
-
-@router.get("/get_createandtransform_config")
-async def get_createandtransform_config(
-    client_name: str = Query(...),
-    app_name: str = Query(...),
-    project_name: str = Query(...)
-):
-    """Retrieve saved createandtransform configuration."""
-    try:
-        mongo_data = await get_createandtransform_config_from_mongo(client_name, app_name, project_name)
-        if mongo_data:
-            return {"status": "success", "source": "mongo", "data": mongo_data}
-        else:
-            raise HTTPException(status_code=404, detail="Createandtransform configuration not found")
-    except Exception as e:
-        print(f"⚠️ get_createandtransform_config error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.get("/debug_mongo")
-async def debug_mongo():
-    """Debug endpoint to test MongoDB connection and list collections."""
-    try:
-        from .mongodb_saver import client
-        print(f"🔍 DEBUG: Testing MongoDB connection...")
-        
-        # Test connection
-        await client.admin.command('ping')
-        print(f"🔍 DEBUG: MongoDB connection successful")
-        
-        # List databases
-        databases = await client.list_database_names()
-        print(f"🔍 DEBUG: Available databases: {databases}")
-        
-        # Check trinity_prod database
-        if "trinity_prod" in databases:
-            trinity_prod_db = client["trinity_prod"]
-            collections = await trinity_prod_db.list_collection_names()
-            print(f"🔍 DEBUG: Collections in trinity_prod: {collections}")
-            
-            # Check if createandtransform_configs collection exists
-            if "createandtransform_configs" in collections:
-                count = await trinity_prod_db["createandtransform_configs"].count_documents({})
-                print(f"🔍 DEBUG: Documents in createandtransform_configs: {count}")
-                
-                # Show a few documents
-                docs = await trinity_prod_db["createandtransform_configs"].find().limit(3).to_list(length=3)
-                print(f"🔍 DEBUG: Sample documents: {docs}")
-            else:
-                print(f"🔍 DEBUG: createandtransform_configs collection does not exist")
-        else:
-            print(f"🔍 DEBUG: trinity_prod database does not exist")
-        
-        return {
-            "status": "success",
-            "databases": databases,
-            "trinity_prod_exists": "trinity_prod" in databases,
-            "collections": collections if "trinity_prod" in databases else [],
-            "createandtransform_configs_exists": "createandtransform_configs" in collections if "trinity_prod" in databases else False,
-            "document_count": count if "trinity_prod" in databases and "createandtransform_configs" in collections else 0
-        }
-    except Exception as e:
-        print(f"❌ DEBUG: MongoDB test failed: {e}")
-        return {
-            "status": "error",
-            "error": str(e),
-            "error_type": type(e).__name__
-        }
 
 from fastapi import Query
 import pyarrow as pa
@@ -793,99 +676,57 @@ async def export_excel(object_name: str):
         print(f"⚠️ createcolumn export_excel error for {object_name}: {e}")
         raise HTTPException(status_code=400, detail=str(e))
 
-@router.get("/identifier_options")
-async def identifier_options(
-    client_name: str = Query(..., description="Client name"),
-    app_name: str = Query(..., description="App name"),
-    project_name: str = Query(..., description="Project name"),
-):
-    """Return identifier column names using Redis ▶ Mongo ▶ fallback logic.
-
-    1. Attempt to read JSON config from Redis key
-       `<client>/<app>/<project>/column_classifier_config`.
-    2. If missing, fetch from Mongo (`classifier_configs` collection).
-       Cache the document back into Redis.
-    3. If still unavailable, return empty list – the frontend will
-       fall back to its existing column_summary extraction flow.
-    """
-    key = f"{client_name}/{app_name}/{project_name}/column_classifier_config"
-    cfg: dict[str, Any] | None = None
-
-    # --- Redis lookup -------------------------------------------------------
-    try:
-        cached = redis_client.get(key)
-        if cached:
-            cfg = json.loads(cached)
-    except Exception as exc:
-        print(f"⚠️ Redis read error for {key}: {exc}")
-
-    # --- Mongo fallback ------------------------------------------------------
-    if cfg is None:
-        try:
-            from app.features.column_classifier.database import get_classifier_config_from_mongo
-            cfg = get_classifier_config_from_mongo(client_name, app_name, project_name)
-            if cfg and redis_client:
-                try:
-                    redis_client.setex(key, 3600, json.dumps(cfg, default=str))
-                except Exception as exc:
-                    print(f"⚠️ Redis write error for {key}: {exc}")
-        except Exception as exc:
-            print(f"⚠️ Mongo classifier config lookup failed: {exc}")
-
-    identifiers: list[str] = []
-    if cfg and isinstance(cfg.get("identifiers"), list):
-        identifiers = cfg["identifiers"]
-
-    # Filter out common time-related identifiers
-    time_keywords = {"date", "time", "month", "months", "week", "weeks", "year", "years"}
-    identifiers = [col for col in identifiers if col.lower() not in time_keywords]
-
-    return {"identifiers": identifiers}
-
-
 @router.get("/classification")
 async def get_column_classification(
     validator_atom_id: str = Query(...),
-    file_key: str = Query(...),
-    client_name: str = Query(..., description="Client name"),
-    app_name: str = Query(..., description="App name"),
-    project_name: str = Query(..., description="Project name")
+    file_key: str = Query(...)
 ):
     """
     Fetch column classification (identifiers, measures, unclassified) from Redis-first fallback then MongoDB for a given validator_atom_id and file_key.
-    Updated to use client/app/project context like scope_selector.
     """
-    collection = await get_column_classifications_collection()
-
-    # 1️⃣  Try Redis via the shared helper with correct client/app/project context
-    identifiers, measures = await fetch_measures_list_with_context(
-        validator_atom_id=validator_atom_id,
-        file_key=file_key,
-        collection=collection,
-        client_name=client_name,
-        app_name=app_name,
-        project_name=project_name,
-    )
-
-    # 2️⃣  Filter out common time-related identifiers
-    time_keywords = {"date", "time", "month", "months", "week", "weeks", "year"}
-    identifiers = [col for col in identifiers if col.lower() not in time_keywords]
-
-    # 3️⃣  Attempt to retrieve *unclassified* list from MongoDB; if missing, default to []
-    unclassified: list = []
+    print(f"🔍 Classification endpoint called with validator_atom_id={validator_atom_id}, file_key={file_key}")
+    
     try:
-        document = await collection.find_one({
-            "validator_atom_id": validator_atom_id,
-            "file_key": file_key,
-        })
-        if document and "final_classification" in document:
-            unclassified = document["final_classification"].get("unclassified", [])
-    except Exception:
-        # Fallback silently – unclassified will remain [] if MongoDB is unreachable
-        pass
+        collection = await get_column_classifications_collection()
+        print(f"✅ MongoDB collection obtained: {collection}")
 
-    return {
-        "identifiers": identifiers,
-        "measures": measures,
-        "unclassified": unclassified,
-    }
+        # 1️⃣  Try Redis via the shared helper; if not available it will fall back to MongoDB
+        print(f"🔍 Calling fetch_measures_list with validator_atom_id={validator_atom_id}, file_key={file_key}")
+        identifiers, measures = await fetch_measures_list(
+            validator_atom_id=validator_atom_id,
+            file_key=file_key,
+            collection=collection,
+        )
+        print(f"✅ fetch_measures_list returned: identifiers={identifiers}, measures={measures}")
+
+        # 2️⃣  Filter out common time-related identifiers
+        time_keywords = {"date", "time", "month", "months", "week", "weeks", "year"}
+        identifiers = [col for col in identifiers if col.lower() not in time_keywords]
+
+        # 3️⃣  Attempt to retrieve *unclassified* list from MongoDB; if missing, default to []
+        unclassified: list = []
+        try:
+            document = await collection.find_one({
+                "validator_atom_id": validator_atom_id,
+                "file_key": file_key,
+            })
+            if document and "final_classification" in document:
+                unclassified = document["final_classification"].get("unclassified", [])
+        except Exception:
+            # Fallback silently – unclassified will remain [] if MongoDB is unreachable
+            pass
+
+        return {
+            "identifiers": identifiers,
+            "measures": measures,
+            "unclassified": unclassified,
+        }
+    except Exception as e:
+        print(f"❌ Error in classification endpoint: {e}")
+        # 🔧 CRITICAL FIX: Return fallback data instead of crashing
+        # This prevents the 404 error and allows the frontend to continue working
+        return {
+            "identifiers": [],
+            "measures": [],
+            "unclassified": [],
+        }

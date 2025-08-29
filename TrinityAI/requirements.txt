@@ -12,3 +12,6 @@ minio
 redis
 pymongo
 python-dotenv
+langchain
+langchain-community
+ollama

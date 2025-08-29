@@ -14,6 +14,12 @@ from app.features.scope_selector.endpoint import router as scope_selector_router
 from app.features.user_apps.endpoint import router as user_apps_router
 from app.features.chart_maker.endpoint import router as chart_maker_router
 from app.features.build_model_feature_based.endpoint import router as build_model_router
+# from app.features.build_autoregressive.endpoint import router as autoregressive_router
+from app.features.select_models_feature_based.endpoint import router as select_router
+from app.features.explore.endpoint import router as explore_router
+from app.features.correlation.endpoint import router as correlation_router
+
+from app.features.correlation.endpoint import router as correlation_router
 from app.features.build_autoregressive.endpoint import router as autoregressive_router
 from app.features.select_models_feature_based.endpoint import router as select_models_router
 
@@ -37,7 +43,14 @@ api_router.include_router(project_state_router)
 api_router.include_router(scope_selector_router)
 api_router.include_router(user_apps_router)
 api_router.include_router(chart_maker_router)
+api_router.include_router(explore_router)
 
 api_router.include_router(build_model_router)
+# api_router.include_router(autoregressive_router)
+
+api_router.include_router(correlation_router)
+
+api_router.include_router(select_router)
+
 api_router.include_router(autoregressive_router)
 api_router.include_router(select_models_router)

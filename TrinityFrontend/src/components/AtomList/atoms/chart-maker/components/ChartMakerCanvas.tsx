@@ -17,6 +17,7 @@ import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { useResponsiveChartLayout } from '@/hooks/useResponsiveChartLayout';
 import { migrateLegacyChart, DEFAULT_TRACE_COLORS } from '../utils/traceUtils';
 import ChatBubble from './ChatBubble';
+import AtomAIChatBot from '@/components/TrinityAI/AtomAIChatBot';
 
 // Extend ChartData type to include uniqueValuesByColumn for type safety
 interface ChartDataWithUniqueValues extends ChartData {
@@ -24,6 +25,7 @@ interface ChartDataWithUniqueValues extends ChartData {
 }
 
 interface ChartMakerCanvasProps {
+  atomId: string;
   charts: ChartMakerConfig[];
   data: ChartData | null;
   onChartTypeChange?: (chartId: string, newType: ChartMakerConfig['type']) => void;
@@ -32,7 +34,7 @@ interface ChartMakerCanvasProps {
   isFullWidthMode?: boolean; // When atom list and global properties tabs are hidden
 }
 
-const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onChartTypeChange, onChartFilterChange, onTraceFilterChange, isFullWidthMode = false }) => {
+const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ atomId, charts, data, onChartTypeChange, onChartFilterChange, onTraceFilterChange, isFullWidthMode = false }) => {
   const typedData = data as ChartDataWithUniqueValues | null;
   const [fullscreenChart, setFullscreenChart] = useState<ChartMakerConfig | null>(null);
   const [fullscreenIndex, setFullscreenIndex] = useState<number | null>(null);
@@ -328,19 +330,11 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
     const colors = getChartColors(index);
     const key = chartKey || chart.lastUpdateTime || chart.id;
 
-    // Dynamic height based on layout or use provided height class
-    // Give more height when sidebars are hidden (full width mode)
-    const chartHeight = heightClass || (() => {
-      if (isFullWidthMode) {
-        return isCompact ? 'h-64' : layoutConfig.layout === 'vertical' ? 'h-[28rem]' : 'h-[36rem]';
-      }
-      // Increased heights for better visibility when sidebars are open
-      return isCompact ? 'h-56' : layoutConfig.layout === 'vertical' ? 'h-[24rem]' : 'h-[28rem]';
-    })();
+    const chartHeight = heightClass || '';
 
     if (!chartData.length || !xAxisConfig.dataKey || (!yAxisConfig.dataKey && traces.length === 0)) {
       return (
-        <div className={`flex items-center justify-center ${chartHeight} text-muted-foreground`}>
+        <div className={`flex items-center justify-center ${chartHeight || 'h-64'} text-muted-foreground`}>
           <div className="text-center">
             <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-gradient-to-br from-slate-100 to-slate-200 flex items-center justify-center">
               <LineChart className="w-8 h-8 text-slate-400" />
@@ -1104,18 +1098,38 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
           <rect width="100%" height="100%" fill="url(#grid)" />
         </svg>
       </div>
-      
-      <div className="relative z-10 flex-shrink-0 p-6 pb-0">
-        <div className="flex items-center mb-4">
-          <div className="w-1 h-8 bg-gradient-to-b from-blue-500 to-blue-600 rounded-full mr-4 shadow-lg"></div>
-          <h2 className="text-2xl font-bold text-gray-900 drop-shadow-sm">Chart Maker</h2>
+
+      {/* Header with chart count and AI assistant */}
+      <div className="relative z-10 flex items-center justify-between p-4 border-b border-gray-200 bg-white/90 backdrop-blur-sm">
+        <div className="flex items-center space-x-2">
+          <BarChart3 className="w-5 h-5 text-gray-600" />
+          <span className="text-sm font-medium text-gray-700">
+            {charts.length === 0 ? 'No Charts' : `${charts.length} Chart${charts.length === 1 ? '' : 's'}`}
+          </span>
         </div>
-        <p className="text-gray-600 font-medium">Interactive data visualization dashboard</p>
+        <div className="flex items-center space-x-2">
+          {/* <AtomAIChatBot
+            atomId={atomId}
+            atomType="chart-maker"
+            atomTitle="Chart Maker"
+            className="mr-2"
+          /> */}
+          {/* <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setFullscreenChart(charts[0] || null)}
+            disabled={charts.length === 0}
+            className="text-xs"
+          >
+            <Maximize2 className="w-3 h-3 mr-1" />
+            Fullscreen
+          </Button> */}
+        </div>
       </div>
       
-      <div className="relative z-10 flex-1 p-6 pt-4 overflow-hidden">
-        <div 
-          className={`grid gap-6 ${layoutConfig.containerClass} transition-all duration-300 ease-in-out h-full`}
+      <div className="relative z-10 p-6 overflow-hidden">
+        <div
+          className={`grid gap-6 ${layoutConfig.containerClass} transition-all duration-300 ease-in-out`}
           style={{
             gridTemplateRows: layoutConfig.rows > 1 ? `repeat(${layoutConfig.rows}, 1fr)` : '1fr'
           }}
@@ -1124,56 +1138,56 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
             const colors = getChartColors(index);
             
             return (
-                   <Card 
-                     key={chart.id} 
-                     className="chart-card border-0 shadow-xl bg-white/95 backdrop-blur-sm overflow-hidden transform hover:scale-[1.02] transition-all duration-300 relative flex flex-col h-full group hover:shadow-2xl"
+                   <Card
+                     key={chart.id}
+                    className="chart-card border border-black shadow-xl bg-white/95 backdrop-blur-sm overflow-hidden transform hover:scale-[1.02] transition-all duration-300 relative flex flex-col group hover:shadow-2xl"
                      onContextMenu={e => {
                        e.preventDefault(); // Disable right-click context menu
                        e.stopPropagation();
                      }}
                    >
-                     <div className={`bg-gradient-to-r ${colors.gradient} p-4 relative flex-shrink-0 group-hover:shadow-lg transition-shadow duration-300`}>
-                       <CardTitle className={`font-bold text-white flex items-center justify-between ${isCompact ? 'text-base' : 'text-lg'} drop-shadow-sm`}>
-                         <div className="flex items-center">
-                           <BarChart3 className={`mr-2 ${isCompact ? 'w-4 h-4' : 'w-5 h-5'} drop-shadow-sm`} />
-                           {chart.title}
-                         </div>
-                         {/* Hints container - aligned in same row */}
-                         <div className="flex items-center gap-2">
-                           {/* Interaction hint for multi-trace charts */}
-                           {(chart.chartConfig?.traces && chart.chartConfig.traces.length > 1) && (
-                             <div className="flex items-center text-xs opacity-80 bg-white/20 rounded-full px-2 py-1">
-                               {chart.chartConfig.chart_type === 'bar' ? (
-                                 <>
-                                   <span className="hidden sm:inline">Click: trace, Ctrl+Click: dim x-axis</span>
-                                   <span className="sm:hidden">Click to emphasize</span>
-                                 </>
-                               ) : (
-                                 <>
-                                   <span className="hidden sm:inline">Click traces to emphasize</span>
-                                   <span className="sm:hidden">Click to emphasize</span>
-                                 </>
-                               )}
-                             </div>
-                           )}
-                           {/* Alt+Click expand hint */}
-                           <div className="flex items-center text-xs text-white/90 bg-white/20 rounded-full px-2 py-1 backdrop-blur-sm">
-                             <span>Alt+Click to expand</span>
-                           </div>
-                         </div>
-                       </CardTitle>
-                       {/* Transparent overlay for Alt+Click fullscreen and mouse hold for chart type switching */}
-                       <div
-                         className="absolute inset-0 cursor-pointer"
-                         style={{ background: 'transparent', zIndex: 10 }}
-                         onClick={e => {
-                           if (e.altKey) {
-                             setFullscreenChart(chart);
-                             setFullscreenIndex(index);
-                           }
-                         }}
-                         onMouseDown={e => handleMouseDown(e, chart.id)}
-                         onContextMenu={e => {
+                    <div className="bg-white border-b border-black p-4 relative flex-shrink-0 group-hover:shadow-lg transition-shadow duration-300">
+                      <CardTitle className={`font-bold text-gray-900 flex items-center justify-between ${isCompact ? 'text-base' : 'text-lg'}`}>
+                        <div className="flex items-center">
+                          <BarChart3 className={`mr-2 ${isCompact ? 'w-4 h-4' : 'w-5 h-5'} text-gray-900`} />
+                          {chart.title}
+                        </div>
+                        {/* Hints container - aligned in same row */}
+                        <div className="flex items-center gap-2">
+                          {/* Interaction hint for multi-trace charts */}
+                          {(chart.chartConfig?.traces && chart.chartConfig.traces.length > 1) && (
+                            <div className="flex items-center text-xs text-gray-700 bg-yellow-50 border border-yellow-200 rounded-full px-2 py-1">
+                              {chart.chartConfig.chart_type === 'bar' ? (
+                                <>
+                                  <span className="hidden sm:inline">Click: trace, Ctrl+Click: dim x-axis</span>
+                                  <span className="sm:hidden">Click to emphasize</span>
+                                </>
+                              ) : (
+                                <>
+                                  <span className="hidden sm:inline">Click traces to emphasize</span>
+                                  <span className="sm:hidden">Click to emphasize</span>
+                                </>
+                              )}
+                            </div>
+                          )}
+                          {/* Alt+Click expand hint */}
+                          <div className="flex items-center text-xs text-gray-700 bg-yellow-50 border border-yellow-200 rounded-full px-2 py-1">
+                            <span>Alt+Click to expand</span>
+                          </div>
+                        </div>
+                      </CardTitle>
+                      {/* Transparent overlay for Alt+Click fullscreen and mouse hold for chart type switching */}
+                      <div
+                        className="absolute inset-0 cursor-pointer"
+                        style={{ background: 'transparent', zIndex: 10 }}
+                        onClick={e => {
+                          if (e.altKey) {
+                            setFullscreenChart(chart);
+                            setFullscreenIndex(index);
+                          }
+                        }}
+                        onMouseDown={e => handleMouseDown(e, chart.id)}
+                        onContextMenu={e => {
                            e.preventDefault(); // Disable right-click context menu
                            e.stopPropagation();
                          }}
@@ -1582,8 +1596,8 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ charts, data, onCha
                         }
                       })()}
                      
-                     <CardContent className={`flex-1 overflow-hidden ${isCompact ? 'p-2' : 'p-4'} flex flex-col`}>
-                       <div className="flex-1 overflow-hidden min-h-0">
+                     <CardContent className={`${isCompact ? 'p-2' : 'p-4'}`}>
+                       <div className="overflow-hidden">
                          {renderChart(chart, index)}
                        </div>
                      </CardContent>

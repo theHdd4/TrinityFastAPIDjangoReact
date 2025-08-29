@@ -175,19 +175,50 @@ def download_dataframe(path: str) -> pd.DataFrame:
             logger.debug("MinIO client connected to %s", actual)
         except Exception:
             logger.debug("MinIO client created for %s", endpoint)
+        
+        # 🔧 CRITICAL FIX: Try multiple paths to find the file
         if not arrow_obj:
             basename = os.path.basename(path)
-            prefix = get_minio_prefix()
-            arrow_obj = _find_latest_object(basename + ".arrow", m_client, bucket, prefix)
+            default_prefix = get_minio_prefix()
+            
+            # 🔍 METHOD 1: Try the AI-provided full path first (if it looks like a full path)
+            if "/" in path and not path.startswith("default_client/"):
+                ai_path = path
+                logger.info(f"🔍 METHOD 1: Trying AI-provided full path: {ai_path}")
+                try:
+                    resp = m_client.get_object(bucket, ai_path)
+                    data = resp.read()
+                    table = ipc.RecordBatchFileReader(pa.BufferReader(data)).read_all()
+                    logger.info(f"✅ METHOD 1 SUCCESS: Found file at AI path {ai_path} with {table.num_rows} rows")
+                    
+                    # Cache the table in Flight for future requests
+                    try:
+                        writer, _ = client.do_put(descriptor, table.schema)
+                        writer.write_table(table)
+                        writer.close()
+                        logger.info(f"🛬 cached table {path} on flight server from AI path")
+                    except Exception as cache_exc:
+                        logger.error(f"⚠️ failed to cache table on flight: {cache_exc}")
+                    
+                    return table.to_pandas()
+                except Exception as ai_exc:
+                    logger.warning(f"❌ METHOD 1 FAILED: AI path {ai_path} not found: {ai_exc}")
+            
+            # 🔍 METHOD 2: Try the default prefix path
+            logger.info(f"🔍 METHOD 2: Trying default prefix path: {default_prefix}")
+            arrow_obj = _find_latest_object(basename + ".arrow", m_client, bucket, default_prefix)
             if arrow_obj is None:
-                arrow_obj = os.path.join(prefix, basename)
+                arrow_obj = os.path.join(default_prefix, basename)
+            
             logger.info(
                 "🪶 searching for %s in bucket=%s prefix=%s -> %s",
                 basename,
                 bucket,
-                prefix,
+                default_prefix,
                 arrow_obj,
             )
+        
+        # 🔍 METHOD 3: Try to download from the resolved path
         try:
             resp = m_client.get_object(bucket, arrow_obj)
             data = resp.read()
@@ -211,6 +242,37 @@ def download_dataframe(path: str) -> pd.DataFrame:
             logger.error(
                 "❌ fallback minio download failed for %s: %s", path, exc
             )
+        
+        # 🔍 METHOD 4: Last resort - try to find the file anywhere in the bucket
+        logger.info(f"🔍 METHOD 4: Last resort - searching entire bucket for {basename}")
+        try:
+            # Search the entire bucket for the file
+            for obj in m_client.list_objects(bucket, recursive=True):
+                if obj.object_name.endswith(basename):
+                    logger.info(f"🔍 Found file in bucket: {obj.object_name}")
+                    try:
+                        resp = m_client.get_object(bucket, obj.object_name)
+                        data = resp.read()
+                        table = ipc.RecordBatchFileReader(pa.BufferReader(data)).read_all()
+                        logger.info(f"✅ METHOD 4 SUCCESS: Found file at {obj.object_name} with {table.num_rows} rows")
+                        
+                        # Cache the table in Flight for future requests
+                        try:
+                            writer, _ = client.do_put(descriptor, table.schema)
+                            writer.write_table(table)
+                            writer.close()
+                            logger.info(f"🛬 cached table {path} on flight server from bucket search")
+                        except Exception as cache_exc:
+                            logger.error(f"⚠️ failed to cache table on flight: {cache_exc}")
+                        
+                        return table.to_pandas()
+                    except Exception as bucket_exc:
+                        logger.warning(f"❌ Failed to read file from bucket path {obj.object_name}: {bucket_exc}")
+                        continue
+        except Exception as search_exc:
+            logger.error(f"❌ Failed to search bucket: {search_exc}")
+        
+        # If all methods failed, raise the original error
         raise
 
 
@@ -254,39 +316,66 @@ def download_table_bytes(path: str) -> bytes:
             logger.debug("MinIO client connected to %s", actual)
         except Exception:
             logger.debug("MinIO client created for %s", endpoint)
+        
+        # 🔧 CRITICAL FIX: Try multiple paths to find the file (same logic as download_dataframe)
         if not arrow_obj:
             basename = os.path.basename(path)
-            prefix = get_minio_prefix()
-            arrow_obj = _find_latest_object(basename + ".arrow", m_client, bucket, prefix)
+            default_prefix = get_minio_prefix()
+            
+            # 🔍 METHOD 1: Try the AI-provided full path first (if it looks like a full path)
+            if "/" in path and not path.startswith("default_client/"):
+                ai_path = path
+                logger.info(f"🔍 METHOD 1: Trying AI-provided full path: {ai_path}")
+                try:
+                    resp = m_client.get_object(bucket, ai_path)
+                    data = resp.read()
+                    logger.info(f"✅ METHOD 1 SUCCESS: Found file at AI path {ai_path}")
+                    return data
+                except Exception as ai_exc:
+                    logger.warning(f"❌ METHOD 1 FAILED: AI path {ai_path} not found: {ai_exc}")
+            
+            # 🔍 METHOD 2: Try the default prefix path
+            logger.info(f"🔍 METHOD 2: Trying default prefix path: {default_prefix}")
+            arrow_obj = _find_latest_object(basename + ".arrow", m_client, bucket, default_prefix)
             if arrow_obj is None:
-                arrow_obj = os.path.join(prefix, basename)
+                arrow_obj = os.path.join(default_prefix, basename)
+            
             logger.info(
                 "🪶 searching for %s in bucket=%s prefix=%s -> %s",
                 basename,
                 bucket,
-                prefix,
+                default_prefix,
                 arrow_obj,
             )
+        
+        # 🔍 METHOD 3: Try to download from the resolved path
         try:
             resp = m_client.get_object(bucket, arrow_obj)
             data = resp.read()
-            table = ipc.RecordBatchFileReader(pa.BufferReader(data)).read_all()
-            logger.info("✔️ fallback minio bytes %s from %s", path, arrow_obj)
-            # store table back in Flight for future requests
-            try:
-                writer, _ = client.do_put(descriptor, table.schema)
-                writer.write_table(table)
-                writer.close()
-                logger.info("🛬 cached bytes for %s on flight server", path)
-            except Exception as cache_exc:
-                logger.error("⚠️ failed to cache bytes on flight: %s", cache_exc)
+            logger.info(f"✅ METHOD 3 SUCCESS: Downloaded from resolved path {arrow_obj}")
             return data
         except Exception as exc:
-            logger.error(
-                "❌ fallback minio byte download failed for %s: %s",
-                path,
-                exc,
-            )
+            logger.error(f"❌ METHOD 3 FAILED: fallback minio download failed for {path}: {exc}")
+        
+        # 🔍 METHOD 4: Last resort - try to find the file anywhere in the bucket
+        logger.info(f"🔍 METHOD 4: Last resort - searching entire bucket for {basename}")
+        try:
+            # Search the entire bucket for the file
+            for obj in m_client.list_objects(bucket, recursive=True):
+                if obj.object_name.endswith(basename):
+                    logger.info(f"🔍 Found file in bucket: {obj.object_name}")
+                    try:
+                        resp = m_client.get_object(bucket, obj.object_name)
+                        data = resp.read()
+                        logger.info(f"✅ METHOD 4 SUCCESS: Found file at {obj.object_name}")
+                        return data
+                    except Exception as bucket_exc:
+                        logger.warning(f"❌ Failed to read file from bucket path {obj.object_name}: {bucket_exc}")
+                        continue
+        except Exception as search_exc:
+            logger.error(f"❌ Failed to search bucket: {search_exc}")
+        
+        # If all methods failed, raise the original error
         raise
 
 

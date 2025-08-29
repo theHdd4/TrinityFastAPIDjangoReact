@@ -16,6 +16,8 @@ import {
   DEFAULT_FEATURE_OVERVIEW_SETTINGS,
   DataFrameOperationsSettings,
   DEFAULT_DATAFRAME_OPERATIONS_SETTINGS,
+  CorrelationSettings,
+  DEFAULT_CORRELATION_SETTINGS,
   ChartMakerSettings,
   DEFAULT_CHART_MAKER_SETTINGS,
   SelectModelsFeatureSettings,
@@ -31,7 +33,10 @@ import BuildModelFeatureBasedPropertiesPanel from '@/components/AtomList/atoms/b
 import MergeProperties from '@/components/AtomList/atoms/merge/components/properties/MergeProperties';
 import ColumnClassifierProperties from '@/components/AtomList/atoms/column-classifier/components/properties/ColumnClassifierProperties';
 import DataFrameOperationsProperties from '@/components/AtomList/atoms/dataframe-operations/components/properties/DataFrameOperationsProperties';
+import CorrelationProperties from '@/components/AtomList/atoms/correlation/components/properties/CorrelationProperties';
 import ChartMakerProperties from '@/components/AtomList/atoms/chart-maker/components/properties/ChartMakerProperties';
+import ExploreProperties from '@/components/AtomList/atoms/explore/components/properties/ExploreProperties';
+
 import SelectModelsFeatureProperties from '@/components/AtomList/atoms/select-models-feature/components/properties/SelectModelsFeatureProperties';
 import AtomSettingsTabs from "./AtomSettingsTabs";
 
@@ -61,9 +66,13 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
     | FeatureOverviewSettings
     | DataFrameOperationsSettings
     | ChartMakerSettings
+    | CorrelationSettings =
+    | ChartMakerSettings
     | SelectModelsFeatureSettings =
     atom?.settings ||
-    (atom?.atomId === 'data-upload-validate'
+    (atom?.atomId === 'correlation'
+      ? { ...DEFAULT_CORRELATION_SETTINGS }
+      : atom?.atomId === 'data-upload-validate'
       ? { ...DEFAULT_DATAUPLOAD_SETTINGS }
       : atom?.atomId === 'feature-overview'
       ? { ...DEFAULT_FEATURE_OVERVIEW_SETTINGS }
@@ -120,6 +129,12 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
             <DataUploadValidateProperties atomId={selectedAtomId} />
           ) : selectedAtomId && atom?.atomId === 'feature-overview' ? (
             <FeatureOverviewProperties atomId={selectedAtomId} />
+          ) : selectedAtomId && atom?.atomId === 'groupby-wtg-avg' ? (
+            <GroupByProperties atomId={selectedAtomId} />
+          ) : selectedAtomId && atom?.atomId === 'create-column' ? (
+            <CreateColumnProperties atomId={selectedAtomId} />
+          ) : selectedAtomId && atom?.atomId === 'explore' ? (
+            <ExploreProperties atomId={selectedAtomId} />
           ) : selectedAtomId && atom?.atomId === 'chart-maker' ? (
             <ChartMakerProperties atomId={selectedAtomId} />
           ) : selectedAtomId && atom?.atomId === 'build-model-feature-based' ? (
@@ -136,6 +151,8 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
             <ColumnClassifierProperties atomId={selectedAtomId} />
           ) : selectedAtomId && atom?.atomId === 'dataframe-operations' ? (
             <DataFrameOperationsProperties atomId={selectedAtomId} />
+          ) : selectedAtomId && atom?.atomId === 'correlation' ? (
+            <CorrelationProperties atomId={selectedAtomId} />
           ) : (
             <AtomSettingsTabs tab={tab} setTab={setTab} selectedAtomId={selectedAtomId!} cardExhibited={cardExhibited} settings={settings as TextBoxSettings} updateSettings={updateSettings} />
           )}

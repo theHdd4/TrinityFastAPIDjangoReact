@@ -145,13 +145,23 @@ def main():
         # Additional localhost aliases for convenience
         for extra in ("localhost", "127.0.0.1"):
             if extra != primary_domain:
-                alias, created = Domain.objects.get_or_create(
-                    domain=extra,
-                    tenant=tenant_obj,
-                    defaults={"is_primary": False},
-                )
-                if created:
-                    print(f"   → Added alias domain: {alias}")
+                try:
+                    alias, created = Domain.objects.get_or_create(
+                        domain=extra,
+                        tenant=tenant_obj,
+                        defaults={"is_primary": False},
+                    )
+                    if created:
+                        print(f"   → Added alias domain: {alias}")
+                    else:
+                        print(f"   → Alias domain already exists for this tenant: {alias}")
+                except Exception as e:
+                    # Check if domain exists for another tenant
+                    existing_domain = Domain.objects.filter(domain=extra).first()
+                    if existing_domain:
+                        print(f"   → Domain '{extra}' already exists for tenant '{existing_domain.tenant.name}', skipping")
+                    else:
+                        print(f"   → Error creating domain '{extra}': {e}")
 
         # Allow optional extra domains via env var so the app works when
         # accessed from an IP or external hostname.
@@ -163,13 +173,23 @@ def main():
 
         for host in hosts:
             if host != primary_domain:
-                alias, created = Domain.objects.get_or_create(
-                    domain=host,
-                    tenant=tenant_obj,
-                    defaults={"is_primary": False},
-                )
-                if created:
-                    print(f"   → Added extra domain: {alias}")
+                try:
+                    alias, created = Domain.objects.get_or_create(
+                        domain=host,
+                        tenant=tenant_obj,
+                        defaults={"is_primary": False},
+                    )
+                    if created:
+                        print(f"   → Added extra domain: {alias}")
+                    else:
+                        print(f"   → Extra domain already exists for this tenant: {alias}")
+                except Exception as e:
+                    # Check if domain exists for another tenant
+                    existing_domain = Domain.objects.filter(domain=host).first()
+                    if existing_domain:
+                        print(f"   → Domain '{host}' already exists for tenant '{existing_domain.tenant.name}', skipping")
+                    else:
+                        print(f"   → Error creating domain '{host}': {e}")
     print()
 
     print(f"→ 3) Running TENANT-SCHEMA migrations for '{tenant_schema}'…")

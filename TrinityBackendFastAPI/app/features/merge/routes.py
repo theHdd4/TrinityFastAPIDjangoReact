@@ -9,7 +9,7 @@ import pyarrow.ipc as ipc
 import numpy as np
 from ..data_upload_validate.app.routes import get_object_prefix
 from .merge.base import get_common_columns, merge_dataframes
-from .deps import get_minio_df, minio_client, MINIO_BUCKET, redis_client
+from .deps import get_minio_df, get_minio_content_with_flight_fallback, minio_client, MINIO_BUCKET, redis_client
 
 router = APIRouter()
 
@@ -119,18 +119,76 @@ async def perform_merge(
     join_type: str = Form(...),          
 ):
     try:
+        print(f"🔍 MERGE PERFORM - Received data:")
+        print(f"   file1: {file1}")
+        print(f"   file2: {file2}")
+        print(f"   bucket_name: {bucket_name}")
+        print(f"   join_columns: {join_columns}")
+        print(f"   join_type: {join_type}")
+        
+        # Validate inputs
+        if not file1 or not file2:
+            raise ValueError("file1 and file2 are required")
+        
+        if not join_columns:
+            raise ValueError("join_columns is required")
+        
+        # Parse join_columns JSON
+        try:
+            join_cols = json.loads(join_columns)
+            print(f"✅ Parsed join_columns: {join_cols}")
+        except json.JSONDecodeError as e:
+            print(f"❌ JSON decode error for join_columns: {e}")
+            print(f"   Raw join_columns: {join_columns}")
+            raise ValueError(f"Invalid join_columns JSON: {e}")
+        
+        # Load dataframes
+        print(f"📁 Loading dataframe 1: {file1}")
         df1 = get_minio_df(bucket_name, file1)
+        print(f"📁 Loading dataframe 2: {file2}")
         df2 = get_minio_df(bucket_name, file2)
+        
+        print(f"📊 DataFrame shapes: df1={df1.shape}, df2={df2.shape}")
+        print(f"📊 DataFrame 1 columns: {list(df1.columns)}")
+        print(f"📊 DataFrame 2 columns: {list(df2.columns)}")
+        
+        # Clean column names - convert to lowercase for consistent matching
         df1.columns = df1.columns.str.strip().str.lower()
         df2.columns = df2.columns.str.strip().str.lower()
+        
+        # Convert join columns to lowercase for case-insensitive matching
+        join_cols_lower = [col.lower() for col in join_cols]
+        print(f"🔄 Join columns case conversion:")
+        print(f"   Original: {join_cols}")
+        print(f"   Lowercase: {join_cols_lower}")
+        
+        # Verify all join columns exist in both dataframes
+        missing_in_df1 = [col for col in join_cols_lower if col not in df1.columns]
+        missing_in_df2 = [col for col in join_cols_lower if col not in df2.columns]
+        
+        if missing_in_df1:
+            print(f"❌ Missing columns in df1: {missing_in_df1}")
+            print(f"   Available columns in df1: {list(df1.columns)}")
+            raise ValueError(f"Join columns not found in first file: {missing_in_df1}")
+            
+        if missing_in_df2:
+            print(f"❌ Missing columns in df2: {missing_in_df2}")
+            print(f"   Available columns in df2: {list(df2.columns)}")
+            raise ValueError(f"Join columns not found in second file: {missing_in_df2}")
+        
+        print(f"✅ All join columns found in both dataframes")
 
         # Clean string values (strip spaces and make lowercase)
         df1 = df1.applymap(lambda x: x.strip().lower() if isinstance(x, str) else x)
         df2 = df2.applymap(lambda x: x.strip().lower() if isinstance(x, str) else x)
 
-        join_cols = json.loads(join_columns)
-        merged_df = merge_dataframes(df1, df2, join_cols, join_type)
+        print(f"🔗 Merging with join_columns: {join_cols_lower}, join_type: {join_type}")
+        merged_df = merge_dataframes(df1, df2, join_cols_lower, join_type)
+        
+        print(f"✅ Merge successful! Result shape: {merged_df.shape}")
+        
         suffix_columns = [c for c in merged_df.columns if c.endswith("_x") or c.endswith("_y")]
+        
         # Return CSV as string (do NOT save)
         csv_text = merged_df.to_csv(index=False)
         return {
@@ -140,6 +198,9 @@ async def perform_merge(
             "note": f"Some overlapping columns were renamed: {suffix_columns}" if suffix_columns else None
         }
     except Exception as e:
+        print(f"❌ MERGE PERFORM ERROR: {e}")
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=400, detail=f"Merge failed: {str(e)}")
 
 @router.post("/save")
@@ -199,8 +260,8 @@ async def cached_dataframe(
     try:
         content = redis_client.get(object_name)
         if content is None:
-            response = minio_client.get_object(MINIO_BUCKET, object_name)
-            content = response.read()
+            # Try Arrow Flight first, then fallback to MinIO
+            content = get_minio_content_with_flight_fallback(MINIO_BUCKET, object_name)
             redis_client.setex(object_name, 3600, content)
         if object_name.endswith(".arrow"):
             reader = ipc.RecordBatchFileReader(pa.BufferReader(content))
@@ -247,8 +308,8 @@ async def export_csv(object_name: str):
     try:
         content = redis_client.get(object_name)
         if content is None:
-            response = minio_client.get_object(MINIO_BUCKET, object_name)
-            content = response.read()
+            # Try Arrow Flight first, then fallback to MinIO
+            content = get_minio_content_with_flight_fallback(MINIO_BUCKET, object_name)
             redis_client.setex(object_name, 3600, content)
         if object_name.endswith(".arrow"):
             reader = ipc.RecordBatchFileReader(pa.BufferReader(content))
@@ -273,8 +334,8 @@ async def export_excel(object_name: str):
     try:
         content = redis_client.get(object_name)
         if content is None:
-            response = minio_client.get_object(MINIO_BUCKET, object_name)
-            content = response.read()
+            # Try Arrow Flight first, then fallback to MinIO
+            content = get_minio_content_with_flight_fallback(MINIO_BUCKET, object_name)
             redis_client.setex(object_name, 3600, content)
         if object_name.endswith(".arrow"):
             reader = ipc.RecordBatchFileReader(pa.BufferReader(content))

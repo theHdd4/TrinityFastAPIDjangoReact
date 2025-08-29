@@ -236,6 +236,14 @@ const GroupByCanvas: React.FC<GroupByCanvasProps> = ({ atomId }) => {
           aggregations[field] = { agg: (selectedAggregationMethods[0] || 'sum').toLowerCase() };
         });
       }
+      
+      console.log('🚀 GroupBy Perform - Sending data:', {
+        identifiers,
+        aggregations,
+        dataSource: settings.dataSource,
+        validator_atom_id: settings.validator_atom_id
+      });
+      
       // Prepare form data
       const formData = new FormData();
       formData.append('validator_atom_id', settings.validator_atom_id || '');
@@ -244,56 +252,144 @@ const GroupByCanvas: React.FC<GroupByCanvasProps> = ({ atomId }) => {
       formData.append('object_names', settings.dataSource || '');
       formData.append('identifiers', JSON.stringify(identifiers));
       formData.append('aggregations', JSON.stringify(aggregations));
+      
+      console.log('📤 Calling GroupBy backend:', `${GROUPBY_API}/run`);
+      
       const res = await fetch(`${GROUPBY_API}/run`, { method: 'POST', body: formData });
       const data = await res.json();
+      
+      console.log('📥 GroupBy backend response:', data);
+      
       if (data.status === 'SUCCESS' && data.result_file) {
-        // Fetch the results from the backend
-        const params = new URLSearchParams({
-          validator_atom_id: settings.validator_atom_id || '',
-          file_key: settings.dataSource || '',
-          bucket_name: 'trinity',
-        });
-        const resultsRes = await fetch(`${GROUPBY_API}/results?${params.toString()}`);
-        const resultsData = await resultsRes.json();
-        if (resultsData && resultsData.merged_data && resultsData.merged_data.length > 0) {
-          const allRows = resultsData.merged_data;
+        // 🔧 CRITICAL FIX: Use the data returned directly from /run endpoint
+        // The backend already returns the grouped results, no need to call /results
+        
+        // Check if we have results data directly
+        if (data.results && Array.isArray(data.results)) {
+          // Backend returned results directly
+          const allRows = data.results;
           setTotalRows(allRows.length);
           setAllResults(allRows);
           setResults(allRows.slice(0, 20));
+          
           // Determine identifiers that have >1 unique value
           const idWithVariety = selectedIdentifiers.filter((id: string) => {
             const uniq = new Set(allRows.map((r: any) => r[id])).size;
             return uniq > 1;
           });
+          
           const headers = Object.keys(allRows[0]).filter((h) => {
             if (selectedIdentifiers.includes(h)) {
               return idWithVariety.includes(h);
             }
             return true; // keep measure columns
           });
+          
           setResultsHeaders(headers);
-          // Persist result metadata so Exhibition tab can reflect latest results
+          
+          // Persist result metadata
           updateSettings(atomId, {
             groupbyResults: {
               result_file: data.result_file,
               result_shape: [allRows.length, headers.length],
+              row_count: data.row_count,
+              columns: data.columns
             },
           });
+          
+          toast({
+            title: 'Success',
+            description: `GroupBy completed! ${allRows.length} rows processed.`,
+          });
+          
         } else {
-          setResults([]);
-          setResultsHeaders([]);
+          // Fallback: try to fetch results from the saved file
+          console.log('🔄 No direct results, trying to fetch from saved file...');
+          
+          // Try to get results from the cached_dataframe endpoint
+          try {
+            const cachedRes = await fetch(`${GROUPBY_API}/cached_dataframe?object_name=${encodeURIComponent(data.result_file)}`);
+            if (cachedRes.ok) {
+              const csvText = await cachedRes.text();
+              // Parse CSV to get results
+              const lines = csvText.split('\n');
+              if (lines.length > 1) {
+                const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, ''));
+                const rows = lines.slice(1).filter(line => line.trim()).map(line => {
+                  const values = line.split(',').map(v => v.trim().replace(/"/g, ''));
+                  const row: any = {};
+                  headers.forEach((header, index) => {
+                    row[header] = values[index] || '';
+                  });
+                  return row;
+                });
+                
+                setTotalRows(rows.length);
+                setAllResults(rows);
+                setResults(rows.slice(0, 20));
+                setResultsHeaders(headers);
+                
+                updateSettings(atomId, {
+                  groupbyResults: {
+                    result_file: data.result_file,
+                    result_shape: [rows.length, headers.length],
+                    row_count: data.row_count,
+                    columns: data.columns
+                  },
+                });
+                
+                toast({
+                  title: 'Success',
+                  description: `GroupBy completed! ${rows.length} rows processed.`,
+                });
+              } else {
+                throw new Error('No data rows found in CSV');
+              }
+            } else {
+              throw new Error('Failed to fetch cached results');
+            }
+          } catch (fetchError) {
+            console.error('❌ Error fetching cached results:', fetchError);
+            // Still mark as successful since the operation completed
+            updateSettings(atomId, {
+              groupbyResults: {
+                result_file: data.result_file,
+                result_shape: [0, 0],
+                row_count: data.row_count,
+                columns: data.columns
+              },
+            });
+            
+            toast({
+              title: 'Partial Success',
+              description: 'GroupBy operation completed, but results display failed. Check the saved file.',
+            });
+          }
         }
       } else {
         setResultsError(data.error || 'GroupBy failed');
         setResults([]);
         setResultsHeaders([]);
+        
+        toast({
+          title: 'Error',
+          description: data.error || 'GroupBy operation failed',
+          variant: 'destructive',
+        });
       }
       setResultsLoading(false);
     } catch (e: any) {
+      console.error('❌ GroupBy Perform Error:', e);
       setResultsError(e.message || 'Error performing groupby');
       setResults([]);
       setResultsHeaders([]);
       setResultsLoading(false);
+      
+      toast({
+        title: 'Error',
+        description: e.message || 'Error performing groupby',
+        variant: 'destructive',
+      });
     }
   };
 
