@@ -4,7 +4,7 @@ pymongo
 redis
 boto3
 pandas
-polars
+polars>=0.20.0
 minio
 motor
 python-multipart
