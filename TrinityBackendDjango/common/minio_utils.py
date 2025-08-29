@@ -89,6 +89,30 @@ def rename_prefix(old_prefix: str, new_prefix: str) -> None:
     print(f"✅ Prefix renamed to {new_prefix}")
 
 
+def copy_prefix(old_prefix: str, new_prefix: str) -> None:
+    """Copy all objects from one prefix to another without deleting the source."""
+    if not ensure_bucket():
+        return
+    if not old_prefix.endswith("/"):
+        old_prefix += "/"
+    if not new_prefix.endswith("/"):
+        new_prefix += "/"
+    try:
+        objects = list(
+            _client.list_objects(MINIO_BUCKET, prefix=old_prefix, recursive=True)
+        )
+    except S3Error as exc:
+        print(f"MinIO connection error: {exc}")
+        return
+    if not objects:
+        create_prefix(new_prefix)
+        return
+    for obj in objects:
+        dest = obj.object_name.replace(old_prefix, new_prefix, 1)
+        _client.copy_object(
+            MINIO_BUCKET, dest, CopySource(MINIO_BUCKET, obj.object_name)
+        )
+
 def _list_objects(prefix: str):
     """Return a list of objects for a given prefix."""
     if not ensure_bucket():

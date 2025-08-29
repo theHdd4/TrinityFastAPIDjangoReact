@@ -8,6 +8,7 @@ import {
   Calendar,
   Pencil,
   Trash,
+  Copy,
   Target,
   BarChart3,
   Zap
@@ -307,6 +308,25 @@ const Projects = () => {
     setEditId(null);
   };
 
+  const duplicateProject = async (id: number, e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      const res = await fetch(`${REGISTRY_API}/projects/${id}/duplicate/`, {
+        method: 'POST',
+        credentials: 'include'
+      });
+      if (res.ok) {
+        const dup = await res.json();
+        setProjects(prev => [
+          ...prev,
+          { ...dup, lastModified: new Date(dup.updated_at) }
+        ]);
+      }
+    } catch {
+      /* ignore */
+    }
+  };
+
   const deleteProject = async (id: number, e: React.MouseEvent) => {
     e.stopPropagation();
     if (!window.confirm('Delete this project?')) return;
@@ -436,6 +456,9 @@ const Projects = () => {
                     <FolderOpen className="w-6 h-6 text-gray-600" />
                   </div>
                   <div className="flex items-center space-x-2">
+                    <button onClick={(e) => duplicateProject(project.id, e)} className="p-1" title="Duplicate">
+                      <Copy className="w-4 h-4 text-gray-500 hover:text-gray-700" />
+                    </button>
                     <button onClick={(e) => startRename(project, e)} className="p-1" title="Rename">
                       <Pencil className="w-4 h-4 text-gray-500 hover:text-gray-700" />
                     </button>

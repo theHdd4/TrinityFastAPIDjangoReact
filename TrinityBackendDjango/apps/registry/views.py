@@ -1,11 +1,13 @@
 from rest_framework import viewsets, permissions, status
 from rest_framework.response import Response
+from rest_framework.decorators import action
 from django.utils.text import slugify
 import os
 from apps.accounts.views import CsrfExemptSessionAuthentication
 from apps.accounts.utils import save_env_var, get_env_dict, load_env_vars
-from .models import App, Project, Session, LaboratoryAction, ArrowDataset
+from .models import App, Project, Session, LaboratoryAction, ArrowDataset, RegistryEnvironment
 from .atom_config import save_atom_list_configuration, load_atom_list_configuration
+from common.minio_utils import copy_prefix
 from .serializers import (
     AppSerializer,
     ProjectSerializer,
@@ -218,6 +220,88 @@ class ProjectViewSet(viewsets.ModelViewSet):
             if "exhibition_config" in state_data:
                 cards = state_data["exhibition_config"].get("cards", [])
                 save_atom_list_configuration(project, "exhibition", cards)
+
+    @action(detail=True, methods=["post"])
+    def duplicate(self, request, pk=None):
+        """Duplicate a project along with its configurations and datasets."""
+        if not self._can_edit(request.user):
+            return Response({"detail": "Permission denied."}, status=status.HTTP_403_FORBIDDEN)
+        source = self.get_object()
+        base_name = f"{source.name} Copy"
+        name = base_name
+        counter = 1
+        while Project.objects.filter(owner=request.user, app=source.app, name=name).exists():
+            name = f"{base_name} {counter}"
+            counter += 1
+        slug_base = slugify(name)
+        slug_val = slug_base
+        counter = 1
+        while Project.objects.filter(owner=request.user, slug=slug_val).exists():
+            slug_val = f"{slug_base}-{counter}"
+            counter += 1
+        new_project = Project.objects.create(
+            name=name,
+            slug=slug_val,
+            description=source.description,
+            owner=request.user,
+            app=source.app,
+            state=source.state,
+        )
+
+        for mode in ["lab", "workflow", "exhibition"]:
+            cfg = load_atom_list_configuration(source, mode)
+            if cfg and cfg.get("cards"):
+                save_atom_list_configuration(new_project, mode, cfg["cards"])
+
+        tenant = os.getenv("CLIENT_NAME", "default_client").replace(" ", "_")
+        app_slug = source.app.slug
+        old_prefix = f"{tenant}/{app_slug}/{source.name}"
+        new_prefix = f"{tenant}/{app_slug}/{new_project.name}"
+        copy_prefix(old_prefix, new_prefix)
+
+        for ds in source.arrow_datasets.all():
+            def _replace(path: str) -> str:
+                return path.replace(old_prefix, new_prefix, 1) if path else path
+
+            ArrowDataset.objects.create(
+                project=new_project,
+                atom_id=ds.atom_id,
+                file_key=_replace(ds.file_key),
+                arrow_object=_replace(ds.arrow_object),
+                flight_path=_replace(ds.flight_path),
+                original_csv=_replace(ds.original_csv),
+                descriptor=ds.descriptor,
+            )
+
+        try:
+            env_src = RegistryEnvironment.objects.get(
+                client_name=tenant, app_name=app_slug, project_name=source.name
+            )
+            env = env_src.envvars or {}
+            env.update(
+                {
+                    "CLIENT_NAME": tenant,
+                    "APP_NAME": app_slug,
+                    "PROJECT_NAME": new_project.name,
+                    "PROJECT_ID": f"{new_project.name}_{new_project.id}",
+                }
+            )
+            RegistryEnvironment.objects.update_or_create(
+                client_name=tenant,
+                app_name=app_slug,
+                project_name=new_project.name,
+                defaults={
+                    "envvars": env,
+                    "identifiers": env_src.identifiers,
+                    "measures": env_src.measures,
+                    "dimensions": env_src.dimensions,
+                },
+            )
+        except RegistryEnvironment.DoesNotExist:
+            pass
+
+        serializer = self.get_serializer(new_project)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
 
 
 class SessionViewSet(viewsets.ModelViewSet):
