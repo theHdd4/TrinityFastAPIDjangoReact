@@ -55,8 +55,10 @@ def _df_payload(df: pd.DataFrame, df_id: str) -> Dict[str, Any]:
 def _fetch_df_from_object(object_name: str) -> pd.DataFrame:
     """Fetch a DataFrame from the Flight server or MinIO given an object key."""
     object_name = unquote(object_name)
-    if not (object_name.endswith('.arrow') or object_name.endswith('.csv')):
-        raise HTTPException(status_code=400, detail="Invalid object_name format")
+    if not object_name.endswith(".arrow"):
+        raise HTTPException(
+            status_code=400, detail="Only .arrow objects are supported"
+        )
     try:
         return download_dataframe(object_name)
     except Exception as e:
