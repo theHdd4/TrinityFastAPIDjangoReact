@@ -23,7 +23,7 @@ import { useToast } from "@/hooks/use-toast";
 import {
   useLaboratoryStore,
   DataUploadSettings,
-  DEFAULT_DATAUPLOAD_SETTINGS,
+  createDefaultDataUploadSettings,
 } from "@/components/LaboratoryMode/store/laboratoryStore";
 
 interface Props {
@@ -36,9 +36,8 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
   );
   const { toast } = useToast();
   const settings: DataUploadSettings =
-    (atom?.settings as DataUploadSettings) || {
-      ...DEFAULT_DATAUPLOAD_SETTINGS,
-    };
+    (atom?.settings as DataUploadSettings) ||
+    createDefaultDataUploadSettings();
   const [allAvailableFiles, setAllAvailableFiles] = useState<
     { name: string; source: string; original: string }[]
   >(

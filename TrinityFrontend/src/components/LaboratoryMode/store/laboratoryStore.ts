@@ -71,6 +71,22 @@ export const DEFAULT_DATAUPLOAD_SETTINGS: DataUploadSettings = {
   fileKeyMap: {},
 };
 
+export const createDefaultDataUploadSettings = (): DataUploadSettings => ({
+  masterFile: "",
+  fileValidation: true,
+  bypassMasterUpload: false,
+  columnConfig: {},
+  frequency: "monthly",
+  dimensions: {},
+  measures: {},
+  uploadedFiles: [],
+  validatorId: undefined,
+  requiredFiles: [],
+  validations: {},
+  fileMappings: {},
+  fileKeyMap: {},
+});
+
 export interface FeatureOverviewSettings {
   selectedColumns: string[];
   hierarchicalView: boolean;
