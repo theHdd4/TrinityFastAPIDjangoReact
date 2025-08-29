@@ -134,11 +134,11 @@ const ColumnClassifierSettings: React.FC<ColumnClassifierSettingsProps> = ({ ato
       </Card>
 
       <Card className="p-4 flex items-center justify-between">
-        <Label htmlFor={`${atomId}-enable-colview`} className="text-sm">
-          Enable Column View
+        <Label htmlFor={`${atomId}-enable-cardview`} className="text-sm">
+          Enable Cardinality View
         </Label>
         <Switch
-          id={`${atomId}-enable-colview`}
+          id={`${atomId}-enable-cardview`}
           checked={enableColumnView}
           onCheckedChange={val => {
             setEnableColumnView(val);

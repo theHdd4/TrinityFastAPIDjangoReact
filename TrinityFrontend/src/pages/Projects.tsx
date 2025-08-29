@@ -17,6 +17,7 @@ import { REGISTRY_API, CLASSIFIER_API } from '@/lib/api';
 import { fetchDimensionMapping } from '@/lib/dimensions';
 import { molecules } from '@/components/MoleculeList/data/molecules';
 import { safeStringify } from '@/utils/safeStringify';
+import { serializeProject, sanitizeLabConfig } from '@/utils/projectStorage';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { useExhibitionStore } from '@/components/ExhibitionMode/store/exhibitionStore';
 import { useAuth } from '@/contexts/AuthContext';
@@ -169,7 +170,7 @@ const Projects = () => {
       });
       if (res.ok) {
         const project = await res.json();
-        localStorage.setItem('current-project', JSON.stringify(project));
+        localStorage.setItem('current-project', serializeProject(project));
 
         try {
           const envRes = await fetch(`${REGISTRY_API}/projects/${project.id}/`, {
@@ -278,7 +279,7 @@ const Projects = () => {
           try {
             const obj = JSON.parse(stored);
             if (obj && obj.id === updated.id) {
-              localStorage.setItem('current-project', JSON.stringify(updated));
+              localStorage.setItem('current-project', serializeProject(updated));
             }
           } catch {
             /* ignore */
@@ -323,7 +324,7 @@ const Projects = () => {
   };
 
   const openProject = async (project: Project) => {
-    localStorage.setItem('current-project', JSON.stringify(project));
+    localStorage.setItem('current-project', serializeProject(project));
     resetLaboratory();
     resetExhibition();
     try {
@@ -366,9 +367,10 @@ const Projects = () => {
           localStorage.removeItem('workflow-selected-atoms');
         }
         if (data.state && data.state.laboratory_config) {
-          localStorage.setItem('laboratory-config', safeStringify(data.state.laboratory_config));
-          if (data.state.laboratory_config.cards) {
-            localStorage.setItem('laboratory-layout-cards', safeStringify(data.state.laboratory_config.cards));
+          const sanitized = sanitizeLabConfig(data.state.laboratory_config);
+          localStorage.setItem('laboratory-config', safeStringify(sanitized));
+          if (sanitized.cards) {
+            localStorage.setItem('laboratory-layout-cards', safeStringify(sanitized.cards));
           } else {
             localStorage.removeItem('laboratory-layout-cards');
           }

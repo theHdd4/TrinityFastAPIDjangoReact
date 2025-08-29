@@ -1,0 +1,299 @@
+/* Explore Canvas CSS - Responsive chart layout without horizontal scrollbars */
+
+.explore-chart-container {
+  width: 100%;
+  max-width: 100%;
+  overflow: hidden;
+  min-width: 0;
+}
+
+/* Ensure the main container doesn't overflow */
+.explore-chart-container > * {
+  width: 100%;
+  max-width: 100%;
+  overflow: hidden;
+  min-width: 0;
+}
+
+.explore-chart-grid {
+  display: grid;
+  gap: 1.5rem;
+  width: 100%;
+  max-width: 100%;
+}
+
+/* Default single column layout */
+.explore-chart-grid {
+  grid-template-columns: 1fr;
+}
+
+/* Responsive behavior for different screen sizes */
+@media (min-width: 768px) {
+  .explore-chart-grid {
+    gap: 2rem;
+  }
+}
+
+@media (min-width: 1024px) {
+  .explore-chart-grid {
+    gap: 2.5rem;
+  }
+}
+
+/* Ensure inline grid styles work properly */
+.explore-chart-grid[style*="grid-template-columns"] {
+  display: grid !important;
+}
+
+/* Specific styling for 2-column layout */
+.explore-chart-grid[style*="repeat(2, 1fr)"] {
+  grid-template-columns: repeat(2, 1fr) !important;
+}
+
+/* Specific styling for 3-column layout */
+.explore-chart-grid[style*="repeat(3, 1fr)"] {
+  grid-template-columns: repeat(3, 1fr) !important;
+}
+
+/* Ensure charts don't overflow on very small screens */
+@media (max-width: 640px) {
+  .explore-chart-grid {
+    gap: 1rem;
+  }
+  
+  .explore-chart-card {
+    margin: 0;
+    padding: 0;
+  }
+}
+
+.explore-chart-card {
+  width: 100%;
+  max-width: 100%;
+  overflow: hidden;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+/* Ensure chart cards have proper spacing */
+.explore-chart-card .border-pink-200 {
+  border-width: 1px;
+  border-style: solid;
+  border-color: rgb(251 207 232);
+}
+
+.explore-chart-content {
+  width: 100%;
+  max-width: 100%;
+  overflow: hidden;
+  min-width: 0;
+}
+
+.explore-chart-renderer {
+  width: 100%;
+  max-width: 100%;
+  overflow: hidden;
+  min-width: 0;
+}
+
+/* Ensure chart configuration areas don't overflow */
+.explore-chart-config {
+  width: 100%;
+  max-width: 100%;
+  overflow: hidden;
+  min-width: 0;
+}
+
+/* Ensure chart type icons and action icons are properly laid out */
+.explore-chart-config .flex {
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+/* Ensure chart type icons don't overflow */
+.explore-chart-config .flex.items-center.space-x-2 {
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+/* Ensure action icons are properly spaced */
+.explore-chart-config .flex.items-center.space-x-2.flex-shrink-0 {
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+/* Ensure chart configuration header is responsive */
+.explore-chart-config .flex.items-center.justify-between {
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+/* Ensure chart configuration header content doesn't overflow */
+.explore-chart-config .flex.items-center.space-x-2 {
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+/* Ensure chart configuration toggle button is properly positioned */
+.explore-chart-config button {
+  flex-shrink: 0;
+}
+
+/* Ensure axis selectors are responsive */
+.explore-axis-selectors {
+  width: 100%;
+  max-width: 100%;
+  overflow: hidden;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+/* Ensure chart settings panel is responsive */
+.explore-chart-settings {
+  width: 100%;
+  max-width: 100%;
+  overflow: visible;
+  min-width: 0;
+}
+
+/* Ensure the chart area itself doesn't overflow */
+.explore-chart-area {
+  width: 100%;
+  max-width: 100%;
+  overflow: hidden;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Scrollable container for multiple pie charts */
+.pie-chart-container {
+  scrollbar-color: #cbd5e1 transparent;
+  scrollbar-width: thin;
+}
+
+.pie-chart-container::-webkit-scrollbar {
+  width: 6px;
+}
+
+.pie-chart-container::-webkit-scrollbar-thumb {
+  background-color: #cbd5e1;
+  border-radius: 9999px;
+}
+
+.pie-chart-container::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* Additional responsive behavior for chart components */
+.explore-chart-container * {
+  box-sizing: border-box;
+}
+
+/* Ensure charts fit within their containers */
+.explore-chart-card .recharts-wrapper {
+  width: 100% !important;
+  max-width: 100% !important;
+  overflow: hidden !important;
+}
+
+/* Ensure charts in 2-column layout are properly sized */
+.explore-chart-grid[style*="repeat(2, 1fr)"] .explore-chart-card {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+
+/* Ensure charts in 3-column layout are properly sized */
+.explore-chart-grid[style*="repeat(3, 1fr)"] .explore-chart-card {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+
+/* Ensure chart content is properly contained */
+.explore-chart-content > * {
+  width: 100%;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+/* Force charts to be responsive */
+.explore-chart-area .recharts-responsive-container {
+  width: 100% !important;
+  max-width: 100% !important;
+  overflow: hidden !important;
+}
+
+/* Ensure chart area content is properly contained */
+.explore-chart-area > div {
+  width: 100%;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+/* Ensure chart area has proper dimensions */
+.explore-chart-area {
+  min-height: 400px;
+  max-height: 500px;
+}
+
+/* Ensure pie charts are properly centered */
+.explore-chart-area .flex.items-center.justify-center {
+  width: 100%;
+  height: 100%;
+}
+
+/* Legend selector styling */
+.explore-legend-selector {
+  border: 1px solid #e5e7eb;
+  transition: all 0.2s ease-in-out;
+}
+
+.explore-legend-selector:hover {
+  border-color: #d1d5db;
+  background-color: #f9fafb;
+}
+
+.explore-legend-selector .bg-purple-100 {
+  background-color: #f3e8ff;
+}
+
+.explore-legend-selector .text-purple-600 {
+  color: #9333ea;
+}
+
+/* Improved tooltip styling for explore atom charts */
+.explore-chart-tooltip {
+  background-color: rgba(255, 255, 255, 0.98) !important;
+  backdrop-filter: blur(10px) !important;
+  border: 1px solid rgba(229, 231, 235, 0.6) !important;
+  border-radius: 12px !important;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.15), 0 10px 10px -5px rgba(0, 0, 0, 0.1) !important;
+  min-width: 8rem !important;
+  padding: 12px !important;
+}
+
+/* Hide dots by default, show only on hover */
+.explore-chart-line .recharts-line-dot {
+  display: none !important;
+}
+
+/* Show dots only on hover */
+.explore-chart-line .recharts-line-dot:hover,
+.explore-chart-line .recharts-line-dot:focus {
+  display: block !important;
+}
+
+/* Active dot styling */
+.explore-chart-line .recharts-active-dot {
+  display: block !important;
+  r: 6 !important;
+  stroke: white !important;
+  stroke-width: 3 !important;
+  cursor: pointer !important;
+}

@@ -386,22 +386,18 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
         });
       }
       
-      // Use preview data from the response
-      if (data.preview_data && data.preview_data.data) {
-        // Parse CSV data to get preview rows
-        const csvLines = data.preview_data.data.split('\n');
-        const headers = csvLines[0].split(',');
-        const previewRows = csvLines.slice(1).map(line => { // Show all rows
-          const values = line.split(',');
-          const row: any = {};
-          headers.forEach((header, index) => {
-            row[header] = values[index] || '';
-          });
-          return row;
-        }).filter(row => Object.keys(row).length > 1); // Filter out empty rows
+      // 🔧 CRITICAL FIX: Display data immediately like GroupBy does
+      // The backend now returns the actual data in data.results
+      if (data.results && Array.isArray(data.results)) {
+        setPreview(data.results);
+        console.log('✅ Preview data loaded directly from perform response:', data.results.length, 'rows');
         
-        setPreview(previewRows);
+        // Set the preview file for pagination
+        if (data.result_file) {
+          setPreviewFile(data.result_file);
+        }
       } else {
+        console.warn('⚠️ No results in perform response:', data);
         setPreview([]);
       }
       

@@ -39,7 +39,7 @@ import rowOperations from '@/components/AtomList/atoms/row-operations';
 import columnClassifier from '@/components/AtomList/atoms/column-classifier';
 import createColumn from '@/components/AtomList/atoms/createcolumn';
 import correlation from '@/components/AtomList/atoms/correlation';
-import explore from '@/components/AtomList/atoms/explore';
+import explore from '@/components/AtomList/atoms/explore'; // Explore atom for interactive data exploration
 import descriptiveStats from '@/components/AtomList/atoms/descriptive-stats';
 import trendAnalysis from '@/components/AtomList/atoms/trend-analysis';
 import regressionFeatureBased from '@/components/AtomList/atoms/regression-feature-based';
