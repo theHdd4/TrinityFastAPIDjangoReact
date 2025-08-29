@@ -60,10 +60,12 @@ const DataFrameOperationsProperties: React.FC<Props> = ({ atomId }) => {
     setLoading(true);
     setError(null);
     try {
-      // Fetch the list of frames to get csv_name for display
+      // Fetch the list of frames to resolve the display name
       const framesRes = await fetch(`${VALIDATE_API}/list_saved_dataframes`);
       const framesData = await framesRes.json();
-      const frames = Array.isArray(framesData.files) ? framesData.files : [];
+      const frames = Array.isArray(framesData.files)
+        ? framesData.files.filter((f: any) => f.arrow_name)
+        : [];
       const foundFrame = frames.find((f: any) => f.object_name === fileId);
       setSelectedFrame(foundFrame || null);
       const resp = await loadDataframeByKey(fileId);
@@ -76,7 +78,7 @@ const DataFrameOperationsProperties: React.FC<Props> = ({ atomId }) => {
       const newData: DataFrameData = {
         headers: resp.headers,
         rows: resp.rows,
-        fileName: foundFrame ? foundFrame.csv_name.split('/').pop() : fileId,
+        fileName: foundFrame ? foundFrame.arrow_name.split('/').pop() : fileId,
         columnTypes,
         pinnedColumns: [],
         frozenColumns: 0,

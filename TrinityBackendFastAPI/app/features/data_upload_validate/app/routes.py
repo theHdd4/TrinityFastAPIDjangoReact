@@ -5,6 +5,7 @@ import json
 import pandas as pd
 import io
 import os
+import openpyxl
 from app.core.utils import get_env_vars
 from pathlib import Path
 import re
@@ -135,6 +136,26 @@ MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "minio:9000")
 MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY", "minio")
 MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY", "minio123")
 MINIO_BUCKET = os.getenv("MINIO_BUCKET", "trinity")
+
+
+CHUNK_ROWS = 10000
+
+
+def stream_excel(file_obj, chunk_rows: int = CHUNK_ROWS):
+    """Yield DataFrame chunks from an Excel file-like object."""
+    wb = openpyxl.load_workbook(file_obj, read_only=True, data_only=True)
+    ws = wb.active
+    rows = ws.iter_rows(values_only=True)
+    headers = next(rows, [])
+    chunk: list[list[Any]] = []
+    for row in rows:
+        chunk.append(list(row))
+        if len(chunk) == chunk_rows:
+            yield pd.DataFrame(chunk, columns=headers)
+            chunk = []
+    if chunk:
+        yield pd.DataFrame(chunk, columns=headers)
+    file_obj.seek(0)
 
 
 def _parse_numeric_id(value: str | int | None) -> int:
@@ -1438,23 +1459,31 @@ async def validate(
     
     for file, key in zip(files, keys):
         try:
-            content = await file.read()
-            file_contents.append((content, file.filename, key))
-            
-            # Parse file based on extension
+            # Determine file size without loading entire content
+            file.file.seek(0, os.SEEK_END)
+            size_bytes = file.file.tell()
+            file.file.seek(0)
+
+            # Parse file based on extension using chunked processing
             if file.filename.lower().endswith(".csv"):
-                df = pd.read_csv(
-                    io.BytesIO(content), parse_dates=True, infer_datetime_format=True
+                reader = pd.read_csv(
+                    file.file,
+                    chunksize=CHUNK_ROWS,
+                    parse_dates=True,
+                    infer_datetime_format=True,
                 )
-            elif file.filename.lower().endswith(".xlsx"):
-                df = pd.read_excel(io.BytesIO(content), parse_dates=True)
+                df = pd.concat(reader, ignore_index=True)
+            elif file.filename.lower().endswith((".xls", ".xlsx")):
+                reader = stream_excel(file.file, CHUNK_ROWS)
+                df = pd.concat(reader, ignore_index=True)
             else:
                 raise HTTPException(status_code=400, detail="Only CSV and XLSX files supported")
-            
+
             # ✅ Preprocess columns (same logic as create_new)
             df.columns = [preprocess_column_name(col) for col in df.columns]
             files_data.append((key, df))
-            
+            file_contents.append((size_bytes, file.filename, key))
+
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"Error parsing file {file.filename}: {str(e)}")
     
@@ -1481,7 +1510,7 @@ async def validate(
             {
                 "file_key": key,
                 "filename": next(f[1] for f in file_contents if f[2] == key),
-                "file_size_bytes": len(next(f[0] for f in file_contents if f[2] == key)),
+                "file_size_bytes": next(f[0] for f in file_contents if f[2] == key),
                 "overall_status": validation_results["file_results"].get(key, {}).get("status", "unknown"),
                 "errors": validation_results["file_results"].get(key, {}).get("errors", []),
                 "warnings": validation_results["file_results"].get(key, {}).get("warnings", []),
@@ -2612,17 +2641,6 @@ async def save_dataframes(
     numeric_pid = _parse_numeric_id(project_id or os.getenv("PROJECT_ID", "0"))
     print(f"📤 saving to prefix {prefix}")
     for file, key in zip(files, keys):
-        content = await file.read()
-        if file.filename.lower().endswith(".csv"):
-            df = pd.read_csv(
-                io.BytesIO(content), parse_dates=True, infer_datetime_format=True
-            )
-        elif file.filename.lower().endswith((".xls", ".xlsx")):
-            df = pd.read_excel(io.BytesIO(content), parse_dates=True)
-        else:
-            raise HTTPException(status_code=400, detail="Unsupported file type")
-
-
         arrow_name = Path(file.filename).stem + ".arrow"
         exists = await arrow_dataset_exists(numeric_pid, validator_atom_id, key)
         if exists and not overwrite:
@@ -2630,16 +2648,46 @@ async def save_dataframes(
             flights.append({"file_key": key})
             continue
 
+        # Stream file in chunks to build Arrow buffer and DataFrame
+        file.file.seek(0)
+        if file.filename.lower().endswith(".csv"):
+            reader = pd.read_csv(
+                file.file,
+                chunksize=CHUNK_ROWS,
+                parse_dates=True,
+                infer_datetime_format=True,
+            )
+        elif file.filename.lower().endswith((".xls", ".xlsx")):
+            reader = stream_excel(file.file, CHUNK_ROWS)
+        else:
+            raise HTTPException(status_code=400, detail="Unsupported file type")
+
         arrow_buf = io.BytesIO()
-        # Normalize column names and types to prevent ArrowTypeError when
-        # object columns contain non-string values (e.g., floats)
-        df.columns = df.columns.map(str)
-        object_cols = df.select_dtypes(include=["object"]).columns
-        for col in object_cols:
-            df[col] = df[col].astype(str)
-        table = pa.Table.from_pandas(df)
-        with ipc.new_file(arrow_buf, table.schema) as writer:
-            writer.write_table(table)
+        df_chunks: List[pd.DataFrame] = []
+        try:
+            first_chunk = next(reader)
+        except StopIteration:
+            uploads.append({"file_key": key, "already_saved": False, "error": "empty file"})
+            flights.append({"file_key": key})
+            continue
+
+        first_chunk.columns = first_chunk.columns.map(str)
+        obj_cols = first_chunk.select_dtypes(include=["object"]).columns
+        for col in obj_cols:
+            first_chunk[col] = first_chunk[col].astype(str)
+        df_chunks.append(first_chunk)
+        schema = pa.Table.from_pandas(first_chunk).schema
+        with ipc.new_file(arrow_buf, schema) as writer:
+            writer.write_table(pa.Table.from_pandas(first_chunk, schema=schema))
+            for chunk in reader:
+                chunk.columns = chunk.columns.map(str)
+                obj_cols = chunk.select_dtypes(include=["object"]).columns
+                for col in obj_cols:
+                    chunk[col] = chunk[col].astype(str)
+                df_chunks.append(chunk)
+                writer.write_table(pa.Table.from_pandas(chunk, schema=schema))
+
+        df = pd.concat(df_chunks, ignore_index=True)
 
         result = upload_to_minio(arrow_buf.getvalue(), arrow_name, prefix)
         saved_name = Path(result.get("object_name", "")).name or arrow_name
