@@ -54,6 +54,8 @@ const Projects = () => {
   const [templates, setTemplates] = useState<Template[]>([]);
   const [hoveredProject, setHoveredProject] = useState<string | null>(null);
   const [hoveredTemplate, setHoveredTemplate] = useState<string | null>(null);
+  const [openProjectMenuId, setOpenProjectMenuId] = useState<string | null>(null);
+  const [openTemplateMenuId, setOpenTemplateMenuId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState('projects');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [searchQuery, setSearchQuery] = useState('');
@@ -473,7 +475,11 @@ const Projects = () => {
                   key={project.id}
                   className="group cursor-pointer hover:shadow-xl transition-all duration-500 border-0 bg-white hover:bg-gradient-to-br hover:from-white hover:to-gray-50/30 overflow-hidden transform hover:-translate-y-1"
                   onMouseEnter={() => setHoveredProject(project.id)}
-                  onMouseLeave={() => setHoveredProject(null)}
+                  onMouseLeave={() => {
+                    if (openProjectMenuId !== project.id) {
+                      setHoveredProject(null);
+                    }
+                  }}
                   onClick={() => {
                     if (editingProjectId !== project.id) openProject(project);
                   }}
@@ -510,7 +516,17 @@ const Projects = () => {
                           >
                             <Trash2 className="w-4 h-4" />
                           </Button>
-                          <DropdownMenu>
+                          <DropdownMenu
+                            onOpenChange={(open) => {
+                              if (open) {
+                                setOpenProjectMenuId(project.id);
+                                setHoveredProject(project.id);
+                              } else {
+                                setOpenProjectMenuId(null);
+                                setHoveredProject(null);
+                              }
+                            }}
+                          >
                             <DropdownMenuTrigger asChild>
                               <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
                                 <MoreHorizontal className="w-4 h-4" />
@@ -628,7 +644,11 @@ const Projects = () => {
                   key={template.id}
                   className="group cursor-pointer hover:shadow-xl transition-all duration-500 border-0 bg-white hover:bg-gradient-to-br hover:from-white hover:to-gray-50/30 overflow-hidden transform hover:-translate-y-1"
                   onMouseEnter={() => setHoveredTemplate(template.id)}
-                  onMouseLeave={() => setHoveredTemplate(null)}
+                  onMouseLeave={() => {
+                    if (openTemplateMenuId !== template.id) {
+                      setHoveredTemplate(null);
+                    }
+                  }}
                 >
                   <div className={viewMode === 'grid' ? 'p-6 flex flex-col h-56 relative' : 'p-6 flex items-center space-x-6 relative'}>
                     <div className={`absolute ${viewMode === 'grid' ? 'top-0 left-0 w-full h-1' : 'left-0 top-0 w-1 h-full'} bg-gradient-to-r from-amber-400 to-orange-500 opacity-60`} />
@@ -665,7 +685,17 @@ const Projects = () => {
                               >
                                 <Plus className="w-4 h-4" />
                               </Button>
-                              <DropdownMenu>
+                              <DropdownMenu
+                                onOpenChange={(open) => {
+                                  if (open) {
+                                    setOpenTemplateMenuId(template.id);
+                                    setHoveredTemplate(template.id);
+                                  } else {
+                                    setOpenTemplateMenuId(null);
+                                    setHoveredTemplate(null);
+                                  }
+                                }}
+                              >
                                 <DropdownMenuTrigger asChild>
                                   <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
                                     <MoreHorizontal className="w-4 h-4" />
@@ -744,7 +774,17 @@ const Projects = () => {
                             >
                               <Plus className="w-4 h-4" />
                             </Button>
-                            <DropdownMenu>
+                            <DropdownMenu
+                              onOpenChange={(open) => {
+                                if (open) {
+                                  setOpenTemplateMenuId(template.id);
+                                  setHoveredTemplate(template.id);
+                                } else {
+                                  setOpenTemplateMenuId(null);
+                                  setHoveredTemplate(null);
+                                }
+                              }}
+                            >
                               <DropdownMenuTrigger asChild>
                                 <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
                                   <MoreHorizontal className="w-4 h-4" />
