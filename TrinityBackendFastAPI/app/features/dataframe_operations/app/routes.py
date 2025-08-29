@@ -3,14 +3,11 @@ import os
 from minio import Minio
 from minio.error import S3Error
 from urllib.parse import unquote
-import pyarrow as pa
-import pyarrow.ipc as ipc
-import pandas as pd
-import numpy as np
+import polars as pl
 import io
 import uuid
 from typing import Dict, Any, List
-from app.DataStorageRetrieval.arrow_client import download_dataframe
+from app.DataStorageRetrieval.arrow_client import download_table_bytes
 from app.features.data_upload_validate.app.routes import get_object_prefix
 
 router = APIRouter()
@@ -29,30 +26,33 @@ minio_client = Minio(
 )
 
 # In-memory storage for dataframe sessions
-SESSIONS: Dict[str, pd.DataFrame] = {}
+SESSIONS: Dict[str, pl.DataFrame] = {}
 
 
-def _get_df(df_id: str) -> pd.DataFrame:
+def _get_df(df_id: str) -> pl.DataFrame:
     df = SESSIONS.get(df_id)
     if df is None:
         raise HTTPException(status_code=404, detail="DataFrame not found")
     return df
 
 
-def _df_payload(df: pd.DataFrame, df_id: str) -> Dict[str, Any]:
-    safe_df = df.replace([np.inf, -np.inf], np.nan).astype(object)
-    rows = safe_df.where(pd.notnull(safe_df), None).to_dict(orient="records")
+def _df_payload(df: pl.DataFrame, df_id: str, page: int = 1, page_size: int = 100) -> Dict[str, Any]:
+    start = (page - 1) * page_size
+    page_df = df.slice(start, page_size)
+    rows = page_df.to_dicts()
     return {
         "df_id": df_id,
-        "headers": list(df.columns),
+        "headers": df.columns,
         "rows": rows,
-        "types": {col: str(df[col].dtype) for col in df.columns},
-        "row_count": len(df),
-        "column_count": len(df.columns),
+        "types": {col: str(dtype) for col, dtype in zip(df.columns, df.dtypes)},
+        "row_count": df.height,
+        "column_count": df.width,
+        "page": page,
+        "page_size": page_size,
     }
 
 
-def _fetch_df_from_object(object_name: str) -> pd.DataFrame:
+def _fetch_df_from_object(object_name: str) -> pl.DataFrame:
     """Fetch a DataFrame from the Flight server or MinIO given an object key."""
     object_name = unquote(object_name)
     if not object_name.endswith(".arrow"):
@@ -60,7 +60,8 @@ def _fetch_df_from_object(object_name: str) -> pd.DataFrame:
             status_code=400, detail="Only .arrow objects are supported"
         )
     try:
-        return download_dataframe(object_name)
+        data = download_table_bytes(object_name)
+        return pl.read_ipc(io.BytesIO(data))
     except Exception as e:
         print(f"[DFOPS] Flight/MinIO fetch error: {e}")
         raise HTTPException(status_code=404, detail="Not Found")
@@ -74,7 +75,9 @@ async def test_alive():
 async def cached_dataframe(object_name: str):
     print("[DFOPS] --- /cached_dataframe called ---")
     df = _fetch_df_from_object(object_name)
-    return Response(content=df.to_csv(index=False), media_type="text/csv")
+    buf = io.StringIO()
+    df.write_csv(buf)
+    return Response(content=buf.getvalue(), media_type="text/csv")
 
 
 @router.post("/load_cached")
@@ -93,7 +96,7 @@ async def save_dataframe(
 ):
     """Save a dataframe (CSV) to MinIO under a `dataframe operations` folder using the original file name."""
     try:
-        df = pd.read_csv(io.StringIO(csv_data))
+        df = pl.read_csv(io.StringIO(csv_data))
 
         # Generate a filename if none supplied
         if not filename:
@@ -114,11 +117,9 @@ async def save_dataframe(
         object_name = f"{dfops_prefix}{filename}"
 
         # Convert to Arrow and upload
-        table = pa.Table.from_pandas(df)
-        arrow_buffer = pa.BufferOutputStream()
-        with ipc.new_file(arrow_buffer, table.schema) as writer:
-            writer.write_table(table)
-        arrow_bytes = arrow_buffer.getvalue().to_pybytes()
+        arrow_buffer = io.BytesIO()
+        df.write_ipc(arrow_buffer)
+        arrow_bytes = arrow_buffer.getvalue()
         minio_client.put_object(
             MINIO_BUCKET,
             object_name,
@@ -147,7 +148,7 @@ async def load_dataframe(file: UploadFile = File(...)):
     """Load a CSV file and store it in a session."""
     try:
         content = await file.read()
-        df = pd.read_csv(io.BytesIO(content))
+        df = pl.read_csv(io.BytesIO(content))
     except Exception:
         raise HTTPException(status_code=400, detail="Failed to parse uploaded file")
     df_id = str(uuid.uuid4())
@@ -163,11 +164,11 @@ async def filter_rows(df_id: str = Body(...), column: str = Body(...), value: An
         if isinstance(value, dict):
             min_v = value.get("min")
             max_v = value.get("max")
-            df = df[df[column].between(min_v, max_v)]
+            df = df.filter(pl.col(column).is_between(min_v, max_v))
         elif isinstance(value, list):
-            df = df[df[column].isin(value)]
+            df = df.filter(pl.col(column).is_in(value))
         else:
-            df = df[df[column] == value]
+            df = df.filter(pl.col(column) == value)
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
     SESSIONS[df_id] = df
@@ -181,7 +182,7 @@ async def sort_dataframe(df_id: str = Body(...), column: str = Body(...), direct
     print(f"/sort called df_id={df_id}, column={column}, direction={direction}", flush=True)
     df = _get_df(df_id)
     try:
-        df = df.sort_values(by=column, ascending=direction == "asc").reset_index(drop=True)
+        df = df.sort(column, descending=direction != "asc")
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
     SESSIONS[df_id] = df
@@ -200,8 +201,10 @@ async def insert_row(
     df = _get_df(df_id)
     empty = {col: None for col in df.columns}
     insert_at = index if direction == "above" else index + 1
-    insert_at = max(0, min(insert_at, len(df)))
-    df = pd.concat([df.iloc[:insert_at], pd.DataFrame([empty]), df.iloc[insert_at:]]).reset_index(drop=True)
+    insert_at = max(0, min(insert_at, df.height))
+    upper = df.slice(0, insert_at)
+    lower = df.slice(insert_at, df.height - insert_at)
+    df = pl.concat([upper, pl.DataFrame([empty], schema=df.schema), lower])
     SESSIONS[df_id] = df
     result = _df_payload(df, df_id)
     print("/insert_row response", result, flush=True)
@@ -213,7 +216,7 @@ async def delete_row(df_id: str = Body(...), index: int = Body(...)):
     print(f"/delete_row called df_id={df_id}, index={index}", flush=True)
     df = _get_df(df_id)
     try:
-        df = df.drop(index).reset_index(drop=True)
+        df = df.with_row_count().filter(pl.col("row_nr") != index).drop("row_nr")
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
     SESSIONS[df_id] = df
@@ -232,9 +235,13 @@ async def insert_column(
     print(f"/insert_column called df_id={df_id}, index={index}, name={name}, default={default}", flush=True)
     df = _get_df(df_id)
     if index >= len(df.columns):
-        df[name] = default
+        df = df.with_columns(pl.lit(default).alias(name))
     else:
-        df.insert(index, name, default)
+        df = df.with_columns(pl.lit(default).alias(name))
+        cols = df.columns
+        cols.remove(name)
+        cols.insert(index, name)
+        df = df.select(cols)
     SESSIONS[df_id] = df
     result = _df_payload(df, df_id)
     print("/insert_column response", result, flush=True)
@@ -246,7 +253,7 @@ async def delete_column(df_id: str = Body(...), name: str = Body(...)):
     print(f"/delete_column called df_id={df_id}, name={name}", flush=True)
     df = _get_df(df_id)
     try:
-        df = df.drop(columns=[name])
+        df = df.drop(name)
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
     SESSIONS[df_id] = df
@@ -260,7 +267,12 @@ async def edit_cell(df_id: str = Body(...), row: int = Body(...), column: str = 
     print(f"/edit_cell called df_id={df_id}, row={row}, column={column}, value={value}", flush=True)
     df = _get_df(df_id)
     try:
-        df.at[row, column] = value
+        df = df.with_row_count().with_columns(
+            pl.when(pl.col("row_nr") == row)
+            .then(pl.lit(value))
+            .otherwise(pl.col(column))
+            .alias(column)
+        ).drop("row_nr")
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
     SESSIONS[df_id] = df
@@ -273,7 +285,7 @@ async def edit_cell(df_id: str = Body(...), row: int = Body(...), column: str = 
 async def rename_column(df_id: str = Body(...), old_name: str = Body(...), new_name: str = Body(...)):
     print(f"/rename_column called df_id={df_id}, old_name={old_name}, new_name={new_name}", flush=True)
     df = _get_df(df_id)
-    df = df.rename(columns={old_name: new_name})
+    df = df.rename({old_name: new_name})
     SESSIONS[df_id] = df
     result = _df_payload(df, df_id)
     print("/rename_column response", result, flush=True)
@@ -285,8 +297,8 @@ async def duplicate_row(df_id: str = Body(...), index: int = Body(...)):
     print(f"/duplicate_row called df_id={df_id}, index={index}", flush=True)
     df = _get_df(df_id)
     try:
-        row = df.iloc[[index]]
-        df = pd.concat([df.iloc[: index], row, df.iloc[index :]]).reset_index(drop=True)
+        row = df.slice(index, 1)
+        df = pl.concat([df.slice(0, index), row, df.slice(index, df.height - index)])
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
     SESSIONS[df_id] = df
@@ -300,8 +312,12 @@ async def duplicate_column(df_id: str = Body(...), name: str = Body(...), new_na
     print(f"/duplicate_column called df_id={df_id}, name={name}, new_name={new_name}", flush=True)
     df = _get_df(df_id)
     try:
-        idx = df.columns.get_loc(name)
-        df.insert(idx, new_name, df[name])
+        idx = df.columns.index(name)
+        df = df.with_columns(pl.col(name).alias(new_name))
+        cols = df.columns
+        cols.remove(new_name)
+        cols.insert(idx, new_name)
+        df = df.select(cols)
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
     SESSIONS[df_id] = df
@@ -315,8 +331,10 @@ async def move_column(df_id: str = Body(...), from_col: str = Body(..., alias="f
     print(f"/move_column called df_id={df_id}, from_col={from_col}, to_index={to_index}", flush=True)
     df = _get_df(df_id)
     try:
-        col = df.pop(from_col)
-        df.insert(to_index, from_col, col)
+        cols = df.columns
+        cols.remove(from_col)
+        cols.insert(to_index, from_col)
+        df = df.select(cols)
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
     SESSIONS[df_id] = df
@@ -331,11 +349,11 @@ async def retype_column(df_id: str = Body(...), name: str = Body(...), new_type:
     df = _get_df(df_id)
     try:
         if new_type == "number":
-            df[name] = pd.to_numeric(df[name], errors="coerce")
+            df = df.with_columns(pl.col(name).cast(pl.Float64, strict=False))
         elif new_type in ["string", "text"]:
-            df[name] = df[name].astype(str)
+            df = df.with_columns(pl.col(name).cast(pl.Utf8))
         else:
-            df[name] = df[name].astype(new_type)
+            df = df.with_columns(pl.col(name).cast(pl.Utf8))
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
     SESSIONS[df_id] = df
@@ -350,8 +368,8 @@ async def preview(df_id: str, n: int = 5):
     preview_df = df.head(n)
     return {
         "df_id": df_id,
-        "headers": list(df.columns),
-        "rows": preview_df.to_dict(orient="records"),
+        "headers": df.columns,
+        "rows": preview_df.to_dicts(),
     }
 
 
@@ -360,9 +378,9 @@ async def info(df_id: str):
     df = _get_df(df_id)
     return {
         "df_id": df_id,
-        "row_count": len(df),
-        "column_count": len(df.columns),
-        "types": {col: str(df[col].dtype) for col in df.columns},
+        "row_count": df.height,
+        "column_count": df.width,
+        "types": {col: str(dtype) for col, dtype in zip(df.columns, df.dtypes)},
     }
 
 
@@ -373,15 +391,24 @@ async def ai_execute(df_id: str = Body(...), operations: List[Dict[str, Any]] = 
         name = op.get("op")
         params = op.get("params", {})
         if name == "filter_rows":
-            df = df[df[params.get("column")] == params.get("value")]
+            df = df.filter(pl.col(params.get("column")) == params.get("value"))
         elif name == "sort":
-            df = df.sort_values(by=params.get("column"), ascending=params.get("direction", "asc") == "asc")
+            df = df.sort(params.get("column"), descending=params.get("direction", "asc") != "asc")
         elif name == "insert_column":
             idx = params.get("index", len(df.columns))
-            df.insert(idx, params.get("name"), params.get("default"))
+            df = df.with_columns(pl.lit(params.get("default")).alias(params.get("name")))
+            cols = df.columns
+            cols.remove(params.get("name"))
+            cols.insert(idx, params.get("name"))
+            df = df.select(cols)
         elif name == "delete_row":
-            df = df.drop(params.get("index")).reset_index(drop=True)
+            df = df.with_row_count().filter(pl.col("row_nr") != params.get("index")).drop("row_nr")
         elif name == "edit_cell":
-            df.at[params.get("row"), params.get("column")] = params.get("value")
-    SESSIONS[df_id] = df.reset_index(drop=True)
+            df = df.with_row_count().with_columns(
+                pl.when(pl.col("row_nr") == params.get("row"))
+                .then(pl.lit(params.get("value")))
+                .otherwise(pl.col(params.get("column")))
+                .alias(params.get("column"))
+            ).drop("row_nr")
+    SESSIONS[df_id] = df
     return _df_payload(SESSIONS[df_id], df_id)

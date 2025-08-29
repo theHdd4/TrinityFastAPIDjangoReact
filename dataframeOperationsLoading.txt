@@ -24,7 +24,15 @@ Performance Improvement Plan
 
 4. **Offload Heavy Work to the Backend**
    - *Current:* Joins, filters, and aggregations run with pandas and the full DataFrame is sent back to the browser.
-   - *Change:* Execute these operations server‑side with Polars, PyArrow, or Dask and expose only paginated or summarized results to the client.
+   - *Change:* Execute these operations server‑side with **Polars** and expose only paginated or summarized results to the client.
+
+Implementation Details
+----------------------
+
+- Backend routes now load Arrow objects directly into Polars DataFrames and keep them in memory server‑side.
+- The `_df_payload` helper paginates responses (default 100 rows) while still reporting full shape and column types.
+- CRUD operations (`filter_rows`, `sort`, `insert_row`, etc.) operate on Polars DataFrames, ensuring vectorized performance.
+- Clients no longer receive entire datasets; only requested slices or summaries are transferred back, reducing network and UI overhead.
 
 5. **Parallelize and Vectorize**
    - Enable multi‑core execution via libraries that release the GIL or leverage SIMD instructions.
