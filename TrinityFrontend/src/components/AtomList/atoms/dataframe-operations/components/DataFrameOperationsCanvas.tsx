@@ -1241,6 +1241,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
         </div>
         </div>
         </div>
+        </div>
         {contextMenu && data && typeof contextMenu.col === 'string' && (
         <div
           id="df-ops-context-menu"
