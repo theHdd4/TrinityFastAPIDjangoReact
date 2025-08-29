@@ -4,6 +4,7 @@ from minio import Minio
 from minio.error import S3Error
 from urllib.parse import unquote
 import polars as pl
+import numba as nb
 import io
 import uuid
 from typing import Dict, Any, List
@@ -279,6 +280,27 @@ async def edit_cell(df_id: str = Body(...), row: int = Body(...), column: str = 
     result = _df_payload(df, df_id)
     print("/edit_cell response", result, flush=True)
     return result
+
+
+@router.post("/apply_udf")
+async def apply_udf(
+    df_id: str = Body(...),
+    column: str = Body(...),
+    udf_code: str = Body(...),
+    new_column: str | None = Body(None),
+):
+    """Apply a custom scalar UDF using Polars with a Numba-compiled function."""
+    df = _get_df(df_id)
+    try:
+        local_ns: Dict[str, Any] = {}
+        exec("def _udf(x):\n    return " + udf_code, {}, local_ns)
+        udf = nb.njit(local_ns["_udf"])  # type: ignore[arg-type]
+        target = new_column or column
+        df = df.with_columns(pl.col(column).apply(udf).alias(target))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    SESSIONS[df_id] = df
+    return _df_payload(df, df_id)
 
 
 @router.post("/rename_column")

@@ -30,6 +30,8 @@ whitenoise
 requests>=2.28.0
 minio
 pandas
+polars>=0.20.0
+numba
 motor
 python-multipart
 pydantic-settings==2.10.1
