@@ -57,6 +57,8 @@ const Projects = () => {
   const [activeTab, setActiveTab] = useState('projects');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [searchQuery, setSearchQuery] = useState('');
+  const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
+  const [editingName, setEditingName] = useState('');
   const navigate = useNavigate();
   const currentApp = JSON.parse(localStorage.getItem('current-app') || '{}');
   const selectedApp = currentApp.slug;
@@ -253,11 +255,26 @@ const Projects = () => {
     }
   };
 
-  const renameProject = async (project: Project) => {
-    const newName = prompt('Rename project', project.name);
-    if (!newName || newName === project.name) return;
+  const startRename = (project: Project, e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    setEditingProjectId(project.id);
+    setEditingName(project.name);
+  };
+
+  const submitRename = async () => {
+    if (!editingProjectId) return;
+    const original = projects.find(p => p.id === editingProjectId);
+    if (!original) {
+      setEditingProjectId(null);
+      return;
+    }
+    const newName = editingName.trim();
+    if (!newName || newName === original.name) {
+      setEditingProjectId(null);
+      return;
+    }
     try {
-      const res = await fetch(`${REGISTRY_API}/projects/${project.id}/`, {
+      const res = await fetch(`${REGISTRY_API}/projects/${original.id}/`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
@@ -265,11 +282,12 @@ const Projects = () => {
       });
       if (res.ok) {
         const updated = await res.json();
-        setProjects(projects.map(p => (p.id === project.id ? { ...p, name: updated.name } : p)));
+        setProjects(projects.map(p => (p.id === original.id ? { ...p, name: updated.name } : p)));
       }
     } catch (err) {
       console.error('Rename project error', err);
     }
+    setEditingProjectId(null);
   };
 
   const deleteProject = async (project: Project) => {
@@ -456,7 +474,9 @@ const Projects = () => {
                   className="group cursor-pointer hover:shadow-xl transition-all duration-500 border-0 bg-white hover:bg-gradient-to-br hover:from-white hover:to-gray-50/30 overflow-hidden transform hover:-translate-y-1"
                   onMouseEnter={() => setHoveredProject(project.id)}
                   onMouseLeave={() => setHoveredProject(null)}
-                  onClick={() => openProject(project)}
+                  onClick={() => {
+                    if (editingProjectId !== project.id) openProject(project);
+                  }}
                 >
                   <div className={viewMode === 'grid' ? 'p-6 flex flex-col h-56 relative' : 'p-6 flex items-center space-x-6 relative'}>
                     <div className={`absolute ${viewMode === 'grid' ? 'top-0 left-0 w-full h-1' : 'left-0 top-0 w-1 h-full'} bg-gradient-to-r ${appDetails.color} opacity-60`} />
@@ -469,18 +489,6 @@ const Projects = () => {
                           <Button
                             variant="ghost"
                             size="sm"
-                            className="h-8 w-8 p-0 hover:bg-blue-50"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              saveProjectAsTemplate(project);
-                            }}
-                            title="Save as Template"
-                          >
-                            <BookmarkPlus className="w-4 h-4 text-blue-600" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
                             className="h-8 w-8 p-0"
                             onClick={(e) => {
                               e.stopPropagation();
@@ -489,18 +497,6 @@ const Projects = () => {
                             title="Duplicate"
                           >
                             <Copy className="w-4 h-4" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-8 w-8 p-0"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              renameProject(project);
-                            }}
-                            title="Rename"
-                          >
-                            <Edit3 className="w-4 h-4" />
                           </Button>
                           <Button
                             variant="ghost"
@@ -546,10 +542,7 @@ const Projects = () => {
                                 Duplicate
                               </DropdownMenuItem>
                               <DropdownMenuItem
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  renameProject(project);
-                                }}
+                                onClick={(e) => startRename(project, e)}
                               >
                                 <Edit3 className="w-4 h-4 mr-2" />
                                 Rename
@@ -569,7 +562,22 @@ const Projects = () => {
                       )}
                     </div>
                     <div className={viewMode === 'grid' ? 'flex-1' : 'flex-1 ml-4'}>
-                      <h3 className={`${viewMode === 'grid' ? 'text-xl' : 'text-lg'} font-semibold text-gray-900 mb-2 group-hover:text-gray-700 transition-colors duration-300 line-clamp-2`}>{project.name}</h3>
+                      {editingProjectId === project.id ? (
+                        <Input
+                          value={editingName}
+                          onChange={(e) => setEditingName(e.target.value)}
+                          onBlur={submitRename}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') submitRename();
+                            if (e.key === 'Escape') setEditingProjectId(null);
+                          }}
+                          autoFocus
+                          className="mb-2"
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                      ) : (
+                        <h3 className={`${viewMode === 'grid' ? 'text-xl' : 'text-lg'} font-semibold text-gray-900 mb-2 group-hover:text-gray-700 transition-colors duration-300 line-clamp-2`}>{project.name}</h3>
+                      )}
                       <p className="text-sm text-gray-600 mb-4 line-clamp-2 leading-relaxed">{project.description}</p>
                       <div className="flex items-center justify-between">
                         <div className="flex items-center space-x-2 text-gray-400 text-xs">
