@@ -4,6 +4,7 @@ pymongo
 redis
 boto3
 pandas
+polars
 minio
 motor
 python-multipart
