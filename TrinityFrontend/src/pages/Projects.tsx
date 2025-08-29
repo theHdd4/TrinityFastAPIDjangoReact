@@ -9,7 +9,6 @@ import { REGISTRY_API } from '@/lib/api';
 import {
   Plus,
   FolderOpen,
-  ArrowLeft,
   Target,
   BarChart3,
   Zap,
@@ -246,12 +245,6 @@ const Projects = () => {
     localStorage.setItem('trinity-templates', JSON.stringify(all));
   };
 
-  const goBackToApps = () => {
-    localStorage.removeItem('selected-app');
-    localStorage.removeItem('current-app');
-    navigate('/apps');
-  };
-
   const formatDate = (date: Date) => {
     const now = new Date();
     const diff = Math.floor((now.getTime() - date.getTime()) / (1000 * 60 * 60 * 24));
@@ -274,39 +267,7 @@ const Projects = () => {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-gray-50">
-      <Header />
-      <div className="bg-white/80 backdrop-blur-sm shadow-sm border-b border-gray-100">
-        <div className="max-w-7xl mx-auto px-6 py-6">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-6">
-              <Button
-                variant="ghost"
-                onClick={goBackToApps}
-                className="text-gray-600 hover:text-gray-900 hover:bg-gray-50 transition-all duration-200"
-              >
-                <ArrowLeft className="w-4 h-4 mr-2" />
-                Back to Apps
-              </Button>
-              <div className="flex items-center space-x-4">
-                <div className={`w-12 h-12 rounded-xl bg-gradient-to-r ${appDetails.color} flex items-center justify-center shadow-lg shadow-gray-200/50 ring-1 ring-white/20`}>
-                  <Icon className="w-6 h-6 text-white" />
-                </div>
-                <div>
-                  <div className="flex items-center space-x-2">
-                    <h1 className="text-2xl font-semibold text-gray-900 mb-1">{appDetails.title}</h1>
-                    <div className="flex items-center text-sm text-gray-500">
-                      <FolderOpen className="w-4 h-4 mr-1" />
-                      <span>{projects.length}</span>
-                    </div>
-                  </div>
-                  <p className="text-sm text-gray-600">{appDetails.description}</p>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
+      <Header projectCount={projects.length} />
       <div className="max-w-7xl mx-auto px-6 py-8">
         <div className="mb-8">
           <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
