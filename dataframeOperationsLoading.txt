@@ -23,8 +23,8 @@ Performance Improvement Plan
    - Drop unused columns early to reduce transfer and processing time.
 
 4. **Offload Heavy Work to the Backend**
-   - Execute joins, filters, and aggregations server‑side with optimized libraries (e.g., Polars, PyArrow, or Dask).
-   - Expose only paginated or summarized results to the client.
+   - *Current:* Joins, filters, and aggregations run with pandas and the full DataFrame is sent back to the browser.
+   - *Change:* Execute these operations server‑side with Polars, PyArrow, or Dask and expose only paginated or summarized results to the client.
 
 5. **Parallelize and Vectorize**
    - Enable multi‑core execution via libraries that release the GIL or leverage SIMD instructions.
