@@ -4,6 +4,8 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import Header from '@/components/Header';
+import { REGISTRY_API } from '@/lib/api';
 import {
   Plus,
   FolderOpen,
@@ -57,7 +59,9 @@ const Projects = () => {
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [searchQuery, setSearchQuery] = useState('');
   const navigate = useNavigate();
-  const selectedApp = localStorage.getItem('selected-app');
+  const currentApp = JSON.parse(localStorage.getItem('current-app') || '{}');
+  const selectedApp = currentApp.slug;
+  const appId = currentApp.id;
 
   const getAppDetails = () => {
     switch (selectedApp) {
@@ -113,15 +117,29 @@ const Projects = () => {
   const Icon = appDetails.icon;
 
   useEffect(() => {
-    const savedProjects = localStorage.getItem('trinity-projects');
-    if (savedProjects) {
-      const parsed = JSON.parse(savedProjects).map((p: any) => ({
-        ...p,
-        lastModified: new Date(p.lastModified)
-      }));
-      const filtered = parsed.filter((p: Project) => p.appTemplate === selectedApp);
-      setProjects(filtered);
-    }
+    const loadProjects = async () => {
+      if (!appId) return;
+      try {
+        const res = await fetch(`${REGISTRY_API}/projects/?app=${appId}`, {
+          credentials: 'include'
+        });
+        if (res.ok) {
+          const data = await res.json();
+          const parsed = data.map((p: any) => ({
+            id: p.id?.toString() || '',
+            name: p.name,
+            lastModified: new Date(p.updated_at),
+            description: p.description,
+            appTemplate: selectedApp || 'blank'
+          }));
+          setProjects(parsed);
+        }
+      } catch (err) {
+        console.error('Projects load error', err);
+      }
+    };
+
+    loadProjects();
 
     const savedTemplates = localStorage.getItem('trinity-templates');
     if (savedTemplates) {
@@ -132,23 +150,40 @@ const Projects = () => {
       const filteredTemplates = parsed.filter((t: Template) => t.appTemplate === selectedApp);
       setTemplates(filteredTemplates);
     }
-  }, [selectedApp]);
+  }, [appId, selectedApp]);
 
-  const createNewProject = () => {
+  const createNewProject = async () => {
+    if (!appId) return;
     const projectName = `New ${appDetails.title} Project`;
-    const newProject: Project = {
-      id: Date.now().toString(),
-      name: projectName,
-      lastModified: new Date(),
-      description: `A new ${appDetails.title.toLowerCase()} analysis project`,
-      appTemplate: selectedApp || 'blank'
-    };
-    const updatedProjects = [...projects, newProject];
-    setProjects(updatedProjects);
-    const allProjects = JSON.parse(localStorage.getItem('trinity-projects') || '[]');
-    localStorage.setItem('trinity-projects', JSON.stringify([...allProjects, newProject]));
-    localStorage.setItem('current-project', JSON.stringify(newProject));
-    navigate('/');
+    const slug = `${projectName.toLowerCase().replace(/\s+/g, '-')}-${Date.now()}`;
+    try {
+      const res = await fetch(`${REGISTRY_API}/projects/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          name: projectName,
+          slug,
+          description: `A new ${appDetails.title.toLowerCase()} analysis project`,
+          app: appId
+        })
+      });
+      if (res.ok) {
+        const p = await res.json();
+        const newProject: Project = {
+          id: p.id?.toString() || Date.now().toString(),
+          name: p.name,
+          lastModified: new Date(p.updated_at || Date.now()),
+          description: p.description,
+          appTemplate: selectedApp || 'blank'
+        };
+        setProjects([...projects, newProject]);
+        localStorage.setItem('current-project', JSON.stringify(newProject));
+        navigate('/');
+      }
+    } catch (err) {
+      console.error('Create project error', err);
+    }
   };
 
   const openProject = (project: Project) => {
@@ -156,17 +191,29 @@ const Projects = () => {
     navigate('/');
   };
 
-  const duplicateProject = (project: Project) => {
-    const dup: Project = {
-      ...project,
-      id: Date.now().toString(),
-      name: `${project.name} Copy`,
-      lastModified: new Date()
-    };
-    const updated = [...projects, dup];
-    setProjects(updated);
-    const all = JSON.parse(localStorage.getItem('trinity-projects') || '[]');
-    localStorage.setItem('trinity-projects', JSON.stringify([...all, dup]));
+  const duplicateProject = async (project: Project) => {
+    try {
+      const res = await fetch(
+        `${REGISTRY_API}/projects/${project.id}/duplicate/`,
+        {
+          method: 'POST',
+          credentials: 'include'
+        }
+      );
+      if (res.ok) {
+        const data = await res.json();
+        const dup: Project = {
+          id: data.id?.toString() || Date.now().toString(),
+          name: data.name || `${project.name} Copy`,
+          lastModified: new Date(data.updated_at || Date.now()),
+          description: data.description,
+          appTemplate: project.appTemplate
+        };
+        setProjects([...projects, dup]);
+      }
+    } catch (err) {
+      console.error('Duplicate project error', err);
+    }
   };
 
   const saveProjectAsTemplate = (project: Project) => {
@@ -201,6 +248,7 @@ const Projects = () => {
 
   const goBackToApps = () => {
     localStorage.removeItem('selected-app');
+    localStorage.removeItem('current-app');
     navigate('/apps');
   };
 
@@ -226,6 +274,7 @@ const Projects = () => {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-gray-50">
+      <Header />
       <div className="bg-white/80 backdrop-blur-sm shadow-sm border-b border-gray-100">
         <div className="max-w-7xl mx-auto px-6 py-6">
           <div className="flex items-center justify-between">
@@ -243,15 +292,15 @@ const Projects = () => {
                   <Icon className="w-6 h-6 text-white" />
                 </div>
                 <div>
-                  <h1 className="text-2xl font-semibold text-gray-900 mb-1">{appDetails.title}</h1>
+                  <div className="flex items-center space-x-2">
+                    <h1 className="text-2xl font-semibold text-gray-900 mb-1">{appDetails.title}</h1>
+                    <div className="flex items-center text-sm text-gray-500">
+                      <FolderOpen className="w-4 h-4 mr-1" />
+                      <span>{projects.length}</span>
+                    </div>
+                  </div>
                   <p className="text-sm text-gray-600">{appDetails.description}</p>
                 </div>
-              </div>
-            </div>
-            <div className="hidden md:flex items-center space-x-6 text-sm text-gray-500">
-              <div className="flex items-center space-x-2">
-                <FolderOpen className="w-4 h-4" />
-                <span>{projects.length} project{projects.length !== 1 ? 's' : ''}</span>
               </div>
             </div>
           </div>
@@ -295,7 +344,7 @@ const Projects = () => {
               </div>
               <Button
                 onClick={createNewProject}
-                className="bg-yellow-500 hover:bg-yellow-600 text-white shadow-lg hover:shadow-xl transition-all duration-300 px-6 py-2.5"
+                className="bg-black hover:bg-gray-900 text-white shadow-lg hover:shadow-xl transition-all duration-300 px-6 py-2.5"
               >
                 <Plus className="w-4 h-4 mr-2" />
                 New Project
@@ -380,9 +429,29 @@ const Projects = () => {
                               </Button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end">
-                              <DropdownMenuItem onClick={() => openProject(project)}>
+                              <DropdownMenuItem
+                                onClick={() => openProject(project)}
+                              >
                                 <FolderOpen className="w-4 h-4 mr-2" />
                                 Open Project
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  saveProjectAsTemplate(project);
+                                }}
+                              >
+                                <BookmarkPlus className="w-4 h-4 mr-2" />
+                                Save as Template
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  duplicateProject(project);
+                                }}
+                              >
+                                <Copy className="w-4 h-4 mr-2" />
+                                Duplicate
                               </DropdownMenuItem>
                               <DropdownMenuItem>
                                 <Edit3 className="w-4 h-4 mr-2" />
