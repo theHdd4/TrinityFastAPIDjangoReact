@@ -31,6 +31,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger
 } from '@/components/ui/dropdown-menu';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 
 interface Project {
   id: string;
@@ -663,17 +664,28 @@ const Projects = () => {
                           </Badge>
                           {hoveredTemplate === template.id && (
                             <div className="flex items-center space-x-1">
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="h-8 w-8 p-0"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  showTemplateDetails(template);
-                                }}
-                              >
-                                <Info className="w-4 h-4" />
-                              </Button>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-8 w-8 p-0"
+                                    onClick={(e) => e.stopPropagation()}
+                                  >
+                                    <Info className="w-4 h-4" />
+                                  </Button>
+                                </TooltipTrigger>
+                                <TooltipContent>
+                                  <p className="font-medium">
+                                    Based on: {template.baseProject?.name || 'Unknown'}
+                                  </p>
+                                  {template.description && (
+                                    <p className="text-xs text-muted-foreground">
+                                      {template.description}
+                                    </p>
+                                  )}
+                                </TooltipContent>
+                              </Tooltip>
                               <Button
                                 variant="ghost"
                                 size="sm"
@@ -752,17 +764,28 @@ const Projects = () => {
                         <span className="text-xs text-gray-500">{template.usageCount} uses</span>
                         {viewMode === 'list' && hoveredTemplate === template.id && (
                           <div className="flex items-center space-x-1">
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-8 w-8 p-0"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                showTemplateDetails(template);
-                              }}
-                            >
-                              <Info className="w-4 h-4" />
-                            </Button>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-8 w-8 p-0"
+                                  onClick={(e) => e.stopPropagation()}
+                                >
+                                  <Info className="w-4 h-4" />
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent>
+                                <p className="font-medium">
+                                  Based on: {template.baseProject?.name || 'Unknown'}
+                                </p>
+                                {template.description && (
+                                  <p className="text-xs text-muted-foreground">
+                                    {template.description}
+                                  </p>
+                                )}
+                              </TooltipContent>
+                            </Tooltip>
                             <Button
                               variant="ghost"
                               size="sm"
