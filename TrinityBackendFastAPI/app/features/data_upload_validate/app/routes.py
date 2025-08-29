@@ -2763,8 +2763,8 @@ async def save_dataframes(
             continue
 
         first_chunk.columns = first_chunk.columns.map(str)
-        obj_cols = first_chunk.select_dtypes(include=["object"]).columns
-        for col in obj_cols:
+        string_cols = first_chunk.select_dtypes(include=["object"]).columns
+        for col in string_cols:
             first_chunk[col] = first_chunk[col].astype(str)
         df_chunks.append(first_chunk)
         schema = pa.Table.from_pandas(first_chunk).schema
@@ -2772,9 +2772,9 @@ async def save_dataframes(
             writer.write_table(pa.Table.from_pandas(first_chunk, schema=schema))
             for chunk in reader:
                 chunk.columns = chunk.columns.map(str)
-                obj_cols = chunk.select_dtypes(include=["object"]).columns
-                for col in obj_cols:
-                    chunk[col] = chunk[col].astype(str)
+                for col in string_cols:
+                    if col in chunk.columns:
+                        chunk[col] = chunk[col].astype(str)
                 df_chunks.append(chunk)
                 writer.write_table(pa.Table.from_pandas(chunk, schema=schema))
 
