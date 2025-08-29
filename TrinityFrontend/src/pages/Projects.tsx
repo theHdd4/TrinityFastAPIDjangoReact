@@ -17,6 +17,7 @@ import {
   Copy,
   MoreHorizontal,
   Edit3,
+  Trash2,
   Bookmark,
   Grid3X3,
   List,
@@ -252,6 +253,74 @@ const Projects = () => {
     }
   };
 
+  const renameProject = async (project: Project) => {
+    const newName = prompt('Rename project', project.name);
+    if (!newName || newName === project.name) return;
+    try {
+      const res = await fetch(`${REGISTRY_API}/projects/${project.id}/`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ name: newName })
+      });
+      if (res.ok) {
+        const updated = await res.json();
+        setProjects(projects.map(p => (p.id === project.id ? { ...p, name: updated.name } : p)));
+      }
+    } catch (err) {
+      console.error('Rename project error', err);
+    }
+  };
+
+  const deleteProject = async (project: Project) => {
+    if (!confirm(`Delete project "${project.name}"?`)) return;
+    try {
+      const res = await fetch(`${REGISTRY_API}/projects/${project.id}/`, {
+        method: 'DELETE',
+        credentials: 'include'
+      });
+      if (res.ok) {
+        setProjects(projects.filter(p => p.id !== project.id));
+      }
+    } catch (err) {
+      console.error('Delete project error', err);
+    }
+  };
+
+  const renameTemplate = async (template: Template) => {
+    const newName = prompt('Rename template', template.name);
+    if (!newName || newName === template.name) return;
+    try {
+      const res = await fetch(`${REGISTRY_API}/templates/${template.id}/`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ name: newName })
+      });
+      if (res.ok) {
+        const updated = await res.json();
+        setTemplates(templates.map(t => (t.id === template.id ? { ...t, name: updated.name } : t)));
+      }
+    } catch (err) {
+      console.error('Rename template error', err);
+    }
+  };
+
+  const deleteTemplate = async (template: Template) => {
+    if (!confirm(`Delete template "${template.name}"?`)) return;
+    try {
+      const res = await fetch(`${REGISTRY_API}/templates/${template.id}/`, {
+        method: 'DELETE',
+        credentials: 'include'
+      });
+      if (res.ok) {
+        setTemplates(templates.filter(t => t.id !== template.id));
+      }
+    } catch (err) {
+      console.error('Delete template error', err);
+    }
+  };
+
   const createProjectFromTemplate = async (template: Template) => {
     try {
       const res = await fetch(`${REGISTRY_API}/templates/${template.id}/use/`, {
@@ -421,6 +490,30 @@ const Projects = () => {
                           >
                             <Copy className="w-4 h-4" />
                           </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 w-8 p-0"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              renameProject(project);
+                            }}
+                            title="Rename"
+                          >
+                            <Edit3 className="w-4 h-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 w-8 p-0 text-red-600"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              deleteProject(project);
+                            }}
+                            title="Delete"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </Button>
                           <DropdownMenu>
                             <DropdownMenuTrigger asChild>
                               <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
@@ -452,9 +545,23 @@ const Projects = () => {
                                 <Copy className="w-4 h-4 mr-2" />
                                 Duplicate
                               </DropdownMenuItem>
-                              <DropdownMenuItem>
+                              <DropdownMenuItem
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  renameProject(project);
+                                }}
+                              >
                                 <Edit3 className="w-4 h-4 mr-2" />
                                 Rename
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  deleteProject(project);
+                                }}
+                              >
+                                <Trash2 className="w-4 h-4 mr-2" />
+                                Delete
                               </DropdownMenuItem>
                             </DropdownMenuContent>
                           </DropdownMenu>
@@ -528,12 +635,73 @@ const Projects = () => {
                           </Badge>
                           {hoveredTemplate === template.id && (
                             <div className="flex items-center space-x-1">
-                              <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={(e)=>{e.stopPropagation(); showTemplateDetails(template);}}>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-8 w-8 p-0"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  showTemplateDetails(template);
+                                }}
+                              >
                                 <Info className="w-4 h-4" />
                               </Button>
-                              <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={(e)=>{e.stopPropagation(); createProjectFromTemplate(template);}}>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-8 w-8 p-0"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  createProjectFromTemplate(template);
+                                }}
+                              >
                                 <Plus className="w-4 h-4" />
                               </Button>
+                              <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                  <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+                                    <MoreHorizontal className="w-4 h-4" />
+                                  </Button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="end">
+                                  <DropdownMenuItem
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      showTemplateDetails(template);
+                                    }}
+                                  >
+                                    <Info className="w-4 h-4 mr-2" />
+                                    Show Details
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      createProjectFromTemplate(template);
+                                    }}
+                                  >
+                                    <Plus className="w-4 h-4 mr-2" />
+                                    Create Project
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      renameTemplate(template);
+                                    }}
+                                  >
+                                    <Edit3 className="w-4 h-4 mr-2" />
+                                    Rename
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      deleteTemplate(template);
+                                    }}
+                                  >
+                                    <Trash2 className="w-4 h-4 mr-2" />
+                                    Delete
+                                  </DropdownMenuItem>
+                                </DropdownMenuContent>
+                              </DropdownMenu>
                             </div>
                           )}
                         </div>
@@ -546,12 +714,73 @@ const Projects = () => {
                         <span className="text-xs text-gray-500">{template.usageCount} uses</span>
                         {viewMode === 'list' && hoveredTemplate === template.id && (
                           <div className="flex items-center space-x-1">
-                            <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={(e)=>{e.stopPropagation(); showTemplateDetails(template);}}>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-8 w-8 p-0"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                showTemplateDetails(template);
+                              }}
+                            >
                               <Info className="w-4 h-4" />
                             </Button>
-                            <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={(e)=>{e.stopPropagation(); createProjectFromTemplate(template);}}>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-8 w-8 p-0"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                createProjectFromTemplate(template);
+                              }}
+                            >
                               <Plus className="w-4 h-4" />
                             </Button>
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+                                  <MoreHorizontal className="w-4 h-4" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end">
+                                <DropdownMenuItem
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    showTemplateDetails(template);
+                                  }}
+                                >
+                                  <Info className="w-4 h-4 mr-2" />
+                                  Show Details
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    createProjectFromTemplate(template);
+                                  }}
+                                >
+                                  <Plus className="w-4 h-4 mr-2" />
+                                  Create Project
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    renameTemplate(template);
+                                  }}
+                                >
+                                  <Edit3 className="w-4 h-4 mr-2" />
+                                  Rename
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    deleteTemplate(template);
+                                  }}
+                                >
+                                  <Trash2 className="w-4 h-4 mr-2" />
+                                  Delete
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
                           </div>
                         )}
                       </div>
