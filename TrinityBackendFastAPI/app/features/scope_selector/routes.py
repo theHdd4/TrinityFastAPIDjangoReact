@@ -1,5 +1,5 @@
 # routes.py
-from fastapi import APIRouter, HTTPException, Depends, Query, Path, Request
+from fastapi import APIRouter, HTTPException, Depends, Query, Path, Request, Body
 from fastapi.responses import JSONResponse
 from typing import Dict, List, Optional, Tuple, Any
 from datetime import datetime
@@ -40,6 +40,7 @@ from .deps import (
     get_processing_jobs_collection
 )
 from .database import ValidatorAtomRepository
+from .mongodb_saver import save_scope_config, get_scope_config_from_mongo
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -1320,6 +1321,53 @@ async def create_multi_filtered_scope(
 
         logger.info(f"Multi-filter scope generated (not persisted): {new_scope_id}")
 
+        # Save the scope configuration to MongoDB
+        try:
+            # Extract client, app, project from file_key
+            # file_key format: "default_client/default_app/default_project/20250814_135348_D0.arrow"
+            file_key_parts = request.file_key.split('/')
+            if len(file_key_parts) >= 3:
+                client_name = file_key_parts[0]
+                app_name = file_key_parts[1]
+                project_name = file_key_parts[2]
+                
+                # Prepare scope configuration data
+                scope_config_data = {
+                    "scope_id": new_scope_id,
+                    "scope_name": auto_generated_name,
+                    "file_key": request.file_key,
+                    "filter_set_results": [result.dict() for result in filter_set_results],
+                    "total_filter_sets": len(filter_set_results),
+                    "overall_filtered_records": overall_filtered_records,
+                    "original_records_count": original_records_count,
+                    "created_at": created_at,
+                    "description": request.description,
+                    "criteria": request.criteria.dict() if request.criteria else None
+                }
+                
+                # Save to MongoDB
+                mongo_result = await save_scope_config(
+                    client_name=client_name,
+                    app_name=app_name,
+                    project_name=project_name,
+                    scope_data=scope_config_data,
+                    user_id="",  # You can add user_id if available
+                    project_id=None  # You can add project_id if available
+                )
+                
+                logger.info(f"🔍 DEBUG: MongoDB save result: {mongo_result}")
+                
+                if mongo_result["status"] == "success":
+                    logger.info(f"📦 Scope configuration saved to MongoDB: {mongo_result['mongo_id']}")
+                else:
+                    logger.error(f"❌ Failed to save scope configuration to MongoDB: {mongo_result['error']}")
+            else:
+                logger.warning(f"⚠️ Could not extract client/app/project from file_key: {request.file_key}")
+                
+        except Exception as e:
+            logger.error(f"❌ Error saving scope configuration to MongoDB: {str(e)}")
+            # Don't fail the entire request if MongoDB save fails
+
         return MultiFilterScopeResponse(
             success=True,
             scope_id=new_scope_id,
@@ -1413,3 +1461,153 @@ def check_combination_criteria(
     
     logger.info("All criteria passed, combination will be saved")
     return True
+
+# ============================================================================
+# SAVE ENDPOINTS
+# ============================================================================
+
+@router.post("/save-scope-config")
+async def save_scope_configuration(
+    client_name: str = Query(..., description="Client name"),
+    app_name: str = Query(..., description="App name"),
+    project_name: str = Query(..., description="Project name"),
+    scope_data: dict = Body(..., description="Scope configuration data to save"),
+    user_id: str = Query("", description="User ID"),
+    project_id: int = Query(None, description="Project ID")
+):
+    """Save scope configuration to MongoDB"""
+    try:
+        result = await save_scope_config(
+            client_name=client_name,
+            app_name=app_name,
+            project_name=project_name,
+            scope_data=scope_data,
+            user_id=user_id,
+            project_id=project_id
+        )
+        
+        if result["status"] == "success":
+            return {
+                "success": True,
+                "message": f"Scope configuration saved successfully",
+                "mongo_id": result["mongo_id"],
+                "operation": result["operation"],
+                "collection": result["collection"]
+            }
+        else:
+            raise HTTPException(status_code=500, detail=f"Failed to save scope configuration: {result['error']}")
+            
+    except Exception as e:
+        logger.error(f"Error saving scope configuration: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to save scope configuration: {str(e)}")
+
+@router.get("/get-scope-config")
+async def get_scope_configuration(
+    client_name: str = Query(..., description="Client name"),
+    app_name: str = Query(..., description="App name"),
+    project_name: str = Query(..., description="Project name")
+):
+    """Retrieve saved scope configuration from MongoDB"""
+    try:
+        result = await get_scope_config_from_mongo(client_name, app_name, project_name)
+        
+        if result:
+            return {
+                "success": True,
+                "data": result
+            }
+        else:
+            return {
+                "success": False,
+                "message": "No scope configuration found",
+                "data": None
+            }
+            
+    except Exception as e:
+        logger.error(f"Error retrieving scope configuration: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve scope configuration: {str(e)}")
+
+
+
+@router.post("/save")
+async def save_scope_data(
+    request: Request,
+    client_name: str = Query(..., description="Client name"),
+    app_name: str = Query(..., description="App name"),
+    project_name: str = Query(..., description="Project name"),
+    user_id: str = Query("", description="User ID"),
+    project_id: int = Query(None, description="Project ID")
+):
+    """General save endpoint for scope data - used by SAVE button"""
+    logger.info(f"🔍 DEBUG: /save endpoint called")
+    logger.info(f"🔍 DEBUG: client_name = {client_name}")
+    logger.info(f"🔍 DEBUG: app_name = {app_name}")
+    logger.info(f"🔍 DEBUG: project_name = {project_name}")
+    logger.info(f"🔍 DEBUG: user_id = {user_id}")
+    logger.info(f"🔍 DEBUG: project_id = {project_id}")
+    
+    try:
+        # Get the request body
+        body = await request.json()
+        logger.info(f"🔍 DEBUG: request body = {body}")
+        
+        # Save scope configuration data
+        result = await save_scope_config(
+            client_name=client_name,
+            app_name=app_name,
+            project_name=project_name,
+            scope_data=body,
+            user_id=user_id,
+            project_id=project_id
+        )
+        
+        logger.info(f"🔍 DEBUG: save_scope_config result = {result}")
+        
+        if result["status"] == "success":
+            return {
+                "success": True,
+                "message": f"Scope data saved successfully",
+                "mongo_id": result["mongo_id"],
+                "operation": result["operation"],
+                "collection": result["collection"]
+            }
+        else:
+            raise HTTPException(status_code=500, detail=f"Failed to save scope data: {result['error']}")
+            
+    except Exception as e:
+        logger.error(f"Error saving scope data: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to save scope data: {str(e)}")
+
+@router.get("/test-mongo")
+async def test_mongo_connection():
+    """Test MongoDB connection and list databases"""
+    try:
+        from .mongodb_saver import client
+        logger.info(f"🔍 DEBUG: Testing MongoDB connection")
+        
+        # List all databases
+        databases = await client.list_database_names()
+        logger.info(f"🔍 DEBUG: Available databases: {databases}")
+        
+        # Check if trinity_prod exists
+        if "trinity_prod" in databases:
+            logger.info(f"🔍 DEBUG: trinity_prod database exists")
+            # List collections in trinity_prod
+            collections = await client["trinity_prod"].list_collection_names()
+            logger.info(f"🔍 DEBUG: Collections in trinity_prod: {collections}")
+        else:
+            logger.warning(f"🔍 DEBUG: trinity_prod database does not exist")
+        
+        return {
+            "success": True,
+            "databases": databases,
+            "trinity_prod_exists": "trinity_prod" in databases,
+            "collections_in_trinity_prod": collections if "trinity_prod" in databases else []
+        }
+        
+    except Exception as e:
+        logger.error(f"Error testing MongoDB connection: {str(e)}")
+        return {
+            "success": False,
+            "error": str(e)
+        }

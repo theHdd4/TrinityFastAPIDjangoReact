@@ -69,7 +69,7 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
   const addXVariable = () => {
     handleDataChange({
       xVariables: [...(finalData?.xVariables || []), []],
-      transformations: [...(finalData?.transformations || []), '']
+      transformations: [...(finalData?.transformations || []), 'standardize']
     });
   };
 

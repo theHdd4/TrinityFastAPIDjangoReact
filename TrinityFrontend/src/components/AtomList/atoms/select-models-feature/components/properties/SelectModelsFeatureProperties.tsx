@@ -23,10 +23,7 @@ const SelectModelsFeatureProperties: React.FC<Props> = ({ atomId }) => {
 
     const handleChange = (newSettings: Partial<SettingsType>) => {
       try {
-        console.log('🔧 SelectModelsFeatureProperties: Updating settings:', newSettings);
-        console.log('🔧 SelectModelsFeatureProperties: atomId:', atomId);
         updateSettings(atomId, newSettings);
-        console.log('🔧 SelectModelsFeatureProperties: Settings updated successfully');
       } catch (err) {
         console.error('🔧 SelectModelsFeatureProperties: Error updating settings:', err);
         setError('Failed to update settings. Please try again.');

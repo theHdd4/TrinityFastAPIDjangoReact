@@ -642,12 +642,21 @@ async def train_models_for_combination_enhanced(
                         )
                     elif standardization == 'minmax':
                         for i, var in enumerate(x_variables):
-                            scale = scaler.scale_[i]
-                            unstandardized_coef = model.coef_[i] / scale
+                            # Get original data statistics for proper destandardization
+                            X_original_fold = X_original.iloc[train_idx]
+                            x_mins = X_original_fold.min().values
+                            x_ranges = X_original_fold.max().values - x_mins
+                            
+                            # Correct min-max destandardization: β_original = β_scaled * (1/range(X))
+                            if x_ranges[i] != 0:
+                                unstandardized_coef = model.coef_[i] * (1 / x_ranges[i])
+                            else:
+                                unstandardized_coef = model.coef_[i]
                             fold_coefs[f"Beta_{var}"] = float(unstandardized_coef)
                         
+                        # Calculate intercept using original data statistics
                         fold_intercept = fold_intercept - np.sum(
-                            [fold_coefs[f"Beta_{var}"] * scaler.min_[i] 
+                            [fold_coefs[f"Beta_{var}"] * x_mins[i] 
                              for i, var in enumerate(x_variables)]
                         )
                     else:
@@ -719,13 +728,21 @@ async def train_models_for_combination_enhanced(
                     )
                 elif standardization == 'minmax':
                     for i, var in enumerate(x_variables):
-                        scale = scaler.scale_[i]
-                        unstandardized_coef = standardized_coefs[i] / scale
+                        # Get original data statistics for proper destandardization
+                        x_mins = X_original.min().values
+                        x_ranges = X_original.max().values - x_mins
+                        
+                        # Correct min-max destandardization: β_original = β_scaled * (1/range(X))
+                        if x_ranges[i] != 0:
+                            unstandardized_coef = standardized_coefs[i] * (1 / x_ranges[i])
+                        else:
+                            unstandardized_coef = standardized_coefs[i]
                         unstandardized_coefficients[f"Beta_{var}"] = float(unstandardized_coef)
                         coefficients[f"Beta_{var}"] = float(standardized_coefs[i])
                     
+                    # Calculate intercept using original data statistics
                     unstandardized_intercept = standardized_intercept - np.sum(
-                        [unstandardized_coefficients[f"Beta_{var}"] * scaler.min_[i] 
+                        [unstandardized_coefficients[f"Beta_{var}"] * x_mins[i] 
                          for i, var in enumerate(x_variables)]
                     )
                 else:
@@ -843,7 +860,7 @@ async def save_model_results_enhanced(
                 "model_type": "regression",
                 
                 # Training configuration
-                "x_variables": x_variables,
+                "x_variables": [f"{var}_{standardization}" for var in x_variables] if standardization != 'none' else x_variables,
                 "y_variable": y_variable,
                 "standardization": standardization,
                 "k_folds": k_folds,
@@ -942,10 +959,10 @@ async def get_csv_from_minio(file_key: str) -> BytesIO:
         raise
 
 
-# async def export_results_to_csv_and_minio(
-#     run_id: str,
-#     include_fold_details: bool = False
-# ) -> tuple[StringIO, str]:
+async def export_results_to_csv_and_minio(
+    run_id: str,
+    include_fold_details: bool = False
+) -> tuple[StringIO, str]:
     """
     Export model results to CSV format and save to MinIO.
     Returns: (csv_buffer, minio_file_key)
@@ -1120,9 +1137,9 @@ async def get_csv_from_minio(file_key: str) -> BytesIO:
             logger.error(f"Failed to save CSV to MinIO: {type(e).__name__}: {e}")
             raise
     
-#     # Reset buffer for download
-#     csv_buffer.seek(0)
-#     return csv_buffer, file_key
+    # Reset buffer for download
+    csv_buffer.seek(0)
+    return csv_buffer, file_key
 
 
 
@@ -1136,56 +1153,56 @@ async def get_csv_from_minio(file_key: str) -> BytesIO:
 
 # Add these marketing functions to your existing database.py
 
-# async def save_marketing_model_results(
-#     run_id: str,
-#     model_results: List[Dict[str, Any]],
-#     metadata: Dict[str, Any]
-# ) -> List[str]:
-#     """Save marketing model results to existing build collection."""
-#     if build_collection is None:
-#         raise Exception("MongoDB build collection not available")
-#     
-#     inserted_ids = []
-#     try:
-#         documents = []
-#         for idx, result in enumerate(model_results):
-#             doc = {
-#                 "_id": f"marketing_{run_id}_{idx}",
-#                 "type": "marketing_model",
-#                 "run_id": run_id,
-#                 "model_id": idx,
-#                 "created_at": datetime.now(),
-#                 **result,
-#                 **metadata
-#             }
-#             documents.append(doc)
-#         
-#         if documents:
-#             result = await build_collection.insert_many(documents)
-#             inserted_ids = [str(id) for id in result.inserted_ids]
-#             logger.info(f"Saved {len(inserted_ids)} marketing model results")
-#         
-#         return inserted_ids
-#         
-#     except Exception as e:
-#         logger.error(f"Error saving marketing model results: {e}")
-#         raise
+async def save_marketing_model_results(
+    run_id: str,
+    model_results: List[Dict[str, Any]],
+    metadata: Dict[str, Any]
+) -> List[str]:
+    """Save marketing model results to existing build collection."""
+    if build_collection is None:
+        raise Exception("MongoDB build collection not available")
+    
+    inserted_ids = []
+    try:
+        documents = []
+        for idx, result in enumerate(model_results):
+            doc = {
+                "_id": f"marketing_{run_id}_{idx}",
+                "type": "marketing_model",
+                "run_id": run_id,
+                "model_id": idx,
+                "created_at": datetime.now(),
+                **result,
+                **metadata
+            }
+            documents.append(doc)
+        
+        if documents:
+            result = await build_collection.insert_many(documents)
+            inserted_ids = [str(id) for id in result.inserted_ids]
+            logger.info(f"Saved {len(inserted_ids)} marketing model results")
+        
+        return inserted_ids
+        
+    except Exception as e:
+        logger.error(f"Error saving marketing model results: {e}")
+        raise
 
-# async def get_marketing_results(run_id: str) -> List[Dict[str, Any]]:
-#     """Retrieve marketing model results from existing build collection."""
-#     if build_collection is None:
-#         raise Exception("MongoDB build collection not available")
-#     
-#     try:
-#         cursor = build_collection.find({
-#             "type": "marketing_model",
-#             "run_id": run_id
-#         })
-#         results = []
-#         async for doc in cursor:
-#             results.append(doc)
-#         return results
-#         
-#     except Exception as e:
-#         logger.error(f"Error retrieving marketing results: {e}")
-#         raise
+async def get_marketing_results(run_id: str) -> List[Dict[str, Any]]:
+    """Retrieve marketing model results from existing build collection."""
+    if build_collection is None:
+        raise Exception("MongoDB build collection not available")
+    
+    try:
+        cursor = build_collection.find({
+            "type": "marketing_model",
+            "run_id": run_id
+        })
+        results = []
+        async for doc in cursor:
+            results.append(doc)
+        return results
+        
+    except Exception as e:
+        logger.error(f"Error retrieving marketing results: {e}")
+        raise

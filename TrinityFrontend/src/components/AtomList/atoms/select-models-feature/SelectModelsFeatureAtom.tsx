@@ -7,7 +7,6 @@ interface Props {
 }
 
 const SelectModelsFeatureAtom: React.FC<Props> = ({ atomId }) => {
-  console.log('🔧 SelectModelsFeatureAtom: Component rendered with atomId:', atomId);
   
   try {
     const atom = useLaboratoryStore(state => state.getAtom(atomId));
@@ -15,9 +14,13 @@ const SelectModelsFeatureAtom: React.FC<Props> = ({ atomId }) => {
       uploadedFile: null,
       selectedDataset: '',
       ensembleMethod: true,
-      selectedScope: 'SCOPE 12',
-      availableScopes: ['SCOPE 12', 'SCOPE 13', 'SCOPE 14', 'SCOPE 15'],
-      selectedVariable: 'Select Variable to View Model Results',
+      selectedScope: '',
+      availableScopes: [],
+      selectedCombinationId: 'all',
+      availableCombinationIds: [],
+      selectedVariable: '',
+      availableVariables: [],
+      elasticityData: [],
       modelResults: [
         { name: 'Jan', value: 45 },
         { name: 'Feb', value: 62 },
@@ -33,41 +36,31 @@ const SelectModelsFeatureAtom: React.FC<Props> = ({ atomId }) => {
         { name: 'Dec', value: 73 }
       ],
       modelFilters: {
-        mape: 0.75,
-        pValue: 0.45,
-        rSquared: 0.82,
-        aic: 0.63,
-        filters: []
+        mape_train: null,
+        mape_test: null,
+        r2_train: null,
+        r2_test: null,
+        aic: null,
+        bic: null,
+        self_elasticity: null
       },
-      selectedModel: 'Select Model to View Model Performance',
+              selectedModel: 'Select Model to View Model Performance',
+        selectedModelPerformance: [],
       performanceData: [],
+      yoyData: [],
+      weightedEnsembleData: [],
       isRunning: false,
       dataType: '',
       aggregationLevel: ''
     };
 
-    // Add useEffect to track settings changes
-    useEffect(() => {
-      console.log('🔧 SelectModelsFeatureAtom: Settings changed for atomId', atomId, ':', settings);
-    }, [settings, atomId]);
 
-    // Force re-render when atom changes
-    useEffect(() => {
-      console.log('🔧 SelectModelsFeatureAtom: Atom object changed:', atom);
-    }, [atom]);
-
-    console.log('🔧 SelectModelsFeatureAtom: Settings for atomId', atomId, ':', settings);
-    console.log('🔧 SelectModelsFeatureAtom: atom object:', atom);
-
-    // Force re-render when settings change
-    const settingsKey = JSON.stringify(settings);
 
     return (
       <div className="w-full h-full bg-white rounded-lg overflow-hidden flex flex-col">
         <SelectModelsFeatureCanvas
           atomId={atomId}
           data={settings}
-          key={settingsKey} // Force re-render when settings change
         />
       </div>
     );
