@@ -958,9 +958,8 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
     }
   };
 
-
   return (
-    <>
+    <div className="flex flex-col h-full min-h-0 overflow-hidden">
       <input
         ref={fileInputRef}
         type="file"
@@ -969,7 +968,6 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
         className="hidden"
       />
 
-      <div className="flex flex-col h-full min-h-0 overflow-hidden">
         {data?.fileName && (
           <div className="border-b border-blue-200 bg-blue-50">
             <div className="flex items-center px-6 py-4">
@@ -1484,8 +1482,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
           <div className="px-3 py-2 text-xs text-gray-400">Right-click to close</div>
         </div>
       )}
-      </div>
-    </>
+    </div>
   );
 };
 
