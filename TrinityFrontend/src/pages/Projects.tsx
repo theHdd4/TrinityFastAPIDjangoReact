@@ -63,6 +63,8 @@ const Projects = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState('');
+  const [editingTemplateId, setEditingTemplateId] = useState<string | null>(null);
+  const [editingTemplateName, setEditingTemplateName] = useState('');
   const navigate = useNavigate();
   const currentApp = JSON.parse(localStorage.getItem('current-app') || '{}');
   const selectedApp = currentApp.slug;
@@ -186,7 +188,8 @@ const Projects = () => {
           name: projectName,
           slug,
           description: `A new ${appDetails.title.toLowerCase()} analysis project`,
-          app: appId
+          app: appId,
+          state: null
         })
       });
       if (res.ok) {
@@ -197,7 +200,7 @@ const Projects = () => {
           lastModified: new Date(p.updated_at || Date.now()),
           description: p.description,
           appTemplate: selectedApp || 'blank',
-          baseTemplate: p.base_template
+          baseTemplate: p.base_template || null
         };
         setProjects([...projects, newProject]);
         localStorage.setItem('current-project', JSON.stringify(newProject));
@@ -312,11 +315,26 @@ const Projects = () => {
     }
   };
 
-  const renameTemplate = async (template: Template) => {
-    const newName = prompt('Rename template', template.name);
-    if (!newName || newName === template.name) return;
+  const startTemplateRename = (template: Template, e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    setEditingTemplateId(template.id);
+    setEditingTemplateName(template.name);
+  };
+
+  const submitTemplateRename = async () => {
+    if (!editingTemplateId) return;
+    const original = templates.find(t => t.id === editingTemplateId);
+    if (!original) {
+      setEditingTemplateId(null);
+      return;
+    }
+    const newName = editingTemplateName.trim();
+    if (!newName || newName === original.name) {
+      setEditingTemplateId(null);
+      return;
+    }
     try {
-      const res = await fetch(`${REGISTRY_API}/templates/${template.id}/`, {
+      const res = await fetch(`${REGISTRY_API}/templates/${original.id}/`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
@@ -324,16 +342,17 @@ const Projects = () => {
       });
       if (res.ok) {
         const updated = await res.json();
-        setTemplates(templates.map(t => (t.id === template.id ? { ...t, name: updated.name } : t)));
+        setTemplates(templates.map(t => (t.id === original.id ? { ...t, name: updated.name } : t)));
         setProjects(
           projects.map(p =>
-            p.baseTemplate === template.name ? { ...p, baseTemplate: updated.name } : p
+            p.baseTemplate === original.name ? { ...p, baseTemplate: updated.name } : p
           )
         );
       }
     } catch (err) {
       console.error('Rename template error', err);
     }
+    setEditingTemplateId(null);
   };
 
   const deleteTemplate = async (template: Template) => {
@@ -658,6 +677,11 @@ const Projects = () => {
                       setHoveredTemplate(null);
                     }
                   }}
+                  onClick={() => {
+                    if (editingTemplateId !== template.id) {
+                      createProjectFromTemplate(template);
+                    }
+                  }}
                 >
                   <div className={viewMode === 'grid' ? 'p-6 flex flex-col h-56 relative' : 'p-6 flex items-center space-x-6 relative'}>
                     <div className={`absolute ${viewMode === 'grid' ? 'top-0 left-0 w-full h-1' : 'left-0 top-0 w-1 h-full'} bg-gradient-to-r from-amber-400 to-orange-500 opacity-60`} />
@@ -715,7 +739,12 @@ const Projects = () => {
                                 }}
                               >
                                 <DropdownMenuTrigger asChild>
-                                  <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-8 w-8 p-0"
+                                    onClick={(e) => e.stopPropagation()}
+                                  >
                                     <MoreHorizontal className="w-4 h-4" />
                                   </Button>
                                 </DropdownMenuTrigger>
@@ -732,7 +761,7 @@ const Projects = () => {
                                   <DropdownMenuItem
                                     onClick={(e) => {
                                       e.stopPropagation();
-                                      renameTemplate(template);
+                                      startTemplateRename(template, e);
                                     }}
                                   >
                                     <Edit3 className="w-4 h-4 mr-2" />
@@ -754,8 +783,23 @@ const Projects = () => {
                         </div>
                       )}
                     </div>
-                    <div className={viewMode === 'grid' ? 'flex-1' : 'flex-1 ml-4'} onClick={() => createProjectFromTemplate(template)}>
-                      <h3 className={`${viewMode === 'grid' ? 'text-xl' : 'text-lg'} font-semibold text-gray-900 mb-2 group-hover:text-gray-700 transition-colors duration-300 line-clamp-2`}>{template.name}</h3>
+                    <div className={viewMode === 'grid' ? 'flex-1' : 'flex-1 ml-4'}>
+                      {editingTemplateId === template.id ? (
+                        <Input
+                          value={editingTemplateName}
+                          onChange={(e) => setEditingTemplateName(e.target.value)}
+                          onBlur={submitTemplateRename}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') submitTemplateRename();
+                            if (e.key === 'Escape') setEditingTemplateId(null);
+                          }}
+                          autoFocus
+                          className="mb-2"
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                      ) : (
+                        <h3 className={`${viewMode === 'grid' ? 'text-xl' : 'text-lg'} font-semibold text-gray-900 mb-2 group-hover:text-gray-700 transition-colors duration-300 line-clamp-2`}>{template.name}</h3>
+                      )}
                       <p className="text-sm text-gray-600 mb-4 line-clamp-2 leading-relaxed">{template.description}</p>
                       <div className="flex items-center justify-between">
                         <span className="text-xs text-gray-500">{template.usageCount} uses</span>
@@ -804,7 +848,12 @@ const Projects = () => {
                               }}
                             >
                               <DropdownMenuTrigger asChild>
-                                <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-8 w-8 p-0"
+                                  onClick={(e) => e.stopPropagation()}
+                                >
                                   <MoreHorizontal className="w-4 h-4" />
                                 </Button>
                               </DropdownMenuTrigger>
@@ -821,7 +870,7 @@ const Projects = () => {
                                 <DropdownMenuItem
                                   onClick={(e) => {
                                     e.stopPropagation();
-                                    renameTemplate(template);
+                                    startTemplateRename(template, e);
                                   }}
                                 >
                                   <Edit3 className="w-4 h-4 mr-2" />
