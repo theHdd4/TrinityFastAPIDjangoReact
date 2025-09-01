@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import Header from '@/components/Header';
 import { REGISTRY_API } from '@/lib/api';
+import { clearProjectState } from '@/utils/projectStorage';
 import {
   Plus,
   FolderOpen,
@@ -203,6 +204,7 @@ const Projects = () => {
           baseTemplate: p.base_template || null
         };
         setProjects([...projects, newProject]);
+        clearProjectState();
         localStorage.setItem('current-project', JSON.stringify(newProject));
         navigate('/');
       }
@@ -212,6 +214,7 @@ const Projects = () => {
   };
 
   const openProject = (project: Project) => {
+    clearProjectState();
     localStorage.setItem('current-project', JSON.stringify(project));
     navigate('/');
   };
@@ -391,6 +394,7 @@ const Projects = () => {
           t.id === template.id ? { ...t, usageCount: t.usageCount + 1 } : t
         );
         setTemplates(updatedTemplates);
+        clearProjectState();
         localStorage.setItem('current-project', JSON.stringify(newProject));
         navigate('/');
       }
@@ -542,19 +546,27 @@ const Projects = () => {
                           >
                             <Trash2 className="w-4 h-4" />
                           </Button>
-                          <DropdownMenu
-                            onOpenChange={(open) => {
-                              if (open) {
-                                setOpenProjectMenuId(project.id);
-                                setHoveredProject(project.id);
-                              } else {
-                                setOpenProjectMenuId(null);
-                                setHoveredProject(null);
-                              }
-                            }}
-                          >
+                            <DropdownMenu
+                              onOpenChange={(open) => {
+                                if (open) {
+                                  setOpenProjectMenuId(project.id);
+                                  setHoveredProject(project.id);
+                                } else {
+                                  setOpenProjectMenuId(null);
+                                  setHoveredProject(null);
+                                }
+                              }}
+                            >
                             <DropdownMenuTrigger asChild>
-                              <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-8 w-8 p-0"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                }}
+                                onPointerDown={(e) => e.stopPropagation()}
+                              >
                                 <MoreHorizontal className="w-4 h-4" />
                               </Button>
                             </DropdownMenuTrigger>
@@ -716,17 +728,24 @@ const Projects = () => {
                                   )}
                                 </TooltipContent>
                               </Tooltip>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="h-8 w-8 p-0"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  createProjectFromTemplate(template);
-                                }}
-                              >
-                                <Plus className="w-4 h-4" />
-                              </Button>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-8 w-8 p-0"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      createProjectFromTemplate(template);
+                                    }}
+                                  >
+                                    <Plus className="w-4 h-4" />
+                                  </Button>
+                                </TooltipTrigger>
+                                <TooltipContent className="text-xs whitespace-nowrap w-fit max-w-none">
+                                  Create a Project based on this Template
+                                </TooltipContent>
+                              </Tooltip>
                               <DropdownMenu
                                 onOpenChange={(open) => {
                                   if (open) {
@@ -743,7 +762,10 @@ const Projects = () => {
                                     variant="ghost"
                                     size="sm"
                                     className="h-8 w-8 p-0"
-                                    onClick={(e) => e.stopPropagation()}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                    }}
+                                    onPointerDown={(e) => e.stopPropagation()}
                                   >
                                     <MoreHorizontal className="w-4 h-4" />
                                   </Button>
@@ -825,17 +847,24 @@ const Projects = () => {
                                 )}
                               </TooltipContent>
                             </Tooltip>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-8 w-8 p-0"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                createProjectFromTemplate(template);
-                              }}
-                            >
-                              <Plus className="w-4 h-4" />
-                            </Button>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-8 w-8 p-0"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    createProjectFromTemplate(template);
+                                  }}
+                                >
+                                  <Plus className="w-4 h-4" />
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent className="text-xs whitespace-nowrap w-fit max-w-none">
+                                Create a Project based on this Template
+                              </TooltipContent>
+                            </Tooltip>
                             <DropdownMenu
                               onOpenChange={(open) => {
                                 if (open) {
@@ -852,7 +881,10 @@ const Projects = () => {
                                   variant="ghost"
                                   size="sm"
                                   className="h-8 w-8 p-0"
-                                  onClick={(e) => e.stopPropagation()}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                  }}
+                                  onPointerDown={(e) => e.stopPropagation()}
                                 >
                                   <MoreHorizontal className="w-4 h-4" />
                                 </Button>
