@@ -1,0 +1,344 @@
+📘 Evaluate API Documentation (v1)
+
+Dataset-agnostic endpoints for evaluating selected models:
+
+list files in MinIO
+
+discover rows flagged as selected
+
+compute Actual vs Predicted for all selected models
+
+compute Contributions and YoY (%) for all selected models
+
+(optional utility) Ensemble YoY for a single combination
+
+Base URL: http://localhost:8012
+Auth: none (add via deployment if needed)
+Content-Type: application/json
+
+Dependencies
+
+MinIO: results & source files (Arrow/Feather/Parquet/CSV)
+
+MongoDB: build configuration (coefficients, file mapping)
+
+Conventions
+
+Selection flag is read from selected_models (case-insensitive truthy: selected/true/yes/1/y).
+
+Flexible input file types: .parquet, .feather/.arrow, .csv.
+
+Year detection uses a Year column in source data for YoY; A-vs-P requires y_variable present in source.
+
+🗂 Files
+1) 🧾 List Files
+
+GET /files
+
+Query
+
+bucket (string, default settings.minio_source_bucket_name)
+
+prefix (string, optional): e.g. runs/2025-08/
+
+recursive (bool, default true)
+
+limit (int, default 1000, max 10000)
+
+200 (example)
+
+{
+  "bucket": "model_results",
+  "prefix": "runs/2025-08/",
+  "count": 3,
+  "objects": [
+    {"name":"runs/2025-08/summary.parquet","size":12345,"etag":"...","last_modified":"2025-08-19T10:22:33","is_dir":false},
+    {"name":"runs/2025-08/source.feather","size":654321,"etag":"...","last_modified":"2025-08-19T10:23:11","is_dir":false}
+  ]
+}
+
+
+Errors: 404 bucket not found, 500 MinIO/unknown
+
+Curl
+
+curl -G "http://localhost:8012/files" \
+  --data-urlencode "prefix=runs/2025-08/" \
+  --data-urlencode "limit=100"
+
+✅ Selected Rows
+2) 🎯 Get Selected Models (from results files)
+
+GET /files/selected
+
+Scans Arrow/Feather/Parquet files and aggregates rows with selected_models truthy.
+
+Query
+
+bucket (string, default settings.minio_source_bucket_name)
+
+prefix (string, optional): scan path (e.g. runs/2025-08/)
+
+recursive (bool, default true)
+
+limit (int, default 1000): max rows returned
+
+offset (int, default 0): pagination offset
+
+extensions (string, default parquet,feather,arrow)
+
+200 (example)
+
+{
+  "bucket": "model_results",
+  "prefix": "runs/2025-08/",
+  "files_scanned": 5,
+  "total_rows_scanned": 12000,
+  "count": 2,
+  "items": [
+    {
+      "Scope": "ALLINDIA",
+      "combination_id": "COLA_330ML",
+      "y_variable": "Sales",
+      "x_variables": ["PPU","Promo","TV"],
+      "model_name": "LASSO_3",
+      "mape_test": 12.3,
+      "r2_test": 0.62,
+      "run_id": "2025-08-19_09-12-00",
+      "timestamp": "2025-08-19T09:12:33",
+      "selected_models": "selected"
+    }
+  ]
+}
+
+
+Errors: 404 bucket missing, 500 parse/unknown
+
+Curl
+
+curl -G "http://localhost:8012/files/selected" \
+  --data-urlencode "prefix=runs/2025-08/"
+
+📈 Charts — Selected Models (Evaluate)
+3) 📊 Actual vs Predicted — All Selected Models
+
+GET /selected/actual-vs-predicted
+
+For every (combination_id, model_name) flagged as selected, compute:
+ŷ_t = intercept + Σ (β_i × X_{i,t}) using source data mapped via build config.
+
+Query
+
+results_file_key (string, required): key to a results file containing the selected rows
+
+client_name (string, required)
+
+app_name (string, required)
+
+project_name (string, required)
+
+bucket (string, default settings.minio_source_bucket_name)
+
+limit_models (int, default 1000)
+
+200 (example)
+
+{
+  "results_file_key": "runs/2025-08/summary.parquet",
+  "bucket": "model_results",
+  "models_count": 2,
+  "items": [
+    {
+      "combination_id": "COLA_330ML",
+      "model_name": "LASSO_3",
+      "file_key": "source/cola_330ml.feather",
+      "actual_values": [123.0, 129.5, 118.2],
+      "predicted_values": [120.8, 130.1, 117.9],
+      "performance_metrics": {
+        "mae": 4.2, "mse": 28.1, "rmse": 5.3, "r2": 0.61, "mape": 3.4
+      },
+      "data_points": 156
+    }
+  ]
+}
+
+
+Notes
+
+Automatically guards extreme outliers (1st/99th pct) like your single-model route.
+
+Requires source file mapping and coefficients from MongoDB build config.
+
+Errors: 404 build config / y_variable missing, 400 bad inputs, 500 read/unknown
+
+Curl
+
+curl -G "http://localhost:8012/selected/actual-vs-predicted" \
+  --data-urlencode "results_file_key=runs/2025-08/summary.parquet" \
+  --data-urlencode "client_name=Acme" \
+  --data-urlencode "app_name=Demand" \
+  --data-urlencode "project_name=India"
+
+4) 📆 Contributions YoY (%) — All Selected Models
+
+GET /selected/contributions-yoy
+
+For every selected (combination_id, model_name):
+
+build variable-level contributions time-series: contrib_{i,t} = β_i × X_{i,t}
+
+group by Year and sum per variable
+
+compute YoY % per variable
+
+Query
+
+results_file_key (string, required)
+
+client_name (string, required)
+
+app_name (string, required)
+
+project_name (string, required)
+
+bucket (string, default settings.minio_source_bucket_name)
+
+200 (example)
+
+{
+  "results_file_key": "runs/2025-08/summary.parquet",
+  "bucket": "model_results",
+  "models_count": 2,
+  "items": [
+    {
+      "combination_id": "COLA_330ML",
+      "model_name": "LASSO_3",
+      "file_key": "source/cola_330ml.feather",
+      "years": [2023, 2024, 2025],
+      "yearly_contributions": {
+        "PPU": [-820.12, -790.33, -850.44],
+        "Promo": [210.55, 230.12, 240.99],
+        "TV": [95.30, 102.44, 110.01]
+      },
+      "yoy_contributions_pct": {
+        "PPU": [0.0, 3.63, -7.62],
+        "Promo": [0.0, 9.29, 4.70],
+        "TV": [0.0, 7.48, 7.39]
+      }
+    }
+  ]
+}
+
+
+Notes
+
+Requires a Year column in the source dataset.
+
+yoy_contributions_pct is % change vs previous year (NaN/Inf treated as 0 for the first year).
+
+Errors: 400 no Year column, 404 no selected models / no contributable variables, 500 read/unknown
+
+Curl
+
+curl -G "http://localhost:8012/selected/contributions-yoy" \
+  --data-urlencode "results_file_key=runs/2025-08/summary.parquet" \
+  --data-urlencode "client_name=Acme" \
+  --data-urlencode "app_name=Demand" \
+  --data-urlencode "project_name=India"
+
+📊 (Optional) Ensemble YoY — Single Combination
+
+GET /models/yoy-calculation-ensemble
+
+Utility endpoint that replicates your single-model charting flow using ensemble betas for one combination_id, pulling the source file via build config, splitting the latest two calendar years, and producing:
+
+observed YoY on the target
+
+explained delta via Σ(β × ΔX̄)
+
+variable-level contributions + residual
+
+waterfall-ready arrays
+
+Query
+
+file_key (string, required): results file (for ensemble inputs)
+
+combination_id, client_id, app_id, project_id, client_name, app_name, project_name (strings, required)
+
+200 (excerpt)
+
+{
+  "success": true,
+  "combination_name": "COLA_330ML",
+  "model_name": "Ensemble",
+  "file_key": "source/cola_330ml.arrow",
+  "date_column_used": "Month",
+  "years_used": {"year1": 2024, "year2": 2025},
+  "observed": {"year1_mean": 121.2, "year2_mean": 129.8, "delta_y": 8.6, "yoy_percentage": 7.1},
+  "explanation": {
+    "explained_delta_yhat": 6.9,
+    "residual": 1.7,
+    "contributions": [
+      {"variable": "PPU","beta_coefficient": -0.85,"mean_year1": 85.0,"mean_year2": 87.5,"delta_contribution": -2.13}
+    ]
+  },
+  "waterfall": { "labels": ["Base 2024","PPU","Promo","Residual","Final 2025"], "values": [121.2,-2.13,9.8,1.7,129.8] }
+}
+
+
+Errors: 404 build config/source key not found, 400 insufficient years / date column not found, 500 read/unknown
+
+📦 Schemas (responses)
+MinIO listings
+MinioObject {
+  name: string; size: number;
+  etag?: string; last_modified?: string; is_dir: boolean;
+}
+
+ListObjectsResponse {
+  bucket: string; prefix?: string; count: number; objects: MinioObject[];
+}
+
+Selected rows
+SelectedModelRow {
+  Scope?: string; combination_id?: string; y_variable?: string;
+  x_variables?: string[]; model_name?: string;
+  mape_train?: number; mape_test?: number;
+  r2_train?: number; r2_test?: number;
+  aic?: number; bic?: number; price_elasticity?: number;
+  run_id?: string; timestamp?: string; selected_models?: string;
+}
+
+SelectedModelsResponse {
+  bucket: string; prefix?: string;
+  files_scanned: number; total_rows_scanned: number;
+  count: number; items: SelectedModelRow[];
+}
+
+Actual vs Predicted (all selected)
+PerformanceMetrics { mae: number; mse: number; rmse: number; r2: number; mape: number; }
+
+ActualPredictedItem {
+  combination_id: string; model_name: string; file_key: string;
+  actual_values: number[]; predicted_values: number[];
+  performance_metrics: PerformanceMetrics; data_points: number;
+}
+
+ActualPredictedResponse {
+  results_file_key: string; bucket: string; models_count: number;
+  items: ActualPredictedItem[];
+}
+
+Contributions YoY (all selected)
+ContributionsItem {
+  combination_id: string; model_name: string; file_key: string;
+  years: (number|string)[];
+  yearly_contributions: Record<string, number[]>;
+  yoy_contributions_pct: Record<string, number[]>;
+}
+
+ContributionsResponse {
+  results_file_key: string; bucket: string; models_count: number;
+  items: ContributionsItem[];
+}
