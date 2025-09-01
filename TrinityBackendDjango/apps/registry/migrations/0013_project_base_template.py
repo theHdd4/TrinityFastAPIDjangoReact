@@ -21,4 +21,17 @@ class Migration(migrations.Migration):
                 help_text="Template this project was created from, if any.",
             ),
         ),
+        migrations.AddField(
+            model_name="historicalproject",
+            name="base_template",
+            field=models.ForeignKey(
+                to="registry.template",
+                null=True,
+                blank=True,
+                on_delete=django.db.models.deletion.DO_NOTHING,
+                related_name="+",
+                db_constraint=False,
+                help_text="Template this project was created from, if any.",
+            ),
+        ),
     ]
