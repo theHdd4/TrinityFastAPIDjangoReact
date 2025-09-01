@@ -742,7 +742,7 @@ const Projects = () => {
                                     <Plus className="w-4 h-4" />
                                   </Button>
                                 </TooltipTrigger>
-                                <TooltipContent className="text-xs w-80 whitespace-nowrap">
+                                <TooltipContent className="text-xs whitespace-nowrap w-fit max-w-none">
                                   Create a Project based on this Template
                                 </TooltipContent>
                               </Tooltip>
@@ -861,7 +861,7 @@ const Projects = () => {
                                   <Plus className="w-4 h-4" />
                                 </Button>
                               </TooltipTrigger>
-                              <TooltipContent className="text-xs w-80 whitespace-nowrap">
+                              <TooltipContent className="text-xs whitespace-nowrap w-fit max-w-none">
                                 Create a Project based on this Template
                               </TooltipContent>
                             </Tooltip>
