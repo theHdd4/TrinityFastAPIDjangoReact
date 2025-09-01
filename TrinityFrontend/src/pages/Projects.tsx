@@ -565,7 +565,11 @@ const Projects = () => {
                                 onClick={(e) => {
                                   e.stopPropagation();
                                 }}
-                                onPointerDown={(e) => e.stopPropagation()}
+                                onPointerDown={(e) => {
+                                  e.stopPropagation();
+                                  setOpenProjectMenuId(project.id);
+                                  setHoveredProject(project.id);
+                                }}
                               >
                                 <MoreHorizontal className="w-4 h-4" />
                               </Button>
@@ -765,7 +769,11 @@ const Projects = () => {
                                     onClick={(e) => {
                                       e.stopPropagation();
                                     }}
-                                    onPointerDown={(e) => e.stopPropagation()}
+                                    onPointerDown={(e) => {
+                                      e.stopPropagation();
+                                      setOpenTemplateMenuId(template.id);
+                                      setHoveredTemplate(template.id);
+                                    }}
                                   >
                                     <MoreHorizontal className="w-4 h-4" />
                                   </Button>
@@ -884,7 +892,11 @@ const Projects = () => {
                                   onClick={(e) => {
                                     e.stopPropagation();
                                   }}
-                                  onPointerDown={(e) => e.stopPropagation()}
+                                  onPointerDown={(e) => {
+                                    e.stopPropagation();
+                                    setOpenTemplateMenuId(template.id);
+                                    setHoveredTemplate(template.id);
+                                  }}
                                 >
                                   <MoreHorizontal className="w-4 h-4" />
                                 </Button>
