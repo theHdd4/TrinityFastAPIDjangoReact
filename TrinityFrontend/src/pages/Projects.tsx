@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import Header from '@/components/Header';
 import { REGISTRY_API } from '@/lib/api';
+import { clearProjectState } from '@/utils/projectStorage';
 import {
   Plus,
   FolderOpen,
@@ -203,6 +204,7 @@ const Projects = () => {
           baseTemplate: p.base_template || null
         };
         setProjects([...projects, newProject]);
+        clearProjectState();
         localStorage.setItem('current-project', JSON.stringify(newProject));
         navigate('/');
       }
@@ -212,6 +214,7 @@ const Projects = () => {
   };
 
   const openProject = (project: Project) => {
+    clearProjectState();
     localStorage.setItem('current-project', JSON.stringify(project));
     navigate('/');
   };
@@ -391,6 +394,7 @@ const Projects = () => {
           t.id === template.id ? { ...t, usageCount: t.usageCount + 1 } : t
         );
         setTemplates(updatedTemplates);
+        clearProjectState();
         localStorage.setItem('current-project', JSON.stringify(newProject));
         navigate('/');
       }

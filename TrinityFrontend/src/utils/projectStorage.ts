@@ -61,3 +61,13 @@ export function saveCurrentProject(project: any): void {
     }
   }
 }
+
+// Clear all cached project-specific state from localStorage
+export function clearProjectState(): void {
+  [
+    'laboratory-config',
+    'laboratory-layout-cards',
+    'workflow-canvas-molecules',
+    'workflow-selected-atoms',
+  ].forEach(key => localStorage.removeItem(key));
+}
