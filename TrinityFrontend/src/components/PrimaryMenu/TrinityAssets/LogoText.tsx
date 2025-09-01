@@ -19,8 +19,7 @@ const LogoText: React.FC<LogoTextProps> = ({ className = '', titleClassName }) =
     >
       Trinity
     </h1>
-    <div className="h-0.5 w-full bg-[#fec107] my-0.5" />
-    <span className="font-mono text-xs text-black/60 leading-none">
+    <span className="font-mono text-xs text-black/60 leading-none mt-1">
       A Quant Matrix AI Experience
     </span>
   </div>
