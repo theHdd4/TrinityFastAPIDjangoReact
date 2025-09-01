@@ -9,13 +9,18 @@ interface LogoTextProps {
 }
 
 const LogoText: React.FC<LogoTextProps> = ({ className = '', titleClassName }) => (
-  <div className={`flex flex-col items-center text-center ${className}`.trim()}>
+  <div
+    className={`flex h-12 flex-col justify-center items-start text-left leading-none ${className}`.trim()}
+  >
     <h1
-      className={`text-4xl font-bold font-mono ${titleClassName || 'text-black'}`.trim()}
+      className={`font-mono font-bold text-3xl leading-none ${
+        titleClassName || 'text-black'
+      }`.trim()}
     >
       Trinity
     </h1>
-    <span className="text-xs text-black/60 font-mono mt-1">
+    <div className="h-0.5 w-full bg-[#fec107] my-0.5" />
+    <span className="font-mono text-xs text-black/60 leading-none">
       A Quant Matrix AI Experience
     </span>
   </div>
