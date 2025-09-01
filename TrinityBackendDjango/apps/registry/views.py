@@ -255,6 +255,7 @@ class ProjectViewSet(viewsets.ModelViewSet):
             owner=request.user,
             app=source.app,
             state=source.state,
+            base_template=source.base_template,
         )
 
         for mode in ["lab", "workflow", "exhibition"]:
@@ -359,6 +360,15 @@ class TemplateViewSet(viewsets.ModelViewSet):
                 qs = qs.filter(app__slug=app_param)
         return qs
 
+    def perform_update(self, serializer):
+        instance = serializer.save()
+        projects = instance.projects.all()
+        if projects.exists():
+            instance.template_projects = [
+                ProjectSerializer(p).data for p in projects
+            ]
+            instance.save(update_fields=["template_projects"])
+
     def _can_edit(self, user):
         perms = [
             "permissions.workflow_edit",
@@ -399,6 +409,7 @@ class TemplateViewSet(viewsets.ModelViewSet):
             owner=request.user,
             app=template.app,
             state=template.state,
+            base_template=template,
         )
 
         for mode in ["lab", "workflow", "exhibition"]:

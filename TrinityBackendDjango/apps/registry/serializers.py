@@ -19,6 +19,7 @@ class ProjectSerializer(serializers.ModelSerializer):
         required=False,
         default=serializers.CurrentUserDefault(),
     )
+    base_template = serializers.SerializerMethodField()
 
     class Meta:
         model = Project
@@ -30,10 +31,14 @@ class ProjectSerializer(serializers.ModelSerializer):
             "owner",
             "app",
             "state",
+            "base_template",
             "created_at",
             "updated_at",
         ]
         read_only_fields = ["id", "created_at", "updated_at"]
+
+    def get_base_template(self, obj):
+        return obj.base_template.name if obj.base_template else None
 
 
 class SessionSerializer(serializers.ModelSerializer):

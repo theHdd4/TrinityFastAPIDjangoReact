@@ -41,6 +41,14 @@ class Project(models.Model):
         null=True,
         help_text="Persisted workflow/laboratory configuration for this project.",
     )
+    base_template = models.ForeignKey(
+        "Template",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="projects",
+        help_text="Template this project was created from, if any.",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     history = HistoricalRecords()

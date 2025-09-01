@@ -31,6 +31,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger
 } from '@/components/ui/dropdown-menu';
+import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 
 interface Project {
   id: string;
@@ -38,6 +39,7 @@ interface Project {
   lastModified: Date;
   description?: string;
   appTemplate: string;
+  baseTemplate?: string | null;
 }
 
 interface Template {
@@ -133,7 +135,8 @@ const Projects = () => {
             name: p.name,
             lastModified: new Date(p.updated_at),
             description: p.description,
-            appTemplate: selectedApp || 'blank'
+            appTemplate: selectedApp || 'blank',
+            baseTemplate: p.base_template
           }));
           setProjects(parsed);
         }
@@ -193,7 +196,8 @@ const Projects = () => {
           name: p.name,
           lastModified: new Date(p.updated_at || Date.now()),
           description: p.description,
-          appTemplate: selectedApp || 'blank'
+          appTemplate: selectedApp || 'blank',
+          baseTemplate: p.base_template
         };
         setProjects([...projects, newProject]);
         localStorage.setItem('current-project', JSON.stringify(newProject));
@@ -225,7 +229,8 @@ const Projects = () => {
           name: data.name || `${project.name} Copy`,
           lastModified: new Date(data.updated_at || Date.now()),
           description: data.description,
-          appTemplate: project.appTemplate
+          appTemplate: project.appTemplate,
+          baseTemplate: data.base_template || project.baseTemplate
         };
         setProjects([...projects, dup]);
       }
@@ -320,6 +325,11 @@ const Projects = () => {
       if (res.ok) {
         const updated = await res.json();
         setTemplates(templates.map(t => (t.id === template.id ? { ...t, name: updated.name } : t)));
+        setProjects(
+          projects.map(p =>
+            p.baseTemplate === template.name ? { ...p, baseTemplate: updated.name } : p
+          )
+        );
       }
     } catch (err) {
       console.error('Rename template error', err);
@@ -354,7 +364,8 @@ const Projects = () => {
           name: p.name,
           lastModified: new Date(p.updated_at),
           description: p.description,
-          appTemplate: selectedApp || 'blank'
+          appTemplate: selectedApp || 'blank',
+          baseTemplate: p.base_template
         };
         setProjects([...projects, newProject]);
         const updatedTemplates = templates.map(t =>
@@ -367,10 +378,6 @@ const Projects = () => {
     } catch (err) {
       console.error('Use template error', err);
     }
-  };
-
-  const showTemplateDetails = (template: Template) => {
-    alert(`Template based on: ${template.baseProject?.name || 'Unknown'}\nDescription: ${template.description || ''}`);
   };
 
   const formatDate = (date: Date) => {
@@ -594,7 +601,9 @@ const Projects = () => {
                       ) : (
                         <h3 className={`${viewMode === 'grid' ? 'text-xl' : 'text-lg'} font-semibold text-gray-900 mb-2 group-hover:text-gray-700 transition-colors duration-300 line-clamp-2`}>{project.name}</h3>
                       )}
-                      <p className="text-sm text-gray-600 mb-4 line-clamp-2 leading-relaxed">{project.description}</p>
+                      <p className="text-sm text-gray-600 mb-4 line-clamp-2 leading-relaxed">
+                        {`Base Template: ${project.baseTemplate || 'None'}`}
+                      </p>
                       <div className="flex items-center justify-between">
                         <div className="flex items-center space-x-2 text-gray-400 text-xs">
                           <Clock className="w-3 h-3" />
@@ -663,17 +672,26 @@ const Projects = () => {
                           </Badge>
                           {hoveredTemplate === template.id && (
                             <div className="flex items-center space-x-1">
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="h-8 w-8 p-0"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  showTemplateDetails(template);
-                                }}
-                              >
-                                <Info className="w-4 h-4" />
-                              </Button>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-8 w-8 p-0"
+                                    onClick={(e) => e.stopPropagation()}
+                                  >
+                                    <Info className="w-4 h-4" />
+                                  </Button>
+                                </TooltipTrigger>
+                                <TooltipContent className="text-xs max-w-xs">
+                                  <p className="font-medium">
+                                    {`Based on: ${template.baseProject?.name || 'Unknown'}`}
+                                  </p>
+                                  {template.description && (
+                                    <p>{template.description}</p>
+                                  )}
+                                </TooltipContent>
+                              </Tooltip>
                               <Button
                                 variant="ghost"
                                 size="sm"
@@ -702,15 +720,6 @@ const Projects = () => {
                                   </Button>
                                 </DropdownMenuTrigger>
                                 <DropdownMenuContent align="end">
-                                  <DropdownMenuItem
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      showTemplateDetails(template);
-                                    }}
-                                  >
-                                    <Info className="w-4 h-4 mr-2" />
-                                    Show Details
-                                  </DropdownMenuItem>
                                   <DropdownMenuItem
                                     onClick={(e) => {
                                       e.stopPropagation();
@@ -752,17 +761,26 @@ const Projects = () => {
                         <span className="text-xs text-gray-500">{template.usageCount} uses</span>
                         {viewMode === 'list' && hoveredTemplate === template.id && (
                           <div className="flex items-center space-x-1">
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-8 w-8 p-0"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                showTemplateDetails(template);
-                              }}
-                            >
-                              <Info className="w-4 h-4" />
-                            </Button>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-8 w-8 p-0"
+                                  onClick={(e) => e.stopPropagation()}
+                                >
+                                  <Info className="w-4 h-4" />
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent className="text-xs max-w-xs">
+                                <p className="font-medium">
+                                  {`Based on: ${template.baseProject?.name || 'Unknown'}`}
+                                </p>
+                                {template.description && (
+                                  <p>{template.description}</p>
+                                )}
+                              </TooltipContent>
+                            </Tooltip>
                             <Button
                               variant="ghost"
                               size="sm"
@@ -791,15 +809,6 @@ const Projects = () => {
                                 </Button>
                               </DropdownMenuTrigger>
                               <DropdownMenuContent align="end">
-                                <DropdownMenuItem
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    showTemplateDetails(template);
-                                  }}
-                                >
-                                  <Info className="w-4 h-4 mr-2" />
-                                  Show Details
-                                </DropdownMenuItem>
                                 <DropdownMenuItem
                                   onClick={(e) => {
                                     e.stopPropagation();
