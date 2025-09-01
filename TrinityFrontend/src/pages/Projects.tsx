@@ -546,17 +546,17 @@ const Projects = () => {
                           >
                             <Trash2 className="w-4 h-4" />
                           </Button>
-                          <DropdownMenu
-                            onOpenChange={(open) => {
-                              if (open) {
-                                setOpenProjectMenuId(project.id);
-                                setHoveredProject(project.id);
-                              } else {
-                                setOpenProjectMenuId(null);
-                                setHoveredProject(null);
-                              }
-                            }}
-                          >
+                            <DropdownMenu
+                              onOpenChange={(open) => {
+                                if (open) {
+                                  setOpenProjectMenuId(project.id);
+                                  setHoveredProject(project.id);
+                                } else {
+                                  setOpenProjectMenuId(null);
+                                  setHoveredProject(null);
+                                }
+                              }}
+                            >
                             <DropdownMenuTrigger asChild>
                               <Button
                                 variant="ghost"
@@ -564,9 +564,8 @@ const Projects = () => {
                                 className="h-8 w-8 p-0"
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  setOpenProjectMenuId(project.id);
-                                  setHoveredProject(project.id);
                                 }}
+                                onPointerDown={(e) => e.stopPropagation()}
                               >
                                 <MoreHorizontal className="w-4 h-4" />
                               </Button>
@@ -743,7 +742,7 @@ const Projects = () => {
                                     <Plus className="w-4 h-4" />
                                   </Button>
                                 </TooltipTrigger>
-                                <TooltipContent className="text-xs">
+                                <TooltipContent className="text-xs w-80 whitespace-nowrap">
                                   Create a Project based on this Template
                                 </TooltipContent>
                               </Tooltip>
@@ -765,9 +764,8 @@ const Projects = () => {
                                     className="h-8 w-8 p-0"
                                     onClick={(e) => {
                                       e.stopPropagation();
-                                      setOpenTemplateMenuId(template.id);
-                                      setHoveredTemplate(template.id);
                                     }}
+                                    onPointerDown={(e) => e.stopPropagation()}
                                   >
                                     <MoreHorizontal className="w-4 h-4" />
                                   </Button>
@@ -863,7 +861,7 @@ const Projects = () => {
                                   <Plus className="w-4 h-4" />
                                 </Button>
                               </TooltipTrigger>
-                              <TooltipContent className="text-xs">
+                              <TooltipContent className="text-xs w-80 whitespace-nowrap">
                                 Create a Project based on this Template
                               </TooltipContent>
                             </Tooltip>
@@ -885,9 +883,8 @@ const Projects = () => {
                                   className="h-8 w-8 p-0"
                                   onClick={(e) => {
                                     e.stopPropagation();
-                                    setOpenTemplateMenuId(template.id);
-                                    setHoveredTemplate(template.id);
                                   }}
+                                  onPointerDown={(e) => e.stopPropagation()}
                                 >
                                   <MoreHorizontal className="w-4 h-4" />
                                 </Button>
