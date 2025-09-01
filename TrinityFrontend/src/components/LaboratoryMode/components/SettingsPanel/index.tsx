@@ -66,8 +66,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
     | FeatureOverviewSettings
     | DataFrameOperationsSettings
     | ChartMakerSettings
-    | CorrelationSettings =
-    | ChartMakerSettings
+    | CorrelationSettings
     | SelectModelsFeatureSettings =
     atom?.settings ||
     (atom?.atomId === 'correlation'

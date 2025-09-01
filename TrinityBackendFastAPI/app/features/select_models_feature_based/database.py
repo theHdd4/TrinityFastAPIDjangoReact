@@ -14,8 +14,8 @@ logger = logging.getLogger(__name__)
 # MinIO config
 # Default to the development MinIO service if not explicitly configured
 MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "minio:9000")
-MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY", "admin_dev")
-MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY", "pass_dev")
+MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY", "minio")
+MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY", "minio123")
 MINIO_BUCKET = os.getenv("MINIO_BUCKET", "trinity")
 MINIO_SECURE = os.getenv("MINIO_SECURE", "false").lower() == "true"
 
@@ -82,7 +82,7 @@ def ensure_minio_bucket():
 ensure_minio_bucket()
 
 # MongoDB configuration
-MONGO_URI = os.getenv("MONGO_URI", "mongodb://admin_dev:pass_dev@10.2.1.65:9005/?authSource=admin")
+MONGO_URI = os.getenv("MONGO_URI", "mongodb://root:rootpass@mongo:27017/trinity_prod?authSource=admin")
 MONGO_DB = os.getenv("MONGO_DB", "validator_atoms_db")
 COLLECTION_NAME = "validator_atoms"
 
