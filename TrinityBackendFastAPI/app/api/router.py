@@ -22,6 +22,7 @@ from app.features.correlation.endpoint import router as correlation_router
 from app.features.correlation.endpoint import router as correlation_router
 from app.features.build_autoregressive.endpoint import router as autoregressive_router
 from app.features.select_models_feature_based.endpoint import router as select_models_router
+from app.features.evaluate_models_feature_based.endpoint import router as evaluate_router
 
 api_router = APIRouter()
 text_router  = APIRouter()
@@ -54,3 +55,5 @@ api_router.include_router(select_router)
 
 api_router.include_router(autoregressive_router)
 api_router.include_router(select_models_router)
+
+api_router.include_router(evaluate_router)
