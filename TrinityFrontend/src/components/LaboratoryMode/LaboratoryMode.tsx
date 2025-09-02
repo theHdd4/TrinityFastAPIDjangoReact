@@ -129,7 +129,6 @@ const LaboratoryMode = () => {
               state: { laboratory_config: sanitized },
             }),
           });
-<<<<<<< HEAD
           const sanitized = sanitizeLabConfig(labConfig);
           localStorage.setItem('laboratory-layout-cards', safeStringify(sanitized.cards));
           localStorage.setItem('laboratory-config', safeStringify(sanitized));

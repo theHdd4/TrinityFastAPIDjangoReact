@@ -36,11 +36,7 @@ import DataFrameOperationsProperties from '@/components/AtomList/atoms/dataframe
 import CorrelationProperties from '@/components/AtomList/atoms/correlation/components/properties/CorrelationProperties';
 import ChartMakerProperties from '@/components/AtomList/atoms/chart-maker/components/properties/ChartMakerProperties';
 import ExploreProperties from '@/components/AtomList/atoms/explore/components/properties/ExploreProperties';
-
-<<<<<<< HEAD
 import SelectModelsFeatureProperties from '@/components/AtomList/atoms/select-models-feature/components/properties/SelectModelsFeatureProperties';
-=======
->>>>>>> dev
 import AtomSettingsTabs from "./AtomSettingsTabs";
 
 interface SettingsPanelProps {
@@ -69,21 +65,14 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
     | FeatureOverviewSettings
     | DataFrameOperationsSettings
     | ChartMakerSettings
-<<<<<<< HEAD
     | CorrelationSettings
     | SelectModelsFeatureSettings =
-=======
-    | CorrelationSettings =
->>>>>>> dev
     atom?.settings ||
     (atom?.atomId === 'correlation'
       ? { ...DEFAULT_CORRELATION_SETTINGS }
       : atom?.atomId === 'data-upload-validate'
-<<<<<<< HEAD
       ? { ...DEFAULT_DATAUPLOAD_SETTINGS }
-=======
       ? createDefaultDataUploadSettings()
->>>>>>> dev
       : atom?.atomId === 'feature-overview'
       ? { ...DEFAULT_FEATURE_OVERVIEW_SETTINGS }
       : atom?.atomId === 'dataframe-operations'

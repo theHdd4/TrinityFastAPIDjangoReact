@@ -554,13 +554,10 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
           atom.id === 'text-box'
             ? { ...DEFAULT_TEXTBOX_SETTINGS }
             : atom.id === 'data-upload-validate'
-<<<<<<< HEAD
             ? { ...DEFAULT_DATAUPLOAD_SETTINGS }
           : atom.id === 'feature-overview'
-=======
             ? createDefaultDataUploadSettings()
             : atom.id === 'feature-overview'
->>>>>>> dev
             ? { ...DEFAULT_FEATURE_OVERVIEW_SETTINGS }
             : atom.id === 'explore'
             ? { data: { ...DEFAULT_EXPLORE_DATA }, settings: { ...DEFAULT_EXPLORE_SETTINGS } }
