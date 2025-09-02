@@ -30,3 +30,16 @@
   stroke-width: 3 !important;
   cursor: pointer !important;
 }
+
+/* Context menu styling for chart template */
+.context-menu,
+.color-submenu,
+.sort-submenu {
+  backdrop-filter: blur(8px);
+}
+
+.context-menu button,
+.color-submenu button,
+.sort-submenu button {
+  transition: background-color 0.15s ease-in-out;
+}
