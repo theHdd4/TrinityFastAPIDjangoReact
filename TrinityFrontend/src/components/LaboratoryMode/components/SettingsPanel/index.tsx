@@ -71,7 +71,6 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
     (atom?.atomId === 'correlation'
       ? { ...DEFAULT_CORRELATION_SETTINGS }
       : atom?.atomId === 'data-upload-validate'
-      ? { ...DEFAULT_DATAUPLOAD_SETTINGS }
       ? createDefaultDataUploadSettings()
       : atom?.atomId === 'feature-overview'
       ? { ...DEFAULT_FEATURE_OVERVIEW_SETTINGS }
