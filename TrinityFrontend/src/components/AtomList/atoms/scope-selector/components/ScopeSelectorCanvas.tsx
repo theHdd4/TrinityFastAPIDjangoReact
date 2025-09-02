@@ -57,7 +57,17 @@ const ScopeSelectorCanvas: React.FC<ScopeSelectorCanvasProps> = ({ data, onDataC
         if (res.ok) {
           const json = await res.json();
           const cfg = json.data || {};
-          const identifiers = Array.isArray(cfg.identifiers) ? cfg.identifiers : [];
+          const dimensions = cfg.dimensions || {};
+          const dimensionIdentifiers = Array.from(
+            new Set(
+              Object.values(dimensions)
+                .flat()
+                .filter((v): v is string => typeof v === 'string')
+            )
+          );
+          const identifiers = Array.isArray(cfg.identifiers)
+            ? cfg.identifiers.filter((id: string) => dimensionIdentifiers.includes(id))
+            : [];
           const measures = Array.isArray(cfg.measures) ? cfg.measures : [];
           if (identifiers.length > 0) {
             const update: Partial<ScopeSelectorData> = {
