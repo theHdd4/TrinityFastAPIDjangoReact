@@ -7,7 +7,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Plus, Settings, Calendar, X, Loader2, Target, Check, BarChart3 } from 'lucide-react';
-import { SCOPE_SELECTOR_API } from '@/lib/api';
+import { SCOPE_SELECTOR_API, CLASSIFIER_API } from '@/lib/api';
 import { ScopeSelectorData, ScopeData } from '../ScopeSelectorAtom';
 
 interface ScopeSelectorCanvasProps {
@@ -40,6 +40,44 @@ const ScopeSelectorCanvas: React.FC<ScopeSelectorCanvasProps> = ({ data, onDataC
   // Drag and drop state
   const [draggedIdentifier, setDraggedIdentifier] = useState<string | null>(null);
   const [dragOverIdentifier, setDragOverIdentifier] = useState<string | null>(null);
+
+  // Fetch column classifier configuration on mount
+  useEffect(() => {
+    const fetchConfig = async () => {
+      try {
+        const envStr = localStorage.getItem('env');
+        const env = envStr ? JSON.parse(envStr) : {};
+        const client = env.CLIENT_NAME || '';
+        const app = env.APP_NAME || '';
+        const project = env.PROJECT_NAME || '';
+        if (!client || !project) return;
+        const res = await fetch(
+          `${CLASSIFIER_API}/get_config?client_name=${encodeURIComponent(client)}&app_name=${encodeURIComponent(app)}&project_name=${encodeURIComponent(project)}`
+        );
+        if (res.ok) {
+          const json = await res.json();
+          const cfg = json.data || {};
+          const identifiers = Array.isArray(cfg.identifiers) ? cfg.identifiers : [];
+          const measures = Array.isArray(cfg.measures) ? cfg.measures : [];
+          if (identifiers.length > 0) {
+            onDataChange({ selectedIdentifiers: identifiers, measures });
+            toast({ title: 'Column classifier configuration loaded' });
+          } else {
+            toast({ title: 'Column classifier configuration not found', variant: 'destructive' });
+          }
+        } else {
+          toast({ title: 'Column classifier configuration not found', variant: 'destructive' });
+        }
+      } catch (err) {
+        console.warn('column classifier config fetch failed', err);
+        toast({ title: 'Failed to fetch column classifier configuration', variant: 'destructive' });
+      }
+    };
+    if (!data.selectedIdentifiers?.length) {
+      fetchConfig();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   
   // Debug log
   useEffect(() => {

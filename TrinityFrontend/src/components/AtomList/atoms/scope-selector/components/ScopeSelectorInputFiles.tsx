@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Card } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { VALIDATE_API, FEATURE_OVERVIEW_API, SCOPE_SELECTOR_API } from '@/lib/api';
+import { VALIDATE_API, FEATURE_OVERVIEW_API } from '@/lib/api';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 
 interface Props {
@@ -29,58 +29,40 @@ const ScopeSelectorInputFiles: React.FC<Props> = ({ atomId }) => {
     }
     
     try {
-      // Try Redis/Mongo identifier list first
-      // Extract client/app/project from path if available
-      const pathParts = val.split('/')
-      const clientName = pathParts[0] ?? ''
-      const appName = pathParts[1] ?? ''
-      const projectName = pathParts[2] ?? ''
-
-      let categoricalColumns: string[] = []
-      try {
-        if (clientName && appName && projectName) {
-          const identRes = await fetch(`${SCOPE_SELECTOR_API}/identifier_options?client_name=${encodeURIComponent(clientName)}&app_name=${encodeURIComponent(appName)}&project_name=${encodeURIComponent(projectName)}`)
-          if (identRes.ok) {
-            const identJson = await identRes.json()
-            if (Array.isArray(identJson.identifiers) && identJson.identifiers.length > 0) {
-              categoricalColumns = identJson.identifiers
-            }
-          }
-        }
-      } catch (err) {
-        console.warn('identifier_options fetch failed', err)
-      }
-
-      // If identifiers not found via config, fall back to column summary
+      // Fetch column summary
       const res = await fetch(`${FEATURE_OVERVIEW_API}/column_summary?object_name=${encodeURIComponent(val)}`);
       if (res.ok) {
         const data = await res.json();
         const allColumns = Array.isArray(data.summary) ? data.summary.filter(Boolean) : [];
-        
-        // Only include object type columns as categorical
-        const finalCats = categoricalColumns.length > 0 ? categoricalColumns : allColumns
-          .filter(col => {
-            const dataType = col.data_type?.toLowerCase() || '';
-            return (dataType === 'object' || dataType === 'category') && col.column;
-          })
-          .map(col => col.column);
-        
-        // Update settings with all columns and initialize available identifiers with all categorical columns
+
+        // Use identifiers from settings if available, otherwise default to categorical columns
+        const finalCats = settings.selectedIdentifiers && settings.selectedIdentifiers.length > 0 ?
+          settings.selectedIdentifiers :
+          allColumns
+            .filter(col => {
+              const dataType = col.data_type?.toLowerCase() || '';
+              return (dataType === 'object' || dataType === 'category') && col.column;
+            })
+            .map(col => col.column);
+
+        // Update settings with all columns and initialize available identifiers
         updateSettings(atomId, {
           dataSource: val,
           allColumns,
           availableIdentifiers: finalCats,
-          selectedIdentifiers: [...finalCats] // Select all categorical columns by default
+          selectedIdentifiers: [...finalCats],
+          measures: settings.measures || [],
         });
       }
     } catch (error) {
       console.error('Error fetching column summary:', error);
       // Still update dataSource even if column fetch fails
-      updateSettings(atomId, { 
+      updateSettings(atomId, {
         dataSource: val,
         allColumns: [],
         availableIdentifiers: [],
-        selectedIdentifiers: []
+        selectedIdentifiers: [],
+        measures: settings.measures || [],
       });
     }
   };
