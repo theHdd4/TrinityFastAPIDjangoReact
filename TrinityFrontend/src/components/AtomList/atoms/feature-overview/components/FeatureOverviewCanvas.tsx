@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
 import Table from "@/templates/tables/table";
 import { Button } from "@/components/ui/button";
 import { FEATURE_OVERVIEW_API } from "@/lib/api";
@@ -124,6 +125,15 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
   const summaryList: ColumnInfo[] = Array.isArray(settings.columnSummary)
     ? settings.columnSummary.filter(Boolean)
     : [];
+
+  const filterUnique = settings.filterUnique ?? true;
+  const displayedSummary = filterUnique
+    ? summaryList.filter((c) => c.unique_count > 1)
+    : summaryList;
+
+  const handleFilterToggle = (val: boolean) => {
+    onUpdateSettings({ filterUnique: val });
+  };
 
   const dimensionCols = Object.values(dimensionMap).flat();
   const colSpan = dimensionCols.length + 2; // SR NO. + View Stat
@@ -285,14 +295,24 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
           <div className="mx-auto max-w-screen-2xl rounded-2xl border border-slate-200 bg-white shadow-sm">
             <div className="flex items-center justify-between border-b border-slate-200 px-5 py-3">
               <h3 className="text-base font-semibold text-slate-800">Cardinality View</h3>
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-slate-500">
+                  Select Columns with more than one unique values
+                </span>
+                <Switch
+                  checked={filterUnique}
+                  onCheckedChange={handleFilterToggle}
+                  className="data-[state=checked]:bg-[#458EE2]"
+                />
+              </div>
             </div>
             <Table
               headers={["Columns", "Data Type", "Unique Counts", "Unique Values"]}
               colClasses={["w-[30%]", "w-[20%]", "w-[15%]", "w-[35%]"]}
               bodyClassName="max-h-[484px] overflow-y-auto"
             >
-              {Array.isArray(summaryList) &&
-                summaryList.map((c: ColumnInfo) => (
+              {Array.isArray(displayedSummary) &&
+                displayedSummary.map((c: ColumnInfo) => (
                   <tr key={c.column} className="table-row">
                     <td className="table-cell-primary">{c.column}</td>
                     <td className="table-cell">
