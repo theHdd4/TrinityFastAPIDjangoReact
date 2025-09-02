@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException, Query, Body
 import logging
 from ..config import cache, scenario_values_collection, select_models_collection, saved_predictions_collection
-from ..schemas import RunRequest, RunResponse, CacheWarmResponse, StatusResponse, IdentifiersResponse, FeaturesResponse, CacheClearResponse, ReferenceRequest, ReferenceResponse, ScenarioValuesRequest, ScenarioValuesResponse
+from ..schemas import RunRequest, RunResponse, CacheWarmResponse, StatusResponse, IdentifiersResponse, FeaturesResponse, CacheClearResponse, ReferenceRequest, ReferenceResponse, ScenarioValuesRequest, ScenarioValuesResponse, SingleCombinationReferenceRequest, SingleCombinationReferenceResponse
 
 from ..scenario.data_service import DataService
 import uuid, logging
@@ -604,11 +604,10 @@ async def run_scenario(
         logger.info("🔍 === RECEIVED PAYLOAD ===")
         logger.info("🔍 Payload type: %s", type(payload))
         logger.info("🔍 Clusters count: %d", len(payload.clusters) if payload.clusters else 0)
-        logger.info("🔍 Identifiers count: %d", len(payload.identifiers) if payload.identifiers else 0)
-        logger.info("🔍 Identifiers content: %s", payload.identifiers)
-        if payload.identifiers:
-            for key, spec in payload.identifiers.items():
-                logger.info("🔍 Identifier %s: column=%s, values=%s", key, spec.column, spec.values)
+        logger.info("🔍 Views count: %d", len(payload.views) if payload.views else 0)
+        if payload.views:
+            for view_id, view_config in payload.views.items():
+                logger.info("🔍 View %s: %d identifier groups", view_id, len(view_config.selected_identifiers))
         logger.info("=== RECEIVED PAYLOAD COMPLETED ===")
 
         # ✅ Check if dataset is cached (no file key needed)
@@ -633,18 +632,18 @@ async def run_scenario(
         # ✅ Run scenario pipeline with current dataset
         result_rows = await ScenarioService.run_scenario(payload, run_id, current_file_key)
 
-        # ✅ Aggregation + storage - NOW WITH AWAIT!
-        response_nests = await AggregationService.aggregate_and_store(
+        # ✅ Aggregation + storage for multiple views - NOW WITH AWAIT!
+        response_data = await AggregationService.aggregate_and_store(
             result_rows, payload, run_id
         )
 
-        # ✅ Response
+        # ✅ Response with new view_results structure
         out = {
             "run_id": run_id,
             "dataset_used": current_file_key,
             "created_at": datetime.utcnow().isoformat(),
             "models_processed": len(models),
-            **response_nests,
+            **response_data,  # This now contains {"view_results": {...}}
         }
         
         logger.info("✅ Scenario run %s finished successfully", run_id)
@@ -707,6 +706,109 @@ async def clear_all_cache():
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to clear cache: {e}")
     return CacheClearResponse(message="Cache cleared successfully")
+
+# ────────────────────────────────────────────────────────────────────────────
+#  POST /api/scenario/single-combination-reference
+# ────────────────────────────────────────────────────────────────────────────
+@router.post("/single-combination-reference", response_model=SingleCombinationReferenceResponse)
+async def get_single_combination_reference(
+    payload: SingleCombinationReferenceRequest = Body(..., description="Single combination reference calculation parameters")
+):
+    """
+    Calculate reference values for a single combination and selected features.
+    
+    This endpoint calculates reference values for one specific combination
+    without requiring the full matching logic or scenario processing.
+    
+    Prerequisites:
+    - Must call GET /init-cache first to load and cache a dataset
+    
+    Returns:
+    - combination: The combination identifiers that were processed
+    - features: List of features that were processed
+    - reference_values: Dictionary mapping feature names to their reference values
+    - statistic_used: The statistic that was applied
+    - date_range: The date range used for calculation
+    """
+    try:
+        # ✅ Check if dataset is cached
+        df = DataService.get_current_d0_dataframe()
+        if df is None:
+            raise HTTPException(
+                status_code=400,
+                detail="No dataset cached. Please call GET /init-cache first."
+            )
+        
+        # ✅ Get current file key for reference
+        current_file_key = DataService.get_current_d0_file_key()
+        
+        # ✅ Get features from cached models
+        models = await DataService.fetch_selected_models()
+        if not models:
+            raise HTTPException(
+                status_code=400,
+                detail="No models available. Please ensure models are selected and cached."
+            )
+        
+        # ✅ Extract features from models
+        available_features = extract_features_from_models(models)
+        
+        # ✅ Validate requested features exist
+        invalid_features = [f for f in payload.features if f not in available_features]
+        if invalid_features:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid features requested: {invalid_features}. Available features: {list(available_features.keys())}"
+            )
+        
+        # ✅ Calculate reference values for the single combination
+        scenario_service = ScenarioService()
+        reference_values = {}
+        
+        for feature in payload.features:
+            try:
+                # Calculate reference value for this feature and combination
+                ref_value = await scenario_service._calc_reference(
+                    stat=payload.stat,
+                    start_date=payload.start_date,
+                    end_date=payload.end_date,
+                    identifiers=payload.combination,
+                    feature=feature
+                )
+                reference_values[feature] = ref_value
+            except Exception as feature_exc:
+                logger.warning(f"Failed to calculate reference for feature {feature}: {feature_exc}")
+                reference_values[feature] = 0.0  # Default to 0 if calculation fails
+        
+        # ✅ Prepare response
+        response_data = {
+            "combination": payload.combination,
+            "features": payload.features,
+            "reference_values": reference_values,
+            "statistic_used": payload.stat,
+            "date_range": {
+                "start_date": payload.start_date,
+                "end_date": payload.end_date
+            },
+            "data_info": {
+                "dataset_key": current_file_key,
+                "models_processed": len(models),
+                "features_available": list(available_features.keys()),
+                "calculation_timestamp": datetime.utcnow().isoformat()
+            },
+            "message": f"Successfully calculated reference values for {len(payload.features)} features in combination {payload.combination}"
+        }
+        
+        logger.info("✅ Single combination reference calculated: %s features for combination %s", 
+                   len(payload.features), payload.combination)
+        
+        return response_data
+        
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("🚨 Single combination reference calculation failed: %s", str(exc))
+        raise HTTPException(status_code=500, detail=f"Single combination reference calculation failed: {str(exc)}")
 
 # ────────────────────────────────────────────────────────────────────────────
 #  POST /api/scenario/force-refresh

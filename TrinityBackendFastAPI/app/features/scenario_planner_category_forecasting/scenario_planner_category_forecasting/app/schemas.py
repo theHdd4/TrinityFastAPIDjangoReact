@@ -63,13 +63,32 @@ class IdentifierFilter(BaseModel):
     values: List[str] = Field(..., description="List of values to include")
 
 
+class ViewConfig(BaseModel):
+    """Schema for view configuration with selected identifiers"""
+    selected_identifiers: Dict[str, Dict[str, List[str]]] = Field(
+        ..., 
+        description="Selected identifiers for this view. Format: {'id1': {'column_name': ['value1', 'value2']}, 'id2': {...}}"
+    )
+    
+    class Config:
+        schema_extra = {
+            "example": {
+                "selected_identifiers": {
+                    "id1": {"Brand": ["heinz", "pl std", "daddies"]},
+                    "id2": {"Channel": ["supermarkets"]},
+                    "id3": {"PPG": ["large", "medium", "small", "xl"]}
+                }
+            }
+        }
+
+
 class RunRequest(BaseModel):
     """Request schema for POST /run endpoint"""
     start_date: str = Field(..., description="Start date for the scenario period (YYYY-MM-DD format)")
     end_date: str = Field(..., description="End date for the scenario period (YYYY-MM-DD format)")
     stat: str = Field(..., description="Statistical measure to use: 'period-mean', 'period-median', etc.")
     clusters: Optional[List[ClusterConfig]] = Field(default=[], description="List of cluster-specific configurations")
-    identifiers: Dict[str, IdentifierFilter] = Field(None, description="Identifier filters to apply to the results")
+    views: Dict[str, ViewConfig] = Field(..., description="Multiple view configurations for result processing")
     
     class Config:
         schema_extra = {
@@ -79,23 +98,39 @@ class RunRequest(BaseModel):
                 "stat": "period-mean",
                 "clusters": [
                     {
-                        "identifiers": {"SubCategory": "SPBIO+"},
+                        "identifiers": {"Brand": "heinz", "Channel": "supermarkets"},
                         "scenario_defs": {
-                            "PFCE": {"type": "pct", "value": 2},
-                            "IIP": {"type": "pct", "value": 1}
+                            "Price": {"type": "pct", "value": 10},
+                            "Marketing_Spend": {"type": "pct", "value": -5}
                         }
                     },
                     {
-                        "identifiers": {"SubCategory": "Deluxe"},
+                        "identifiers": {"Brand": "pl std", "Channel": "supermarkets"},
                         "scenario_defs": {
-                            "GDP": {"type": "pct", "value": -1}
+                            "Price": {"type": "pct", "value": 15}
                         }
                     }
                 ],
-                "identifiers": {
-                    "Id_1": {
-                        "column": "SubCategory",
-                        "values": ["SPBIO+", "Deluxe"]
+                "views": {
+                    "view_1": {
+                        "selected_identifiers": {
+                            "id1": {"Brand": ["heinz", "pl std", "daddies"]},
+                            "id2": {"Channel": ["supermarkets"]},
+                            "id3": {"PPG": ["large", "medium", "small", "xl"]}
+                        }
+                    },
+                    "view_2": {
+                        "selected_identifiers": {
+                            "id1": {"Channel": ["supermarkets"]},
+                            "id2": {"Brand": ["heinz", "pl std", "daddies"]}
+                        }
+                    },
+                    "view_3": {
+                        "selected_identifiers": {
+                            "id1": {"PPG": ["xl", "large"]},
+                            "id2": {"Brand": ["pl std", "heinz"]},
+                            "id3": {"Channel": ["supermarkets"]}
+                        }
                     }
                 }
             }
@@ -108,9 +143,7 @@ class RunResponse(BaseModel):
     dataset_used: str = Field(..., description="Dataset key used for this run")
     created_at: str = Field(..., description="ISO timestamp when the run was created")
     models_processed: int = Field(..., description="Number of models processed")
-    flat: Optional[Dict] = Field(None, description="Flat aggregation results")
-    hierarchy: Optional[List] = Field(None, description="Hierarchical aggregation results")
-    individuals: Optional[List] = Field(None, description="Individual model results")
+    view_results: Dict[str, Dict[str, Any]] = Field(..., description="Results organized by view ID")
 
 
 # ----------  Status ----------
@@ -142,6 +175,77 @@ class CacheClearResponse(BaseModel):
     """Response schema for DELETE /cache/all endpoint"""
     message: str = Field(..., description="Cache operation result message")
 
+
+# ────────────────────────────────────────────────────────────────────────────
+#  Single Combination Reference Endpoint Request/Response
+# ────────────────────────────────────────────────────────────────────────────
+class SingleCombinationReferenceRequest(BaseModel):
+    """Request schema for POST /api/scenario/single-combination-reference endpoint"""
+    stat: str = Field(
+        ...,
+        description="Statistic to calculate: mean, median, sum, min, max, period-mean, period-median, period-sum, period-min, period-max, rolling-mean"
+    )
+    start_date: str = Field(
+        ...,
+        description="Start date for period-based calculations (YYYY-MM-DD)"
+    )
+    end_date: str = Field(
+        ...,
+        description="End date for period-based calculations (YYYY-MM-DD)"
+    )
+    combination: Dict[str, str] = Field(
+        ...,
+        description="Single combination identifiers (e.g., {'Category': 'Beverages', 'SubCategory': 'Soft Drinks'})"
+    )
+    features: List[str] = Field(
+        ...,
+        description="List of selected feature names to calculate reference values for"
+    )
+    
+    class Config:
+        schema_extra = {
+            "example": {
+                "stat": "period-mean",
+                "start_date": "2023-01-01",
+                "end_date": "2023-12-31",
+                "combination": {
+                    "Category": "Beverages",
+                    "SubCategory": "Soft Drinks"
+                },
+                "features": ["PFCE", "IIP", "Sales"]
+            }
+        }
+
+class SingleCombinationReferenceResponse(BaseModel):
+    """Response schema for POST /api/scenario/single-combination-reference endpoint"""
+    combination: Dict[str, str] = Field(
+        ...,
+        description="The combination identifiers that were processed"
+    )
+    features: List[str] = Field(
+        ...,
+        description="List of features that were processed"
+    )
+    reference_values: Dict[str, float] = Field(
+        ...,
+        description="Dictionary mapping feature names to their reference values"
+    )
+    statistic_used: str = Field(
+        ...,
+        description="The statistic that was applied (e.g., period-mean, median)"
+    )
+    date_range: Dict[str, str] = Field(
+        ...,
+        description="The date range used for calculation"
+    )
+    data_info: Dict[str, Any] = Field(
+        ...,
+        description="Information about the dataset used for calculation"
+    )
+    message: str = Field(
+        ...,
+        description="Human-readable message about the calculation"
+    )
 
 # ────────────────────────────────────────────────────────────────────────────
 #  Reference Endpoint Request/Response

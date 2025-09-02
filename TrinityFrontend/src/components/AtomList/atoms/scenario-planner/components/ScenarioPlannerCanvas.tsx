@@ -6,9 +6,17 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
 import { SCENARIO_PLANNER_API } from '@/lib/api';
 
-import { Trash2 } from 'lucide-react';
-import { ScenarioPlannerSettings } from '@/components/LaboratoryMode/store/laboratoryStore';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { Trash2, Maximize2, Minimize2, RefreshCw } from 'lucide-react';
+import { 
+  ScenarioPlannerSettings
+} from '@/components/LaboratoryMode/store/laboratoryStore';
+import { 
+  getComputedSettings,
+  getCurrentScenarioData,
+  addNewScenario,
+  initializeNewScenario
+} from '@/components/AtomList/atoms/scenario-planner/utils/scenarioPlannerUtils';
+
 import { useToast } from '@/hooks/use-toast';
 import ScenarioResultsChart from './ScenarioResultsChart';
 
@@ -25,59 +33,153 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
 }) => {
   const { toast } = useToast();
 
-  const [combinationInputs, setCombinationInputs] = useState<{[key: string]: {[featureId: string]: {input: string; change: string}}}>({}); 
+  // ✅ NEW: Maximize mode state
+  const [isMaximized, setIsMaximized] = useState(false);
+
+  // ✅ NEW: Scenario renaming state with persistence
+  const [editingScenario, setEditingScenario] = useState<string | null>(null);
+  
+  // ✅ NEW: Initialize scenarioNames from global store or local storage
+  const [scenarioNames, setScenarioNames] = useState<Record<string, string>>(() => {
+    // Try to get from global store first
+    if (settings?.scenarioNames) {
+      console.log('📝 Loading scenarioNames from global store:', settings.scenarioNames);
+      return settings.scenarioNames;
+    }
+    
+    // Fallback to local storage
+    try {
+      const stored = localStorage.getItem('scenarioPlanner_scenarioNames');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        console.log('📝 Loading scenarioNames from local storage:', parsed);
+        return parsed;
+      }
+    } catch (error) {
+      console.warn('⚠️ Failed to parse scenarioNames from local storage:', error);
+    }
+    
+    // Default names if nothing stored
+    const defaultNames = {
+      'scenario-1': 'Scenario 1',
+      'scenario-2': 'Scenario 2',
+      'scenario-3': 'Scenario 3',
+      'scenario-4': 'Scenario 4',
+      'scenario-5': 'Scenario 5'
+    };
+    console.log('📝 Using default scenarioNames:', defaultNames);
+    return defaultNames;
+  });
+
+
+
+  // ✅ FIXED: Get current scenario data for proper isolation
+  const currentScenario = settings?.selectedScenario || 'scenario-1';
+  const currentScenarioData = settings?.scenarios?.[currentScenario];
+  
+  // ✅ FIXED: Use scenario-specific data merged with global updates
+  const computedSettings = useMemo(() => {
+    console.log('🔄 Recomputing settings for scenario:', currentScenario, {
+      hasScenarioData: !!currentScenarioData,
+      combinationsCount: currentScenarioData?.combinations?.length || 0
+    });
+    
+    if (currentScenarioData) {
+      const result = {
+        // Use scenario-specific data as base
+        identifiers: currentScenarioData.identifiers || [],
+        features: currentScenarioData.features || [],
+        outputs: currentScenarioData.outputs || [],
+        combinations: currentScenarioData.combinations || [],
+        resultViews: currentScenarioData.resultViews || [],
+        aggregatedViews: currentScenarioData.aggregatedViews || [],
+        selectedView: currentScenarioData.selectedView || 'view-1',
+        combinationInputs: currentScenarioData.combinationInputs || {},
+        originalReferenceValues: currentScenarioData.originalReferenceValues || {},
+        
+        // Merge with global updates from Settings component
+        ...(settings.backendIdentifiers && Array.isArray(settings.backendIdentifiers) && { identifiers: settings.backendIdentifiers }),
+        ...(settings.features && Array.isArray(settings.features) && { features: settings.features }), // Use user-selected features
+        // ✅ FIXED: Prioritize scenario-specific aggregatedViews over global ones
+        ...(currentScenarioData.aggregatedViews && Array.isArray(currentScenarioData.aggregatedViews) && currentScenarioData.aggregatedViews.length > 0 
+          ? { aggregatedViews: currentScenarioData.aggregatedViews }
+          : (settings.aggregatedViews && Array.isArray(settings.aggregatedViews) && { aggregatedViews: settings.aggregatedViews })
+        ),
+        ...(settings.selectedView && { selectedView: settings.selectedView })
+      };
+      
+      console.log('✅ Computed settings result:', {
+        combinationsCount: result.combinations.length,
+        combinationIds: result.combinations.map(c => c.id)
+      });
+      
+      return result;
+    } else {
+      // Fallback to global settings if no scenario data exists
+      return {
+        identifiers: Array.isArray(settings.backendIdentifiers) ? settings.backendIdentifiers : [],
+        features: Array.isArray(settings.features) ? settings.features : [], // Use user-selected features
+        outputs: [],
+        combinations: [],
+        resultViews: [],
+        aggregatedViews: Array.isArray(settings.aggregatedViews) ? settings.aggregatedViews : [],
+        selectedView: settings.selectedView || 'view-1',
+        combinationInputs: {},
+        originalReferenceValues: {}
+      };
+    }
+  }, [currentScenarioData, settings.backendIdentifiers, settings.features, settings.aggregatedViews, settings.selectedView]);
+
+
+  
+  // ✅ FIXED: Use scenario-specific combination inputs
+  const combinationInputs = currentScenarioData?.combinationInputs || {}; 
   const [loadingReference, setLoadingReference] = useState<string | null>(null); // Track which combination is loading reference
   const [loadedReferenceCombinations, setLoadedReferenceCombinations] = useState<Set<string>>(new Set()); // Track which combinations have reference values loaded
   const [runningScenario, setRunningScenario] = useState(false);
 
-  // ✅ NEW: Process individual results for chart display - filtered by selected view
+  // ✅ NEW: Helper function to format numbers to exactly 3 decimal places
+  const formatToThreeDecimals = (value: any): string => {
+    if (value === null || value === undefined) return '0';
+    
+    const numValue = typeof value === 'number' ? value : parseFloat(value);
+    if (isNaN(numValue)) return '0';
+    
+    // Round to 3 decimal places and convert to string
+    return (Math.round(numValue * 1000) / 1000).toFixed(3);
+  };
+
+  // ✅ FIXED: Process individual results for chart display - using per-view results
   const processedChartData = useMemo(() => {
-    if (!settings?.scenarioResults?.individuals || !settings?.selectedView) return [];
+    // ✅ NEW: Get results for the current scenario and selected view
+    const currentViewResults = currentScenarioData?.viewResults?.[computedSettings.selectedView];
+    
+    if (!currentViewResults?.individuals || !computedSettings.selectedView) {
+      return [];
+    }
     
     // Get the selected aggregated view configuration
-    const selectedAggregatedView = settings.aggregatedViews?.find(v => v.id === settings.selectedView);
-    
-    console.log('🔍 Processing chart data for selected view:', {
-      selectedView: settings.selectedView,
-      selectedAggregatedView: selectedAggregatedView,
-      totalIndividuals: settings.scenarioResults.individuals.length
-    });
+    const selectedAggregatedView = computedSettings.aggregatedViews?.find(v => v.id === computedSettings.selectedView);
     
     // Filter individuals based on the selected view's identifier configuration
-    const filteredIndividuals = settings.scenarioResults.individuals.filter((individual: any) => {
+    const filteredIndividuals = (currentViewResults.individuals || []).filter((individual: any) => {
       if (!selectedAggregatedView || !individual.identifiers) return false;
       
-      // Check if this individual matches the selected view's identifier configuration
-      for (const identifierId of selectedAggregatedView.identifierOrder) {
-        const selectedValues = selectedAggregatedView.selectedIdentifiers[identifierId] || [];
-        const individualValue = individual.identifiers[identifierId];
-        
-        // If this identifier has selected values, check if individual's value is included
-        if (selectedValues.length > 0 && !selectedValues.includes(individualValue)) {
-          return false; // This individual doesn't match the view's filter
-        }
-      }
+          // Check if this individual matches the selected view's identifier configuration
+    for (const identifierId of selectedAggregatedView.identifierOrder) {
+      const selectedValues = selectedAggregatedView.selectedIdentifiers[identifierId] || [];
+      const individualValue = individual.identifiers[identifierId];
       
-      return true; // This individual matches the view's configuration
-    });
+      // If this identifier has selected values, check if individual's value is included
+      if (selectedValues.length > 0 && !selectedValues.includes(individualValue)) {
+        return false; // This individual doesn't match the view's filter
+      }
+    }
     
-    console.log('🔍 Filtered individuals for chart:', {
-      originalCount: settings.scenarioResults.individuals.length,
-      filteredCount: filteredIndividuals.length,
-      filteredData: filteredIndividuals
-    });
+    return true; // This individual matches the view's configuration
+  });
     
     return filteredIndividuals.map((individual: any, index: number) => {
-      // Debug: Log the structure of each individual
-      if (index === 0) {
-        console.log('🔍 Sample individual structure:', {
-          individual,
-          prediction: individual.prediction,
-          scenario: individual.scenario,
-          pct_uplift: individual.pct_uplift,
-          pct_uplift_type: typeof individual.pct_uplift
-        });
-      }
       
       // Create combination label from identifiers (only show identifiers that are in the selected view)
       const relevantIdentifiers = selectedAggregatedView?.identifierOrder.reduce((acc: any, identifierId: string) => {
@@ -120,50 +222,195 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
         prediction,
         pct_uplift,
         combinationLabel: identifierParts || 'Unknown',
-        run_id: individual.run_id || settings.scenarioResults?.runId || ''
+        run_id: individual.run_id || currentViewResults?.runId || ''
       };
     });
-  }, [settings?.scenarioResults?.individuals, settings?.scenarioResults?.runId, settings?.selectedView, settings?.aggregatedViews]);
+  }, [currentScenarioData?.viewResults, computedSettings?.selectedView, computedSettings?.aggregatedViews]);
   
-  // ✅ NEW: State for ORIGINAL reference values (never changes)
-  const [originalReferenceValues, setOriginalReferenceValues] = useState<{
-    [combinationId: string]: {
-      [featureId: string]: number;
-    };
-  }>({});
+  // ✅ FIXED: Use computed settings for original reference values
+  const originalReferenceValues = computedSettings?.originalReferenceValues || {};
+  
+  // State for cleared combinations removed - only clear functionality needed
   
   // Use a ref to track which scenarios have been cleared to prevent infinite loops
   const clearedScenariosRef = useRef<Set<string>>(new Set());
   
-  // Use combinations directly from global store (settings)
-  const combinations = settings?.combinations || [];
-  const currentIdentifiers = settings?.identifiers || [];
+  // ✅ FIXED: Use computed settings for combinations and identifiers
+  const combinations = computedSettings?.combinations || [];
+  const currentIdentifiers = computedSettings?.identifiers || [];
 
-  // ✅ NEW: Prepare run request payload according to the correct flow
-  const prepareRunRequest = (settings: ScenarioPlannerSettings) => {
-    console.log('🔍 === Preparing Run Request ===');
-    console.log('🔍 Current settings:', {
-      combinations: settings.combinations,
-      features: settings.features,
-      referenceMethod: settings.referenceMethod,
-      referencePeriod: settings.referencePeriod,
-      aggregatedViews: settings.aggregatedViews,
-      selectedView: settings.selectedView
+  // ✅ NEW: State for toggling between hierarchical and flat results
+  const [resultViewMode, setResultViewMode] = useState<Record<string, 'hierarchy' | 'flat'>>({});
+
+  // ✅ NEW: Function to toggle result view mode for a specific view
+  const toggleResultViewMode = (viewId: string) => {
+    console.log('🔄 Toggle button clicked for view:', viewId);
+    setResultViewMode(prev => {
+      const newMode = prev[viewId] === 'hierarchy' ? 'flat' : 'hierarchy';
+      console.log('🔄 Switching view mode from', prev[viewId] || 'hierarchy', 'to', newMode);
+      return {
+        ...prev,
+        [viewId]: newMode
+      };
     });
+  };
+
+  // ✅ NEW: Context menu state
+  const [contextMenu, setContextMenu] = useState<{
+    visible: boolean;
+    x: number;
+    y: number;
+    scenarioId: string;
+  } | null>(null);
+
+  // ✅ NEW: Temporary input value state for renaming
+  const [tempRenameValue, setTempRenameValue] = useState<string>('');
+
+  // ✅ NEW: Scenario functions
+  const handleScenarioClick = (scenarioId: string) => {
+    // Simple click - just change selection
+    onSettingsChange({ selectedScenario: scenarioId });
+  };
+
+  const handleContextMenuAction = (action: 'rename' | 'delete') => {
+    if (!contextMenu) return;
+
+    const { scenarioId } = contextMenu;
+    console.log('🎯 Context menu action:', { action, scenarioId });
+    
+    if (action === 'rename') {
+      console.log('✏️ Setting editing scenario to:', scenarioId);
+      console.log('📊 Current editingScenario before:', editingScenario);
+      
+      // ✅ NEW: Set both editing state and temporary input value
+      const currentName = scenarioNames[scenarioId] || `Scenario ${scenarioId.replace('scenario-', '')}`;
+      setTempRenameValue(currentName);
+      setEditingScenario(scenarioId);
+      
+      console.log('📊 editingScenario should now be:', scenarioId);
+      console.log('📝 tempRenameValue set to:', currentName);
+      // ✅ FIXED: Don't trigger scenario selection change - just set editing state
+      // This prevents the component from re-rendering and losing the editing state
+    } else if (action === 'delete') {
+      handleRemoveScenario(scenarioId);
+    }
+    
+    setContextMenu(null);
+  };
+
+  const closeContextMenu = () => {
+    setContextMenu(null);
+  };
+
+  const handleScenarioRename = (scenarioId: string, newName: string) => {
+    console.log('🔄 handleScenarioRename called:', { scenarioId, newName });
+    
+    // ✅ SIMPLE: Just save the new name if it's not empty
+    const trimmedNewName = newName.trim();
+    
+    if (!trimmedNewName) {
+      console.log('⏭️ Empty name, not saving');
+      setEditingScenario(null);
+      return;
+    }
+    
+    console.log('✅ Saving new name:', trimmedNewName);
+    setScenarioNames(prev => ({
+      ...prev,
+      [scenarioId]: trimmedNewName
+    }));
+    
+    setEditingScenario(null);
+  };
+
+  const handleScenarioRenameCancel = () => {
+    console.log('❌ Rename cancelled');
+    setEditingScenario(null);
+    setTempRenameValue('');
+  };
+
+  const handleScenarioRenameKeyDown = (e: React.KeyboardEvent, scenarioId: string) => {
+    if (e.key === 'Enter') {
+      const target = e.target as HTMLInputElement;
+      handleScenarioRename(scenarioId, target.value);
+    } else if (e.key === 'Escape') {
+      setEditingScenario(null);
+    }
+  };
+
+
+
+  // ✅ NEW: Debug useEffect to monitor resultViewMode changes
+  useEffect(() => {
+    console.log('🔄 resultViewMode state changed:', resultViewMode);
+  }, [resultViewMode]);
+
+  // ✅ NEW: Debug useEffect to monitor editingScenario changes
+  useEffect(() => {
+    console.log('✏️ editingScenario state changed:', editingScenario);
+  }, [editingScenario]);
+
+  // ✅ NEW: Function to generate dynamic view names based on selected identifiers
+  const getViewDisplayName = (view: any): string => {
+    if (typeof view === 'string') {
+      return view.replace('view-', 'View ');
+    }
+    
+    // If it's an aggregated view object, generate name from selected identifiers
+    if (view.selectedIdentifiers && Object.keys(view.selectedIdentifiers).length > 0) {
+      const identifierNames: string[] = [];
+      
+      // Extract identifier names from the selected identifiers
+      Object.entries(view.selectedIdentifiers).forEach(([identifierId, valueIds]) => {
+        if (Array.isArray(valueIds) && valueIds.length > 0) {
+          // Find the identifier name from the backend identifiers
+          const identifier = computedSettings.identifiers.find(id => id.id === identifierId);
+          if (identifier) {
+            identifierNames.push(identifier.name);
+          }
+        }
+      });
+      
+      // If we have identifier names, join them with underscore
+      if (identifierNames.length > 0) {
+        const displayName = identifierNames.join('_');
+        console.log(`🏷️ Generated view name for ${view.id}: ${displayName} (from identifiers: ${identifierNames.join(', ')})`);
+        return displayName;
+      }
+    }
+    
+    // Fallback to view name or default
+    const fallbackName = view.name || view.id.replace('view-', 'View ');
+    console.log(`🏷️ Using fallback name for ${view.id}: ${fallbackName}`);
+    return fallbackName;
+  };
+
+  // ✅ NEW: Sync scenarioNames with global store changes
+  useEffect(() => {
+    if (settings?.scenarioNames && JSON.stringify(settings.scenarioNames) !== JSON.stringify(scenarioNames)) {
+      console.log('🔄 Syncing scenarioNames from global store:', settings.scenarioNames);
+      setScenarioNames(settings.scenarioNames);
+    }
+  }, [settings?.scenarioNames]);
+
+  // ✅ UPDATED: Prepare run request payload for ALL views
+  const prepareRunRequest = (settings: ScenarioPlannerSettings) => {
+    // ✅ FIXED: Use computed settings for data access
+    const computedSettings = getComputedSettings(settings);
 
     // 1. Get combinations (what gets modified in the scenario)
-    if (!settings.combinations || settings.combinations.length === 0) {
+    if (!computedSettings.combinations || computedSettings.combinations.length === 0) {
       throw new Error('No combinations available for scenario planning');
     }
 
     // 2. Transform combinations to backend clusters format
-    const clusters = settings.combinations.map(combination => {
+    const clusters = (computedSettings.combinations || []).map(combination => {
       // Extract identifiers from combination.id format (e.g., "identifier-1:value-1a")
       const identifiers: { [key: string]: string } = {};
       combination.identifiers.forEach(identifierString => {
         const [identifierId, valueId] = identifierString.split(':');
-        const identifier = settings.identifiers.find(id => id.id === identifierId);
-        const value = identifier?.values.find(v => v.id === valueId);
+          const identifier = (computedSettings.identifiers || []).find(id => id.id === identifierId);
+  const value = (identifier?.values || []).find(v => v.id === valueId);
         if (identifier && value) {
           identifiers[identifier.name] = value.name;
         }
@@ -171,7 +418,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
 
       // Create scenario definitions from input values
       const scenarioDefs: { [key: string]: any } = {};
-      settings.features.forEach(feature => {
+      (computedSettings.features || []).forEach(feature => {
         if (feature.selected && combinationInputs[combination.id]?.[feature.id]) {
           const input = combinationInputs[combination.id][feature.id];
           const referenceValue = getReferenceValue(combination.id, feature.id);
@@ -189,7 +436,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
             } else if (inputValue !== referenceValue) {
               // User modified absolute value - calculate percentage
               const pctChange = ((inputValue - referenceValue) / referenceValue) * 100;
-              scenarioDefs[feature.name] = {
+              scenarioDefs[feature.id] = {
                 type: 'pct',
                 value: pctChange
               };
@@ -198,111 +445,90 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
         }
       });
 
-      console.log(`🔍 Combination ${combination.id} transformed:`, {
-        originalIdentifiers: combination.identifiers,
-        extractedIdentifiers: identifiers,
-        scenarioDefs: scenarioDefs
-      });
-
       return {
         identifiers,
         scenario_defs: scenarioDefs
       };
     });
 
-    // 3. Build the identifiers filter for result aggregation (from aggregated views)
-    const identifiersFilter: { [key: string]: any } = {};
+    // 3. Build views structure for all aggregated views
+    const views: { [key: string]: any } = {};
     
-    console.log('🔍 === DEBUGGING IDENTIFIERS FILTER ===');
-    console.log('🔍 settings.aggregatedViews:', settings.aggregatedViews);
-    console.log('🔍 settings.selectedView:', settings.selectedView);
-    console.log('🔍 Full settings object keys:', Object.keys(settings));
-    console.log('🔍 Full settings object:', settings);
-    
-    if (settings.aggregatedViews && settings.aggregatedViews.length > 0) {
-      console.log('🔍 Available aggregated views:', settings.aggregatedViews.map(v => ({ id: v.id, name: v.name })));
-      const aggregatedView = settings.aggregatedViews.find(v => v.id === settings.selectedView);
-      console.log('🔍 Found aggregated view:', aggregatedView);
-      
-      if (aggregatedView && aggregatedView.selectedIdentifiers) {
-        console.log('🔍 Aggregated view selectedIdentifiers:', aggregatedView.selectedIdentifiers);
-        let identifierCounter = 1;
-        Object.entries(aggregatedView.selectedIdentifiers).forEach(([identifierId, valueIds]) => {
-          if (Array.isArray(valueIds) && valueIds.length > 0) {
-            // Find the identifier name
-            const identifier = settings.identifiers.find(id => id.id === identifierId);
-            console.log(`🔍 Looking for identifier ${identifierId}:`, {
-              found: !!identifier,
-              identifier: identifier,
-              allIdentifiers: settings.identifiers.map(id => ({ id: id.id, name: id.name }))
-            });
-            
-            if (identifier) {
-              // ✅ Convert value IDs to value names for backend
-              const valueNames = valueIds.map(valueId => {
-                const value = identifier.values.find(v => v.id === valueId);
-                return value ? value.name : valueId; // Fallback to ID if name not found
-              }).filter(Boolean); // Remove any null/undefined values
+    if (computedSettings.aggregatedViews && computedSettings.aggregatedViews.length > 0) {
+      // ✅ NEW: Process ALL aggregated views, not just the current one
+      computedSettings.aggregatedViews.forEach(view => {
+        if (view && view.selectedIdentifiers) {
+          const viewSelectedIdentifiers: { [key: string]: { [key: string]: string[] } } = {};
+          
+          // Convert aggregated view format to backend format
+          let idCounter = 1;
+          Object.entries(view.selectedIdentifiers).forEach(([identifierId, valueIds]) => {
+            if (Array.isArray(valueIds) && valueIds.length > 0) {
+              // Find the identifier name
+              const identifier = (computedSettings.identifiers || []).find(id => id.id === identifierId);
               
-              if (valueNames.length > 0) {
-                // ✅ Use "Id_1", "Id_2" format as backend expects
-                const identifierKey = `Id_${identifierCounter}`;
-                identifiersFilter[identifierKey] = {
-                  column: identifier.name,
-                  values: valueNames // ✅ Now using actual value names, not IDs
-                };
-                identifierCounter++;
+              if (identifier) {
+                // Convert value IDs to value names for backend
+                const valueNames = valueIds.map(valueId => {
+                  const value = (identifier?.values || []).find(v => v.id === valueId);
+                  return value ? value.name : valueId; // Fallback to ID if name not found
+                }).filter(Boolean); // Remove any null/undefined values
+                
+                if (valueNames.length > 0) {
+                  const idKey = `id${idCounter}`;
+                  viewSelectedIdentifiers[idKey] = {
+                    [identifier.name]: valueNames
+                  };
+                  idCounter++;
+                }
               }
             }
+          });
+          
+          // Only add view if it has valid selected identifiers
+          if (Object.keys(viewSelectedIdentifiers).length > 0) {
+            views[view.id] = {
+              selected_identifiers: viewSelectedIdentifiers
+            };
           }
-        });
-      } else {
-        console.log('🔍 No aggregated view found or no selectedIdentifiers');
-      }
+        }
+      });
     } else {
-      console.log('🔍 No aggregatedViews in settings, creating default aggregated view');
-      
-      // ✅ FALLBACK: Create a default aggregated view from available identifiers
-      if (settings.identifiers && settings.identifiers.length > 0) {
-        console.log('🔍 Creating default aggregated view from identifiers:', settings.identifiers);
+      // ✅ FALLBACK: Create a default view from checked identifiers
+      if (computedSettings.identifiers && computedSettings.identifiers.length > 0) {
+        const defaultViewSelectedIdentifiers: { [key: string]: { [key: string]: string[] } } = {};
         
-        let identifierCounter = 1;
-        settings.identifiers.forEach(identifier => {
+        let idCounter = 1;
+        (computedSettings.identifiers || []).forEach(identifier => {
           // Get checked values for this identifier
-          const checkedValues = identifier.values.filter(v => v.checked);
+          const checkedValues = (identifier.values || []).filter(v => v.checked);
           
           if (checkedValues.length > 0) {
-            const identifierKey = `Id_${identifierCounter}`;
+            const idKey = `id${idCounter}`;
             const valueNames = checkedValues.map(v => v.name);
             
-            identifiersFilter[identifierKey] = {
-              column: identifier.name,
-              values: valueNames
+            defaultViewSelectedIdentifiers[idKey] = {
+              [identifier.name]: valueNames
             };
-            
-            console.log(`🔍 Added default identifier ${identifierKey}:`, {
-              column: identifier.name,
-              values: valueNames
-            });
-            
-            identifierCounter++;
+            idCounter++;
           }
         });
-      } else {
-        console.log('🔍 No identifiers available for default aggregated view');
+        
+        // Create default view if we have any identifiers
+        if (Object.keys(defaultViewSelectedIdentifiers).length > 0) {
+          views['view-1'] = {
+            selected_identifiers: defaultViewSelectedIdentifiers
+          };
+        }
       }
     }
-    
-    console.log('🔍 Final identifiersFilter:', identifiersFilter);
-    console.log('🔍 identifiersFilter isEmpty:', Object.keys(identifiersFilter).length === 0);
-    console.log('🔍 === DEBUGGING IDENTIFIERS FILTER COMPLETED ===')
 
     const payload = {
       start_date: settings.referencePeriod?.from || '2024-01-01',
       end_date: settings.referencePeriod?.to || '2024-12-31',
       stat: settings.referenceMethod || 'period-mean',
       clusters,
-      identifiers: identifiersFilter
+      views
     };
 
     console.log('📦 Final payload prepared:', payload);
@@ -311,9 +537,9 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
       hasEndDate: !!payload.end_date,
       hasStat: !!payload.stat,
       clustersCount: payload.clusters.length,
-      identifiersCount: Object.keys(payload.identifiers).length,
-      identifiersFormat: Object.keys(payload.identifiers).every(key => key.startsWith('Id_')),
-      backendSchemaMatch: '✅ PERFECT MATCH'
+      viewsCount: Object.keys(payload.views).length,
+      viewIds: Object.keys(payload.views),
+      backendSchemaMatch: '✅ NEW MULTI-VIEW FORMAT'
     });
     return payload;
   };
@@ -321,19 +547,9 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
   // ✅ NEW: Handle running the scenario
   const handleRunScenario = async () => {
     try {
-      console.log('🔍 === DEBUG: Starting handleRunScenario ===');
-      console.log('🔍 Current settings:', {
-        selectedView: settings.selectedView,
-        resultViews: settings.resultViews,
-        combinations: settings.combinations,
-        aggregatedViews: settings.aggregatedViews,
-        features: settings.features,
-        referenceMethod: settings.referenceMethod,
-        referencePeriod: settings.referencePeriod
-      });
 
       // 1. Validate combinations exist
-      if (!settings.combinations || settings.combinations.length === 0) {
+      if (!computedSettings.combinations || computedSettings.combinations.length === 0) {
         toast({
           title: "No Combinations Available",
           description: "Please create combinations first by selecting identifier values",
@@ -343,7 +559,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
       }
 
       // 2. Validate features are selected
-      const selectedFeatures = settings.features?.filter(f => f.selected) || [];
+      const selectedFeatures = computedSettings.features?.filter(f => f.selected) || [];
       if (selectedFeatures.length === 0) {
         toast({
           title: "No Features Selected",
@@ -364,9 +580,10 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
       }
 
       // 4. Validate aggregated view configuration OR fallback to checked identifiers
-      if (settings.aggregatedViews && settings.aggregatedViews.length > 0) {
-        // If aggregated views exist, validate them
-        const selectedView = settings.aggregatedViews.find(v => v.id === settings.selectedView);
+      if (computedSettings.aggregatedViews && computedSettings.aggregatedViews.length > 0) {
+        // ✅ FIXED: Use current scenario's selected view instead of global selectedView
+        const currentSelectedView = currentScenarioData?.selectedView || 'view-1';
+        const selectedView = (computedSettings.aggregatedViews || []).find(v => v.id === currentSelectedView);
         if (!selectedView) {
           toast({
             title: "No View Selected",
@@ -377,7 +594,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
         }
 
         // 5. Validate view has identifier selections
-        const hasIdentifierSelections = Object.values(selectedView.selectedIdentifiers || {}).some(values => 
+        const hasIdentifierSelections = Object.values(selectedView?.selectedIdentifiers || {}).some(values => 
           Array.isArray(values) && values.length > 0
         );
 
@@ -391,8 +608,8 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
         }
       } else {
         // 4B. Fallback: Validate we have checked identifiers for default aggregated view
-        const hasCheckedIdentifiers = settings.identifiers?.some(identifier => 
-          identifier.values.some(v => v.checked)
+                const hasCheckedIdentifiers = (computedSettings.identifiers || []).some(identifier =>
+          (identifier.values || []).some(v => v.checked)
         );
 
         if (!hasCheckedIdentifiers) {
@@ -407,33 +624,19 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
 
       setRunningScenario(true);
       
-      // Prepare the request payload
-      const runRequest = prepareRunRequest(settings);
-      
-      // ✅ Get view context for logging and result storage
-      let viewContext = { viewName: 'Default View', viewId: 'default-view' };
-      if (settings.aggregatedViews && settings.aggregatedViews.length > 0) {
-        const selectedView = settings.aggregatedViews.find(v => v.id === settings.selectedView);
-        if (selectedView) {
-          viewContext = { viewName: selectedView.name, viewId: selectedView.id };
-        }
-      }
-      
-      console.log('🚀 Running scenario:', {
-        viewName: viewContext.viewName,
-        viewId: viewContext.viewId,
-        combinationsCount: runRequest.clusters.length,
-        featuresCount: selectedFeatures.length,
-        payload: runRequest
+      console.log('🎯 RUNNING SCENARIO FOR ALL VIEWS:', {
+        currentScenario,
+        scenarioData: currentScenarioData,
+        allScenarios: Object.keys(settings.scenarios || {}),
+        allViewsInCurrentScenario: currentScenarioData ? Object.keys(currentScenarioData.viewResults || {}) : [],
+        aggregatedViewsCount: computedSettings.aggregatedViews?.length || 0,
+        allViewIds: computedSettings.aggregatedViews?.map(v => v.id) || []
       });
       
-      // Call the backend run endpoint
-      console.log('🚀 === SENDING PAYLOAD TO BACKEND ===');
-      console.log('📤 Full Request Payload:', JSON.stringify(runRequest, null, 2));
-      console.log('📤 Clusters Count:', runRequest.clusters.length);
-      console.log('📤 Identifiers Count:', Object.keys(runRequest.identifiers).length);
-      console.log('📤 Identifiers Details:', runRequest.identifiers);
-      console.log('=== SENDING PAYLOAD TO BACKEND COMPLETED ===');
+      // ✅ NEW: Prepare the request payload with ALL views
+      const runRequest = prepareRunRequest(settings);
+      
+
 
       const response = await fetch(`${SCENARIO_PLANNER_API}/run`, {
         method: 'POST',
@@ -445,26 +648,53 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
       
       if (response.ok) {
         const result = await response.json();
-        console.log('✅ Scenario run completed:', result);
         
-        // Store results with view context
+        // ✅ NEW: Process view_results for ALL views returned from backend
+        const updatedScenarios = { ...settings.scenarios };
+        if (!updatedScenarios[currentScenario]) {
+          updatedScenarios[currentScenario] = { ...currentScenarioData };
+        }
+        
+        // Initialize viewResults if it doesn't exist
+        if (!updatedScenarios[currentScenario].viewResults) {
+          updatedScenarios[currentScenario].viewResults = {};
+        }
+        
+        // ✅ NEW: Store results for ALL views returned from backend
+        if (result.view_results) {
+          Object.entries(result.view_results).forEach(([viewId, viewData]: [string, any]) => {
+            // Find the view name from aggregated views
+            let viewName = viewId.replace('view-', 'View ').replace('_', ' ');
+            if (computedSettings.aggregatedViews && computedSettings.aggregatedViews.length > 0) {
+              const foundView = computedSettings.aggregatedViews.find(v => v.id === viewId);
+              if (foundView) {
+                viewName = foundView.name || viewName;
+              }
+            }
+            
+            updatedScenarios[currentScenario].viewResults[viewId] = {
+              runId: result.run_id,
+              viewId: viewId,
+              viewName: viewName,
+              datasetUsed: result.dataset_used,
+              createdAt: result.created_at,
+              modelsProcessed: result.models_processed,
+              flat: viewData.flat,
+              hierarchy: viewData.hierarchy,
+              individuals: viewData.individuals
+            };
+          });
+        }
+        
         onSettingsChange({
-          scenarioResults: {
-            runId: result.run_id,
-            viewId: viewContext.viewId,
-            viewName: viewContext.viewName,
-            datasetUsed: result.dataset_used,
-            createdAt: result.created_at,
-            modelsProcessed: result.models_processed,
-            flat: result.flat,
-            hierarchy: result.hierarchy,
-            individuals: result.individuals
-          }
+          scenarios: updatedScenarios
         });
+        
+        const viewsProcessed = result.view_results ? Object.keys(result.view_results).length : 0;
         
         toast({
           title: "Scenario Completed",
-          description: `Successfully processed ${result.models_processed} models for ${viewContext.viewName}`,
+          description: `Successfully processed ${result.models_processed} models across ${viewsProcessed} views`,
           variant: "default",
         });
         
@@ -487,7 +717,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
 
   // Get all available scenarios (including the current one and any others)
   const availableScenarios = useMemo(() => {
-    const baseScenarios = ['scenario-1', 'scenario-2'];
+    const baseScenarios = ['scenario-1'];
     const currentScenario = settings?.selectedScenario;
     
     // Get all scenarios from settings if they exist, with fallback to base scenarios
@@ -506,8 +736,8 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
     return allScenarios;
   }, [settings?.selectedScenario, settings?.allScenarios]);
 
-  // Add new scenario
-  const handleAddScenario = () => {
+  // ✅ NEW: Add new scenario with fresh backend data initialization
+  const handleAddScenario = async () => {
     // Ensure availableScenarios is always an array
     if (!Array.isArray(availableScenarios)) {
       console.error('availableScenarios is not an array:', availableScenarios);
@@ -516,61 +746,80 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
     
     const nextScenarioNumber = availableScenarios.length + 1;
     const newScenarioId = `scenario-${nextScenarioNumber}`;
-    
-    console.log('=== Adding New Scenario ===');
-    console.log('Current available scenarios:', availableScenarios);
-    console.log('Next scenario number:', nextScenarioNumber);
-    console.log('New scenario ID:', newScenarioId);
-    console.log('=== Adding New Scenario completed ===');
-    
-    // Update both the selected scenario and the list of all scenarios
-    onSettingsChange({ 
-      selectedScenario: newScenarioId,
-      allScenarios: [...availableScenarios, newScenarioId]
-    });
+  
+    try {
+      // ✅ CHANGED: Duplicate current scenario instead of creating fresh one
+      const updatedSettings = addNewScenario(settings, newScenarioId);
+      
+      // ✅ NEW: Update both the selected scenario, all scenarios list, and the scenarios data
+      onSettingsChange({ 
+        selectedScenario: newScenarioId,
+        allScenarios: [...availableScenarios, newScenarioId],
+        scenarios: updatedSettings.scenarios
+      });
+      
+      // ✅ DEBUG: Log new scenario creation and initialization
+      console.log('🆕 New Scenario Created and Initialized:', {
+        scenarioId: newScenarioId,
+        hasIdentifiers: updatedSettings.scenarios[newScenarioId]?.identifiers?.length > 0,
+        hasFeatures: updatedSettings.scenarios[newScenarioId]?.features?.length > 0,
+        hasCombinations: updatedSettings.scenarios[newScenarioId]?.combinations?.length > 0,
+        referenceMethod: updatedSettings.scenarios[newScenarioId]?.referenceMethod,
+        referencePeriod: updatedSettings.scenarios[newScenarioId]?.referencePeriod
+      });
+      
+      // ✅ CHANGED: No need to auto-load reference values since we're duplicating existing scenario
+      
+      toast({
+        title: "Scenario Duplicated",
+        description: `${newScenarioId.replace('scenario-', 'Scenario ')} has been created as a copy of the current scenario.`,
+        variant: "default",
+      });
+      
+    } catch (error) {
+      console.error('❌ Error creating new scenario:', error);
+      toast({
+        title: "Error Creating Scenario",
+        description: "Failed to create new scenario. Please try again.",
+        variant: "destructive",
+      });
+    }
   };
 
   // Remove scenario (only for Scenario 3 and beyond)
   const handleRemoveScenario = (scenarioId: string) => {
-    // Don't allow removing Scenario 1 and Scenario 2
-    if (scenarioId === 'scenario-1' || scenarioId === 'scenario-2') {
+    // Don't allow removing Scenario 1
+    if (scenarioId === 'scenario-1') {
       return;
     }
 
-    const updatedScenarios = availableScenarios.filter(id => id !== scenarioId);
+            const updatedScenarios = (availableScenarios || []).filter(id => id !== scenarioId);
     
     // If we're removing the currently selected scenario, switch to Scenario 1
     const newSelectedScenario = settings?.selectedScenario === scenarioId ? 'scenario-1' : settings?.selectedScenario;
     
-    console.log('=== Removing Scenario ===');
-    console.log('Removing scenario:', scenarioId);
-    console.log('Updated scenarios:', updatedScenarios);
-    console.log('New selected scenario:', newSelectedScenario);
-    console.log('=== Removing Scenario completed ===');
+    // ✅ FIXED: Remove scenario data from scenarios object
+    const updatedScenariosData = { ...settings.scenarios };
+    delete updatedScenariosData[scenarioId];
     
     onSettingsChange({ 
       selectedScenario: newSelectedScenario,
-      allScenarios: updatedScenarios
+      allScenarios: updatedScenarios,
+      scenarios: updatedScenariosData
     });
   };
 
-  // New function to fetch reference values for ALL combinations - OPTIMIZED!
-  const fetchReferenceValuesForAll = async () => {
-    if (combinations.length === 0) {
-      toast({
-        title: "No Combinations Available",
-        description: "Please create combinations first by selecting identifier values",
-        variant: "default",
-      });
+  // ✅ NEW: Function to fetch reference values for specific combinations (for new scenarios)
+  const fetchReferenceValuesForAllWithCombinations = async (specificCombinations: any[]) => {
+    if (specificCombinations.length === 0) {
+      console.log('⚠️ No combinations provided for reference value fetching');
       return;
     }
 
     try {
       // Show loading state for all combinations
       setLoadingReference('all');
-      
-      console.log('🔍 Fetching reference values for ALL combinations:', combinations.length);
-      
+
       // ✅ OPTIMIZATION: Make ONE API call instead of multiple calls
       const statMethod = settings.referenceMethod || 'period-mean';
       const requestBody: any = {
@@ -578,8 +827,6 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
         start_date: settings.referencePeriod?.from || '2024-01-01',
         end_date: settings.referencePeriod?.to || '2024-12-31'
       };
-      
-      console.log('📊 Making single API call for all combinations:', requestBody);
       
       const response = await fetch(`${SCENARIO_PLANNER_API}/reference`, {
         method: 'POST',
@@ -591,14 +838,32 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
       
       if (response.ok) {
         const data = await response.json();
-        console.log('✅ Reference values fetched for all combinations:', data);
         
-        // Process ALL combinations with the same data
+        // ✅ DEBUG: Log reference values data for verification
+        console.log('🔍 Reference Values Debug (New Scenario):', {
+          referenceMethod: settings.referenceMethod,
+          referencePeriod: settings.referencePeriod,
+          totalModels: Object.keys(data.reference_values_by_model || {}).length,
+          sampleModel: Object.entries(data.reference_values_by_model || {})[0],
+          requestBody,
+          combinationsCount: specificCombinations.length
+        });
+        
+        // Process the specific combinations with the same data
         const newInputs = { ...combinationInputs };
-        const newOriginalRefs = { ...originalReferenceValues }; // ✅ NEW: Store original reference values
+        const newOriginalRefs = { ...originalReferenceValues };
         let totalPopulated = 0;
         
-        combinations.forEach(combination => {
+        // ✅ DEBUG: Log what we're working with
+        console.log('🔍 Processing combinations for reference values:', {
+          combinationsCount: specificCombinations.length,
+          combinations: specificCombinations,
+          availableFeatures: computedSettings?.features?.filter(f => f.selected) || [],
+          selectedFeaturesCount: computedSettings?.features?.filter(f => f.selected)?.length || 0
+        });
+        
+        specificCombinations.forEach(combination => {
+          // ✅ FIXED: Preserve existing user input - don't overwrite if user has data
           if (!newInputs[combination.id]) {
             newInputs[combination.id] = {};
           }
@@ -615,22 +880,22 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
             });
           }
           
-          console.log(`🔍 Processing combination ${combination.id}:`, identifiers);
-          
           // Find matching model for this combination
           const matchingModel = Object.entries(data.reference_values_by_model).find(([modelId, modelData]: [string, any]) => {
+            // Check if model identifiers match our combination
             const modelIdentifiers = modelData.identifiers || {};
-            return Object.keys(identifiers).every(key => 
+            
+            return identifiers && Object.keys(identifiers).every(key => 
               modelIdentifiers[key] === identifiers[key]
             );
           });
           
           if (matchingModel) {
             const [modelId, modelData] = matchingModel;
-            console.log(`🎯 Found matching model for ${combination.id}:`, modelId);
             
-            // Populate features for this combination
-            const features = settings?.features || [];
+            // Map features to their reference values
+            const features = computedSettings?.features || [];
+            
             features.forEach(feature => {
               if (feature.selected && (modelData as any).reference_values?.[feature.name]) {
                 if (!newInputs[combination.id][feature.id]) {
@@ -639,20 +904,196 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
                 
                 const referenceValue = (modelData as any).reference_values[feature.name];
                 
-                // ✅ NEW: Store ORIGINAL reference value (never changes)
-                newOriginalRefs[combination.id][feature.id] = referenceValue;
+                // Set both Abs (input) and Pct (change) fields
+                newInputs[combination.id][feature.id].input = formatToThreeDecimals(referenceValue);
+                newInputs[combination.id][feature.id].change = '0'; // Auto-populate percentage with 0
                 
-                // Set current input to reference value
-                newInputs[combination.id][feature.id].input = referenceValue.toString();
-                newInputs[combination.id][feature.id].change = '0';
+                // ✅ NEW: Store original reference values for this combination
+                if (!newOriginalRefs[combination.id][feature.id]) {
+                  newOriginalRefs[combination.id][feature.id] = referenceValue;
+                }
+                
                 totalPopulated++;
               }
             });
-          } else {
-            console.log(`⚠️ No exact match for ${combination.id}, using best available values`);
+          }
+        });
+        
+        // ✅ FIXED: Update scenario-specific data in global store
+        // ✅ NEW: Use the new scenario ID that was passed to this function
+        const newScenarioId = specificCombinations[0]?.scenarioId || settings.selectedScenario;
+        const updatedScenarios = { ...settings.scenarios };
+        
+        if (!updatedScenarios[newScenarioId]) {
+          updatedScenarios[newScenarioId] = {};
+        }
+        
+        updatedScenarios[newScenarioId].combinationInputs = newInputs;
+        updatedScenarios[newScenarioId].originalReferenceValues = newOriginalRefs;
+        
+        onSettingsChange({ 
+          scenarios: updatedScenarios
+        });
+        
+        // Mark all combinations as having reference values loaded
+        setLoadedReferenceCombinations(prev => new Set([...prev, ...specificCombinations.map(c => c.id)]));
+        
+        console.log(`✅ Successfully populated reference values for ${totalPopulated} feature-combination pairs`);
+        
+        toast({
+          title: "Reference Values Loaded",
+          description: `Successfully loaded reference values for ${specificCombinations.length} combinations.`,
+          variant: "default",
+        });
+        
+      } else {
+        throw new Error(`Failed to fetch reference values: ${response.status}`);
+      }
+    } catch (error) {
+      console.error('❌ Error fetching reference values:', error);
+      toast({
+        title: "Error Loading Reference Values",
+        description: "Failed to load reference values. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setLoadingReference(null);
+    }
+  };
+
+  // New function to fetch reference values for ALL combinations - OPTIMIZED!
+  const fetchReferenceValuesForAll = async () => {
+    if (combinations.length === 0) {
+      toast({
+        title: "No Combinations Available",
+        description: "Please create combinations first by selecting identifier values",
+        variant: "default",
+      });
+      return;
+    }
+
+    try {
+      // Show loading state for all combinations
+      setLoadingReference('all');
+
+      // ✅ OPTIMIZATION: Make ONE API call instead of multiple calls
+      const statMethod = settings.referenceMethod || 'period-mean';
+      const requestBody: any = {
+        stat: statMethod,
+        start_date: settings.referencePeriod?.from || '2024-01-01',
+        end_date: settings.referencePeriod?.to || '2024-12-31'
+      };
+      
+      const response = await fetch(`${SCENARIO_PLANNER_API}/reference`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(requestBody)
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        
+        // ✅ DEBUG: Log reference values data for verification
+        console.log('🔍 Reference Values Debug:', {
+          referenceMethod: settings.referenceMethod,
+          referencePeriod: settings.referencePeriod,
+          totalModels: Object.keys(data.reference_values_by_model || {}).length,
+          sampleModel: Object.entries(data.reference_values_by_model || {})[0],
+          requestBody
+        });
+        
+        // Process ALL combinations with the same data
+        const newInputs = { ...combinationInputs };
+        const newOriginalRefs = { ...originalReferenceValues }; // ✅ NEW: Store original reference values
+        let totalPopulated = 0;
+        const processedCombinationIds = new Set<string>(); // ✅ NEW: Track processed combinations
+        
+        combinations.forEach(combination => {
+          // ✅ FIXED: Preserve existing user input - don't overwrite if user has data
+          if (!newInputs[combination.id]) {
+            newInputs[combination.id] = {};
+          }
+          if (!newOriginalRefs[combination.id]) {
+            newOriginalRefs[combination.id] = {};
+          }
+          
+          // Extract identifiers for this combination
+          const identifiers: { [key: string]: string } = {};
+          if (Array.isArray(combination.identifiers)) {
+            combination.identifiers.forEach((identifierId: string) => {
+              const [identifierIdPart, valueIdPart] = identifierId.split(':');
+              identifiers[identifierIdPart] = valueIdPart;
+            });
+          }
+          
+          // Find matching model for this combination
+          const matchingModel = Object.entries(data.reference_values_by_model).find(([modelId, modelData]: [string, any]) => {
+            const modelIdentifiers = modelData.identifiers || {};
+            const isMatch = identifiers && Object.keys(identifiers).every(key => 
+              modelIdentifiers[key] === identifiers[key]
+            );
             
+            // ✅ DEBUG: Log matching process
+            if (isMatch) {
+              console.log(`✅ Found matching model for combination ${combination.id}:`, {
+                combinationIdentifiers: identifiers,
+                modelId,
+                modelIdentifiers
+              });
+            }
+            
+            return isMatch;
+          });
+          
+          // ✅ DEBUG: Log if no match found
+          if (!matchingModel) {
+            console.log(`⚠️ No matching model found for combination ${combination.id}:`, {
+              combinationIdentifiers: identifiers,
+              availableModels: Object.keys(data.reference_values_by_model),
+              sampleModelIdentifiers: Object.entries(data.reference_values_by_model)[0]?.[1]?.identifiers
+            });
+          }
+          
+          if (matchingModel) {
+            const [modelId, modelData] = matchingModel;
+            
+            // Populate features for this combination
+            const features = computedSettings?.features || [];
+            features.forEach(feature => {
+              if (feature.selected && (modelData as any).reference_values?.[feature.name]) {
+                if (!newInputs[combination.id][feature.id]) {
+                  newInputs[combination.id][feature.id] = { input: '', change: '' };
+                }
+                
+                const referenceValue = (modelData as any).reference_values[feature.name];
+                
+                // ✅ DEBUG: Log reference value assignment
+                console.log(`📊 Reference Value Assigned:`, {
+                  combination: combination.id,
+                  feature: feature.name,
+                  referenceValue,
+                  hasUserInput: !!combinationInputs[combination.id]?.[feature.id]?.input,
+                  willPopulate: !combinationInputs[combination.id]?.[feature.id]?.input
+                });
+                
+                // ✅ NEW: Store ORIGINAL reference value (never changes)
+                newOriginalRefs[combination.id][feature.id] = referenceValue;
+                
+                                  // ✅ FIXED: Only set input to reference value if user doesn't have input
+                  if (!combinationInputs[combination.id]?.[feature.id]?.input) {
+                    newInputs[combination.id][feature.id].input = formatToThreeDecimals(referenceValue);
+                    newInputs[combination.id][feature.id].change = '0';
+                    totalPopulated++;
+                  } else {
+                  // User already has input - preserve it, just store the original reference
+                }
+              }
+            });
+          } else {
             // Use best available reference values from any model
-            const features = settings?.features || [];
+            const features = computedSettings?.features || [];
             features.forEach(feature => {
               if (feature.selected) {
                 if (!newInputs[combination.id][feature.id]) {
@@ -671,37 +1112,66 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
                   // ✅ NEW: Store ORIGINAL reference value
                   newOriginalRefs[combination.id][feature.id] = bestReferenceValue;
                   
+                  // ✅ FIXED: Only set input to reference value if user doesn't have input
+                  if (!combinationInputs[combination.id]?.[feature.id]?.input) {
                   newInputs[combination.id][feature.id].input = bestReferenceValue.toString();
                   newInputs[combination.id][feature.id].change = '0';
                   totalPopulated++;
+                  } else {
+                    // User already has input - preserve it, just store the original reference
+                  }
                 } else {
                   // Fallback value
                   const fallbackValue = 100;
                   // ✅ NEW: Store ORIGINAL reference value
                   newOriginalRefs[combination.id][feature.id] = fallbackValue;
                   
+                  // ✅ FIXED: Only set input to reference value if user doesn't have input
+                  if (!combinationInputs[combination.id]?.[feature.id]?.input) {
                   newInputs[combination.id][feature.id].input = fallbackValue.toString();
                   newInputs[combination.id][feature.id].change = '0';
                   totalPopulated++;
+                  } else {
+                    // User already has input - preserve it, just store the original reference
+                  }
                 }
               }
             });
           }
           
-          // Mark this combination as loaded
-          setLoadedReferenceCombinations(prev => new Set([...prev, combination.id]));
+          // ✅ NEW: Add to processed combinations set
+          processedCombinationIds.add(combination.id);
         });
         
-        // ✅ NEW: Update both inputs and original reference values
-        setCombinationInputs(newInputs);
-        setOriginalReferenceValues(newOriginalRefs);
+        // ✅ FIXED: Update loaded combinations state ONCE after processing all combinations
+        setLoadedReferenceCombinations(prev => {
+          const newSet = new Set([...prev, ...processedCombinationIds]);
+          console.log('📝 Updated loaded combinations:', {
+            previousCount: prev.size,
+            newlyProcessed: processedCombinationIds.size,
+            totalLoaded: newSet.size,
+            newlyProcessedIds: Array.from(processedCombinationIds)
+          });
+          return newSet;
+        });
         
-        console.log(`✅ Successfully populated ${totalPopulated} feature values across ${combinations.length} combinations`);
-        console.log('🎯 Original reference values stored:', newOriginalRefs);
+        // ✅ FIXED: Update scenario-specific data in global store
+        const updatedScenarios = { ...settings.scenarios };
+        if (!updatedScenarios[currentScenario]) {
+          updatedScenarios[currentScenario] = { ...currentScenarioData };
+        }
+        updatedScenarios[currentScenario].combinationInputs = newInputs;
+        updatedScenarios[currentScenario].originalReferenceValues = newOriginalRefs;
+        
+        onSettingsChange({ 
+          scenarios: updatedScenarios
+        });
+        
+        // Cleared combinations state removed
         
         toast({
           title: "Reference Values Loaded",
-          description: `Successfully populated reference values for ALL ${combinations.length} combination(s)`,
+          description: `Successfully populated reference values for ${totalPopulated} new features (preserved existing user input)`,
           variant: "default",
         });
         
@@ -724,8 +1194,6 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
   // Refactored function to fetch reference values for a single combination
   const fetchReferenceValuesForCombination = async (combination: any) => {
     try {
-      console.log('🔍 Fetching reference values for combination:', combination);
-      
       // Extract identifiers from combination for the request
       const identifiers: { [key: string]: string } = {};
       if (Array.isArray(combination.identifiers)) {
@@ -734,8 +1202,6 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
           identifiers[identifierIdPart] = valueIdPart;
         });
       }
-      
-      console.log('🎯 Extracted identifiers for reference request:', identifiers);
       
       // Call the reference endpoint
       // ✅ FIXED: Backend requires dates for ALL methods, not just period-based ones
@@ -749,15 +1215,6 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
         end_date: settings.referencePeriod?.to || '2024-12-31'
       };
       
-      console.log('📊 Using reference settings:', {
-        method: statMethod,
-        requestBody,
-        originalSettings: {
-          referenceMethod: settings.referenceMethod,
-          referencePeriod: settings.referencePeriod
-        }
-      });
-      
       const response = await fetch(`${SCENARIO_PLANNER_API}/reference`, {
         method: 'POST',
         headers: {
@@ -768,37 +1225,19 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
       
       if (response.ok) {
         const data = await response.json();
-        console.log('✅ Reference values fetched:', data);
         
         // Find the model that matches our combination identifiers
-        console.log('🔍 Looking for matching model with identifiers:', identifiers);
-        console.log('🔍 Available models:', Object.entries(data.reference_values_by_model).map(([id, model]: [string, any]) => ({
-          modelId: id,
-          modelIdentifiers: model.identifiers,
-          features: model.features,
-          hasReferenceValues: !!model.reference_values
-        })));
-        
         const matchingModel = Object.entries(data.reference_values_by_model).find(([modelId, modelData]: [string, any]) => {
           // Check if model identifiers match our combination
           const modelIdentifiers = modelData.identifiers || {};
           
-          console.log(`🔍 Checking model ${modelId}:`, {
-            modelIdentifiers,
-            combinationIdentifiers: identifiers,
-            matchResult: Object.keys(identifiers).every(key => 
-              modelIdentifiers[key] === identifiers[key]
-            )
-          });
-          
-          return Object.keys(identifiers).every(key => 
+          return identifiers && Object.keys(identifiers).every(key => 
             modelIdentifiers[key] === identifiers[key]
           );
         });
         
         if (matchingModel) {
           const [modelId, modelData] = matchingModel;
-          console.log('🎯 Found matching model:', modelId, modelData);
           
           // Populate the Abs boxes with reference values
           const newInputs = { ...combinationInputs };
@@ -807,13 +1246,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
           }
           
           // Map features to their reference values
-          const features = settings?.features || [];
-          console.log('🎯 Mapping features to reference values:', {
-            features: features.map(f => ({ id: f.id, name: f.name, selected: f.selected })),
-            modelData: modelData,
-            referenceValues: (modelData as any).reference_values,
-            currentCombinationInputs: newInputs[combination.id]
-          });
+          const features = computedSettings?.features || [];
           
           features.forEach(feature => {
             if (feature.selected && (modelData as any).reference_values?.[feature.name]) {
@@ -822,23 +1255,23 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
               }
               
               const referenceValue = (modelData as any).reference_values[feature.name];
-              console.log(`📊 Setting reference value for ${feature.name} (${feature.id}):`, referenceValue);
               
               // Set both Abs (input) and Pct (change) fields
-              newInputs[combination.id][feature.id].input = referenceValue.toString();
+              newInputs[combination.id][feature.id].input = formatToThreeDecimals(referenceValue);
               newInputs[combination.id][feature.id].change = '0'; // Auto-populate percentage with 0
-            } else {
-              console.log(`⚠️ Feature ${feature.name} (${feature.id}) not selected or no reference value:`, {
-                selected: feature.selected,
-                hasReferenceValue: !!(modelData as any).reference_values?.[feature.name],
-                referenceValue: (modelData as any).reference_values?.[feature.name]
-              });
             }
           });
           
-          console.log('🔄 Updated combination inputs:', newInputs[combination.id]);
+          // ✅ FIXED: Update scenario-specific data in global store
+          const updatedScenarios = { ...settings.scenarios };
+          if (!updatedScenarios[currentScenario]) {
+            updatedScenarios[currentScenario] = { ...currentScenarioData };
+          }
+          updatedScenarios[currentScenario].combinationInputs = newInputs;
           
-          setCombinationInputs(newInputs);
+          onSettingsChange({ 
+            scenarios: updatedScenarios
+          });
           
           // Mark this combination as having reference values loaded
           setLoadedReferenceCombinations(prev => new Set([...prev, combination.id]));
@@ -854,8 +1287,8 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
             newInputs[combination.id] = {};
           }
           
-          const features = settings?.features || [];
-          console.log('🔄 Trying to find best available reference values for features:', features.map(f => f.name));
+          const features = computedSettings?.features || [];
+          console.log('🔄 Trying to find best available reference values for features:', (features || []).map(f => f.name));
           
           features.forEach(feature => {
             if (feature.selected) {
@@ -870,25 +1303,31 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
               Object.entries(data.reference_values_by_model).forEach(([modelId, modelData]: [string, any]) => {
                 if (modelData.reference_values?.[feature.name]) {
                   bestReferenceValue = modelData.reference_values[feature.name];
-                  console.log(`🎯 Found reference value for ${feature.name} from model ${modelId}:`, bestReferenceValue);
                 }
               });
               
               if (bestReferenceValue !== null) {
-                console.log(`✅ Using best available reference value for ${feature.name}:`, bestReferenceValue);
-                newInputs[combination.id][feature.id].input = bestReferenceValue.toString();
+                newInputs[combination.id][feature.id].input = formatToThreeDecimals(bestReferenceValue);
                 newInputs[combination.id][feature.id].change = '0'; // Auto-populate percentage with 0
               } else {
                 // If no reference value found anywhere, use fallback
                 const fallbackValue = '0';
-                console.log(`⚠️ No reference value found for ${feature.name}, using fallback:`, fallbackValue);
                 newInputs[combination.id][feature.id].input = fallbackValue;
                 newInputs[combination.id][feature.id].change = '0'; // Auto-populate percentage with 0
               }
             }
           });
           
-          setCombinationInputs(newInputs);
+          // ✅ FIXED: Update scenario-specific data in global store
+          const updatedScenarios = { ...settings.scenarios };
+          if (!updatedScenarios[currentScenario]) {
+            updatedScenarios[currentScenario] = { ...currentScenarioData };
+          }
+          updatedScenarios[currentScenario].combinationInputs = newInputs;
+          
+          onSettingsChange({ 
+            scenarios: updatedScenarios
+          });
           
           // Mark this combination as having reference values loaded
           setLoadedReferenceCombinations(prev => new Set([...prev, combination.id]));
@@ -917,192 +1356,142 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
   // Clear reference values for a combination
   const clearReferenceValues = (combinationId: string) => {
     const newInputs = { ...combinationInputs };
-    const newOriginalRefs = { ...originalReferenceValues };
     
     if (newInputs[combinationId]) {
-      // Clear only the input values (keep change values)
+      // ✅ FIXED: Restore reference values instead of clearing
       Object.keys(newInputs[combinationId]).forEach(featureId => {
         if (newInputs[combinationId][featureId]) {
+          // Get the original reference value for this feature
+          const referenceValue = originalReferenceValues[combinationId]?.[featureId];
+          
+          if (referenceValue !== undefined) {
+            // Restore Abs to original reference value
+            newInputs[combinationId][featureId].input = formatToThreeDecimals(referenceValue);
+            // Set Pct to 0 (no change from reference)
+            newInputs[combinationId][featureId].change = '0';
+          } else {
+            // Fallback: clear both fields if no reference value available
           newInputs[combinationId][featureId].input = '';
+            newInputs[combinationId][featureId].change = '';
+          }
         }
       });
-      setCombinationInputs(newInputs);
       
-      // ✅ NEW: Clear original reference values for this combination
-      if (newOriginalRefs[combinationId]) {
-        delete newOriginalRefs[combinationId];
-        setOriginalReferenceValues(newOriginalRefs);
+      // ✅ FIXED: Update scenario-specific data in global store
+      const updatedScenarios = { ...settings.scenarios };
+      if (!updatedScenarios[currentScenario]) {
+        updatedScenarios[currentScenario] = { ...currentScenarioData };
       }
+      updatedScenarios[currentScenario].combinationInputs = newInputs;
       
-      // Remove from loaded reference combinations
-      setLoadedReferenceCombinations(prev => {
-        const newSet = new Set(prev);
-        newSet.delete(combinationId);
-        return newSet;
+      onSettingsChange({ 
+        scenarios: updatedScenarios
       });
       
       toast({
-        title: "Reference Values Cleared",
-        description: `Reference values cleared for ${combinationId}`,
+        title: "Reference Values Restored",
+        description: `Reference values restored for ${combinationId}`,
         variant: "default",
       });
     }
   };
 
-  // Handle right-click context menu for scenario removal
+  // Refresh function removed - only clear functionality needed
+
+  // Handle right-click context menu for scenario actions
   const handleScenarioContextMenu = (e: React.MouseEvent, scenarioId: string) => {
     e.preventDefault();
+    e.stopPropagation();
     
-    // Only allow removal for Scenario 3 and beyond
-    if (scenarioId === 'scenario-1' || scenarioId === 'scenario-2') {
-      return;
-    }
+    // ✅ FIXED: Position context menu to the right of the scenario tab
+    const rect = e.currentTarget.getBoundingClientRect();
+    const menuX = rect.right + 5; // 5px to the right of the tab
+    const menuY = rect.top; // Align with the top of the tab
     
-    // Show toast notification for scenario removal
-    toast({
-      title: "Remove Scenario",
-      description: `Are you sure you want to remove ${scenarioId.replace('scenario-', 'Scenario ')}?`,
-      action: (
-        <div className="flex gap-2 mt-2">
-          <Button
-            size="sm"
-            variant="default"
-            onClick={() => {
-              handleRemoveScenario(scenarioId);
-              toast({
-                title: "Scenario Removed",
-                description: `${scenarioId.replace('scenario-', 'Scenario ')} has been removed successfully.`,
-                variant: "default",
-              });
-            }}
-          >
-            Remove
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => {
-              // Dismiss the toast
-              toast({
-                title: "Cancelled",
-                description: "Scenario removal was cancelled.",
-                variant: "default",
-              });
-            }}
-          >
-            Cancel
-          </Button>
-        </div>
-      ),
-      variant: "default",
+    setContextMenu({
+      visible: true,
+      x: menuX,
+      y: menuY,
+      scenarioId
     });
   };
 
-  // Debug: Log when data changes
-  useEffect(() => {
-    console.log('=== Canvas: Data received ===');
-    console.log('Canvas: settings.combinations:', settings?.combinations);
-    console.log('Canvas: settings.combinations?.length:', settings?.combinations?.length);
-    console.log('Canvas: settings.identifiers:', settings?.identifiers);
-    console.log('Canvas: combinations variable:', combinations);
-    console.log('Canvas: combinations.length:', combinations.length);
-    console.log('Canvas: currentIdentifiers:', currentIdentifiers);
-    console.log('Canvas: currentIdentifiers length:', currentIdentifiers.length);
-    console.log('Canvas: Backend data available:', {
-      hasBackendIdentifiers: !!settings?.backendIdentifiers,
-      hasBackendFeatures: !!settings?.backendFeatures
-    });
-    console.log('=== Canvas: Data received completed ===');
-  }, [settings?.combinations, settings?.identifiers, currentIdentifiers]); // Only depend on specific properties, not the entire settings object
+
 
   // Restore state from store when component mounts or settings change
   useEffect(() => {
-    console.log('🔄 Canvas: Checking for state restoration...');
-    
     if (settings?.backendIdentifiers && settings?.backendFeatures) {
-      console.log('✅ Canvas: Backend data available, checking if state needs restoration');
-      
       // Check if we need to restore combinations
-      const needsCombinationRestoration = !combinations.length && settings.identifiers?.length;
+      const needsCombinationRestoration = !combinations.length && computedSettings.identifiers?.length;
       
       if (needsCombinationRestoration) {
-        console.log('🔄 Canvas: Combinations need restoration, but this should be handled by Settings component');
-      } else {
-        console.log('✅ Canvas: State already restored, no action needed');
+        // Combinations need restoration, but this should be handled by Settings component
       }
-    } else {
-      console.log('⏳ Canvas: Waiting for backend data...');
     }
-  }, [settings?.backendIdentifiers, settings?.backendFeatures, combinations.length, settings?.identifiers]);
+  }, [settings?.backendIdentifiers, settings?.backendFeatures, combinations.length, computedSettings?.identifiers]);
 
-  // Debug: Monitor combinations changes
-  useEffect(() => {
-    console.log('=== Canvas: Combinations changed ===');
-    console.log('Canvas: combinations updated:', combinations);
-    console.log('Canvas: combinations.length:', combinations.length);
-    console.log('=== Canvas: Combinations changed completed ===');
-  }, [combinations]);
 
-  // Auto-load reference values when new combinations are created
+
+    // ✅ REMOVED: No more auto-loading of reference values
   useEffect(() => {
     if (combinations.length === 0) {
-      setCombinationInputs({});
-    } else {
-      // Check if we have new combinations that need reference values
-      const newCombinations = combinations.filter(combination => 
-        !loadedReferenceCombinations.has(combination.id)
-      );
+      // ✅ Clear combination inputs from global store when no combinations
+      onSettingsChange({ combinationInputs: {} });
+      setLoadedReferenceCombinations(new Set()); // Clear loaded combinations tracking
+    }
+  }, [combinations.length]); // Only depend on combinations length, not the full array
+  
+  // ✅ FIXED: Only clear reference values when settings change - manual reload with Ctrl+Enter
+  useEffect(() => {
+    console.log('🔍 Canvas: Checking if reference values need clearing...', {
+      referenceValuesNeedRefresh: settings.referenceValuesNeedRefresh,
+      combinationsLength: combinations.length,
+      hasSettings: !!settings
+    });
+    
+    if (settings.referenceValuesNeedRefresh && combinations.length > 0) {
+      console.log('🧹 Canvas: CLEARING reference values - user must press Ctrl+Enter to reload');
       
-      console.log(`🔍 Combinations status:`, {
-        total: combinations.length,
-        loaded: loadedReferenceCombinations.size,
-        new: newCombinations.length,
-        newIds: newCombinations.map(c => c.id),
-        hasBackendData: !!(settings?.backendIdentifiers && settings?.backendFeatures)
+      // ✅ NEW: Only clear existing reference values - don't auto-reload
+      const updatedScenarios = { ...settings.scenarios };
+      if (!updatedScenarios[currentScenario]) {
+        updatedScenarios[currentScenario] = { ...currentScenarioData };
+      }
+      
+      // Clear combination inputs and original reference values
+      updatedScenarios[currentScenario].combinationInputs = {};
+      updatedScenarios[currentScenario].originalReferenceValues = {};
+      
+      onSettingsChange({ 
+        scenarios: updatedScenarios
       });
       
-      if (newCombinations.length > 0 && settings?.backendIdentifiers && settings?.backendFeatures) {
-        console.log(`🔄 Auto-loading reference values for ${newCombinations.length} new combinations`);
-        // Auto-trigger reference value loading for new combinations
-        fetchReferenceValuesForAll();
-      }
-    }
-  }, [combinations, loadedReferenceCombinations, settings?.backendIdentifiers, settings?.backendFeatures]);
-  
-  // ✅ FIXED: Auto-refresh reference values when settings change
-  useEffect(() => {
-    if (settings.referenceValuesNeedRefresh && combinations.length > 0) {
-      console.log('🔄 Auto-refresh triggered for reference values');
-      
-      // Clear existing reference values to force reload
-      setCombinationInputs({});
       setLoadedReferenceCombinations(new Set());
-      setOriginalReferenceValues({});
-      
-      // Fetch new reference values with updated settings
-      fetchReferenceValuesForAll();
       
       // ✅ FIXED: Use setTimeout to break the circular dependency
       setTimeout(() => {
         onSettingsChange({
-          referenceValuesNeedRefresh: false
+          referenceValuesNeedRefresh: false,
+          // ✅ NEW: Update last reference values to current ones after clearing
+          lastReferenceMethod: settings.referenceMethod,
+          lastReferencePeriod: settings.referencePeriod
         });
       }, 0);
       
       toast({
-        title: "Reference Values Refreshed",
-        description: "Reference values updated with new method and period settings",
+        title: "Reference Values Cleared",
+        description: "Press Ctrl+Enter to load reference values with new settings",
         variant: "default",
       });
     }
-  }, [settings.referenceValuesNeedRefresh, combinations.length]); // Removed onSettingsChange from dependencies
+  }, [settings.referenceValuesNeedRefresh, combinations.length, currentScenario]);
 
   // Clear data when switching to a new scenario (fresh page experience)
   useEffect(() => {
     // Only clear data when first visiting a newly added scenario
     if (settings?.selectedScenario && 
         !settings.selectedScenario.startsWith('scenario-1') && 
-        !settings.selectedScenario.startsWith('scenario-2') &&
+    
         combinations.length === 0) { // Only clear if no combinations exist
       // This is a newly added scenario (3, 4, 5, etc.) - clear everything
       // Use a ref to prevent infinite loops - only run once per scenario
@@ -1111,19 +1500,20 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
       if (shouldClear) {
         onSettingsChange({ 
           combinations: [],
-          identifiers: settings.identifiers?.map(identifier => ({
+          identifiers: (computedSettings.identifiers || []).map(identifier => ({
             ...identifier,
-            values: identifier.values?.map(value => ({
+            values: (identifier.values || []).map(value => ({
               ...value,
               checked: false
-            })) || []
-          })) || []
+            }))
+          }))
         });
-        setCombinationInputs({});
+        // ✅ FIXED: Clear combination inputs from global store
+        onSettingsChange({ combinationInputs: {} });
         clearedScenariosRef.current.add(settings.selectedScenario);
       }
     }
-  }, [settings?.selectedScenario, settings?.identifiers, combinations.length]); // Removed onSettingsChange from dependencies
+  }, [settings?.selectedScenario, computedSettings?.identifiers, combinations.length]); // Removed onSettingsChange from dependencies
 
   // Live calculation functions for Pct and Abs fields
   const calculateAbsFromPct = (referenceValue: number, pctChange: number): number => {
@@ -1139,7 +1529,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
   // Helper function to get reference value for a feature - Now uses ORIGINAL reference values!
   const getReferenceValue = (combinationId: string, featureId: string): number | null => {
     // Find the feature name from the feature ID
-    const feature = settings?.features?.find(f => f.id === featureId);
+    const feature = (computedSettings?.features || []).find(f => f.id === featureId);
     if (!feature) return null;
 
     // ✅ Priority 1: Use ORIGINAL reference value (never changes)
@@ -1159,15 +1549,14 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
     
     // Priority 3: Use fallback reference value (default: 100)
     const fallbackValue = 100;
-    console.log(`🔄 Using fallback reference value ${fallbackValue} for ${combinationId}:${featureId}`);
     return fallbackValue;
   };
 
   const handleInputChange = (combinationId: string, featureId: string, field: 'input' | 'change', value: string) => {
     const numValue = parseFloat(value) || 0;
     
-    setCombinationInputs(prev => {
-      const newInputs = { ...prev };
+    // ✅ FIXED: Use global store instead of local state for user input persistence
+    const newInputs = { ...combinationInputs };
       if (!newInputs[combinationId]) {
         newInputs[combinationId] = { [featureId]: { input: '', change: '' } };
       }
@@ -1186,165 +1575,258 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
         if (field === 'change') {
           // Pct field changed - calculate new Abs value
           const newAbsValue = calculateAbsFromPct(referenceValue, numValue);
-          newInputs[combinationId][featureId].input = newAbsValue.toFixed(2);
-          console.log(`🔄 Pct changed to ${numValue}% → Abs updated to ${newAbsValue.toFixed(2)}`);
+          newInputs[combinationId][featureId].input = formatToThreeDecimals(newAbsValue);
         } else if (field === 'input') {
           // Abs field changed - calculate new Pct value
           const newPctValue = calculatePctFromAbs(referenceValue, numValue);
-          newInputs[combinationId][featureId].change = newPctValue.toFixed(2);
-          console.log(`🔄 Abs changed to ${numValue} → Pct updated to ${newPctValue.toFixed(2)}%`);
+          newInputs[combinationId][featureId].change = formatToThreeDecimals(newPctValue);
         }
       }
 
-      return newInputs;
+      // ✅ FIXED: Update scenario-specific data in global store
+      const updatedScenarios = { ...settings.scenarios };
+      if (!updatedScenarios[currentScenario]) {
+        updatedScenarios[currentScenario] = { ...currentScenarioData };
+      }
+      updatedScenarios[currentScenario].combinationInputs = newInputs;
+      
+      onSettingsChange({ 
+        scenarios: updatedScenarios
     });
   };
 
   const handleDeleteCombination = (combinationId: string) => {
+    console.log('🗑️ Deleting combination:', combinationId);
+    
+    // ✅ FIXED: Use computedSettings.combinations to ensure we're working with current data
+    const currentCombinations = computedSettings?.combinations || [];
+    
     // Find the combination to be deleted
-    const combinationToDelete = combinations.find(c => c.id === combinationId);
+    const combinationToDelete = currentCombinations.find(c => c.id === combinationId);
     
     if (combinationToDelete) {
+      console.log('✅ Found combination to delete:', combinationToDelete);
+
       // Remove the combination from the data
-      const updatedCombinations = combinations.filter(c => c.id !== combinationId);
+      const updatedCombinations = currentCombinations.filter(c => c.id !== combinationId);
+      console.log('📝 Updated combinations count:', updatedCombinations.length);
       
-      // Collect all identifier values still needed by remaining combinations
-      const stillNeededValues = new Set<string>();
-      updatedCombinations?.forEach(combination => {
-        combination.identifiers?.forEach(identifierString => {
-          stillNeededValues.add(identifierString);
-        });
-      });
+      // ✅ FIXED: Update scenario-specific data in global store with proper immutability
+      const updatedScenarios = { ...settings.scenarios };
       
-      // Update the identifiers to uncheck only values that are no longer needed
-      const updatedIdentifiers = currentIdentifiers?.map(identifier => {
-        return {
-          ...identifier,
-          values: identifier.values?.map(value => {
-            // Create the full identifier string (e.g., "identifier-1-1a")
-            const fullIdentifierString = `${identifier.id}-${value.id}`;
-            
-            // Check if this value is still needed by any remaining combination
-            const isStillNeeded = stillNeededValues.has(fullIdentifierString);
-            
-            // Only uncheck if it was checked before but is no longer needed
-            return {
-              ...value,
-              checked: isStillNeeded ? value.checked : false
-            };
-          }) || []
-        };
-      }) || [];
-      
-      // Update both combinations and identifiers together
-      onSettingsChange({ 
+      // Create a new scenario object instead of mutating
+      updatedScenarios[currentScenario] = {
+        ...(currentScenarioData || {}),
         combinations: updatedCombinations,
-        identifiers: updatedIdentifiers
-      });
+        combinationInputs: {
+          ...(currentScenarioData?.combinationInputs || {}),
+          // Remove inputs for the deleted combination
+          [combinationId]: undefined
+        }
+      };
       
-      // Also clear any inputs for this combination
-      const newCombinationInputs = { ...combinationInputs };
-      delete newCombinationInputs[combinationId];
-      setCombinationInputs(newCombinationInputs);
+      // Clean up undefined values
+      if (updatedScenarios[currentScenario].combinationInputs) {
+        Object.keys(updatedScenarios[currentScenario].combinationInputs).forEach(key => {
+          if (updatedScenarios[currentScenario].combinationInputs[key] === undefined) {
+            delete updatedScenarios[currentScenario].combinationInputs[key];
+          }
+        });
+      }
+      
+      console.log('💾 Saving updated scenarios...');
+      onSettingsChange({ 
+        scenarios: updatedScenarios
+      });
+    } else {
+      console.log('❌ Combination not found:', combinationId);
     }
   };
 
-  const selectedFeatures = useMemo(() => 
-    settings?.features?.filter(f => f.selected) || [], 
-    [settings?.features]
+  const selectedFeatures = useMemo(() => {
+    const features = computedSettings?.features || [];
+    return (features || []).filter(f => f.selected) || [];
+  }, [computedSettings?.features]);
+  
+  const selectedOutputs = useMemo(() => {
+    const outputs = computedSettings?.outputs || [];
+    return (outputs || []).filter(o => o.selected) || [];
+  }, [computedSettings?.outputs]);
+
+  // ✅ NEW: Helper functions for scenario + view specific results
+  const getResultsForScenarioAndView = useMemo(() => 
+    (scenarioId: string, viewId: string) => {
+      return settings?.scenarios?.[scenarioId]?.viewResults?.[viewId] || null;
+    }, 
+    [settings?.scenarios]
   );
-  const selectedOutputs = useMemo(() => 
-    settings?.outputs?.filter(o => o.selected) || [], 
-    [settings?.outputs]
+
+  const getChartDataForScenarioAndView = useMemo(() => 
+    (scenarioId: string, viewId: string) => {
+      const viewResults = getResultsForScenarioAndView(scenarioId, viewId);
+      const currentMode = resultViewMode[viewId] || 'hierarchy';
+      
+      if (currentMode === 'hierarchy') {
+        if (!viewResults?.hierarchy) return [];
+        
+        return viewResults.hierarchy.map((hierarchicalResult: any) => ({
+          identifiers: hierarchicalResult.identifiers || {},
+          prediction: hierarchicalResult.scenario?.prediction || hierarchicalResult.prediction || 0,
+          pct_uplift: (hierarchicalResult.pct_uplift?.prediction) || hierarchicalResult.pct_uplift || 0,
+          combinationLabel: Object.values(hierarchicalResult.identifiers || {})
+            .join(', '),
+          run_id: hierarchicalResult.run_id || viewResults.runId || '',
+          baseline: hierarchicalResult.baseline?.prediction || 0,
+          delta: hierarchicalResult.delta?.prediction || 0,
+          features: hierarchicalResult.scenario?.features || {}
+        }));
+      } else {
+        // Flat mode
+        if (!viewResults?.flat) return [];
+        
+        // Process flat results - they have a different structure
+        const flatData = [];
+        for (const [identifierKey, identifierResults] of Object.entries(viewResults.flat)) {
+          if (Array.isArray(identifierResults)) {
+            identifierResults.forEach((result: any) => {
+              flatData.push({
+                identifiers: result.identifiers || {},
+                prediction: result.scenario?.prediction || result.prediction || 0,
+                pct_uplift: (result.pct_uplift?.prediction) || result.pct_uplift || 0,
+                combinationLabel: Object.values(result.identifiers || {}).join('_ '),
+                run_id: result.run_id || viewResults.runId || '',
+                baseline: result.baseline?.prediction || 0,
+                delta: result.delta?.prediction || 0,
+                features: result.scenario?.features || {}
+              });
+            });
+          }
+        }
+        return flatData;
+      }
+    }, 
+    [getResultsForScenarioAndView, resultViewMode]
   );
 
-  // Debug: Monitor features changes
-  useEffect(() => {
-    console.log('Features changed:', {
-      allFeatures: settings?.features?.map(f => ({ id: f.id, name: f.name, selected: f.selected })) || [],
-      selectedFeatures: selectedFeatures.map(f => ({ id: f.id, name: f.name, selected: f.selected }))
-    });
-  }, [settings?.features, selectedFeatures]);
-
-  // Debug: Monitor resultViews changes
-  useEffect(() => {
-    console.log('=== Canvas: ResultViews changed ===');
-    console.log('Canvas: settings.resultViews:', settings?.resultViews);
-    console.log('Canvas: resultViews length:', settings?.resultViews?.length);
-    console.log('Canvas: resultViews names:', settings?.resultViews?.map(v => v.name));
-    console.log('Canvas: resultViews IDs:', settings?.resultViews?.map(v => v.id));
-    console.log('=== Canvas: ResultViews changed completed ===');
-  }, [settings?.resultViews]);
-
-  // Debug: Monitor settings changes
-  useEffect(() => {
-    console.log('=== Canvas: Settings changed ===');
-    console.log('Canvas: Full settings object:', settings);
-    console.log('Canvas: selectedView:', settings?.selectedView);
-    console.log('Canvas: resultViews from settings:', settings?.resultViews);
-    console.log('=== Canvas: Settings changed completed ===');
-  }, [settings]);
-
-  // ✅ NEW: Monitor scenario results
-  useEffect(() => {
-    if (settings?.scenarioResults) {
-      console.log('🎉 === SCENARIO RESULTS RECEIVED ===');
-      console.log('🎯 View:', settings.scenarioResults.viewName);
-      console.log('🆔 Run ID:', settings.scenarioResults.runId);
-      console.log('📊 Models Processed:', settings.scenarioResults.modelsProcessed);
-      console.log('📁 Dataset Used:', settings.scenarioResults.datasetUsed);
-      console.log('🕒 Created At:', settings.scenarioResults.createdAt);
+  const hasResultsForScenarioAndView = useMemo(() => 
+    (scenarioId: string, viewId: string) => {
+      const viewResults = getResultsForScenarioAndView(scenarioId, viewId);
+      const currentMode = resultViewMode[viewId] || 'hierarchy';
       
-      console.log('📈 Flat Results:', settings.scenarioResults.flat);
-      console.log('🌳 Hierarchy Results:', settings.scenarioResults.hierarchy);
-      console.log('👥 Individual Results:', settings.scenarioResults.individuals);
+      if (currentMode === 'hierarchy') {
+        // ✅ CHANGED: Check for hierarchical results
+        return !!(viewResults?.hierarchy && viewResults.hierarchy.length > 0);
+      } else {
+        // ✅ NEW: Check for flat results
+        return !!(viewResults?.flat && Object.keys(viewResults.flat).length > 0);
+      }
+    }, 
+    [getResultsForScenarioAndView, resultViewMode]
+  );
+
+  // ✅ NEW: Monitor per-view scenario results
+  useEffect(() => {
+    const currentViewResults = currentScenarioData?.viewResults?.[computedSettings.selectedView];
+    if (currentViewResults) {
+      console.log('🎉 === VIEW-SPECIFIC RESULTS LOADED ===');
+      console.log('🎯 View:', currentViewResults.viewName);
+      console.log('🆔 Run ID:', currentViewResults.runId);
+      console.log('📊 Models Processed:', currentViewResults.modelsProcessed);
+      console.log('📁 Dataset Used:', currentViewResults.datasetUsed);
+      console.log('🕒 Created At:', currentViewResults.createdAt);
       
-      console.log('=== SCENARIO RESULTS COMPLETED ===');
+      console.log('📈 Flat Results:', currentViewResults.flat);
+      console.log('🌳 Hierarchy Results (NOW DISPLAYED):', currentViewResults.hierarchy);
+      console.log('👥 Individual Results (NOT DISPLAYED):', currentViewResults.individuals);
+      
+      console.log('=== VIEW RESULTS COMPLETED ===');
     }
-  }, [settings?.scenarioResults]);
+  }, [currentScenarioData?.viewResults, computedSettings?.selectedView]);
 
   // Force re-render when views change
   const viewsKey = React.useMemo(() => {
-    const views = settings?.resultViews || [];
-    return `views-${views.length}-${views.map(v => `${v.id}-${v.name}`).join('-')}`;
-  }, [settings?.resultViews]);
+    const views = computedSettings?.resultViews || [];
+    return `views-${views.length}-${(views || []).map(v => `${v.id}-${v.name}`).join('-')}`;
+  }, [computedSettings?.resultViews]);
 
-  // Mock chart data
-  const chartData = [
-    { name: 'Jan', value: 400 },
-    { name: 'Feb', value: 300 },
-    { name: 'Mar', value: 500 },
-    { name: 'Apr', value: 280 },
-  ];
+
 
   return (
-    <div className="flex h-full bg-gray-50" onKeyDown={handleKeyDown} tabIndex={0}>
-      {/* Main Canvas - Full Width */}
-      <div className="flex-1 flex flex-col p-6 space-y-6">
+    <div 
+      className={`flex bg-gray-50 ${isMaximized 
+        ? 'fixed inset-0 z-50 h-screen w-screen' 
+        : 'h-full'
+      }`} 
+      onKeyDown={handleKeyDown} 
+      tabIndex={0}
+    >
+      {/* Main Canvas - Responsive Layout */}
+      <div className={`flex-1 flex flex-col ${isMaximized 
+        ? 'px-8 py-4 space-y-4 max-w-none overflow-auto' 
+        : 'px-3 py-6 space-y-6 max-w-7xl mx-auto'
+      }`} style={isMaximized ? {} : { marginLeft: '-20px' }}>
         {/* Scenario Selection */}
-        <Card className="p-4 shadow-sm border-gray-200">
+        <Card className={`${isMaximized ? 'p-3' : 'p-4'} shadow-sm border-gray-200`}>
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-2">
-              <h4 className="text-sm font-medium text-gray-700 mb-0">Active Scenario:</h4>
               <div className="grid p-1 bg-gray-100 rounded-lg" style={{ gridTemplateColumns: `repeat(${availableScenarios?.length || 2}, 1fr)` }}>
                 {availableScenarios?.map((scenarioId, index) => (
                   <button
                     key={scenarioId}
-                    onClick={() => onSettingsChange({ selectedScenario: scenarioId })}
+                    onClick={() => handleScenarioClick(scenarioId)}
                     onContextMenu={(e) => handleScenarioContextMenu(e, scenarioId)}
                     className={`px-4 py-2 text-sm font-medium transition-all duration-200 min-w-[90px] h-[32px] flex items-center justify-center ${
                       settings?.selectedScenario === scenarioId
                         ? 'bg-blue-600 text-white font-semibold shadow-md transform scale-105'
                         : 'bg-transparent text-gray-600 hover:bg-gray-200 hover:text-gray-800'
                     } rounded-md`}
-                    title={scenarioId !== 'scenario-1' && scenarioId !== 'scenario-2' ? `Right-click to remove ${scenarioId.replace('scenario-', 'Scenario ')}` : undefined}
+                    title={scenarioId !== 'scenario-1' ? `Right-click for options (rename/delete)` : 'Right-click to rename'}
                   >
-                    <span>{scenarioId.replace('scenario-', 'Scenario ')}</span>
+                    {(() => {
+                      const isEditing = editingScenario === scenarioId;
+                      console.log(`🔍 TOP Render check for ${scenarioId}:`, { editingScenario, scenarioId, isEditing });
+                      return isEditing;
+                    })() ? (
+                      <div className="flex flex-col items-center space-y-2">
+                        <input
+                          type="text"
+                          value={tempRenameValue}
+                          onChange={(e) => setTempRenameValue(e.target.value)}
+                          onClick={(e) => e.stopPropagation()}
+                          className="bg-white border border-blue-300 outline-none text-center w-full text-sm font-medium px-2 py-1 rounded text-black"
+                          autoFocus
+                          style={{ minWidth: '80px' }}
+                        />
+                        <div className="flex space-x-2">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleScenarioRename(scenarioId, tempRenameValue);
+                            }}
+                            className="px-2 py-1 text-xs bg-blue-500 text-white rounded hover:bg-blue-600"
+                          >
+                            Rename
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleScenarioRenameCancel();
+                            }}
+                            className="px-2 py-1 text-xs bg-gray-500 text-white rounded hover:bg-gray-600"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <span>{scenarioNames[scenarioId] || scenarioId.replace('scenario-', 'Scenario ')}</span>
+                    )}
                   </button>
                 ))}
               </div>
             </div>
             
+            <div className="flex items-center space-x-2">
                          <Button 
                onClick={handleAddScenario}
                variant="outline"
@@ -1353,21 +1835,33 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
              >
                + Add Scenario
              </Button>
+             
+             {/* ✅ NEW: Maximize/Minimize Button */}
+             <Button 
+               onClick={() => setIsMaximized(!isMaximized)}
+               variant="outline"
+               size="sm"
+               className="text-sm px-3 py-2 h-[32px] bg-white border-gray-300 hover:bg-gray-50 hover:border-gray-400 transition-all duration-200 shadow-sm"
+               title={isMaximized ? "Exit Fullscreen" : "Maximize Editor"}
+             >
+               {isMaximized ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
+             </Button>
+            </div>
           </div>
         </Card>
 
 
         
         {/* Main Editor Table */}
-        <Card className="p-4 shadow-sm border-gray-200">
+        <Card className={`${isMaximized ? 'p-3' : 'p-4'} shadow-sm border-gray-200`}>
           <div className="bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm">
-            <div className="max-h-[350px] overflow-y-auto">
-              <div className="overflow-x-auto" style={{ width: '920px', maxWidth: '920px', overflow: 'auto' }}>
+            <div className={`${isMaximized ? 'max-h-[600px]' : 'max-h-[350px]'} overflow-y-auto`}>
+              <div className={`overflow-x-auto ${isMaximized ? 'w-full' : ''}`} style={isMaximized ? {} : { width: '920px', maxWidth: '920px', overflow: 'auto' }}>
                 <table 
-                  key={combinations.length + '_' + combinations.map(c => c.id).join('_')} 
+                  key={combinations.length + '_' + (combinations || []).map(c => c.id).join('_')} 
                   className="min-w-full border-collapse"
-                  style={{ 
-                    width: `${Math.max(920, 200 + (selectedFeatures?.length || 0) * 180)}px`
+                  style={isMaximized ? {} : { 
+                    width: `${Math.max(920, 200 + (selectedFeatures?.length || 0) * 320)}px`
                   }}
                 >
                 <thead className="bg-gradient-to-r from-gray-50 to-gray-100 sticky top-0 z-10">
@@ -1380,16 +1874,16 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
                     </th>
                     {selectedFeatures && selectedFeatures.length > 0 ? (
                       selectedFeatures.map(feature => (
-                        <th key={feature.id} className="px-4 py-3 text-center text-sm font-semibold text-gray-900 border-b-2 border-r border-gray-300 w-36 bg-gradient-to-r from-gray-50 to-gray-100">
+                                                 <th key={feature.id} className="px-4 py-3 text-center text-sm font-semibold text-gray-900 border-b-2 border-r border-gray-300 w-80 bg-gradient-to-r from-gray-50 to-gray-100 sticky top-0 z-10">
                           <div className="mb-2 font-medium text-gray-800">{feature.name}</div>
-                          <div className="grid grid-cols-2 gap-2 text-xs font-medium">
+                          <div className="grid gap-3 text-xs font-medium" style={{ gridTemplateColumns: '2fr 1fr' }}>
                             <span className="bg-blue-100 text-blue-700 px-2 py-1 rounded">Abs</span>
-                            <span className="bg-green-100 text-green-700 px-2 py-1 rounded">Pct</span>
+                            <span className="bg-green-100 text-green-700 px-2 py-1 rounded">%</span>
                           </div>
                         </th>
                       ))
                     ) : (
-                      <th className="px-4 py-3 text-center text-sm font-medium text-red-600 border-b-2 border-gray-300 bg-gradient-to-r from-red-50 to-red-100">
+                      <th className="px-4 py-3 text-center text-sm font-medium text-red-600 border-b-2 border-gray-300 bg-gradient-to-r from-red-50 to-red-100 sticky top-0 z-10">
                         <div className="flex items-center justify-center space-x-2">
                           <div className="w-2 h-2 bg-red-500 rounded-full"></div>
                           <span>No features selected</span>
@@ -1427,21 +1921,11 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
                                 <div className="space-y-1">
                                   {/* Removed unnecessary checkbox - live calculations work automatically */}
                                   {Array.isArray(combination.identifiers) 
-                                    ? combination.identifiers.map((identifierId, idx) => {
+                                    ? (combination.identifiers || []).map((identifierId, idx) => {
                                         // Extract the identifier and value names for display
                                         const [identifierIdPart, valueIdPart] = identifierId.split(':');
-                                        const identifier = currentIdentifiers?.find(id => id.id === identifierIdPart);
-                                        const value = identifier?.values?.find(v => v.id === valueIdPart);
-                                        
-                                        // Debug logging for each identifier display
-                                        console.log('🎨 Canvas: Displaying identifier:', {
-                                          identifierId,
-                                          identifierIdPart,
-                                          valueIdPart,
-                                          foundIdentifier: identifier,
-                                          foundValue: value,
-                                          currentIdentifiers: currentIdentifiers
-                                        });
+                                          const identifier = (currentIdentifiers || []).find(id => id.id === identifierIdPart);
+  const value = (identifier?.values || []).find(v => v.id === valueIdPart);
                                         
                                         return (
                                           <div key={idx} className="text-xs">
@@ -1460,10 +1944,10 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
                                         <div className="w-3 h-3 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
                                         Loading reference...
                                       </span>
-                                    ) : loadingReference === 'multiple' ? ( // Removed isSelected from here
+                                    ) : loadingReference === 'all' ? (
                                       <span className="flex items-center gap-1 text-blue-600">
                                         <div className="w-3 h-3 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
-                                        Loading with batch...
+                                        Loading...
                                       </span>
                                     ) : loadedReferenceCombinations.has(combination.id) ? (
                                       <span className="flex items-center gap-1 text-green-600">
@@ -1472,13 +1956,17 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
                                             e.stopPropagation();
                                             clearReferenceValues(combination.id);
                                           }}
-                                          className="text-red-500 hover:text-red-700 text-xs underline"
-                                          title="Clear reference values"
+                                          className="text-blue-500 hover:text-blue-700 text-xs"
+                                          title="Refresh reference values"
                                         >
-                                          Clear
+                                          <RefreshCw className="w-3 h-3" />
                                         </button>
                                       </span>
-                                                                          ) : null}
+                                    ) : (
+                                      <span className="text-gray-400 text-xs">
+                                        Press Ctrl+Enter to load
+                                      </span>
+                                    )}
                                   </div>
                                 </div>
                               <button
@@ -1492,22 +1980,28 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
                           </td>
                           {selectedFeatures?.map(feature => {
                             return (
-                              <td key={feature.id} className="px-4 py-3 text-sm text-center border-r border-gray-300 w-36">
-                                <div className="grid grid-cols-2 gap-2">
-                                  <Input 
-                                    type="number" 
-                                    className="h-8 text-xs border-gray-200 focus:border-blue-300 focus:ring-1 focus:ring-blue-300 transition-all duration-200"
-                                    value={combinationInputs[combination.id]?.[feature.id]?.input || ''}
-                                    onChange={(e) => handleInputChange(combination.id, feature.id, 'input', e.target.value)}
-                                    placeholder="Abs"
-                                  />
-                                  <Input 
-                                    type="number" 
-                                    className="h-8 text-xs border-gray-200 focus:border-blue-300 focus:ring-1 focus:ring-blue-300 transition-all duration-200"
-                                    value={combinationInputs[combination.id]?.[feature.id]?.change || ''}
-                                    onChange={(e) => handleInputChange(combination.id, feature.id, 'change', e.target.value)}
-                                    placeholder="Pct(%)"
-                                  />
+                              <td key={feature.id} className="px-3 py-1.5 text-sm text-center border-r border-gray-300 w-80">
+                                                                  <div className="grid gap-2" style={{ gridTemplateColumns: '2fr 1fr' }}>
+                                    <div className="relative">
+                                      <Input 
+                                       type="number" 
+                                       className="h-7 text-sm border-gray-200 focus:border-blue-300 focus:ring-1 focus:ring-blue-300 transition-all duration-200 px-2 text-center pr-1"
+                                       value={combinationInputs[combination.id]?.[feature.id]?.input || ''}
+                                       onChange={(e) => handleInputChange(combination.id, feature.id, 'input', e.target.value)}
+                                       placeholder="Abs"
+                                       step="any"
+                                     />
+                                    </div>
+                                    <div className="relative">
+                                      <Input 
+                                       type="number" 
+                                       className="h-7 text-sm border-gray-200 focus:border-blue-300 focus:ring-1 focus:ring-blue-300 transition-all duration-200 px-2 text-center pr-1"
+                                       value={combinationInputs[combination.id]?.[feature.id]?.change || ''}
+                                       onChange={(e) => handleInputChange(combination.id, feature.id, 'change', e.target.value)}
+                                       placeholder="%"
+                                       step="any"
+                                     />
+                                    </div>
                                 </div>
                               </td>
                             );
@@ -1520,6 +2014,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
               </table>
               </div>
             </div>
+            
           </div>
         </Card>
 
@@ -1537,39 +2032,34 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
                 )}
               </div>
               <div className="flex flex-col items-end space-y-2">
-                {settings?.scenarioResults && (
-                  <Badge variant="outline" className="text-xs text-green-600 bg-green-50 border-green-200">
-                    ✅ Results Available for {settings.scenarioResults.viewName}
-                  </Badge>
-                )}
                                 <Button 
                   onClick={handleRunScenario} 
                   className="bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white font-medium px-6 py-2 shadow-lg hover:shadow-xl transition-all duration-200 transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed"
                   disabled={runningScenario || 
-                            !settings.combinations?.length || 
-                            !settings.features?.some(f => f.selected) ||
+                            !computedSettings.combinations?.length || 
+                            !(computedSettings.features || []).some(f => f.selected) ||
                             !settings.referenceMethod ||
                             !settings.referencePeriod?.from ||
                             !settings.referencePeriod?.to ||
                             !(
                               // Either aggregated views are configured with selections
-                              (settings.aggregatedViews?.length && 
-                               settings.aggregatedViews?.find(v => v.id === settings.selectedView)?.selectedIdentifiers &&
-                               Object.values(settings.aggregatedViews.find(v => v.id === settings.selectedView)?.selectedIdentifiers || {}).some(values => Array.isArray(values) && values.length > 0)) ||
+                              (computedSettings.aggregatedViews?.length && 
+                               computedSettings.aggregatedViews?.find(v => v.id === settings.selectedView)?.selectedIdentifiers &&
+                               Object.values((computedSettings.aggregatedViews || []).find(v => v.id === settings.selectedView)?.selectedIdentifiers || {}).some(values => Array.isArray(values) && values.length > 0)) ||
                               // OR we have checked identifiers for fallback
-                              (!settings.aggregatedViews?.length && 
-                               settings.identifiers?.some(identifier => identifier.values.some(v => v.checked)))
+                              (!computedSettings.aggregatedViews?.length && 
+                               Array.isArray(computedSettings.identifiers) && (computedSettings.identifiers || []).some(identifier => (identifier.values || []).some(v => v.checked)))
                             )}
-                  title={!settings.combinations?.length ? "No combinations available" :
-                         !settings.features?.some(f => f.selected) ? "No features selected" :
+                  title={!computedSettings.combinations?.length ? "No combinations available" :
+                         !(computedSettings.features || []).some(f => f.selected) ? "No features selected" :
                          !settings.referenceMethod ? "No reference method set" :
                          !settings.referencePeriod?.from || !settings.referencePeriod?.to ? "Reference period incomplete" :
                          !(
-                           (settings.aggregatedViews?.length && 
-                            settings.aggregatedViews?.find(v => v.id === settings.selectedView)?.selectedIdentifiers &&
-                            Object.values(settings.aggregatedViews.find(v => v.id === settings.selectedView)?.selectedIdentifiers || {}).some(values => Array.isArray(values) && values.length > 0)) ||
-                           (!settings.aggregatedViews?.length && 
-                            settings.identifiers?.some(identifier => identifier.values.some(v => v.checked)))
+                           (computedSettings.aggregatedViews?.length && 
+                            computedSettings.aggregatedViews?.find(v => v.id === settings.selectedView)?.selectedIdentifiers &&
+                                                           Object.values((computedSettings.aggregatedViews || []).find(v => v.id === settings.selectedView)?.selectedIdentifiers || {}).some(values => Array.isArray(values) && values.length > 0)) ||
+                             (!computedSettings.aggregatedViews?.length && 
+                              Array.isArray(computedSettings.identifiers) && (computedSettings.identifiers || []).some(identifier => (identifier.values || []).some(v => v.checked)))
                          ) ? "No identifiers selected for result filtering" :
                          "Run scenario"}
                 >
@@ -1583,143 +2073,190 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
 
 
             
-            <Tabs defaultValue="scenario-1" className="mb-6">
+            {/* ✅ Scenario Results Tabs - Synchronized with top scenario selection */}
+            <Tabs 
+              value={currentScenario} 
+              onValueChange={(scenarioId) => {
+                // ✅ NEW: Sync with top scenario tabs - seamless navigation
+                handleScenarioClick(scenarioId);
+              }}
+              className="mb-6"
+            >
               <TabsList className="flex w-fit mb-4 p-1.5 bg-gray-100 rounded-lg border border-gray-200 shadow-sm">
                 {availableScenarios?.map((scenarioId, index) => (
                   <TabsTrigger 
                     key={scenarioId} 
                     value={scenarioId} 
+                    onContextMenu={(e) => handleScenarioContextMenu(e, scenarioId)}
                     className="text-sm font-medium data-[state=active]:bg-blue-600 data-[state=active]:text-white data-[state=active]:font-semibold data-[state=active]:shadow-md data-[state=inactive]:bg-transparent data-[state=inactive]:text-gray-700 data-[state=inactive]:hover:bg-gray-200 rounded-md transition-all duration-200 px-4 py-2"
+                    title="Right-click for options"
                   >
-                    {scenarioId.replace('scenario-', 'Scenario ')}
-                  </TabsTrigger>
-                )) || []}
-              </TabsList>
-            </Tabs>
-
-            <Tabs 
-              key={viewsKey}
-              defaultValue={settings?.selectedView || 'view-1'} 
-              value={settings?.selectedView || 'view-1'} 
-              onValueChange={(value) => onSettingsChange({ selectedView: value })}
-            >
-
-              
-              <TabsList className="flex w-fit p-1.5 bg-gray-100 rounded-lg border border-gray-200 shadow-sm">
-                {settings?.resultViews?.map((view) => (
-                  <TabsTrigger 
-                    key={view.id} 
-                    value={view.id} 
-                    className="text-sm font-medium data-[state=active]:bg-blue-600 data-[state=active]:text-white data-[state=active]:font-semibold data-[state=active]:shadow-md data-[state=inactive]:bg-transparent data-[state=inactive]:text-gray-700 data-[state=inactive]:hover:bg-gray-200 rounded-md transition-all duration-200 px-4 py-2"
-                  >
-                    {view.name}
-                  </TabsTrigger>
-                )) || []}
-              </TabsList>
-              
-              {settings?.resultViews?.map((view) => (
-                <TabsContent key={view.id} value={view.id} className="mt-4">
-                  {view.id === 'view-1' ? (
-                    <div className="space-y-6">
-                      {/* ✅ Individual Results Chart for View 1 */}
-                      {processedChartData.length > 0 && (
-                        <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm">
-                          <div className="mb-4">
-                            <div className="flex items-center justify-between">
-                              <div>
-                                <h4 className="text-lg font-semibold text-gray-800 mb-2">Individual Scenario Results</h4>
-                                <p className="text-sm text-gray-600">
-                                  Showing prediction values for each combination with percentage uplift
-                                </p>
-                              </div>
-                              <div className="text-right">
-                                <Badge variant="outline" className="text-xs text-blue-600 bg-blue-50 border-blue-200">
-                                  📊 View: {settings.aggregatedViews?.find(v => v.id === settings.selectedView)?.name || settings.selectedView}
-                                </Badge>
-                                <p className="text-xs text-gray-500 mt-1">
-                                  {processedChartData.length} result{processedChartData.length !== 1 ? 's' : ''} filtered
-                                </p>
-                              </div>
-                            </div>
-                          </div>
-                          <ScenarioResultsChart 
-                            data={processedChartData} 
-                            width={900} 
-                            height={450} 
-                          />
-                        </div>
+                    <>
+                      {scenarioNames[scenarioId] || scenarioId.replace('scenario-', 'Scenario ')}
+                      {/* Show results indicator */}
+                      {Object.keys(settings?.scenarios?.[scenarioId]?.viewResults || {}).length > 0 && (
+                        <span className="ml-2 w-2 h-2 bg-green-400 rounded-full"></span>
                       )}
-                      
-                      <div className="grid grid-cols-2 gap-4">
-                      {selectedOutputs?.slice(0, 4).map((output, index) => (
-                        <div key={output.id} className="bg-white border border-gray-200 rounded-xl p-5 overflow-hidden shadow-sm hover:shadow-md transition-shadow duration-200">
-                          <div className="flex items-center justify-between mb-3">
-                            <h4 className="text-base font-semibold text-gray-800">{output.name}</h4>
-                            <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
-                          </div>
-                          <div className="w-full h-[140px] overflow-x-auto bg-gradient-to-br from-gray-50 to-blue-50 rounded-lg p-2">
-                            <ResponsiveContainer width={Math.max(400, chartData.length * 80)} height={140}>
-                              <BarChart data={chartData} margin={{ left: 10, right: 10, top: 10, bottom: 25 }}>
-                                <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
-                                <XAxis 
-                                  dataKey="name" 
-                                  tick={{ fontSize: 11, fill: '#6B7280' }} 
-                                  interval={0}
-                                  angle={-45}
-                                  textAnchor="end"
-                                  height={60}
-                                />
-                                <YAxis tick={{ fontSize: 11, fill: '#6B7280' }} />
-                                <Tooltip 
-                                  contentStyle={{
-                                    backgroundColor: 'white',
-                                    border: '1px solid #E5E7EB',
-                                    borderRadius: '8px',
-                                    boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)'
-                                  }}
-                                />
-                                <Bar dataKey="value" fill="url(#blueGradient)" radius={[4, 4, 0, 0]} />
-                                <defs>
-                                  <linearGradient id="blueGradient" x1="0" y1="0" x2="0" y2="1">
-                                    <stop offset="0%" stopColor="#3B82F6" />
-                                    <stop offset="100%" stopColor="#1D4ED8" />
-                                  </linearGradient>
-                                </defs>
-                              </BarChart>
-                            </ResponsiveContainer>
-                          </div>
-                        </div>
-                      )) || []}
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="text-center py-12">
-                      <div className="space-y-4">
-                        <div className="w-20 h-20 bg-gray-100 rounded-full flex items-center justify-center mx-auto">
-                          <svg className="w-10 h-10 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-                          </svg>
-                        </div>
-                        <div className="space-y-2">
-                          <h4 className="text-xl font-semibold text-gray-800">{view.name}</h4>
-                          <p className="text-gray-600">Configure this view in the settings panel</p>
-                          {view.selectedCombinations && view.selectedCombinations.length > 0 && (
-                            <div className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-2 inline-block">
-                              <p className="text-sm text-blue-700 font-medium">
-                                Selected combinations: {view.selectedCombinations.length}
-                              </p>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  )}
+                    </>
+                  </TabsTrigger>
+                )) || []}
+              </TabsList>
+              
+              {/* ✅ Scenario Content - Each scenario shows its own view tabs and results */}
+              {availableScenarios?.map((scenarioId) => (
+                <TabsContent key={scenarioId} value={scenarioId}>
+                  <div className="space-y-4">
+                    {/* ✅ View Tabs for this specific scenario */}
+                    <Tabs 
+                      key={`${scenarioId}-views`}
+                      defaultValue={settings?.scenarios?.[scenarioId]?.selectedView || (computedSettings.aggregatedViews?.[0]?.id || 'view-1')} 
+                      value={settings?.scenarios?.[scenarioId]?.selectedView || (computedSettings.aggregatedViews?.[0]?.id || 'view-1')} 
+                      onValueChange={(value) => {
+                        // Update this specific scenario's selected view
+                        const updatedScenarios = { ...settings.scenarios };
+                        if (!updatedScenarios[scenarioId]) {
+                          updatedScenarios[scenarioId] = {};
+                        }
+                        updatedScenarios[scenarioId] = {
+                          ...updatedScenarios[scenarioId],
+                          selectedView: value
+                        };
+                        onSettingsChange({ scenarios: updatedScenarios });
+                      }}
+                    >
+              <TabsList className="flex w-fit p-1.5 bg-gray-100 rounded-lg border border-gray-200 shadow-sm">
+                {/* ✅ FIXED: Use dynamic aggregatedViews instead of hardcoded array */}
+                {(computedSettings.aggregatedViews || ['view-1', 'view-2', 'view-3']).map((view) => {
+                  const viewId = typeof view === 'string' ? view : view.id;
+                  const viewDisplayName = getViewDisplayName(view);
+                  
+                  return (
+                    <TabsTrigger 
+                      key={viewId} 
+                      value={viewId} 
+                      className="text-sm font-medium data-[state=active]:bg-blue-600 data-[state=active]:text-white data-[state=active]:font-semibold data-[state=active]:shadow-md data-[state=inactive]:bg-transparent data-[state=inactive]:text-gray-700 data-[state=inactive]:hover:bg-gray-200 rounded-md transition-all duration-200 px-4 py-2"
+                    >
+                      {viewDisplayName}
+                    </TabsTrigger>
+                  );
+                })}
+              </TabsList>
+              
+                      {/* ✅ View Content for this specific scenario */}
+                      {(computedSettings.aggregatedViews || ['view-1', 'view-2', 'view-3']).map((view) => {
+                        const viewId = typeof view === 'string' ? view : view.id;
+                        const chartData = getChartDataForScenarioAndView(scenarioId, viewId);
+                        const hasResults = hasResultsForScenarioAndView(scenarioId, viewId);
+                        
+                        return (
+                          <TabsContent key={viewId} value={viewId} className="mt-4">
+                            {hasResults ? (
+                              <div className="space-y-6">
+                                {/* ✅ Individual Results Chart for this scenario + view */}
+                                {chartData.length > 0 && (
+                                  <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm">
+                                    <div className="mb-4">
+                                      <div className="flex items-center justify-between">
+                                        <div></div>
+                                        <div className="text-right">
+                                          {/* ✅ NEW: Toggle button for switching between hierarchical and flat results */}
+                                          <button
+                                            onClick={() => toggleResultViewMode(viewId)}
+                                            className="mb-2 px-3 py-1.5 text-xs bg-blue-100 border border-blue-400 hover:bg-blue-200 hover:border-blue-500 hover:text-blue-700 transition-all duration-200 font-medium rounded-md flex items-center gap-2"
+                                          >
+                                            <div className="flex flex-col gap-0.5">
+                                              <div className="w-3 h-0.5 bg-current rounded-full"></div>
+                                              <div className="w-3 h-0.5 bg-current rounded-full"></div>
+                                              <div className="w-3 h-0.5 bg-current rounded-full"></div>
+                                            </div>
+                                            {resultViewMode[viewId] === 'flat' ? 'Show Hierarchy' : 'Show Flat'}
+                                          </button>
+                                        </div>
+                                      </div>
+                                    </div>
+                                    <ScenarioResultsChart 
+                                      data={chartData} 
+                                      width={900} 
+                                      height={450}
+                                      viewMode={resultViewMode[viewId] || 'hierarchy'}
+                                    />
+                                  </div>
+                                )}
+                              </div>
+                            ) : (
+                              <div className="text-center py-12">
+                                <div className="space-y-4">
+                                  <div className="w-20 h-20 bg-gray-100 rounded-full flex items-center justify-center mx-auto">
+                                    <svg className="w-10 h-10 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                                    </svg>
+                                  </div>
+                                  <div className="space-y-2">
+                                    <h4 className="text-xl font-semibold text-gray-800">
+                                      {scenarioId.replace('scenario-', 'Scenario ')} - {viewId.replace('view-', 'View ')}
+                                    </h4>
+                                    <p className="text-gray-600">Configure identifiers for this view and run scenario to see results</p>
+                                    <div className="bg-gray-50 border border-gray-200 rounded-lg px-4 py-2 inline-block">
+                                      <p className="text-sm text-gray-700 font-medium">
+                                        No results yet - configure and run scenario
+                                      </p>
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+                          </TabsContent>
+                        );
+                      })}
+                    </Tabs>
+                  </div>
                 </TabsContent>
-              )) || []}
+              ))}
             </Tabs>
           </div>
         </Card>
       </div>
+
+      {/* ✅ NEW: Context Menu for Scenario Actions */}
+      {contextMenu && (
+        <div 
+          className="fixed z-50 bg-white border border-gray-200 rounded-lg shadow-lg py-2 min-w-[160px]"
+          style={{
+            left: contextMenu.x,
+            top: contextMenu.y,
+          }}
+        >
+          <button
+            onClick={() => handleContextMenuAction('rename')}
+            className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-blue-50 hover:text-blue-700 flex items-center gap-2"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+            </svg>
+            Rename
+          </button>
+          
+          {contextMenu.scenarioId !== 'scenario-1' && (
+            <button
+              onClick={() => handleContextMenuAction('delete')}
+              className="w-full px-4 py-2 text-left text-sm text-red-600 hover:bg-red-50 hover:text-red-700 flex items-center gap-2"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+              </svg>
+              Delete
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* ✅ NEW: Click outside to close context menu */}
+      {contextMenu && (
+        <div 
+          className="fixed inset-0 z-40" 
+          onClick={closeContextMenu}
+        />
+      )}
     </div>
   );
 };

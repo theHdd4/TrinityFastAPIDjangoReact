@@ -65,81 +65,116 @@ class AggregationService:
     ) -> Dict[str, Any]:
         try:
             logger.info(f"Starting aggregation for run_id: {run_id}")
-            # Filter rows by payload identifiers
-            def _row_allowed(r):
-                for spec in payload.identifiers.values():  # Changed from payload["identifiers"] to payload.identifiers
-                    col, vals = spec.column, set(spec.values)  # Changed from spec["column"] to spec.column
-                    if r["identifiers"].get(col) not in vals:
-                        return False
-                return True
+            logger.info(f"Processing {len(payload.views)} views")
+            
+            # Build overall feature set
+            feat_set = {f for r in result_rows for f in r["baseline"]["features"]}
+            
+            # Process each view separately
+            view_results = {}
+            
+            for view_id, view_config in payload.views.items():
+                logger.info(f"Processing view: {view_id}")
+                
+                # Filter rows for this specific view
+                def _row_allowed_for_view(r):
+                    # Check if the row matches at least one value for EACH column in the view
+                    for id_key, identifier_config in view_config.selected_identifiers.items():
+                        for col, vals in identifier_config.items():
+                            # If this column exists in the row, check if its value is in the allowed values
+                            row_value = r["identifiers"].get(col)
+                            if row_value is not None and row_value not in vals:
+                                return False
+                    return True
 
-            filtered = [r for r in result_rows if _row_allowed(r)]
-            if not filtered:
-                raise ValueError("No clusters match the requested identifiers")
-            # Build DataFrame
-            feat_set = {f for r in filtered for f in r["baseline"]["features"]}
-            df = pd.DataFrame([
-                {**r["identifiers"],
-                 "baseline_pred": r["baseline"]["prediction"],
-                 "scenario_pred": r["scenario"]["prediction"],
-                 **{f"b_{k}": r["baseline"]["features"].get(k, 0.0) for k in feat_set},
-                 **{f"s_{k}": r["scenario"]["features"].get(k, 0.0) for k in feat_set}}
-                for r in filtered
-            ])
-            individuals_json = filtered
-            # Flat and hierarchical
-            flat_out = await cls._process_flat_aggregations(df, payload, feat_set)
-            hier_list = await cls._process_hierarchical_aggregations(df, payload, feat_set)
-            # Store docs
-            await asyncio.gather(
-                cls._store_flat_aggregations(flat_out, payload, run_id, feat_set),
-                cls._store_hierarchical_aggregations(hier_list, payload, run_id, feat_set)
-            )
-            # CSVs
-            await cls._generate_csv_files(df, hier_list, run_id, feat_set, [spec.column for spec in payload.identifiers.values()])  # Changed from spec["column"] to spec.column
-            logger.info(f"✅ Aggregation completed for run_id: {run_id}")
-            return {"flat": flat_out, "hierarchy": hier_list, "individuals": individuals_json}
+                filtered = [r for r in result_rows if _row_allowed_for_view(r)]
+                if not filtered:
+                    logger.warning(f"No clusters match view {view_id} identifiers")
+                    view_results[view_id] = {"flat": {}, "hierarchy": [], "individuals": []}
+                    continue
+                
+                # Build DataFrame for this view
+                df = pd.DataFrame([
+                    {**r["identifiers"],
+                     "baseline_pred": r["baseline"]["prediction"],
+                     "scenario_pred": r["scenario"]["prediction"],
+                     **{f"b_{k}": r["baseline"]["features"].get(k, 0.0) for k in feat_set},
+                     **{f"s_{k}": r["scenario"]["features"].get(k, 0.0) for k in feat_set}}
+                    for r in filtered
+                ])
+                
+                # Process flat and hierarchical aggregations for this view
+                flat_out = await cls._process_flat_aggregations_for_view(df, view_config, feat_set)
+                hier_list = await cls._process_hierarchical_aggregations_for_view(df, view_config, feat_set)
+                
+                # Store results for this view
+                view_results[view_id] = {
+                    "flat": flat_out,
+                    "hierarchy": hier_list,
+                    "individuals": filtered
+                }
+                
+                # Store docs for this view
+                await asyncio.gather(
+                    cls._store_flat_aggregations_for_view(flat_out, view_id, run_id, feat_set),
+                    cls._store_hierarchical_aggregations_for_view(hier_list, view_id, run_id, feat_set)
+                )
+            
+            logger.info(f"✅ Aggregation completed for run_id: {run_id}, processed {len(view_results)} views")
+            return {"view_results": view_results}
         except Exception as e:
             logger.error(f"❌ Aggregation failed for run_id {run_id}: {e}")
             raise
 
     @classmethod
-    async def _process_flat_aggregations(
-        cls, df: pd.DataFrame, payload: Any, feat_set: set  # Changed from Dict to Any
+    async def _process_flat_aggregations_for_view(
+        cls, df: pd.DataFrame, view_config: Any, feat_set: set
     ) -> Dict[str, List[Dict[str, Any]]]:
-        """Compute flat aggregations for all model results, regardless of user filters."""
+        """Compute flat aggregations for a specific view."""
         sum_cols = ["baseline_pred", "scenario_pred"] + [f"{p}_{k}" for p in ("b","s") for k in feat_set]
         out: Dict[str, List[Dict[str, Any]]] = {}
-        for key, spec in payload.identifiers.items():  # Changed from payload["identifiers"] to payload.identifiers
-            col = spec.column  # Changed from spec["column"] to spec.column
-            # Use entire DataFrame for flat aggregation
-            g = df.groupby([col], dropna=False)[sum_cols].sum().reset_index()
-            g = cls._recalculate_metrics(g, feat_set)
-            out[key] = [_row_to_json(row, [col], feat_set) for _, row in g.iterrows()]
+        
+        # Process each identifier in the view
+        for id_key, identifier_config in view_config.selected_identifiers.items():
+            for col, vals in identifier_config.items():
+                # Group by this column and aggregate
+                g = df.groupby([col], dropna=False)[sum_cols].sum().reset_index()
+                g = cls._recalculate_metrics(g, feat_set)
+                out[col] = [_row_to_json(row, [col], feat_set) for _, row in g.iterrows()]
         return out
 
+    # ✅ REMOVED: Old _process_flat_aggregations method - replaced by view-specific version
+
     @classmethod
-    async def _process_hierarchical_aggregations(
-        cls, df: pd.DataFrame, payload: Any, feat_set: set  # Changed from Dict to Any
+    async def _process_hierarchical_aggregations_for_view(
+        cls, df: pd.DataFrame, view_config: Any, feat_set: set
     ) -> List[Dict[str, Any]]:
-        logger.info("🔍 === HIERARCHICAL AGGREGATIONS DEBUG ===")
-        logger.info("🔍 Payload identifiers: %s", payload.identifiers)
-        logger.info("🔍 Payload identifiers type: %s", type(payload.identifiers))
-        logger.info("🔍 Payload identifiers length: %d", len(payload.identifiers) if payload.identifiers else 0)
+        """Compute hierarchical aggregations for a specific view based on id1, id2, id3 order."""
+        logger.info("🔍 === VIEW HIERARCHICAL AGGREGATIONS DEBUG ===")
+        logger.info("🔍 View config: %s", view_config.selected_identifiers)
         
-        id_cols = [spec.column for spec in payload.identifiers.values()]  # Changed from spec["column"] to spec.column
-        logger.info("🔍 Generated id_cols: %s", id_cols)
+        # Extract columns in the correct order (id1, id2, id3, etc.)
+        id_cols = []
+        for id_key in sorted(view_config.selected_identifiers.keys()):  # Sort to ensure id1, id2, id3 order
+            identifier_config = view_config.selected_identifiers[id_key]
+            for col, vals in identifier_config.items():
+                id_cols.append(col)
+                break  # Only take the first column for each id level
+        
+        logger.info("🔍 Generated hierarchical id_cols: %s", id_cols)
         logger.info("🔍 id_cols length: %d", len(id_cols))
         
         if not id_cols:
-            logger.error("❌ NO ID_COLS - THIS WILL CAUSE THE GROUPBY ERROR!")
-            raise ValueError("No identifier columns found for hierarchical aggregation. Check that payload.identifiers is populated correctly.")
+            logger.warning("❌ NO ID_COLS for hierarchical view aggregation!")
+            return []
         
-        logger.info("=== HIERARCHICAL AGGREGATIONS DEBUG COMPLETED ===")
+        logger.info("=== VIEW HIERARCHICAL AGGREGATIONS DEBUG COMPLETED ===")
         sum_cols = ["baseline_pred", "scenario_pred"] + [f"{p}_{k}" for p in ("b","s") for k in feat_set]
         dfg = df.groupby(id_cols, dropna=False)[sum_cols].sum().reset_index()
         dfg = cls._recalculate_metrics(dfg, feat_set)
         return [_row_to_json(row, id_cols, feat_set) for _, row in dfg.iterrows()]
+
+    # ✅ REMOVED: Old _process_hierarchical_aggregations method - replaced by view-specific version
 
     @classmethod
     def _recalculate_metrics(cls, df: pd.DataFrame, feat_set: set) -> pd.DataFrame:
@@ -187,17 +222,17 @@ class AggregationService:
             logger.error(f"Error generating CSVs for {run_id}: {e}")
 
     @classmethod
-    async def _store_flat_aggregations(
-        cls, flat_out: Dict[str, List[Dict[str, Any]]], payload: Any, run_id: str, feat_set: set  # Changed from Dict to Any
+    async def _store_flat_aggregations_for_view(
+        cls, flat_out: Dict[str, List[Dict[str, Any]]], view_id: str, run_id: str, feat_set: set
     ):
         docs = []
-        for key, lst in flat_out.items():
-            col = payload.identifiers[key].column  # Changed from payload["identifiers"][key]["column"] to payload.identifiers[key].column
+        for col, lst in flat_out.items():
             for rec in lst:
                 docs.append({
                     "run_id": run_id,
+                    "view_id": view_id,
                     "aggregation_type": "flat",
-                    "identifier_type": key,
+                    "identifier_type": col,
                     "identifiers": {"column": col, "value": rec["identifiers"][col]},
                     "features_included": list(feat_set),
                     "result": rec,
@@ -206,14 +241,17 @@ class AggregationService:
         if docs:
             await flat_aggregations_collection.insert_many(docs)
 
+    # ✅ REMOVED: Old _store_flat_aggregations method - replaced by view-specific version
+
     @classmethod
-    async def _store_hierarchical_aggregations(
-        cls, hier_list: List[Dict[str, Any]], payload: Any, run_id: str, feat_set: set  # Changed from Dict to Any
+    async def _store_hierarchical_aggregations_for_view(
+        cls, hier_list: List[Dict[str, Any]], view_id: str, run_id: str, feat_set: set
     ):
         docs = []
         for rec in hier_list:
             docs.append({
                 "run_id": run_id,
+                "view_id": view_id,
                 "aggregation_type": "hierarchy",
                 "identifiers": rec["identifiers"],
                 "features_included": list(feat_set),
@@ -222,6 +260,8 @@ class AggregationService:
             })
         if docs:
             await hierarchical_aggregations_collection.insert_many(docs)
+
+    # ✅ REMOVED: Old _store_hierarchical_aggregations method - replaced by view-specific version
 
     @classmethod
     async def get_flat_aggregations(cls, run_id: str) -> List[Dict]:

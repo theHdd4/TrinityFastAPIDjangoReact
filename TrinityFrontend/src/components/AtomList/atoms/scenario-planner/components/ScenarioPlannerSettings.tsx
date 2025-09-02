@@ -124,7 +124,7 @@ const SortableIdentifier: React.FC<SortableIdentifierProps> = ({
         <Select
           onValueChange={(value) => {
             if (value === "All") {
-              const allValueIds = identifier.values.map((value: any) => value.id);
+              const allValueIds = (identifier.values || []).map((value: any) => value.id);
               onToggleIdentifierSelection(view.id, identifierId, "All");
             }
           }}
@@ -150,7 +150,7 @@ const SortableIdentifier: React.FC<SortableIdentifierProps> = ({
               <div className="flex items-center space-x-3 p-2 hover:bg-gray-100 rounded cursor-pointer"
                    onClick={() => {
                      const currentSelected = view.selectedIdentifiers[identifierId] || [];
-                     const allValueIds = identifier.values.map((value: any) => value.id);
+                     const allValueIds = (identifier.values || []).map((value: any) => value.id);
                      if (currentSelected.length === allValueIds.length) {
                        // Deselect all
                        onToggleIdentifierSelection(view.id, identifierId, "clearAll");
@@ -164,7 +164,7 @@ const SortableIdentifier: React.FC<SortableIdentifierProps> = ({
                   checked={(view.selectedIdentifiers[identifierId] || []).length === identifier.values.length}
                   onChange={() => {
                     const currentSelected = view.selectedIdentifiers[identifierId] || [];
-                    const allValueIds = identifier.values.map((value: any) => value.id);
+                                         const allValueIds = (identifier.values || []).map((value: any) => value.id);
                     if (currentSelected.length === allValueIds.length) {
                       // Deselect all
                       onToggleIdentifierSelection(view.id, identifierId, "clearAll");
@@ -314,7 +314,7 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
     }
       }, [backendIdentifiers, backendFeatures, data.identifiers]);
     
-    // ✅ RESTORED & IMPROVED: Auto-refresh reference values when reference method or period changes
+    // ✅ FIXED: Only auto-refresh when reference settings actually change (not on tab switch)
     useEffect(() => {
       // Only trigger if we have real data and reference values are already loaded
       const hasRealData = data.identifiers?.some(id => 
@@ -331,8 +331,30 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
         !id.name.startsWith('identifier-')
       );
       
-      if (hasRealData && data.combinations?.length > 0) {
-        console.log('🔄 Reference settings changed, triggering auto-refresh of reference values');
+      // ✅ FIXED: Only trigger if reference settings actually changed, not just on mount
+      // Initialize lastReference values if they don't exist
+      const hasLastValues = data.lastReferenceMethod && data.lastReferencePeriod;
+      const referenceMethodChanged = hasLastValues && data.referenceMethod !== data.lastReferenceMethod;
+      const referencePeriodChanged = hasLastValues && (
+        data.referencePeriod?.from !== data.lastReferencePeriod?.from ||
+        data.referencePeriod?.to !== data.lastReferencePeriod?.to
+      );
+      
+      // ✅ DEBUG: Log reference period comparison
+      console.log('🔍 Reference period change detection:', {
+        currentMethod: data.referenceMethod,
+        lastMethod: data.lastReferenceMethod,
+        methodChanged: referenceMethodChanged,
+        currentPeriod: data.referencePeriod,
+        lastPeriod: data.lastReferencePeriod,
+        periodChanged: referencePeriodChanged,
+        hasRealData,
+        combinationsCount: data.combinations?.length || 0
+      });
+      
+      if (hasRealData && data.combinations?.length > 0 && (referenceMethodChanged || referencePeriodChanged)) {
+        console.log('🔄 Reference settings actually changed, triggering auto-refresh of reference values');
+        console.log('Changes detected:', { referenceMethodChanged, referencePeriodChanged });
         
         // Notify parent component to refresh reference values
         if (onDataChange) {
@@ -343,37 +365,49 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
             lastReferencePeriod: data.referencePeriod
           });
         }
+      } else if (hasRealData && data.combinations?.length > 0) {
+        console.log('✅ No reference settings changed, skipping auto-refresh to preserve user input');
+        
+        // ✅ NEW: Initialize last values if they don't exist but we have current values
+        if (!hasLastValues && data.referenceMethod && data.referencePeriod && onDataChange) {
+          console.log('🔧 Initializing last reference values for future change detection');
+          onDataChange({
+            lastReferenceMethod: data.referenceMethod,
+            lastReferencePeriod: data.referencePeriod
+          });
+        }
       }
     }, [data.referenceMethod, data.referencePeriod, data.identifiers, data.combinations]); // Removed onDataChange to prevent infinite loops
     
     // ✅ RESTORED & IMPROVED: Manual refresh function for user control
     const handleManualRefresh = () => {
+      console.log('🔄 Settings: Manual refresh button clicked!', {
+        hasOnDataChange: !!onDataChange,
+        identifiersLength: data.identifiers?.length || 0,
+        combinationsLength: data.combinations?.length || 0,
+        referenceMethod: data.referenceMethod,
+        referencePeriod: data.referencePeriod
+      });
+      
       if (onDataChange) {
-        onDataChange({
+        const refreshData = {
           referenceValuesNeedRefresh: true,
           lastReferenceMethod: data.referenceMethod,
           lastReferencePeriod: data.referencePeriod
-        });
+        };
+        
+        console.log('🔄 Settings: Calling onDataChange with:', refreshData);
+        onDataChange(refreshData);
         
         toast({
           title: "Manual Refresh Triggered",
           description: "Reference values will be refreshed with current settings",
           variant: "default",
         });
+      } else {
+        console.log('❌ Settings: onDataChange is not available!');
       }
     };
-    
-    // ✅ NEW: Debug logging to see what's happening with data
-  useEffect(() => {
-    console.log('🔍 Settings Debug - Current state:', {
-      hasBackendIdentifiers: !!backendIdentifiers,
-      hasBackendFeatures: !!backendFeatures,
-      currentIdentifiers: data.identifiers?.map(id => ({ id: id.id, name: id.name })),
-      currentFeatures: data.features?.map(f => ({ id: f.id, name: f.name })),
-      backendIdentifierColumns: backendIdentifiers?.identifier_columns,
-      backendFeaturesList: backendFeatures?.all_unique_features
-    });
-  }, [backendIdentifiers, backendFeatures, data.identifiers, data.features]);
   
   const [openSections, setOpenSections] = useState({
     identifier1: true,
@@ -396,6 +430,21 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
   const [identifierFilters, setIdentifierFilters] = useState<Record<string, string[]>>({});
   const [uniqueValues, setUniqueValues] = useState<Record<string, string[]>>({});
   const [loadingValues, setLoadingValues] = useState<Record<string, boolean>>({});
+
+  // ✅ FIXED: Initialize aggregatedViews from global store data
+  useEffect(() => {
+    if (data.aggregatedViews && Array.isArray(data.aggregatedViews) && data.aggregatedViews.length > 0) {
+      console.log('🔄 Settings: Initializing aggregatedViews from global store:', data.aggregatedViews);
+      setAggregatedViews(data.aggregatedViews);
+    } else if (data.scenarios && data.selectedScenario && data.scenarios[data.selectedScenario]?.aggregatedViews) {
+      // Fallback to scenario-specific aggregatedViews
+      const scenarioViews = data.scenarios[data.selectedScenario].aggregatedViews;
+      if (Array.isArray(scenarioViews) && scenarioViews.length > 0) {
+        console.log('🔄 Settings: Initializing aggregatedViews from scenario-specific data:', scenarioViews);
+        setAggregatedViews(scenarioViews);
+      }
+    }
+  }, [data.aggregatedViews, data.scenarios, data.selectedScenario]);
 
   // DnD sensors
   const sensors = useSensors(
@@ -499,55 +548,41 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
     }
   };
 
-  // Don't auto-fetch on mount - wait for cache initialization from input files
-  // useEffect(() => {
-  //   fetchIdentifiers();
-  //   fetchFeatures();
-  // }, []);
+  // ✅ FIXED: Auto-fetch backend data on mount if not already loaded
+  useEffect(() => {
+    // Only fetch if we don't have backend data yet
+    if (!backendIdentifiers || !backendFeatures) {
+      fetchIdentifiers();
+      fetchFeatures();
+    }
+  }, []); // Only run on mount
+
+  // ✅ SIMPLE LOG: Check if backend data is being received
+  useEffect(() => {
+    console.log('🔍 Backend Data Status:', {
+      hasIdentifiers: !!backendIdentifiers,
+      hasFeatures: !!backendFeatures,
+      identifiersCount: backendIdentifiers?.identifier_columns?.length || 0,
+      featuresCount: backendFeatures?.all_unique_features?.length || 0
+    });
+  }, [backendIdentifiers, backendFeatures]);
+
+  // ✅ SIMPLE LOG: Check if reference values are being received
+  useEffect(() => {
+    console.log('🔍 Reference Values Status:', {
+      hasReferenceData: !!data.originalReferenceValues,
+      referenceValuesCount: Object.keys(data.originalReferenceValues || {}).length,
+      sampleReferenceData: Object.keys(data.originalReferenceValues || {}).slice(0, 2) // Show first 2 keys
+    });
+  }, [data.originalReferenceValues]);
 
   // ✅ FIXED: Sync backend data with frontend settings when data changes
   useEffect(() => {
-    console.log('🔄 Sync useEffect triggered:', {
-      hasBackendIdentifiers: !!backendIdentifiers,
-      hasBackendFeatures: !!backendFeatures,
-      identifierColumns: backendIdentifiers?.identifier_columns,
-      allFeatures: backendFeatures?.all_unique_features
-    });
-
-    // ✅ FIXED: Check if we have REAL data (not dummy data from default settings)
-    const hasRealCurrentData = data.identifiers?.some(id => 
-      id.name && 
-      // Check for dummy identifiers from default settings
-      id.name !== 'Identifier 1' && 
-      id.name !== 'Identifier 2' && 
-      id.name !== 'Identifier 3' && 
-      id.name !== 'Identifier 4' &&
-      id.name !== 'identifier-1' && 
-      id.name !== 'identifier-2' &&
-      id.name !== 'identifier-3' &&
-      id.name !== 'identifier-4' &&
-      !id.name.startsWith('Identifier') && // Generic check
-      !id.name.startsWith('identifier-') && // Generic check
-      // Check for dummy values
-      !id.values?.some(val => 
-        val.name && (
-          val.name.startsWith('Identifier 1-') ||
-          val.name.startsWith('Identifier 2-') ||
-          val.name.startsWith('Identifier 3-') ||
-          val.name.startsWith('Identifier 4-') ||
-          val.name.startsWith('1a') ||
-          val.name.startsWith('2a') ||
-          val.name.startsWith('3a') ||
-          val.name.startsWith('4a')
-        )
-      )
-    );
-    
-    if (hasRealCurrentData) {
-      console.log('✅ Real data already exists, skipping backend sync to preserve user selections');
-      return;
+    // ✅ SIMPLIFIED: No more dummy data checks - always sync when backend data is available
+    if (data.identifiers && data.identifiers.length > 0) {
+      // Continue with sync to ensure backend data is properly integrated
     } else {
-      console.log('🔄 Dummy data detected, backend sync will proceed to load real data');
+      // Backend sync will proceed to load data
     }
 
     if (backendIdentifiers && backendFeatures && 
@@ -555,10 +590,8 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
         backendFeatures.all_unique_features) {
       
       try {
-        console.log('📊 Backend data available, creating new identifiers and features...');
-        
         // Update identifiers based on backend data
-        const newIdentifiers = backendIdentifiers.identifier_columns.map((column: string, index: number) => ({
+        const newIdentifiers = (backendIdentifiers.identifier_columns || []).map((column: string, index: number) => ({
           id: column, // Use actual column name as ID instead of generic identifier-X
           name: column,
           values: (backendIdentifiers.identifier_values?.[column] || []).map((value: string, valueIndex: number) => ({
@@ -569,14 +602,11 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
         }));
 
         // Update features based on backend data
-        const newFeatures = backendFeatures.all_unique_features.map((feature: string, index: number) => ({
+        const newFeatures = (backendFeatures.all_unique_features || []).map((feature: string, index: number) => ({
           id: `feature-${index + 1}`,
           name: feature,
           selected: index < 4 // Select first 4 features by default
         }));
-
-        console.log('✅ New identifiers created:', newIdentifiers);
-        console.log('✅ New features created:', newFeatures);
 
         // ✅ IMPROVED: Only update if we have new data and it's actually different to prevent infinite loop
         const currentIdentifiers = data.identifiers || [];
@@ -586,54 +616,69 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
         const featuresChanged = JSON.stringify(newFeatures) !== JSON.stringify(currentFeatures);
         
         if (newIdentifiers.length > 0 && newFeatures.length > 0 && (identifiersChanged || featuresChanged)) {
-          console.log('🚀 Calling onDataChange to update store...');
-          onDataChange({
+          // ✅ FIXED: Update both global data and current scenario data
+          const updateData: Partial<SettingsType> = {
             identifiers: newIdentifiers,
             features: newFeatures
-          });
-          console.log('✅ Store updated successfully!');
-        } else {
-          console.log('⏭️ Data unchanged, skipping update');
+          };
+          
+          // Also update the current scenario's data if we have scenario-specific structure
+          if (data.scenarios && data.selectedScenario) {
+            const updatedScenarios = { ...data.scenarios };
+            if (updatedScenarios[data.selectedScenario]) {
+              updatedScenarios[data.selectedScenario] = {
+                ...updatedScenarios[data.selectedScenario],
+                identifiers: newIdentifiers,
+                features: newFeatures
+              };
+              updateData.scenarios = updatedScenarios;
+            }
+          }
+          
+          onDataChange(updateData);
         }
       } catch (error) {
         console.error('❌ Error syncing backend data:', error);
       }
     } else {
-      console.log('⏳ Waiting for backend data...', {
-        backendIdentifiers: backendIdentifiers,
-        backendFeatures: backendFeatures
-      });
+      // ✅ NEW: If we have backend data but it's not being used, force a sync
+      if (backendIdentifiers && backendFeatures && (!data.identifiers || data.identifiers.length === 0)) {
+        // This will trigger the sync logic in the next render cycle
+      }
     }
-  }, [backendIdentifiers, backendFeatures, data.identifiers]); // Added data.identifiers to prevent unnecessary syncs
+  }, [backendIdentifiers, backendFeatures, data.identifiers]); // ✅ FIXED: Removed data.features - features shouldn't trigger combination regeneration
 
   // ✅ FIXED: Regenerate combinations when identifiers change (after backend sync)
   useEffect(() => {
     if (data.identifiers && data.identifiers.length > 0) {
-      console.log('🔄 Identifiers changed, regenerating combinations...');
-      console.log('Current identifiers:', data.identifiers);
-      
-      // Check if these are real identifiers from backend (not dummy ones)
-      const hasRealIdentifiers = data.identifiers.some(id => 
-        id.name && id.name !== 'Identifier 1' && id.name !== 'Identifier 2'
-      );
-      
-      if (hasRealIdentifiers) {
-        console.log('✅ Real identifiers detected, regenerating combinations...');
+      // ✅ SIMPLIFIED: No more dummy identifier checks - generate combinations for any valid identifiers
+      if (data.identifiers && data.identifiers.length > 0) {
         const newCombinations = generateCombinationsFromIdentifiers(data.identifiers);
-        console.log('🆕 New combinations generated:', newCombinations);
         
         // Only update if combinations are actually different to prevent infinite loop
         if (JSON.stringify(newCombinations) !== JSON.stringify(data.combinations)) {
-          console.log('🔄 Combinations changed, updating store...');
-          onDataChange({ combinations: newCombinations });
-        } else {
-          console.log('⏭️ Combinations unchanged, skipping update');
+          // ✅ FIXED: Update both global data and current scenario data
+          const updateData: Partial<SettingsType> = {
+            combinations: newCombinations
+          };
+          
+          // Also update the current scenario's data if we have scenario-specific structure
+          if (data.scenarios && data.selectedScenario) {
+            const updatedScenarios = { ...data.scenarios };
+            if (updatedScenarios[data.selectedScenario]) {
+              updatedScenarios[data.selectedScenario] = {
+                ...updatedScenarios[data.selectedScenario],
+                combinations: newCombinations
+              };
+              updateData.scenarios = updatedScenarios;
+            }
+          }
+          
+          onDataChange(updateData);
         }
-      } else {
-        console.log('⏳ Waiting for real identifiers from backend...');
       }
     }
-  }, [data.identifiers]); // Simplified dependencies to prevent infinite loops
+  }, [data.identifiers]); // ✅ FIXED: Only watch identifiers, not features (features shouldn't regenerate combinations)
 
   // Initialize filters when aggregated views change
   useEffect(() => {
@@ -674,7 +719,7 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
     const newUniqueValues: Record<string, string[]> = {};
     data.identifiers.forEach(identifier => {
           if (identifier && identifier.id && identifier.values && Array.isArray(identifier.values)) {
-            newUniqueValues[identifier.id] = identifier.values.map(value => value.id).filter(Boolean);
+            newUniqueValues[identifier.id] = (identifier.values || []).map(value => value.id).filter(Boolean);
           }
     });
     setUniqueValues(newUniqueValues);
@@ -689,7 +734,7 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
     if (data.resultViews && Array.isArray(data.resultViews) && data.resultViews.length > 0) {
       try {
       // Convert resultViews to aggregatedViews format
-      const syncedViews = data.resultViews.map(view => ({
+      const syncedViews = (data.resultViews || []).map(view => ({
           id: view.id || `view-${Date.now()}`,
           name: view.name || 'Unnamed View',
         identifierOrder: [],
@@ -763,10 +808,10 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
      }
    }, [data.identifiers, aggregatedViews.length]);
 
-     // ✅ NEW: Save aggregatedViews to global store whenever they change
+     // ✅ NEW: Save aggregatedViews to both global store and scenario-specific data
    useEffect(() => {
      if (aggregatedViews && aggregatedViews.length > 0) {
-       console.log('🔄 Saving aggregatedViews to global store:', aggregatedViews);
+       console.log('🔄 Saving aggregatedViews to global store and scenario-specific data:', aggregatedViews);
        console.log('🔄 Current aggregatedViews selectedIdentifiers:', 
          aggregatedViews.map(view => ({
            id: view.id,
@@ -775,7 +820,30 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
            identifierOrder: view.identifierOrder
          }))
        );
+       
+       // Save to global store
        onDataChange({ aggregatedViews: aggregatedViews });
+       
+       // ✅ NEW: Also save to scenario-specific data if we're in a scenario context
+       if (data.selectedScenario) {
+         const updatedScenarios = { ...data.scenarios };
+         if (!updatedScenarios[data.selectedScenario]) {
+           updatedScenarios[data.selectedScenario] = {};
+         }
+         
+         updatedScenarios[data.selectedScenario] = {
+           ...updatedScenarios[data.selectedScenario],
+           aggregatedViews: aggregatedViews
+         };
+         
+         console.log('🔄 Updated scenario-specific aggregatedViews for:', data.selectedScenario);
+         
+         // Save scenario-specific data
+         onDataChange({ 
+           aggregatedViews: aggregatedViews,
+           scenarios: updatedScenarios
+         });
+       }
      }
    }, [aggregatedViews]); // ✅ FIXED: Removed onDataChange to prevent infinite loop
 
@@ -794,6 +862,9 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
       selectedIdentifiers: {}
     };
     
+    console.log('🔄 Adding new view:', newView);
+    console.log('🔄 Current aggregatedViews count:', aggregatedViews.length);
+    
     // Update local state
     setAggregatedViews([...aggregatedViews, newView]);
     
@@ -805,18 +876,48 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
     };
     
     const updatedResultViews = [...(data.resultViews || []), newResultView];
-    onDataChange({ resultViews: updatedResultViews });
+    
+    // ✅ NEW: Also update scenario-specific aggregatedViews if we're in a scenario context
+    const updatedScenarios = { ...data.scenarios };
+    if (data.selectedScenario && updatedScenarios[data.selectedScenario]) {
+      updatedScenarios[data.selectedScenario] = {
+        ...updatedScenarios[data.selectedScenario],
+        aggregatedViews: [...(updatedScenarios[data.selectedScenario].aggregatedViews || []), newView]
+      };
+      console.log('🔄 Updated scenario-specific aggregatedViews for:', data.selectedScenario);
+    }
+    
+    onDataChange({ 
+      resultViews: updatedResultViews,
+      scenarios: updatedScenarios
+    });
+    
+    console.log('🔄 Updated resultViews count:', updatedResultViews.length);
   };
 
-  // Remove view
+    // Remove view
   const removeView = (viewId: string) => {
     if (aggregatedViews.length > 1) {
       // Update local state
-      setAggregatedViews(aggregatedViews.filter(view => view.id !== viewId));
+      setAggregatedViews((aggregatedViews || []).filter(view => view.id !== viewId));
       
       // Sync with main settings - remove from resultViews
       const updatedResultViews = (data.resultViews || []).filter(view => view.id !== viewId);
-      onDataChange({ resultViews: updatedResultViews });
+      
+      // ✅ NEW: Also update scenario-specific aggregatedViews if we're in a scenario context
+      const updatedScenarios = { ...data.scenarios };
+      if (data.selectedScenario && updatedScenarios[data.selectedScenario]) {
+        updatedScenarios[data.selectedScenario] = {
+          ...updatedScenarios[data.selectedScenario],
+          aggregatedViews: (updatedScenarios[data.selectedScenario].aggregatedViews || []).filter(view => view.id !== viewId)
+        };
+        console.log('🔄 Removed view from scenario-specific aggregatedViews for:', data.selectedScenario);
+      }
+      
+      onDataChange({ 
+        resultViews: updatedResultViews,
+        scenarios: updatedScenarios
+      });
       
       // If the removed view was selected, switch to view-1
       if (data.selectedView === viewId) {
@@ -827,6 +928,7 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
 
   // Update identifier order (drag and drop)
   const updateIdentifierOrder = (viewId: string, newOrder: string[]) => {
+    console.log('🔄 Updating identifier order for view:', viewId, 'new order:', newOrder);
     setAggregatedViews(prev => prev.map(view => 
       view.id === viewId ? { ...view, identifierOrder: newOrder } : view
     ));
@@ -843,8 +945,8 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
            
            if (valueId === "selectAll") {
              // Select all values for this identifier
-             const identifier = data.identifiers.find(id => id.id === identifierId);
-             newSelected = identifier ? identifier.values.map(v => v.id) : [];
+             const identifier = (data.identifiers || []).find(id => id.id === identifierId);
+             newSelected = identifier ? (identifier.values || []).map(v => v.id) : [];
              console.log('🔄 Selecting all values for', identifierId, ':', newSelected);
            } else if (valueId === "clearAll") {
              // Clear all values for this identifier
@@ -854,7 +956,7 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
              // Toggle individual value
              const currentSelected = view.selectedIdentifiers[identifierId] || [];
              newSelected = currentSelected.includes(valueId)
-               ? currentSelected.filter(id => id !== valueId)
+               ? (currentSelected || []).filter(id => id !== valueId)
                : [...currentSelected, valueId];
              console.log('🔄 Toggling value', valueId, 'for', identifierId, '. New selected:', newSelected);
            }
@@ -921,7 +1023,7 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
 
   // Select all values for an identifier
   const selectAllIdentifierValues = (identifierId: string) => {
-    const updatedIdentifiers = data.identifiers.map(identifier => {
+    const updatedIdentifiers = (data.identifiers || []).map(identifier => {
       if (identifier.id === identifierId) {
         return {
           ...identifier,
@@ -940,11 +1042,11 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
 
   // Deselect all values for an identifier
   const deselectAllIdentifierValues = (identifierId: string) => {
-    const updatedIdentifiers = data.identifiers.map(identifier => {
+    const updatedIdentifiers = (data.identifiers || []).map(identifier => {
       if (identifier.id === identifierId) {
         return {
           ...identifier,
-          values: identifier.values.map(value => ({ ...value, checked: false }))
+          values: (identifier.values || []).map(value => ({ ...value, checked: false }))
         };
       }
       return identifier;
@@ -959,11 +1061,11 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
 
   const generateCombinationsFromIdentifiers = (identifiers: any[]) => {
     const selectedValues = identifiers
-      .filter(identifier => identifier.values.some((value: any) => value.checked))
+              .filter(identifier => (identifier.values || []).some((value: any) => value.checked))
       .map(identifier => ({
         id: identifier.id,
         name: identifier.name,
-        values: identifier.values.filter((value: any) => value.checked)
+                  values: (identifier.values || []).filter((value: any) => value.checked)
       }))
       .filter(identifier => identifier.values.length > 0);
 
@@ -1000,7 +1102,7 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
           `${selectedValues[valueIndex].id}:${value.id}` // Use colon separator for better parsing
         ),
       values: Object.fromEntries(
-        data.features.filter(f => f.selected).map(feature => [
+        (data.features || []).filter(f => f.selected).map(feature => [
           feature.id,
           {
             input: 0,
@@ -1016,11 +1118,11 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
   };
 
   const toggleIdentifierValue = (identifierId: string, valueId: string) => {
-    const updatedIdentifiers = data.identifiers.map(identifier => {
+    const updatedIdentifiers = (data.identifiers || []).map(identifier => {
       if (identifier.id === identifierId) {
         return {
           ...identifier,
-          values: identifier.values.map(value => 
+          values: (identifier.values || []).map(value => 
             value.id === valueId ? { ...value, checked: !value.checked } : value
           )
         };
@@ -1041,24 +1143,24 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
   };
 
   const selectAllFeatures = () => {
-    const updatedFeatures = data.features.map(feature => ({ ...feature, selected: true }));
+    const updatedFeatures = (data.features || []).map(feature => ({ ...feature, selected: true }));
     onDataChange({ features: updatedFeatures });
   };
 
   const deselectAllFeatures = () => {
-    const updatedFeatures = data.features.map(feature => ({ ...feature, selected: false }));
+    const updatedFeatures = (data.features || []).map(feature => ({ ...feature, selected: false }));
     onDataChange({ features: updatedFeatures });
   };
 
   const toggleOutput = (outputId: string) => {
-    const updatedOutputs = data.outputs.map(output =>
+    const updatedOutputs = (data.outputs || []).map(output =>
       output.id === outputId ? { ...output, selected: !output.selected } : output
     );
     onDataChange({ outputs: updatedOutputs });
   };
 
   const toggleFeature = (featureId: string) => {
-    const updatedFeatures = data.features.map(feature =>
+    const updatedFeatures = (data.features || []).map(feature =>
       feature.id === featureId ? { ...feature, selected: !feature.selected } : feature
     );
     onDataChange({ features: updatedFeatures });
@@ -1069,7 +1171,7 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
   };
 
   // Filter identifiers to only show those with unique values > 1 (clustering-style)
-  const filteredIdentifiers = data.identifiers.filter(identifier => {
+        const filteredIdentifiers = (data.identifiers || []).filter(identifier => {
     const count = uniqueValues[identifier.id]?.length || 0;
     return count > 1;
   });
@@ -1083,7 +1185,7 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
   });
 
   return (
-    <div className="h-full">
+    <div className="h-full flex flex-col">
       <ScrollArea className="flex-1 p-4">
         <div className="space-y-3">
 
@@ -1120,7 +1222,7 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
                             <div className="flex items-center space-x-2">
                               <Checkbox 
                                 id={`select-all-${identifier.id}`}
-                                checked={identifier.values.every(value => value.checked)}
+                                checked={(identifier.values || []).every(value => value.checked)}
                                 onCheckedChange={(checked) => {
                                   if (checked === true) {
                                     selectAllIdentifierValues(identifier.id);
@@ -1132,7 +1234,7 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
                                 ref={(el) => {
                                   if (el) {
                                     // Set indeterminate state when some items are selected
-                                    (el as HTMLInputElement).indeterminate = identifier.values.some(value => value.checked) && !identifier.values.every(value => value.checked);
+                                    (el as HTMLInputElement).indeterminate = (identifier.values || []).some(value => value.checked) && !(identifier.values || []).every(value => value.checked);
                                   }
                                 }}
                               />
@@ -1273,13 +1375,16 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
                   </div>
                   
                                     {/* ✅ RESTORED: Manual Refresh Button */}
-                  <div className="pt-2">
+                  <div className="pt-2 space-y-2">
                     <Button
                       onClick={handleManualRefresh}
                       variant="outline"
                       size="sm"
                       className="w-full"
                       disabled={!data.identifiers?.length || !data.combinations?.length}
+                      title={(!data.identifiers?.length || !data.combinations?.length) ? 
+                        `Button disabled: ${!data.identifiers?.length ? 'No identifiers' : ''} ${!data.combinations?.length ? 'No combinations' : ''}` : 
+                        'Click to refresh reference values'}
                     >
                       <RefreshCw className="h-4 w-4 mr-2" />
                       Refresh Reference Values
@@ -1310,7 +1415,7 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
                   <div className="flex items-center space-x-2">
                     <Checkbox 
                       id="select-all-features"
-                      checked={data.features.every(feature => feature.selected)}
+                      checked={(data.features || []).every(feature => feature.selected)}
                       onCheckedChange={(checked) => {
                         if (checked === true) {
                           selectAllFeatures();
@@ -1322,7 +1427,7 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
                       ref={(el) => {
                         if (el) {
                           // Set indeterminate state when some features are selected
-                          (el as HTMLInputElement).indeterminate = data.features.some(feature => feature.selected) && !data.features.every(feature => feature.selected);
+                          (el as HTMLInputElement).indeterminate = (data.features || []).some(feature => feature.selected) && !(data.features || []).every(feature => feature.selected);
                         }
                       }}
                     />
@@ -1548,7 +1653,7 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
                                           onChange={() => {
                                             if (view.identifierOrder.includes(identifier.id)) {
                                               // Remove identifier from view
-                                              const newOrder = view.identifierOrder.filter(id => id !== identifier.id);
+                                              const newOrder = (view.identifierOrder || []).filter(id => id !== identifier.id);
                                               const newSelectedIdentifiers = { ...view.selectedIdentifiers };
                                               delete newSelectedIdentifiers[identifier.id];
                                               
@@ -1605,7 +1710,7 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
                                 >
                                   <div className="space-y-2">
                                     {view.identifierOrder.map((identifierId, index) => {
-                                      const identifier = data.identifiers.find(id => id.id === identifierId);
+                                      const identifier = (data.identifiers || []).find(id => id.id === identifierId);
                                       if (!identifier) return null;
                                       
                                       return (
@@ -1642,6 +1747,8 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
           </Card>
         </div>
       </ScrollArea>
+      
+
     </div>
   );
 };

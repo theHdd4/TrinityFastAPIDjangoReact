@@ -1,5 +1,5 @@
-import React, { useEffect, useRef } from 'react';
-import * as d3 from 'd3';
+import React from 'react';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, ResponsiveContainer, Legend, Tooltip } from 'recharts';
 
 interface ScenarioData {
   identifiers: Record<string, string>;
@@ -7,162 +7,64 @@ interface ScenarioData {
   pct_uplift: number;
   combinationLabel: string;
   run_id: string;
+  baseline?: number;
+  delta?: number;
+  features?: Record<string, any>;
 }
 
 interface ScenarioResultsChartProps {
   data: ScenarioData[];
   width?: number;
   height?: number;
+  viewMode?: 'hierarchy' | 'flat';
+  viewIdentifiers?: Record<string, string[]>;
 }
 
 export const ScenarioResultsChart: React.FC<ScenarioResultsChartProps> = ({ 
   data, 
   width = 800, 
-  height = 400 
+  height = 400,
+  viewMode = 'hierarchy',
+  viewIdentifiers
 }) => {
-  const svgRef = useRef<SVGSVGElement>(null);
+  // Transform data for Recharts format
+  const chartData = data.map(item => ({
+    name: item.combinationLabel,
+    baseline: item.baseline || 0,
+    scenario: item.prediction,
+    uplift: item.pct_uplift,
+    delta: item.delta || 0
+  }));
 
-  useEffect(() => {
-    if (!data || data.length === 0 || !svgRef.current) return;
-
-    // Clear previous chart
-    d3.select(svgRef.current).selectAll("*").remove();
-
-    // Set up dimensions and margins
-    const margin = { top: 60, right: 30, bottom: 120, left: 80 };
-    const chartWidth = width - margin.left - margin.right;
-    const chartHeight = height - margin.top - margin.bottom;
-
-    // Create SVG
-    const svg = d3.select(svgRef.current)
-      .attr("width", width)
-      .attr("height", height);
-
-    // Create chart group
-    const chartGroup = svg.append("g")
-      .attr("transform", `translate(${margin.left},${margin.top})`);
-
-    // Set up scales
-    const xScale = d3.scaleBand()
-      .domain(data.map(d => d.combinationLabel))
-      .range([0, chartWidth])
-      .padding(0.2);
-
-    const yScale = d3.scaleLinear()
-      .domain([0, d3.max(data, d => d.prediction) || 0])
-      .nice()
-      .range([chartHeight, 0]);
-
-    // Create color scale based on uplift - simple conditional colors
-    const getBarColor = (uplift: number) => {
-      if (uplift > 0) return "#22c55e"; // Green for positive
-      if (uplift < 0) return "#ef4444"; // Red for negative  
-      return "#eab308"; // Yellow for zero/neutral
-    };
-
-    // Add bars
-    const bars = chartGroup.selectAll(".bar")
-      .data(data)
-      .enter()
-      .append("rect")
-      .attr("class", "bar")
-      .attr("x", d => xScale(d.combinationLabel) || 0)
-      .attr("y", d => yScale(d.prediction))
-      .attr("width", xScale.bandwidth())
-      .attr("height", d => chartHeight - yScale(d.prediction))
-      .attr("fill", d => getBarColor(d.pct_uplift))
-      .attr("stroke", "#333")
-      .attr("stroke-width", 1)
-      .style("cursor", "pointer");
-
-    // Add hover effects
-    bars.on("mouseover", function(event, d) {
-      d3.select(this)
-        .attr("stroke-width", 2)
-        .attr("stroke", "#000");
+  // Custom tooltip content
+  const CustomTooltip = ({ active, payload, label }: any) => {
+    if (active && payload && payload.length) {
+      const baselineData = payload.find((p: any) => p.dataKey === 'baseline');
+      const scenarioData = payload.find((p: any) => p.dataKey === 'scenario');
       
-      // Show tooltip
-      const tooltip = d3.select("body").append("div")
-        .attr("class", "d3-tooltip")
-        .style("position", "absolute")
-        .style("background", "rgba(0, 0, 0, 0.8)")
-        .style("color", "white")
-        .style("padding", "8px")
-        .style("border-radius", "4px")
-        .style("font-size", "12px")
-        .style("pointer-events", "none")
-        .style("z-index", "1000");
-
-      tooltip.html(`
-        <div><strong>${d.combinationLabel}</strong></div>
-        <div>Prediction: ${typeof d.prediction === 'number' ? d.prediction.toLocaleString() : d.prediction}</div>
-        <div>Uplift: ${typeof d.pct_uplift === 'number' ? d.pct_uplift.toFixed(2) : d.pct_uplift}%</div>
-        <div>Combination: ${d.combinationLabel}</div>
-      `)
-        .style("left", (event.pageX + 10) + "px")
-        .style("top", (event.pageY - 10) + "px");
-    })
-    .on("mouseout", function() {
-      d3.select(this)
-        .attr("stroke-width", 1)
-        .attr("stroke", "#333");
-      
-      d3.selectAll(".d3-tooltip").remove();
-    });
-
-    // Add percentage uplift labels on top of bars
-    chartGroup.selectAll(".uplift-label")
-      .data(data)
-      .enter()
-      .append("text")
-      .attr("class", "uplift-label")
-      .attr("x", d => (xScale(d.combinationLabel) || 0) + xScale.bandwidth() / 2)
-      .attr("y", d => yScale(d.prediction) - 5)
-      .attr("text-anchor", "middle")
-      .style("font-size", "11px")
-      .style("font-weight", "bold")
-      .style("fill", "#333")
-      .text(d => {
-        const uplift = typeof d.pct_uplift === 'number' ? d.pct_uplift : 0;
-        return `${uplift > 0 ? '+' : ''}${uplift.toFixed(1)}%`;
-      });
-
-    // Add prediction value labels on bars
-    chartGroup.selectAll(".value-label")
-      .data(data)
-      .enter()
-      .append("text")
-      .attr("class", "value-label")
-      .attr("x", d => (xScale(d.combinationLabel) || 0) + xScale.bandwidth() / 2)
-      .attr("y", d => yScale(d.prediction) + (chartHeight - yScale(d.prediction)) / 2)
-      .attr("text-anchor", "middle")
-      .style("font-size", "10px")
-      .style("font-weight", "bold")
-      .style("fill", "white")
-      .style("text-shadow", "1px 1px 1px rgba(0,0,0,0.7)")
-      .text(d => d.prediction.toLocaleString());
-
-    // Add X axis (without labels)
-    chartGroup.append("g")
-      .attr("transform", `translate(0,${chartHeight})`)
-      .call(d3.axisBottom(xScale).tickFormat(() => "")); // Remove X-axis labels
-
-    // Add Y axis (without label)
-    chartGroup.append("g")
-      .call(d3.axisLeft(yScale).tickFormat(d3.format(".2s")));
-
-    // Add title
-    svg.append("text")
-      .attr("x", width / 2)
-      .attr("y", margin.top / 2)
-      .attr("text-anchor", "middle")
-      .style("font-size", "16px")
-      .style("font-weight", "bold")
-      .text("Scenario Results - Individual Predictions");
-
-    // Remove legend - keeping color scale for bars but removing the visual legend
-
-  }, [data, width, height]);
+      return (
+        <div className="bg-white p-3 border border-gray-200 rounded-lg shadow-lg">
+          <p className="font-semibold text-gray-800 mb-2">{label}</p>
+          {baselineData && (
+            <p className="text-blue-600 text-sm">
+              Baseline: {baselineData.value?.toLocaleString() || 'N/A'}
+            </p>
+          )}
+          {scenarioData && (
+            <p className="text-green-600 text-sm">
+              Scenario: {scenarioData.value?.toLocaleString() || 'N/A'}
+            </p>
+          )}
+          {scenarioData && baselineData && (
+            <p className="text-gray-600 text-sm">
+              Uplift: {((scenarioData.value - baselineData.value) / baselineData.value * 100).toFixed(2)}%
+            </p>
+          )}
+        </div>
+      );
+    }
+    return null;
+  };
 
   if (!data || data.length === 0) {
     return (
@@ -177,7 +79,96 @@ export const ScenarioResultsChart: React.FC<ScenarioResultsChartProps> = ({
 
   return (
     <div className="w-full">
-      <svg ref={svgRef} className="border border-gray-200 rounded-lg bg-white"></svg>
+      <div className="mb-4">
+        <h3 className="text-lg font-semibold text-gray-800 text-center">
+          {viewMode === 'hierarchy' ? 'Individual Results' : 'Aggregated Results'}
+        </h3>
+      </div>
+      
+      <ResponsiveContainer width="100%" height={height}>
+        <BarChart 
+          data={chartData} 
+          margin={{ top: 20, right: 30, left: 20, bottom: 60 }}
+        >
+          <defs>
+            {/* Baseline bar gradient */}
+            <linearGradient id="baselineGradient" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#3b82f6" stopOpacity={1}/>
+              <stop offset="100%" stopColor="#1d4ed8" stopOpacity={0.8}/>
+            </linearGradient>
+            
+            {/* Scenario bar gradient */}
+            <linearGradient id="scenarioGradient" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#22c55e" stopOpacity={1}/>
+              <stop offset="100%" stopColor="#16a34a" stopOpacity={0.8}/>
+            </linearGradient>
+            
+            {/* Shadow filter */}
+            <filter id="barShadow" x="-50%" y="-50%" width="200%" height="200%">
+              <feDropShadow dx="0" dy="4" stdDeviation="4" floodOpacity="0.2" floodColor="#000"/>
+            </filter>
+          </defs>
+          
+          <CartesianGrid 
+            strokeDasharray="3 3" 
+            stroke="#e2e8f0" 
+            strokeOpacity={0.6}
+            vertical={false}
+          />
+          
+          <XAxis 
+            dataKey="name" 
+            stroke="#64748b"
+            fontSize={11}
+            fontWeight={500}
+            tickLine={false}
+            axisLine={false}
+            tickMargin={8}
+            angle={-45}
+            textAnchor="end"
+            height={80}
+          />
+          
+          <YAxis 
+            stroke="#64748b"
+            fontSize={11}
+            fontWeight={500}
+            tickLine={false}
+            axisLine={false}
+            tickMargin={8}
+            width={60}
+            tickFormatter={(value) => value.toLocaleString()}
+          />
+          
+          <Tooltip content={<CustomTooltip />} />
+          
+          <Legend 
+            verticalAlign="top" 
+            height={36}
+            wrapperStyle={{
+              paddingBottom: '10px'
+            }}
+          />
+          
+          {/* Baseline bars */}
+          <Bar 
+            dataKey="baseline" 
+            fill="url(#baselineGradient)"
+            radius={[4, 4, 0, 0]}
+            filter="url(#barShadow)"
+            name="Baseline"
+          />
+          
+          {/* Scenario bars */}
+          <Bar 
+            dataKey="scenario" 
+            fill="url(#scenarioGradient)"
+            radius={[4, 4, 0, 0]}
+            filter="url(#barShadow)"
+            name="Scenario"
+          />
+        </BarChart>
+      </ResponsiveContainer>
     </div>
   );
 };

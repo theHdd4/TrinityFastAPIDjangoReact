@@ -469,49 +469,104 @@ export const DEFAULT_CLUSTERING_SETTINGS: ClusteringSettings = {
   }
 };
 
+// ✅ UPDATED: New nested scenario structure for better isolation
 export interface ScenarioPlannerSettings {
-  selectedScenario: string;
+  // ✅ NEW: Scenario-specific data structure
   allScenarios: string[];
-  identifiers: Array<{
-    id: string;
-    name: string;
-    values: Array<{
-      id: string;
-      name: string;
-      checked: boolean;
-    }>;
-  }>;
-  features: Array<{
-    id: string;
-    name: string;
-    selected: boolean;
-  }>;
-  outputs: Array<{
-    id: string;
-    name: string;
-    selected: boolean;
-  }>;
-  combinations: Array<{
-    id: string;
-    identifiers: string[];
-    values: Record<string, {
-      input: number;
-      change: number;
-      reference: number;
-    }>;
-  }>;
+  selectedScenario: string;
+  scenarios: {
+    [scenarioId: string]: {
+      identifiers: Array<{
+        id: string;
+        name: string;
+        values: Array<{
+          id: string;
+          name: string;
+          checked: boolean;
+        }>;
+      }>;
+      features: Array<{
+        id: string;
+        name: string;
+        selected: boolean;
+      }>;
+      outputs: Array<{
+        id: string;
+        name: string;
+        selected: boolean;
+      }>;
+      combinations: Array<{
+        id: string;
+        identifiers: string[];
+      }>;
+      referenceMethod: 'period-mean' | 'mean' | 'period-median' | 'median';
+      referencePeriod: {
+        from: string;
+        to: string;
+      };
+      resultViews: Array<{
+        id: string;
+        name: string;
+        selectedCombinations: string[];
+      }>;
+      selectedView: string;
+      combinationInputs?: {
+        [combinationId: string]: {
+          [featureId: string]: {
+            input: string;
+            change: string;
+          };
+        };
+      };
+      originalReferenceValues?: {
+        [combinationId: string]: {
+          [featureId: string]: number;
+        };
+      };
+      scenarioResults?: {
+        runId: string;
+        viewId: string;
+        viewName: string;
+        datasetUsed: string;
+        createdAt: string;
+        modelsProcessed: number;
+        flat: any;
+        hierarchy: any[];
+        individuals: any[];
+      };
+      // ✅ NEW: Per-view results storage
+      viewResults?: {
+        [viewId: string]: {
+          runId: string;
+          viewId: string;
+          viewName: string;
+          datasetUsed: string;
+          createdAt: string;
+          modelsProcessed: number;
+          flat: any;
+          hierarchy: any[];
+          individuals: any[];
+        };
+      };
+      aggregatedViews?: Array<{
+        id: string;
+        name: string;
+        identifierOrder: string[];
+        selectedIdentifiers: Record<string, string[]>;
+      }>;
+    };
+  };
+  
+  // Global settings (shared across all scenarios)
   referenceMethod: 'period-mean' | 'mean' | 'period-median' | 'median';
   referencePeriod: {
     from: string;
     to: string;
   };
-  resultViews: Array<{
-    id: string;
-    name: string;
-    selectedCombinations: string[];
-  }>;
   selectedResultScenario: string;
   selectedView: string;
+  
+  // Backend data (shared across all scenarios)
   scenarioData?: {
     selectedDataFile?: string;
     objectName?: string;
@@ -525,6 +580,7 @@ export interface ScenarioPlannerSettings {
   };
   backendIdentifiers?: any;
   backendFeatures?: any;
+  
   // ✅ NEW: Properties for auto-refresh functionality
   referenceValuesNeedRefresh?: boolean;
   lastReferenceMethod?: 'period-mean' | 'mean' | 'period-median' | 'median';
@@ -532,93 +588,95 @@ export interface ScenarioPlannerSettings {
     from: string;
     to: string;
   };
-  // ✅ NEW: Properties for scenario results
-  scenarioResults?: {
-    runId: string;
-    viewId: string;
-    viewName: string;
-    datasetUsed: string;
-    createdAt: string;
-    modelsProcessed: number;
-    flat: any;
-    hierarchy: any[];
-    individuals: any[];
+  
+  // ✅ NEW: Property to control refresh functionality
+  refreshEnabled?: boolean;
+  
+  // ✅ NEW: Backward compatibility properties (computed from current scenario)
+  // These prevent infinite loops by providing the old flat structure
+  // NOTE: These are NOT stored in the store - they are computed on-demand
+  identifiers?: Array<{
+    id: string;
+    name: string;
+    values: Array<{
+      id: string;
+      name: string;
+      checked: boolean;
+    }>;
+  }>;
+  features?: Array<{
+    id: string;
+    name: string;
+    selected: boolean;
+  }>;
+  outputs?: Array<{
+    id: string;
+    name: string;
+    selected: boolean;
+  }>;
+  combinations?: Array<{
+    id: string;
+    identifiers: string[];
+  }>;
+  resultViews?: Array<{
+    id: string;
+    name: string;
+    selectedCombinations: string[];
+  }>;
+  combinationInputs?: {
+    [combinationId: string]: {
+      [featureId: string]: {
+        input: string;
+        change: string;
+      };
+    };
   };
-  // ✅ NEW: Properties for aggregated views (identifier filtering)
+  originalReferenceValues?: {
+    [combinationId: string]: {
+      [featureId: string]: number;
+    };
+  };
   aggregatedViews?: Array<{
     id: string;
     name: string;
     identifierOrder: string[];
     selectedIdentifiers: Record<string, string[]>;
   }>;
+  
+  // Legacy properties for backward compatibility
+  scenarioResults?: any;
 }
 
 export const DEFAULT_SCENARIO_PLANNER_SETTINGS: ScenarioPlannerSettings = {
+  allScenarios: ['scenario-1'],
   selectedScenario: 'scenario-1',
-  allScenarios: ['scenario-1', 'scenario-2'],
-  identifiers: [
-    {
-      id: 'identifier-1',
-      name: 'Identifier 1',
-      values: [
-        { id: '1a', name: 'Identifier 1-A', checked: true },
-        { id: '1b', name: 'Identifier 1-B', checked: false },
-        { id: '1c', name: 'Identifier 1-C', checked: false },
-      ]
-    },
-    {
-      id: 'identifier-2',
-      name: 'Identifier 2',
-      values: [
-        { id: '2a', name: 'Identifier 2-A', checked: true },
-        { id: '2b', name: 'Identifier 2-B', checked: false },
-        { id: '2c', name: 'Identifier 2-C', checked: false },
-      ]
-    },
-    {
-      id: 'identifier-3',
-      name: 'Identifier 3',
-      values: [
-        { id: '3a', name: 'Identifier 3-A', checked: false },
-        { id: '3b', name: 'Identifier 3-B', checked: false },
-        { id: '3c', name: 'Identifier 3-C', checked: false },
-      ]
-    },
-    {
-      id: 'identifier-4',
-      name: 'Identifier 4',
-      values: [
-        { id: '4a', name: 'Identifier 4-A', checked: false },
-        { id: '4b', name: 'Identifier 4-B', checked: false },
-        { id: '4c', name: 'Identifier 4-C', checked: false },
-      ]
+  scenarios: {
+    'scenario-1': {
+      identifiers: [], // Will be populated from backend
+      features: [], // Will be populated from backend
+      outputs: [], // Will be populated from backend
+      combinations: [], // Will be generated from identifiers
+      referenceMethod: 'period-mean',
+      referencePeriod: { from: '01-JAN-2020', to: '30-MAR-2024' },
+      resultViews: [
+        { id: 'view-1', name: 'View 1', selectedCombinations: [] },
+        { id: 'view-2', name: 'View 2', selectedCombinations: [] },
+        { id: 'view-3', name: 'View 3', selectedCombinations: [] }
+      ],
+      selectedView: 'view-1',
+      combinationInputs: {},
+      originalReferenceValues: {},
+      aggregatedViews: [] // Will be created from backend identifiers
     }
-  ],
-  features: [
-    { id: 'feature-1', name: 'Feature 1', selected: true },
-    { id: 'feature-2', name: 'Feature 2', selected: true },
-    { id: 'feature-3', name: 'Feature 3', selected: true },
-    { id: 'feature-4', name: 'Feature 4', selected: true },
-    { id: 'feature-5', name: 'Feature 5', selected: false },
-    { id: 'feature-6', name: 'Feature 6', selected: false },
-    { id: 'feature-7', name: 'Feature 7', selected: false },
-  ],
-  outputs: [
-    { id: 'output-1', name: 'Output 1', selected: true },
-    { id: 'output-2', name: 'Output 2', selected: true },
-    { id: 'output-3', name: 'Output 3', selected: true },
-    { id: 'output-4', name: 'Output 4', selected: true },
-  ],
-  combinations: [],
+  },
+  
+  // Global settings (shared across all scenarios)
   referenceMethod: 'period-mean',
   referencePeriod: { from: '01-JAN-2020', to: '30-MAR-2024' },
-  resultViews: [
-    { id: 'view-1', name: 'View 1', selectedCombinations: [] },
-    { id: 'view-2', name: 'View 2', selectedCombinations: [] },
-    { id: 'view-3', name: 'View 3', selectedCombinations: [] },
-  ],
   selectedResultScenario: 'scenario-1',
   selectedView: 'view-1',
+  
+  // Backend data (shared across all scenarios)
   scenarioData: {
     selectedDataFile: '',
     objectName: '',
@@ -630,14 +688,14 @@ export const DEFAULT_SCENARIO_PLANNER_SETTINGS: ScenarioPlannerSettings = {
     outputPath: '',
     outputFilename: ''
   },
+  
   // ✅ NEW: Default values for auto-refresh functionality
   referenceValuesNeedRefresh: false,
   lastReferenceMethod: 'period-mean',
   lastReferencePeriod: { from: '01-JAN-2020', to: '30-MAR-2024' },
-  // ✅ NEW: Default values for aggregated views - will be populated when backend data loads
-  aggregatedViews: [],
-  // ✅ NEW: Default values for scenario results
-  scenarioResults: undefined
+  
+  // ✅ NEW: Default value for refresh functionality
+  refreshEnabled: false
 };
 
 export interface DroppedAtom {
@@ -677,7 +735,6 @@ export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
     console.log('=== Store: updateAtomSettings called ===');
     console.log('Store: atomId:', atomId);
     console.log('Store: settings to update:', settings);
-    console.log('Store: resultViews in settings:', settings.resultViews);
     
     set((state) => {
       const updatedCards = state.cards.map((card) => ({
@@ -688,38 +745,23 @@ export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
                 ...atom, 
                 settings: { 
                   ...(atom.settings || {}), 
-                  ...settings,
-                  // Ensure resultViews is properly updated
-                  ...(settings.resultViews && { resultViews: settings.resultViews })
+                  ...settings
                 } 
               }
             : atom,
         ),
       }));
       
-      // Debug: Log the updated atom settings
-      const updatedAtom = updatedCards.flatMap(card => card.atoms).find(atom => atom.id === atomId);
-      console.log('Store: Updated atom settings:', updatedAtom?.settings);
-      console.log('Store: Updated resultViews:', updatedAtom?.settings?.resultViews);
-      console.log('=== Store: updateAtomSettings completed ===');
-      
       return { cards: updatedCards };
     });
   },
-  getAtom: (atomId) => {
-    for (const card of get().cards) {
-      const atom = card.atoms.find((a) => a.id === atomId);
-      if (atom) return atom;
-    }
-    return undefined;
+
+  getAtom: (atomId: string) => {
+    const state = get();
+    return state.cards.flatMap(card => card.atoms).find(atom => atom.id === atomId);
   },
+
   reset: () => {
     set({ cards: [] });
   },
 }));
-
-
-
-
-
-
