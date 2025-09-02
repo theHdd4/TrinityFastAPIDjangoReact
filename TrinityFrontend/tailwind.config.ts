@@ -126,7 +126,7 @@ export default {
                                 'dot-travel': {
                                         '0%': {
                                                 top: '-3rem',
-                                                left: '-2.25rem'
+                                                left: '-1.5rem'
                                         },
                                         '30%': {
                                                 top: '50%',
