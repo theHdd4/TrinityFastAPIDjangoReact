@@ -55,6 +55,17 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
     setFileAssignments(settings.fileMappings || {});
   }, [settings.fileMappings]);
 
+  useEffect(() => {
+    if (uploadedFiles.length === 0 && (settings.uploadedFiles?.length || 0) > 0) {
+      const files: UploadedFileRef[] = (settings.uploadedFiles || []).map(name => ({
+        name,
+        path: settings.filePathMap?.[name] || '',
+        size: 0,
+      }));
+      setUploadedFiles(files);
+    }
+  }, [settings.uploadedFiles, settings.filePathMap, uploadedFiles.length]);
+
   const handleFileUpload = async (files: File[]) => {
     const uploaded: UploadedFileRef[] = [];
     for (const file of files) {
