@@ -22,7 +22,7 @@ const LogoText: React.FC<LogoTextProps> = ({ className = '', titleClassName }) =
       </h1>
       <div className="h-0.5 bg-trinity-yellow mt-1 w-full" />
     </div>
-    <div className="overflow-hidden w-full mt-1">
+    <div className="overflow-hidden w-full mt-px">
       <span className="font-mono text-xs text-black/60 leading-tight whitespace-nowrap inline-block animate-slide-in-left">
         A Quant Matrix AI Experience
       </span>
