@@ -8,8 +8,8 @@ import logging
 # Configure logging
 logger = logging.getLogger(__name__)
 
-MONGO_URI = os.getenv("MONGO_URI", "mongodb://mongo:27017/trinity")
-MONGO_DB = os.getenv("MONGO_DB", "trinity")
+MONGO_URI = os.getenv("MONGO_URI", "mongodb://admin_dev:pass_dev@10.2.1.65:9005/?authSource=admin")
+MONGO_DB = os.getenv("MONGO_DB", "trinity_prod")
 client = AsyncIOMotorClient(MONGO_URI)
 db = client[MONGO_DB]
 logger.info(f"🔍 DEBUG: MONGO_URI = {MONGO_URI}")
@@ -39,7 +39,7 @@ async def save_build_config(
         logger.info(f"🔍 DEBUG: document_id = {document_id}")
         
         # Check if document already exists
-        existing_doc = await client["trinity_prod"]["build-model_featurebased_configs"].find_one({"_id": document_id})
+        existing_doc = await db["build-model_featurebased_configs"].find_one({"_id": document_id})
         
         if existing_doc:
             # Merge new data with existing data instead of replacing
@@ -74,7 +74,7 @@ async def save_build_config(
             logger.info(f"🔍 DEBUG: Merged document = {merged_document}")
             
             # Update the existing document
-            result = await client["trinity_prod"]["build-model_featurebased_configs"].replace_one(
+            result = await db["build-model_featurebased_configs"].replace_one(
                 {"_id": document_id},
                 merged_document
             )
@@ -99,7 +99,7 @@ async def save_build_config(
             logger.info(f"🔍 DEBUG: New document to save = {document}")
             
             # Insert new document
-            result = await client["trinity_prod"]["build-model_featurebased_configs"].insert_one(document)
+            result = await db["build-model_featurebased_configs"].insert_one(document)
             
             operation = "inserted"
         
@@ -125,7 +125,7 @@ async def get_build_config_from_mongo(client_name: str, app_name: str, project_n
     """Retrieve saved build configuration."""
     try:
         document_id = f"{client_name}/{app_name}/{project_name}"
-        result = await client["trinity_prod"]["build-model_featurebased_configs"].find_one({"_id": document_id})
+        result = await db["build-model_featurebased_configs"].find_one({"_id": document_id})
         return result
     except Exception as e:
         logger.error(f"MongoDB read error for build-model_featurebased_configs: {e}")

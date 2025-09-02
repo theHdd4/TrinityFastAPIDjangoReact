@@ -1582,28 +1582,11 @@ async def save_scope_data(
 async def test_mongo_connection():
     """Test MongoDB connection and list databases"""
     try:
-        from .mongodb_saver import client
+        from .mongodb_saver import test_mongodb_connection
         logger.info(f"🔍 DEBUG: Testing MongoDB connection")
         
-        # List all databases
-        databases = await client.list_database_names()
-        logger.info(f"🔍 DEBUG: Available databases: {databases}")
-        
-        # Check if trinity_prod exists
-        if "trinity_prod" in databases:
-            logger.info(f"🔍 DEBUG: trinity_prod database exists")
-            # List collections in trinity_prod
-            collections = await client["trinity_prod"].list_collection_names()
-            logger.info(f"🔍 DEBUG: Collections in trinity_prod: {collections}")
-        else:
-            logger.warning(f"🔍 DEBUG: trinity_prod database does not exist")
-        
-        return {
-            "success": True,
-            "databases": databases,
-            "trinity_prod_exists": "trinity_prod" in databases,
-            "collections_in_trinity_prod": collections if "trinity_prod" in databases else []
-        }
+        result = await test_mongodb_connection()
+        return result
         
     except Exception as e:
         logger.error(f"Error testing MongoDB connection: {str(e)}")
