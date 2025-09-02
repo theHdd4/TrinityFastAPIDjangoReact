@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     # =============================================================================
     mongo_uri: str = os.getenv(
         "SCOPE_SELECTOR_MONGO_URI",
-        os.getenv("MONGO_URI", "mongodb://mongo:27017/trinity")
+        os.getenv("MONGO_URI", "mongodb://admin_dev:pass_dev@10.2.1.65:9005/?authSource=admin")
     )
     mongo_source_database: str = "validator_atoms_db"
     mongo_scope_database: str = "Scope_selection"

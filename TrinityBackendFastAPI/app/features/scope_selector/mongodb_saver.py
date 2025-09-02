@@ -8,8 +8,9 @@ import logging
 # Configure logging
 logger = logging.getLogger(__name__)
 
-MONGO_URI = os.getenv("MONGO_URI", "mongodb://mongo:27017/trinity")
-MONGO_DB = os.getenv("MONGO_DB", "trinity")
+# Use the same MongoDB URI as column classifier for consistency
+MONGO_URI = os.getenv("MONGO_URI", "mongodb://admin_dev:pass_dev@10.2.1.65:9005/?authSource=admin")
+MONGO_DB = os.getenv("MONGO_DB", "trinity_prod")  # Use trinity_prod database like column classifier
 client = AsyncIOMotorClient(MONGO_URI)
 db = client[MONGO_DB]
 logger.info(f"🔍 DEBUG: MONGO_URI = {MONGO_URI}")
@@ -52,11 +53,11 @@ async def save_scope_config(
         
         logger.info(f"🔍 DEBUG: document to save = {document}")
         logger.info(f"🔍 DEBUG: MongoDB client = {client}")
-        logger.info(f"🔍 DEBUG: Database = trinity_prod")
+        logger.info(f"🔍 DEBUG: Database = {MONGO_DB}")
         logger.info(f"🔍 DEBUG: Collection = scopeselector_configs")
         
-        # Save to scopeselector_configs collection in trinity_prod database (same as createandtransform_configs)
-        result = await client["trinity_prod"]["scopeselector_configs"].replace_one(
+        # Save to scopeselector_configs collection in trinity_prod database (same as column classifier)
+        result = await db["scopeselector_configs"].replace_one(
             {"_id": document_id},
             document,
             upsert=True
@@ -84,8 +85,54 @@ async def get_scope_config_from_mongo(client_name: str, app_name: str, project_n
     """Retrieve saved scope configuration."""
     try:
         document_id = f"{client_name}/{app_name}/{project_name}"
-        result = await client["trinity_prod"]["scopeselector_configs"].find_one({"_id": document_id})
+        result = await db["scopeselector_configs"].find_one({"_id": document_id})
         return result
     except Exception as e:
         logger.error(f"MongoDB read error for scopeselector_configs: {e}")
         return None
+
+async def test_mongodb_connection():
+    """Test MongoDB connection and return status"""
+    try:
+        # Test connection by listing databases
+        databases = await client.list_database_names()
+        logger.info(f"🔍 DEBUG: Available databases: {databases}")
+        
+        # Test access to trinity_prod database
+        if "trinity_prod" in databases:
+            collections = await db.list_collection_names()
+            logger.info(f"🔍 DEBUG: Collections in trinity_prod: {collections}")
+            
+            # Test write access by inserting a test document
+            test_doc = {"_id": "test_connection", "timestamp": datetime.utcnow()}
+            await db["scopeselector_configs"].replace_one(
+                {"_id": "test_connection"}, 
+                test_doc, 
+                upsert=True
+            )
+            logger.info("🔍 DEBUG: Test document inserted successfully")
+            
+            # Clean up test document
+            await db["scopeselector_configs"].delete_one({"_id": "test_connection"})
+            logger.info("🔍 DEBUG: Test document cleaned up")
+            
+            return {
+                "status": "success",
+                "message": "MongoDB connection and write access working",
+                "databases": databases,
+                "collections": collections
+            }
+        else:
+            return {
+                "status": "error",
+                "message": "trinity_prod database not found",
+                "databases": databases
+            }
+            
+    except Exception as e:
+        logger.error(f"❌ MongoDB connection test failed: {e}")
+        return {
+            "status": "error",
+            "message": f"MongoDB connection failed: {str(e)}",
+            "error": str(e)
+        }
