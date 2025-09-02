@@ -14,15 +14,15 @@ const LogoText: React.FC<LogoTextProps> = ({ className = '', titleClassName }) =
   >
     <div className="flex flex-col items-start w-fit">
       <h1
-        className={`font-mono font-bold text-3xl leading-none ${
+        className={`font-mono font-bold text-2xl leading-none ${
           titleClassName || 'text-black'
         }`.trim()}
       >
         Trinity
       </h1>
-      <div className="h-0.5 bg-trinity-yellow mt-0.5 w-full" />
+      <div className="h-0.5 bg-trinity-yellow mt-px w-full" />
     </div>
-    <div className="overflow-hidden mt-0.5 w-full">
+    <div className="overflow-hidden mt-px w-full">
       <span className="font-mono text-xs text-black/60 leading-none whitespace-nowrap inline-block animate-tagline-scroll">
         A Quant Matrix AI Experience
       </span>
