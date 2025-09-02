@@ -452,10 +452,14 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
             ? raw.map((c: any) => ({
                 id: c.id,
                 atoms: Array.isArray(c.atoms)
-                  ? c.atoms.map((a: any) => ({
-                      ...a,
-                      llm: a.llm || LLM_MAP[a.atomId],
-                    }))
+                  ? c.atoms.map((a: any) => {
+                      const info = allAtoms.find(at => at.id === a.atomId);
+                      return {
+                        ...a,
+                        llm: a.llm || LLM_MAP[a.atomId],
+                        color: a.color || info?.color || 'bg-gray-400',
+                      };
+                    })
                   : [],
                 isExhibited: !!c.isExhibited,
                 moleculeId: c.moleculeId,

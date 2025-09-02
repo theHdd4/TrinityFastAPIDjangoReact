@@ -1,16 +1,22 @@
 import { safeStringify } from './safeStringify';
 import { useExhibitionStore } from '@/components/ExhibitionMode/store/exhibitionStore';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
+import { atoms as allAtoms } from '@/components/AtomList/data';
 
 function stripCards(cards: any[]): any[] {
   return cards.map(card => ({
     ...card,
     atoms: card.atoms.map((atom: any) => {
+      const info = allAtoms.find(a => a.id === atom.atomId);
       if (atom.type === 'dataframe-operations' && atom.settings) {
         const { tableData, data, ...rest } = atom.settings;
-        return { ...atom, settings: rest };
+        return {
+          ...atom,
+          settings: rest,
+          color: atom.color || info?.color || 'bg-gray-400',
+        };
       }
-      return atom;
+      return { ...atom, color: atom.color || info?.color || 'bg-gray-400' };
     }),
   }));
 }
