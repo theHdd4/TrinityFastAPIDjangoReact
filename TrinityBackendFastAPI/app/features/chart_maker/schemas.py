@@ -219,3 +219,5 @@ class ChartResponse(BaseModel):
     chart_id: str
     chart_config: RechartsConfig
     data_summary: dict
+    file_name: Optional[str] = None
+    data_source: Optional[str] = None

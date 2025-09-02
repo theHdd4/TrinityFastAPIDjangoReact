@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { safeStringify } from '@/utils/safeStringify';
+import { sanitizeLabConfig } from '@/utils/projectStorage';
 import { Card, Card as AtomBox } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
@@ -27,10 +28,12 @@ import DataFrameOperationsAtom from '@/components/AtomList/atoms/dataframe-opera
 import ScopeSelectorAtom from '@/components/AtomList/atoms/scope-selector/ScopeSelectorAtom';
 import CreateColumnAtom from '@/components/AtomList/atoms/createcolumn/CreateColumnAtom';
 import GroupByAtom from '@/components/AtomList/atoms/groupby-wtg-avg/GroupByAtom';
+import CorrelationAtom from '@/components/AtomList/atoms/correlation/CorrelationAtom';
 import ChartMakerAtom from '@/components/AtomList/atoms/chart-maker/ChartMakerAtom';
 import BuildModelFeatureBasedAtom from '@/components/AtomList/atoms/build-model-feature-based/BuildModelFeatureBasedAtom';
 import ClusteringAtom from '@/components/AtomList/atoms/clustering/ClusteringAtom';
 import ScenarioPlannerAtom from '@/components/AtomList/atoms/scenario-planner/ScenarioPlannerAtom';
+import ExploreAtom from '@/components/AtomList/atoms/explore/ExploreAtom';
 import { fetchDimensionMapping } from '@/lib/dimensions';
 
 import {
@@ -38,13 +41,15 @@ import {
   LayoutCard,
   DroppedAtom,
   DEFAULT_TEXTBOX_SETTINGS,
-  DEFAULT_DATAUPLOAD_SETTINGS,
+  createDefaultDataUploadSettings,
   DEFAULT_FEATURE_OVERVIEW_SETTINGS,
   DEFAULT_DATAFRAME_OPERATIONS_SETTINGS,
   DEFAULT_CHART_MAKER_SETTINGS,
   DEFAULT_SCENARIO_PLANNER_SETTINGS,
   DataUploadSettings,
   ColumnClassifierColumn,
+  DEFAULT_EXPLORE_SETTINGS,
+  DEFAULT_EXPLORE_DATA,
 } from '../../store/laboratoryStore';
 import { deriveWorkflowMolecules, WorkflowMolecule } from './helpers';
 
@@ -467,7 +472,7 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
                   }
                 }
                 if (data.state && data.state.laboratory_config) {
-                  const cfg = data.state.laboratory_config;
+                  const cfg = sanitizeLabConfig(data.state.laboratory_config);
                   localStorage.setItem(STORAGE_KEY, safeStringify(cfg.cards));
                   localStorage.setItem('laboratory-config', safeStringify(cfg));
                   if (!storedAtoms && data.state.workflow_selected_atoms) {
@@ -551,10 +556,12 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
            atom.id === 'text-box'
              ? { ...DEFAULT_TEXTBOX_SETTINGS }
              : atom.id === 'data-upload-validate'
-             ? { ...DEFAULT_DATAUPLOAD_SETTINGS }
+             ? createDefaultDataUploadSettings()
              : atom.id === 'feature-overview'
              ? { ...DEFAULT_FEATURE_OVERVIEW_SETTINGS }
-             : atom.id === 'chart-maker'
+             : atom.id === 'explore'
+            ? { data: { ...DEFAULT_EXPLORE_DATA }, settings: { ...DEFAULT_EXPLORE_SETTINGS } }
+            : atom.id === 'chart-maker'
              ? { ...DEFAULT_CHART_MAKER_SETTINGS }
              : atom.id === 'scenario-planner'
              ? { ...DEFAULT_SCENARIO_PLANNER_SETTINGS }
@@ -618,9 +625,11 @@ const addNewCardWithAtom = (
       atomId === 'text-box'
         ? { ...DEFAULT_TEXTBOX_SETTINGS }
         : atomId === 'data-upload-validate'
-        ? { ...DEFAULT_DATAUPLOAD_SETTINGS }
+        ? createDefaultDataUploadSettings()
         : atomId === 'feature-overview'
         ? { ...DEFAULT_FEATURE_OVERVIEW_SETTINGS }
+        : atomId === 'explore'
+        ? { data: { ...DEFAULT_EXPLORE_DATA }, settings: { ...DEFAULT_EXPLORE_SETTINGS } }
         : atomId === 'chart-maker'
         ? { ...DEFAULT_CHART_MAKER_SETTINGS }
         : atomId === 'scenario-planner'
@@ -718,14 +727,18 @@ const handleAddDragLeave = (e: React.DragEvent) => {
          info.id === 'text-box'
            ? { ...DEFAULT_TEXTBOX_SETTINGS }
            : info.id === 'data-upload-validate'
-           ? { ...DEFAULT_DATAUPLOAD_SETTINGS }
+           ? createDefaultDataUploadSettings()
            : info.id === 'feature-overview'
            ? { ...DEFAULT_FEATURE_OVERVIEW_SETTINGS }
            : info.id === 'scenario-planner'
            ? { ...DEFAULT_SCENARIO_PLANNER_SETTINGS }
            : info.id === 'dataframe-operations'
            ? { ...DEFAULT_DATAFRAME_OPERATIONS_SETTINGS }
-           : undefined,
+           : info.id === 'chart-maker'
+          ? { ...DEFAULT_CHART_MAKER_SETTINGS }
+          : info.id === 'explore'
+          ? { data: { ...DEFAULT_EXPLORE_DATA }, settings: { ...DEFAULT_EXPLORE_SETTINGS } }
+          : undefined,
     };
     setLayoutCards(
       (Array.isArray(layoutCards) ? layoutCards : []).map(card =>
@@ -775,11 +788,12 @@ const handleAddDragLeave = (e: React.DragEvent) => {
     if (current) {
       try {
         const proj = JSON.parse(current);
+        const sanitized = sanitizeLabConfig({ cards: updated });
         await fetch(`${REGISTRY_API}/projects/${proj.id}/`, {
           method: 'PATCH',
           credentials: 'include',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ state: { laboratory_config: { cards: updated } } }),
+          body: JSON.stringify({ state: { laboratory_config: sanitized } }),
         });
       } catch {
         /* ignore */
@@ -1198,6 +1212,8 @@ const handleAddDragLeave = (e: React.DragEvent) => {
                         <FeatureOverviewAtom atomId={atom.id} />
                       ) : atom.atomId === 'clustering' ? (
                         <ClusteringAtom atomId={atom.id} />
+                      ) : atom.atomId === 'explore' ? (
+                        <ExploreAtom atomId={atom.id} />
                       ) : atom.atomId === 'chart-maker' ? (
                         <ChartMakerAtom atomId={atom.id} />
                       ) : atom.atomId === 'concat' ? (
@@ -1218,6 +1234,8 @@ const handleAddDragLeave = (e: React.DragEvent) => {
                         <ScenarioPlannerAtom atomId={atom.id} />
                        ) : atom.atomId === 'scope-selector' ? (
                         <ScopeSelectorAtom atomId={atom.id} />
+                      ) : atom.atomId === 'correlation' ? (
+                        <CorrelationAtom atomId={atom.id} />
                       ) : (
                         <div>
                           <h4 className="font-semibold text-gray-900 mb-1 text-sm">{atom.title}</h4>

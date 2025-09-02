@@ -5,6 +5,7 @@ import json
 import pandas as pd
 import io
 import os
+import openpyxl
 from app.core.utils import get_env_vars
 from pathlib import Path
 import re
@@ -137,6 +138,26 @@ MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY", "minio123")
 MINIO_BUCKET = os.getenv("MINIO_BUCKET", "trinity")
 
 
+CHUNK_ROWS = 10000
+
+
+def stream_excel(file_obj, chunk_rows: int = CHUNK_ROWS):
+    """Yield DataFrame chunks from an Excel file-like object."""
+    wb = openpyxl.load_workbook(file_obj, read_only=True, data_only=True)
+    ws = wb.active
+    rows = ws.iter_rows(values_only=True)
+    headers = next(rows, [])
+    chunk: list[list[Any]] = []
+    for row in rows:
+        chunk.append(list(row))
+        if len(chunk) == chunk_rows:
+            yield pd.DataFrame(chunk, columns=headers)
+            chunk = []
+    if chunk:
+        yield pd.DataFrame(chunk, columns=headers)
+    file_obj.seek(0)
+
+
 def _parse_numeric_id(value: str | int | None) -> int:
     """Return the numeric component of an ID string like "name_123"."""
     if value is None:
@@ -216,6 +237,21 @@ async def get_object_prefix(
     if include_env:
         return prefix, env, env_source
     return prefix
+
+
+def read_minio_object(object_name: str) -> bytes:
+    """Read an object from MinIO and return its bytes."""
+    client = get_client()
+    response = client.get_object(MINIO_BUCKET, object_name)
+    try:
+        data = response.read()
+    finally:
+        try:
+            response.close()
+            response.release_conn()
+        except Exception:
+            pass
+    return data
 
 
 @router.get("/get_object_prefix")
@@ -383,7 +419,37 @@ def load_existing_configs():
             print(f"⚠️ Failed to load config {config_file}: {str(e)}")
 
 
-            
+# Upload arbitrary file to MinIO and return its path
+@router.post("/upload-file")
+async def upload_file(
+    file: UploadFile = File(...),
+    client_id: str = Form(""),
+    app_id: str = Form(""),
+    project_id: str = Form(""),
+    client_name: str = Form(""),
+    app_name: str = Form(""),
+    project_name: str = Form("")
+):
+    if client_id:
+        os.environ["CLIENT_ID"] = client_id
+    if app_id:
+        os.environ["APP_ID"] = app_id
+    if project_id:
+        os.environ["PROJECT_ID"] = project_id
+    if client_name:
+        os.environ["CLIENT_NAME"] = client_name
+    if app_name:
+        os.environ["APP_NAME"] = app_name
+    if project_name:
+        os.environ["PROJECT_NAME"] = project_name
+    prefix = await get_object_prefix()
+    ensure_minio_bucket()
+    content = await file.read()
+    result = upload_to_minio(content, file.filename, prefix)
+    if result.get("status") != "success":
+        raise HTTPException(status_code=500, detail=result.get("error_message", "Upload failed"))
+    return {"file_path": result["object_name"]}
+
 
 # POST: CREATE_NEW - Create validator atom with column preprocessing
 @router.post("/create_new", status_code=202, response_model=CreateValidatorResponse)
@@ -1393,8 +1459,9 @@ async def configure_validation_config(request: Request):
 @router.post("/validate", response_model=ValidateResponse)
 async def validate(
     validator_atom_id: str = Form(...),
-    files: List[UploadFile] = File(...),
+    files: List[UploadFile] | None = File(None),
     file_keys: str = Form(...),
+    file_paths: str = Form(default=""),
     date_frequency: str = Form(default=None),
     user_id: str = Form(""),
     client_id: str = Form("")
@@ -1406,11 +1473,18 @@ async def validate(
         keys = json.loads(file_keys)
     except json.JSONDecodeError:
         raise HTTPException(status_code=400, detail="Invalid JSON format for file_keys")
-    
-    if len(files) != len(keys):
+
+    paths = json.loads(file_paths) if file_paths else []
+    files_list = files or []
+
+    if files_list and len(files_list) != len(keys):
         raise HTTPException(status_code=400, detail="Number of files must match number of keys")
-    
-    if len(files) > 3:
+    if paths and len(paths) != len(keys):
+        raise HTTPException(status_code=400, detail="Number of file paths must match number of keys")
+    if not files_list and not paths:
+        raise HTTPException(status_code=400, detail="No files or file paths provided")
+
+    if files_list and len(files_list) > 3:
         raise HTTPException(status_code=400, detail="Maximum 3 files allowed")
     
     # ✅ Get validator atom data from MongoDB first
@@ -1435,28 +1509,58 @@ async def validate(
     # ✅ Parse files and store content for MinIO
     files_data = []
     file_contents = []
-    
-    for file, key in zip(files, keys):
-        try:
-            content = await file.read()
-            file_contents.append((content, file.filename, key))
-            
-            # Parse file based on extension
-            if file.filename.lower().endswith(".csv"):
-                df = pd.read_csv(
-                    io.BytesIO(content), parse_dates=True, infer_datetime_format=True
-                )
-            elif file.filename.lower().endswith(".xlsx"):
-                df = pd.read_excel(io.BytesIO(content), parse_dates=True)
-            else:
-                raise HTTPException(status_code=400, detail="Only CSV and XLSX files supported")
-            
-            # ✅ Preprocess columns (same logic as create_new)
-            df.columns = [preprocess_column_name(col) for col in df.columns]
-            files_data.append((key, df))
-            
-        except Exception as e:
-            raise HTTPException(status_code=400, detail=f"Error parsing file {file.filename}: {str(e)}")
+
+    if files_list:
+        for file, key in zip(files_list, keys):
+            try:
+                file.file.seek(0, os.SEEK_END)
+                size_bytes = file.file.tell()
+                file.file.seek(0)
+
+                if file.filename.lower().endswith(".csv"):
+                    reader = pd.read_csv(
+                        file.file,
+                        chunksize=CHUNK_ROWS,
+                        parse_dates=True,
+                        infer_datetime_format=True,
+                    )
+                    df = pd.concat(reader, ignore_index=True)
+                elif file.filename.lower().endswith((".xls", ".xlsx")):
+                    reader = stream_excel(file.file, CHUNK_ROWS)
+                    df = pd.concat(reader, ignore_index=True)
+                else:
+                    raise HTTPException(status_code=400, detail="Only CSV and XLSX files supported")
+
+                df.columns = [preprocess_column_name(col) for col in df.columns]
+                files_data.append((key, df))
+                file_contents.append((size_bytes, file.filename, key))
+            except Exception as e:
+                raise HTTPException(status_code=400, detail=f"Error parsing file {file.filename}: {str(e)}")
+    else:
+        for path, key in zip(paths, keys):
+            try:
+                data = read_minio_object(path)
+                size_bytes = len(data)
+                filename = Path(path).name
+                if filename.lower().endswith(".csv"):
+                    reader = pd.read_csv(
+                        io.BytesIO(data),
+                        chunksize=CHUNK_ROWS,
+                        parse_dates=True,
+                        infer_datetime_format=True,
+                    )
+                    df = pd.concat(reader, ignore_index=True)
+                elif filename.lower().endswith((".xls", ".xlsx")):
+                    reader = stream_excel(io.BytesIO(data), CHUNK_ROWS)
+                    df = pd.concat(reader, ignore_index=True)
+                else:
+                    raise HTTPException(status_code=400, detail="Only CSV and XLSX files supported")
+
+                df.columns = [preprocess_column_name(col) for col in df.columns]
+                files_data.append((key, df))
+                file_contents.append((size_bytes, filename, key))
+            except Exception as e:
+                raise HTTPException(status_code=400, detail=f"Error parsing file {path}: {str(e)}")
     
     # ✅ Enhanced validation with auto-correction and custom conditions
     validation_results = perform_enhanced_validation(files_data, validator_data)
@@ -1481,7 +1585,7 @@ async def validate(
             {
                 "file_key": key,
                 "filename": next(f[1] for f in file_contents if f[2] == key),
-                "file_size_bytes": len(next(f[0] for f in file_contents if f[2] == key)),
+                "file_size_bytes": next(f[0] for f in file_contents if f[2] == key),
                 "overall_status": validation_results["file_results"].get(key, {}).get("status", "unknown"),
                 "errors": validation_results["file_results"].get(key, {}).get("errors", []),
                 "warnings": validation_results["file_results"].get(key, {}).get("warnings", []),
@@ -2575,8 +2679,9 @@ load_existing_configs()
 @router.post("/save_dataframes")
 async def save_dataframes(
     validator_atom_id: str = Form(...),
-    files: List[UploadFile] = File(...),
+    files: List[UploadFile] | None = File(None),
     file_keys: str = Form(...),
+    file_paths: str = Form(default=""),
     overwrite: bool = Form(False),
     client_id: str = Form(""),
     user_id: str = Form(""),
@@ -2591,8 +2696,15 @@ async def save_dataframes(
         keys = json.loads(file_keys)
     except json.JSONDecodeError:
         raise HTTPException(status_code=400, detail="Invalid JSON format for file_keys")
-    if len(files) != len(keys):
+
+    paths = json.loads(file_paths) if file_paths else []
+    files_list = files or []
+    if files_list and len(files_list) != len(keys):
         raise HTTPException(status_code=400, detail="Number of files must match number of keys")
+    if paths and len(paths) != len(keys):
+        raise HTTPException(status_code=400, detail="Number of file paths must match number of keys")
+    if not files_list and not paths:
+        raise HTTPException(status_code=400, detail="No files or file paths provided")
 
     uploads = []
     flights = []
@@ -2611,29 +2723,62 @@ async def save_dataframes(
     prefix = await get_object_prefix()
     numeric_pid = _parse_numeric_id(project_id or os.getenv("PROJECT_ID", "0"))
     print(f"📤 saving to prefix {prefix}")
-    for file, key in zip(files, keys):
-        content = await file.read()
-        if file.filename.lower().endswith(".csv"):
-            df = pd.read_csv(
-                io.BytesIO(content), parse_dates=True, infer_datetime_format=True
-            )
-        elif file.filename.lower().endswith((".xls", ".xlsx")):
-            df = pd.read_excel(io.BytesIO(content), parse_dates=True)
-        else:
-            raise HTTPException(status_code=400, detail="Unsupported file type")
 
+    if files_list:
+        iter_sources = [(f.filename, f.file) for f in files_list]
+    else:
+        iter_sources = []
+        for p in paths:
+            data = read_minio_object(p)
+            iter_sources.append((Path(p).name, io.BytesIO(data)))
 
-        arrow_name = Path(file.filename).stem + ".arrow"
+    for (filename, fileobj), key in zip(iter_sources, keys):
+        arrow_name = Path(filename).stem + ".arrow"
         exists = await arrow_dataset_exists(numeric_pid, validator_atom_id, key)
         if exists and not overwrite:
             uploads.append({"file_key": key, "already_saved": True})
             flights.append({"file_key": key})
             continue
 
+        fileobj.seek(0)
+        if filename.lower().endswith(".csv"):
+            reader = pd.read_csv(
+                fileobj,
+                chunksize=CHUNK_ROWS,
+                parse_dates=True,
+                infer_datetime_format=True,
+            )
+        elif filename.lower().endswith((".xls", ".xlsx")):
+            reader = stream_excel(fileobj, CHUNK_ROWS)
+        else:
+            raise HTTPException(status_code=400, detail="Unsupported file type")
+
         arrow_buf = io.BytesIO()
-        table = pa.Table.from_pandas(df)
-        with ipc.new_file(arrow_buf, table.schema) as writer:
-            writer.write_table(table)
+        df_chunks: List[pd.DataFrame] = []
+        try:
+            first_chunk = next(reader)
+        except StopIteration:
+            uploads.append({"file_key": key, "already_saved": False, "error": "empty file"})
+            flights.append({"file_key": key})
+            continue
+
+        first_chunk.columns = first_chunk.columns.map(str)
+        string_cols = first_chunk.select_dtypes(include=["object"]).columns
+        for col in string_cols:
+            first_chunk[col] = first_chunk[col].astype(str)
+        df_chunks.append(first_chunk)
+        schema = pa.Table.from_pandas(first_chunk).schema
+        with ipc.new_file(arrow_buf, schema) as writer:
+            writer.write_table(pa.Table.from_pandas(first_chunk, schema=schema))
+            for chunk in reader:
+                chunk.columns = chunk.columns.map(str)
+                for col in string_cols:
+                    if col in chunk.columns:
+                        chunk[col] = chunk[col].astype(str)
+                df_chunks.append(chunk)
+                writer.write_table(pa.Table.from_pandas(chunk, schema=schema))
+
+        df = pd.concat(df_chunks, ignore_index=True)
 
         result = upload_to_minio(arrow_buf.getvalue(), arrow_name, prefix)
         saved_name = Path(result.get("object_name", "")).name or arrow_name
@@ -2644,7 +2789,7 @@ async def save_dataframes(
             key,
             result.get("object_name", ""),
             flight_path,
-            file.filename,
+            filename,
         )
         redis_client.set(f"flight:{flight_path}", result.get("object_name", ""))
 
@@ -2654,7 +2799,7 @@ async def save_dataframes(
             key,
             result.get("object_name", ""),
             flight_path,
-            file.filename,
+            filename,
         )
 
         uploads.append({

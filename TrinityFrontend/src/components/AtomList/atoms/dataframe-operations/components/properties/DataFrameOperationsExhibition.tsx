@@ -174,7 +174,7 @@ const DataFrameOperationsExhibition = ({ data, settings, onSettingsChange, onDat
   // Pagination
   const handlePageChange = (page: number) => setCurrentPage(page);
 
-  if (!data || !Array.isArray(data.headers) || data.headers.length === 0) return <div className="text-green-700 text-xs p-2">No data loaded.</div>;
+  if (!data || !Array.isArray(data.headers) || data.headers.length === 0) return <div className="text-slate-700 text-xs p-2">No data loaded.</div>;
 
   const selectedColumns = Array.isArray(settings.selectedColumns) ? settings.selectedColumns : data.headers;
   const sortColumns = Array.isArray(settings.sortColumns) ? settings.sortColumns : [];
@@ -186,7 +186,7 @@ const DataFrameOperationsExhibition = ({ data, settings, onSettingsChange, onDat
         {data && data.headers && data.rows && data.rows.length > 0 ? (
           <>
             <div className="flex gap-2">
-              <Button className="bg-green-600 hover:bg-green-700 text-white flex items-center gap-2" onClick={handleExportCSV}>
+              <Button className="bg-blue-600 hover:bg-blue-700 text-white flex items-center gap-2" onClick={handleExportCSV}>
                 <FileText className="w-4 h-4" /> Export as CSV
               </Button>
               <Button className="bg-blue-600 hover:bg-blue-700 text-white flex items-center gap-2" onClick={handleExportXLSX}>

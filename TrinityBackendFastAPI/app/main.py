@@ -15,7 +15,7 @@ app = FastAPI()
 
 origins = os.getenv(
     "FASTAPI_CORS_ORIGINS",
-    "http://10.2.1.173:8080,http://127.0.0.1:8080,http://10.2.1.242:8080,http://10.2.1.65:8080,http://10.142.213.220,https://trinity.quantmatrixai.com",
+    "http://10.184.0.220:8080,http://10.2.1.173:8080,http://127.0.0.1:8080,http://10.2.1.242:8080,http://10.2.1.65:8080,http://10.142.213.220,https://trinity.quantmatrixai.com",
 )
 allowed_origins = [o.strip() for o in origins.split(",") if o.strip()]
 
@@ -51,4 +51,3 @@ async def log_env():
             prefix,
         )
     )
-

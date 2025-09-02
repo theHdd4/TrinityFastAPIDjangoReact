@@ -7,13 +7,19 @@ import {
   TextBoxSettings,
   DEFAULT_TEXTBOX_SETTINGS,
   DataUploadSettings,
-  DEFAULT_DATAUPLOAD_SETTINGS,
+  createDefaultDataUploadSettings,
   FeatureOverviewSettings,
   DEFAULT_FEATURE_OVERVIEW_SETTINGS,
   DataFrameOperationsSettings,
   DEFAULT_DATAFRAME_OPERATIONS_SETTINGS,
+  CorrelationSettings,
+  DEFAULT_CORRELATION_SETTINGS,
   ChartMakerSettings,
   DEFAULT_CHART_MAKER_SETTINGS,
+  ClusteringSettings,
+  DEFAULT_CLUSTERING_SETTINGS,
+  ScenarioPlannerSettings,
+  DEFAULT_SCENARIO_PLANNER_SETTINGS,
 } from '../../store/laboratoryStore';
 
 import DataUploadValidateProperties from '@/components/AtomList/atoms/data-upload-validate/components/properties/DataUploadValidateProperties';
@@ -26,7 +32,12 @@ import BuildModelFeatureBasedPropertiesPanel from '@/components/AtomList/atoms/b
 import MergeProperties from '@/components/AtomList/atoms/merge/components/properties/MergeProperties';
 import ColumnClassifierProperties from '@/components/AtomList/atoms/column-classifier/components/properties/ColumnClassifierProperties';
 import DataFrameOperationsProperties from '@/components/AtomList/atoms/dataframe-operations/components/properties/DataFrameOperationsProperties';
+import CorrelationProperties from '@/components/AtomList/atoms/correlation/components/properties/CorrelationProperties';
 import ChartMakerProperties from '@/components/AtomList/atoms/chart-maker/components/properties/ChartMakerProperties';
+import ClusteringProperties from '@/components/AtomList/atoms/clustering/components/properties/ClusteringProperties';
+import { ScenarioPlannerProperties } from '@/components/AtomList/atoms/scenario-planner/components/properties/ScenarioPlannerProperties';
+
+import ExploreProperties from '@/components/AtomList/atoms/explore/components/properties/ExploreProperties';
 
 import AtomSettingsTabs from './AtomSettingsTabs';
 
@@ -57,10 +68,19 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
     | DataUploadSettings
     | FeatureOverviewSettings
     | DataFrameOperationsSettings
-    | ChartMakerSettings =
+    | ChartMakerSettings
+    | CorrelationSettings
+    | ClusteringSettings
+    | ScenarioPlannerSettings =
     atom?.settings ||
-    (atom?.atomId === 'data-upload-validate'
-      ? { ...DEFAULT_DATAUPLOAD_SETTINGS }
+    (atom?.atomId === 'correlation'
+      ? { ...DEFAULT_CORRELATION_SETTINGS }
+      : atom?.atomId === 'clustering'
+      ? { ...DEFAULT_CLUSTERING_SETTINGS }
+      : atom?.atomId === 'scenario-planner'
+      ? { ...DEFAULT_SCENARIO_PLANNER_SETTINGS }
+      : atom?.atomId === 'data-upload-validate'
+      ? createDefaultDataUploadSettings()
       : atom?.atomId === 'feature-overview'
       ? { ...DEFAULT_FEATURE_OVERVIEW_SETTINGS }
       : atom?.atomId === 'dataframe-operations'
@@ -106,6 +126,12 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
             <DataUploadValidateProperties atomId={selectedAtomId} />
           ) : selectedAtomId && atom?.atomId === 'feature-overview' ? (
             <FeatureOverviewProperties atomId={selectedAtomId} />
+          ) : selectedAtomId && atom?.atomId === 'groupby-wtg-avg' ? (
+            <GroupByProperties atomId={selectedAtomId} />
+          ) : selectedAtomId && atom?.atomId === 'create-column' ? (
+            <CreateColumnProperties atomId={selectedAtomId} />
+          ) : selectedAtomId && atom?.atomId === 'explore' ? (
+            <ExploreProperties atomId={selectedAtomId} />
           ) : selectedAtomId && atom?.atomId === 'chart-maker' ? (
             <ChartMakerProperties atomId={selectedAtomId} />
           ) : selectedAtomId && atom?.atomId === 'build-model-feature-based' ? (
@@ -122,8 +148,14 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
             <DataFrameOperationsProperties atomId={selectedAtomId} />
           ) : selectedAtomId && atom?.atomId === 'groupby-wtg-avg' ? (
             <GroupByProperties atomId={selectedAtomId} />
-          ) : selectedAtomId && atom?.atomId === 'createcolumn' ? (
+          ) : selectedAtomId && (atom?.atomId === 'create-column' || atom?.atomId === 'createcolumn') ? (
             <CreateColumnProperties atomId={selectedAtomId} />
+          ) : selectedAtomId && atom?.atomId === 'correlation' ? (
+            <CorrelationProperties atomId={selectedAtomId} />
+          ) : selectedAtomId && atom?.atomId === 'clustering' ? (
+            <ClusteringProperties atomId={selectedAtomId} />
+          ) : selectedAtomId && atom?.atomId === 'scenario-planner' ? (
+            <ScenarioPlannerProperties atomId={selectedAtomId} />
           ) : (
             <AtomSettingsTabs
               tab={tab}

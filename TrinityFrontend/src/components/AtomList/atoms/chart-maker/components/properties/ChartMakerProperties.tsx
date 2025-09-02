@@ -168,6 +168,57 @@ const ChartMakerProperties: React.FC<Props> = ({ atomId }) => {
     }
   };
 
+  // Ensure the backend has a valid file for the selected datasource when the
+  // project is reloaded. The saved `fileId` may point to a temporary file that
+  // no longer exists on the server, which would cause chart generation to fail
+  // with a 500 error. When a datasource is present, verify the stored `fileId`
+  // and reload the dataframe if necessary to obtain a fresh identifier.
+  useEffect(() => {
+    const ensureFileReady = async () => {
+      if (!settings.dataSource) return;
+
+      let fileValid = false;
+
+      if (settings.fileId) {
+        try {
+          await chartMakerApi.getAllColumns(settings.fileId);
+          fileValid = true;
+        } catch {
+          console.warn('[ChartMakerProperties] Stored file_id is invalid, reloading');
+        }
+      }
+
+      if (!fileValid) {
+        try {
+          setLoading({ uploading: true });
+          let objectName = settings.dataSource;
+          if (!objectName.endsWith('.arrow')) {
+            objectName += '.arrow';
+          }
+          const uploadResponse = await chartMakerApi.loadSavedDataframe(objectName);
+          const chartData: ChartData = {
+            columns: uploadResponse.columns,
+            rows: uploadResponse.sample_data,
+            numeric_columns: uploadResponse.numeric_columns,
+            categorical_columns: uploadResponse.categorical_columns,
+            unique_values: uploadResponse.unique_values,
+            file_id: uploadResponse.file_id,
+            row_count: uploadResponse.row_count,
+          };
+          await handleDataUpload(chartData, uploadResponse.file_id, settings.dataSource);
+        } catch (err) {
+          console.error('[ChartMakerProperties] Failed to reload dataframe:', err);
+          setError(err instanceof Error ? err.message : 'Failed to reload dataframe');
+          setLoading({ uploading: false });
+        }
+      }
+    };
+
+    ensureFileReady();
+    // Only run when the datasource changes on initial load
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settings.dataSource]);
+
   const handleRenderCharts = async () => {
     if (!settings.fileId) {
       setError('No file uploaded');

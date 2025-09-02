@@ -288,14 +288,21 @@ sys.path.append(str(AGENT_PATH))
 # Include other agents so their APIs can be mounted
 MERGE_PATH = Path(__file__).resolve().parent / "Agent_Merge"
 CONCAT_PATH = Path(__file__).resolve().parent / "Agent_concat"
+CREATE_TRANSFORM_PATH = Path(__file__).resolve().parent / "Agent_create_transform"
+GROUPBY_PATH = Path(__file__).resolve().parent / "Agent_groupby"
+CHARTMAKER_PATH = Path(__file__).resolve().parent / "Agent_chartmaker"
 sys.path.append(str(MERGE_PATH))
 sys.path.append(str(CONCAT_PATH))
+sys.path.append(str(CREATE_TRANSFORM_PATH))
+sys.path.append(str(GROUPBY_PATH))
+sys.path.append(str(CHARTMAKER_PATH))
 
 from single_llm_processor import SingleLLMProcessor
 from Agent_Merge.main_app import router as merge_router
 from Agent_concat.main_app import router as concat_router
 from Agent_create_transform.main_app import router as create_transform_router
 from Agent_groupby.main_app import router as groupby_router
+from Agent_chartmaker.main_app import router as chartmaker_router
 
 def convert_numpy(obj):
     if isinstance(obj, dict):
@@ -393,25 +400,54 @@ async def perform_operation(request: PerformRequest):
             
         elif request.operation == "create_transform":
             # Handle create/transform operations
-            payload = {
-                "object_names": request.file1,
-                "bucket_name": request.bucket_name,
-                "identifiers": request.identifiers or "",
-                "operations": request.operations or "[]"
-            }
-            
-            # Call the backend createcolumn API
-            create_url = os.getenv(
-                "CREATE_PERFORM_URL",
-                f"http://{os.getenv('HOST_IP', 'localhost')}:{os.getenv('FASTAPI_PORT', '8001')}/api/create/perform",
-            )
-            
-            resp = requests.post(create_url, data=payload, timeout=60)
-            resp.raise_for_status()
-            result = resp.json()
-            
-            logger.info(f"Create/Transform operation completed: {result}")
-            return result
+            try:
+                # Parse the operations JSON string
+                operations_data = json.loads(request.operations or "[]")
+                
+                # Convert operations to the format expected by the backend
+                payload = {
+                    "object_names": request.file1,
+                    "bucket_name": request.bucket_name,
+                    "identifiers": request.identifiers or ""
+                }
+                
+                # Add operations in the format expected by the backend
+                for idx, op in enumerate(operations_data):
+                    if isinstance(op, dict) and "operation" in op and "source_columns" in op:
+                        op_type = op["operation"]
+                        source_cols = op["source_columns"]
+                        rename_to = op.get("rename_to", "")
+                        
+                        # The backend expects the operation type to be part of the key
+                        # Format: {op_type}_{idx}, {op_type}_{idx}_rename, etc.
+                        payload[f"{op_type}_{idx}"] = ",".join(source_cols)
+                        if rename_to:
+                            payload[f"{op_type}_{idx}_rename"] = rename_to
+                        
+                        # Add any additional parameters if they exist
+                        if "param" in op:
+                            payload[f"{op_type}_{idx}_param"] = op["param"]
+                        if "period" in op:
+                            payload[f"{op_type}_{idx}_period"] = op["period"]
+                
+                logger.info(f"Create/Transform payload: {payload}")
+                
+                # Call the backend createcolumn API
+                create_url = os.getenv(
+                    "CREATE_PERFORM_URL",
+                    f"http://{os.getenv('HOST_IP', 'localhost')}:{os.getenv('FASTAPI_PORT', '8001')}/api/create/perform",
+                )
+                
+                resp = requests.post(create_url, data=payload, timeout=60)
+                resp.raise_for_status()
+                result = resp.json()
+                
+                logger.info(f"Create/Transform operation completed: {result}")
+                return result
+                
+            except Exception as e:
+                logger.error(f"Create/Transform operation failed: {e}")
+                raise HTTPException(status_code=500, detail=f"Create/Transform operation failed: {str(e)}")
             
         elif request.operation == "groupby":
             # Handle groupby operations
@@ -448,6 +484,7 @@ api_router.include_router(merge_router)
 api_router.include_router(concat_router)
 api_router.include_router(create_transform_router)
 api_router.include_router(groupby_router)
+api_router.include_router(chartmaker_router)
 
 # Enable CORS for browser-based clients
 app.add_middleware(

@@ -131,9 +131,16 @@ export const CLUSTERING_API =
   normalizeUrl(import.meta.env.VITE_CLUSTERING_API) ||
   `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/clustering`;
 
+export const CORRELATION_API =
+  normalizeUrl(import.meta.env.VITE_CORRELATION_API) ||
+  `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/correlation`;
 export const CHART_MAKER_API =
   normalizeUrl(import.meta.env.VITE_CHART_MAKER_API) ||
   `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/chart-maker`;
+
+export const EXPLORE_API =
+  normalizeUrl(import.meta.env.VITE_EXPLORE_API) ||
+  `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/explore`;
 
 export const BUILD_MODEL_API =
   normalizeUrl(import.meta.env.VITE_BUILD_MODEL_API) ||

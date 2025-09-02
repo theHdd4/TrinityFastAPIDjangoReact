@@ -53,6 +53,8 @@ export interface DataUploadSettings {
   fileMappings?: Record<string, string>;
   /** Map of displayed master file names to the original names known by the backend */
   fileKeyMap?: Record<string, string>;
+  /** Map of uploaded file display names to the stored MinIO object path */
+  filePathMap?: Record<string, string>;
 }
 
 export const DEFAULT_DATAUPLOAD_SETTINGS: DataUploadSettings = {
@@ -69,7 +71,25 @@ export const DEFAULT_DATAUPLOAD_SETTINGS: DataUploadSettings = {
   validations: {},
   fileMappings: {},
   fileKeyMap: {},
+  filePathMap: {},
 };
+
+export const createDefaultDataUploadSettings = (): DataUploadSettings => ({
+  masterFile: "",
+  fileValidation: true,
+  bypassMasterUpload: false,
+  columnConfig: {},
+  frequency: "monthly",
+  dimensions: {},
+  measures: {},
+  uploadedFiles: [],
+  validatorId: undefined,
+  requiredFiles: [],
+  validations: {},
+  fileMappings: {},
+  fileKeyMap: {},
+  filePathMap: {},
+});
 
 export interface FeatureOverviewSettings {
   selectedColumns: string[];
@@ -129,6 +149,125 @@ export const DEFAULT_CONCAT_SETTINGS: ConcatSettings = {
   performConcat: false,
   concatResults: undefined,
   concatId: undefined,
+};
+
+export interface CorrelationSettings {
+  variables: string[];
+  selectedVar1: string | null;
+  selectedVar2: string | null;
+  correlationMatrix: number[][];
+  timeSeriesData: Array<{
+    date: Date | number;
+    var1Value: number;
+    var2Value: number;
+  }>;
+  identifiers: {
+    identifier3: string;
+    identifier4: string;
+    identifier6: string;
+    identifier7: string;
+    identifier15: string;
+  };
+  settings: {
+    dataSource: string;
+    dataset: string;
+    dateFrom: string;
+    dateTo: string;
+    aggregationLevel: string;
+    correlationMethod: string;
+    selectData: string;
+    selectFilter: string;
+    uploadedFile?: string;
+    filterDimensions?: Record<string, string[]>;
+  };
+  // Enhanced visualization options
+  visualizationOptions?: {
+    heatmapColorScheme: string;
+    var1Color: string;
+    var2Color: string;
+    normalizeValues: boolean;
+    selectedVizType: string;
+  };
+  // Add missing properties for saved dataframes
+  selectedFile?: string;  // Selected dataframe object_name
+  validatorAtomId?: string;  // Validator atom ID for column extraction
+  selectedColumns?: string[];  // Selected columns for correlation analysis
+  // File processing related data
+  fileData?: {
+    fileName: string;
+    rawData: any[];
+    numericColumns: string[];
+    dateColumns: string[];
+    categoricalColumns: string[];
+    columnValues?: { [columnName: string]: string[] }; // Cached unique values for categorical columns
+    isProcessed: boolean;
+  };
+  isUsingFileData?: boolean;
+  showAllColumns?: boolean;
+  // Column values loading state
+  columnValuesLoading?: boolean;
+  columnValuesError?: string;
+  // Date analysis data
+  dateAnalysis?: {
+    has_date_data: boolean;
+    date_columns: Array<{
+      column_name: string;
+      min_date?: string;
+      max_date?: string;
+      format_detected: string;
+      granularity: string;
+      sample_values: string[];
+      is_valid_date: boolean;
+    }>;
+    overall_date_range?: {
+      min_date: string;
+      max_date: string;
+    };
+    recommended_granularity: string;
+    date_format_detected: string;
+  };
+}
+
+export const DEFAULT_CORRELATION_SETTINGS: CorrelationSettings = {
+  variables: [],
+  selectedVar1: null,
+  selectedVar2: null,
+  correlationMatrix: [],
+  timeSeriesData: [],
+  identifiers: {
+    identifier3: 'All',
+    identifier4: 'All',
+    identifier6: 'All',
+    identifier7: 'All',
+    identifier15: 'All'
+  },
+  settings: {
+    dataSource: 'CSV',
+    dataset: '',
+    dateFrom: '01 JAN 2023',
+    dateTo: '31 DEC 2024',
+    aggregationLevel: 'None',
+    correlationMethod: 'pearson',
+    selectData: 'Single Selection',
+    selectFilter: 'Single Selection',
+    uploadedFile: undefined,
+    filterDimensions: {}
+  },
+  visualizationOptions: {
+    heatmapColorScheme: 'RdBu',
+    var1Color: '#ef4444',
+    var2Color: '#3b82f6',
+    normalizeValues: false,
+    selectedVizType: 'heatmap'
+  },
+  selectedFile: undefined,
+  validatorAtomId: undefined,
+  selectedColumns: [],
+  fileData: undefined,
+  isUsingFileData: true,  // Default to always using file data
+  showAllColumns: false,
+  columnValuesLoading: false,
+  columnValuesError: undefined
 };
 
 export interface ColumnClassifierColumn {
@@ -698,6 +837,75 @@ export const DEFAULT_SCENARIO_PLANNER_SETTINGS: ScenarioPlannerSettings = {
   refreshEnabled: false
 };
 
+export interface ExploreData {
+  dataframe?: string;
+  dimensions: string[];
+  measures: string[];
+  graphLayout: {
+    numberOfGraphsInRow: number;
+    rows: number;
+  };
+  allColumns?: string[];
+  numericalColumns?: string[];
+  columnSummary?: any[];
+  showDataSummary?: boolean;
+  filterUnique?: boolean;
+  chartType?: string;
+  xAxis?: string;
+  yAxis?: string;
+  xAxisLabel?: string;
+  yAxisLabel?: string;
+  title?: string;
+  legendField?: string;
+  aggregation?: string;
+  weightColumn?: string;
+  dateFilters?: Array<{
+    column: string;
+    values: string[];
+  }>;
+  columnClassifierConfig?: {
+    identifiers: string[];
+    measures: string[];
+    dimensions: { [key: string]: string[] };
+    client_name?: string;
+    app_name?: string;
+    project_name?: string;
+  };
+  availableDimensions?: string[];
+  availableMeasures?: string[];
+  availableIdentifiers?: string[];
+  chartReadyData?: any;
+  fallbackDimensions?: string[];
+  fallbackMeasures?: string[];
+  applied?: boolean;
+  chartDataSets?: { [idx: number]: any };
+  chartGenerated?: { [chartIndex: number]: boolean };
+  chartNotes?: { [chartIndex: number]: string };
+  [key: string]: any;
+}
+
+export interface ExploreSettings {
+  dataSource: string;
+  enableFiltering?: boolean;
+  enableExport?: boolean;
+  autoRefresh?: boolean;
+  [key: string]: any;
+}
+
+export const DEFAULT_EXPLORE_DATA: ExploreData = {
+  dimensions: [],
+  measures: [],
+  graphLayout: { numberOfGraphsInRow: 1, rows: 1 },
+  applied: false,
+};
+
+export const DEFAULT_EXPLORE_SETTINGS: ExploreSettings = {
+  dataSource: "",
+  enableFiltering: false,
+  enableExport: false,
+  autoRefresh: false,
+};
+
 export interface DroppedAtom {
   id: string;
   atomId: string;
@@ -719,7 +927,9 @@ export interface LayoutCard {
 
 interface LaboratoryStore {
   cards: LayoutCard[];
+  auxPanelActive: 'settings' | 'frames' | null;
   setCards: (cards: LayoutCard[]) => void;
+  setAuxPanelActive: (panel: 'settings' | 'frames' | null) => void;
   updateAtomSettings: (atomId: string, settings: any) => void;
   getAtom: (atomId: string) => DroppedAtom | undefined;
   reset: () => void;
@@ -727,8 +937,13 @@ interface LaboratoryStore {
 
 export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
   cards: [],
+  auxPanelActive: null,
   setCards: (cards: LayoutCard[]) => {
     set({ cards });
+  },
+  
+  setAuxPanelActive: (panel: 'settings' | 'frames' | null) => {
+    set({ auxPanelActive: panel });
   },
 
   updateAtomSettings: (atomId: string, settings: any) => {

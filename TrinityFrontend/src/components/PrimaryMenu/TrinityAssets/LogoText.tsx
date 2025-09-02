@@ -3,23 +3,24 @@ import React from 'react';
 interface LogoTextProps {
   className?: string;
   /**
-   * Additional classes for the title element. If none are provided the
-   * brand gradient is used.
+   * Additional classes for the title element. Defaults to plain black text.
    */
   titleClassName?: string;
 }
 
 const LogoText: React.FC<LogoTextProps> = ({ className = '', titleClassName }) => (
-  <div className={`flex flex-col ${className}`.trim()}>
+  <div
+    className={`flex h-12 flex-col justify-center items-start text-left leading-none ${className}`.trim()}
+  >
     <h1
-      className={`text-2xl font-bold tracking-tight leading-none font-mono ${
-        titleClassName || 'bg-gradient-to-r from-black via-gray-800 to-trinity-yellow bg-clip-text text-transparent'
-      }`}
+      className={`font-mono font-bold text-3xl leading-none ${
+        titleClassName || 'text-black'
+      }`.trim()}
     >
       Trinity
     </h1>
-    <span className="text-xs font-light text-gray-600 tracking-widest uppercase mt-0.5 font-mono">
-      A Quant Matrix AI Product
+    <span className="font-mono text-xs text-black/60 leading-none mt-1">
+      A Quant Matrix AI Experience
     </span>
   </div>
 );

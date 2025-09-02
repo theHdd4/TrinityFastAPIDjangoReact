@@ -5,7 +5,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Sparkles, Bot, User, X, MessageSquare, Send, Plus, RotateCcw } from 'lucide-react';
-import { TRINITY_AI_API, CONCAT_API, MERGE_API, CREATECOLUMN_API, GROUPBY_API } from '@/lib/api';
+import { TRINITY_AI_API, CONCAT_API, MERGE_API, CREATECOLUMN_API, GROUPBY_API, FEATURE_OVERVIEW_API, VALIDATE_API, CHART_MAKER_API } from '@/lib/api';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 
 interface Message {
@@ -36,6 +36,7 @@ const PERFORM_ENDPOINTS: Record<string, string> = {
   concat: `${CONCAT_API}/perform`,
   'create-column': `${CREATECOLUMN_API}/perform`,
   'groupby-wtg-avg': `${GROUPBY_API}/run`,
+  'chart-maker': `${CHART_MAKER_API}/generate`,
 };
 
 import { cn } from '@/lib/utils';
@@ -150,8 +151,9 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
           session_id: sessionId  // Include session ID for context
         }),
       });
+      let data;
       if (res.ok) {
-        const data = await res.json();
+        data = await res.json();
         // Enhanced AI response handling with suggestions as master key
         let aiText = '';
         if (data.success) {
@@ -454,31 +456,182 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
               operationCompleted: false
             });
           }
-        } else if (atomType === 'create-column' && data.create_transform_json) {
-          const cfg = data.create_transform_json;
+        } else if (atomType === 'create-column' && data.json) {
+          const cfg = data.json[0]; // Get first configuration object
           
           console.log('🤖 AI CREATE COLUMN CONFIG EXTRACTED:', cfg);
           
-          // Update atom settings with the AI configuration FIRST (like concat/merge)
+          // 🔧 CRITICAL FIX: Convert AI config to proper CreateColumn format
+          const operations = [];
+          
+          // Parse operations from the new AI format (add_0, add_0_rename, etc.)
+          const operationKeys = Object.keys(cfg).filter(key => 
+            key.match(/^(add|subtract|multiply|divide|power|sqrt|log|abs|dummy|rpi|residual|stl_outlier|logistic|detrend|deseasonalize|detrend_deseasonalize|exp|standardize_zscore|standardize_minmax)_\d+$/)
+          );
+          
+          operationKeys.forEach((opKey) => {
+            const match = opKey.match(/^(\w+)_(\d+)$/);
+            if (match) {
+              const opType = match[1];
+              const opIndex = parseInt(match[2]);
+              const columns = cfg[opKey].split(',').map(col => col.trim());
+              const renameKey = `${opType}_${opIndex}_rename`;
+              const rename = cfg[renameKey] || '';
+              
+              operations.push({
+                id: `${opType}_${opIndex}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                type: opType,
+                name: opType.charAt(0).toUpperCase() + opType.slice(1),
+                columns: columns,
+                newColumnName: rename || `${opType}_${columns.join('_')}`,
+                rename: rename,
+                param: null // Will be added if param exists
+              });
+              
+              // Check if there are parameters
+              const paramKey = `${opType}_${opIndex}_param`;
+              if (cfg[paramKey]) {
+                operations[operations.length - 1].param = cfg[paramKey];
+              }
+              
+              // Check if there are period parameters
+              const periodKey = `${opType}_${opIndex}_period`;
+              if (cfg[periodKey]) {
+                operations[operations.length - 1].param = cfg[periodKey];
+              }
+            }
+          });
+          
+          // 🔧 CRITICAL FIX: Set dataSource first to trigger column loading, then load columns
           updateAtomSettings(atomId, { 
             aiConfig: cfg,
             aiMessage: data.message,
-            operationCompleted: false
+            operationCompleted: false,
+            // Auto-populate the CreateColumn interface - EXACTLY like GroupBy
+            dataSource: cfg.object_name || '', // Note: AI uses object_name (singular)
+            bucketName: cfg.bucket_name || 'trinity',
+            selectedIdentifiers: cfg.identifiers || [],
+            // 🔧 CRITICAL FIX: Set the file key for column loading
+            file_key: cfg.object_name || '',
+            // 🔧 CRITICAL FIX: Set operations in the format expected by CreateColumnCanvas
+            // This ensures the UI automatically displays the AI-configured operations
+            operations: operations.map((op, index) => ({
+              id: op.id,
+              type: op.type,
+              name: op.name,
+              columns: op.columns,
+              newColumnName: op.newColumnName,
+              rename: op.rename,
+              param: op.param
+            }))
           });
+          
+          // 🔧 CRITICAL FIX: Load columns directly after setting dataSource
+          if (cfg.object_name) {
+            try {
+              console.log('🔄 Loading columns for AI-selected data source:', cfg.object_name);
+              
+              // 🔧 CRITICAL FIX: Get the current prefix and construct full object name
+              let fullObjectName = cfg.object_name;
+              try {
+                const prefixRes = await fetch(`${VALIDATE_API}/get_object_prefix`);
+                if (prefixRes.ok) {
+                  const prefixData = await prefixRes.json();
+                  const prefix = prefixData.prefix || '';
+                  console.log('🔧 Current prefix:', prefix);
+                  
+                  // Construct full object name if we have a prefix
+                  if (prefix && !cfg.object_name.startsWith(prefix)) {
+                    fullObjectName = `${prefix}${cfg.object_name}`;
+                    console.log('🔧 Constructed full object name:', fullObjectName);
+                  }
+                }
+              } catch (prefixError) {
+                console.warn('⚠️ Failed to get prefix, using original object name:', prefixError);
+              }
+              
+              // Fetch column summary to populate allColumns with full object name
+              const columnRes = await fetch(`${FEATURE_OVERVIEW_API}/column_summary?object_name=${encodeURIComponent(fullObjectName)}`);
+              if (columnRes.ok) {
+                const columnData = await columnRes.json();
+                const allColumns = Array.isArray(columnData.summary) ? columnData.summary.filter(Boolean) : [];
+                
+                console.log('✅ Columns loaded successfully:', allColumns.length);
+                
+                // Update atom settings with the loaded columns
+                updateAtomSettings(atomId, {
+                  allColumns: allColumns,
+                  // Also set the CSV display name
+                  csvDisplay: cfg.object_name.split('/').pop() || cfg.object_name
+                });
+                
+                // 🔧 CRITICAL FIX: Also trigger the handleFrameChange logic to set up identifiers
+                try {
+                  // Try to fetch identifiers from backend classification
+                  const resp = await fetch(`${CREATECOLUMN_API}/classification?validator_atom_id=${encodeURIComponent(atomId)}&file_key=${encodeURIComponent(cfg.object_name)}`);
+                  console.log('🔍 Classification response status:', resp.status);
+                  if (resp.ok) {
+                    const data = await resp.json();
+                    console.log('🔍 Classification identifiers:', data.identifiers);
+                    updateAtomSettings(atomId, {
+                      selectedIdentifiers: data.identifiers || []
+                    });
+                  } else {
+                    // Fallback to categorical columns
+                    const cats = allColumns.filter(c =>
+                      c.data_type && (
+                        c.data_type.toLowerCase().includes('object') ||
+                        c.data_type.toLowerCase().includes('string') ||
+                        c.data_type.toLowerCase().includes('category')
+                      )
+                    ).map(c => c.column)
+                    .filter(id => !['date','time','month','months','week','weeks','year'].includes(id.toLowerCase()));
+                    
+                    console.log('🔧 Fallback categorical columns:', cats);
+                    updateAtomSettings(atomId, {
+                      selectedIdentifiers: cats
+                    });
+                  }
+                } catch (err) {
+                  console.warn('⚠️ Failed to fetch classification, using fallback:', err);
+                  // Fallback to categorical columns
+                  const cats = allColumns.filter(c =>
+                    c.data_type && (
+                      c.data_type.toLowerCase().includes('object') ||
+                      c.data_type.toLowerCase().includes('string') ||
+                      c.data_type.toLowerCase().includes('category')
+                    )
+                  ).map(c => c.column)
+                  .filter(id => !['date','time','month','months','week','weeks','year'].includes(id.toLowerCase()));
+                  
+                  console.log('🔧 Fallback categorical columns (catch):', cats);
+                  updateAtomSettings(atomId, {
+                    selectedIdentifiers: cats
+                  });
+                }
+                
+              } else {
+                console.warn('⚠️ Failed to load columns for data source:', cfg.object_name);
+              }
+            } catch (error) {
+              console.error('❌ Error loading columns for data source:', error);
+            }
+          }
           
           // Add AI success message with operation completion
           const aiSuccessMsg: Message = {
             id: (Date.now() + 1).toString(),
-            content: `✅ ${data.message || 'AI create column configuration completed'}\n\nFiles: ${cfg.file_name || 'N/A'}\nOperation: ${cfg.operations?.[0]?.type || 'N/A'}\n\n🔄 Executing create column operation...`,
+            content: `✅ ${data.message || 'AI create column configuration completed'}\n\nFile: ${cfg.object_name || 'N/A'}\nOperations: ${operations.map(op => `${op.type}(${op.columns.join(', ')})`).join(', ')}\n\n🔄 Configuration loaded! Now executing the Create Column operations...`,
             sender: 'ai',
             timestamp: new Date(),
           };
           setMessages(prev => [...prev, aiSuccessMsg]);
-          
-          // Automatically call perform endpoint with AI configuration
-          try {
-            if (performEndpoint) {
-              console.log('🚀 Calling create column perform endpoint with AI config:', cfg);
+
+          // 🔧 CRITICAL FIX: Automatically execute the operations (like GroupBy)
+          // Wait a bit for the UI to update, then automatically perform the operations
+          setTimeout(async () => {
+            try {
+              console.log('🚀 Auto-executing Create Column operations with AI config');
               
               // Extract just the filename if it's a full path
               const getFilename = (filePath: string) => {
@@ -486,75 +639,84 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
                 return filePath.includes("/") ? filePath.split("/").pop() || filePath : filePath;
               };
               
-              const formData = new URLSearchParams({
-                object_names: getFilename(cfg.object_names || ''),
-                bucket_name: cfg.bucket_name || 'trinity',
-                identifiers: cfg.identifiers?.join(',') || '',
-              });
+              // 🔧 CRITICAL FIX: Convert to FormData format that CreateColumn backend expects
+              const formData = new FormData();
+              formData.append('object_names', getFilename(cfg.object_name || ''));
+              formData.append('bucket_name', cfg.bucket_name || 'trinity');
               
-              // Add operation fields that backend expects (add_0, add_1, etc.)
-              if (cfg.operations && Array.isArray(cfg.operations)) {
-                cfg.operations.forEach((op, index) => {
-                  if (op.type && op.source_columns) {
-                    formData.append(`${op.type}_${index}`, op.source_columns.join(','));
-                    if (op.rename_to) {
-                      formData.append(`${op.type}_${index}_rename`, op.rename_to);
+              // Add operations in the format backend expects
+              operations.forEach((op, index) => {
+                if (op.columns && op.columns.filter(Boolean).length > 0) {
+                  const colString = op.columns.filter(Boolean).join(',');
+                  const rename = op.rename && op.rename.trim() ? op.rename.trim() : '';
+                  const key = `${op.type}_${index}`;
+                  
+                  // Add the operation
+                  formData.append(key, colString);
+                  
+                  // Add rename if specified
+                  if (rename) {
+                    formData.append(`${key}_rename`, rename);
+                  }
+                  
+                  // Add parameters if specified
+                  if (op.param) {
+                    if (['detrend', 'deseasonalize', 'detrend_deseasonalize'].includes(op.type)) {
+                      formData.append(`${key}_period`, String(op.param));
+                    } else if (op.type === 'power') {
+                      formData.append(`${key}_param`, String(op.param));
+                    } else if (op.type === 'logistic') {
+                      formData.append(`${key}_param`, JSON.stringify(op.param));
                     }
                   }
-                });
-              }
-              
-              console.log('📁 Sending create column data to backend:', formData.toString());
-              console.log('🔍 CREATE COLUMN CONFIG SENT TO BACKEND:', {
-                endpoint: performEndpoint,
-                config: cfg,
-                formData: Object.fromEntries(formData.entries())
+                }
               });
               
-              console.log('🚀 CALLING CREATE COLUMN BACKEND API:', performEndpoint);
-              console.log('📤 Request details:', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                body: formData.toString()
+              // Add identifiers
+              const identifiers = cfg.identifiers || [];
+              formData.append('identifiers', identifiers.join(','));
+              
+              console.log('📁 Auto-executing with form data:', {
+                object_names: getFilename(cfg.object_name || ''),
+                bucket_name: cfg.bucket_name || 'trinity',
+                operations: operations.map((op, index) => ({
+                  index,
+                  type: op.type,
+                  columns: op.columns,
+                  rename: op.rename,
+                  param: op.param
+                })),
+                identifiers: identifiers
               });
               
               const res2 = await fetch(performEndpoint, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
                 body: formData,
-              });
-              
-              console.log('📥 CREATE COLUMN BACKEND RESPONSE:', {
-                status: res2.status,
-                statusText: res2.statusText,
-                ok: res2.ok,
-                url: res2.url
               });
               
               if (res2.ok) {
                 const result = await res2.json();
-                console.log('✅ Create column operation successful:', result);
+                console.log('✅ Auto-execution successful:', result);
                 
-                // Update atom settings with results
+                // 🔧 CRITICAL FIX: Update atom settings with results
                 updateAtomSettings(atomId, {
-                  aiConfig: cfg,
-                  aiMessage: data.message,
-                  createResults: result,
-                  operationCompleted: true
+                  operationCompleted: true,
+                  createColumnResults: result
                 });
                 
-                // Add completion message
+                // Add success message
                 const completionMsg: Message = {
                   id: (Date.now() + 1).toString(),
-                  content: `🎉 Create column operation completed successfully!\n\nStatus: ${result.status}\nMessage: ${result.message}`,
+                  content: `🎉 Create Column operations completed successfully!\n\nFile: ${cfg.object_name || 'N/A'}\nOperations: ${operations.map(op => `${op.type}(${op.columns.join(', ')})`).join(', ')}\n\n📊 Results are ready! New columns have been created.\n\n💡 You can now view the results in the Create Column interface.`,
                   sender: 'ai',
                   timestamp: new Date(),
                 };
                 setMessages(prev => [...prev, completionMsg]);
                 
               } else {
-                console.error('❌ Create column operation failed:', res2.status, res2.statusText);
+                console.error('❌ Auto-execution failed:', res2.status, res2.statusText);
                 
+                // Try to get detailed error message
                 let errorDetail = res2.statusText;
                 try {
                   const errorData = await res2.json();
@@ -565,40 +727,47 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
                 
                 const errorMsg: Message = {
                   id: (Date.now() + 1).toString(),
-                  content: `❌ Create column operation failed: ${res2.status}\n\nError: ${errorDetail}`,
+                  content: `❌ Auto-execution failed: ${res2.status}\n\nError: ${errorDetail}\n\nFile: ${cfg.object_name || 'N/A'}\nOperations: ${operations.map(op => `${op.type}(${op.columns.join(', ')})`).join(', ')}\n\n💡 Please try clicking the Perform button manually.`,
                   sender: 'ai',
                   timestamp: new Date(),
                 };
                 setMessages(prev => [...prev, errorMsg]);
                 
                 updateAtomSettings(atomId, {
-                  aiConfig: cfg,
-                  aiMessage: data.message,
                   operationCompleted: false
                 });
               }
+              
+            } catch (error) {
+              console.error('❌ Error during auto-execution:', error);
+              
+              const errorMsg: Message = {
+                id: (Date.now() + 1).toString(),
+                content: `❌ Auto-execution error: ${error.message || 'Unknown error occurred'}\n\nFile: ${cfg.object_name || 'N/A'}\nOperations: ${operations.map(op => `${op.type}(${op.columns.join(', ')})`).join(', ')}\n\n💡 Please try clicking the Perform button manually.`,
+                sender: 'ai',
+                timestamp: new Date(),
+              };
+              setMessages(prev => [...prev, errorMsg]);
+              
+              updateAtomSettings(atomId, {
+                operationCompleted: false
+              });
             }
-          } catch (error) {
-            console.error('❌ Error calling create column perform endpoint:', error);
-            const errorMsg: Message = {
-              id: (Date.now() + 1).toString(),
-              content: `❌ Error: ${error.message || 'Unknown error occurred'}`,
-              sender: 'ai',
-              timestamp: new Date(),
-            };
-            setMessages(prev => [...prev, errorMsg]);
-            
-            updateAtomSettings(atomId, {
-              aiConfig: cfg,
-              aiMessage: data.message,
-              operationCompleted: false
-            });
-          }
+          }, 1000); // Wait 1 second for UI to update
           
+          // 🔧 CRITICAL FIX: Operations are now auto-executed above
+          // No need for manual execution - the AI automatically performs the operations
         } else if (atomType === 'groupby-wtg-avg' && data.groupby_json) {
           const cfg = data.groupby_json;
           
           console.log('🤖 AI GROUPBY CONFIG EXTRACTED:', cfg);
+          console.log('🔍 AI CONFIG DETAILS:', {
+            object_names: cfg.object_names,
+            file_name: cfg.file_name,
+            file_key: cfg.file_key,
+            identifiers: cfg.identifiers,
+            aggregations: cfg.aggregations
+          });
           
           // 🔧 CRITICAL FIX: Automatically populate GroupBy settings with AI configuration
           const aiSelectedIdentifiers = cfg.identifiers || [];
@@ -606,13 +775,60 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
           
           // 🔧 FIX: Ensure we have a single file, not multiple files
           let singleFileName = '';
-          if (cfg.object_names) {
+          
+          // Try multiple possible fields from AI response
+          const possibleFileFields = [
+            cfg.object_names,
+            cfg.file_name,
+            cfg.file_key,
+            cfg.data_source,
+            cfg.source_file
+          ].filter(Boolean);
+          
+          if (possibleFileFields.length > 0) {
+            singleFileName = possibleFileFields[0];
             // If object_names contains multiple files (comma-separated), take only the first one
-            if (cfg.object_names.includes(',')) {
-              singleFileName = cfg.object_names.split(',')[0].trim();
+            if (singleFileName.includes(',')) {
+              singleFileName = singleFileName.split(',')[0].trim();
               console.log('🔧 Multiple files detected, using first file:', singleFileName);
+            }
+            console.log('🔧 Using file path from AI response:', singleFileName);
+          }
+          
+          // 🔧 CRITICAL FIX: If AI didn't provide a real file path, try to get it from atom settings
+          if (!singleFileName || singleFileName === 'your_file.csv' || singleFileName === 'N/A') {
+            console.log('⚠️ AI provided placeholder filename, trying to get real file path from atom settings');
+            
+            // Try to get the real data source from the current atom settings
+            const currentAtom = useLaboratoryStore.getState().getAtom(atomId);
+            const realDataSource = currentAtom?.settings?.dataSource;
+            
+            if (realDataSource && realDataSource !== 'your_file.csv' && realDataSource !== 'N/A') {
+              singleFileName = realDataSource;
+              console.log('✅ Using real file path from atom settings:', singleFileName);
             } else {
-              singleFileName = cfg.object_names;
+              // Still no real file path - show error and don't proceed
+              const errorMsg: Message = {
+                id: (Date.now() + 1).toString(),
+                content: `❌ Cannot proceed: No valid file path found\n\nAI provided: ${cfg.object_names || 'N/A'}\nAtom settings: ${realDataSource || 'N/A'}\n\n💡 Please ensure you have selected a data file before using AI GroupBy.`,
+                sender: 'ai',
+                timestamp: new Date(),
+              };
+              setMessages(prev => [...prev, errorMsg]);
+              
+              updateAtomSettings(atomId, { 
+                aiConfig: cfg,
+                aiMessage: data.message,
+                operationCompleted: false,
+                selectedIdentifiers: aiSelectedIdentifiers,
+                selectedMeasures: aiSelectedMeasures,
+                selectedMeasureNames: aiSelectedMeasures.map(m => m.field),
+                selectedAggregationMethods: ['Sum', 'Mean', 'Min', 'Max', 'Count', 'Median', 'Weighted Mean', 'Rank Percentile'],
+                dataSource: '',
+                bucketName: cfg.bucket_name || 'trinity'
+              });
+              
+              return; // Don't proceed with the operation
             }
           }
           
@@ -674,6 +890,18 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
             singleFileName: singleFileName
           });
           
+          // 🔧 CRITICAL FIX: Final validation - ensure we have a valid file path
+          if (!singleFileName || singleFileName === 'your_file.csv' || singleFileName === 'N/A') {
+            const errorMsg: Message = {
+              id: (Date.now() + 1).toString(),
+              content: `❌ Cannot proceed: Invalid file path\n\nFile path: ${singleFileName}\n\n💡 Please ensure you have selected a valid data file before using AI GroupBy.`,
+              sender: 'ai',
+              timestamp: new Date(),
+            };
+            setMessages(prev => [...prev, errorMsg]);
+            return; // Don't proceed with the operation
+          }
+          
           // Update atom settings with the AI configuration and auto-populated options
           updateAtomSettings(atomId, { 
             aiConfig: cfg,
@@ -694,108 +922,600 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
           // Add AI success message with operation completion
           const aiSuccessMsg: Message = {
             id: (Date.now() + 1).toString(),
-            content: `✅ ${data.message || 'AI groupby configuration completed'}\n\nFile: ${singleFileName || 'N/A'}\nIdentifiers: ${cfg.identifiers?.join(', ') || 'N/A'}\nAggregations: ${aiSelectedMeasures.map(m => `${m.field} (${m.aggregator})`).join(', ')}\n\n🔄 Executing groupby operation automatically...`,
+            content: `✅ ${data.message || 'AI groupby configuration completed'}\n\nFile: ${singleFileName || 'N/A'}\nIdentifiers: ${cfg.identifiers?.join(', ') || 'N/A'}\nAggregations: ${aiSelectedMeasures.map(m => `${m.field} (${m.aggregator})`).join(', ')}\n\n🔄 Operation completed! You can now configure the groupby or proceed with the current settings.`,
             sender: 'ai',
             timestamp: new Date(),
           };
           setMessages(prev => [...prev, aiSuccessMsg]);
           
-          // 🔧 CRITICAL FIX: Automatically execute GroupBy operation after AI configuration
-          // This eliminates the need for users to manually click the Perform button
+          // 🔧 CRITICAL FIX: Automatically call perform endpoint with AI configuration and validate real results
           try {
-            console.log('🤖 AUTO-EXECUTING GroupBy operation with AI configuration...');
-            
-            // 🔧 FIX: Use single file name, not comma-separated list
-            const formData = new URLSearchParams({
-              object_names: singleFileName,  // Single file only
-              bucket_name: cfg.bucket_name || 'trinity',
-              identifiers: JSON.stringify(aiSelectedIdentifiers),
-              aggregations: JSON.stringify(cfg.aggregations || {}),
-              validator_atom_id: atomId,
-              file_key: singleFileName,  // Single file only
-            });
-            
-            console.log('📤 Auto-executing GroupBy with data:', Object.fromEntries(formData.entries()));
-            
-            // Automatically call the GroupBy backend API
-            const res = await fetch(performEndpoint, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-              body: formData,
-            });
-            
-            console.log('📥 Auto-execution response:', {
-              status: res.status,
-              statusText: res.statusText,
-              ok: res.ok
-            });
-            
-            if (res.ok) {
-              const result = await res.json();
-              console.log('✅ Auto-execution successful:', result);
-              
-              // Update atom settings with results
-              updateAtomSettings(atomId, {
-                aiConfig: cfg,
-                aiMessage: data.message,
-                groupbyResults: result,
-                operationCompleted: true
+            if (performEndpoint) {
+              console.log('🚀 Calling groupby perform endpoint with AI config:', { 
+                singleFileName, 
+                aiSelectedIdentifiers, 
+                aiSelectedMeasures 
               });
               
-              // Add completion message
-              const completionMsg: Message = {
-                id: (Date.now() + 1).toString(),
-                content: `🎉 GroupBy operation completed automatically!\n\nStatus: ${result.status}\nResult File: ${result.result_file}\nRow Count: ${result.row_count}\nColumns: ${result.columns?.length || 0}\n\n✅ Results are now displayed in the interface!`,
-                sender: 'ai',
-                timestamp: new Date(),
+              // Extract just the filename if it's a full path
+              const getFilename = (filePath: string) => {
+                if (!filePath) return "";
+                return filePath.includes("/") ? filePath.split("/").pop() || filePath : filePath;
               };
-              setMessages(prev => [...prev, completionMsg]);
               
-            } else {
-              console.error('❌ Auto-execution failed:', res.status, res.statusText);
+              // Convert to FormData format that GroupBy backend expects
+              const formData = new URLSearchParams({
+                validator_atom_id: atomId, // 🔧 CRITICAL: Add required validator_atom_id
+                file_key: getFilename(singleFileName), // 🔧 CRITICAL: Add required file_key
+                object_names: getFilename(singleFileName),
+                bucket_name: cfg.bucket_name || 'trinity',
+                identifiers: JSON.stringify(aiSelectedIdentifiers),
+                aggregations: JSON.stringify(aiSelectedMeasures.reduce((acc, m) => {
+                  // 🔧 CRITICAL FIX: Convert to backend-expected format
+                  // Backend expects: { "field_name": { "agg": "sum", "weight_by": "", "rename_to": "" } }
+                  acc[m.field] = {
+                    agg: m.aggregator.toLowerCase(),
+                    weight_by: m.weight_by || '',
+                    rename_to: m.rename_to || m.field
+                  };
+                  return acc;
+                }, {}))
+              });
               
-              let errorDetail = res.statusText;
-              try {
-                const errorData = await res.json();
-                errorDetail = errorData.detail || errorData.message || res.statusText;
-              } catch (e) {
-                // If we can't parse error response, use status text
+              console.log('📁 Sending groupby data to backend:', {
+                validator_atom_id: atomId,
+                file_key: getFilename(singleFileName),
+                object_names: getFilename(singleFileName),
+                bucket_name: cfg.bucket_name || 'trinity',
+                identifiers: aiSelectedIdentifiers,
+                aggregations: aiSelectedMeasures.reduce((acc, m) => {
+                  acc[m.field] = {
+                    agg: m.aggregator.toLowerCase(),
+                    weight_by: m.weight_by || '',
+                    rename_to: m.rename_to || m.field
+                  };
+                  return acc;
+                }, {})
+              });
+              
+              const res2 = await fetch(performEndpoint, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: formData,
+              });
+              
+              if (res2.ok) {
+                const result = await res2.json();
+                console.log('✅ GroupBy operation successful:', result);
+                
+                // 🔧 CRITICAL FIX: Backend has completed and saved the file
+                // Now we need to retrieve the actual results from the saved file
+                if (result.status === 'SUCCESS' && result.result_file) {
+                  console.log('🔄 Backend operation completed, retrieving results from saved file:', result.result_file);
+                  
+                  // 🔧 FIX: Retrieve results from the saved file using the cached_dataframe endpoint
+                  try {
+                    const cachedRes = await fetch(`${GROUPBY_API}/cached_dataframe?object_name=${encodeURIComponent(result.result_file)}`);
+                    if (cachedRes.ok) {
+                      const csvText = await cachedRes.text();
+                      console.log('📄 Retrieved CSV data from saved file, length:', csvText.length);
+                      
+                      // Parse CSV to get actual results
+                      const lines = csvText.split('\n');
+                      if (lines.length > 1) {
+                        const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, ''));
+                        const rows = lines.slice(1).filter(line => line.trim()).map(line => {
+                          const values = line.split(',').map(v => v.trim().replace(/"/g, ''));
+                          const row: any = {};
+                          headers.forEach((header, index) => {
+                            row[header] = values[index] || '';
+                          });
+                          return row;
+                        });
+                        
+                        console.log('✅ Successfully parsed results from saved file:', {
+                          rowCount: rows.length,
+                          columns: headers.length,
+                          sampleData: rows.slice(0, 2)
+                        });
+                        
+                        // ✅ REAL RESULTS AVAILABLE - Update atom settings with actual data
+                        updateAtomSettings(atomId, {
+                          selectedIdentifiers: aiSelectedIdentifiers,
+                          selectedMeasures: aiSelectedMeasures,
+                          selectedMeasureNames: aiSelectedMeasures.map(m => m.field),
+                          selectedAggregationMethods: ['Sum', 'Mean', 'Min', 'Max', 'Count', 'Median', 'Weighted Mean', 'Rank Percentile'],
+                          dataSource: singleFileName || cfg.file_key || '',
+                          bucketName: cfg.bucket_name || 'trinity',
+                          groupbyResults: {
+                            ...result,
+                            // 🔧 CRITICAL: Store the actual grouped data from saved file
+                            unsaved_data: rows,
+                            result_file: result.result_file,
+                            row_count: rows.length,
+                            columns: headers
+                          },
+                          operationCompleted: true
+                        });
+                        
+                        // ✅ SUCCESS MESSAGE WITH REAL DATA FROM SAVED FILE
+                        const completionMsg: Message = {
+                          id: (Date.now() + 1).toString(),
+                          content: `🎉 GroupBy operation completed successfully!\n\nResult File: ${result.result_file}\nRows: ${rows.length.toLocaleString()}\nColumns: ${headers.length}\n\n📊 Results are ready! The data has been grouped and saved.\n\n💡 You can now view the results in the GroupBy interface - no need to click Perform again!`,
+                          sender: 'ai',
+                          timestamp: new Date(),
+                        };
+                        setMessages(prev => [...prev, completionMsg]);
+                        
+                      } else {
+                        throw new Error('No data rows found in CSV');
+                      }
+                    } else {
+                      throw new Error(`Failed to fetch cached results: ${cachedRes.status}`);
+                    }
+                  } catch (fetchError) {
+                    console.error('❌ Error fetching results from saved file:', fetchError);
+                    
+                    // ⚠️ File saved but couldn't retrieve results - still mark as successful
+                    updateAtomSettings(atomId, {
+                      selectedIdentifiers: aiSelectedIdentifiers,
+                      selectedMeasures: aiSelectedMeasures,
+                      selectedMeasureNames: aiSelectedMeasures.map(m => m.field),
+                      selectedAggregationMethods: ['Sum', 'Mean', 'Min', 'Max', 'Count', 'Median', 'Weighted Mean', 'Rank Percentile'],
+                      dataSource: singleFileName || cfg.file_key || '',
+                      bucketName: cfg.bucket_name || 'trinity',
+                      groupbyResults: {
+                        ...result,
+                        result_file: result.result_file,
+                        row_count: result.row_count || 0,
+                        columns: result.columns || []
+                      },
+                      operationCompleted: true
+                    });
+                    
+                    // ⚠️ WARNING MESSAGE - File saved but results retrieval failed
+                    const warningMsg: Message = {
+                      id: (Date.now() + 1).toString(),
+                      content: `⚠️ GroupBy operation completed and file saved, but results display failed\n\nResult File: ${result.result_file}\nRows: ${result.row_count || 'Unknown'}\nColumns: ${result.columns?.length || 'Unknown'}\n\n📁 File has been saved successfully. Please click the Perform button to view the results.`,
+                      sender: 'ai',
+                      timestamp: new Date(),
+                    };
+                    setMessages(prev => [...prev, warningMsg]);
+                  }
+                  
+                } else {
+                  // ❌ Backend operation failed
+                  console.error('❌ GroupBy backend operation failed:', result);
+                  
+                  updateAtomSettings(atomId, {
+                    selectedIdentifiers: aiSelectedIdentifiers,
+                    selectedMeasures: aiSelectedMeasures,
+                    selectedMeasureNames: aiSelectedMeasures.map(m => m.field),
+                    selectedAggregationMethods: ['Sum', 'Mean', 'Min', 'Max', 'Count', 'Median', 'Weighted Mean', 'Rank Percentile'],
+                    dataSource: singleFileName || cfg.file_key || '',
+                    bucketName: cfg.bucket_name || 'trinity',
+                    operationCompleted: false
+                  });
+                  
+                  const errorMsg: Message = {
+                    id: (Date.now() + 1).toString(),
+                    content: `❌ GroupBy operation failed: ${result.error || 'Unknown error'}\n\nFile: ${singleFileName}\nIdentifiers: ${aiSelectedIdentifiers.join(', ')}\nMeasures: ${aiSelectedMeasures.map(m => `${m.field} (${m.aggregator})`).join(', ')}\n\n💡 Please check your configuration and try clicking the Perform button manually.`,
+                    sender: 'ai',
+                    timestamp: new Date(),
+                  };
+                  setMessages(prev => [...prev, errorMsg]);
+                }
+              } else {
+                console.error('❌ GroupBy operation failed:', res2.status, res2.statusText);
+                
+                // Try to get detailed error message from backend
+                let errorDetail = res2.statusText;
+                try {
+                  const errorData = await res2.json();
+                  errorDetail = errorData.detail || errorData.message || res2.statusText;
+                } catch (e) {
+                  // If we can't parse error response, use status text
+                }
+                
+                const errorMsg: Message = {
+                  id: (Date.now() + 1).toString(),
+                  content: `❌ GroupBy operation failed: ${res2.status}\n\nError: ${errorDetail}\n\nFile: ${singleFileName}\nIdentifiers: ${aiSelectedIdentifiers.join(', ')}\nMeasures: ${aiSelectedMeasures.map(m => `${m.field} (${m.aggregator})`).join(', ')}\n\n💡 Please check your configuration and try clicking the Perform button manually.`,
+                  sender: 'ai',
+                  timestamp: new Date(),
+                };
+                setMessages(prev => [...prev, errorMsg]);
+                
+                updateAtomSettings(atomId, {
+                  selectedIdentifiers: aiSelectedIdentifiers,
+                  selectedMeasures: aiSelectedMeasures,
+                  selectedMeasureNames: aiSelectedMeasures.map(m => m.field),
+                  selectedAggregationMethods: ['Sum', 'Mean', 'Min', 'Max', 'Count', 'Median', 'Weighted Mean', 'Rank Percentile'],
+                  dataSource: singleFileName || cfg.file_key || '',
+                  bucketName: cfg.bucket_name || 'trinity',
+                  operationCompleted: false
+                });
               }
-              
-              const errorMsg: Message = {
-                id: (Date.now() + 1).toString(),
-                content: `❌ Auto-execution failed: ${res.status}\n\nError: ${errorDetail}\n\nYou can still try clicking the Perform button manually.`,
-                sender: 'ai',
-                timestamp: new Date(),
-              };
-              setMessages(prev => [...prev, errorMsg]);
-              
-              updateAtomSettings(atomId, {
-                aiConfig: cfg,
-                aiMessage: data.message,
-                operationCompleted: false
-              });
             }
           } catch (error) {
-            console.error('❌ Error in auto-execution:', error);
+            console.error('❌ Error calling groupby perform endpoint:', error);
             const errorMsg: Message = {
               id: (Date.now() + 1).toString(),
-              content: `❌ Auto-execution error: ${error.message || 'Unknown error occurred'}\n\nYou can still try clicking the Perform button manually.`,
+              content: `❌ Error: ${error.message || 'Unknown error occurred'}\n\nFile: ${singleFileName}\nIdentifiers: ${aiSelectedIdentifiers.join(', ')}\nMeasures: ${aiSelectedMeasures.map(m => `${m.field} (${m.aggregator})`).join(', ')}\n\n💡 Please try clicking the Perform button manually.`,
               sender: 'ai',
               timestamp: new Date(),
             };
             setMessages(prev => [...prev, errorMsg]);
             
             updateAtomSettings(atomId, {
-              aiConfig: cfg,
-              aiMessage: data.message,
+              selectedIdentifiers: aiSelectedIdentifiers,
+              selectedMeasures: aiSelectedMeasures,
+              selectedMeasureNames: aiSelectedMeasures.map(m => m.field),
+              selectedAggregationMethods: ['Sum', 'Mean', 'Min', 'Max', 'Count', 'Median', 'Weighted Mean', 'Rank Percentile'],
+              dataSource: singleFileName || cfg.file_key || '',
+              bucketName: cfg.bucket_name || 'trinity',
               operationCompleted: false
             });
           }
+                 } else if (atomType === 'chart-maker' && data.chart_json) {
+          // 🔧 SIMPLIFIED LOGIC: chart_json is always a list
+          // Single chart: chart_json contains 1 chart configuration
+          // Two charts: chart_json contains 2 chart configurations
+          
+          console.log('🔍 ===== CHART MAKER AI RESPONSE =====');
+          console.log('📝 User Prompt:', userMsg.content);
+          
+          // 🔧 UNIFIED APPROACH: chart_json is always an array
+          const chartsList = Array.isArray(data.chart_json) ? data.chart_json : [data.chart_json];
+          const numberOfCharts = chartsList.length;
+          
+          console.log('📊 Charts in chart_json:', numberOfCharts);
+          console.log('🔍 ===== END CHART ANALYSIS =====');
+          
+          // 🔧 GET TARGET FILE: Use the exact keys from LLM response
+          let targetFile = '';
+          
+          // Priority 1: Use AI-provided file name (exact keys from LLM)
+          if (data.file_name || data.data_source) {
+            targetFile = data.file_name || data.data_source;
+            console.log('🎯 Using AI-provided file name:', targetFile);
+          } else {
+            console.log('⚠️ No file name found in AI response');
+          }
+          
+          if (!targetFile) {
+            // No file found - show error and don't proceed
+            const errorMsg: Message = {
+              id: (Date.now() + 1).toString(),
+              content: `❌ Cannot proceed: No valid file found for chart generation\n\nAI provided: ${data.file_name || 'N/A'}\nContext: ${data.file_context?.available_files?.join(', ') || 'N/A'}\n\n💡 Please ensure you have selected a data file before using AI Chart Maker.`,
+              sender: 'ai',
+              timestamp: new Date(),
+            };
+            setMessages(prev => [...prev, errorMsg]);
+            return;
+          }
+          
+          // 🔧 CREATE CHART CONFIGURATIONS: chart_json is always a list
+          let charts: any[] = [];
+          
+          console.log('🔧 Processing charts from chart_json list...');
+          
+          charts = chartsList.map((chartConfig: any, index: number) => {
+            const chartType = chartConfig.chart_type || 'bar';
+            const traces = chartConfig.traces || [];
+            const title = chartConfig.title || `Chart ${index + 1}`;
+            
+            return {
+              id: `ai_chart_${chartConfig.chart_id || index + 1}_${Date.now()}`,
+              title: title,
+              type: chartType as 'line' | 'bar' | 'area' | 'pie' | 'scatter',
+              xAxis: traces[0]?.x_column || '',
+              yAxis: traces[0]?.y_column || '',
+              filters: {},
+              chartRendered: false,
+              isAdvancedMode: traces.length > 1,
+              traces: traces.map((trace: any, traceIndex: number) => ({
+                id: `trace_${traceIndex}`,
+                x_column: trace.x_column || '', // 🔧 FIX: Use correct property name
+                y_column: trace.y_column || '', // 🔧 FIX: Use correct property name
+                yAxis: trace.y_column || '', // Keep for backward compatibility
+                name: trace.name || `Trace ${traceIndex + 1}`,
+                color: trace.color || undefined,
+                aggregation: trace.aggregation || 'sum',
+                filters: {}
+              }))
+            };
+          });
+          
+          console.log('🔧 Processed charts:', charts.length);
+          
+          // 🔧 CRITICAL FIX: Update atom settings with the AI configuration AND load data
+          updateAtomSettings(atomId, { 
+            aiConfig: data,
+            aiMessage: data.message,
+            // Add the AI-generated charts to the charts array
+            charts: charts,
+            // 🔧 CRITICAL: Set proper data source and file ID for chart rendering
+            dataSource: targetFile,
+            fileId: targetFile,
+            // Set the first chart as active
+            currentChart: charts[0],
+            // Mark that AI has configured the chart(s)
+            aiConfigured: true,
+            // Set multiple charts configuration based on list length
+            multipleCharts: numberOfCharts > 1,
+            numberOfCharts: numberOfCharts,
+            // Set chart type and basic settings for first chart
+            chartType: charts[0].type,
+            chartTitle: charts[0].title,
+            xAxisColumn: charts[0].xAxis,
+            yAxisColumn: charts[0].yAxis,
+            // 🔧 CRITICAL: Set chart rendering state to trigger data loading
+            chartRendered: false,
+            chartLoading: false
+          });
+          
+          // 🔧 CRITICAL FIX: Connect to actual file system and load real data
+          try {
+            console.log('🔄 Connecting AI chart to actual file system...');
+            
+            // 🔧 STEP 1: Load the actual file data using the chart-maker backend
+            console.log('📥 Loading actual file data from backend:', targetFile);
+            
+            // Call the chart-maker backend to load the saved dataframe
+            const loadResponse = await fetch(`${CHART_MAKER_API}/load-saved-dataframe`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ object_name: targetFile })
+            });
+            
+            if (loadResponse.ok) {
+              const fileData = await loadResponse.json();
+              console.log('✅ File data loaded successfully:', fileData);
+              
+              // 🔧 STEP 2: Update atom settings with REAL file data
+              updateAtomSettings(atomId, {
+                dataSource: targetFile,
+                fileId: fileData.file_id,
+                uploadedData: {
+                  columns: fileData.columns,
+                  rows: fileData.sample_data,
+                  numeric_columns: fileData.numeric_columns,
+                  categorical_columns: fileData.categorical_columns,
+                  unique_values: fileData.unique_values,
+                  file_id: fileData.file_id,
+                  row_count: fileData.row_count
+                },
+                chartRendered: false, // Will be rendered when chart is generated
+                chartLoading: false
+              });
+              
+              // 🔧 STEP 3: Generate charts using the backend - UNIFIED APPROACH
+              console.log('🚀 Generating charts with backend data...');
+              
+              // Generate each chart separately by calling FastAPI multiple times
+              const generatedCharts = [];
+              
+              for (let i = 0; i < charts.length; i++) {
+                const chart = charts[i];
+                const chartType = chart.type;
+                const traces = chart.traces || [];
+                const title = chart.title;
+                
+                console.log(`📊 Generating chart ${i + 1}/${charts.length}: ${title} (${chartType})`);
+                
+                const chartRequest = {
+                  file_id: fileData.file_id,
+                  chart_type: chartType,
+                  traces: traces.map(trace => ({
+                    x_column: trace.x_column || chart.xAxis,
+                    y_column: trace.y_column || chart.yAxis,
+                    name: trace.name || `Trace ${traces.indexOf(trace) + 1}`,
+                    chart_type: trace.chart_type || chartType,
+                    aggregation: trace.aggregation || 'sum'
+                  })),
+                  title: title
+                };
+                
+                console.log(`📊 Chart ${i + 1} request payload:`, chartRequest);
+                
+                try {
+                  const chartResponse = await fetch(`${CHART_MAKER_API}/charts`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(chartRequest)
+                  });
+                  
+                  if (chartResponse.ok) {
+                    const chartResult = await chartResponse.json();
+                    console.log(`✅ Chart ${i + 1} generated successfully:`, chartResult);
+                    
+                    // Update chart configuration with backend-generated chart
+                    const updatedChart = {
+                      ...chart,
+                      chartConfig: chartResult.chart_config,
+                      filteredData: chartResult.chart_config.data,
+                      chartRendered: true,
+                      chartLoading: false,
+                      lastUpdateTime: Date.now()
+                    };
+                    
+                    generatedCharts.push(updatedChart);
+                    
+                  } else {
+                    console.error(`❌ Chart ${i + 1} generation failed:`, chartResponse.status);
+                    
+                    // Try to get detailed error message
+                    let errorDetail = chartResponse.statusText;
+                    try {
+                      const errorData = await chartResponse.json();
+                      errorDetail = errorData.detail || errorData.message || chartResponse.statusText;
+                    } catch (e) {
+                      // If we can't parse error response, use status text
+                    }
+                    
+                    // Add error message for this specific chart
+                    const errorMsg: Message = {
+                      id: (Date.now() + i).toString(),
+                      content: `⚠️ Chart ${i + 1} generation failed: ${chartResponse.status}\n\nError: ${errorDetail}\n\nChart: ${title} (${chartType})\n\n💡 This chart may need manual generation.`,
+                      sender: 'ai',
+                      timestamp: new Date(),
+                    };
+                    setMessages(prev => [...prev, errorMsg]);
+                    
+                    // Add failed chart with error state
+                    generatedCharts.push({
+                      ...chart,
+                      chartRendered: false,
+                      chartLoading: false,
+                      error: errorDetail
+                    });
+                  }
+                } catch (error) {
+                  console.error(`❌ Error generating chart ${i + 1}:`, error);
+                  
+                  // Add error message for this specific chart
+                  const errorMsg: Message = {
+                    id: (Date.now() + i).toString(),
+                    content: `❌ Error generating chart ${i + 1}: ${error.message || 'Unknown error occurred'}\n\nChart: ${title} (${chartType})\n\n💡 This chart may need manual generation.`,
+                    sender: 'ai',
+                    timestamp: new Date(),
+                  };
+                  setMessages(prev => [...prev, errorMsg]);
+                  
+                  // Add failed chart with error state
+                  generatedCharts.push({
+                    ...chart,
+                    chartRendered: false,
+                    chartLoading: false,
+                    error: error.message || 'Unknown error'
+                  });
+                }
+              }
+              
+              // 🔧 STEP 4: Update atom settings with all generated charts
+              updateAtomSettings(atomId, {
+                charts: generatedCharts,
+                currentChart: generatedCharts[0] || charts[0],
+                chartRendered: generatedCharts.some(chart => chart.chartRendered),
+                chartLoading: false
+              });
+              
+              console.log('🎉 Charts processed:', generatedCharts.length);
+              
+              // 🔧 CLEANED UP: Show only essential success information
+              const successCount = generatedCharts.filter(chart => chart.chartRendered).length;
+              const totalCount = generatedCharts.length;
+              
+              if (totalCount > 1) {
+                // Multiple charts - simple success message
+                const successMsg: Message = {
+                  id: (Date.now() + 3).toString(),
+                  content: `✅ ${successCount}/${totalCount} charts generated successfully!\n\n💡 Use the 2-chart layout option to view them simultaneously.`,
+                  sender: 'ai',
+                  timestamp: new Date(),
+                };
+                setMessages(prev => [...prev, successMsg]);
+              } else {
+                // Single chart - simple success message
+                const successMsg: Message = {
+                  id: (Date.now() + 3).toString(),
+                  content: `✅ Chart generated successfully with real data!`,
+                  sender: 'ai',
+                  timestamp: new Date(),
+                };
+                setMessages(prev => [...prev, successMsg]);
+              }
+              
+            } else {
+              console.error('❌ Failed to load file data:', loadResponse.status);
+              
+              // Try to get detailed error message
+              let errorDetail = loadResponse.statusText;
+              try {
+                const errorData = await loadResponse.json();
+                errorDetail = errorData.detail || errorData.message || loadResponse.statusText;
+              } catch (e) {
+                // If we can't parse error response, use status text
+              }
+              
+              // Fallback to manual rendering
+              updateAtomSettings(atomId, {
+                chartRendered: false,
+                chartLoading: false
+              });
+              
+              const errorMsg: Message = {
+                id: (Date.now() + 1).toString(),
+                content: `⚠️ Failed to load file data: ${errorDetail}\n\n💡 Please ensure the file exists and try again.`,
+                sender: 'ai',
+                timestamp: new Date(),
+              };
+              setMessages(prev => [...prev, errorMsg]);
+            }
+            
+          } catch (error) {
+            console.error('❌ Error in AI chart setup:', error);
+            
+            // Fallback to manual rendering
+            updateAtomSettings(atomId, {
+              chartRendered: false,
+              chartLoading: false
+            });
+            
+            const errorMsg: Message = {
+              id: (Date.now() + 1).toString(),
+              content: `❌ Error setting up chart: ${error.message || 'Unknown error occurred'}\n\n💡 Please try generating the chart manually.`,
+              sender: 'ai',
+              timestamp: new Date(),
+            };
+            setMessages(prev => [...prev, errorMsg]);
+          }
+          
+          // 🔧 CLEANED UP: Show only LLM suggestions for better user experience
+          let aiContent = '';
+          
+          if (numberOfCharts > 1) {
+            // Multiple charts - show LLM suggestions
+            aiContent = `💡 ${data.message || 'Multiple chart configuration completed successfully'}\n\n`;
+            
+            // Add LLM suggestions if available
+            if (data.suggestions && Array.isArray(data.suggestions)) {
+              aiContent += `${data.suggestions.join('\n')}\n\n`;
+            }
+            
+            // Add next steps if available
+            if (data.next_steps && Array.isArray(data.next_steps)) {
+              aiContent += `🎯 Next Steps:\n${data.next_steps.join('\n')}`;
+            }
+            
+          } else {
+            // Single chart - show LLM suggestions
+            aiContent = `💡 ${data.message || 'Chart configuration completed successfully'}\n\n`;
+            
+            // Add LLM suggestions if available
+            if (data.suggestions && Array.isArray(data.suggestions)) {
+              aiContent += `${data.suggestions.join('\n')}\n\n`;
+            }
+            
+            // Add next steps if available
+            if (data.next_steps && Array.isArray(data.next_steps)) {
+              aiContent += `🎯 Next Steps:\n${data.next_steps.join('\n')}`;
+            }
+          }
+          
+          // Single clean message with LLM suggestions
+          const aiMsg: Message = {
+            id: (Date.now() + 1).toString(),
+            content: aiContent,
+            sender: 'ai',
+            timestamp: new Date(),
+          };
+          setMessages(prev => [...prev, aiMsg]);
+          
         }
       } else {
         // Handle AI suggestions when complete info is not available
-        if (data.suggestions && Array.isArray(data.suggestions)) {
+        if (data && data.suggestions && Array.isArray(data.suggestions)) {
           const suggestionsMsg: Message = { 
             id: (Date.now() + 1).toString(), 
             content: `💡 ${data.message || 'AI needs more information'}\n\n${data.suggestions.join('\n')}\n\n${data.next_steps ? data.next_steps.join('\n') : ''}`,
