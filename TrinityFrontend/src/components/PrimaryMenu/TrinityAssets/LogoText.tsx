@@ -21,11 +21,11 @@ const LogoText: React.FC<LogoTextProps> = ({ className = '', titleClassName }) =
         Trinity
       </h1>
       <div className="h-0.5 bg-trinity-yellow mt-0.5 w-full" />
-      <div className="overflow-hidden mt-1 w-full">
-        <span className="font-mono text-xs text-black/60 leading-none whitespace-nowrap inline-block animate-tagline-scroll">
-          A Quant Matrix AI Experience
-        </span>
-      </div>
+    </div>
+    <div className="overflow-hidden mt-1 w-full">
+      <span className="font-mono text-xs text-black/60 leading-none whitespace-nowrap inline-block animate-tagline-scroll">
+        A Quant Matrix AI Experience
+      </span>
     </div>
   </div>
 );
