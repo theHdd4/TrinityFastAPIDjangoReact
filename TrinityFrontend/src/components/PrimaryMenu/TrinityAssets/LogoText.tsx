@@ -22,7 +22,7 @@ const LogoText: React.FC<LogoTextProps> = ({ className = '', titleClassName }) =
       </h1>
       <div className="relative w-full mt-1 h-0.5">
         <div className="absolute left-0 top-0 h-full bg-trinity-yellow w-0 animate-line-grow" />
-        <span className="absolute left-0 top-1/2 w-2 h-2 rounded-full bg-trinity-blue -translate-x-1/2 -translate-y-1/2 animate-dot-travel" />
+        <span className="absolute left-0 top-1/2 w-2 h-2 rounded-full bg-black -translate-x-1/2 -translate-y-1/2 animate-dot-travel" />
       </div>
     </div>
     <div className="w-full -mt-0.5">
