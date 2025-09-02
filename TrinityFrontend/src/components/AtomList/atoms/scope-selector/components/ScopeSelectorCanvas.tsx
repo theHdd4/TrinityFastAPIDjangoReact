@@ -60,7 +60,44 @@ const ScopeSelectorCanvas: React.FC<ScopeSelectorCanvasProps> = ({ data, onDataC
           const identifiers = Array.isArray(cfg.identifiers) ? cfg.identifiers : [];
           const measures = Array.isArray(cfg.measures) ? cfg.measures : [];
           if (identifiers.length > 0) {
-            onDataChange({ selectedIdentifiers: identifiers, measures });
+            const update: Partial<ScopeSelectorData> = {
+              selectedIdentifiers: identifiers,
+              measures,
+            };
+            if (!data.scopes || data.scopes.length === 0) {
+              const newScope: ScopeData = {
+                id: Date.now().toString(),
+                name: 'Scope 1',
+                identifiers: Object.fromEntries(
+                  identifiers.map((id: string) => [id, ''])
+                ),
+                timeframe: {
+                  from: dateRange.available
+                    ? (dateRange.min ?? new Date().toISOString().split('T')[0])
+                    : new Date().toISOString().split('T')[0],
+                  to: dateRange.available
+                    ? (
+                        dateRange.max ??
+                        new Date(
+                          new Date().setFullYear(
+                            new Date().getFullYear() + 1
+                          )
+                        )
+                          .toISOString()
+                          .split('T')[0]
+                      )
+                    : new Date(
+                        new Date().setFullYear(
+                          new Date().getFullYear() + 1
+                        )
+                      )
+                        .toISOString()
+                        .split('T')[0],
+                },
+              };
+              update.scopes = [newScope];
+            }
+            onDataChange(update);
             toast({ title: 'Column classifier configuration loaded' });
           } else {
             toast({ title: 'Column classifier configuration not found', variant: 'destructive' });

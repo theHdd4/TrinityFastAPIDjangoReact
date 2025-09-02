@@ -17,11 +17,42 @@ const ScopeSelectorInputFiles: React.FC<Props> = ({ atomId }) => {
   const [frames, setFrames] = useState<Frame[]>([]);
 
   useEffect(() => {
-    fetch(`${VALIDATE_API}/list_saved_dataframes`)
+    let query = '';
+    const envStr = localStorage.getItem('env');
+    if (envStr) {
+      try {
+        const env = JSON.parse(envStr);
+        query =
+          '?' +
+          new URLSearchParams({
+            client_id: env.CLIENT_ID || '',
+            app_id: env.APP_ID || '',
+            project_id: env.PROJECT_ID || '',
+            client_name: env.CLIENT_NAME || '',
+            app_name: env.APP_NAME || '',
+            project_name: env.PROJECT_NAME || ''
+          }).toString();
+      } catch {
+        /* ignore */
+      }
+    }
+    fetch(`${VALIDATE_API}/list_saved_dataframes${query}`)
       .then(r => r.json())
-      .then(d => setFrames(Array.isArray(d.files) ? d.files : []))
-      .catch(() => setFrames([]));
-  }, []);
+      .then(d => {
+        let files = Array.isArray(d.files) ? d.files : [];
+        if (settings.dataSource && !files.some(f => f.object_name === settings.dataSource)) {
+          files = [...files, { object_name: settings.dataSource, csv_name: settings.dataSource }];
+        }
+        setFrames(files);
+      })
+      .catch(() => {
+        if (settings.dataSource) {
+          setFrames([{ object_name: settings.dataSource, csv_name: settings.dataSource }]);
+        } else {
+          setFrames([]);
+        }
+      });
+  }, [settings.dataSource]);
 
   const handleFrameChange = async (val: string) => {
     if (!val.endsWith('.arrow')) {
@@ -66,6 +97,13 @@ const ScopeSelectorInputFiles: React.FC<Props> = ({ atomId }) => {
       });
     }
   };
+
+  useEffect(() => {
+    if (settings.dataSource && (!settings.allColumns || settings.allColumns.length === 0)) {
+      handleFrameChange(settings.dataSource);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settings.dataSource]);
 
   return (
     <div className="space-y-4 p-2">
