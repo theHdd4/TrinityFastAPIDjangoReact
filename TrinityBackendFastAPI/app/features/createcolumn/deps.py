@@ -57,6 +57,13 @@ def get_minio_df(bucket: str, file_key: str) -> pd.DataFrame:
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorCollection
 import os
 from fastapi import HTTPException
+from typing import Tuple
+
+# Redis configuration from environment variables
+REDIS_HOST = os.getenv("REDIS_HOST", "redis")
+# decode_responses=True to get str directly
+redis_client = redis.Redis(host=REDIS_HOST, port=6379, decode_responses=True)
+
 MONGO_URI = os.getenv("MONGO_URI", "mongodb://mongo:27017/trinity")
 MONGO_DB = os.getenv("MONGO_DB", "trinity")
 client = AsyncIOMotorClient(MONGO_URI)
@@ -103,18 +110,75 @@ async def fetch_measures_list(
     print(f"✅ MongoDB data: identifiers={identifiers}, measures={measures}")
     return identifiers, measures
 
+async def fetch_identifiers_and_measures(
+    validator_atom_id: str,
+    file_key: str,
+    collection: AsyncIOMotorCollection,
+) -> Tuple[list, list]:
+    """Return identifiers & measures using Redis→Mongo→legacy strategy with filtering."""
+
+    # 1️⃣  Redis cache
+    cfg = redis_classifier_config()
+    if cfg and isinstance(cfg.get("identifiers"), list) and isinstance(cfg.get("measures"), list):
+        identifiers = cfg["identifiers"]
+        measures = cfg["measures"]
+    else:
+        # 2️⃣  MongoDB classifier_configs
+        try:
+            from app.features.column_classifier.database import get_classifier_config_from_mongo
+            mongo_cfg: dict | None = get_classifier_config_from_mongo(CLIENT_NAME, APP_NAME, PROJECT_NAME)
+            if mongo_cfg and isinstance(mongo_cfg.get("identifiers"), list) and isinstance(mongo_cfg.get("measures"), list):
+                identifiers = mongo_cfg["identifiers"]
+                measures = mongo_cfg["measures"]
+                # Write back to Redis
+                try:
+                    import json
+                    key = f"{_object_prefix()}column_classifier_config"
+                    redis_client.setex(key, 3600, json.dumps(mongo_cfg, default=str))
+                except Exception as exc:
+                    print(f"⚠️ Redis setex in fetch_identifiers_and_measures: {exc}")
+            else:
+                raise ValueError("config not found in Mongo")
+        except Exception as exc:
+            # 3️⃣  Legacy collection fallback
+            document = await collection.find_one({"validator_atom_id": validator_atom_id, "file_key": file_key})
+            if not document or "final_classification" not in document:
+                raise HTTPException(status_code=404, detail="Final classification not found in MongoDB or Redis")
+            identifiers = document["final_classification"].get("identifiers", [])
+            measures = document["final_classification"].get("measures", [])
+
+    return identifiers, measures
+
 
 # In mongodb_saver.py or a shared db file
 async def get_create_settings_collection():
     return client["column_operations_db"]["create_settings"]
 
-# Redis configuration from environment variables
-REDIS_HOST = os.getenv("REDIS_HOST", "redis")
-# decode_responses=True to get str directly
-redis_client = redis.Redis(host=REDIS_HOST, port=6379, decode_responses=True)
-
 
 import os
+
+# -------- Runtime object prefix helper (client/app/project) --------
+
+def _current_names() -> tuple[str, str, str]:
+    """Return current (client, app, project) names from env vars."""
+    return (
+        os.getenv("CLIENT_NAME", "default_client"),
+        os.getenv("APP_NAME", "default_app"),
+        os.getenv("PROJECT_NAME", "default_project"),
+    )
+
+def _object_prefix() -> str:
+    """Return the current `<client>/<app>/<project>/` prefix **from environment vars**.
+
+    Environment variables may change during the lifetime of the FastAPI process
+    (e.g. set per-request by a middleware). Therefore we must build the prefix
+    at *call time*, not import time.
+    """
+    client = os.getenv("CLIENT_NAME", "default_client")
+    app = os.getenv("APP_NAME", "default_app")
+    project = os.getenv("PROJECT_NAME", "default_project")
+    return f"{client}/{app}/{project}/"
+
 CLIENT_NAME = os.getenv("CLIENT_NAME", "default_client")
 APP_NAME = os.getenv("APP_NAME", "default_app")
 PROJECT_NAME = os.getenv("PROJECT_NAME", "default_project")
@@ -129,9 +193,10 @@ def redis_classifier_config() -> dict | None:
 
     Returns parsed dict or None if key missing/invalid.
     """
-    key = f"{OBJECT_PREFIX}column_classifier_config"
+    key = f"{_object_prefix()}column_classifier_config"
     try:
         data_str = redis_client.get(key)
+        print(f"🔍 redis_classifier_config GET {key} => {'hit' if data_str else 'miss'}")
         if not data_str:
             return None
         import json

@@ -147,6 +147,19 @@ const ScopeSelectorCanvas: React.FC<ScopeSelectorCanvasProps> = ({ data, onDataC
         }
       });
 
+      // Add criteria to the request body
+      if (data.criteria) {
+        requestBody.criteria = {
+          min_datapoints_enabled: data.criteria.minDatapointsEnabled,
+          min_datapoints: data.criteria.minDatapoints,
+          pct90_enabled: data.criteria.pct90Enabled,
+          pct_percentile: data.criteria.pctPercentile,
+          pct_threshold: data.criteria.pctThreshold,
+          pct_base: data.criteria.pctBase,
+          pct_column: data.criteria.pctColumn
+        };
+      }
+
       const response = await fetch(`${SCOPE_SELECTOR_API}/scopes/${scopeId}/create-multi-filtered-scope`, {
         method: 'POST',
         headers: {
@@ -960,7 +973,15 @@ const ScopeSelectorCanvas: React.FC<ScopeSelectorCanvasProps> = ({ data, onDataC
                       >
                         <td className="sticky left-0 z-10 px-6 py-4 whitespace-nowrap text-sm font-bold text-gray-900 bg-gradient-to-r from-blue-50 to-indigo-50 border-r border-blue-200/50">
                           <div className="flex items-center gap-3">
-                            <div className={`w-3 h-3 rounded-full ${row.count === 0 ? 'bg-red-500' : 'bg-blue-500'}`}></div>
+                            <div className={`w-3 h-3 rounded-full ${
+                              row.count === 0
+                                ? 'bg-red-500'
+                                : (data.criteria?.minDatapointsEnabled && row.count < (data.criteria?.minDatapoints || 0))
+                                  ? 'bg-red-500'
+                                  : (data.criteria?.pct90Enabled && row.pctPass === false)
+                                    ? 'bg-red-500'
+                                    : 'bg-blue-500'
+                            }`}></div>
                             <span className="bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">
                               {`Scope ${data.scopes.findIndex(s=>s.id===row.scopeId)+1}`}
                             </span>

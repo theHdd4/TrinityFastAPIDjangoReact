@@ -4,14 +4,14 @@ from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from routes import router
-from config import get_settings, Settings
+from config import settings, Settings
 
 def create_app() -> FastAPI:
     """Create and configure the FastAPI application."""
-    settings = get_settings()
+    # Use the settings instance directly
     
     app = FastAPI(
-        title=settings.app_name,
+        title="Select Models Feature Based API",
         description="""
         ## Selection API
         
@@ -22,8 +22,9 @@ def create_app() -> FastAPI:
         - **Monitor system health** and connections
         
         ### Database Configuration
-        - **MongoDB**: Port 9005 with authentication
-        - **MinIO**: Port 9003 with access keys
+        - **MongoDB**: Standard connection with authentication
+        - **MinIO**: Standard connection with access keys
+        - **Redis**: Standard connection for caching
         
         ### Key Features
         - Unique combination extraction from scope data
@@ -31,8 +32,8 @@ def create_app() -> FastAPI:
         - Health monitoring for all services
         - Comprehensive error handling
         """,
-        version=settings.app_version,
-        debug=settings.debug,
+        version="1.0.0",
+        debug=True,
         contact={
             "name": "Selection API",
             "url": "http://localhost:8012/docs",
@@ -52,7 +53,7 @@ def create_app() -> FastAPI:
     )
     
     # Include routes
-    app.include_router(router, prefix=settings.api_prefix)
+    app.include_router(router, prefix="/api/select")
     
     return app
 
@@ -65,29 +66,28 @@ async def root():
     return RedirectResponse(url="/docs")
 
 @app.get("/info", tags=["Info"])
-async def get_app_info(settings: Settings = Depends(get_settings)):
+async def get_app_info():
     """Get application information and available endpoints."""
     return {
-        "app_name": settings.app_name,
-        "version": settings.app_version,
+        "app_name": "Select Models Feature Based API",
+        "version": "1.0.0",
         "database": {
-            "mongodb_endpoint": settings.mongo_details.split('@')[1] if '@' in settings.mongo_details else settings.mongo_details,
-            "database": settings.database_name,
-            "collection": settings.collection_name
+            "mongodb_endpoint": "mongodb://admin_dev:pass_dev@10.2.1.65:9005/?authSource=admin",
+            "database": "validator_atoms_db",
+            "collection": "validator_atoms"
         },
         "minio": {
-            "endpoint": settings.minio_url,
-            "bucket": settings.minio_bucket_name,
-            "port": "9003"
+            "endpoint": "minio:9000",
+            "bucket": "trinity"
+        },
+        "redis": {
+            "host": "redis",
+            "port": 6379,
+            "db": 0
         },
         "available_endpoints": {
-            "health_check": f"{settings.api_prefix}/health",
-            "all_combinations": f"{settings.api_prefix}/combinations",
-            "filter_combinations": f"{settings.api_prefix}/combinations/filter",
-            "combination_details": f"{settings.api_prefix}/combinations/{{combination_id}}",
-            "file_download": f"{settings.api_prefix}/files/download/{{file_key}}",
-            "list_files": f"{settings.api_prefix}/files/list",
-            "list_scopes": f"{settings.api_prefix}/scopes",
+            "health_check": "/api/select/health",
+            "combination_ids": "/api/select/combination-ids",
             "documentation": "/docs",
             "openapi_schema": "/openapi.json"
         }
@@ -96,11 +96,10 @@ async def get_app_info(settings: Settings = Depends(get_settings)):
 # For direct execution
 if __name__ == "__main__":
     import uvicorn
-    settings = get_settings()
     uvicorn.run(
         app,
-        host=settings.host,
-        port=settings.port,
-        reload=settings.debug,
+        host="127.0.0.1",
+        port=8012,
+        reload=True,
         log_level="info"
     )

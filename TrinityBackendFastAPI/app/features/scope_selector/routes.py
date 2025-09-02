@@ -1,5 +1,5 @@
 # routes.py
-from fastapi import APIRouter, HTTPException, Depends, Query, Path, Request
+from fastapi import APIRouter, HTTPException, Depends, Query, Path, Request, Body
 from fastapi.responses import JSONResponse
 from typing import Dict, List, Optional, Tuple, Any
 from datetime import datetime
@@ -28,7 +28,8 @@ from .schemas import (
     ColumnClassification,
     ClassificationSummary,
     ScopeFilterResponse,
-    ScopeFilterRequest
+    ScopeFilterRequest,
+    CriteriaSettings
 )
 from ..data_upload_validate.app.routes import get_object_prefix
 from .deps import (
@@ -39,6 +40,7 @@ from .deps import (
     get_processing_jobs_collection
 )
 from .database import ValidatorAtomRepository
+from .mongodb_saver import save_scope_config, get_scope_config_from_mongo
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -1236,6 +1238,18 @@ async def create_multi_filtered_scope(
                 if len(combination_df) == 0:
                     continue
                 
+                logger.info(f"Processing combination: {combination_filter} with {len(combination_df)} records")
+                
+                # Check criteria before saving
+                criteria_result = check_combination_criteria(combination_df, request.criteria, df)
+                logger.info(f"Criteria check result for {combination_filter}: {criteria_result}")
+                
+                if not criteria_result:
+                    logger.info(f"Skipping combination {combination_filter} - does not meet criteria")
+                    continue
+                
+                logger.info(f"Saving combination {combination_filter} - meets all criteria")
+                
                 # Generate filename for this combination
                 combination_name_parts = []
                 for col_name, value in combination_filter.items():
@@ -1307,6 +1321,53 @@ async def create_multi_filtered_scope(
 
         logger.info(f"Multi-filter scope generated (not persisted): {new_scope_id}")
 
+        # Save the scope configuration to MongoDB
+        try:
+            # Extract client, app, project from file_key
+            # file_key format: "default_client/default_app/default_project/20250814_135348_D0.arrow"
+            file_key_parts = request.file_key.split('/')
+            if len(file_key_parts) >= 3:
+                client_name = file_key_parts[0]
+                app_name = file_key_parts[1]
+                project_name = file_key_parts[2]
+                
+                # Prepare scope configuration data
+                scope_config_data = {
+                    "scope_id": new_scope_id,
+                    "scope_name": auto_generated_name,
+                    "file_key": request.file_key,
+                    "filter_set_results": [result.dict() for result in filter_set_results],
+                    "total_filter_sets": len(filter_set_results),
+                    "overall_filtered_records": overall_filtered_records,
+                    "original_records_count": original_records_count,
+                    "created_at": created_at,
+                    "description": request.description,
+                    "criteria": request.criteria.dict() if request.criteria else None
+                }
+                
+                # Save to MongoDB
+                mongo_result = await save_scope_config(
+                    client_name=client_name,
+                    app_name=app_name,
+                    project_name=project_name,
+                    scope_data=scope_config_data,
+                    user_id="",  # You can add user_id if available
+                    project_id=None  # You can add project_id if available
+                )
+                
+                logger.info(f"🔍 DEBUG: MongoDB save result: {mongo_result}")
+                
+                if mongo_result["status"] == "success":
+                    logger.info(f"📦 Scope configuration saved to MongoDB: {mongo_result['mongo_id']}")
+                else:
+                    logger.error(f"❌ Failed to save scope configuration to MongoDB: {mongo_result['error']}")
+            else:
+                logger.warning(f"⚠️ Could not extract client/app/project from file_key: {request.file_key}")
+                
+        except Exception as e:
+            logger.error(f"❌ Error saving scope configuration to MongoDB: {str(e)}")
+            # Don't fail the entire request if MongoDB save fails
+
         return MultiFilterScopeResponse(
             success=True,
             scope_id=new_scope_id,
@@ -1327,3 +1388,226 @@ async def create_multi_filtered_scope(
     finally:
         if client:
             client.close()
+
+def check_combination_criteria(
+    combination_df: pd.DataFrame,
+    criteria: Optional[CriteriaSettings],
+    original_df: pd.DataFrame
+) -> bool:
+    """
+    Check if a combination meets all the specified criteria.
+    Returns True if the combination should be saved, False otherwise.
+    """
+    logger.info(f"Checking criteria for combination with {len(combination_df)} records")
+    logger.info(f"Criteria object: {criteria}")
+    
+    if not criteria:
+        logger.info("No criteria specified, saving all combinations")
+        return True  # No criteria specified, save all combinations
+    
+    # Check minimum datapoints criteria
+    if criteria.min_datapoints_enabled:
+        logger.info(f"Checking min datapoints: {len(combination_df)} >= {criteria.min_datapoints}")
+        if len(combination_df) < criteria.min_datapoints:
+            logger.info(f"Combination rejected: {len(combination_df)} datapoints < {criteria.min_datapoints} minimum")
+            return False
+        else:
+            logger.info(f"Min datapoints criteria passed: {len(combination_df)} >= {criteria.min_datapoints}")
+    
+    # Check percentile criteria
+    if criteria.pct90_enabled and criteria.pct_column:
+        logger.info(f"Checking percentile criteria: {criteria.pct_percentile}th percentile of {criteria.pct_column} > {criteria.pct_threshold}% of {criteria.pct_base}")
+        try:
+            # Get the column for percentile calculation
+            if criteria.pct_column not in combination_df.columns:
+                logger.warning(f"Percentile column '{criteria.pct_column}' not found in combination data")
+                return True  # Skip this criteria if column not found
+            
+            # Calculate the percentile value
+            percentile_value = combination_df[criteria.pct_column].quantile(criteria.pct_percentile / 100)
+            logger.info(f"Percentile value: {percentile_value}")
+            
+            # Calculate the base value based on the specified base
+            if criteria.pct_base == "max":
+                base_value = original_df[criteria.pct_column].max()
+            elif criteria.pct_base == "min":
+                base_value = original_df[criteria.pct_column].min()
+            elif criteria.pct_base == "mean":
+                base_value = original_df[criteria.pct_column].mean()
+            elif criteria.pct_base == "dist":
+                # Use the distribution (total sum) of the column
+                base_value = original_df[criteria.pct_column].sum()
+            else:
+                logger.warning(f"Unknown pct_base: {criteria.pct_base}, using max")
+                base_value = original_df[criteria.pct_column].max()
+            
+            logger.info(f"Base value ({criteria.pct_base}): {base_value}")
+            
+            # Calculate the percentage
+            if base_value != 0:
+                percentage = (percentile_value / base_value) * 100
+                logger.info(f"Calculated percentage: {percentage:.2f}%")
+                if percentage <= criteria.pct_threshold:
+                    logger.info(f"Combination rejected: {percentage:.2f}% <= {criteria.pct_threshold}% threshold")
+                    return False
+                else:
+                    logger.info(f"Percentile criteria passed: {percentage:.2f}% > {criteria.pct_threshold}%")
+            else:
+                logger.warning(f"Base value is 0 for column {criteria.pct_column}, skipping percentile check")
+                
+        except Exception as e:
+            logger.error(f"Error checking percentile criteria: {str(e)}")
+            return True  # Skip this criteria if there's an error
+    
+    logger.info("All criteria passed, combination will be saved")
+    return True
+
+# ============================================================================
+# SAVE ENDPOINTS
+# ============================================================================
+
+@router.post("/save-scope-config")
+async def save_scope_configuration(
+    client_name: str = Query(..., description="Client name"),
+    app_name: str = Query(..., description="App name"),
+    project_name: str = Query(..., description="Project name"),
+    scope_data: dict = Body(..., description="Scope configuration data to save"),
+    user_id: str = Query("", description="User ID"),
+    project_id: int = Query(None, description="Project ID")
+):
+    """Save scope configuration to MongoDB"""
+    try:
+        result = await save_scope_config(
+            client_name=client_name,
+            app_name=app_name,
+            project_name=project_name,
+            scope_data=scope_data,
+            user_id=user_id,
+            project_id=project_id
+        )
+        
+        if result["status"] == "success":
+            return {
+                "success": True,
+                "message": f"Scope configuration saved successfully",
+                "mongo_id": result["mongo_id"],
+                "operation": result["operation"],
+                "collection": result["collection"]
+            }
+        else:
+            raise HTTPException(status_code=500, detail=f"Failed to save scope configuration: {result['error']}")
+            
+    except Exception as e:
+        logger.error(f"Error saving scope configuration: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to save scope configuration: {str(e)}")
+
+@router.get("/get-scope-config")
+async def get_scope_configuration(
+    client_name: str = Query(..., description="Client name"),
+    app_name: str = Query(..., description="App name"),
+    project_name: str = Query(..., description="Project name")
+):
+    """Retrieve saved scope configuration from MongoDB"""
+    try:
+        result = await get_scope_config_from_mongo(client_name, app_name, project_name)
+        
+        if result:
+            return {
+                "success": True,
+                "data": result
+            }
+        else:
+            return {
+                "success": False,
+                "message": "No scope configuration found",
+                "data": None
+            }
+            
+    except Exception as e:
+        logger.error(f"Error retrieving scope configuration: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve scope configuration: {str(e)}")
+
+
+
+@router.post("/save")
+async def save_scope_data(
+    request: Request,
+    client_name: str = Query(..., description="Client name"),
+    app_name: str = Query(..., description="App name"),
+    project_name: str = Query(..., description="Project name"),
+    user_id: str = Query("", description="User ID"),
+    project_id: int = Query(None, description="Project ID")
+):
+    """General save endpoint for scope data - used by SAVE button"""
+    logger.info(f"🔍 DEBUG: /save endpoint called")
+    logger.info(f"🔍 DEBUG: client_name = {client_name}")
+    logger.info(f"🔍 DEBUG: app_name = {app_name}")
+    logger.info(f"🔍 DEBUG: project_name = {project_name}")
+    logger.info(f"🔍 DEBUG: user_id = {user_id}")
+    logger.info(f"🔍 DEBUG: project_id = {project_id}")
+    
+    try:
+        # Get the request body
+        body = await request.json()
+        logger.info(f"🔍 DEBUG: request body = {body}")
+        
+        # Save scope configuration data
+        result = await save_scope_config(
+            client_name=client_name,
+            app_name=app_name,
+            project_name=project_name,
+            scope_data=body,
+            user_id=user_id,
+            project_id=project_id
+        )
+        
+        logger.info(f"🔍 DEBUG: save_scope_config result = {result}")
+        
+        if result["status"] == "success":
+            return {
+                "success": True,
+                "message": f"Scope data saved successfully",
+                "mongo_id": result["mongo_id"],
+                "operation": result["operation"],
+                "collection": result["collection"]
+            }
+        else:
+            raise HTTPException(status_code=500, detail=f"Failed to save scope data: {result['error']}")
+            
+    except Exception as e:
+        logger.error(f"Error saving scope data: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to save scope data: {str(e)}")
+
+@router.get("/test-mongo")
+async def test_mongo_connection():
+    """Test MongoDB connection and list databases"""
+    try:
+        from .mongodb_saver import client
+        logger.info(f"🔍 DEBUG: Testing MongoDB connection")
+        
+        # List all databases
+        databases = await client.list_database_names()
+        logger.info(f"🔍 DEBUG: Available databases: {databases}")
+        
+        # Check if trinity_prod exists
+        if "trinity_prod" in databases:
+            logger.info(f"🔍 DEBUG: trinity_prod database exists")
+            # List collections in trinity_prod
+            collections = await client["trinity_prod"].list_collection_names()
+            logger.info(f"🔍 DEBUG: Collections in trinity_prod: {collections}")
+        else:
+            logger.warning(f"🔍 DEBUG: trinity_prod database does not exist")
+        
+        return {
+            "success": True,
+            "databases": databases,
+            "trinity_prod_exists": "trinity_prod" in databases,
+            "collections_in_trinity_prod": collections if "trinity_prod" in databases else []
+        }
+        
+    except Exception as e:
+        logger.error(f"Error testing MongoDB connection: {str(e)}")
+        return {
+            "success": False,
+            "error": str(e)
+        }

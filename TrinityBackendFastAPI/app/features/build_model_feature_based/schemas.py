@@ -127,7 +127,12 @@ class ModelResult(BaseModel):
     csf: Optional[float] = Field(None, description="Consumer Surplus Fraction")
     mcv: Optional[float] = Field(None, description="Marginal Consumer Value")
     ppu_at_elasticity: Optional[float] = Field(None, description="Average PPU used for elasticity calculation")
-
+    
+    # Elasticity and Contribution fields
+    elasticities: Optional[Dict[str, float]] = Field(None, description="Elasticity values for each variable")
+    contributions: Optional[Dict[str, float]] = Field(None, description="Contribution values for each variable")
+    elasticity_details: Optional[Dict[str, Any]] = Field(None, description="Details about elasticity calculation")
+    contribution_details: Optional[Dict[str, Any]] = Field(None, description="Details about contribution calculation")
 
 
 class CombinationModelResults(BaseModel):

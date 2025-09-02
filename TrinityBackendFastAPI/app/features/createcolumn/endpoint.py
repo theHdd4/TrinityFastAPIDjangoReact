@@ -5,6 +5,6 @@ from .routes import router as create_routes
 router = APIRouter()
 router.include_router(
     create_routes,
-    prefix="/create",
+    prefix="/create-column",
     tags=["Create"]
 )
