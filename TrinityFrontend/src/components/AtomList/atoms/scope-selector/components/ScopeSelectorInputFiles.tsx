@@ -74,11 +74,10 @@ const ScopeSelectorInputFiles: React.FC<Props> = ({ atomId }) => {
           })
           .map(col => col.column);
 
-        // Preserve previously selected identifiers if available
-        const selectedCats =
-          settings.selectedIdentifiers && settings.selectedIdentifiers.length > 0
-            ? settings.selectedIdentifiers
-            : allCats;
+        // Preserve previously selected identifiers that still exist in this dataset
+        const selectedCats = Array.isArray(settings.selectedIdentifiers)
+          ? settings.selectedIdentifiers.filter((id: string) => allCats.includes(id))
+          : [];
 
         // Update settings with all identifiers while keeping selected ones
         updateSettings(atomId, {
