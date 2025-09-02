@@ -1,0 +1,27 @@
+Issue: Reopening a project after performing DataFrame operations fails with a browser error `QuotaExceededError: Failed to execute 'setItem' on 'Storage': Setting the value of 'current-project' exceeded the quota.`
+
+Reason: Large results from DataFrame operations were being cached in `localStorage`. When switching projects, these oversized entries remained and `current-project` could not be written, causing the project to fail loading.
+
+Potential Prognosis: Without trimming or clearing these cached items, repeated DataFrame interactions can fill the browser's storage. Users would be unable to reopen projects until manually clearing site data, leading to potential data loss or confusion.
+
+Implemented Changes:
+- Added a safe storage helper (`saveCurrentProject`) that strips in-memory DataFrame data and catches quota errors. When storage is full, it now purges heavy cache keys before retrying, preventing the `QuotaExceededError` and allowing projects to reopen reliably.
+- Laboratory saves now strip large DataFrame results before sending them to the backend, and the server sanitizes DataFrame-operation atoms before writing to MongoDB so only configuration (not the data itself) is persisted and retrieved.
+
+Issue: Saving a DataFrame from the DataFrame Operations atom produced the original, unmodified dataset.
+
+Reason: The save routine reused the original file name and cached rows, so MinIO persisted the untouched source file instead of the edited table.
+
+Potential Prognosis: Users could believe their changes were stored, but reopening the file would reveal stale data, causing confusion or accidental loss of work.
+
+Implemented Changes:
+- The save handler now captures the latest table state and names files using the pattern `DF_OPS_{SerialNumber}_{FileName}` inside the `dataframe operations` folder so each save writes a distinct, updated Arrow file.
+
+Issue: Uploading a file in the DataFrame Operations atom caused a phantom scroll area with extra whitespace below the table.
+
+Reason: The canvas wrapper kept an inflated height after the heavy table mounted, leaving a large empty layout box even though the visible content was smaller.
+
+Potential Prognosis: Repeated uploads would continue to expand the layout, confusing users with persistent blank space and awkward scrolling.
+
+Implemented Changes:
+- The canvas and atom wrappers now use a strict flex layout (`h-full`, `flex-1`, and `overflow-auto`) and a layout effect resets container height and scroll after each upload, removing the phantom whitespace and keeping the UI stable.

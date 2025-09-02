@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import BackToAppsIcon from '../TrinityAssets/BackToAppsIcon';
 import { REGISTRY_API } from '@/lib/api';
-import { serializeProject } from '@/utils/projectStorage';
+import { saveCurrentProject } from '@/utils/projectStorage';
 
 interface AppIdentityProps {
   projectName: string | null;
@@ -35,7 +35,7 @@ const AppIdentity: React.FC<AppIdentityProps> = ({ projectName, onGoBack, onRena
         if (res.ok) {
           const updated = await res.json();
           console.log('Project renamed from primary menu', updated);
-          localStorage.setItem('current-project', serializeProject(updated));
+          saveCurrentProject(updated);
           try {
             const envRes = await fetch(`${REGISTRY_API}/projects/${proj.id}/`, {
               credentials: 'include'

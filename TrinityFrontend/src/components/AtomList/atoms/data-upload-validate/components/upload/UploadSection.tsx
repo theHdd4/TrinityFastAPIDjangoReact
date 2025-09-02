@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useId } from 'react';
 import { FileText, Upload, Trash2 } from 'lucide-react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -12,7 +12,7 @@ interface FileRow {
 }
 
 interface UploadSectionProps {
-  uploadedFiles: File[];
+  uploadedFiles: { name: string; path: string; size: number }[];
   files: FileRow[];
   validationResults: Record<string, string>;
   validationDetails: Record<string, any[]>;
@@ -58,8 +58,10 @@ const UploadSection: React.FC<UploadSectionProps> = ({
   saveStatus,
   disabled = false,
   disableValidation = false
-}) => (
-  <Card className="h-full flex flex-col shadow-sm border-2 border-blue-200 bg-white">
+}) => {
+  const inputId = useId();
+  return (
+    <Card className="h-full flex flex-col shadow-sm border-2 border-blue-200 bg-white">
     <div className="p-4 border-b border-gray-100">
       <h3 className="text-lg font-semibold text-gray-900 mb-1">Uploaded Files</h3>
       <p className="text-sm text-gray-600">Manage your uploaded data files</p>
@@ -135,8 +137,8 @@ const UploadSection: React.FC<UploadSectionProps> = ({
           <p className="text-sm font-medium text-gray-900 mb-1">{isDragOver ? 'Drop files here' : 'Drag and Drop your File'}</p>
           <p className="text-xs text-gray-600 mb-4">OR</p>
         </div>
-        <input type="file" multiple accept=".csv,.xlsx,.xls,.json" onChange={onFileSelect} className="hidden" id="file-upload" disabled={disabled} />
-        <label htmlFor="file-upload">
+        <input type="file" multiple accept=".csv,.xlsx,.xls,.json" onChange={onFileSelect} className="hidden" id={inputId} disabled={disabled} />
+        <label htmlFor={inputId}>
           <Button asChild className={`cursor-pointer ${disabled ? 'pointer-events-none opacity-70' : ''}`} disabled={disabled}>
             <span>Browse</span>
           </Button>
@@ -153,7 +155,8 @@ const UploadSection: React.FC<UploadSectionProps> = ({
         </Button>
       )}
     </div>
-  </Card>
-);
+    </Card>
+  );
+};
 
 export default UploadSection;

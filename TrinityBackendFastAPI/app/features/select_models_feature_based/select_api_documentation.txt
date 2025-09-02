@@ -569,4 +569,9 @@ o Body: { file_key, row_index | filter_criteria, model_name?, tags?, description
 o Persists selection; returns model_id
 •  (Optional) Retrieve saved models
 • GET /models/saved-generic → list with pagination
+<<<<<<< HEAD
 • GET /models/saved-generic/{model_id} → full record
+=======
+• GET /models/saved-generic/{model_id} → full record
+
+>>>>>>> dev

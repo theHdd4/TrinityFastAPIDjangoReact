@@ -9,6 +9,9 @@ If you notice the stack running slowly, consider the following optimizations:
   ```bash
   uvicorn apps.orchestration.fastapi_app:app --workers 4
   ```
+- **Delegate heavy computations to FastAPI + Polars**: Push CPU-intensive dataframe work to backend endpoints and prefer Polars
+  over Pandas for better performance. For custom UDFs, wrap functions with Numba and call them via `DataFrame.apply`.
+- **Keep the UI responsive**: Perform any client-side parsing in Web Workers so that long-running tasks don't block rendering.
 - **Use a production React build**: Build the frontend with `npm run build` and serve the `dist/` directory using a web server or the `frontend` container's production mode.
 - **Monitor container logs**: Use `docker compose logs` to check for errors or repeated restarts which can slow requests.
 
