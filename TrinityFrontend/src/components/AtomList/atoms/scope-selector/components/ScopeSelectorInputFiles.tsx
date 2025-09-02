@@ -66,22 +66,26 @@ const ScopeSelectorInputFiles: React.FC<Props> = ({ atomId }) => {
         const data = await res.json();
         const allColumns = Array.isArray(data.summary) ? data.summary.filter(Boolean) : [];
 
-        // Use identifiers from settings if available, otherwise default to categorical columns
-        const finalCats = settings.selectedIdentifiers && settings.selectedIdentifiers.length > 0 ?
-          settings.selectedIdentifiers :
-          allColumns
-            .filter(col => {
-              const dataType = col.data_type?.toLowerCase() || '';
-              return (dataType === 'object' || dataType === 'category') && col.column;
-            })
-            .map(col => col.column);
+        // Determine all categorical identifiers
+        const allCats = allColumns
+          .filter(col => {
+            const dataType = col.data_type?.toLowerCase() || '';
+            return (dataType === 'object' || dataType === 'category') && col.column;
+          })
+          .map(col => col.column);
 
-        // Update settings with all columns and initialize available identifiers
+        // Preserve previously selected identifiers if available
+        const selectedCats =
+          settings.selectedIdentifiers && settings.selectedIdentifiers.length > 0
+            ? settings.selectedIdentifiers
+            : allCats;
+
+        // Update settings with all identifiers while keeping selected ones
         updateSettings(atomId, {
           dataSource: val,
           allColumns,
-          availableIdentifiers: finalCats,
-          selectedIdentifiers: [...finalCats],
+          availableIdentifiers: allCats,
+          selectedIdentifiers: [...selectedCats],
           measures: settings.measures || [],
         });
       }

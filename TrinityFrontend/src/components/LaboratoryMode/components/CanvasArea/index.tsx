@@ -361,12 +361,20 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
       )
       .flatMap(([, v]) => v)
       .filter(Boolean);
+    const allColumns = Array.isArray(prev.summary) ? prev.summary.filter(Boolean) : [];
+    const allCats = allColumns
+      .filter(col => {
+        const dataType = col.data_type?.toLowerCase() || '';
+        return (dataType === 'object' || dataType === 'category') && col.column;
+      })
+      .map(col => col.column);
+    const selected = identifiers.filter(id => allCats.includes(id));
     console.log('✅ pre-filling scope selector with', prev.csv);
     updateAtomSettings(atomId, {
       dataSource: prev.csv,
-      allColumns: Array.isArray(prev.summary) ? prev.summary.filter(Boolean) : [],
-      availableIdentifiers: identifiers,
-      selectedIdentifiers: identifiers,
+      allColumns,
+      availableIdentifiers: allCats,
+      selectedIdentifiers: selected,
     });
   };
 

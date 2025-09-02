@@ -73,7 +73,6 @@ const ScopeSelectorCanvas: React.FC<ScopeSelectorCanvasProps> = ({ data, onDataC
           if (dimensionIdentifiers.length > 0) {
             const update: Partial<ScopeSelectorData> = {
               selectedIdentifiers: dimensionIdentifiers,
-              availableIdentifiers: dimensionIdentifiers,
               measures,
             };
             if (!data.scopes || data.scopes.length === 0) {
