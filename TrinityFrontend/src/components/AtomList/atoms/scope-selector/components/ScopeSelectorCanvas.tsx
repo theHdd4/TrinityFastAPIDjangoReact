@@ -61,7 +61,10 @@ const ScopeSelectorCanvas: React.FC<ScopeSelectorCanvasProps> = ({ data, onDataC
           const dimensionIdentifiers = Array.from(
             new Set(
               Object.entries(dimensions)
-                .filter(([k]) => k !== 'unattributed_dimensions')
+                .filter(([k]) =>
+                  k.toLowerCase() !== 'unattributed' &&
+                  k.toLowerCase() !== 'unattributed_dimensions'
+                )
                 .flatMap(([, vals]) => (Array.isArray(vals) ? vals : []))
                 .filter((v): v is string => typeof v === 'string')
             )
