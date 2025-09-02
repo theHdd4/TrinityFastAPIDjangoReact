@@ -125,20 +125,23 @@ export default {
                                 },
                                 'dot-travel': {
                                         '0%': {
-                                                transform: 'translateX(0) translateY(-100%)'
+                                                top: '-3rem',
+                                                left: '-3.75rem'
                                         },
-                                        '20%': {
-                                                transform: 'translateX(0) translateY(0)'
+                                        '30%': {
+                                                top: '0',
+                                                left: '0'
                                         },
                                         '100%': {
-                                                transform: 'translateX(100%) translateY(0)'
+                                                top: '0',
+                                                left: '100%'
                                         }
                                 },
                                 'line-grow': {
                                         '0%': {
                                                 width: '0%'
                                         },
-                                        '20%': {
+                                        '30%': {
                                                 width: '0%'
                                         },
                                         '100%': {
