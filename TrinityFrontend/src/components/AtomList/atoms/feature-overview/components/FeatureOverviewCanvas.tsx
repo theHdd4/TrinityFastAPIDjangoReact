@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import Table from "@/Templates/Table/table";
+import Table from "@/templates/tables/table";
 import { Button } from "@/components/ui/button";
 import { FEATURE_OVERVIEW_API } from "@/lib/api";
 import { fetchDimensionMapping } from "@/lib/dimensions";

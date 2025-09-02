@@ -3,7 +3,7 @@ import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Plus } from 'lucide-react';
-import Table from '@/Templates/Table/table';
+import Table from '@/templates/tables/table';
 import { FEATURE_OVERVIEW_API } from '@/lib/api';
 
 interface ColumnInfo {

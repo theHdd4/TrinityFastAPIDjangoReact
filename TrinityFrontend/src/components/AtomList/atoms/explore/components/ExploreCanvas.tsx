@@ -10,7 +10,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { Switch } from '@/components/ui/switch';
 import { BarChart3, Settings, Filter, Eye, EyeOff, Edit3, Palette, ChevronDown, ChevronUp, X, Plus, RotateCcw, Database, Maximize2 } from 'lucide-react';
 import { ExploreData } from '../ExploreAtom';
-import RechartsChartRenderer from '@/Templates/Charts/RechartsChartRenderer';
+import RechartsChartRenderer from '@/templates/charts/RechartsChartRenderer';
 import { EXPLORE_API, TEXT_API } from '@/lib/api';
 import { toast } from '@/components/ui/use-toast';
 import './ExploreCanvas.css';
