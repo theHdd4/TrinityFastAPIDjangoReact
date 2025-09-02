@@ -123,20 +123,26 @@ export default {
                                                 opacity: '1'
                                         }
                                 },
-                                'slide-in-left': {
+                                'dot-travel': {
                                         '0%': {
-                                                transform: 'translateX(-100%)'
+                                                transform: 'translateX(0) translateY(-100%)'
+                                        },
+                                        '20%': {
+                                                transform: 'translateX(0) translateY(0)'
                                         },
                                         '100%': {
-                                                transform: 'translateX(0)'
+                                                transform: 'translateX(100%) translateY(0)'
                                         }
                                 },
-                                'tagline-scroll': {
+                                'line-grow': {
                                         '0%': {
-                                                transform: 'translateX(100%)'
+                                                width: '0%'
+                                        },
+                                        '20%': {
+                                                width: '0%'
                                         },
                                         '100%': {
-                                                transform: 'translateX(-100%)'
+                                                width: '100%'
                                         }
                                 }
                         },
@@ -145,8 +151,8 @@ export default {
                                 'accordion-up': 'accordion-up 0.2s ease-out',
                                 'fade-in': 'fade-in 0.3s ease-out',
                                 'scale-in': 'scale-in 0.2s ease-out',
-                                'slide-in-left': 'slide-in-left 0.7s linear forwards',
-                                'tagline-scroll': 'tagline-scroll 12s linear infinite'
+                                'dot-travel': 'dot-travel 1.5s ease-in-out forwards',
+                                'line-grow': 'line-grow 1.5s ease-in-out forwards'
                         }
                 }
         },
