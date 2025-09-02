@@ -125,10 +125,6 @@ export default {
                                 },
                                 'dot-travel': {
                                         '0%': {
-                                                top: '-3rem',
-                                                left: '-1.5rem'
-                                        },
-                                        '30%': {
                                                 top: '50%',
                                                 left: '0'
                                         },
@@ -141,9 +137,6 @@ export default {
                                         '0%': {
                                                 width: '0%'
                                         },
-                                        '30%': {
-                                                width: '0%'
-                                        },
                                         '100%': {
                                                 width: '100%'
                                         }
@@ -154,8 +147,8 @@ export default {
                                 'accordion-up': 'accordion-up 0.2s ease-out',
                                 'fade-in': 'fade-in 0.3s ease-out',
                                 'scale-in': 'scale-in 0.2s ease-out',
-                                'dot-travel': 'dot-travel 4s ease-in-out forwards',
-                                'line-grow': 'line-grow 4s ease-in-out forwards'
+                                'dot-travel': 'dot-travel 4s ease-in-out infinite',
+                                'line-grow': 'line-grow 4s ease-in-out infinite'
                         }
                 }
         },
