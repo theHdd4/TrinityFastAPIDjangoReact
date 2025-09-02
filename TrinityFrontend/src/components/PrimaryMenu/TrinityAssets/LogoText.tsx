@@ -20,8 +20,21 @@ const LogoText: React.FC<LogoTextProps> = ({ className = '', titleClassName }) =
       >
         Trinity
       </h1>
-      <div className="relative w-full mt-1 h-0.5">
-        <div className="absolute left-0 top-0 h-full bg-trinity-yellow w-0 animate-line-grow" />
+      <div className="relative w-full mt-1 h-1">
+        <div className="absolute left-0 top-0 h-full w-0 overflow-hidden animate-line-grow">
+          <svg
+            className="w-full h-full text-trinity-yellow"
+            viewBox="0 0 100 4"
+            preserveAspectRatio="none"
+          >
+            <polyline
+              points="0,2 10,1 20,3 30,1 40,3 50,1 60,3 70,1 80,3 90,1 100,2"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+            />
+          </svg>
+        </div>
         <span className="absolute left-0 top-1/2 w-2 h-2 rounded-full bg-black -translate-x-1/2 -translate-y-1/2 animate-dot-travel" />
       </div>
     </div>
