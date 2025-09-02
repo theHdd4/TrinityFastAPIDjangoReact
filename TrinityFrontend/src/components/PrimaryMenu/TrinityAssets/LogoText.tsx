@@ -10,7 +10,7 @@ interface LogoTextProps {
 
 const LogoText: React.FC<LogoTextProps> = ({ className = '', titleClassName }) => (
   <div
-    className={`flex h-12 flex-col justify-center items-start text-left leading-none w-fit ${className}`.trim()}
+    className={`flex min-h-12 flex-col justify-center items-start text-left w-fit ${className}`.trim()}
   >
     <div className="flex flex-col items-start w-fit">
       <h1
@@ -23,7 +23,7 @@ const LogoText: React.FC<LogoTextProps> = ({ className = '', titleClassName }) =
       <div className="h-0.5 bg-trinity-yellow mt-0.5 w-full" />
     </div>
     <div className="overflow-hidden mt-1 w-full">
-      <span className="font-mono text-xs text-black/60 leading-none whitespace-nowrap inline-block animate-tagline-scroll">
+      <span className="font-mono text-xs text-black/60 leading-tight whitespace-nowrap inline-block animate-tagline-scroll">
         A Quant Matrix AI Experience
       </span>
     </div>
