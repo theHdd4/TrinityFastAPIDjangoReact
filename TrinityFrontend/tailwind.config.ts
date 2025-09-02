@@ -125,9 +125,6 @@ export default {
                                 },
                                 'tagline-scroll': {
                                         '0%': {
-                                                transform: 'translateX(-100%)'
-                                        },
-                                        '50%': {
                                                 transform: 'translateX(100%)'
                                         },
                                         '100%': {
