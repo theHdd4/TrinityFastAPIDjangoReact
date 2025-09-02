@@ -345,6 +345,26 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
     }
   };
 
+  const prefillScopeSelector = async (atomId: string) => {
+    const prev = await findLatestDataSource();
+    if (!prev || !prev.csv) {
+      console.warn('⚠️ no data source found for scope selector');
+      return;
+    }
+    await prefetchDataframe(prev.csv);
+    const rawMapping = await fetchDimensionMapping();
+    const identifiers = Object.values(rawMapping || {})
+      .flat()
+      .filter(Boolean);
+    console.log('✅ pre-filling scope selector with', prev.csv);
+    updateAtomSettings(atomId, {
+      dataSource: prev.csv,
+      allColumns: Array.isArray(prev.summary) ? prev.summary.filter(Boolean) : [],
+      availableIdentifiers: identifiers,
+      selectedIdentifiers: identifiers,
+    });
+  };
+
   // Load saved layout and workflow rendering
   useEffect(() => {
     let initialCards: LayoutCard[] | null = null;
@@ -578,6 +598,8 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
         prefillFeatureOverview(cardId, newAtom.id);
       } else if (atom.id === 'column-classifier') {
         prefillColumnClassifier(newAtom.id);
+      } else if (atom.id === 'scope-selector') {
+        prefillScopeSelector(newAtom.id);
       }
     }
   };
@@ -655,6 +677,8 @@ const addNewCardWithAtom = (
     prefillFeatureOverview(newCard.id, newAtom.id);
   } else if (atomId === 'column-classifier') {
     prefillColumnClassifier(newAtom.id);
+  } else if (atomId === 'scope-selector') {
+    prefillScopeSelector(newAtom.id);
   }
 };
 
@@ -746,6 +770,8 @@ const handleAddDragLeave = (e: React.DragEvent) => {
       prefillFeatureOverview(cardId, newAtom.id);
     } else if (info.id === 'column-classifier') {
       prefillColumnClassifier(newAtom.id);
+    } else if (info.id === 'scope-selector') {
+      prefillScopeSelector(newAtom.id);
     }
   };
 
@@ -856,6 +882,8 @@ const handleAddDragLeave = (e: React.DragEvent) => {
         await prefillFeatureOverview(cardId, atom.id);
       } else if (atom.atomId === 'column-classifier') {
         await prefillColumnClassifier(atom.id);
+      } else if (atom.atomId === 'scope-selector') {
+        await prefillScopeSelector(atom.id);
       }
     }
   };
