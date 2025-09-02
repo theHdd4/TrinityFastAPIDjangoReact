@@ -353,8 +353,9 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
     }
     await prefetchDataframe(prev.csv);
     const rawMapping = await fetchDimensionMapping();
-    const identifiers = Object.values(rawMapping || {})
-      .flat()
+    const identifiers = Object.entries(rawMapping || {})
+      .filter(([k]) => k !== 'unattributed_dimensions')
+      .flatMap(([, v]) => v)
       .filter(Boolean);
     console.log('✅ pre-filling scope selector with', prev.csv);
     updateAtomSettings(atomId, {

@@ -60,18 +60,17 @@ const ScopeSelectorCanvas: React.FC<ScopeSelectorCanvasProps> = ({ data, onDataC
           const dimensions = cfg.dimensions || {};
           const dimensionIdentifiers = Array.from(
             new Set(
-              Object.values(dimensions)
-                .flat()
+              Object.entries(dimensions)
+                .filter(([k]) => k !== 'unattributed_dimensions')
+                .flatMap(([, vals]) => (Array.isArray(vals) ? vals : []))
                 .filter((v): v is string => typeof v === 'string')
             )
           );
-          const identifiers = Array.isArray(cfg.identifiers)
-            ? cfg.identifiers.filter((id: string) => dimensionIdentifiers.includes(id))
-            : [];
           const measures = Array.isArray(cfg.measures) ? cfg.measures : [];
-          if (identifiers.length > 0) {
+          if (dimensionIdentifiers.length > 0) {
             const update: Partial<ScopeSelectorData> = {
-              selectedIdentifiers: identifiers,
+              selectedIdentifiers: dimensionIdentifiers,
+              availableIdentifiers: dimensionIdentifiers,
               measures,
             };
             if (!data.scopes || data.scopes.length === 0) {
@@ -79,7 +78,7 @@ const ScopeSelectorCanvas: React.FC<ScopeSelectorCanvasProps> = ({ data, onDataC
                 id: Date.now().toString(),
                 name: 'Scope 1',
                 identifiers: Object.fromEntries(
-                  identifiers.map((id: string) => [id, ''])
+                  dimensionIdentifiers.map((id: string) => [id, ''])
                 ),
                 timeframe: {
                   from: dateRange.available
