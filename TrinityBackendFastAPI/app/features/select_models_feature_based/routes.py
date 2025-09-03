@@ -1668,6 +1668,33 @@ async def select_and_save_model_generic(selection_req: GenericModelSelectionRequ
             # Create unique _id like build atom: client_name/app_name/project_name (without combination_id)
             document_id = f"{client_name}/{app_name}/{project_name}"
             
+            # Get the select_configs collection dynamically
+            select_configs_coll = get_select_configs_collection()
+            if select_configs_coll is None:
+                logger.error("❌ Failed to get select_configs collection - cannot save metadata")
+                raise Exception("Select configs collection not available")
+            
+            # Look up createandtransform_operations from scope selector collection based on document_id
+            createandtransform_operations = None
+            try:
+                # Use the same MongoDB client that's already connected
+                from .database import client as mongo_client
+                scopeselector_collection = mongo_client["trinity_prod"]["scopeselector_configs"]
+                
+                # Query by the same document_id (client/app/project) to get the scope selector document
+                scopeselector_doc = await scopeselector_collection.find_one({"_id": document_id})
+                
+                if scopeselector_doc and "createandtransform_operations" in scopeselector_doc:
+                    createandtransform_operations = scopeselector_doc["createandtransform_operations"]
+                    logger.info(f"🔍 Found createandtransform operations from scope selector for document_id: {document_id}")
+                else:
+                    logger.info(f"🔍 No createandtransform operations found in scope selector for document_id: {document_id}")
+                    createandtransform_operations = None
+                        
+            except Exception as e:
+                logger.warning(f"⚠️ Could not fetch createandtransform operations: {str(e)}")
+                createandtransform_operations = None
+            
             # Prepare document for select_configs collection with client/app/project structure
             select_config_document = {
                 # Custom _id like build atom
@@ -1684,14 +1711,11 @@ async def select_and_save_model_generic(selection_req: GenericModelSelectionRequ
                 
                 # Reference to the saved model
                 "saved_model_id": str(result.inserted_id),
-                "saved_model_collection": "saved_models_generic"
+                "saved_model_collection": "saved_models_generic",
+                
+                # Createandtransform operations from scope selector (before combinations)
+                "createandtransform_operations": createandtransform_operations
             }
-            
-            # Get the select_configs collection dynamically
-            select_configs_coll = get_select_configs_collection()
-            if select_configs_coll is None:
-                logger.error("❌ Failed to get select_configs collection - cannot save metadata")
-                raise Exception("Select configs collection not available")
             
             # Check if document already exists to append results like build atom
             existing_doc = await select_configs_coll.find_one({"_id": document_id})
@@ -1702,6 +1726,9 @@ async def select_and_save_model_generic(selection_req: GenericModelSelectionRequ
                 
                 # Update timestamp
                 merged_document["updated_at"] = datetime.now()
+                
+                # Update createandtransform_operations from scope selector
+                merged_document["createandtransform_operations"] = createandtransform_operations
                 
                 # Initialize combinations array if it doesn't exist
                 if "combinations" not in merged_document:

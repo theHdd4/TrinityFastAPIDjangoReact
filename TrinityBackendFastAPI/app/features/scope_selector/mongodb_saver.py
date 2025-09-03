@@ -38,6 +38,50 @@ async def save_scope_config(
         document_id = f"{client_name}/{app_name}/{project_name}"
         logger.info(f"🔍 DEBUG: document_id = {document_id}")
         
+        # Look up createandtransform_configs to get operations data based on file_key
+        createandtransform_operations = None
+        try:
+            file_key = scope_data.get("file_key", "")
+            if file_key:
+                # Search in createandtransform_configs collection for files with matching saved_file
+                createandtransform_collection = client["trinity_prod"]["createandtransform_configs"]
+                createandtransform_docs = await createandtransform_collection.find({
+                    "files": {
+                        "$elemMatch": {
+                            "saved_file": file_key
+                        }
+                    }
+                }).to_list(length=None)
+                
+                # Extract operations from matching files
+                if createandtransform_docs:
+                    for doc in createandtransform_docs:
+                        for file_entry in doc.get("files", []):
+                            if file_entry.get("saved_file") == file_key:
+                                createandtransform_operations = {
+                                    "saved_file": file_entry.get("saved_file"),
+                                    "operations": file_entry.get("operations", []),
+                                    "file_columns": file_entry.get("file_columns", []),
+                                    "file_shape": file_entry.get("file_shape"),
+                                    "saved_at": file_entry.get("saved_at")
+                                }
+                                break
+                        if createandtransform_operations:
+                            break
+                    
+                    if createandtransform_operations:
+                        logger.info(f"🔍 Found createandtransform operations for saved_file: {file_key}")
+                    else:
+                        logger.info(f"🔍 No createandtransform operations found for saved_file: {file_key}")
+                        createandtransform_operations = None
+                else:
+                    logger.info(f"🔍 No createandtransform documents found for saved_file: {file_key}")
+                    createandtransform_operations = None
+                
+        except Exception as e:
+            logger.warning(f"⚠️ Could not fetch createandtransform operations: {str(e)}")
+            createandtransform_operations = None
+        
         document = {
             "_id": document_id,
             "client_name": client_name,
@@ -47,6 +91,7 @@ async def save_scope_config(
             "updated_at": datetime.utcnow(),
             "user_id": user_id,
             "project_id": project_id,
+            "createandtransform_operations": createandtransform_operations,  # Add the operations data
             **scope_data,
         }
         

@@ -1,15 +1,16 @@
 # app/routes.py
 
-from fastapi import APIRouter, Form, HTTPException, Query
+from fastapi import APIRouter, Form, HTTPException, Query, Body
 from fastapi.responses import Response
 
 import json
+from datetime import datetime
 # from .create.base import calculate_residuals, compute_rpi, apply_stl_outlier
 from .create.base import calculate_residuals, compute_rpi, apply_stl_outlier
 
 from .deps import get_minio_df,fetch_measures_list,fetch_identifiers_and_measures,get_column_classifications_collection,get_create_settings_collection,minio_client, MINIO_BUCKET, redis_client
 from app.features.data_upload_validate.app.routes import get_object_prefix
-from .mongodb_saver import save_create_data,save_create_data_settings
+from .mongodb_saver import save_create_data,save_create_data_settings,save_createandtransform_configs
 import io
 from sklearn.preprocessing import StandardScaler
 from sklearn.preprocessing import MinMaxScaler
@@ -526,13 +527,16 @@ async def get_create_data(
 
 
 
-from fastapi import Body
-
-
 @router.post("/save")
 async def save_createcolumn_dataframe(
     csv_data: str = Body(..., embed=True),
-    filename: str = Body(..., embed=True)
+    filename: str = Body(..., embed=True),
+    client_name: str = Body(None),
+    app_name: str = Body(None),
+    project_name: str = Body(None),
+    user_id: str = Body(None),
+    project_id: int = Body(None),
+    operation_details: str = Body(None)
 ):
     """
     Save a created column dataframe (CSV) to MinIO as Arrow file and return file info.
@@ -571,20 +575,50 @@ async def save_createcolumn_dataframe(
         )
         # Cache in Redis for 1 hour
         redis_client.setex(filename, 3600, arrow_bytes)
+        
+        # Save operation details to MongoDB if provided
+        mongo_save_result = None
+        if client_name and app_name and project_name and operation_details:
+            try:
+                # Parse operation details
+                operation_data = json.loads(operation_details) if isinstance(operation_details, str) else operation_details
+                
+                # Get the input file from operation details
+                input_file = operation_data.get("input_file", "unknown_input_file")
+                operation_data["saved_file"] = filename
+                operation_data["file_shape"] = df.shape
+                operation_data["file_columns"] = list(df.columns)
+                operation_data["saved_at"] = datetime.utcnow()
+                
+                # Save to MongoDB
+                mongo_save_result = await save_createandtransform_configs(
+                    client_name=client_name,
+                    app_name=app_name,
+                    project_name=project_name,
+                    operation_data=operation_data,
+                    user_id=user_id or "",
+                    project_id=project_id
+                )
+                
+                print(f"✅ MongoDB save result: {mongo_save_result}")
+                
+            except Exception as mongo_error:
+                print(f"⚠️ MongoDB save error: {mongo_error}")
+                # Don't fail the entire operation if MongoDB save fails
+                mongo_save_result = {"status": "error", "error": str(mongo_error)}
+        
         return {
             "result_file": filename,
             "shape": df.shape,
             "columns": list(df.columns),
-            "message": "DataFrame saved successfully"
+            "message": "DataFrame saved successfully",
+            "mongo_save_result": mongo_save_result
         }
     except Exception as e:
         print(f"⚠️ save_createcolumn_dataframe error: {e}")
         raise HTTPException(status_code=400, detail=str(e))
 
-from fastapi import Query
-import pyarrow as pa
-import pyarrow.ipc as ipc
-import numpy as np
+
 
 @router.get("/cached_dataframe")
 async def cached_dataframe(
