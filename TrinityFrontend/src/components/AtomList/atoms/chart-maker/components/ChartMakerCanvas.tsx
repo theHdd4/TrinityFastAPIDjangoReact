@@ -318,7 +318,9 @@ const renderChart = (chart: ChartMakerConfig, index: number, chartKey?: string, 
   const xAxisConfig = config.x_axis || { dataKey: chart.xAxis };
   const yAxisConfig = config.y_axis || { dataKey: chart.yAxis };
   const key = chartKey || chart.lastUpdateTime || chart.id;
-  const chartHeight = heightClass || '';
+  // Ensure charts have a visible height when rendered in card view
+  // Default to responsive heights based on layout when none provided
+  const chartHeight = heightClass || (isCompact ? 'h-56' : 'h-80');
 
   if (!chartData.length || !xAxisConfig.dataKey || (!yAxisConfig.dataKey && traces.length === 0)) {
     return (
