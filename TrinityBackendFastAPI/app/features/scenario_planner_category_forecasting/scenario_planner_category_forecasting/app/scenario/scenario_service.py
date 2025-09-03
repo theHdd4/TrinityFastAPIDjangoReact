@@ -205,7 +205,9 @@ class ScenarioService:
 
         for meta in models:
             ident = meta["identifiers"]
-            df_slice = DataService.get_cluster_dataframe(d0_key, ident)
+            combination = meta.get("combination")
+            logger.info("Processing scenario for combination: %s", combination)
+            df_slice = DataService.get_cluster_dataframe(d0_key, ident, combination=combination)
 
             # 1️⃣ Reference
             ref_vals = cls._calc_reference(
@@ -250,8 +252,29 @@ class ScenarioService:
             ref_trans_values = X_ref_t.to_dict()
             scen_trans_values = X_scen_t.to_dict()
 
-            coeff = pd.Series(meta["coefficients"])
+            # Create coefficient mapping: x_variable -> coefficient
+            # Handle the mismatch between x_variables and coefficient names (Beta_ prefix)
+            coeff_mapping = {}
+            for x_var in meta["x_variables"]:
+                # Try to find coefficient with Beta_ prefix
+                beta_key = f"Beta_{x_var}"
+                if beta_key in meta["coefficients"]:
+                    coeff_mapping[x_var] = meta["coefficients"][beta_key]
+                else:
+                    # Fallback: try without prefix
+                    if x_var in meta["coefficients"]:
+                        coeff_mapping[x_var] = meta["coefficients"][x_var]
+                    else:
+                        logger.warning(f"Could not find coefficient for variable: {x_var}")
+                        coeff_mapping[x_var] = 0.0
+            
+            coeff = pd.Series(coeff_mapping)
             intercept = meta["intercept"]
+            
+            logger.info(f"Original coefficients keys: {list(meta['coefficients'].keys())}")
+            logger.info(f"X variables: {meta['x_variables']}")
+            logger.info(f"Mapped coefficients: {coeff.to_dict()}")
+            logger.info(f"Intercept: {intercept}")
 
             contrib_ref = X_ref_t * coeff
             contrib_scen = X_scen_t * coeff

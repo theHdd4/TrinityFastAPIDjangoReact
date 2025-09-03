@@ -605,7 +605,7 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
         const newFeatures = (backendFeatures.all_unique_features || []).map((feature: string, index: number) => ({
           id: `feature-${index + 1}`,
           name: feature,
-          selected: index < 4 // Select first 4 features by default
+          selected: index < 3// Select first 3 features by default
         }));
 
         // ✅ IMPROVED: Only update if we have new data and it's actually different to prevent infinite loop
@@ -1170,11 +1170,9 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
     setOpenSections(prev => ({ ...prev, [section]: !prev[section] }));
   };
 
-  // Filter identifiers to only show those with unique values > 1 (clustering-style)
-        const filteredIdentifiers = (data.identifiers || []).filter(identifier => {
-    const count = uniqueValues[identifier.id]?.length || 0;
-    return count > 1;
-  });
+  // ✅ FIXED: Show all identifiers in aggregated views (don't filter by unique values > 1)
+  // The clustering-style filter was too restrictive for aggregated views
+  const filteredIdentifiers = data.identifiers || [];
 
   // Debug logging for current identifiers
   console.log('🎯 Current identifiers in render:', {

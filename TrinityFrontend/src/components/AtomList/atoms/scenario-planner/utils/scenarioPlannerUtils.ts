@@ -59,13 +59,11 @@ export const initializeNewScenario = async (settings: ScenarioPlannerSettings, s
          return null;
        }
        
-       // ✅ NEW: Select first few features by default to ensure reference values can be populated
-       const shouldBeSelected = index < 3; // Select first 3 features by default
-       
+       // ✅ FIXED: Don't auto-select features - let user choose
        return {
          id: feature.id,
          name: feature.name,
-         selected: shouldBeSelected // ✅ Select some features by default for new scenarios
+         selected: false // ✅ Let user manually select features
        };
      }).filter(Boolean); // Remove null features
     

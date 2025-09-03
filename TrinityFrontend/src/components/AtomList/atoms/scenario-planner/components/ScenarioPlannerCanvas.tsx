@@ -1611,6 +1611,63 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
       const updatedCombinations = currentCombinations.filter(c => c.id !== combinationId);
       console.log('📝 Updated combinations count:', updatedCombinations.length);
       
+      // ✅ FIXED: More careful approach to only uncheck values from deleted combination
+      console.log('🔍 Analyzing combination deletion impact...');
+      
+      // Get the identifier values that were in the deleted combination
+      const deletedIdentifierValues = new Set<string>();
+      if (Array.isArray(combinationToDelete.identifiers)) {
+        combinationToDelete.identifiers.forEach(identifierString => {
+          deletedIdentifierValues.add(identifierString);
+        });
+      }
+      
+      // Get all identifier values that are still used by remaining combinations
+      const stillUsedIdentifierValues = new Set<string>();
+      updatedCombinations.forEach(combination => {
+        if (Array.isArray(combination.identifiers)) {
+          combination.identifiers.forEach(identifierString => {
+            stillUsedIdentifierValues.add(identifierString);
+          });
+        }
+      });
+      
+      // Only uncheck values that were in the deleted combination AND are not used by any remaining combination
+      const valuesToUncheck = new Set<string>();
+      deletedIdentifierValues.forEach(deletedValue => {
+        if (!stillUsedIdentifierValues.has(deletedValue)) {
+          valuesToUncheck.add(deletedValue);
+        }
+      });
+      
+      console.log('🔍 Deletion analysis:', {
+        deletedCombination: combinationId,
+        deletedValues: Array.from(deletedIdentifierValues),
+        remainingCombinations: updatedCombinations.map(c => c.id),
+        stillUsedValues: Array.from(stillUsedIdentifierValues),
+        valuesToUncheck: Array.from(valuesToUncheck)
+      });
+      
+      // ✅ FIXED: Only update checked status for values that should actually be unchecked
+      const updatedIdentifiers = (computedSettings?.identifiers || []).map(identifier => ({
+        ...identifier,
+        values: (identifier.values || []).map(value => {
+          const identifierString = `${identifier.id}:${value.id}`;
+          const shouldBeChecked = value.checked && !valuesToUncheck.has(identifierString);
+          return {
+            ...value,
+            checked: shouldBeChecked
+          };
+        })
+      }));
+      
+      console.log('📝 Updated identifier selections:', updatedIdentifiers.map(id => ({
+        name: id.name,
+        previouslyChecked: (computedSettings?.identifiers?.find(orig => orig.id === id.id)?.values || [])
+          .filter(v => v.checked).map(v => v.name),
+        nowChecked: id.values.filter(v => v.checked).map(v => v.name)
+      })));
+      
       // ✅ FIXED: Update scenario-specific data in global store with proper immutability
       const updatedScenarios = { ...settings.scenarios };
       
@@ -1618,6 +1675,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
       updatedScenarios[currentScenario] = {
         ...(currentScenarioData || {}),
         combinations: updatedCombinations,
+        identifiers: updatedIdentifiers, // ✅ NEW: Update identifiers to match remaining combinations
         combinationInputs: {
           ...(currentScenarioData?.combinationInputs || {}),
           // Remove inputs for the deleted combination
@@ -1634,12 +1692,136 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
         });
       }
       
-      console.log('💾 Saving updated scenarios...');
+      console.log('💾 Saving updated scenarios with synchronized identifiers...');
       onSettingsChange({ 
         scenarios: updatedScenarios
       });
+      
+      // ✅ FIXED: Show user feedback about what was actually updated
+      const deletedValuesList = Array.from(deletedIdentifierValues).map(idString => {
+        const [identifierId, valueId] = idString.split(':');
+        const identifier = computedSettings?.identifiers?.find(id => id.id === identifierId);
+        const value = identifier?.values?.find(v => v.id === valueId);
+        return value ? `${identifier?.name}: ${value.name}` : idString;
+      }).join(', ');
+      
+      const uncheckedValuesList = Array.from(valuesToUncheck).map(idString => {
+        const [identifierId, valueId] = idString.split(':');
+        const identifier = computedSettings?.identifiers?.find(id => id.id === identifierId);
+        const value = identifier?.values?.find(v => v.id === valueId);
+        return value ? `${identifier?.name}: ${value.name}` : idString;
+      }).join(', ');
+      
+      let toastMessage = `Deleted combination: ${deletedValuesList}`;
+      if (uncheckedValuesList.length > 0) {
+        toastMessage += `\n\nUnchecked orphaned values: ${uncheckedValuesList}`;
+      }
+      if (updatedCombinations.length > 0) {
+        toastMessage += `\n\nRemaining combinations: ${updatedCombinations.length}`;
+      }
+      
+      toast({
+        title: "Combination Deleted",
+        description: toastMessage,
+        variant: "default",
+      });
+      
     } else {
       console.log('❌ Combination not found:', combinationId);
+    }
+  };
+
+  // ✅ NEW: Helper function to analyze identifier usage across combinations
+  const analyzeIdentifierUsage = () => {
+    const combinations = computedSettings?.combinations || [];
+    const usedIdentifierValues = new Set<string>();
+    
+    combinations.forEach(combination => {
+      if (Array.isArray(combination.identifiers)) {
+        combination.identifiers.forEach(identifierString => {
+          usedIdentifierValues.add(identifierString);
+        });
+      }
+    });
+    
+    console.log('🔍 Current identifier usage analysis:', {
+      totalCombinations: combinations.length,
+      usedIdentifierValues: Array.from(usedIdentifierValues),
+      identifiers: computedSettings?.identifiers?.map(id => ({
+        name: id.name,
+        totalValues: id.values?.length || 0,
+        checkedValues: id.values?.filter(v => v.checked).map(v => v.name) || [],
+        usedValues: id.values?.filter(v => usedIdentifierValues.has(`${id.id}:${v.id}`)).map(v => v.name) || []
+      }))
+    });
+    
+    return usedIdentifierValues;
+  };
+
+  // ✅ NEW: Global refresh function for all combinations
+  const handleGlobalRefresh = async () => {
+    try {
+      console.log('🔄 Starting global refresh for all combinations...');
+      
+      // Show confirmation toast
+      toast({
+        title: "Refreshing All Combinations",
+        description: "Clearing inputs and resetting to reference values...",
+        variant: "default",
+      });
+
+      // 1. First fetch fresh reference values from backend
+      await fetchReferenceValuesForAll();
+      
+      // 2. Now clear all inputs and reset to the fresh reference values
+      const clearedInputs: Record<string, Record<string, { input: string; change: string }>> = {};
+      
+      const combinations = computedSettings?.combinations || [];
+      const features = computedSettings?.features || [];
+      
+      combinations.forEach(combination => {
+        clearedInputs[combination.id] = {};
+        features.forEach(feature => {
+          if (feature.selected) {
+            // Use the fresh reference values that were just fetched
+            const referenceValue = originalReferenceValues[combination.id]?.[feature.id];
+            clearedInputs[combination.id][feature.id] = {
+              input: formatToThreeDecimals(referenceValue || 0),
+              change: '0' // Set percentage to 0
+            };
+          }
+        });
+      });
+
+      // 3. Update the scenario with cleared inputs
+      const updatedScenarios = { ...settings.scenarios };
+      if (!updatedScenarios[currentScenario]) {
+        updatedScenarios[currentScenario] = { ...currentScenarioData };
+      }
+      
+      updatedScenarios[currentScenario].combinationInputs = clearedInputs;
+      
+      // 4. Save to global store
+      onSettingsChange({ 
+        scenarios: updatedScenarios
+      });
+
+      // 5. Show success message
+      toast({
+        title: "Combinations Refreshed",
+        description: `Successfully reset ${combinations.length} combinations to fresh reference values`,
+        variant: "default",
+      });
+
+      console.log('✅ Global refresh completed successfully');
+
+    } catch (error) {
+      console.error('❌ Error during global refresh:', error);
+      toast({
+        title: "Refresh Error",
+        description: "Failed to refresh combinations. Please try again.",
+        variant: "destructive",
+      });
     }
   };
 
@@ -1867,9 +2049,21 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
                 <thead className="bg-gradient-to-r from-gray-50 to-gray-100 sticky top-0 z-10">
                   <tr>
                     <th className="px-4 py-3 text-left text-sm font-semibold text-gray-900 border-b-2 border-r-2 border-gray-300 w-48 sticky left-0 z-20 bg-gradient-to-r from-gray-50 to-gray-100 shadow-sm">
-                      <div className="flex items-center space-x-2">
-                        <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
-                        <span>Combination</span>
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center space-x-2">
+                          <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
+                          <span>Combination</span>
+                        </div>
+                        {/* ✅ NEW: Global Refresh Button for Combination Section */}
+                        <Button
+                          onClick={handleGlobalRefresh}
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 w-6 p-0 text-blue-600 hover:text-blue-700 hover:bg-blue-50 transition-all duration-200"
+                          title="Refresh all combinations - Clear inputs and reset to reference values"
+                        >
+                          <RefreshCw className="w-4 h-4" />
+                        </Button>
                       </div>
                     </th>
                     {selectedFeatures && selectedFeatures.length > 0 ? (

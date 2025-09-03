@@ -7,7 +7,7 @@ import json
 # from .create.base import calculate_residuals, compute_rpi, apply_stl_outlier
 from .create.base import calculate_residuals, compute_rpi, apply_stl_outlier
 
-from .deps import get_minio_df,fetch_measures_list,get_column_classifications_collection,get_create_settings_collection,minio_client, MINIO_BUCKET, redis_client
+from .deps import get_minio_df,fetch_measures_list,fetch_identifiers_and_measures,get_column_classifications_collection,get_create_settings_collection,minio_client, MINIO_BUCKET, redis_client
 from app.features.data_upload_validate.app.routes import get_object_prefix
 from .mongodb_saver import save_create_data,save_create_data_settings
 import io
@@ -40,6 +40,55 @@ CREATE_OPTIONS = {
 @router.get("/options")
 async def get_create_options():
     return {"status": "SUCCESS", "available_create_operations": CREATE_OPTIONS}
+
+# IDENTIFIER OPTIONS ENDPOINT
+# ============================================================================
+
+from app.features.column_classifier.database import get_classifier_config_from_mongo  # import here to avoid circular deps
+
+@router.get("/identifier_options")
+async def identifier_options(
+    client_name: str = Query(..., description="Client name"),
+    app_name: str = Query(..., description="App name"),
+    project_name: str = Query(..., description="Project name"),
+):
+    """Return identifier column names using Redis ▶ Mongo ▶ fallback logic.
+
+    1. Attempt to read JSON config from Redis key
+       `<client>/<app>/<project>/column_classifier_config`.
+    2. If missing, fetch from Mongo (`column_classifier_configs` collection).
+       Cache the document back into Redis.
+    3. If still unavailable, return empty list – the frontend will
+       fall back to its existing column_summary extraction flow.
+    """
+    import json
+    from typing import Any
+    
+    key = f"{client_name}/{app_name}/{project_name}/column_classifier_config"
+    cfg: dict[str, Any] | None = None
+
+    # --- Redis lookup -------------------------------------------------------
+    try:
+        cached = redis_client.get(key)
+        if cached:
+            cfg = json.loads(cached)
+    except Exception as exc:
+        print(f"⚠️ Redis read error for {key}: {exc}")
+
+    # --- Mongo fallback ------------------------------------------------------
+    if cfg is None:
+        cfg = get_classifier_config_from_mongo(client_name, app_name, project_name)
+        if cfg:
+            try:
+                redis_client.setex(key, 3600, json.dumps(cfg, default=str))
+            except Exception as exc:
+                print(f"⚠️ Redis write error for {key}: {exc}")
+
+    identifiers: list[str] = []
+    if cfg and isinstance(cfg.get("identifiers"), list):
+        identifiers = cfg["identifiers"]
+
+    return {"identifiers": identifiers}
 
 
 @router.post("/settings")

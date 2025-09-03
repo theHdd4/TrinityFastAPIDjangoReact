@@ -20,6 +20,8 @@ import {
   DEFAULT_CLUSTERING_SETTINGS,
   ScenarioPlannerSettings,
   DEFAULT_SCENARIO_PLANNER_SETTINGS,
+  SelectModelsFeatureSettings,
+  DEFAULT_SELECT_MODELS_FEATURE_SETTINGS,
 } from '../../store/laboratoryStore';
 
 import DataUploadValidateProperties from '@/components/AtomList/atoms/data-upload-validate/components/properties/DataUploadValidateProperties';
@@ -38,7 +40,7 @@ import ClusteringProperties from '@/components/AtomList/atoms/clustering/compone
 import { ScenarioPlannerProperties } from '@/components/AtomList/atoms/scenario-planner/components/properties/ScenarioPlannerProperties';
 
 import ExploreProperties from '@/components/AtomList/atoms/explore/components/properties/ExploreProperties';
-
+import SelectModelsFeatureProperties from '@/components/AtomList/atoms/select-models-feature/components/properties/SelectModelsFeatureProperties';
 import AtomSettingsTabs from './AtomSettingsTabs';
 
 interface SettingsPanelProps {
@@ -71,7 +73,8 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
     | ChartMakerSettings
     | CorrelationSettings
     | ClusteringSettings
-    | ScenarioPlannerSettings =
+    | ScenarioPlannerSettings
+    | SelectModelsFeatureSettings =
     atom?.settings ||
     (atom?.atomId === 'correlation'
       ? { ...DEFAULT_CORRELATION_SETTINGS }
@@ -87,6 +90,8 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
       ? { ...DEFAULT_DATAFRAME_OPERATIONS_SETTINGS }
       : atom?.atomId === 'chart-maker'
       ? { ...DEFAULT_CHART_MAKER_SETTINGS }
+      : atom?.atomId === 'select-models-feature'
+      ? { ...DEFAULT_SELECT_MODELS_FEATURE_SETTINGS }
       : { ...DEFAULT_TEXTBOX_SETTINGS });
 
   useEffect(() => {
@@ -136,6 +141,8 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
             <ChartMakerProperties atomId={selectedAtomId} />
           ) : selectedAtomId && atom?.atomId === 'build-model-feature-based' ? (
             <BuildModelFeatureBasedPropertiesPanel atomId={selectedAtomId} />
+          ) : selectedAtomId && atom?.atomId === 'select-models-feature' ? (
+            <SelectModelsFeatureProperties atomId={selectedAtomId} />
           ) : selectedAtomId && atom?.atomId === 'concat' ? (
             <ConcatProperties atomId={selectedAtomId} />
           ) : selectedAtomId && atom?.atomId === 'scope-selector' ? (

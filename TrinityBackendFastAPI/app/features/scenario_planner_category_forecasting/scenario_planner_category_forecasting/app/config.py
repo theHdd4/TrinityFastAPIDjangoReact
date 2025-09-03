@@ -13,8 +13,8 @@ logger = logging.getLogger(__name__)
 # --------------------------------------------------------------------------- #
 # MongoDB                                                                     #
 # --------------------------------------------------------------------------- #
-# Use the same MONGO_URI pattern as other atoms
-MONGO_URI = os.getenv("MONGO_URI", "mongodb://mongo:27017/trinity")
+# Use the same database as the build atom (trinity_prod)
+MONGO_URI = os.getenv("MONGO_URI", "mongodb://root:rootpass@mongo:27017/trinity_prod?authSource=admin")
 
 # Debug: Log environment variables to see what's being set
 logger.info("Environment MONGO_URI: %s", os.getenv("MONGO_URI"))
@@ -26,12 +26,11 @@ mongo_client = motor.motor_asyncio.AsyncIOMotorClient(MONGO_URI, serverSelection
 # Get database
 db = mongo_client.get_default_database()
 
-# Primary collections
-scope_collection = db["scopes_promo"]
-select_models_collection = db["select_models_promo"]
+# Primary collections - use the same as build atom
+scope_collection = db["scopeselector_configs"]
+select_models_collection = db["build-model_featurebased_configs"]  # Same collection as build atom
 reference_points_collection = db["calculated_reference_points_promo"]
 saved_predictions_collection = db["save_prediction_promo"]
-aggregated_predictions_collection = db["aggregated_predictions_promo"]
 flat_aggregations_collection = db["flat_aggregations"]
 hierarchical_aggregations_collection = db["hierarchical_aggregations"]
 

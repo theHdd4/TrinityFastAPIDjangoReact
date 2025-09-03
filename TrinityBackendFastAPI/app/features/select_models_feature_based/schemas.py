@@ -65,16 +65,35 @@ class ModelVariablesResponse(BaseModel):
 class ModelFilterRequest(BaseModel):
     file_key: str = Field(..., description="MinIO key for the results file (CSV/Arrow)")
     variable: str = Field(..., description="Column to analyze (e.g., SelfElasticity col)")
+    method: Optional[str] = Field("elasticity", description="Method type: elasticity, beta, or average")
+    combination_id: Optional[str] = Field(None, description="Filter by specific combination ID")
     min_mape: Optional[float] = None
     max_mape: Optional[float] = None
     min_r2: Optional[float] = None
     max_r2: Optional[float] = None
     min_self_elasticity: Optional[float] = None
     max_self_elasticity: Optional[float] = None
+    min_mape_train: Optional[float] = None
+    max_mape_train: Optional[float] = None
+    min_mape_test: Optional[float] = None
+    max_mape_test: Optional[float] = None
+    min_r2_train: Optional[float] = None
+    max_r2_train: Optional[float] = None
+    min_r2_test: Optional[float] = None
+    max_r2_test: Optional[float] = None
+    min_aic: Optional[float] = None
+    max_aic: Optional[float] = None
+    min_bic: Optional[float] = None
+    max_bic: Optional[float] = None
+    # Per-variable filters for multiple variables
+    variable_filters: Optional[Dict[str, Dict[str, float]]] = Field(None, description="Filters for each variable: {'variable_name': {'min': value, 'max': value}}")
 
 class FilteredModel(BaseModel):
     model_name: str
     self_elasticity: float
+    # Add dynamic fields for different methods
+    self_beta: Optional[float] = None
+    self_avg: Optional[float] = None
 
 # ---------- Weighted ensemble (blend) ----------
 
@@ -84,6 +103,7 @@ class WeightedEnsembleRequest(BaseModel):
     include_numeric: Optional[List[str]] = None
     exclude_numeric: Optional[List[str]] = None
     filter_criteria: Optional[Dict[str, Any]] = None
+    filtered_models: Optional[List[str]] = None    # List of model names to include in ensemble
 
 class ComboResult(BaseModel):
     combo: Dict[str, Any]
@@ -240,6 +260,17 @@ class SavedModelListResponse(BaseModel):
     total: int
     models: List[SavedModelPreview]
     pagination: Dict[str, Any]
+
+class SavedCombinationsStatusResponse(BaseModel):
+    file_key: str
+    atom_id: str
+    total_combinations: int
+    saved_combinations: List[str]
+    pending_combinations: List[str]
+    saved_count: int
+    pending_count: int
+    completion_percentage: float
+    note: Optional[str] = None
 
 # ---------- Scopes list (light) ----------
 

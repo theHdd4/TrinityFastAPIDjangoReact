@@ -319,7 +319,7 @@ const ClusteringSelections: React.FC<Props> = ({ atomId }) => {
       case 'kmeans':
         return 'K-Means clustering is a centroid-based algorithm that partitions the data into K clusters, where K is a user-defined number of clusters. It aims to minimize the sum of squared distances from each point to its assigned cluster center.';
       case 'dbscan':
-        return 'DBSCAN (Density-Based Spatial Clustering of Applications with Noise) is a density-based clustering algorithm that groups together points that are close to each other based on a distance metric, and identifies outliers as noise.';
+        return 'DBSCAN (Density-Based Spatial Clustering of Applications with Noise) is a density-based clustering algorithm that automatically determines the number of clusters based on data density. It groups together points that are close to each other based on a distance metric (epsilon) and minimum samples threshold, and identifies outliers as noise. No K-selection is needed.';
       case 'hac':
         return 'Hierarchical Agglomerative Clustering (HAC) is a bottom-up approach that builds a hierarchy of clusters. It starts with each data point as a single cluster and merges clusters based on a distance metric until all points are in one cluster.';
       case 'birch':
@@ -829,6 +829,11 @@ const ClusteringSelections: React.FC<Props> = ({ atomId }) => {
                   {['kmeans', 'hac', 'birch', 'gmm'].includes(clusteringData.algorithm) && clusteringData.k_selection && (
                     <span className="ml-2 text-blue-600">
                       • K-selection: {clusteringData.k_selection === 'manual' ? 'Manual' : clusteringData.k_selection.charAt(0).toUpperCase() + clusteringData.k_selection.slice(1)}
+                    </span>
+                  )}
+                  {clusteringData.algorithm === 'dbscan' && (
+                    <span className="ml-2 text-green-600">
+                      • Auto-clustering: Automatically determines number of clusters based on density
                     </span>
                   )}
                 </div>

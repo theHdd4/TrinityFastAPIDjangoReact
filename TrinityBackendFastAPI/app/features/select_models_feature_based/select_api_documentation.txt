@@ -570,4 +570,3 @@ o Persists selection; returns model_id
 •  (Optional) Retrieve saved models
 • GET /models/saved-generic → list with pagination
 • GET /models/saved-generic/{model_id} → full record
-

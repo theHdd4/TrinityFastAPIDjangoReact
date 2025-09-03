@@ -391,6 +391,28 @@ export interface ChartMakerSettings {
   error?: string;
 }
 
+export interface SelectModelsFeatureSettings {
+  uploadedFile: File | null;
+  selectedDataset: string;
+  ensembleMethod: boolean;
+  selectedScope: string;
+  availableScopes: string[];
+  selectedVariable: string;
+  modelResults: any[];
+  modelFilters: {
+    mape: number;
+    pValue: number;
+    rSquared: number;
+    aic: number;
+    filters: string[];
+  };
+  selectedModel: string;
+  performanceData: any[];
+  isRunning: boolean;
+  dataType: string;
+  aggregationLevel: string;
+}
+
 export const DEFAULT_CHART_MAKER_SETTINGS: ChartMakerSettings = {
   dataSource: '',
   fileId: '',
@@ -905,7 +927,40 @@ export const DEFAULT_EXPLORE_SETTINGS: ExploreSettings = {
   enableExport: false,
   autoRefresh: false,
 };
-
+export const DEFAULT_SELECT_MODELS_FEATURE_SETTINGS: SelectModelsFeatureSettings = {
+  uploadedFile: null,
+  selectedDataset: '',
+  ensembleMethod: true,
+  selectedScope: 'SCOPE 12',
+  availableScopes: ['SCOPE 12', 'SCOPE 13', 'SCOPE 14', 'SCOPE 15'],
+  selectedVariable: 'Select Variable to View Model Results',
+  modelResults: [
+    { name: 'Jan', value: 45 },
+    { name: 'Feb', value: 62 },
+    { name: 'Mar', value: 38 },
+    { name: 'Apr', value: 75 },
+    { name: 'May', value: 55 },
+    { name: 'Jun', value: 88 },
+    { name: 'Jul', value: 42 },
+    { name: 'Aug', value: 68 },
+    { name: 'Sep', value: 35 },
+    { name: 'Oct', value: 92 },
+    { name: 'Nov', value: 58 },
+    { name: 'Dec', value: 73 }
+  ],
+  modelFilters: {
+    mape: 0.75,
+    pValue: 0.45,
+    rSquared: 0.82,
+    aic: 0.63,
+    filters: []
+  },
+  selectedModel: 'Select Model to View Model Performance',
+  performanceData: [],
+  isRunning: false,
+  dataType: '',
+  aggregationLevel: ''
+};
 export interface DroppedAtom {
   id: string;
   atomId: string;

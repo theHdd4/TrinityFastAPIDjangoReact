@@ -159,3 +159,8 @@ console.log('Clustering API Configuration:', {
   clusteringApi: normalizeUrl(import.meta.env.VITE_CLUSTERING_API) ||
     `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/clustering`
 });
+
+
+export const SELECT_API =
+  normalizeUrl(import.meta.env.VITE_SELECT_API) ||
+  `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/select`;

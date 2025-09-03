@@ -704,9 +704,11 @@ const ClusteringCanvas: React.FC<ClusteringCanvasProps> = ({
                    </div>
                    <div className="bg-white p-2 rounded-lg border border-gray-200">
                      <div className="text-lg font-bold text-black">
-                       {clusteringData.k_selection ? clusteringData.k_selection.charAt(0).toUpperCase() + clusteringData.k_selection.slice(1) : 'N/A'}
+                       {clusteringData.algorithm === 'dbscan' ? 'N/A' : (clusteringData.k_selection ? clusteringData.k_selection.charAt(0).toUpperCase() + clusteringData.k_selection.slice(1) : 'N/A')}
                      </div>
-                     <div className="text-xs text-black">K-Selection Method</div>
+                     <div className="text-xs text-black">
+                       {clusteringData.algorithm === 'dbscan' ? 'Auto-clustering' : 'K-Selection Method'}
+                     </div>
                    </div>
                    <div className="bg-white p-2 rounded-lg border border-gray-200">
                      <div className="text-lg font-bold text-black">

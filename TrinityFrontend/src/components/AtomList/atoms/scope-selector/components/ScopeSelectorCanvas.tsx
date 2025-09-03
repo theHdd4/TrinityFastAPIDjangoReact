@@ -135,17 +135,67 @@ const ScopeSelectorCanvas: React.FC<ScopeSelectorCanvasProps> = ({ data, onDataC
       data.scopes.slice(0, 5).forEach((scope, idx) => {
         const setNum = idx + 1;
         const identifierFilters: Record<string, string[]> = {};
-        Object.entries(scope.identifiers).forEach(([key, value]) => {
-          if (Array.isArray(value) ? value.length : value) {
-            identifierFilters[key] = Array.isArray(value) ? value : [value as string];
+        
+        // Debug logging for each scope
+        console.log(`🔍 Building scope ${setNum}:`, {
+          scopeId: scope.id,
+          scopeName: scope.name,
+          identifiers: scope.identifiers,
+          selectedIdentifiers: data.selectedIdentifiers
+        });
+        
+        // Only include identifiers that are actually selected and have values
+        data.selectedIdentifiers.forEach(identifier => {
+          const value = scope.identifiers[identifier];
+          if (value) {
+            if (Array.isArray(value) && value.length > 0) {
+              identifierFilters[identifier] = value;
+            } else if (typeof value === 'string' && value.trim() !== '') {
+              identifierFilters[identifier] = [value];
+            }
           }
         });
-        requestBody[`identifier_filters_${setNum}`] = identifierFilters;
-        if (scope.timeframe.from && scope.timeframe.to) {
-          requestBody[`start_date_${setNum}`] = scope.timeframe.from;
-          requestBody[`end_date_${setNum}`] = scope.timeframe.to;
+        
+        // Debug logging for the built filters
+        console.log(`🔍 Scope ${setNum} identifier filters:`, identifierFilters);
+        
+        // Only add to request body if we have actual filters
+        if (Object.keys(identifierFilters).length > 0) {
+          requestBody[`identifier_filters_${setNum}`] = identifierFilters;
+          if (scope.timeframe.from && scope.timeframe.to) {
+            requestBody[`start_date_${setNum}`] = scope.timeframe.from;
+            requestBody[`end_date_${setNum}`] = scope.timeframe.to;
+          }
+        } else {
+          console.warn(`⚠️ Scope ${setNum} has no valid identifier filters, skipping`);
         }
       });
+
+      // Add criteria to the request body
+      if (data.criteria) {
+        requestBody.criteria = {
+          min_datapoints_enabled: data.criteria.minDatapointsEnabled,
+          min_datapoints: data.criteria.minDatapoints,
+          pct90_enabled: data.criteria.pct90Enabled,
+          pct_percentile: data.criteria.pctPercentile,
+          pct_threshold: data.criteria.pctThreshold,
+          pct_base: data.criteria.pctBase,
+          pct_column: data.criteria.pctColumn
+        };
+      }
+
+      // Validate that we have at least one scope with identifier filters
+      const hasValidFilters = Object.keys(requestBody).some(key => 
+        key.startsWith('identifier_filters_') && 
+        Object.keys(requestBody[key]).length > 0
+      );
+
+      if (!hasValidFilters) {
+        throw new Error('No valid identifier filters found. Please ensure at least one scope has selected identifier values.');
+      }
+
+      // Debug log the final request body
+      console.log('🔍 Final request body:', requestBody);
 
       const response = await fetch(`${SCOPE_SELECTOR_API}/scopes/${scopeId}/create-multi-filtered-scope`, {
         method: 'POST',
@@ -960,7 +1010,15 @@ const ScopeSelectorCanvas: React.FC<ScopeSelectorCanvasProps> = ({ data, onDataC
                       >
                         <td className="sticky left-0 z-10 px-6 py-4 whitespace-nowrap text-sm font-bold text-gray-900 bg-gradient-to-r from-blue-50 to-indigo-50 border-r border-blue-200/50">
                           <div className="flex items-center gap-3">
-                            <div className={`w-3 h-3 rounded-full ${row.count === 0 ? 'bg-red-500' : 'bg-blue-500'}`}></div>
+                            <div className={`w-3 h-3 rounded-full ${
+                              row.count === 0
+                                ? 'bg-red-500'
+                                : (data.criteria?.minDatapointsEnabled && row.count < (data.criteria?.minDatapoints || 0))
+                                  ? 'bg-red-500'
+                                  : (data.criteria?.pct90Enabled && row.pctPass === false)
+                                    ? 'bg-red-500'
+                                    : 'bg-blue-500'
+                            }`}></div>
                             <span className="bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">
                               {`Scope ${data.scopes.findIndex(s=>s.id===row.scopeId)+1}`}
                             </span>

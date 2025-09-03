@@ -46,7 +46,7 @@ class ValidatorAtomResponse(BaseModel):
         }
 
 
-# Pydantic models (if not already defined el`sewhere)
+# Pydantic models (if not already defined elsewhere)
 class ScopeRequest(BaseModel):
     """Simple scope selection request"""
     identifiers: List[str] = Field(..., description="Selected identifier columns", min_items=1)
@@ -103,6 +103,16 @@ class ScopeFilterResponse(BaseModel):
     original_records_count: int = Field(..., description="Original number of records before filtering")
     created_at: str
 
+class CriteriaSettings(BaseModel):
+    """Criteria settings for filtering combinations"""
+    min_datapoints_enabled: bool = Field(True, description="Whether to apply minimum datapoints criteria")
+    min_datapoints: int = Field(24, description="Minimum number of datapoints required")
+    pct90_enabled: bool = Field(False, description="Whether to apply percentile criteria")
+    pct_percentile: int = Field(90, description="Percentile to check (0-100)")
+    pct_threshold: float = Field(10.0, description="Threshold percentage")
+    pct_base: str = Field("max", description="Base for percentage calculation (max, min, mean, dist)")
+    pct_column: Optional[str] = Field(None, description="Column to use for percentile calculation")
+
 class MultiFilterScopeRequest(BaseModel):
     """Request model for multiple filter sets with optional time filtering"""
     file_key: str = Field(..., description="MinIO file key/path to the data file")
@@ -133,6 +143,9 @@ class MultiFilterScopeRequest(BaseModel):
     end_date_5: Optional[str] = Field(None, description="Optional end date for fifth filter set")
     
     description: Optional[str] = Field(None, description="Overall description for all filter sets")
+    
+    # Criteria settings
+    criteria: Optional[CriteriaSettings] = Field(None, description="Criteria settings for filtering combinations")
 
     
     
