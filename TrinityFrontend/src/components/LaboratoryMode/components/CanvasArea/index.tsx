@@ -24,6 +24,7 @@ import FeatureOverviewAtom from '@/components/AtomList/atoms/feature-overview/Fe
 import ConcatAtom from '@/components/AtomList/atoms/concat/ConcatAtom';
 import MergeAtom from '@/components/AtomList/atoms/merge/MergeAtom';
 import ColumnClassifierAtom from '@/components/AtomList/atoms/column-classifier/ColumnClassifierAtom';
+import SelectModelsFeatureAtom from '@/components/AtomList/atoms/select-models-feature/SelectModelsFeatureAtom';
 import DataFrameOperationsAtom from '@/components/AtomList/atoms/dataframe-operations/DataFrameOperationsAtom';
 import ScopeSelectorAtom from '@/components/AtomList/atoms/scope-selector/ScopeSelectorAtom';
 import CreateColumnAtom from '@/components/AtomList/atoms/createcolumn/CreateColumnAtom';
@@ -43,6 +44,7 @@ import {
   DEFAULT_FEATURE_OVERVIEW_SETTINGS,
   DEFAULT_DATAFRAME_OPERATIONS_SETTINGS,
   DEFAULT_CHART_MAKER_SETTINGS,
+  DEFAULT_SELECT_MODELS_FEATURE_SETTINGS,
   DataUploadSettings,
   ColumnClassifierColumn,
   DEFAULT_EXPLORE_SETTINGS,
@@ -343,6 +345,39 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
     }
   };
 
+  const prefillScopeSelector = async (atomId: string) => {
+    const prev = await findLatestDataSource();
+    if (!prev || !prev.csv) {
+      console.warn('⚠️ no data source found for scope selector');
+      return;
+    }
+    await prefetchDataframe(prev.csv);
+    const rawMapping = await fetchDimensionMapping();
+    const identifiers = Object.entries(rawMapping || {})
+      .filter(
+        ([k]) =>
+          k.toLowerCase() !== 'unattributed' &&
+          k.toLowerCase() !== 'unattributed_dimensions'
+      )
+      .flatMap(([, v]) => v)
+      .filter(Boolean);
+    const allColumns = Array.isArray(prev.summary) ? prev.summary.filter(Boolean) : [];
+    const allCats = allColumns
+      .filter(col => {
+        const dataType = col.data_type?.toLowerCase() || '';
+        return (dataType === 'object' || dataType === 'category') && col.column;
+      })
+      .map(col => col.column);
+    const selected = identifiers.filter(id => allCats.includes(id));
+    console.log('✅ pre-filling scope selector with', prev.csv);
+    updateAtomSettings(atomId, {
+      dataSource: prev.csv,
+      allColumns,
+      availableIdentifiers: allCats,
+      selectedIdentifiers: selected,
+    });
+  };
+
   // Load saved layout and workflow rendering
   useEffect(() => {
     let initialCards: LayoutCard[] | null = null;
@@ -430,10 +465,14 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
             ? raw.map((c: any) => ({
                 id: c.id,
                 atoms: Array.isArray(c.atoms)
-                  ? c.atoms.map((a: any) => ({
-                      ...a,
-                      llm: a.llm || LLM_MAP[a.atomId],
-                    }))
+                  ? c.atoms.map((a: any) => {
+                      const info = allAtoms.find(at => at.id === a.atomId);
+                      return {
+                        ...a,
+                        llm: a.llm || LLM_MAP[a.atomId],
+                        color: a.color || info?.color || 'bg-gray-400',
+                      };
+                    })
                   : [],
                 isExhibited: !!c.isExhibited,
                 moleculeId: c.moleculeId,
@@ -559,6 +598,8 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
             ? { data: { ...DEFAULT_EXPLORE_DATA }, settings: { ...DEFAULT_EXPLORE_SETTINGS } }
             : atom.id === 'chart-maker'
             ? { ...DEFAULT_CHART_MAKER_SETTINGS }
+            : atom.id === 'select-models-feature'
+            ? { ...DEFAULT_SELECT_MODELS_FEATURE_SETTINGS }
             : undefined,
       };
       
@@ -574,6 +615,8 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
         prefillFeatureOverview(cardId, newAtom.id);
       } else if (atom.id === 'column-classifier') {
         prefillColumnClassifier(newAtom.id);
+      } else if (atom.id === 'scope-selector') {
+        prefillScopeSelector(newAtom.id);
       }
     }
   };
@@ -626,6 +669,8 @@ const addNewCardWithAtom = (
         ? { data: { ...DEFAULT_EXPLORE_DATA }, settings: { ...DEFAULT_EXPLORE_SETTINGS } }
         : atomId === 'chart-maker'
         ? { ...DEFAULT_CHART_MAKER_SETTINGS }
+        : atomId === 'select-models-feature'
+        ? { ...DEFAULT_SELECT_MODELS_FEATURE_SETTINGS }
         : undefined,
   };
   const newCard: LayoutCard = {
@@ -649,6 +694,8 @@ const addNewCardWithAtom = (
     prefillFeatureOverview(newCard.id, newAtom.id);
   } else if (atomId === 'column-classifier') {
     prefillColumnClassifier(newAtom.id);
+  } else if (atomId === 'scope-selector') {
+    prefillScopeSelector(newAtom.id);
   }
 };
 
@@ -740,6 +787,8 @@ const handleAddDragLeave = (e: React.DragEvent) => {
       prefillFeatureOverview(cardId, newAtom.id);
     } else if (info.id === 'column-classifier') {
       prefillColumnClassifier(newAtom.id);
+    } else if (info.id === 'scope-selector') {
+      prefillScopeSelector(newAtom.id);
     }
   };
 
@@ -850,6 +899,8 @@ const handleAddDragLeave = (e: React.DragEvent) => {
         await prefillFeatureOverview(cardId, atom.id);
       } else if (atom.atomId === 'column-classifier') {
         await prefillColumnClassifier(atom.id);
+      } else if (atom.atomId === 'scope-selector') {
+        await prefillScopeSelector(atom.id);
       }
     }
   };
@@ -1214,6 +1265,8 @@ const handleAddDragLeave = (e: React.DragEvent) => {
                         <GroupByAtom atomId={atom.id} />
                       ) : atom.atomId === 'build-model-feature-based' ? (
                           <BuildModelFeatureBasedAtom atomId={atom.id} />
+                       ) : atom.atomId === 'select-models-feature' ? (
+                        <SelectModelsFeatureAtom atomId={atom.id} />
                        ) : atom.atomId === 'scope-selector' ? (
                         <ScopeSelectorAtom atomId={atom.id} />
                       ) : atom.atomId === 'correlation' ? (

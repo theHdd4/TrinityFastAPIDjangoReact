@@ -69,7 +69,7 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
   const addXVariable = () => {
     handleDataChange({
       xVariables: [...(finalData?.xVariables || []), []],
-      transformations: [...(finalData?.transformations || []), '']
+      transformations: [...(finalData?.transformations || []), 'standardize']
     });
   };
 
@@ -812,12 +812,12 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
                                   {combination.model_results.map((model, modelIndex) => (
                                     <TableRow key={modelIndex} className="hover:bg-blue-50/50 transition-colors duration-150">
                                       <TableCell className="font-semibold text-blue-600">{model.model_name}</TableCell>
-                                      <TableCell className="font-mono text-sm">{model.mape_train?.toFixed(4) || 'N/A'}</TableCell>
-                                      <TableCell className="font-mono text-sm">{model.mape_test?.toFixed(4) || 'N/A'}</TableCell>
-                                      <TableCell className="font-mono text-sm">{model.r2_train?.toFixed(4) || 'N/A'}</TableCell>
-                                      <TableCell className="font-mono text-sm">{model.r2_test?.toFixed(4) || 'N/A'}</TableCell>
-                                      <TableCell className="font-mono text-sm">{model.aic?.toFixed(2) || 'N/A'}</TableCell>
-                                      <TableCell className="font-mono text-sm">{model.bic?.toFixed(2) || 'N/A'}</TableCell>
+                                      <TableCell className="font-mono text-sm">{model.mape_train?.toFixed(1) || 'N/A'}</TableCell>
+                                      <TableCell className="font-mono text-sm">{model.mape_test?.toFixed(1) || 'N/A'}</TableCell>
+                                      <TableCell className="font-mono text-sm">{model.r2_train?.toFixed(1) || 'N/A'}</TableCell>
+                                      <TableCell className="font-mono text-sm">{model.r2_test?.toFixed(1) || 'N/A'}</TableCell>
+                                      <TableCell className="font-mono text-sm">{model.aic?.toFixed(1) || 'N/A'}</TableCell>
+                                      <TableCell className="font-mono text-sm">{model.bic?.toFixed(1) || 'N/A'}</TableCell>
                                     </TableRow>
                                   ))}
                                 </TableBody>
@@ -856,18 +856,90 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
                                     <TableCell className="font-semibold text-purple-600">Intercept</TableCell>
                                     {combination.model_results.map((model, index) => (
                                       <TableCell key={index} className="font-mono text-sm">
-                                        {model.intercept ? model.intercept.toFixed(4) : 'N/A'}
+                                         {model.intercept ? model.intercept.toFixed(1) : 'N/A'}
                                       </TableCell>
                                     ))}
                                   </TableRow>
                                   {/* X-variables rows */}
-                                  {modelResult.x_variables.map((variable) => (
+                                   {finalData?.xVariables?.[0]?.map((variable) => (
                                     <TableRow key={variable} className="hover:bg-purple-50/50 transition-colors duration-150">
                                       <TableCell className="font-semibold text-purple-600">{variable}</TableCell>
                                       {combination.model_results.map((model, index) => (
                                         <TableCell key={index} className="font-mono text-sm">
-                                          {model.coefficients && model.coefficients[`Beta_${variable}`] 
-                                            ? model.coefficients[`Beta_${variable}`].toFixed(4) 
+                                           {model.coefficients && model.coefficients[`Beta_${variable}`] !== undefined
+                                             ? model.coefficients[`Beta_${variable}`].toFixed(1) 
+                                             : 'N/A'}
+                                         </TableCell>
+                                       ))}
+                                     </TableRow>
+                                   ))}
+             </TableBody>
+           </Table>
+                             </div>
+                           </div>
+                         )}
+                         
+                         {/* Elasticities Table */}
+                         {combination.model_results && combination.model_results.length > 0 && (
+                           <div className="bg-gray-50 rounded-lg p-4">
+                             <h5 className="font-semibold text-lg text-gray-700 mb-4 flex items-center gap-2">
+                               <TrendingUp className="w-5 h-5 text-orange-600" />
+                               Model Elasticities
+                             </h5>
+                             <div className="overflow-x-auto">
+                               <Table className="bg-white rounded-lg border border-gray-200">
+                                 <TableHeader>
+                                   <TableRow className="bg-gradient-to-r from-orange-50 to-red-50 hover:bg-gradient-to-r hover:from-orange-100 hover:to-red-100">
+                                     <TableHead className="font-semibold text-gray-700 bg-orange-50">Variable</TableHead>
+                                     {combination.model_results.map((model, index) => (
+                                       <TableHead key={index} className="font-semibold text-gray-700">{model.model_name}</TableHead>
+                                     ))}
+                                   </TableRow>
+                                 </TableHeader>
+                                 <TableBody>
+                                   {finalData?.xVariables?.[0]?.map((variable) => (
+                                     <TableRow key={variable} className="hover:bg-orange-50/50 transition-colors duration-150">
+                                       <TableCell className="font-semibold text-orange-600">{variable}</TableCell>
+                                       {combination.model_results.map((model, index) => (
+                                         <TableCell key={index} className="font-mono text-sm">
+                                           {model.elasticities && model.elasticities[variable] !== undefined
+                                             ? model.elasticities[variable].toFixed(1)
+                                             : 'N/A'}
+                                         </TableCell>
+                                       ))}
+                                     </TableRow>
+                                   ))}
+                                 </TableBody>
+                               </Table>
+                             </div>
+                           </div>
+                         )}
+                         
+                         {/* Contributions Table */}
+                         {combination.model_results && combination.model_results.length > 0 && (
+                           <div className="bg-gray-50 rounded-lg p-4">
+                             <h5 className="font-semibold text-lg text-gray-700 mb-4 flex items-center gap-2">
+                               <BarChart3 className="w-5 h-5 text-teal-600" />
+                               Feature Contributions
+                             </h5>
+                             <div className="overflow-x-auto">
+                               <Table className="bg-white rounded-lg border border-gray-200">
+                                 <TableHeader>
+                                   <TableRow className="bg-gradient-to-r from-teal-50 to-cyan-50 hover:bg-gradient-to-r hover:from-teal-100 hover:to-cyan-100">
+                                     <TableHead className="font-semibold text-gray-700 bg-teal-50">Variable</TableHead>
+                                     {combination.model_results.map((model, index) => (
+                                       <TableHead key={index} className="font-semibold text-gray-700">{model.model_name}</TableHead>
+                                     ))}
+                                   </TableRow>
+                                 </TableHeader>
+                                 <TableBody>
+                                   {finalData?.xVariables?.[0]?.map((variable) => (
+                                     <TableRow key={variable} className="hover:bg-teal-50/50 transition-colors duration-150">
+                                       <TableCell className="font-semibold text-teal-600">{variable}</TableCell>
+                                       {combination.model_results.map((model, index) => (
+                                         <TableCell key={index} className="font-mono text-sm">
+                                           {model.contributions && model.contributions[variable] !== undefined
+                                             ? (model.contributions[variable] * 100).toFixed(1) + '%'
                                             : 'N/A'}
                                         </TableCell>
                                       ))}

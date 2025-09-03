@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Card } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { VALIDATE_API, FEATURE_OVERVIEW_API, SCOPE_SELECTOR_API } from '@/lib/api';
+import { VALIDATE_API, FEATURE_OVERVIEW_API } from '@/lib/api';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 
 interface Props {
@@ -17,11 +17,42 @@ const ScopeSelectorInputFiles: React.FC<Props> = ({ atomId }) => {
   const [frames, setFrames] = useState<Frame[]>([]);
 
   useEffect(() => {
-    fetch(`${VALIDATE_API}/list_saved_dataframes`)
+    let query = '';
+    const envStr = localStorage.getItem('env');
+    if (envStr) {
+      try {
+        const env = JSON.parse(envStr);
+        query =
+          '?' +
+          new URLSearchParams({
+            client_id: env.CLIENT_ID || '',
+            app_id: env.APP_ID || '',
+            project_id: env.PROJECT_ID || '',
+            client_name: env.CLIENT_NAME || '',
+            app_name: env.APP_NAME || '',
+            project_name: env.PROJECT_NAME || ''
+          }).toString();
+      } catch {
+        /* ignore */
+      }
+    }
+    fetch(`${VALIDATE_API}/list_saved_dataframes${query}`)
       .then(r => r.json())
-      .then(d => setFrames(Array.isArray(d.files) ? d.files : []))
-      .catch(() => setFrames([]));
-  }, []);
+      .then(d => {
+        let files = Array.isArray(d.files) ? d.files : [];
+        if (settings.dataSource && !files.some(f => f.object_name === settings.dataSource)) {
+          files = [...files, { object_name: settings.dataSource, csv_name: settings.dataSource }];
+        }
+        setFrames(files);
+      })
+      .catch(() => {
+        if (settings.dataSource) {
+          setFrames([{ object_name: settings.dataSource, csv_name: settings.dataSource }]);
+        } else {
+          setFrames([]);
+        }
+      });
+  }, [settings.dataSource]);
 
   const handleFrameChange = async (val: string) => {
     if (!val.endsWith('.arrow')) {
@@ -29,61 +60,53 @@ const ScopeSelectorInputFiles: React.FC<Props> = ({ atomId }) => {
     }
     
     try {
-      // Try Redis/Mongo identifier list first
-      // Extract client/app/project from path if available
-      const pathParts = val.split('/')
-      const clientName = pathParts[0] ?? ''
-      const appName = pathParts[1] ?? ''
-      const projectName = pathParts[2] ?? ''
-
-      let categoricalColumns: string[] = []
-      try {
-        if (clientName && appName && projectName) {
-          const identRes = await fetch(`${SCOPE_SELECTOR_API}/identifier_options?client_name=${encodeURIComponent(clientName)}&app_name=${encodeURIComponent(appName)}&project_name=${encodeURIComponent(projectName)}`)
-          if (identRes.ok) {
-            const identJson = await identRes.json()
-            if (Array.isArray(identJson.identifiers) && identJson.identifiers.length > 0) {
-              categoricalColumns = identJson.identifiers
-            }
-          }
-        }
-      } catch (err) {
-        console.warn('identifier_options fetch failed', err)
-      }
-
-      // If identifiers not found via config, fall back to column summary
+      // Fetch column summary
       const res = await fetch(`${FEATURE_OVERVIEW_API}/column_summary?object_name=${encodeURIComponent(val)}`);
       if (res.ok) {
         const data = await res.json();
         const allColumns = Array.isArray(data.summary) ? data.summary.filter(Boolean) : [];
-        
-        // Only include object type columns as categorical
-        const finalCats = categoricalColumns.length > 0 ? categoricalColumns : allColumns
+
+        // Determine all categorical identifiers
+        const allCats = allColumns
           .filter(col => {
             const dataType = col.data_type?.toLowerCase() || '';
             return (dataType === 'object' || dataType === 'category') && col.column;
           })
           .map(col => col.column);
-        
-        // Update settings with all columns and initialize available identifiers with all categorical columns
+
+        // Preserve previously selected identifiers that still exist in this dataset
+        const selectedCats = Array.isArray(settings.selectedIdentifiers)
+          ? settings.selectedIdentifiers.filter((id: string) => allCats.includes(id))
+          : [];
+
+        // Update settings with all identifiers while keeping selected ones
         updateSettings(atomId, {
           dataSource: val,
           allColumns,
-          availableIdentifiers: finalCats,
-          selectedIdentifiers: [...finalCats] // Select all categorical columns by default
+          availableIdentifiers: allCats,
+          selectedIdentifiers: [...selectedCats],
+          measures: settings.measures || [],
         });
       }
     } catch (error) {
       console.error('Error fetching column summary:', error);
       // Still update dataSource even if column fetch fails
-      updateSettings(atomId, { 
+      updateSettings(atomId, {
         dataSource: val,
         allColumns: [],
         availableIdentifiers: [],
-        selectedIdentifiers: []
+        selectedIdentifiers: [],
+        measures: settings.measures || [],
       });
     }
   };
+
+  useEffect(() => {
+    if (settings.dataSource && (!settings.allColumns || settings.allColumns.length === 0)) {
+      handleFrameChange(settings.dataSource);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settings.dataSource]);
 
   return (
     <div className="space-y-4 p-2">

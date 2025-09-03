@@ -267,33 +267,3 @@
   color: #9333ea;
 }
 
-/* Improved tooltip styling for explore atom charts */
-.explore-chart-tooltip {
-  background-color: rgba(255, 255, 255, 0.98) !important;
-  backdrop-filter: blur(10px) !important;
-  border: 1px solid rgba(229, 231, 235, 0.6) !important;
-  border-radius: 12px !important;
-  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.15), 0 10px 10px -5px rgba(0, 0, 0, 0.1) !important;
-  min-width: 8rem !important;
-  padding: 12px !important;
-}
-
-/* Hide dots by default, show only on hover */
-.explore-chart-line .recharts-line-dot {
-  display: none !important;
-}
-
-/* Show dots only on hover */
-.explore-chart-line .recharts-line-dot:hover,
-.explore-chart-line .recharts-line-dot:focus {
-  display: block !important;
-}
-
-/* Active dot styling */
-.explore-chart-line .recharts-active-dot {
-  display: block !important;
-  r: 6 !important;
-  stroke: white !important;
-  stroke-width: 3 !important;
-  cursor: pointer !important;
-}

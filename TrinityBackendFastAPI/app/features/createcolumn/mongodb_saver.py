@@ -3,8 +3,8 @@
 import os
 from motor.motor_asyncio import AsyncIOMotorClient
 from datetime import datetime
-MONGO_URI = os.getenv("MONGO_URI", "mongodb://mongo:27017/trinity")
-MONGO_DB = os.getenv("MONGO_DB", "trinity")
+MONGO_URI = os.getenv("MONGO_URI", "mongodb://admin_dev:pass_dev@10.2.1.65:9005/?authSource=admin")
+MONGO_DB = os.getenv("MONGO_DB", "trinity_prod")
 client = AsyncIOMotorClient(MONGO_URI)
 db = client[MONGO_DB]
 # print("Mongo DB in use:", MONGO_DB)
@@ -31,17 +31,17 @@ async def save_createandtransform_configs(
     project_id: int | None = None,
 ):
     """Save createcolumn operation data to MongoDB createandtransform_configs collection"""
-    # print(f"🔍 DEBUG: save_createandtransform_configs called with:")
-    # print(f"🔍 DEBUG: client_name = {client_name}")
-    # print(f"🔍 DEBUG: app_name = {app_name}")
-    # print(f"🔍 DEBUG: project_name = {project_name}")
-    # print(f"🔍 DEBUG: user_id = {user_id}")
-    # print(f"🔍 DEBUG: project_id = {project_id}")
-    # print(f"🔍 DEBUG: operation_data = {operation_data}")
+    print(f"🔍 DEBUG: save_createandtransform_configs called with:")
+    print(f"🔍 DEBUG: client_name = {client_name}")
+    print(f"🔍 DEBUG: app_name = {app_name}")
+    print(f"🔍 DEBUG: project_name = {project_name}")
+    print(f"🔍 DEBUG: user_id = {user_id}")
+    print(f"🔍 DEBUG: project_id = {project_id}")
+    print(f"🔍 DEBUG: operation_data = {operation_data}")
     
     try:
         document_id = f"{client_name}/{app_name}/{project_name}"
-        # print(f"🔍 DEBUG: document_id = {document_id}")
+        print(f"🔍 DEBUG: document_id = {document_id}")
         
         document = {
             "_id": document_id,
@@ -55,21 +55,21 @@ async def save_createandtransform_configs(
             **operation_data,
         }
         
-        # print(f"🔍 DEBUG: document to save = {document}")
-        # print(f"🔍 DEBUG: MongoDB client = {client}")
-        # print(f"🔍 DEBUG: Database = trinity_prod")
-        # print(f"🔍 DEBUG: Collection = createandtransform_configs")
+        print(f"🔍 DEBUG: document to save = {document}")
+        print(f"🔍 DEBUG: MongoDB client = {client}")
+        print(f"🔍 DEBUG: Database = {MONGO_DB}")
+        print(f"🔍 DEBUG: Collection = createandtransform_configs")
         
         # Save to createandtransform_configs collection in trinity_prod database (same as column_classifier_configs)
-        result = await client["trinity_prod"]["createandtransform_configs"].replace_one(
+        result = await db["createandtransform_configs"].replace_one(
             {"_id": document_id},
             document,
             upsert=True
         )
-        # print(f"📦 Stored in createandtransform_configs: {document}")
-        # print(f"🔍 DEBUG: MongoDB result = {result}")
-        # print(f"🔍 DEBUG: result.upserted_id = {result.upserted_id}")
-        # print(f"🔍 DEBUG: result.modified_count = {result.modified_count}")
+        print(f"📦 Stored in createandtransform_configs: {document}")
+        print(f"🔍 DEBUG: MongoDB result = {result}")
+        print(f"🔍 DEBUG: result.upserted_id = {result.upserted_id}")
+        print(f"🔍 DEBUG: result.modified_count = {result.modified_count}")
         
         return {
             "status": "success", 
@@ -89,7 +89,7 @@ async def get_createandtransform_config_from_mongo(client_name: str, app_name: s
     """Retrieve saved createandtransform configuration."""
     try:
         document_id = f"{client_name}/{app_name}/{project_name}"
-        result = await client["trinity_prod"]["createandtransform_configs"].find_one({"_id": document_id})
+        result = await db["createandtransform_configs"].find_one({"_id": document_id})
         return result
     except Exception as e:
         # print(f"MongoDB read error for createandtransform_configs: {e}")

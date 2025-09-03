@@ -41,3 +41,4 @@ scikit-learn
 pykalman
 openpyxl
 xlsxwriter
+prophet

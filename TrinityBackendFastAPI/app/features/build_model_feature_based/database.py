@@ -57,11 +57,16 @@ try:
     metadata_collection = marketing_db["marketing_metadata"]
     marketing_collection = marketing_db["marketing_models"]
 
+    # ADD CREATEANDTRANSFORM COLLECTION HERE
+    trinity_prod_db = mongo_client["trinity_prod"]
+    createandtransform_configs_collection = trinity_prod_db["createandtransform_configs"]
+
     logger.info("✅ MongoDB connected - collections ready:")
     logger.info("    • Scope_selection.Scopes")
     logger.info("    • Builddatabase.simple")  # Assuming these are your settings
     logger.info("    • Marketing.marketing_metadata")
     logger.info("    • Marketing.marketing_models")
+    logger.info("    • trinity_prod.createandtransform_configs")
 
     logger.info(f"    • {settings.database_name}.{settings.collection_name}")
     
@@ -70,8 +75,10 @@ except Exception as e:
     mongo_client = None
     scope_db = None
     build_db = None
+    trinity_prod_db = None
     scopes_collection = None
     build_collection = None
+    createandtransform_configs_collection = None
 
 # MinIO Client Connection
 try:
@@ -635,12 +642,21 @@ async def train_models_for_combination_enhanced(
                         )
                     elif standardization == 'minmax':
                         for i, var in enumerate(x_variables):
-                            scale = scaler.scale_[i]
-                            unstandardized_coef = model.coef_[i] / scale
+                            # Get original data statistics for proper destandardization
+                            X_original_fold = X_original.iloc[train_idx]
+                            x_mins = X_original_fold.min().values
+                            x_ranges = X_original_fold.max().values - x_mins
+                            
+                            # Correct min-max destandardization: β_original = β_scaled * (1/range(X))
+                            if x_ranges[i] != 0:
+                                unstandardized_coef = model.coef_[i] * (1 / x_ranges[i])
+                            else:
+                                unstandardized_coef = model.coef_[i]
                             fold_coefs[f"Beta_{var}"] = float(unstandardized_coef)
                         
+                        # Calculate intercept using original data statistics
                         fold_intercept = fold_intercept - np.sum(
-                            [fold_coefs[f"Beta_{var}"] * scaler.min_[i] 
+                            [fold_coefs[f"Beta_{var}"] * x_mins[i] 
                              for i, var in enumerate(x_variables)]
                         )
                     else:
@@ -712,13 +728,21 @@ async def train_models_for_combination_enhanced(
                     )
                 elif standardization == 'minmax':
                     for i, var in enumerate(x_variables):
-                        scale = scaler.scale_[i]
-                        unstandardized_coef = standardized_coefs[i] / scale
+                        # Get original data statistics for proper destandardization
+                        x_mins = X_original.min().values
+                        x_ranges = X_original.max().values - x_mins
+                        
+                        # Correct min-max destandardization: β_original = β_scaled * (1/range(X))
+                        if x_ranges[i] != 0:
+                            unstandardized_coef = standardized_coefs[i] * (1 / x_ranges[i])
+                        else:
+                            unstandardized_coef = standardized_coefs[i]
                         unstandardized_coefficients[f"Beta_{var}"] = float(unstandardized_coef)
                         coefficients[f"Beta_{var}"] = float(standardized_coefs[i])
                     
+                    # Calculate intercept using original data statistics
                     unstandardized_intercept = standardized_intercept - np.sum(
-                        [unstandardized_coefficients[f"Beta_{var}"] * scaler.min_[i] 
+                        [unstandardized_coefficients[f"Beta_{var}"] * x_mins[i] 
                          for i, var in enumerate(x_variables)]
                     )
                 else:
@@ -836,7 +860,7 @@ async def save_model_results_enhanced(
                 "model_type": "regression",
                 
                 # Training configuration
-                "x_variables": x_variables,
+                "x_variables": [f"{var}_{standardization}" for var in x_variables] if standardization != 'none' else x_variables,
                 "y_variable": y_variable,
                 "standardization": standardization,
                 "k_folds": k_folds,

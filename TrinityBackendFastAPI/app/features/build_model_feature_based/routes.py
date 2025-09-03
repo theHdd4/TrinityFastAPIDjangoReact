@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Query, Path, Form
+from fastapi import APIRouter, HTTPException, Query, Path, Form, Body, Request
 import logging
 import asyncio
 from datetime import datetime
@@ -27,6 +27,9 @@ from ..scope_selector.deps import get_minio_client
 
 # Import get_object_prefix for dynamic path construction
 from ..data_upload_validate.app.routes import get_object_prefix
+
+# Import MongoDB saver functions
+from .mongodb_saver import save_build_config, get_build_config_from_mongo
 
 
 
@@ -104,6 +107,8 @@ from .marketing_helpers import (
     logistic_function,
     power_function
 )
+
+# Elasticity and contribution imports - removed unused imports since we're using direct calculation
 
 # Global progress tracking
 training_progress = {}
@@ -524,6 +529,102 @@ async def train_models_direct(request: dict):
                     # Store variable statistics
                     all_variable_stats[combination] = variable_data
                     
+                    # Calculate elasticities and contributions for each model
+                    logger.info(f"Starting elasticity calculation for combination {combination}")
+                    for model_result in model_results:
+                        try:
+                            # Get coefficients and means that are already available
+                            coefficients = model_result.get('coefficients', {})
+                            variable_averages = variable_data.get('variable_averages', {})
+                            
+                            # Try to get createcolumn transformation data from MongoDB
+                            transform_data = None
+                            try:
+                                # Try to get client/app/project info from the request or use defaults
+                                client_name = request.get('client_name', 'default_client')
+                                app_name = request.get('app_name', 'default_app')
+                                project_name = request.get('project_name', 'default_project')
+                                
+                                # Fetch createcolumn transformation data
+                                if 'createandtransform_configs_collection' in globals() and createandtransform_configs_collection is not None:
+                                    document_id = f"{client_name}/{app_name}/{project_name}"
+                                    transform_doc = await createandtransform_configs_collection.find_one({"_id": document_id})
+                                    if transform_doc:
+                                        transform_data = transform_doc
+                                        logger.info(f"Found createcolumn transformation data for {document_id}")
+                                    else:
+                                        logger.info(f"No createcolumn transformation data found for {document_id}, using direct calculation")
+                                else:
+                                    logger.info("createandtransform_configs_collection not available, using direct calculation")
+                            except Exception as e:
+                                logger.warning(f"Failed to fetch createcolumn transformation data: {e}, using direct calculation")
+                            
+                            # Calculate elasticities using the CORRECT formula since Y is NOT standardized
+                            elasticities = {}
+                            contributions = {}
+                            
+                            # Get unstandardized coefficients (these are the correct ones since Y is not standardized)
+                            unstandardized_coeffs = model_result.get('unstandardized_coefficients', {})
+                            
+                            # For each X variable, calculate elasticity and contribution
+                            for x_var in x_variables:
+                                beta_key = f"Beta_{x_var}"
+                                x_mean = variable_averages.get(x_var, 0)
+                                y_mean = variable_averages.get(y_variable, 0)
+                                
+                                # Use unstandardized coefficients for elasticity calculation
+                                # Since Y is NOT standardized, we need unstandardized coefficients
+                                if unstandardized_coeffs and beta_key in unstandardized_coeffs:
+                                    beta_val = unstandardized_coeffs[beta_key]
+                                else:
+                                    # Fallback to raw coefficients if unstandardized not available
+                                    beta_val = coefficients.get(beta_key, 0)
+                                
+                                # Calculate elasticity using the CORRECT formula: (β × X_mean) / Y_mean
+                                if y_mean != 0 and x_mean != 0:
+                                    elasticity = (beta_val * x_mean) / y_mean
+                                else:
+                                    elasticity = 0
+                                
+                                elasticities[x_var] = elasticity
+                                
+                                # Calculate contribution: (β × X_mean) / sum(all_β × X_mean)
+                                contributions[x_var] = abs(beta_val * x_mean)
+                            
+                            # Normalize contributions to sum to 1
+                            total_contribution = sum(contributions.values())
+                            if total_contribution > 0:
+                                for x_var in contributions:
+                                    contributions[x_var] = contributions[x_var] / total_contribution
+                            
+                            # Store results in model_result
+                            model_result['elasticities'] = elasticities
+                            model_result['contributions'] = contributions
+                            
+
+                            model_result['elasticity_details'] = {
+                                'calculation_method': 'direct_from_model_results',
+                                'variables_processed': list(elasticities.keys()),
+                                'transform_data_used': transform_data is not None
+                            }
+                            model_result['contribution_details'] = {
+                                'calculation_method': 'direct_from_model_results',
+                                'variables_processed': list(contributions.keys()),
+                                'total_contribution': total_contribution,
+                                'transform_data_used': transform_data is not None
+                            }
+                            
+
+                                
+                        except Exception as e:
+                            logger.warning(f"Failed to calculate elasticities/contributions for {combination} {model_result.get('model_name', 'unknown')}: {e}")
+                            logger.warning(f"Exception details: {type(e).__name__}: {str(e)}")
+                            # Don't fail the entire process if elasticity calculation fails
+                            model_result['elasticities'] = {}
+                            model_result['contributions'] = {}
+                            model_result['elasticity_details'] = {}
+                            model_result['contribution_details'] = {}
+                    
                     # Save results to MongoDB (if available)
                     try:
                         saved_ids = await save_model_results_enhanced(
@@ -554,6 +655,8 @@ async def train_models_direct(request: dict):
                         
                     except Exception as e:
                         logger.error(f"Failed to save results for {combination}: {e}")
+                    
+
                     
                     combination_results.append({
                         "combination_id": combination,
@@ -598,9 +701,14 @@ async def train_models_direct(request: dict):
             # Create a summary DataFrame with key results
             summary_data = []
             for combo_result in combination_results:
+                # Get variable averages for this combination
+                combination_id = combo_result['combination_id']
+                variable_averages = all_variable_stats.get(combination_id, {}).get('variable_averages', {})
+                
                 for model_result in combo_result.get('model_results', []):
                     # Create base summary row
                     summary_row = {
+                        'Scope': f'Scope_{scope_number}',
                         'combination_id': combo_result['combination_id'],
                         'y_variable': y_variable,
                         'x_variables': x_variables,  # Keep as list instead of joining
@@ -615,15 +723,36 @@ async def train_models_direct(request: dict):
                         'n_parameters': model_result.get('n_parameters', 0),
                         'price_elasticity': model_result.get('price_elasticity', None),
                         'run_id': run_id,
-                        'scope_number': scope_number,
+                        
                         'timestamp': timestamp
                     }
+                    
+                    # Add average values for each variable (before any transformation)
+                    for x_var in x_variables:
+                        avg_key = f"{x_var}_avg"
+                        summary_row[avg_key] = variable_averages.get(x_var, 0)
+                    
+                    # Add Y variable average
+                    y_avg_key = f"{y_variable}_avg"
+                    summary_row[y_avg_key] = variable_averages.get(y_variable, 0)
                     
                     # Add beta coefficients for each X-variable
                     coefficients = model_result.get('coefficients', {})
                     for x_var in x_variables:
                         beta_key = f"{x_var}_beta"
                         summary_row[beta_key] = coefficients.get(f"Beta_{x_var}", 0)
+                    
+                    # Add elasticity values for each X-variable
+                    elasticities = model_result.get('elasticities', {})
+                    for x_var in x_variables:
+                        elasticity_key = f"{x_var}_elasticity"
+                        summary_row[elasticity_key] = elasticities.get(x_var, 0)
+                    
+                    # Add contribution values for each X-variable
+                    contributions = model_result.get('contributions', {})
+                    for x_var in x_variables:
+                        contribution_key = f"{x_var}_contribution"
+                        summary_row[contribution_key] = contributions.get(x_var, 0)
                     
                     summary_data.append(summary_row)
             
@@ -688,8 +817,14 @@ async def train_models_direct(request: dict):
             
             return cleaned_results
         
+
+        
         # Clean the results before returning
         cleaned_combination_results = clean_model_results(combination_results)
+        
+
+        
+
         
         # Update final progress
         training_progress[run_id]["status"] = "completed"
@@ -697,6 +832,95 @@ async def train_models_direct(request: dict):
         training_progress[run_id]["percentage"] = 100
         training_progress[run_id]["current_combination"] = ""
         training_progress[run_id]["current_model"] = ""
+        
+        # Save the build configuration to MongoDB
+        try:
+            # Extract client, app, project from the first combination file path
+            # We'll use a default structure since the file paths might not contain this info
+            client_name = "default_client"
+            app_name = "default_app"
+            project_name = "default_project"
+            
+            # Try to extract from file paths if available
+            if combination_results and len(combination_results) > 0:
+                first_result = combination_results[0]
+                if 'file_key' in first_result:
+                    file_key = first_result['file_key']
+                    # file_key format might be: "default_client/default_app/default_project/..."
+                    file_key_parts = file_key.split('/')
+                    if len(file_key_parts) >= 3:
+                        client_name = file_key_parts[0]
+                        app_name = file_key_parts[1]
+                        project_name = file_key_parts[2]
+            
+            # Extract file keys and model coefficients from combination results
+            combination_file_keys = []
+            model_coefficients = {}
+            
+            for i, combo_result in enumerate(cleaned_combination_results):
+                if 'file_key' in combo_result:
+                    # Use the original combination from the combinations list
+                    combination_name = combinations[i] if i < len(combinations) else f"combination_{i}"
+                    combination_file_keys.append({
+                        "combination": combination_name,
+                        "file_key": combo_result['file_key']
+                    })
+                    
+                    # Extract model coefficients for this combination
+                    if 'model_results' in combo_result:
+                        combination_coefficients = {}
+                        for model_result in combo_result['model_results']:
+                            model_name = model_result.get('model_name', 'unknown')
+                            coefficients = model_result.get('coefficients', {})
+                            intercept = model_result.get('intercept', 0)
+                            
+                            combination_coefficients[model_name] = {
+                                "intercept": intercept,
+                                "coefficients": coefficients,
+                                "x_variables": x_variables,
+                                "y_variable": y_variable
+                            }
+                        
+                        model_coefficients[combination_name] = combination_coefficients
+            
+            # Prepare build configuration data
+            build_config_data = {
+                "run_id": run_id,
+                "scope_number": scope_number,
+                "combinations": combinations,
+                "x_variables": x_variables,
+                "y_variable": y_variable,
+                "standardization": standardization,
+                "k_folds": k_folds,
+                "models_to_run": models_to_run,
+                "total_combinations_processed": len(cleaned_combination_results),
+                "total_models_saved": total_saved,
+                # "variable_statistics": all_variable_stats,
+                "combination_file_keys": combination_file_keys,
+                "model_coefficients": model_coefficients,
+                "created_at": datetime.now().isoformat(),
+                "training_status": "completed"
+            }
+            
+            # Save to MongoDB
+            mongo_result = await save_build_config(
+                client_name=client_name,
+                app_name=app_name,
+                project_name=project_name,
+                build_data=build_config_data,
+                user_id="",  # You can add user_id if available
+                project_id=None  # You can add project_id if available
+            )
+            
+            logger.info(f"🔍 DEBUG: MongoDB save result: {mongo_result}")
+            
+            if mongo_result["status"] == "success":
+                logger.info(f"📦 Build configuration saved to MongoDB: {mongo_result['mongo_id']}")
+            else:
+                logger.error(f"❌ Failed to save build configuration to MongoDB: {mongo_result['error']}")
+        except Exception as e:
+            logger.error(f"❌ Error saving build configuration to MongoDB: {str(e)}")
+            # Don't fail the entire request if MongoDB save fails
         
         # Return response
         return ModelTrainingResponse(
@@ -1986,3 +2210,153 @@ async def get_file_path(
     except Exception as e:
         logger.error(f"Error in get_file_path: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+# Elasticity and contribution endpoints removed - using direct calculation in train-models-direct instead
+
+# ============================================================================
+# SAVE ENDPOINTS
+# ============================================================================
+
+@router.post("/save-build-config")
+async def save_build_configuration(
+    client_name: str = Query(..., description="Client name"),
+    app_name: str = Query(..., description="App name"),
+    project_name: str = Query(..., description="Project name"),
+    build_data: dict = Body(..., description="Build configuration data to save"),
+    user_id: str = Query("", description="User ID"),
+    project_id: int = Query(None, description="Project ID")
+):
+    """Save build configuration to MongoDB"""
+    try:
+        result = await save_build_config(
+            client_name=client_name,
+            app_name=app_name,
+            project_name=project_name,
+            build_data=build_data,
+            user_id=user_id,
+            project_id=project_id
+        )
+        
+        if result["status"] == "success":
+            return {
+                "success": True,
+                "message": f"Build configuration saved successfully",
+                "mongo_id": result["mongo_id"],
+                "operation": result["operation"],
+                "collection": result["collection"]
+            }
+        else:
+            raise HTTPException(status_code=500, detail=f"Failed to save build configuration: {result['error']}")
+            
+    except Exception as e:
+        logger.error(f"Error saving build configuration: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to save build configuration: {str(e)}")
+
+@router.get("/get-build-config")
+async def get_build_configuration(
+    client_name: str = Query(..., description="Client name"),
+    app_name: str = Query(..., description="App name"),
+    project_name: str = Query(..., description="Project name")
+):
+    """Retrieve saved build configuration from MongoDB"""
+    try:
+        result = await get_build_config_from_mongo(client_name, app_name, project_name)
+        
+        if result:
+            return {
+                "success": True,
+                "data": result
+            }
+        else:
+            return {
+                "success": False,
+                "message": "No build configuration found",
+                "data": None
+            }
+            
+    except Exception as e:
+        logger.error(f"Error retrieving build configuration: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve build configuration: {str(e)}")
+
+@router.post("/save")
+async def save_build_data(
+    request: Request,
+    client_name: str = Query(..., description="Client name"),
+    app_name: str = Query(..., description="App name"),
+    project_name: str = Query(..., description="Project name"),
+    user_id: str = Query("", description="User ID"),
+    project_id: int = Query(None, description="Project ID")
+):
+    """General save endpoint for build data - used by SAVE button"""
+    logger.info(f"🔍 DEBUG: /save endpoint called")
+    logger.info(f"🔍 DEBUG: client_name = {client_name}")
+    logger.info(f"🔍 DEBUG: app_name = {app_name}")
+    logger.info(f"🔍 DEBUG: project_name = {project_name}")
+    logger.info(f"🔍 DEBUG: user_id = {user_id}")
+    logger.info(f"🔍 DEBUG: project_id = {project_id}")
+    
+    try:
+        # Get the request body
+        body = await request.json()
+        logger.info(f"🔍 DEBUG: request body = {body}")
+        
+        # Save build configuration data
+        result = await save_build_config(
+            client_name=client_name,
+            app_name=app_name,
+            project_name=project_name,
+            build_data=body,
+            user_id=user_id,
+            project_id=project_id
+        )
+        
+        logger.info(f"🔍 DEBUG: save_build_config result = {result}")
+        
+        if result["status"] == "success":
+            return {
+                "success": True,
+                "message": f"Build data saved successfully",
+                "mongo_id": result["mongo_id"],
+                "operation": result["operation"],
+                "collection": result["collection"]
+            }
+        else:
+            raise HTTPException(status_code=500, detail=f"Failed to save build data: {result['error']}")
+            
+    except Exception as e:
+        logger.error(f"Error saving build data: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to save build data: {str(e)}")
+
+@router.get("/test-mongo")
+async def test_mongo_connection():
+    """Test MongoDB connection and list databases"""
+    try:
+        from .mongodb_saver import client
+        logger.info(f"🔍 DEBUG: Testing MongoDB connection")
+        
+        # List all databases
+        databases = await client.list_database_names()
+        logger.info(f"🔍 DEBUG: Available databases: {databases}")
+        
+        # Check if trinity_prod exists
+        if "trinity_prod" in databases:
+            logger.info(f"🔍 DEBUG: trinity_prod database exists")
+            # List collections in trinity_prod
+            collections = await client["trinity_prod"].list_collection_names()
+            logger.info(f"🔍 DEBUG: Collections in trinity_prod: {collections}")
+        else:
+            logger.warning(f"🔍 DEBUG: trinity_prod database does not exist")
+        
+        return {
+            "success": True,
+            "databases": databases,
+            "trinity_prod_exists": "trinity_prod" in databases,
+            "collections_in_trinity_prod": collections if "trinity_prod" in databases else []
+        }
+        
+    except Exception as e:
+        logger.error(f"Error testing MongoDB connection: {str(e)}")
+        return {
+            "success": False,
+            "error": str(e)
+        }

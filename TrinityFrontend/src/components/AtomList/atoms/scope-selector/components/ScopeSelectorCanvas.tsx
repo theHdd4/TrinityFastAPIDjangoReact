@@ -7,7 +7,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Plus, Settings, Calendar, X, Loader2, Target, Check, BarChart3 } from 'lucide-react';
-import { SCOPE_SELECTOR_API } from '@/lib/api';
+import { SCOPE_SELECTOR_API, CLASSIFIER_API } from '@/lib/api';
 import { ScopeSelectorData, ScopeData } from '../ScopeSelectorAtom';
 
 interface ScopeSelectorCanvasProps {
@@ -40,6 +40,92 @@ const ScopeSelectorCanvas: React.FC<ScopeSelectorCanvasProps> = ({ data, onDataC
   // Drag and drop state
   const [draggedIdentifier, setDraggedIdentifier] = useState<string | null>(null);
   const [dragOverIdentifier, setDragOverIdentifier] = useState<string | null>(null);
+
+  // Fetch column classifier configuration on mount
+  useEffect(() => {
+    const fetchConfig = async () => {
+      try {
+        const envStr = localStorage.getItem('env');
+        const env = envStr ? JSON.parse(envStr) : {};
+        const client = env.CLIENT_NAME || '';
+        const app = env.APP_NAME || '';
+        const project = env.PROJECT_NAME || '';
+        if (!client || !project) return;
+        const res = await fetch(
+          `${CLASSIFIER_API}/get_config?client_name=${encodeURIComponent(client)}&app_name=${encodeURIComponent(app)}&project_name=${encodeURIComponent(project)}`
+        );
+        if (res.ok) {
+          const json = await res.json();
+          const cfg = json.data || {};
+          const dimensions = cfg.dimensions || {};
+          const dimensionIdentifiers = Array.from(
+            new Set(
+              Object.entries(dimensions)
+                .filter(([k]) =>
+                  k.toLowerCase() !== 'unattributed' &&
+                  k.toLowerCase() !== 'unattributed_dimensions'
+                )
+                .flatMap(([, vals]) => (Array.isArray(vals) ? vals : []))
+                .filter((v): v is string => typeof v === 'string')
+            )
+          );
+          const measures = Array.isArray(cfg.measures) ? cfg.measures : [];
+          if (dimensionIdentifiers.length > 0) {
+            const update: Partial<ScopeSelectorData> = {
+              selectedIdentifiers: dimensionIdentifiers,
+              measures,
+            };
+            if (!data.scopes || data.scopes.length === 0) {
+              const newScope: ScopeData = {
+                id: Date.now().toString(),
+                name: 'Scope 1',
+                identifiers: Object.fromEntries(
+                  dimensionIdentifiers.map((id: string) => [id, ''])
+                ),
+                timeframe: {
+                  from: dateRange.available
+                    ? (dateRange.min ?? new Date().toISOString().split('T')[0])
+                    : new Date().toISOString().split('T')[0],
+                  to: dateRange.available
+                    ? (
+                        dateRange.max ??
+                        new Date(
+                          new Date().setFullYear(
+                            new Date().getFullYear() + 1
+                          )
+                        )
+                          .toISOString()
+                          .split('T')[0]
+                      )
+                    : new Date(
+                        new Date().setFullYear(
+                          new Date().getFullYear() + 1
+                        )
+                      )
+                        .toISOString()
+                        .split('T')[0],
+                },
+              };
+              update.scopes = [newScope];
+            }
+            onDataChange(update);
+            toast({ title: 'Column classifier configuration loaded' });
+          } else {
+            toast({ title: 'Column classifier configuration not found', variant: 'destructive' });
+          }
+        } else {
+          toast({ title: 'Column classifier configuration not found', variant: 'destructive' });
+        }
+      } catch (err) {
+        console.warn('column classifier config fetch failed', err);
+        toast({ title: 'Failed to fetch column classifier configuration', variant: 'destructive' });
+      }
+    };
+    if (!data.selectedIdentifiers?.length) {
+      fetchConfig();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   
   // Debug log
   useEffect(() => {
@@ -146,6 +232,19 @@ const ScopeSelectorCanvas: React.FC<ScopeSelectorCanvasProps> = ({ data, onDataC
           requestBody[`end_date_${setNum}`] = scope.timeframe.to;
         }
       });
+
+      // Add criteria to the request body
+      if (data.criteria) {
+        requestBody.criteria = {
+          min_datapoints_enabled: data.criteria.minDatapointsEnabled,
+          min_datapoints: data.criteria.minDatapoints,
+          pct90_enabled: data.criteria.pct90Enabled,
+          pct_percentile: data.criteria.pctPercentile,
+          pct_threshold: data.criteria.pctThreshold,
+          pct_base: data.criteria.pctBase,
+          pct_column: data.criteria.pctColumn
+        };
+      }
 
       const response = await fetch(`${SCOPE_SELECTOR_API}/scopes/${scopeId}/create-multi-filtered-scope`, {
         method: 'POST',
@@ -960,7 +1059,15 @@ const ScopeSelectorCanvas: React.FC<ScopeSelectorCanvasProps> = ({ data, onDataC
                       >
                         <td className="sticky left-0 z-10 px-6 py-4 whitespace-nowrap text-sm font-bold text-gray-900 bg-gradient-to-r from-blue-50 to-indigo-50 border-r border-blue-200/50">
                           <div className="flex items-center gap-3">
-                            <div className={`w-3 h-3 rounded-full ${row.count === 0 ? 'bg-red-500' : 'bg-blue-500'}`}></div>
+                            <div className={`w-3 h-3 rounded-full ${
+                              row.count === 0
+                                ? 'bg-red-500'
+                                : (data.criteria?.minDatapointsEnabled && row.count < (data.criteria?.minDatapoints || 0))
+                                  ? 'bg-red-500'
+                                  : (data.criteria?.pct90Enabled && row.pctPass === false)
+                                    ? 'bg-red-500'
+                                    : 'bg-blue-500'
+                            }`}></div>
                             <span className="bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">
                               {`Scope ${data.scopes.findIndex(s=>s.id===row.scopeId)+1}`}
                             </span>
