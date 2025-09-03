@@ -340,6 +340,12 @@ class ProjectViewSet(viewsets.ModelViewSet):
                 cfg = state.get(field)
                 if cfg and cfg.get("cards"):
                     save_atom_list_configuration(project, mode, cfg["cards"])
+
+            projects = template.template_projects or []
+            if not any(p.get("id") == project.id for p in projects):
+                projects.append(ProjectSerializer(project).data)
+                template.template_projects = projects
+                template.save(update_fields=["template_projects"])
         else:
             project.base_template = template
             project.save(update_fields=["base_template"])

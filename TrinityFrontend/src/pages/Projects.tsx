@@ -273,7 +273,7 @@ const Projects = () => {
 
   const importTemplateToProject = async (project: Project, template: Template) => {
     try {
-      let overwrite = false;
+      let proceed = true;
       try {
         const res = await fetch(`${REGISTRY_API}/projects/${project.id}/`, {
           credentials: 'include'
@@ -282,24 +282,25 @@ const Projects = () => {
           const data = await res.json();
           const state = data.state || {};
           if (state && Object.keys(state).length > 0) {
-            overwrite = confirm(`Do you want overwrite config for ${project.name}?`);
-            if (!overwrite) return;
+            proceed = confirm(`Do you want overwrite config for ${project.name}?`);
           }
         }
       } catch (err) {
         console.error('Project state fetch error', err);
       }
-      const body: any = { template_id: template.id };
-      if (overwrite) body.overwrite = true;
+      if (!proceed) return;
       const res = await fetch(`${REGISTRY_API}/projects/${project.id}/import_template/`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify(body)
+        body: JSON.stringify({ template_id: template.id, overwrite: true })
       });
       if (res.ok) {
+        const updated = await res.json();
         setProjects(
-          projects.map(p => (p.id === project.id ? { ...p, baseTemplate: template.name } : p))
+          projects.map(p =>
+            p.id === project.id ? { ...p, baseTemplate: updated.base_template } : p
+          )
         );
       }
     } catch (err) {
