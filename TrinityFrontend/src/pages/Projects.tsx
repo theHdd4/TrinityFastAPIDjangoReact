@@ -206,7 +206,8 @@ const Projects = () => {
           appTemplate: selectedApp || 'blank',
           baseTemplate: p.base_template || null
         };
-        setProjects([...projects, newProject]);
+        setProjects(prev => [...prev, newProject]);
+        setActiveTab('projects');
       }
     } catch (err) {
       console.error('Create project error', err);
