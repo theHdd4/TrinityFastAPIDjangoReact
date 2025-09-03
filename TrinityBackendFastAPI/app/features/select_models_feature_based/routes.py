@@ -12,6 +12,8 @@ from typing import Dict, Any
 
 from .database import (
     scopes_collection,
+    select_configs_collection,
+    get_select_configs_collection,
     minio_client,
     check_database_health,
     extract_unique_combinations,
@@ -24,6 +26,9 @@ from .database import (
     get_transformation_metadata,
     get_model_by_transform_and_id  
 )
+
+# Import get_object_prefix for dynamic path construction
+from ..data_upload_validate.app.routes import get_object_prefix
 
 from .schemas import (
     CombinationSelectionOptions,
@@ -45,7 +50,7 @@ from .schemas import (
     SavedCombinationsStatusResponse
 )
 
-from .database import MINIO_BUCKET, MONGO_URI, MONGO_DB, OBJECT_PREFIX
+from .database import MINIO_BUCKET, MONGO_URI, MONGO_DB, OBJECT_PREFIX, SELECT_CONFIGS_COLLECTION_NAME
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -70,6 +75,42 @@ async def health_check():
             "bucket": MINIO_BUCKET
         }
     )
+
+@router.get("/debug/mongodb", tags=["Debug"])
+async def debug_mongodb():
+    """Debug endpoint to check MongoDB connection and collections."""
+    try:
+        # Check basic connection
+        if db is None:
+            return {"status": "error", "message": "Database connection is None"}
+        
+        # Check select_configs collection
+        select_configs_coll = get_select_configs_collection()
+        if select_configs_coll is None:
+            return {"status": "error", "message": "select_configs collection is None"}
+        
+        # Try to ping MongoDB
+        await client.admin.command('ping')
+        
+        # Check if collection exists and is accessible
+        collection_info = await db.list_collection_names()
+        
+        return {
+            "status": "success",
+            "message": "MongoDB connection working",
+            "database": MONGO_DB,
+            "collections": collection_info,
+            "select_configs_collection": SELECT_CONFIGS_COLLECTION_NAME,
+            "collection_accessible": select_configs_coll is not None
+        }
+        
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": f"MongoDB connection failed: {str(e)}",
+            "error_type": type(e).__name__,
+            "database": MONGO_DB
+        }
 
 @router.get("/combination-ids", tags=["Combinations"])
 async def get_unique_combination_ids(
@@ -1582,16 +1623,141 @@ async def select_and_save_model_generic(selection_req: GenericModelSelectionRequ
             "total_rows_in_file": len(df)
         }
         
-        # Save to MongoDB
+        # Get saved_models_generic collection reference (required by code but not saved to MongoDB)
         saved_models_collection = db.get_collection("saved_models_generic")
         
-        # Insert the model
-        result = await saved_models_collection.insert_one(document)
+        # Create a mock result object to maintain compatibility
+        class MockResult:
+            def __init__(self):
+                self.inserted_id = "mock_id_not_saved_to_mongo"
         
-        # Create index for efficient queries
-        await saved_models_collection.create_index([("created_at", -1)])
-        await saved_models_collection.create_index([("tags", 1)])
-        await saved_models_collection.create_index([("model_name", 1)])
+        result = MockResult()
+        
+        # Note: Not actually saving to saved_models_generic collection in MongoDB
+        # Only saving to select_configs collection
+        
+        # Also save to select_configs collection with metadata and model results
+        try:
+            # Log the available fields for debugging
+            logger.info(f"🔍 DEBUG: Available fields in cleaned_dict: {list(cleaned_dict.keys())}")
+            
+            # Get client, app, and project from object prefix (like build atom)
+            try:
+                object_prefix = await get_object_prefix()
+                prefix_parts = object_prefix.strip('/').split('/')
+                
+                if len(prefix_parts) >= 2:
+                    client_name = prefix_parts[0]
+                    app_name = prefix_parts[1]
+                    project_name = prefix_parts[2] if len(prefix_parts) > 2 else "default_project"
+                    logger.info(f"✅ Extracted client: {client_name}, app: {app_name}, project: {project_name}")
+                else:
+                    client_name = "default_client"
+                    app_name = "default_app"
+                    project_name = "default_project"
+                    logger.warning(f"⚠️ Could not extract client/app/project from prefix: {object_prefix}")
+            except Exception as e:
+                logger.warning(f"⚠️ Failed to get object prefix: {e}")
+                client_name = "default_client"
+                app_name = "default_app"
+                project_name = "default_project"
+            
+            # Get combination_id for creating unique _id
+            combination_id = cleaned_dict.get("combination_id") or cleaned_dict.get("Combination_ID") or cleaned_dict.get("combination") or "unknown"
+            
+            # Create unique _id like build atom: client_name/app_name/project_name/combination_id
+            document_id = f"{client_name}/{app_name}/{project_name}/{combination_id}"
+            
+            # Prepare document for select_configs collection with client/app/project structure
+            select_config_document = {
+                # Custom _id like build atom
+                "_id": document_id,
+                
+                # Client/App/Project structure (like build atom)
+                "client_name": client_name,
+                "app_name": app_name,
+                "project_name": project_name,
+                
+                # Metadata from the selection - use get() with fallbacks
+                "combination_id": combination_id,
+                "scope": cleaned_dict.get("Scope") or cleaned_dict.get("scope") or cleaned_dict.get("scope_name") or "unknown",
+                "y_variable": cleaned_dict.get("y_variable") or cleaned_dict.get("Y_Variable") or cleaned_dict.get("target") or "unknown",
+                "x_variables": cleaned_dict.get("x_variables") or cleaned_dict.get("X_Variables") or cleaned_dict.get("features") or "unknown",
+                "model_name": cleaned_dict.get("model_name") or cleaned_dict.get("Model_Name") or cleaned_dict.get("Model") or "unknown",
+                
+                # Model performance metrics - use get() with fallbacks
+                "mape_train": cleaned_dict.get("mape_train") or cleaned_dict.get("MAPE_Train") or cleaned_dict.get("train_mape") or None,
+                "mape_test": cleaned_dict.get("mape_test") or cleaned_dict.get("MAPE_Test") or cleaned_dict.get("test_mape") or None,
+                "r2_train": cleaned_dict.get("r2_train") or cleaned_dict.get("R2_Train") or cleaned_dict.get("train_r2") or None,
+                "r2_test": cleaned_dict.get("r2_test") or cleaned_dict.get("R2_Test") or cleaned_dict.get("test_r2") or None,
+                "aic": cleaned_dict.get("aic") or cleaned_dict.get("AIC") or None,
+                "bic": cleaned_dict.get("bic") or cleaned_dict.get("BIC") or None,
+                "intercept": cleaned_dict.get("intercept") or cleaned_dict.get("Intercept") or None,
+                "n_parameters": cleaned_dict.get("n_parameters") or cleaned_dict.get("N_Parameters") or cleaned_dict.get("parameters") or None,
+                "price_elasticity": cleaned_dict.get("price_elasticity") or cleaned_dict.get("Price_Elasticity") or cleaned_dict.get("elasticity") or None,
+                
+                # Additional metadata
+                "run_id": cleaned_dict.get("run_id") or cleaned_dict.get("Run_ID") or cleaned_dict.get("run") or None,
+                "timestamp": cleaned_dict.get("timestamp") or cleaned_dict.get("Timestamp") or cleaned_dict.get("date") or None,
+                "source_file": selection_req.file_key,
+                "selection_criteria": {
+                    "row_index": selection_req.row_index,
+                    "filter_criteria": selection_req.filter_criteria
+                },
+                "tags": selection_req.tags,
+                "description": selection_req.description,
+                
+                # Timestamps
+                "created_at": datetime.now(),
+                "updated_at": datetime.now(),
+                
+                # Reference to the saved model
+                "saved_model_id": str(result.inserted_id),
+                "saved_model_collection": "saved_models_generic",
+                
+                # Store the complete cleaned_dict for reference
+                "complete_model_data": cleaned_dict
+            }
+            
+            # Get the select_configs collection dynamically
+            select_configs_coll = get_select_configs_collection()
+            if select_configs_coll is None:
+                logger.error("❌ Failed to get select_configs collection - cannot save metadata")
+                raise Exception("Select configs collection not available")
+            
+            # Use replace_one with upsert=True like scope selector atom
+            result_select = await select_configs_coll.replace_one(
+                {"_id": document_id},
+                select_config_document,
+                upsert=True
+            )
+            
+            # Determine operation type like scope selector
+            operation = "inserted" if result_select.upserted_id else "updated"
+            logger.info(f"✅ Document saved with custom _id: {document_id}")
+            logger.info(f"✅ Operation: {operation}")
+            logger.info(f"✅ Upserted ID: {result_select.upserted_id}")
+            logger.info(f"✅ Modified count: {result_select.modified_count}")
+            
+            # Create index for efficient queries (including client/app/project)
+            await select_configs_coll.create_index([("client_name", 1), ("app_name", 1), ("project_name", 1)])
+            await select_configs_coll.create_index([("combination_id", 1)])
+            await select_configs_coll.create_index([("scope", 1)])
+            await select_configs_coll.create_index([("model_name", 1)])
+            await select_configs_coll.create_index([("created_at", -1)])
+            
+            logger.info(f"✅ Successfully saved to select_configs collection for combination_id: {select_config_document['combination_id']}")
+            logger.info(f"✅ Document saved with custom _id: {document_id}")
+            logger.info(f"✅ Operation: {operation}")
+            logger.info(f"✅ Saved under client: {client_name}, app: {app_name}, project: {project_name}")
+            logger.info(f"✅ Collection used: {MONGO_DB}.{SELECT_CONFIGS_COLLECTION_NAME}")
+            
+        except Exception as e:
+            logger.error(f"❌ Error: Failed to save to select_configs collection: {e}")
+            logger.error(f"❌ Error details: {type(e).__name__}: {str(e)}")
+            import traceback
+            logger.error(f"❌ Traceback: {traceback.format_exc()}")
+            # Continue with the main flow even if this fails
         
         # Now modify the source file to add 'selected_models' column
         try:
@@ -3279,11 +3445,13 @@ async def get_saved_combinations_status(
         raise HTTPException(status_code=503, detail="MongoDB connection is not available.")
     
     try:
-        # Get all saved models for this file and atom
-        saved_models_collection = db.get_collection("saved_models_generic")
+        # Get all saved models from select_configs collection instead of saved_models_generic
+        select_configs_coll = get_select_configs_collection()
+        if select_configs_coll is None:
+            raise HTTPException(status_code=503, detail="Select configs collection not available.")
         
         # Find models saved by this atom for this file
-        saved_models = await saved_models_collection.find({
+        saved_models = await select_configs_coll.find({
             "source_file": file_key,
             "tags": {"$in": [f"select-models-feature-{atom_id}"]}
         }).to_list(length=None)
@@ -3291,8 +3459,8 @@ async def get_saved_combinations_status(
         # Extract combination IDs from saved models
         saved_combination_ids = set()
         for model in saved_models:
-            if "model_data" in model and "combination_id" in model["model_data"]:
-                saved_combination_ids.add(str(model["model_data"]["combination_id"]))
+            if "combination_id" in model:
+                saved_combination_ids.add(str(model["combination_id"]))
         
         # Get all unique combination IDs from the source file
         if not minio_client:

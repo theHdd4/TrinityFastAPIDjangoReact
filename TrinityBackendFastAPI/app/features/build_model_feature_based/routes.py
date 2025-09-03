@@ -29,7 +29,7 @@ from ..scope_selector.deps import get_minio_client
 from ..data_upload_validate.app.routes import get_object_prefix
 
 # Import MongoDB saver functions
-from .mongodb_saver import save_build_config, get_build_config_from_mongo
+from .mongodb_saver import save_build_config, get_build_config_from_mongo, get_scope_config_from_mongo, get_combination_column_values
 
 
 
@@ -696,6 +696,31 @@ async def train_models_direct(request: dict):
             # Construct the full path with the standard structure
             model_results_file_key = f"{prefix}model-results/{model_results_filename}"
             
+            # Get identifiers from scope configuration
+            identifiers = []
+            try:
+                # Extract client, app, project from prefix
+                prefix_parts = prefix.strip('/').split('/')
+                
+                if len(prefix_parts) >= 2:
+                    client_name = prefix_parts[0]
+                    app_name = prefix_parts[1]
+                    project_name = prefix_parts[2] if len(prefix_parts) > 2 else "default_project"
+                    
+                    # Get scope configuration from MongoDB
+                    scope_config = await get_scope_config_from_mongo(client_name, app_name, project_name)
+                    
+                    if scope_config and 'identifiers' in scope_config:
+                        identifiers = scope_config['identifiers']
+                        logger.info(f"✅ Retrieved identifiers: {identifiers}")
+                    else:
+                        logger.warning("⚠️ No identifiers found in scope config")
+                else:
+                    logger.warning(f"⚠️ Could not extract client/app/project from prefix: {prefix}")
+            except Exception as e:
+                logger.warning(f"❌ Failed to get identifiers from scope config: {e}")
+                identifiers = []
+            
             # Prepare data for MinIO storage
             
             # Create a summary DataFrame with key results
@@ -704,6 +729,24 @@ async def train_models_direct(request: dict):
                 # Get variable averages for this combination
                 combination_id = combo_result['combination_id']
                 variable_averages = all_variable_stats.get(combination_id, {}).get('variable_averages', {})
+                
+                # Get column values for this combination from source file
+                column_values = {}
+                
+                if identifiers and combo_result.get('file_key'):
+                    try:
+                        column_values = await get_combination_column_values(
+                            minio_client, 
+                            bucket_name, 
+                            combo_result['file_key'], 
+                            identifiers
+                        )
+                        logger.info(f"✅ Retrieved column values for {combination_id}: {column_values}")
+                    except Exception as e:
+                        logger.warning(f"❌ Failed to get column values for {combination_id}: {e}")
+                        column_values = {identifier: "Unknown" for identifier in identifiers}
+                else:
+                    column_values = {identifier: "Unknown" for identifier in identifiers}
                 
                 for model_result in combo_result.get('model_results', []):
                     # Create base summary row
@@ -723,9 +766,15 @@ async def train_models_direct(request: dict):
                         'n_parameters': model_result.get('n_parameters', 0),
                         'price_elasticity': model_result.get('price_elasticity', None),
                         'run_id': run_id,
-                        
                         'timestamp': timestamp
                     }
+                    
+                    # Add identifier column values
+                    for identifier in identifiers:
+                        if identifier in column_values:
+                            summary_row[f"{identifier}"] = column_values[identifier]
+                        else:
+                            summary_row[f"{identifier}"] = "Unknown"
                     
                     # Add average values for each variable (before any transformation)
                     for x_var in x_variables:

@@ -12,9 +12,6 @@ MONGO_URI = os.getenv("MONGO_URI", "mongodb://mongo:27017/trinity")
 MONGO_DB = os.getenv("MONGO_DB", "trinity")
 client = AsyncIOMotorClient(MONGO_URI)
 db = client[MONGO_DB]
-logger.info(f"🔍 DEBUG: MONGO_URI = {MONGO_URI}")
-logger.info(f"🔍 DEBUG: MONGO_DB = {MONGO_DB}")
-logger.info(f"🔍 DEBUG: MongoDB client initialized = {client is not None}")
 
 async def save_build_config(
     client_name: str,
@@ -26,25 +23,14 @@ async def save_build_config(
     project_id: int | None = None,
 ):
     """Save build model configuration data to MongoDB build-model_featurebased_configs collection"""
-    logger.info(f"🔍 DEBUG: save_build_config called with:")
-    logger.info(f"🔍 DEBUG: client_name = {client_name}")
-    logger.info(f"🔍 DEBUG: app_name = {app_name}")
-    logger.info(f"🔍 DEBUG: project_name = {project_name}")
-    logger.info(f"🔍 DEBUG: user_id = {user_id}")
-    logger.info(f"🔍 DEBUG: project_id = {project_id}")
-    logger.info(f"🔍 DEBUG: build_data = {build_data}")
-    
     try:
         document_id = f"{client_name}/{app_name}/{project_name}"
-        logger.info(f"🔍 DEBUG: document_id = {document_id}")
         
         # Check if document already exists
         existing_doc = await client["trinity_prod"]["build-model_featurebased_configs"].find_one({"_id": document_id})
         
         if existing_doc:
             # Merge new data with existing data instead of replacing
-            logger.info(f"🔍 DEBUG: Existing document found, merging data")
-            
             # Create base document with existing data
             merged_document = existing_doc.copy()
             
@@ -71,8 +57,6 @@ async def save_build_config(
                     # If key doesn't exist, add it
                     merged_document[key] = value
             
-            logger.info(f"🔍 DEBUG: Merged document = {merged_document}")
-            
             # Update the existing document
             result = await client["trinity_prod"]["build-model_featurebased_configs"].replace_one(
                 {"_id": document_id},
@@ -82,8 +66,6 @@ async def save_build_config(
             operation = "updated"
         else:
             # Create new document
-            logger.info(f"🔍 DEBUG: No existing document found, creating new one")
-            
             document = {
                 "_id": document_id,
                 "client_name": client_name,
@@ -96,17 +78,12 @@ async def save_build_config(
                 **build_data,
             }
             
-            logger.info(f"🔍 DEBUG: New document to save = {document}")
-            
             # Insert new document
             result = await client["trinity_prod"]["build-model_featurebased_configs"].insert_one(document)
             
             operation = "inserted"
         
         logger.info(f"📦 Stored in build-model_featurebased_configs: {document_id}")
-        logger.info(f"🔍 DEBUG: MongoDB result = {result}")
-        logger.info(f"🔍 DEBUG: result.upserted_id = {getattr(result, 'upserted_id', None)}")
-        logger.info(f"🔍 DEBUG: result.modified_count = {getattr(result, 'modified_count', None)}")
         
         return {
             "status": "success", 
@@ -117,8 +94,6 @@ async def save_build_config(
         
     except Exception as e:
         logger.error(f"❌ MongoDB save error for build-model_featurebased_configs: {e}")
-        logger.error(f"🔍 DEBUG: Exception type = {type(e)}")
-        logger.error(f"🔍 DEBUG: Exception details = {str(e)}")
         return {"status": "error", "error": str(e)}
 
 async def get_build_config_from_mongo(client_name: str, app_name: str, project_name: str):
@@ -130,3 +105,59 @@ async def get_build_config_from_mongo(client_name: str, app_name: str, project_n
     except Exception as e:
         logger.error(f"MongoDB read error for build-model_featurebased_configs: {e}")
         return None
+
+async def get_scope_config_from_mongo(client_name: str, app_name: str, project_name: str):
+    """Retrieve saved scope configuration from scopeselector_configs collection."""
+    try:
+        document_id = f"{client_name}/{app_name}/{project_name}"
+        result = await client["trinity_prod"]["scopeselector_configs"].find_one({"_id": document_id})
+        return result
+    except Exception as e:
+        logger.error(f"❌ MongoDB read error for scopeselector_configs: {e}")
+        return None
+
+async def get_combination_column_values(minio_client, bucket_name: str, file_key: str, identifiers: list):
+    """Get unique column values for identifiers from a source file."""
+    try:
+        import pandas as pd
+        import pyarrow as pa
+        import pyarrow.feather as feather
+        from io import BytesIO
+        
+        # Get the file from MinIO
+        response = minio_client.get_object(bucket_name, file_key)
+        file_data = response.read()
+        response.close()
+        response.release_conn()
+        
+        # Determine file type and read accordingly
+        if file_key.endswith('.arrow') or file_key.endswith('.feather'):
+            # Read Arrow/Feather file
+            buffer = BytesIO(file_data)
+            df = feather.read_feather(buffer)  # Already returns pandas DataFrame
+        elif file_key.endswith('.csv'):
+            # Read CSV file
+            buffer = BytesIO(file_data)
+            df = pd.read_csv(buffer)
+        else:
+            logger.warning(f"Unsupported file format: {file_key}")
+            return {}
+        
+        # Extract unique values for each identifier column
+        column_values = {}
+        for identifier in identifiers:
+            if identifier in df.columns:
+                unique_values = df[identifier].dropna().unique().tolist()
+                # Convert to string and limit to first value if multiple exist
+                if unique_values:
+                    column_values[identifier] = str(unique_values[0])  # Only first value as requested
+                else:
+                    column_values[identifier] = "Unknown"
+            else:
+                column_values[identifier] = "Unknown"
+        
+        return column_values
+        
+    except Exception as e:
+        logger.error(f"Error getting column values from {file_key}: {e}")
+        return {identifier: "Unknown" for identifier in identifiers}

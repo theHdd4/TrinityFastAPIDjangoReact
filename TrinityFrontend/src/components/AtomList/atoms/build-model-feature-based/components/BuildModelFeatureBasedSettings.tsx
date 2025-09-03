@@ -304,6 +304,7 @@ const BuildModelFeatureBasedSettings: React.FC<BuildModelFeatureBasedSettingsPro
                       id={option.value}
                       checked={data?.selectedCombinations?.includes(option.value) || false}
                       onCheckedChange={(checked) => handleCombinationToggle(option.value, checked as boolean)}
+                      onClick={(e) => e.stopPropagation()}
                     />
                     <Label htmlFor={option.value} className="text-sm truncate">{option.label}</Label>
                   </div>

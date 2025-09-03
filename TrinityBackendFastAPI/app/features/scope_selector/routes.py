@@ -1336,6 +1336,7 @@ async def create_multi_filtered_scope(
                     "scope_id": new_scope_id,
                     "scope_name": auto_generated_name,
                     "file_key": request.file_key,
+                    "identifiers": list(set([col for result in filter_set_results for col in result.identifier_filters.keys()])),
                     "filter_set_results": [result.dict() for result in filter_set_results],
                     "total_filter_sets": len(filter_set_results),
                     "overall_filtered_records": overall_filtered_records,
