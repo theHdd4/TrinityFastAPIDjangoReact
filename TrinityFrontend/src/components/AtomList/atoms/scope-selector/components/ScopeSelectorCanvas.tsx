@@ -401,7 +401,28 @@ const ScopeSelectorCanvas: React.FC<ScopeSelectorCanvasProps> = ({ data, onDataC
           throw new Error(`Status ${res.status}`);
         }
         const json = await res.json();
-        setDateRange({ min: json.min_date, max: json.max_date, available: true });
+        const fetchedRange = { min: json.min_date, max: json.max_date, available: true };
+        setDateRange(fetchedRange);
+        if (data.scopes?.length) {
+          const updatedScopes = data.scopes.map(scope => ({
+            ...scope,
+            timeframe: {
+              from:
+                fetchedRange.min ??
+                scope.timeframe?.from ??
+                new Date().toISOString().split('T')[0],
+              to:
+                fetchedRange.max ??
+                scope.timeframe?.to ??
+                new Date(
+                  new Date().setFullYear(new Date().getFullYear() + 1)
+                )
+                  .toISOString()
+                  .split('T')[0]
+            }
+          }));
+          onDataChange({ scopes: updatedScopes });
+        }
       } catch (err) {
         console.warn('Date range unavailable:', err);
         setDateRange({ min: null, max: null, available: false });
@@ -409,6 +430,7 @@ const ScopeSelectorCanvas: React.FC<ScopeSelectorCanvasProps> = ({ data, onDataC
     };
     fetchRange();
     return () => controller.abort();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data.dataSource]);
 
   // Combined effect to handle data source and identifier changes
