@@ -206,7 +206,7 @@ const Projects = () => {
           appTemplate: selectedApp || 'blank',
           baseTemplate: p.base_template || null
         };
-        setProjects(prev => [...prev, newProject]);
+        setProjects(prev => [newProject, ...prev]);
         setActiveTab('projects');
       }
     } catch (err) {
@@ -239,7 +239,7 @@ const Projects = () => {
           appTemplate: project.appTemplate,
           baseTemplate: data.base_template || project.baseTemplate
         };
-        setProjects([...projects, dup]);
+        setProjects(prev => [dup, ...prev]);
       }
     } catch (err) {
       console.error('Duplicate project error', err);
@@ -427,7 +427,7 @@ const Projects = () => {
           appTemplate: selectedApp || 'blank',
           baseTemplate: p.base_template
         };
-        setProjects([...projects, newProject]);
+        setProjects(prev => [newProject, ...prev]);
         const updatedTemplates = templates.map(t =>
           t.id === template.id ? { ...t, usageCount: t.usageCount + 1 } : t
         );
