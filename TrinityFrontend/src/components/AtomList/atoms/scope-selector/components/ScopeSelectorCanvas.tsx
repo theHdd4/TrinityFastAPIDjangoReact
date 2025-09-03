@@ -218,7 +218,7 @@ const ScopeSelectorCanvas: React.FC<ScopeSelectorCanvasProps> = ({ data, onDataC
         description: 'Scope generated from Scope Selector',
       };
 
-      data.scopes.slice(0, 5).forEach((scope, idx) => {
+      const scopeEntries = data.scopes.slice(0, 5).map((scope, idx) => {
         const setNum = idx + 1;
         const identifierFilters: Record<string, string[]> = {};
         Object.entries(scope.identifiers).forEach(([key, value]) => {
@@ -226,6 +226,20 @@ const ScopeSelectorCanvas: React.FC<ScopeSelectorCanvasProps> = ({ data, onDataC
             identifierFilters[key] = Array.isArray(value) ? value : [value as string];
           }
         });
+        return { scope, setNum, identifierFilters };
+      });
+
+      const validScopes = scopeEntries.filter(
+        (entry) => Object.keys(entry.identifierFilters).length > 0
+      );
+
+      if (validScopes.length === 0) {
+        toast({ title: 'No identifier filters selected', variant: 'destructive' });
+        setSaving(false);
+        return;
+      }
+
+      validScopes.forEach(({ scope, setNum, identifierFilters }) => {
         requestBody[`identifier_filters_${setNum}`] = identifierFilters;
         if (scope.timeframe.from && scope.timeframe.to) {
           requestBody[`start_date_${setNum}`] = scope.timeframe.from;
@@ -275,7 +289,7 @@ const ScopeSelectorCanvas: React.FC<ScopeSelectorCanvasProps> = ({ data, onDataC
         }, [[]]);
       };
 
-      for (const scope of data.scopes) {
+      for (const { scope } of validScopes) {
         // Use selectedIdentifiers to maintain the correct order from canvas
         const keys = data.selectedIdentifiers.filter(key => scope.identifiers[key]);
         const valueArrays: string[][] = keys.map(k => {
