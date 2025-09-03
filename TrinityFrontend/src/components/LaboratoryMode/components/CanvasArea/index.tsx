@@ -41,7 +41,7 @@ import {
   LayoutCard,
   DroppedAtom,
   DEFAULT_TEXTBOX_SETTINGS,
-  DEFAULT_DATAUPLOAD_SETTINGS,
+  createDefaultDataUploadSettings,
   DEFAULT_FEATURE_OVERVIEW_SETTINGS,
   DEFAULT_DATAFRAME_OPERATIONS_SETTINGS,
   DEFAULT_CHART_MAKER_SETTINGS,
@@ -346,6 +346,39 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
     }
   };
 
+  const prefillScopeSelector = async (atomId: string) => {
+    const prev = await findLatestDataSource();
+    if (!prev || !prev.csv) {
+      console.warn('⚠️ no data source found for scope selector');
+      return;
+    }
+    await prefetchDataframe(prev.csv);
+    const rawMapping = await fetchDimensionMapping();
+    const identifiers = Object.entries(rawMapping || {})
+      .filter(
+        ([k]) =>
+          k.toLowerCase() !== 'unattributed' &&
+          k.toLowerCase() !== 'unattributed_dimensions'
+      )
+      .flatMap(([, v]) => v)
+      .filter(Boolean);
+    const allColumns = Array.isArray(prev.summary) ? prev.summary.filter(Boolean) : [];
+    const allCats = allColumns
+      .filter(col => {
+        const dataType = col.data_type?.toLowerCase() || '';
+        return (dataType === 'object' || dataType === 'category') && col.column;
+      })
+      .map(col => col.column);
+    const selected = identifiers.filter(id => allCats.includes(id));
+    console.log('✅ pre-filling scope selector with', prev.csv);
+    updateAtomSettings(atomId, {
+      dataSource: prev.csv,
+      allColumns,
+      availableIdentifiers: allCats,
+      selectedIdentifiers: selected,
+    });
+  };
+
   // Load saved layout and workflow rendering
   useEffect(() => {
     let initialCards: LayoutCard[] | null = null;
@@ -433,10 +466,14 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
             ? raw.map((c: any) => ({
                 id: c.id,
                 atoms: Array.isArray(c.atoms)
-                  ? c.atoms.map((a: any) => ({
-                      ...a,
-                      llm: a.llm || LLM_MAP[a.atomId],
-                    }))
+                  ? c.atoms.map((a: any) => {
+                      const info = allAtoms.find(at => at.id === a.atomId);
+                      return {
+                        ...a,
+                        llm: a.llm || LLM_MAP[a.atomId],
+                        color: a.color || info?.color || 'bg-gray-400',
+                      };
+                    })
                   : [],
                 isExhibited: !!c.isExhibited,
                 moleculeId: c.moleculeId,
@@ -555,8 +592,8 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
           atom.id === 'text-box'
             ? { ...DEFAULT_TEXTBOX_SETTINGS }
             : atom.id === 'data-upload-validate'
-            ? { ...DEFAULT_DATAUPLOAD_SETTINGS }
-          : atom.id === 'feature-overview'
+            ? createDefaultDataUploadSettings()
+            : atom.id === 'feature-overview'
             ? { ...DEFAULT_FEATURE_OVERVIEW_SETTINGS }
             : atom.id === 'explore'
             ? { data: { ...DEFAULT_EXPLORE_DATA }, settings: { ...DEFAULT_EXPLORE_SETTINGS } }
@@ -579,6 +616,8 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
         prefillFeatureOverview(cardId, newAtom.id);
       } else if (atom.id === 'column-classifier') {
         prefillColumnClassifier(newAtom.id);
+      } else if (atom.id === 'scope-selector') {
+        prefillScopeSelector(newAtom.id);
       }
     }
   };
@@ -624,7 +663,7 @@ const addNewCardWithAtom = (
       atomId === 'text-box'
         ? { ...DEFAULT_TEXTBOX_SETTINGS }
         : atomId === 'data-upload-validate'
-        ? { ...DEFAULT_DATAUPLOAD_SETTINGS }
+        ? createDefaultDataUploadSettings()
         : atomId === 'feature-overview'
         ? { ...DEFAULT_FEATURE_OVERVIEW_SETTINGS }
         : atomId === 'explore'
@@ -656,6 +695,8 @@ const addNewCardWithAtom = (
     prefillFeatureOverview(newCard.id, newAtom.id);
   } else if (atomId === 'column-classifier') {
     prefillColumnClassifier(newAtom.id);
+  } else if (atomId === 'scope-selector') {
+    prefillScopeSelector(newAtom.id);
   }
 };
 
@@ -726,7 +767,7 @@ const handleAddDragLeave = (e: React.DragEvent) => {
         info.id === 'text-box'
           ? { ...DEFAULT_TEXTBOX_SETTINGS }
           : info.id === 'data-upload-validate'
-          ? { ...DEFAULT_DATAUPLOAD_SETTINGS }
+          ? createDefaultDataUploadSettings()
           : info.id === 'feature-overview'
           ? { ...DEFAULT_FEATURE_OVERVIEW_SETTINGS }
           : info.id === 'dataframe-operations'
@@ -747,6 +788,8 @@ const handleAddDragLeave = (e: React.DragEvent) => {
       prefillFeatureOverview(cardId, newAtom.id);
     } else if (info.id === 'column-classifier') {
       prefillColumnClassifier(newAtom.id);
+    } else if (info.id === 'scope-selector') {
+      prefillScopeSelector(newAtom.id);
     }
   };
 
@@ -785,11 +828,12 @@ const handleAddDragLeave = (e: React.DragEvent) => {
     if (current) {
       try {
         const proj = JSON.parse(current);
+        const sanitized = sanitizeLabConfig({ cards: updated });
         await fetch(`${REGISTRY_API}/projects/${proj.id}/`, {
           method: 'PATCH',
           credentials: 'include',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ state: { laboratory_config: { cards: updated } } }),
+          body: JSON.stringify({ state: { laboratory_config: sanitized } }),
         });
       } catch {
         /* ignore */
@@ -856,6 +900,8 @@ const handleAddDragLeave = (e: React.DragEvent) => {
         await prefillFeatureOverview(cardId, atom.id);
       } else if (atom.atomId === 'column-classifier') {
         await prefillColumnClassifier(atom.id);
+      } else if (atom.atomId === 'scope-selector') {
+        await prefillScopeSelector(atom.id);
       }
     }
   };

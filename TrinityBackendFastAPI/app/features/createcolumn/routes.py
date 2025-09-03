@@ -539,13 +539,23 @@ async def save_createcolumn_dataframe(
     operation_details: str = Body(None)
 ):
     """
-    Save a created column dataframe (CSV) to MinIO as Arrow file and return file info.
+    Save a created column dataframe (CSV) to MinIO as Arrow file and save metadata to MongoDB.
     """
     import pandas as pd
     import pyarrow as pa
     import pyarrow.ipc as ipc
     import io
     import uuid
+
+    # Debug: Log all received parameters
+    print(f"🔍 DEBUG: /save endpoint called")
+    print(f"🔍 DEBUG: client_name = '{client_name}'")
+    print(f"🔍 DEBUG: app_name = '{app_name}'")
+    print(f"🔍 DEBUG: project_name = '{project_name}'")
+    print(f"🔍 DEBUG: user_id = '{user_id}'")
+    print(f"🔍 DEBUG: project_id = {project_id}")
+    print(f"🔍 DEBUG: operation_details = '{operation_details[:200]}...' (truncated)")
+    print(f"🔍 DEBUG: filename = '{filename}'")
 
     try:
         # Parse CSV to DataFrame
@@ -813,3 +823,69 @@ async def get_column_classification(
             "measures": [],
             "unclassified": [],
         }
+
+
+# =============================================================================
+# SAVE CONFIG ENDPOINTS
+# =============================================================================
+
+@router.post("/save-config")
+async def save_createcolumn_configuration(
+    client_name: str = Query(..., description="Client name"),
+    app_name: str = Query(..., description="App name"),
+    project_name: str = Query(..., description="Project name"),
+    config_data: dict = Body(..., description="Createcolumn configuration data to save"),
+    user_id: str = Query("", description="User ID"),
+    project_id: int = Query(None, description="Project ID")
+):
+    """Save createcolumn configuration to MongoDB"""
+    try:
+        result = await save_createandtransform_configs(
+            client_name=client_name,
+            app_name=app_name,
+            project_name=project_name,
+            operation_data=config_data,
+            user_id=user_id,
+            project_id=project_id
+        )
+        
+        if result["status"] == "success":
+            return {
+                "success": True,
+                "message": f"Createcolumn configuration saved successfully",
+                "mongo_id": result["mongo_id"],
+                "operation": result["operation"],
+                "collection": result["collection"]
+            }
+        else:
+            raise HTTPException(status_code=500, detail=f"Failed to save createcolumn configuration: {result['error']}")
+            
+    except Exception as e:
+        print(f"Error saving createcolumn configuration: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to save createcolumn configuration: {str(e)}")
+
+@router.get("/get-config")
+async def get_createcolumn_configuration(
+    client_name: str = Query(..., description="Client name"),
+    app_name: str = Query(..., description="App name"),
+    project_name: str = Query(..., description="Project name")
+):
+    """Retrieve saved createcolumn configuration from MongoDB"""
+    try:
+        result = await get_createandtransform_config_from_mongo(client_name, app_name, project_name)
+        
+        if result:
+            return {
+                "success": True,
+                "data": result
+            }
+        else:
+            return {
+                "success": False,
+                "message": "No createcolumn configuration found",
+                "data": None
+            }
+            
+    except Exception as e:
+        print(f"Error retrieving createcolumn configuration: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve createcolumn configuration: {str(e)}")

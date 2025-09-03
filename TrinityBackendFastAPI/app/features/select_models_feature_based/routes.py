@@ -3521,4 +3521,3 @@ async def get_saved_combinations_status(
     except Exception as e:
         logger.error(f"Error getting saved combinations status: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error getting saved combinations status: {str(e)}")
-

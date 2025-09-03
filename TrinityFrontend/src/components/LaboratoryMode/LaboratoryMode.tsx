@@ -5,7 +5,7 @@ import { Play, Save, Share2, Undo2, AlertTriangle, List } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import Header from '@/components/Header';
 import { safeStringify } from '@/utils/safeStringify';
-import { sanitizeLabConfig } from '@/utils/projectStorage';
+import { sanitizeLabConfig, saveCurrentProject } from '@/utils/projectStorage';
 import CanvasArea from './components/CanvasArea';
 import AuxiliaryMenu from './components/AuxiliaryMenu';
 import AuxiliaryMenuLeft from './components/AuxiliaryMenuLeft';
@@ -24,8 +24,8 @@ const LaboratoryMode = () => {
   const [showFloatingNavigationList, setShowFloatingNavigationList] = useState(true);
   const [auxActive, setAuxActive] = useState<string | null>(null);
   const { toast } = useToast();
-  const { cards, setCards } = useExhibitionStore();
-  const setLabCards = useLaboratoryStore(state => state.setCards);
+  const { cards, setCards: setLabCards } = useLaboratoryStore();
+  const setExhibitionCards = useExhibitionStore(state => state.setCards);
   const { hasPermission, user } = useAuth();
   const canEdit = hasPermission('laboratory:edit');
 
@@ -48,19 +48,22 @@ const LaboratoryMode = () => {
         const last = Array.isArray(data) ? data[0] : data.results?.[0];
         if (last && last.state) {
           setLabCards(last.state);
-          setCards(last.state);
+          setExhibitionCards(last.state);
           try {
             const labConfig = {
               cards: last.state,
               exhibitedCards: (last.state || []).filter((c: any) => c.isExhibited),
               timestamp: new Date().toISOString(),
             };
+            const sanitized = sanitizeLabConfig(labConfig);
             await fetch(`${REGISTRY_API}/projects/${proj.id}/`, {
               method: 'PATCH',
               credentials: 'include',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ state: { laboratory_config: labConfig } }),
+              body: JSON.stringify({ state: { laboratory_config: sanitized } }),
             }).catch(() => {});
+            localStorage.setItem('laboratory-layout-cards', safeStringify(sanitized.cards));
+            localStorage.setItem('laboratory-config', safeStringify(sanitized));
             await fetch(`${LAB_ACTIONS_API}/${last.id}/`, { method: 'DELETE', credentials: 'include' }).catch(() => {});
             toast({ title: 'Undo', description: 'Last change reverted' });
           } catch (storageError) {
@@ -104,14 +107,15 @@ const LaboratoryMode = () => {
     try {
       const exhibitedCards = (cards || []).filter(card => card.isExhibited);
 
-      setCards(cards);
-      
+      setExhibitionCards(cards);
+
       // Save the current laboratory configuration
       const labConfig = {
         cards,
         exhibitedCards,
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
       };
+      const sanitized = sanitizeLabConfig(labConfig);
 
       const current = localStorage.getItem('current-project');
       if (current) {
@@ -122,10 +126,11 @@ const LaboratoryMode = () => {
             headers: { 'Content-Type': 'application/json' },
             credentials: 'include',
             body: JSON.stringify({
-              state: { laboratory_config: labConfig },
+              state: { laboratory_config: sanitized },
             }),
           });
-          const sanitized = sanitizeLabConfig(labConfig);
+          proj.state = { ...(proj.state || {}), laboratory_config: sanitized };
+          saveCurrentProject(proj);
           localStorage.setItem('laboratory-layout-cards', safeStringify(sanitized.cards));
           localStorage.setItem('laboratory-config', safeStringify(sanitized));
         } catch (apiError) {
@@ -133,7 +138,7 @@ const LaboratoryMode = () => {
           // Don't show error for API failures, just log them
         }
       }
-      
+
       toast({
         title: "Configuration Saved",
         description: `Laboratory configuration saved successfully. ${exhibitedCards.length} card(s) marked for exhibition.`,

@@ -1,7 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { ChartContainer, ChartTooltip, ChartTooltipContent } from '@/components/ui/chart';
-import { LineChart, Line, BarChart, Bar, AreaChart, Area, PieChart, Pie, Cell, ScatterChart, Scatter, XAxis, YAxis, CartesianGrid, ResponsiveContainer, Legend } from 'recharts';
+import RechartsChartRenderer from '@/templates/charts/RechartsChartRenderer';
 import { BarChart3, TrendingUp, BarChart2, Triangle, Zap, Maximize2, ChevronDown, ChevronLeft, ChevronRight, Filter, X, LineChart as LineChartIcon, PieChart as PieChartIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -265,793 +264,90 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ atomId, charts, dat
     }
   }, [chatBubble.visible, chatBubbleShouldRender, overlayActive]);
 
-  const renderChart = (chart: ChartMakerConfig, index: number, chartKey?: string, heightClass?: string, isFullscreen = false) => {
-    // Show loading spinner if chart is loading
-    if ((chart as any).chartLoading) {
-      const loadingHeight = isCompact ? 'h-56' : 'h-80';
-      const colors = getChartColors(index);
-      return (
-        <div className={`flex flex-col items-center justify-center ${loadingHeight} bg-gradient-to-br from-white/50 to-gray-50/50 backdrop-blur-sm relative overflow-hidden`}>
-          {/* Background shimmer effect */}
-          <div className="absolute inset-0 chart-loading"></div>
-          
-          {/* Modern loading animation */}
-          <div className="relative z-10 flex flex-col items-center space-y-4">
-            <div className="relative">
-              <div className="w-12 h-12 rounded-full border-4 border-gray-200 animate-spin"></div>
-              <div 
-                className="absolute inset-0 w-12 h-12 rounded-full border-4 border-transparent animate-spin"
-                style={{
-                  borderTopColor: colors.primary,
-                  borderRightColor: colors.primary,
-                  animationDuration: '1s',
-                  animationDirection: 'reverse'
-                }}
-              ></div>
-            </div>
-            
-            <div className="text-center">
-              <div className="text-sm font-medium text-gray-700 mb-1">
-                Rendering Chart
-              </div>
-              <div className="text-xs text-gray-500">
-                Creating beautiful visualization...
-              </div>
-            </div>
-            
-            {/* Floating chart icons */}
-            <div className="absolute inset-0 pointer-events-none">
-              <BarChart3 
-                className="absolute top-4 left-4 w-4 h-4 text-gray-300 animate-pulse" 
-                style={{ animationDelay: '0s' }}
-              />
-              <TrendingUp 
-                className="absolute top-8 right-6 w-3 h-3 text-gray-300 animate-pulse" 
-                style={{ animationDelay: '0.5s' }}
-              />
-              <BarChart2 
-                className="absolute bottom-6 left-8 w-3 h-3 text-gray-300 animate-pulse" 
-                style={{ animationDelay: '1s' }}
-              />
-            </div>
-          </div>
-        </div>
-      );
-    }
-    // Use preview type if set, else actual type
-    const previewType = previewTypes[chart.id];
-    // Use backend config if available
-    const config = chart.chartConfig || {};
-    const chartType = previewType || config.chart_type || chart.type;
-    const chartData = config.data || getFilteredData(chart);
-    const traces = config.traces || [];
-    const xAxisConfig = config.x_axis || { dataKey: chart.xAxis };
-    const yAxisConfig = config.y_axis || { dataKey: chart.yAxis };
+
+const renderChart = (chart: ChartMakerConfig, index: number, chartKey?: string, heightClass?: string, isFullscreen = false) => {
+  if ((chart as any).chartLoading) {
+    const loadingHeight = isCompact ? 'h-56' : 'h-80';
     const colors = getChartColors(index);
-    const key = chartKey || chart.lastUpdateTime || chart.id;
-
-    const chartHeight = heightClass || '';
-
-    if (!chartData.length || !xAxisConfig.dataKey || (!yAxisConfig.dataKey && traces.length === 0)) {
-      return (
-        <div className={`flex items-center justify-center ${chartHeight || 'h-64'} text-muted-foreground`}>
+    return (
+      <div className={`flex flex-col items-center justify-center ${loadingHeight} bg-gradient-to-br from-white/50 to-gray-50/50 backdrop-blur-sm relative overflow-hidden`}>
+        <div className="absolute inset-0 chart-loading"></div>
+        <div className="relative z-10 flex flex-col items-center space-y-4">
+          <div className="relative">
+            <div className="w-12 h-12 rounded-full border-4 border-gray-200 animate-spin"></div>
+            <div
+              className="absolute inset-0 w-12 h-12 rounded-full border-4 border-transparent animate-spin"
+              style={{ borderTopColor: colors.primary, borderRightColor: colors.primary, animationDuration: '1s', animationDirection: 'reverse' }}
+            ></div>
+          </div>
           <div className="text-center">
-            <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-gradient-to-br from-slate-100 to-slate-200 flex items-center justify-center">
-              <LineChart className="w-8 h-8 text-slate-400" />
-            </div>
-            <p className="font-medium">Configure chart settings</p>
-            <p className="text-sm">Select X-axis and Y-axis to display data</p>
+            <div className="text-sm font-medium text-gray-700 mb-1">Rendering Chart</div>
+            <div className="text-xs text-gray-500">Creating beautiful visualization...</div>
           </div>
         </div>
-      );
-    }
+      </div>
+    );
+  }
 
-    switch (chartType) {
-      case 'line':
-        return (
-          <ChartContainer key={key} config={config} className={`chart-container ${chartHeight} w-full`}>
-            <LineChart 
-              data={chartData} 
-              margin={{ top: 20, right: 30, left: 20, bottom: 20 }}
-              onClick={() => {
-                // Clear trace emphasis when clicking on chart background
-                setEmphasizedTrace(prev => ({ ...prev, [chart.id]: null }));
-              }}
-            >
-                <defs>
-                  <linearGradient id={`lineGradient-${chart.id}`} x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor={colors.primary} stopOpacity={0.8}/>
-                    <stop offset="100%" stopColor={colors.primary} stopOpacity={0.1}/>
-                  </linearGradient>
-                  <filter id={`lineShadow-${chart.id}`} x="-50%" y="-50%" width="200%" height="200%">
-                    <feDropShadow dx="0" dy="2" stdDeviation="3" floodOpacity="0.3" floodColor={colors.primary}/>
-                  </filter>
-                </defs>
-                <CartesianGrid 
-                  strokeDasharray="3 3" 
-                  stroke="#e2e8f0" 
-                  strokeOpacity={0.6}
-                  vertical={false}
-                />
-                <XAxis 
-                  {...xAxisConfig} 
-                  stroke="#64748b"
-                  fontSize={11}
-                  fontWeight={500}
-                  tickLine={false}
-                  axisLine={false}
-                  tickMargin={8}
-                />
-                <YAxis 
-                  {...(yAxisConfig.dataKey ? yAxisConfig : { type: yAxisConfig.type || 'number' })} 
-                  stroke="#64748b"
-                  fontSize={11}
-                  fontWeight={500}
-                  tickLine={false}
-                  axisLine={false}
-                  tickMargin={8}
-                  width={60}
-                />
-                <ChartTooltip 
-                  content={<ChartTooltipContent />} 
-                  contentStyle={{ 
-                    backgroundColor: 'rgba(255, 255, 255, 0.98)', 
-                    border: 'none', 
-                    borderRadius: '12px', 
-                    boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.15), 0 10px 10px -5px rgba(0, 0, 0, 0.1)',
-                    backdropFilter: 'blur(10px)',
-                    fontSize: '12px',
-                    fontWeight: 500
-                  }} 
-                  cursor={{ stroke: colors.primary, strokeWidth: 1, strokeOpacity: 0.4 }}
-                />
-                {traces.length > 0 ? traces.map((trace, i) => {
-                  const isEmphasized = emphasizedTrace[chart.id] === trace.dataKey;
-                  const isOtherEmphasized = emphasizedTrace[chart.id] && emphasizedTrace[chart.id] !== trace.dataKey;
-                  const traceColor = trace.stroke || trace.fill || DEFAULT_TRACE_COLORS[i % DEFAULT_TRACE_COLORS.length];
-                  
-                  // Custom dot component that handles clicks
-                  const CustomActiveDot = (props: any) => {
-                    const { cx, cy, fill } = props;
-                    return (
-                      <circle
-                        cx={cx}
-                        cy={cy}
-                        r={6}
-                        fill={fill}
-                        stroke="white"
-                        strokeWidth={3}
-                        style={{ cursor: 'pointer' }}
-                        filter={`url(#lineShadow-${chart.id})`}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setEmphasizedTrace(prev => ({
-                            ...prev,
-                            [chart.id]: prev[chart.id] === trace.dataKey ? null : trace.dataKey
-                          }));
-                        }}
-                      />
-                    );
-                  };
-                  
-                  return (
-                    <Line 
-                      key={trace.dataKey || i} 
-                      type="monotone" 
-                      dataKey={trace.dataKey} 
-                      stroke={traceColor}
-                      strokeOpacity={isOtherEmphasized ? 0.4 : 1}
-                      strokeWidth={isEmphasized ? 4 : 2}
-                      fill={`url(#lineGradient-${chart.id})`}
-                      dot={{ 
-                        fill: traceColor, 
-                        strokeWidth: 0, 
-                        r: 0,
-                        filter: `url(#lineShadow-${chart.id})`
-                      }}
-                      activeDot={<CustomActiveDot fill={traceColor} />}
-                      filter={isEmphasized ? `url(#lineShadow-${chart.id})` : undefined}
-                    />
-                  );
-                }) : (
-                  <Line 
-                    type="monotone" 
-                    dataKey={yAxisConfig.dataKey} 
-                    stroke={colors.primary}
-                    strokeWidth={3}
-                    fill={`url(#lineGradient-${chart.id})`}
-                    dot={{ 
-                      fill: colors.primary, 
-                      strokeWidth: 0, 
-                      r: 0
-                    }}
-                    activeDot={{ 
-                      r: 6, 
-                      fill: colors.primary, 
-                      stroke: 'white', 
-                      strokeWidth: 3,
-                      filter: `url(#lineShadow-${chart.id})`,
-                      style: { cursor: 'pointer' }
-                    }}
-                    filter={`url(#lineShadow-${chart.id})`}
-                  />
-                )}
-                {/* Add legend for multi-trace charts */}
-                {traces.length > 0 && (
-                  <Legend 
-                    wrapperStyle={{ 
-                      paddingTop: '20px',
-                      fontSize: '12px',
-                      opacity: 0.8
-                    }}
-                    iconType="line"
-                    formatter={(value) => {
-                      // Find the trace that matches this dataKey and return its name
-                      const matchingTrace = traces.find(trace => trace.dataKey === value);
-                      return matchingTrace ? matchingTrace.name : value;
-                    }}
-                  />
-                )}
-              </LineChart>
-            </ChartContainer>
-        );
-      case 'bar':
-        // Process data to apply x-axis dimming (multiple x-values can be dimmed)
-        const processedBarData = dimmedXValues[chart.id] && dimmedXValues[chart.id].size > 0
-          ? chartData.map(item => {
-              const isDimmed = dimmedXValues[chart.id].has(String(item[xAxisConfig.dataKey]));
-              const newItem = { ...item };
-              
-              // Dim selected x-values for all traces
-              if (isDimmed && traces.length > 0) {
-                traces.forEach(trace => {
-                  newItem[`${trace.dataKey}_dimmed`] = true;
-                });
-              }
-              return newItem;
-            })
-          : chartData;
-          
-        return (
-          <ChartContainer key={key} config={config} className={`chart-container ${chartHeight} w-full`}>
-            <BarChart 
-              data={processedBarData} 
-              margin={{ top: 20, right: 30, left: 20, bottom: 20 }}
-              onClick={() => {
-                // Clear trace emphasis when clicking on chart background (but keep dimmed x-values)
-                setEmphasizedTrace(prev => ({ ...prev, [chart.id]: null }));
-              }}
-            >
-              <defs>
-                <linearGradient id={`barGradient-${chart.id}`} x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor={colors.primary} stopOpacity={1}/>
-                  <stop offset="100%" stopColor={colors.darkAccent} stopOpacity={0.8}/>
-                </linearGradient>
-                <filter id={`barShadow-${chart.id}`} x="-50%" y="-50%" width="200%" height="200%">
-                  <feDropShadow dx="0" dy="4" stdDeviation="4" floodOpacity="0.2" floodColor={colors.primary}/>
-                </filter>
-              </defs>
-              <CartesianGrid 
-                strokeDasharray="3 3" 
-                stroke="#e2e8f0" 
-                strokeOpacity={0.6}
-                vertical={false}
-              />
-              <XAxis 
-                {...xAxisConfig} 
-                stroke={dimmedXValues[chart.id] && dimmedXValues[chart.id].size > 0 ? "#374151" : "#64748b"}
-                fontSize={11}
-                fontWeight={500}
-                tickLine={false}
-                axisLine={false}
-                tickMargin={8}
-                onClick={(data) => {
-                  if (data && data.value) {
-                    const xValue = String(data.value);
-                    setDimmedXValues(prev => {
-                      const currentSet = prev[chart.id] || new Set();
-                      const newSet = new Set(currentSet);
-                      
-                      if (newSet.has(xValue)) {
-                        newSet.delete(xValue); // Remove if already dimmed
-                      } else {
-                        newSet.add(xValue); // Add to dimmed set
-                      }
-                      
-                      return { ...prev, [chart.id]: newSet };
-                    });
-                    setEmphasizedTrace(prev => ({ ...prev, [chart.id]: null }));
-                  }
-                }}
-                style={{ cursor: 'pointer' }}
-              />
-              <YAxis 
-                {...(yAxisConfig.dataKey ? yAxisConfig : { type: yAxisConfig.type || 'number' })} 
-                stroke="#64748b"
-                fontSize={11}
-                fontWeight={500}
-                tickLine={false}
-                axisLine={false}
-                tickMargin={8}
-                width={60}
-              />
-              <ChartTooltip 
-                content={<ChartTooltipContent />} 
-                contentStyle={{ 
-                  backgroundColor: 'rgba(255, 255, 255, 0.98)', 
-                  border: 'none', 
-                  borderRadius: '12px', 
-                  boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.15), 0 10px 10px -5px rgba(0, 0, 0, 0.1)',
-                  backdropFilter: 'blur(10px)',
-                  fontSize: '12px',
-                  fontWeight: 500
-                }} 
-                cursor={{ fill: 'rgba(0, 0, 0, 0.04)' }}
-              />
-              {traces.length > 0 ? traces.map((trace, i) => {
-                const isEmphasized = emphasizedTrace[chart.id] === trace.dataKey;
-                const isOtherEmphasized = emphasizedTrace[chart.id] && emphasizedTrace[chart.id] !== trace.dataKey;
-                const traceColor = trace.stroke || trace.fill || DEFAULT_TRACE_COLORS[i % DEFAULT_TRACE_COLORS.length];
-                
-                // Custom bar shape that handles clicks
-                const CustomBar = (props: any) => {
-                  const { x, y, width, height, payload } = props;
-                  const isXDimmed = payload && payload[`${trace.dataKey}_dimmed`];
-                  const finalColor = isXDimmed ? `${traceColor}60` : traceColor;
-                  const finalOpacity = isXDimmed ? 0.4 : (isOtherEmphasized ? 0.3 : 0.8);
-                  
-                  return (
-                    <rect
-                      x={x}
-                      y={y}
-                      width={width}
-                      height={height}
-                      fill={finalColor}
-                      fillOpacity={finalOpacity}
-                      stroke={traceColor}
-                      strokeWidth={isEmphasized ? 2 : 0}
-                      rx={6}
-                      ry={6}
-                      style={{ cursor: 'pointer' }}
-                      filter={isEmphasized ? `url(#barShadow-${chart.id})` : undefined}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        if (e.ctrlKey || e.metaKey) {
-                          // Ctrl/Cmd + click for x-axis dimming (additive)
-                          const xValue = String(payload[xAxisConfig.dataKey]);
-                          setDimmedXValues(prev => {
-                            const currentSet = prev[chart.id] || new Set();
-                            const newSet = new Set(currentSet);
-                            
-                            if (newSet.has(xValue)) {
-                              newSet.delete(xValue); // Remove if already dimmed
-                            } else {
-                              newSet.add(xValue); // Add to dimmed set
-                            }
-                            
-                            return { ...prev, [chart.id]: newSet };
-                          });
-                          setEmphasizedTrace(prev => ({ ...prev, [chart.id]: null }));
-                        } else {
-                          // Regular click for trace emphasis
-                          setEmphasizedTrace(prev => ({
-                            ...prev,
-                            [chart.id]: prev[chart.id] === trace.dataKey ? null : trace.dataKey
-                          }));
-                          setDimmedXValues(prev => ({ ...prev, [chart.id]: new Set() }));
-                        }
-                      }}
-                    />
-                  );
-                };
-                
-                return (
-                  <Bar 
-                    key={trace.dataKey || i} 
-                    dataKey={trace.dataKey} 
-                    fill={traceColor}
-                    fillOpacity={isOtherEmphasized ? 0.3 : 0.8}
-                    stroke={traceColor}
-                    strokeWidth={isEmphasized ? 2 : 0}
-                    radius={[6, 6, 0, 0]}
-                    filter={isEmphasized ? `url(#barShadow-${chart.id})` : undefined}
-                    style={{ cursor: 'pointer' }}
-                    shape={<CustomBar />}
-                  />
-                );
-              }) : (
-                <Bar 
-                  dataKey={yAxisConfig.dataKey} 
-                  fill={`url(#barGradient-${chart.id})`}
-                  radius={[6, 6, 0, 0]}
-                  filter={`url(#barShadow-${chart.id})`}
-                  style={{ cursor: 'pointer' }}
-                />
-              )}
-              {/* Add legend for multi-trace charts */}
-              {traces.length > 0 && (
-                <Legend 
-                  wrapperStyle={{ 
-                    paddingTop: '20px',
-                    fontSize: '12px',
-                    opacity: 0.8
-                  }}
-                  iconType="rect"
-                  formatter={(value) => {
-                    // Find the trace that matches this dataKey and return its name
-                    const matchingTrace = traces.find(trace => trace.dataKey === value);
-                    return matchingTrace ? matchingTrace.name : value;
-                  }}
-                />
-              )}
-            </BarChart>
-          </ChartContainer>
-        );
-      case 'area':
-        return (
-          <ChartContainer key={key} config={config} className={`chart-container ${chartHeight} w-full`}>
-            <AreaChart 
-              data={chartData} 
-              margin={{ top: 20, right: 30, left: 20, bottom: 20 }}
-              onClick={() => {
-                // Clear trace emphasis when clicking on chart background
-                setEmphasizedTrace(prev => ({ ...prev, [chart.id]: null }));
-              }}
-            >
-              <defs>
-                <linearGradient id={`areaGradient-${chart.id}`} x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor={colors.primary} stopOpacity={0.6}/>
-                  <stop offset="50%" stopColor={colors.primary} stopOpacity={0.3}/>
-                  <stop offset="100%" stopColor={colors.primary} stopOpacity={0.05}/>
-                </linearGradient>
-                <filter id={`areaShadow-${chart.id}`} x="-50%" y="-50%" width="200%" height="200%">
-                  <feDropShadow dx="0" dy="2" stdDeviation="3" floodOpacity="0.3" floodColor={colors.primary}/>
-                </filter>
-              </defs>
-              <CartesianGrid 
-                strokeDasharray="3 3" 
-                stroke="#e2e8f0" 
-                strokeOpacity={0.6}
-                vertical={false}
-              />
-              <XAxis 
-                {...xAxisConfig} 
-                stroke="#64748b"
-                fontSize={11}
-                fontWeight={500}
-                tickLine={false}
-                axisLine={false}
-                tickMargin={8}
-              />
-              <YAxis 
-                {...(yAxisConfig.dataKey ? yAxisConfig : { type: yAxisConfig.type || 'number' })} 
-                stroke="#64748b"
-                fontSize={11}
-                fontWeight={500}
-                tickLine={false}
-                axisLine={false}
-                tickMargin={8}
-                width={60}
-              />
-              <ChartTooltip 
-                content={<ChartTooltipContent />} 
-                contentStyle={{ 
-                  backgroundColor: 'rgba(255, 255, 255, 0.98)', 
-                  border: 'none', 
-                  borderRadius: '12px', 
-                  boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.15), 0 10px 10px -5px rgba(0, 0, 0, 0.1)',
-                  backdropFilter: 'blur(10px)',
-                  fontSize: '12px',
-                  fontWeight: 500
-                }} 
-                cursor={{ stroke: colors.primary, strokeWidth: 1, strokeOpacity: 0.4 }}
-              />
-              {traces.length > 0 ? traces.map((trace, i) => {
-                const isEmphasized = emphasizedTrace[chart.id] === trace.dataKey;
-                const isOtherEmphasized = emphasizedTrace[chart.id] && emphasizedTrace[chart.id] !== trace.dataKey;
-                const traceColor = trace.stroke || trace.fill || DEFAULT_TRACE_COLORS[i % DEFAULT_TRACE_COLORS.length];
-                
-                // Custom active dot for area charts
-                const CustomActiveDot = (props: any) => {
-                  const { cx, cy, fill } = props;
-                  return (
-                    <circle
-                      cx={cx}
-                      cy={cy}
-                      r={6}
-                      fill={fill}
-                      stroke="white"
-                      strokeWidth={3}
-                      style={{ cursor: 'pointer' }}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setEmphasizedTrace(prev => ({
-                          ...prev,
-                          [chart.id]: prev[chart.id] === trace.dataKey ? null : trace.dataKey
-                        }));
-                      }}
-                    />
-                  );
-                };
-                
-                return (
-                  <Area 
-                    key={trace.dataKey || i} 
-                    type="monotone" 
-                    dataKey={trace.dataKey} 
-                    stroke={traceColor} 
-                    fill={traceColor}
-                    fillOpacity={isOtherEmphasized ? 0.1 : 0.3}
-                    strokeOpacity={isOtherEmphasized ? 0.4 : 1}
-                    strokeWidth={isEmphasized ? 4 : 2}
-                    filter={isEmphasized ? `url(#areaShadow-${chart.id})` : undefined}
-                    dot={{ 
-                      fill: traceColor, 
-                      strokeWidth: 0, 
-                      r: 0
-                    }}
-                    activeDot={<CustomActiveDot fill={traceColor} />}
-                  />
-                );
-              }) : (
-                <Area 
-                  type="monotone" 
-                  dataKey={yAxisConfig.dataKey} 
-                  stroke={colors.primary} 
-                  fill={`url(#areaGradient-${chart.id})`}
-                  strokeWidth={3}
-                  filter={`url(#areaShadow-${chart.id})`}
-                  dot={{ 
-                    fill: colors.primary, 
-                    strokeWidth: 0, 
-                    r: 0
-                  }}
-                  activeDot={{ 
-                    r: 6, 
-                    fill: colors.primary, 
-                    stroke: 'white', 
-                    strokeWidth: 3,
-                    style: { cursor: 'pointer' }
-                  }}
-                />
-              )}
-              {/* Add legend for multi-trace charts */}
-              {traces.length > 0 && (
-                <Legend 
-                  wrapperStyle={{ 
-                    paddingTop: '20px',
-                    fontSize: '12px',
-                    opacity: 0.8
-                  }}
-                  iconType="rect"
-                  formatter={(value) => {
-                    // Find the trace that matches this dataKey and return its name
-                    const matchingTrace = traces.find(trace => trace.dataKey === value);
-                    return matchingTrace ? matchingTrace.name : value;
-                  }}
-                />
-              )}
-            </AreaChart>
-          </ChartContainer>
-        );
-      case 'scatter':
-        return (
-          <ChartContainer key={key} config={config} className={`chart-container ${chartHeight} w-full`}>
-            <ScatterChart 
-              data={chartData} 
-              margin={{ top: 20, right: 30, left: 20, bottom: 20 }}
-              onClick={() => {
-                // Clear trace emphasis when clicking on chart background
-                setEmphasizedTrace(prev => ({ ...prev, [chart.id]: null }));
-              }}
-            >
-              <defs>
-                <radialGradient id={`scatterGradient-${chart.id}`} cx="50%" cy="50%" r="50%">
-                  <stop offset="0%" stopColor={colors.primary} stopOpacity={1}/>
-                  <stop offset="100%" stopColor={colors.darkAccent} stopOpacity={0.7}/>
-                </radialGradient>
-                <filter id={`scatterShadow-${chart.id}`} x="-50%" y="-50%" width="200%" height="200%">
-                  <feDropShadow dx="0" dy="2" stdDeviation="3" floodOpacity="0.4" floodColor={colors.primary}/>
-                </filter>
-              </defs>
-              <CartesianGrid 
-                strokeDasharray="3 3" 
-                stroke="#e2e8f0" 
-                strokeOpacity={0.6}
-              />
-              <XAxis 
-                {...xAxisConfig} 
-                stroke="#64748b"
-                fontSize={11}
-                fontWeight={500}
-                tickLine={false}
-                axisLine={false}
-                tickMargin={8}
-              />
-              <YAxis 
-                {...(yAxisConfig.dataKey ? yAxisConfig : { type: yAxisConfig.type || 'number' })} 
-                stroke="#64748b"
-                fontSize={11}
-                fontWeight={500}
-                tickLine={false}
-                axisLine={false}
-                tickMargin={8}
-                width={60}
-              />
-              <ChartTooltip 
-                content={<ChartTooltipContent />} 
-                contentStyle={{ 
-                  backgroundColor: 'rgba(255, 255, 255, 0.98)', 
-                  border: 'none', 
-                  borderRadius: '12px', 
-                  boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.15), 0 10px 10px -5px rgba(0, 0, 0, 0.1)',
-                  backdropFilter: 'blur(10px)',
-                  fontSize: '12px',
-                  fontWeight: 500
-                }} 
-                cursor={{ strokeDasharray: '3 3' }}
-              />
-              {traces.length > 0 ? traces.map((trace, i) => {
-                const isEmphasized = emphasizedTrace[chart.id] === trace.dataKey;
-                const isOtherEmphasized = emphasizedTrace[chart.id] && emphasizedTrace[chart.id] !== trace.dataKey;
-                const traceColor = trace.stroke || trace.fill || DEFAULT_TRACE_COLORS[i % DEFAULT_TRACE_COLORS.length];
-                
-                // Custom scatter shape that handles clicks
-                const CustomScatter = (props: any) => {
-                  const { cx, cy } = props;
-                  const radius = isEmphasized ? 6 : 4;
-                  const opacity = isOtherEmphasized ? 0.3 : 0.8;
-                  
-                  return (
-                    <circle
-                      cx={cx}
-                      cy={cy}
-                      r={radius}
-                      fill={traceColor}
-                      fillOpacity={opacity}
-                      style={{ cursor: 'pointer' }}
-                      filter={isEmphasized ? `url(#scatterShadow-${chart.id})` : undefined}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setEmphasizedTrace(prev => ({
-                          ...prev,
-                          [chart.id]: prev[chart.id] === trace.dataKey ? null : trace.dataKey
-                        }));
-                      }}
-                    />
-                  );
-                };
-                
-                return (
-                  <Scatter 
-                    key={trace.dataKey || i} 
-                    dataKey={trace.dataKey} 
-                    fill={traceColor}
-                    fillOpacity={isOtherEmphasized ? 0.3 : 0.8}
-                    r={isEmphasized ? 6 : 4}
-                    filter={isEmphasized ? `url(#scatterShadow-${chart.id})` : undefined}
-                    style={{ cursor: 'pointer' }}
-                    shape={<CustomScatter />}
-                  />
-                );
-              }) : (
-                <Scatter 
-                  dataKey={yAxisConfig.dataKey} 
-                  fill={`url(#scatterGradient-${chart.id})`}
-                  fillOpacity={0.8}
-                  filter={`url(#scatterShadow-${chart.id})`}
-                  style={{ cursor: 'pointer' }}
-                />
-              )}
-              {/* Add legend for multi-trace charts */}
-              {traces.length > 0 && (
-                <Legend 
-                  wrapperStyle={{ 
-                    paddingTop: '20px',
-                    fontSize: '12px',
-                    opacity: 0.8
-                  }}
-                  iconType="circle"
-                  formatter={(value) => {
-                    // Find the trace that matches this dataKey and return its name
-                    const matchingTrace = traces.find(trace => trace.dataKey === value);
-                    return matchingTrace ? matchingTrace.name : value;
-                  }}
-                />
-              )}
-            </ScatterChart>
-          </ChartContainer>
-        );
-      case 'pie':
-        // Pie chart expects data as [{ name, value }]
-        const pieData = (chartData as any[]).reduce((acc: { name: string; value: number }[], row) => {
-          const key = row[xAxisConfig.dataKey];
-          const value = Number(row[yAxisConfig.dataKey]) || 0;
-          const existing = acc.find(item => item.name === key);
-          if (existing) {
-            existing.value += value;
-          } else {
-            acc.push({ name: key, value });
-          }
-          return acc;
-        }, []);
-
-        // Modern pie color palette with better harmony
-        const modernPieColors = [
-          "#8884d8", // blue (matches backend and single-series first color)
-          colors.secondary,
-          colors.tertiary,
-          "#3b82f6", // blue
-          "#f59e0b", // amber
-          "#ef4444", // red
-          "#06b6d4", // cyan
-          "#84cc16", // lime
-          "#f97316", // orange
-          "#ec4899", // pink
-        ];
-
-        return (
-          <ChartContainer key={key} config={config} className={`chart-container ${chartHeight} w-full`}>
-            <PieChart
-              onClick={() => {
-                // Clear trace emphasis when clicking on chart background
-                setEmphasizedTrace(prev => ({ ...prev, [chart.id]: null }));
-              }}
-            >
-              <defs>
-                {modernPieColors.map((color, i) => (
-                  <linearGradient key={i} id={`pieGradient-${chart.id}-${i}`} x1="0" y1="0" x2="1" y2="1">
-                    <stop offset="0%" stopColor={color} stopOpacity={1}/>
-                    <stop offset="100%" stopColor={color} stopOpacity={0.8}/>
-                  </linearGradient>
-                ))}
-                <filter id={`pieShadow-${chart.id}`} x="-50%" y="-50%" width="200%" height="200%">
-                  <feDropShadow dx="0" dy="4" stdDeviation="6" floodOpacity="0.15" floodColor="#000000"/>
-                </filter>
-              </defs>
-              <Pie
-                data={pieData}
-                cx="50%"
-                cy="50%"
-                outerRadius={isCompact ? 65 : 95}
-                innerRadius={isCompact ? 25 : 35}
-                dataKey="value"
-                stroke="white"
-                strokeWidth={3}
-                filter={`url(#pieShadow-${chart.id})`}
-                label={({ name, percent }) => 
-                  percent > 0.05 ? `${name} ${(percent * 100).toFixed(0)}%` : ''
-                }
-                labelLine={false}
-                style={{ fontSize: '11px', fontWeight: 500 }}
-              >
-                {pieData.map((entry, i) => (
-                  <Cell 
-                    key={`cell-${i}`} 
-                    fill={`url(#pieGradient-${chart.id}-${i % modernPieColors.length})`}
-                    style={{ cursor: 'pointer' }}
-                  />
-                ))}
-              </Pie>
-              <ChartTooltip 
-                content={<ChartTooltipContent />} 
-                contentStyle={{ 
-                  backgroundColor: 'rgba(255, 255, 255, 0.98)', 
-                  border: 'none', 
-                  borderRadius: '12px', 
-                  boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.15), 0 10px 10px -5px rgba(0, 0, 0, 0.1)',
-                  backdropFilter: 'blur(10px)',
-                  fontSize: '12px',
-                  fontWeight: 500
-                }} 
-              />
-            </PieChart>
-          </ChartContainer>
-        );
-      default:
-        return null;
-    }
+  const previewType = previewTypes[chart.id];
+  const config = chart.chartConfig || {};
+  const rawType = previewType || config.chart_type || chart.type;
+  const typeMap: Record<string, string> = {
+    line: 'line_chart',
+    bar: 'bar_chart',
+    area: 'area_chart',
+    pie: 'pie_chart',
+    scatter: 'scatter_chart',
+    line_chart: 'line_chart',
+    bar_chart: 'bar_chart',
+    area_chart: 'area_chart',
+    pie_chart: 'pie_chart',
+    scatter_chart: 'scatter_chart',
   };
+  const rendererType = typeMap[rawType] || 'line_chart';
+  const chartData = config.data || getFilteredData(chart);
+  const traces = config.traces || [];
+  const xAxisConfig = config.x_axis || { dataKey: chart.xAxis };
+  const yAxisConfig = config.y_axis || { dataKey: chart.yAxis };
+  const key = chartKey || chart.lastUpdateTime || chart.id;
+  const chartHeight = heightClass || '';
+
+  if (!chartData.length || !xAxisConfig.dataKey || (!yAxisConfig.dataKey && traces.length === 0)) {
+    return (
+      <div className={`flex items-center justify-center ${chartHeight || 'h-64'} text-muted-foreground`}>
+        <div className="text-center">
+          <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-gradient-to-br from-slate-100 to-slate-200 flex items-center justify-center">
+            <LineChartIcon className="w-8 h-8 text-slate-400" />
+          </div>
+          <p className="font-medium">Configure chart settings</p>
+          <p className="text-sm">Select X-axis and Y-axis to display data</p>
+        </div>
+      </div>
+    );
+  }
+
+  const colors = getChartColors(index);
+  const rendererProps = {
+    key,
+    type: rendererType as 'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart',
+    data: chartData,
+    xField: xAxisConfig.dataKey,
+    yField: traces.length ? undefined : yAxisConfig.dataKey,
+    yFields: traces.length ? traces.map((t: any) => t.dataKey) : undefined,
+    title: chart.title,
+    xAxisLabel: xAxisConfig.label || xAxisConfig.dataKey,
+    yAxisLabel: yAxisConfig.label || yAxisConfig.dataKey,
+    yAxisLabels: traces.length ? traces.map((t: any) => t.name || t.dataKey) : undefined,
+    colors: [colors.primary, colors.secondary, colors.tertiary],
+  } as const;
+
+  return (
+    <div className={`w-full ${chartHeight}`}>
+      <RechartsChartRenderer {...rendererProps} />
+    </div>
+  );
+};
+
 
   if (charts.length === 0) {
     return (

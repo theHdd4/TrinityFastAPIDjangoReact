@@ -3,8 +3,8 @@
 import os
 from motor.motor_asyncio import AsyncIOMotorClient
 from datetime import datetime
-MONGO_URI = os.getenv("MONGO_URI", "mongodb://mongo:27017/trinity")
-MONGO_DB = os.getenv("MONGO_DB", "trinity")
+MONGO_URI = os.getenv("MONGO_URI", "mongodb://admin_dev:pass_dev@10.2.1.65:9005/?authSource=admin")
+MONGO_DB = os.getenv("MONGO_DB", "trinity_prod")
 client = AsyncIOMotorClient(MONGO_URI)
 db = client[MONGO_DB]
 # print("Mongo DB in use:", MONGO_DB)
@@ -140,7 +140,7 @@ async def get_createandtransform_config_from_mongo(client_name: str, app_name: s
     """Retrieve saved createandtransform configuration."""
     try:
         document_id = f"{client_name}/{app_name}/{project_name}"
-        result = await client["trinity_prod"]["createandtransform_configs"].find_one({"_id": document_id})
+        result = await db["createandtransform_configs"].find_one({"_id": document_id})
         return result
     except Exception as e:
         # print(f"MongoDB read error for createandtransform_configs: {e}")

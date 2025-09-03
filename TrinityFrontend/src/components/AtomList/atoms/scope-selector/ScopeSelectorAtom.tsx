@@ -23,6 +23,7 @@ export interface ScopeSelectorData {
   scopes: ScopeData[];
   availableIdentifiers: string[];
   selectedIdentifiers: string[];
+  measures?: string[];
   allColumns?: ColumnInfo[];
   dataSource?: string;
 }
@@ -41,6 +42,7 @@ const ScopeSelectorAtom: React.FC<ScopeSelectorAtomProps> = ({ atomId, onPropert
     scopes: [],
     availableIdentifiers: [],
     selectedIdentifiers: [],
+    measures: [],
     allColumns: [],
     dataSource: '',
     ...(atom?.settings || {})
@@ -53,6 +55,7 @@ const ScopeSelectorAtom: React.FC<ScopeSelectorAtomProps> = ({ atomId, onPropert
         scopes: [],
         availableIdentifiers: [],
         selectedIdentifiers: [],
+        measures: [],
         allColumns: [],
         dataSource: '',
         ...prev, // Keep any existing state that's not in settings

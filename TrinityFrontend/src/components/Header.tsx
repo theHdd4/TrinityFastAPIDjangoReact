@@ -9,9 +9,13 @@ import {
   MyProfile,
   Navigation,
 } from '@/components/PrimaryMenu';
-import { Target, BarChart3, Zap, Plus } from 'lucide-react';
+import { Target, BarChart3, Zap, Plus, FolderOpen } from 'lucide-react';
 
-const Header = () => {
+interface HeaderProps {
+  projectCount?: number;
+}
+
+const Header: React.FC<HeaderProps> = ({ projectCount = 0 }) => {
   const location = useLocation();
   const navigate = useNavigate();
   const [projectName, setProjectName] = useState<string | null>(null);
@@ -109,12 +113,18 @@ const Header = () => {
         {isProjects && appInfo && (() => {
           const IconComp = appInfo.Icon;
           return (
-            <div className="flex items-center space-x-2">
-              <span className="text-sm font-medium text-gray-800">{appInfo.title}</span>
-              <div
-                className={`w-8 h-8 rounded-lg bg-gradient-to-r ${appInfo.color} flex items-center justify-center shadow-md`}
-              >
-                <IconComp className="w-4 h-4 text-white" />
+            <div className="flex items-center space-x-3">
+              <div className="flex items-center text-sm text-gray-500">
+                <FolderOpen className="w-4 h-4 mr-1" />
+                <span>{projectCount}</span>
+              </div>
+              <div className="flex items-center space-x-2">
+                <span className="text-sm font-medium text-gray-800">{appInfo.title}</span>
+                <div
+                  className={`w-8 h-8 rounded-lg bg-gradient-to-r ${appInfo.color} flex items-center justify-center shadow-md`}
+                >
+                  <IconComp className="w-4 h-4 text-white" />
+                </div>
               </div>
               <button type="button" onClick={handleGoBack} className="p-2" title="Back to Apps">
                 <TrinityAssets.BackToAppsIcon className="w-5 h-5" />
