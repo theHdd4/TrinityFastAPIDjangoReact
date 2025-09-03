@@ -20,6 +20,13 @@ class ProjectSerializer(serializers.ModelSerializer):
         default=serializers.CurrentUserDefault(),
     )
     base_template = serializers.SerializerMethodField()
+    base_template_id = serializers.PrimaryKeyRelatedField(
+        queryset=Template.objects.all(),
+        source="base_template",
+        write_only=True,
+        required=False,
+        allow_null=True,
+    )
 
     class Meta:
         model = Project
@@ -32,6 +39,7 @@ class ProjectSerializer(serializers.ModelSerializer):
             "app",
             "state",
             "base_template",
+            "base_template_id",
             "created_at",
             "updated_at",
         ]

@@ -30,7 +30,10 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuTrigger
+  DropdownMenuTrigger,
+  DropdownMenuSub,
+  DropdownMenuSubTrigger,
+  DropdownMenuSubContent
 } from '@/components/ui/dropdown-menu';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 
@@ -265,6 +268,42 @@ const Projects = () => {
       }
     } catch (err) {
       console.error('Save template error', err);
+    }
+  };
+
+  const importTemplateToProject = async (project: Project, template: Template) => {
+    try {
+      let overwrite = false;
+      try {
+        const res = await fetch(`${REGISTRY_API}/projects/${project.id}/`, {
+          credentials: 'include'
+        });
+        if (res.ok) {
+          const data = await res.json();
+          const state = data.state || {};
+          if (state && Object.keys(state).length > 0) {
+            overwrite = confirm(`Do you want overwrite config for ${project.name}?`);
+            if (!overwrite) return;
+          }
+        }
+      } catch (err) {
+        console.error('Project state fetch error', err);
+      }
+      const body: any = { template_id: template.id };
+      if (overwrite) body.overwrite = true;
+      const res = await fetch(`${REGISTRY_API}/projects/${project.id}/import_template/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(body)
+      });
+      if (res.ok) {
+        setProjects(
+          projects.map(p => (p.id === project.id ? { ...p, baseTemplate: template.name } : p))
+        );
+      }
+    } catch (err) {
+      console.error('Import template error', err);
     }
   };
 
@@ -590,6 +629,32 @@ const Projects = () => {
                                 <BookmarkPlus className="w-4 h-4 mr-2" />
                                 Save as Template
                               </DropdownMenuItem>
+                              <DropdownMenuSub>
+                                <DropdownMenuSubTrigger
+                                  onClick={(e) => e.stopPropagation()}
+                                  onPointerDown={(e) => e.stopPropagation()}
+                                >
+                                  <Bookmark className="w-4 h-4 mr-2" />
+                                  Import from Template
+                                </DropdownMenuSubTrigger>
+                                <DropdownMenuSubContent>
+                                  {templates.length === 0 ? (
+                                    <DropdownMenuItem disabled>None</DropdownMenuItem>
+                                  ) : (
+                                    templates.map((t) => (
+                                      <DropdownMenuItem
+                                        key={t.id}
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          importTemplateToProject(project, t);
+                                        }}
+                                      >
+                                        {t.name}
+                                      </DropdownMenuItem>
+                                    ))
+                                  )}
+                                </DropdownMenuSubContent>
+                              </DropdownMenuSub>
                               <DropdownMenuItem
                                 onClick={(e) => {
                                   e.stopPropagation();

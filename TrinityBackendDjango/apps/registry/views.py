@@ -314,6 +314,42 @@ class ProjectViewSet(viewsets.ModelViewSet):
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=["post"])
+    def import_template(self, request, pk=None):
+        """Apply a template to an existing project."""
+        if not self._can_edit(request.user):
+            return Response({"detail": "Permission denied."}, status=status.HTTP_403_FORBIDDEN)
+        project = self.get_object()
+        template_id = request.data.get("template_id")
+        if not template_id:
+            return Response({"detail": "template_id required."}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            template = Template.objects.get(id=template_id, app=project.app)
+        except Template.DoesNotExist:
+            return Response({"detail": "Template not found."}, status=status.HTTP_404_NOT_FOUND)
+        overwrite = bool(request.data.get("overwrite"))
+        if overwrite:
+            base_id = template.base_project.get("id") if template.base_project else None
+            source = None
+            if base_id:
+                try:
+                    source = Project.objects.get(id=base_id)
+                except Project.DoesNotExist:
+                    source = None
+            project.state = template.state
+            project.base_template = template
+            project.save()
+            if source:
+                for mode in ["lab", "workflow", "exhibition"]:
+                    cfg = load_atom_list_configuration(source, mode)
+                    if cfg and cfg.get("cards"):
+                        save_atom_list_configuration(project, mode, cfg["cards"])
+        else:
+            project.base_template = template
+            project.save(update_fields=["base_template"])
+        serializer = self.get_serializer(project)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=["post"])
     def save_template(self, request, pk=None):
         """Persist the project as a reusable template."""
         if not self._can_edit(request.user):
