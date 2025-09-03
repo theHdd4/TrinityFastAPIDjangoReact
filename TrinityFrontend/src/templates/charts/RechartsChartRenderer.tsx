@@ -1149,23 +1149,30 @@ const RechartsChartRenderer: React.FC<Props> = ({
       }
     }
     
-    // Handle dual Y-axes detection
-    if (yKeys.length === 0 && yFields && yFields.length > 0) {
-      yKeys = yFields;
-    } else if (yKeys.length === 0 && firstItem) {
-      const availableKeys = Object.keys(firstItem);
-      // For dual Y-axes, try to find multiple numeric fields
-      const numericKeys = availableKeys.filter(key => 
-        key !== xKey && 
-        key !== 'category' && 
-        key !== 'label' &&
-        typeof firstItem[key] === 'number' && 
-        !isNaN(firstItem[key])
-      );
-      if (numericKeys.length >= 2) {
-        yKeys = numericKeys.slice(0, 2); // Take first two numeric fields
-      } else if (numericKeys.length === 1) {
-        yKeys = [numericKeys[0]];
+    // Determine which Y-axis fields to use. Only include a secondary axis when explicitly configured.
+    if (yKeys.length === 0) {
+      if (yFields && yFields.length > 0) {
+        // Use provided fields (may include multiple for dual axes)
+        yKeys = yFields;
+      } else if (yField) {
+        // Single field explicitly specified – use it as the only Y axis
+        yKeys = [yField];
+      } else if (firstItem) {
+        // Fallback: auto-detect the first numeric field for a single Y axis
+        const availableKeys = Object.keys(firstItem);
+        const numericKeys = availableKeys.filter(key =>
+          key !== xKey &&
+          key !== 'category' &&
+          key !== 'label' &&
+          typeof firstItem[key] === 'number' &&
+          !isNaN(firstItem[key])
+        );
+        if (numericKeys.length > 0) {
+          yKeys = [numericKeys[0]];
+        }
+      }
+      if (!yKey && yKeys.length > 0) {
+        yKey = yKeys[0];
       }
     }
     
