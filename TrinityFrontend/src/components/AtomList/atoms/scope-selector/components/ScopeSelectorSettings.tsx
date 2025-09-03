@@ -109,16 +109,6 @@ const ScopeSelectorSettings: React.FC<ScopeSelectorSettingsProps> = ({ data, onD
     }
   }, [availableIdentifiers, data.dataSource, onDataChange]);
 
-  // Auto-select identifiers with >1 unique values on initial load
-  const hasAutoSelected = React.useRef(false);
-  React.useEffect(() => {
-    if (!hasAutoSelected.current && availableIdentifiers.length > 0 && data.dataSource) {
-      hasAutoSelected.current = true;
-      selectMultiValueIdentifiers();
-    }
-  // we only want this to run once on mount
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data.dataSource]);
 
   if (!data.allColumns?.length) {
     return (

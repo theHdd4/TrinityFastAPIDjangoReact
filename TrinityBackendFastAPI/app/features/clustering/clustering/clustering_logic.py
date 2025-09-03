@@ -15,12 +15,84 @@ from sklearn.mixture import GaussianMixture
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import silhouette_score
 from types import SimpleNamespace
+import pyarrow as pa
+import pyarrow.ipc as ipc
+import time
+from datetime import datetime
 
 from app.DataStorageRetrieval.db import  fetch_client_app_project
 from app.core.utils import get_env_vars
 
 # Lazy-loaded MinIO client
 _minio_client = None
+
+# Auto-save function for MongoDB
+async def auto_save_clustering_data(
+    client_name: str,
+    app_name: str,
+    project_name: str,
+    operation_type: str,
+    clustering_data: dict,
+    user_id: str = "",
+    project_id: int = None
+):
+    """Automatically save clustering data to MongoDB during operations"""
+    try:
+        # Import database functions here to avoid circular imports
+        from .database import (
+            save_clustering_config,
+            save_clustering_results,
+            save_clustering_metadata
+        )
+        
+        # Add timestamp and operation metadata
+        data_with_metadata = {
+            **clustering_data,
+            "auto_saved_at": datetime.utcnow().isoformat(),
+            "operation_type": operation_type
+        }
+        
+        if operation_type == "config":
+            result = await save_clustering_config(
+                client_name=client_name,
+                app_name=app_name,
+                project_name=project_name,
+                clustering_data=data_with_metadata,
+                user_id=user_id,
+                project_id=project_id
+            )
+        elif operation_type == "results":
+            result = await save_clustering_results(
+                client_name=client_name,
+                app_name=app_name,
+                project_name=project_name,
+                clustering_results=data_with_metadata,
+                user_id=user_id,
+                project_id=project_id
+            )
+        elif operation_type == "metadata":
+            result = await save_clustering_metadata(
+                client_name=client_name,
+                app_name=app_name,
+                project_name=project_name,
+                metadata=data_with_metadata,
+                user_id=user_id,
+                project_id=project_id
+            )
+        else:
+            print(f"⚠️ Unknown operation type for auto-save: {operation_type}")
+            return None
+            
+        if result and result.get("status") == "success":
+            print(f"✅ Auto-saved {operation_type} to MongoDB: {result.get('mongo_id')}")
+            return result
+        else:
+            print(f"⚠️ Auto-save failed for {operation_type}: {result}")
+            return None
+            
+    except Exception as e:
+        print(f"⚠️ Auto-save error for {operation_type}: {str(e)}")
+        return None
 
 def get_minio_client():
     """Get MinIO client, initializing if needed"""
@@ -382,6 +454,70 @@ def cluster_dataframe(df: pd.DataFrame, req: Any) -> np.ndarray:
 
     raise ValueError("Unsupported algorithm: expected one of {'kmeans','dbscan','hac','birch','gmm'}")
 
+async def cluster_dataframe_with_auto_save(
+    df: pd.DataFrame, 
+    req: Any, 
+    client_name: str = "",
+    app_name: str = "",
+    project_name: str = "",
+    user_id: str = "",
+    project_id: int = None
+) -> np.ndarray:
+    """
+    Apply clustering with optional K selection and auto-save to MongoDB.
+    This is the enhanced version that automatically saves results.
+    """
+    start_time = time.time()
+    
+    # Run the original clustering function
+    labels = cluster_dataframe(df, req)
+    
+    # Calculate processing time
+    processing_time = time.time() - start_time
+    
+    # Auto-save clustering results if client info is provided
+    if client_name and app_name and project_name:
+        try:
+            # Prepare clustering results for auto-save
+            clustering_results = {
+                "algorithm": getattr(req, "algorithm", "unknown"),
+                "k_selection": getattr(req, "k_selection", "unknown"),
+                "n_clusters": len(np.unique(labels)),
+                "data_shape": df.shape,
+                "processing_time": processing_time,
+                "timestamp": datetime.utcnow().isoformat(),
+                "request_parameters": {
+                    "algorithm": getattr(req, "algorithm", ""),
+                    "k_selection": getattr(req, "k_selection", ""),
+                    "n_clusters": getattr(req, "n_clusters", ""),
+                    "k_min": getattr(req, "k_min", ""),
+                    "k_max": getattr(req, "k_max", ""),
+                    "eps": getattr(req, "eps", ""),
+                    "min_samples": getattr(req, "min_samples", ""),
+                    "linkage": getattr(req, "linkage", ""),
+                    "threshold": getattr(req, "threshold", ""),
+                    "covariance_type": getattr(req, "covariance_type", ""),
+                    "random_state": getattr(req, "random_state", ""),
+                    "n_init": getattr(req, "n_init", "")
+                }
+            }
+            
+            # Auto-save results
+            await auto_save_clustering_data(
+                client_name=client_name,
+                app_name=app_name,
+                project_name=project_name,
+                operation_type="results",
+                clustering_data=clustering_results,
+                user_id=user_id,
+                project_id=project_id
+            )
+            
+        except Exception as e:
+            print(f"⚠️ Auto-save failed during clustering: {str(e)}")
+    
+    return labels
+
 def get_output_dataframe(df: pd.DataFrame, labels: np.ndarray) -> pd.DataFrame:
     """Get the full output dataframe with cluster IDs added"""
     # Add cluster labels to dataframe (same logic as save_clusters_to_minio)
@@ -439,8 +575,6 @@ def save_clusters_to_minio(df: pd.DataFrame, labels: np.ndarray, file_path: str)
 
 
 from .schemas import IdentifierFilter, MeasureFilter
-import pyarrow as pa
-import pyarrow.ipc as ipc
 
 def apply_identifier_filters(df: pd.DataFrame, identifier_filters: List[IdentifierFilter]) -> pd.DataFrame:
     """Apply identifier value filters to dataframe"""

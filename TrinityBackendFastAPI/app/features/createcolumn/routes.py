@@ -1,6 +1,6 @@
 # app/routes.py
 
-from fastapi import APIRouter, Form, HTTPException, Query
+from fastapi import APIRouter, Form, HTTPException, Query, Body, Request
 from fastapi.responses import Response
 
 import json
@@ -9,7 +9,7 @@ from .create.base import calculate_residuals, compute_rpi, apply_stl_outlier
 
 from .deps import get_minio_df,fetch_measures_list,fetch_identifiers_and_measures,get_column_classifications_collection,get_create_settings_collection,minio_client, MINIO_BUCKET, redis_client
 from app.features.data_upload_validate.app.routes import get_object_prefix
-from .mongodb_saver import save_create_data,save_create_data_settings
+from .mongodb_saver import save_create_data,save_create_data_settings,save_createandtransform_configs,get_createandtransform_config_from_mongo
 import io
 from sklearn.preprocessing import StandardScaler
 from sklearn.preprocessing import MinMaxScaler
@@ -529,19 +529,84 @@ async def get_create_data(
 from fastapi import Body
 
 
+@router.post("/save-config-data")
+async def save_createcolumn_config_data(
+    request: Request,
+    client_name: str = Query(..., description="Client name"),
+    app_name: str = Query(..., description="App name"),
+    project_name: str = Query(..., description="Project name"),
+    user_id: str = Query("", description="User ID"),
+    project_id: int = Query(None, description="Project ID")
+):
+    """General save endpoint for createcolumn config data - used by SAVE button"""
+    print(f"🔍 DEBUG: /save-config-data endpoint called")
+    print(f"🔍 DEBUG: client_name = {client_name}")
+    print(f"🔍 DEBUG: app_name = {app_name}")
+    print(f"🔍 DEBUG: project_name = {project_name}")
+    print(f"🔍 DEBUG: user_id = {user_id}")
+    print(f"🔍 DEBUG: project_id = {project_id}")
+    
+    try:
+        # Get the request body
+        body = await request.json()
+        print(f"🔍 DEBUG: request body = {body}")
+        
+        # Save createcolumn configuration data
+        result = await save_createandtransform_configs(
+            client_name=client_name,
+            app_name=app_name,
+            project_name=project_name,
+            operation_data=body,
+            user_id=user_id,
+            project_id=project_id
+        )
+        
+        print(f"🔍 DEBUG: save_createandtransform_configs result = {result}")
+        
+        if result["status"] == "success":
+            return {
+                "success": True,
+                "message": f"Createcolumn config data saved successfully",
+                "mongo_id": result["mongo_id"],
+                "operation": result["operation"],
+                "collection": result["collection"]
+            }
+        else:
+            raise HTTPException(status_code=500, detail=f"Failed to save createcolumn config data: {result['error']}")
+            
+    except Exception as e:
+        print(f"Error saving createcolumn config data: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to save createcolumn config data: {str(e)}")
+
 @router.post("/save")
 async def save_createcolumn_dataframe(
     csv_data: str = Body(..., embed=True),
-    filename: str = Body(..., embed=True)
+    filename: str = Body(..., embed=True),
+    client_name: str = Body("", description="Client name"),
+    app_name: str = Body("", description="App name"),
+    project_name: str = Body("", description="Project name"),
+    user_id: str = Body("", description="User ID"),
+    project_id: int = Body(None, description="Project ID"),
+    operation_details: str = Body("", description="Operation details JSON string")
 ):
     """
-    Save a created column dataframe (CSV) to MinIO as Arrow file and return file info.
+    Save a created column dataframe (CSV) to MinIO as Arrow file and save metadata to MongoDB.
     """
     import pandas as pd
     import pyarrow as pa
     import pyarrow.ipc as ipc
     import io
     import uuid
+
+    # Debug: Log all received parameters
+    print(f"🔍 DEBUG: /save endpoint called")
+    print(f"🔍 DEBUG: client_name = '{client_name}'")
+    print(f"🔍 DEBUG: app_name = '{app_name}'")
+    print(f"🔍 DEBUG: project_name = '{project_name}'")
+    print(f"🔍 DEBUG: user_id = '{user_id}'")
+    print(f"🔍 DEBUG: project_id = {project_id}")
+    print(f"🔍 DEBUG: operation_details = '{operation_details[:200]}...' (truncated)")
+    print(f"🔍 DEBUG: filename = '{filename}'")
 
     try:
         # Parse CSV to DataFrame
@@ -571,17 +636,72 @@ async def save_createcolumn_dataframe(
         )
         # Cache in Redis for 1 hour
         redis_client.setex(filename, 3600, arrow_bytes)
+        
+        # Save metadata to MongoDB
+        mongo_result = None
+        try:
+            # Extract client/app/project info or use defaults
+            final_client_name = client_name or 'default_client'
+            final_app_name = app_name or 'default_app'
+            final_project_name = project_name or 'default_project'
+            final_user_id = user_id or ''
+            final_project_id = project_id or 1
+            
+            # Parse operation_details if provided
+            operations_data = []
+            if operation_details:
+                try:
+                    import json
+                    operation_details_parsed = json.loads(operation_details)
+                    operations_data = operation_details_parsed.get('operations', [])
+                    print(f"🔍 DEBUG: Parsed operations = {operations_data}")
+                except Exception as parse_error:
+                    print(f"⚠️ Error parsing operation_details: {parse_error}")
+            
+            # Prepare metadata for MongoDB in the expected format
+            config_data = {
+                "operation_type": "createcolumn",
+                "result_file": filename,
+                "shape": list(df.shape),  # Convert to list format
+                "columns": list(df.columns),
+                "operations": operations_data,  # The actual operations data
+                "timestamp": pd.Timestamp.now().isoformat()
+            }
+            
+            print(f"🔍 DEBUG: Saving createcolumn metadata to MongoDB")
+            print(f"🔍 DEBUG: final_client_name = {final_client_name}")
+            print(f"🔍 DEBUG: final_app_name = {final_app_name}")
+            print(f"🔍 DEBUG: final_project_name = {final_project_name}")
+            print(f"🔍 DEBUG: operations count = {len(operations_data)}")
+            print(f"🔍 DEBUG: config_data = {config_data}")
+            
+            # Save to MongoDB
+            mongo_result = await save_createandtransform_configs(
+                final_client_name,
+                final_app_name,
+                final_project_name,
+                config_data,
+                user_id=final_user_id,
+                project_id=final_project_id
+            )
+            
+            print(f"🔍 DEBUG: MongoDB save result = {mongo_result}")
+            
+        except Exception as mongo_error:
+            print(f"⚠️ MongoDB save error (non-fatal): {mongo_error}")
+            mongo_result = {"status": "error", "error": str(mongo_error)}
+        
         return {
             "result_file": filename,
             "shape": df.shape,
             "columns": list(df.columns),
-            "message": "DataFrame saved successfully"
+            "message": "DataFrame saved successfully",
+            "mongodb_saved": mongo_result["status"] == "success" if mongo_result else False,
+            "mongodb_result": mongo_result
         }
     except Exception as e:
         print(f"⚠️ save_createcolumn_dataframe error: {e}")
         raise HTTPException(status_code=400, detail=str(e))
-
-from fastapi import Query
 import pyarrow as pa
 import pyarrow.ipc as ipc
 import numpy as np
@@ -779,3 +899,69 @@ async def get_column_classification(
             "measures": [],
             "unclassified": [],
         }
+
+
+# =============================================================================
+# SAVE CONFIG ENDPOINTS
+# =============================================================================
+
+@router.post("/save-config")
+async def save_createcolumn_configuration(
+    client_name: str = Query(..., description="Client name"),
+    app_name: str = Query(..., description="App name"),
+    project_name: str = Query(..., description="Project name"),
+    config_data: dict = Body(..., description="Createcolumn configuration data to save"),
+    user_id: str = Query("", description="User ID"),
+    project_id: int = Query(None, description="Project ID")
+):
+    """Save createcolumn configuration to MongoDB"""
+    try:
+        result = await save_createandtransform_configs(
+            client_name=client_name,
+            app_name=app_name,
+            project_name=project_name,
+            operation_data=config_data,
+            user_id=user_id,
+            project_id=project_id
+        )
+        
+        if result["status"] == "success":
+            return {
+                "success": True,
+                "message": f"Createcolumn configuration saved successfully",
+                "mongo_id": result["mongo_id"],
+                "operation": result["operation"],
+                "collection": result["collection"]
+            }
+        else:
+            raise HTTPException(status_code=500, detail=f"Failed to save createcolumn configuration: {result['error']}")
+            
+    except Exception as e:
+        print(f"Error saving createcolumn configuration: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to save createcolumn configuration: {str(e)}")
+
+@router.get("/get-config")
+async def get_createcolumn_configuration(
+    client_name: str = Query(..., description="Client name"),
+    app_name: str = Query(..., description="App name"),
+    project_name: str = Query(..., description="Project name")
+):
+    """Retrieve saved createcolumn configuration from MongoDB"""
+    try:
+        result = await get_createandtransform_config_from_mongo(client_name, app_name, project_name)
+        
+        if result:
+            return {
+                "success": True,
+                "data": result
+            }
+        else:
+            return {
+                "success": False,
+                "message": "No createcolumn configuration found",
+                "data": None
+            }
+            
+    except Exception as e:
+        print(f"Error retrieving createcolumn configuration: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve createcolumn configuration: {str(e)}")

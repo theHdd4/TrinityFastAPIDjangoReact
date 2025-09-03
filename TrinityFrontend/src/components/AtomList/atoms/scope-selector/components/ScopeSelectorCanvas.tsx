@@ -135,39 +135,15 @@ const ScopeSelectorCanvas: React.FC<ScopeSelectorCanvasProps> = ({ data, onDataC
       data.scopes.slice(0, 5).forEach((scope, idx) => {
         const setNum = idx + 1;
         const identifierFilters: Record<string, string[]> = {};
-        
-        // Debug logging for each scope
-        console.log(`🔍 Building scope ${setNum}:`, {
-          scopeId: scope.id,
-          scopeName: scope.name,
-          identifiers: scope.identifiers,
-          selectedIdentifiers: data.selectedIdentifiers
-        });
-        
-        // Only include identifiers that are actually selected and have values
-        data.selectedIdentifiers.forEach(identifier => {
-          const value = scope.identifiers[identifier];
-          if (value) {
-            if (Array.isArray(value) && value.length > 0) {
-              identifierFilters[identifier] = value;
-            } else if (typeof value === 'string' && value.trim() !== '') {
-              identifierFilters[identifier] = [value];
-            }
+        Object.entries(scope.identifiers).forEach(([key, value]) => {
+          if (Array.isArray(value) ? value.length : value) {
+            identifierFilters[key] = Array.isArray(value) ? value : [value as string];
           }
         });
-        
-        // Debug logging for the built filters
-        console.log(`🔍 Scope ${setNum} identifier filters:`, identifierFilters);
-        
-        // Only add to request body if we have actual filters
-        if (Object.keys(identifierFilters).length > 0) {
-          requestBody[`identifier_filters_${setNum}`] = identifierFilters;
-          if (scope.timeframe.from && scope.timeframe.to) {
-            requestBody[`start_date_${setNum}`] = scope.timeframe.from;
-            requestBody[`end_date_${setNum}`] = scope.timeframe.to;
-          }
-        } else {
-          console.warn(`⚠️ Scope ${setNum} has no valid identifier filters, skipping`);
+        requestBody[`identifier_filters_${setNum}`] = identifierFilters;
+        if (scope.timeframe.from && scope.timeframe.to) {
+          requestBody[`start_date_${setNum}`] = scope.timeframe.from;
+          requestBody[`end_date_${setNum}`] = scope.timeframe.to;
         }
       });
 
@@ -183,19 +159,6 @@ const ScopeSelectorCanvas: React.FC<ScopeSelectorCanvasProps> = ({ data, onDataC
           pct_column: data.criteria.pctColumn
         };
       }
-
-      // Validate that we have at least one scope with identifier filters
-      const hasValidFilters = Object.keys(requestBody).some(key => 
-        key.startsWith('identifier_filters_') && 
-        Object.keys(requestBody[key]).length > 0
-      );
-
-      if (!hasValidFilters) {
-        throw new Error('No valid identifier filters found. Please ensure at least one scope has selected identifier values.');
-      }
-
-      // Debug log the final request body
-      console.log('🔍 Final request body:', requestBody);
 
       const response = await fetch(`${SCOPE_SELECTOR_API}/scopes/${scopeId}/create-multi-filtered-scope`, {
         method: 'POST',

@@ -1,11 +1,21 @@
-from fastapi import APIRouter, HTTPException, Query, Body
+from fastapi import APIRouter, HTTPException, Query, Body, Request
 from typing import List, Optional
 import datetime
 import time
 import pandas as pd
 import io
+import os
 from minio.error import S3Error
-from .database import column_coll, cluster_coll
+from .database import (
+    column_coll, 
+    cluster_coll,
+    save_clustering_config,
+    save_clustering_results,
+    save_clustering_metadata,
+    get_clustering_config_from_mongo,
+    get_clustering_results_from_mongo,
+    get_clustering_metadata_from_mongo
+)
 from .schemas import (
     FilterPayload, 
     ClusteringRequest, 
@@ -19,26 +29,54 @@ from .clustering_logic import (
     check_bucket_and_file,
     load_csv_from_minio, 
     cluster_dataframe, 
+    cluster_dataframe_with_auto_save,
     parse_minio_path,
     apply_identifier_filters,
     apply_measure_filters,
     calculate_cluster_stats,
     get_unique_values, 
     get_output_dataframe, 
-    get_object_prefix
+    get_object_prefix,
+    auto_save_clustering_data
 )
 from .config import settings
 from fastapi.responses import StreamingResponse
 import uuid
 import pyarrow as pa
 import pyarrow.ipc as ipc
+import json
 
 router = APIRouter()
 
 @router.get("/")
 async def root():
     """Root endpoint for clustering backend."""
-    return {"message": "Clustering backend is running", "endpoints": ["/ping", "/test", "/available-dates", "/debug-columns", "/filter-and-cluster", "/unique_values", "/export_csv", "/export_excel", "/save", "/rename"]}
+    return {
+        "message": "Clustering backend is running", 
+        "endpoints": [
+            "/ping", 
+            "/test", 
+            "/available-dates", 
+            "/debug-columns", 
+            "/filter-and-cluster", 
+            "/unique_values", 
+            "/export_csv", 
+            "/export_excel", 
+            "/save", 
+            "/rename",
+            "/save_clustering_config",
+            "/save_clustering_results",
+            "/save_clustering_metadata",
+            "/save-config-mongo",
+            "/save-results-mongo", 
+            "/save-metadata-mongo",
+            "/get-config-mongo",
+            "/get-results-mongo",
+            "/get-metadata-mongo",
+            "/test-mongo",
+            "/test-auto-save"
+        ]
+    }
 
 @router.get("/ping")
 async def ping():
@@ -390,7 +428,70 @@ async def filter_and_cluster(request: FilterAndClusterRequest):
         print(f"🔍 Legacy use_elbow: {request.use_elbow}")
         
         try:
-            labels = cluster_dataframe(df, request)
+            # Auto-save clustering configuration before running algorithm
+            config_data = {
+                "algorithm": request.algorithm,
+                "k_selection": request.k_selection,
+                "n_clusters": request.n_clusters,
+                "k_min": request.k_min,
+                "k_max": request.k_max,
+                "eps": request.eps,
+                "min_samples": request.min_samples,
+                "linkage": request.linkage,
+                "threshold": request.threshold,
+                "covariance_type": request.covariance_type,
+                "random_state": request.random_state,
+                "n_init": request.n_init,
+                "identifier_columns": request.identifier_columns,
+                "measure_columns": request.measure_columns,
+                "filters_applied": filters_applied,
+                "file_path": request.file_path,
+                "timestamp": datetime.datetime.utcnow().isoformat()
+            }
+            
+            # Get environment variables for auto-save
+            client_name = os.getenv("CLIENT_NAME", "default_client")
+            app_name = os.getenv("APP_NAME", "default_app")
+            project_name = os.getenv("PROJECT_NAME", "default_project")
+            user_id = os.getenv("USER_ID", "")
+            
+            # Handle PROJECT_ID - it should be a numeric ID, not a string
+            # If PROJECT_ID is set to a string like "New Forecasting Analysis Project 2_10",
+            # that should actually be PROJECT_NAME, not PROJECT_ID
+            project_id_env = os.getenv("PROJECT_ID")
+            if project_id_env and project_id_env.isdigit():
+                project_id = int(project_id_env)
+            else:
+                # If PROJECT_ID is not a valid number, it might be a project name
+                # In that case, use it as project_name and set project_id to None
+                if project_id_env and not project_id_env.isdigit():
+                    print(f"⚠️ Warning: PROJECT_ID environment variable contains non-numeric value: '{project_id_env}'")
+                    print(f"⚠️ This should probably be PROJECT_NAME instead of PROJECT_ID")
+                    print(f"⚠️ Setting project_id to None and using '{project_id_env}' as project_name")
+                    project_name = project_id_env
+                project_id = None
+            
+            # Auto-save configuration
+            await auto_save_clustering_data(
+                client_name=client_name,
+                app_name=app_name,
+                project_name=project_name,
+                operation_type="config",
+                clustering_data=config_data,
+                user_id=user_id,
+                project_id=project_id
+            )
+            
+            # Run clustering with auto-save
+            labels = await cluster_dataframe_with_auto_save(
+                df, 
+                request, 
+                client_name=client_name,
+                app_name=app_name,
+                project_name=project_name,
+                user_id=user_id,
+                project_id=project_id
+            )
             print(f"✅ Clustering completed successfully. Labels shape: {labels.shape}")
         except Exception as e:
             print(f"❌ Clustering algorithm failed: {str(e)}")
@@ -417,38 +518,8 @@ async def filter_and_cluster(request: FilterAndClusterRequest):
             preview_data = output_data[:request.preview_limit]
             print(f"✅ Preview data created with {len(preview_data)} rows from output data")
 
-        metadata = {
-            "input_path": request.file_path,
-            "filtered_file_path": None,  # No automatic saving
-            "clustered_file_path": None,  # No automatic saving
-            "original_rows": original_rows,
-            "filtered_rows": filtered_rows,
-            "filters_applied": filters_applied,
-            "algorithm": request.algorithm,
-            "params": {
-                # K-selection parameters
-                "k_selection": request.k_selection,
-                "n_clusters": request.n_clusters,
-                "k_min": request.k_min,
-                "k_max": request.k_max,
-                "gap_b": request.gap_b,
-                "use_elbow": request.use_elbow,
-                
-                # Algorithm-specific parameters
-                "eps": request.eps,
-                "min_samples": request.min_samples,
-                "linkage": request.linkage,
-                "threshold": request.threshold,
-                "covariance_type": getattr(request, 'covariance_type', 'full'),
-                
-                # Performance parameters
-                "random_state": getattr(request, 'random_state', 0),
-                "n_init": getattr(request, 'n_init', 10)
-            },
-            "timestamp": datetime.datetime.utcnow()
-        }
-
-        await cluster_coll.insert_one(metadata)
+        # Metadata is now handled by auto-save functions - no need for duplicate saving
+        print("ℹ️ Metadata saving handled by auto-save functions")
 
         print("🔍 ===== CREATING RESPONSE =====")
 
@@ -471,6 +542,36 @@ async def filter_and_cluster(request: FilterAndClusterRequest):
         # Validate response against schema
         validated_response = FilterAndClusterResponse(**response_data.model_dump())
         print("✅ Response validation: PASSED - Schema validation successful")
+        
+        # Auto-save final clustering results
+        try:
+            final_results_data = {
+                "input_path": request.file_path,  # The file used for clustering
+                "algorithm": request.algorithm,
+                "n_clusters_found": len(cluster_stats),
+                "cluster_stats": cluster_stats,
+                "cluster_sizes": cluster_sizes,
+                "data_shape": df.shape,
+                "processing_time": time.time() - start_time,
+                "filters_applied": filters_applied,
+                "columns_used": df.columns.tolist(),
+                "timestamp": datetime.datetime.utcnow().isoformat()
+            }
+            
+            # Auto-save final results
+            await auto_save_clustering_data(
+                client_name=client_name,
+                app_name=app_name,
+                project_name=project_name,
+                operation_type="results",
+                clustering_data=final_results_data,
+                user_id=user_id,
+                project_id=project_id
+            )
+            
+            print(f"✅ Final results auto-saved to MongoDB")
+        except Exception as e:
+            print(f"⚠️ Auto-save of final results failed: {str(e)}")
 
         print(f"📤 Response Summary:")
         print(f"   📊 Original Rows: {response_data.original_rows}")
@@ -874,3 +975,436 @@ async def save_clustering_dataframe(
     except Exception as e:
         print(f"⚠️ save_clustering_dataframe error: {e}")
         raise HTTPException(status_code=400, detail=str(e))
+
+
+# ── 11. Save clustering config ────────────────────────────────────────────
+@router.post("/save_clustering_config")
+async def save_clustering_config_endpoint(
+    request: Request,
+    config_data: str = Body(..., embed=True),
+    filename: str = Body("", embed=True)
+):
+    """Save clustering configuration to MinIO."""
+    try:
+        # 1. Load config data from JSON payload
+        config_dict = json.loads(config_data)
+
+        # 2. Determine output filename with standard prefix
+        if not filename:
+            clustering_id = str(uuid.uuid4())[:8]
+            filename = f"{clustering_id}_clustering_config.json"
+        if not filename.endswith(".json"):
+            filename += ".json"
+            
+        # Get standard prefix and create full path (following concat atom pattern exactly)
+        prefix = await get_object_prefix()
+        filename = f"{prefix}clustering-data/{filename}"
+        print(f"🔍 Filename: {filename}")
+
+        # 3. Convert to JSON bytes
+        json_bytes = json.dumps(config_dict).encode('utf-8')
+
+        # 4. Upload to MinIO & cache in Redis
+        minio_client = get_minio_client()
+        minio_client.put_object(
+            settings.minio_bucket,
+            filename,
+            data=io.BytesIO(json_bytes),
+            length=len(json_bytes),
+            content_type="application/json",
+        )
+        
+        # Cache in Redis for 1 hour
+        try:
+            import redis
+            redis_client = redis.Redis(host='localhost', port=6379, db=0, decode_responses=False)
+            redis_client.setex(filename, 3600, json_bytes)
+            print(f"✅ Cached clustering config in Redis: {filename}")
+        except Exception as e:
+            print(f"⚠️ Redis caching failed: {e}")
+
+        return {
+            "result_file": filename,
+            "message": "Clustering config saved successfully"
+        }
+    except Exception as e:
+        print(f"⚠️ save_clustering_config_endpoint error: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+# ── 12. Save clustering results ────────────────────────────────────────────
+@router.post("/save_clustering_results")
+async def save_clustering_results_endpoint(
+    request: Request,
+    results_data: str = Body(..., embed=True),
+    filename: str = Body("", embed=True)
+):
+    """Save clustering results to MinIO."""
+    try:
+        # 1. Load results data from JSON payload
+        results_dict = json.loads(results_data)
+
+        # 2. Determine output filename with standard prefix
+        if not filename:
+            clustering_id = str(uuid.uuid4())[:8]
+            filename = f"{clustering_id}_clustering_results.json"
+        if not filename.endswith(".json"):
+            filename += ".json"
+            
+        # Get standard prefix and create full path (following concat atom pattern exactly)
+        prefix = await get_object_prefix()
+        filename = f"{prefix}clustering-data/{filename}"
+        print(f"🔍 Filename: {filename}")
+
+        # 3. Convert to JSON bytes
+        json_bytes = json.dumps(results_dict).encode('utf-8')
+
+        # 4. Upload to MinIO & cache in Redis
+        minio_client = get_minio_client()
+        minio_client.put_object(
+            settings.minio_bucket,
+            filename,
+            data=io.BytesIO(json_bytes),
+            length=len(json_bytes),
+            content_type="application/json",
+        )
+        
+        # Cache in Redis for 1 hour
+        try:
+            import redis
+            redis_client = redis.Redis(host='localhost', port=6379, db=0, decode_responses=False)
+            redis_client.setex(filename, 3600, json_bytes)
+            print(f"✅ Cached clustering results in Redis: {filename}")
+        except Exception as e:
+            print(f"⚠️ Redis caching failed: {e}")
+
+        return {
+            "result_file": filename,
+            "message": "Clustering results saved successfully"
+        }
+    except Exception as e:
+        print(f"⚠️ save_clustering_results_endpoint error: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+# ── 13. Save clustering metadata ────────────────────────────────────────────
+@router.post("/save_clustering_metadata")
+async def save_clustering_metadata_endpoint(
+    request: Request,
+    metadata_data: str = Body(..., embed=True),
+    filename: str = Body("", embed=True)
+):
+    """Save clustering metadata to MinIO."""
+    try:
+        # 1. Load metadata data from JSON payload
+        metadata_dict = json.loads(metadata_data)
+
+        # 2. Determine output filename with standard prefix
+        if not filename:
+            clustering_id = str(uuid.uuid4())[:8]
+            filename = f"{clustering_id}_clustering_metadata.json"
+        if not filename.endswith(".json"):
+            filename += ".json"
+            
+        # Get standard prefix and create full path (following concat atom pattern exactly)
+        prefix = await get_object_prefix()
+        filename = f"{prefix}clustering-data/{filename}"
+        print(f"🔍 Filename: {filename}")
+
+        # 3. Convert to JSON bytes
+        json_bytes = json.dumps(metadata_dict).encode('utf-8')
+
+        # 4. Upload to MinIO & cache in Redis
+        minio_client = get_minio_client()
+        minio_client.put_object(
+            settings.minio_bucket,
+            filename,
+            data=io.BytesIO(json_bytes),
+            length=len(json_bytes),
+            content_type="application/json",
+        )
+        
+        # Cache in Redis for 1 hour
+        try:
+            import redis
+            redis_client = redis.Redis(host='localhost', port=6379, db=0, decode_responses=False)
+            redis_client.setex(filename, 3600, json_bytes)
+            print(f"✅ Cached clustering metadata in Redis: {filename}")
+        except Exception as e:
+            print(f"⚠️ Redis caching failed: {e}")
+
+        return {
+            "result_file": filename,
+            "message": "Clustering metadata saved successfully"
+        }
+    except Exception as e:
+        print(f"⚠️ save_clustering_metadata_endpoint error: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+# ── 14. Save clustering configuration to MongoDB ────────────────────────────────────────────
+@router.post("/save-config-mongo")
+async def save_clustering_configuration_mongo(
+    request: Request,
+    client_name: str = Query(..., description="Client name"),
+    app_name: str = Query(..., description="App name"),
+    project_name: str = Query(..., description="Project name"),
+    user_id: str = Query("", description="User ID"),
+    project_id: int = Query(None, description="Project ID")
+):
+    """Save clustering configuration data to MongoDB - used by SAVE CONFIG button"""
+    print(f"🔍 DEBUG: /save-config-mongo endpoint called")
+    print(f"🔍 DEBUG: client_name = {client_name}")
+    print(f"🔍 DEBUG: app_name = {app_name}")
+    print(f"🔍 DEBUG: project_name = {project_name}")
+    print(f"🔍 DEBUG: user_id = {user_id}")
+    print(f"🔍 DEBUG: project_id = {project_id}")
+    
+    try:
+        # Get the request body
+        body = await request.json()
+        print(f"🔍 DEBUG: request body = {body}")
+        
+        # Save clustering configuration data
+        result = await save_clustering_config(
+            client_name=client_name,
+            app_name=app_name,
+            project_name=project_name,
+            clustering_data=body,
+            user_id=user_id,
+            project_id=project_id
+        )
+        
+        print(f"🔍 DEBUG: save_clustering_config result = {result}")
+        
+        if result["status"] == "success":
+            return {
+                "success": True,
+                "message": f"Clustering configuration saved successfully",
+                "mongo_id": result["mongo_id"],
+                "operation": result["operation"],
+                "collection": result["collection"]
+            }
+        else:
+            raise HTTPException(status_code=500, detail=f"Failed to save clustering configuration: {result['error']}")
+            
+    except Exception as e:
+        print(f"Error saving clustering configuration: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to save clustering configuration: {str(e)}")
+
+
+# ── 15. Save clustering results to MongoDB ────────────────────────────────────────────
+@router.post("/save-results-mongo")
+async def save_clustering_results_mongo(
+    request: Request,
+    client_name: str = Query(..., description="Client name"),
+    app_name: str = Query(..., description="App name"),
+    project_name: str = Query(..., description="Project name"),
+    user_id: str = Query("", description="User ID"),
+    project_id: int = Query(None, description="Project ID")
+):
+    """Save clustering results data to MongoDB - used by SAVE RESULTS button"""
+    print(f"🔍 DEBUG: /save-results-mongo endpoint called")
+    print(f"🔍 DEBUG: client_name = {client_name}")
+    print(f"🔍 DEBUG: app_name = {app_name}")
+    print(f"🔍 DEBUG: project_name = {project_name}")
+    print(f"🔍 DEBUG: user_id = {user_id}")
+    print(f"🔍 DEBUG: project_id = {project_id}")
+    
+    try:
+        # Get the request body
+        body = await request.json()
+        print(f"🔍 DEBUG: request body = {body}")
+        
+        # Save clustering results data
+        result = await save_clustering_results(
+            client_name=client_name,
+            app_name=app_name,
+            project_name=project_name,
+            clustering_results=body,
+            user_id=user_id,
+            project_id=project_id
+        )
+        
+        print(f"🔍 DEBUG: save_clustering_results result = {result}")
+        
+        if result["status"] == "success":
+            return {
+                "success": True,
+                "message": f"Clustering results saved successfully",
+                "mongo_id": result["mongo_id"],
+                "operation": result["operation"],
+                "collection": result["collection"]
+            }
+        else:
+            raise HTTPException(status_code=500, detail=f"Failed to save clustering results: {result['error']}")
+            
+    except Exception as e:
+        print(f"Error saving clustering results: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to save clustering results: {str(e)}")
+
+
+# ── 16. Save clustering metadata to MongoDB ────────────────────────────────────────────
+@router.post("/save-metadata-mongo")
+async def save_clustering_metadata_mongo(
+    request: Request,
+    client_name: str = Query(..., description="Client name"),
+    app_name: str = Query(..., description="App name"),
+    project_name: str = Query(..., description="Project name"),
+    user_id: str = Query(..., description="User ID"),
+    project_id: int = Query(None, description="Project ID")
+):
+    """Save clustering metadata to MongoDB - used for tracking operations"""
+    print(f"🔍 DEBUG: /save-metadata-mongo endpoint called")
+    print(f"🔍 DEBUG: client_name = {client_name}")
+    print(f"🔍 DEBUG: app_name = {app_name}")
+    print(f"🔍 DEBUG: project_name = {project_name}")
+    print(f"🔍 DEBUG: user_id = {user_id}")
+    print(f"🔍 DEBUG: project_id = {project_id}")
+    
+    try:
+        # Get the request body
+        body = await request.json()
+        print(f"🔍 DEBUG: request body = {body}")
+        
+        # Save clustering metadata
+        result = await save_clustering_metadata(
+            client_name=client_name,
+            app_name=app_name,
+            project_name=project_name,
+            metadata=body,
+            user_id=user_id,
+            project_id=project_id
+        )
+        
+        print(f"🔍 DEBUG: save_clustering_metadata result = {result}")
+        
+        if result["status"] == "success":
+            return {
+                "success": True,
+                "message": f"Clustering metadata saved successfully",
+                "mongo_id": result["mongo_id"],
+                "operation": result["operation"],
+                "collection": result["collection"]
+            }
+        else:
+            raise HTTPException(status_code=500, detail=f"Failed to save clustering metadata: {result['error']}")
+            
+    except Exception as e:
+        print(f"Error saving clustering metadata: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to save clustering metadata: {str(e)}")
+
+
+# ── 17. Get clustering configuration from MongoDB ────────────────────────────────────────────
+@router.get("/get-config-mongo")
+async def get_clustering_configuration_mongo(
+    client_name: str = Query(..., description="Client name"),
+    app_name: str = Query(..., description="App name"),
+    project_name: str = Query(..., description="Project name")
+):
+    """Retrieve saved clustering configuration from MongoDB."""
+    try:
+        result = await get_clustering_config_from_mongo(client_name, app_name, project_name)
+        
+        if result:
+            return {
+                "success": True,
+                "data": result
+            }
+        else:
+            return {
+                "success": False,
+                "message": "No clustering configuration found",
+                "data": None
+            }
+            
+    except Exception as e:
+        print(f"Error retrieving clustering configuration: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve clustering configuration: {str(e)}")
+
+
+# ── 18. Get clustering results from MongoDB ────────────────────────────────────────────
+@router.get("/get-results-mongo")
+async def get_clustering_results_mongo(
+    client_name: str = Query(..., description="Client name"),
+    app_name: str = Query(..., description="App name"),
+    project_name: str = Query(..., description="Project name")
+):
+    """Retrieve saved clustering results from MongoDB."""
+    try:
+        result = await get_clustering_results_from_mongo(client_name, app_name, project_name)
+        
+        if result:
+            return {
+                "success": True,
+                "data": result
+            }
+        else:
+            return {
+                "success": False,
+                "message": "No clustering results found",
+                "data": None
+            }
+            
+    except Exception as e:
+        print(f"Error retrieving clustering results: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve clustering results: {str(e)}")
+
+
+# ── 19. Get clustering metadata from MongoDB ────────────────────────────────────────────
+@router.get("/get-metadata-mongo")
+async def get_clustering_metadata_mongo(
+    client_name: str = Query(..., description="Client name"),
+    app_name: str = Query(..., description="App name"),
+    project_name: str = Query(..., description="Project name"),
+    limit: int = Query(10, description="Number of metadata entries to retrieve")
+):
+    """Retrieve clustering metadata history from MongoDB."""
+    try:
+        results = await get_clustering_metadata_from_mongo(client_name, app_name, project_name, limit)
+        
+        return {
+            "success": True,
+            "data": results,
+            "count": len(results)
+        }
+            
+    except Exception as e:
+        print(f"Error retrieving clustering metadata: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve clustering metadata: {str(e)}")
+
+
+# ── 20. Test MongoDB connection ────────────────────────────────────────────
+@router.get("/test-mongo")
+async def test_mongo_connection():
+    """Test MongoDB connection and list databases"""
+    try:
+        from .database import client
+        print(f"🔍 DEBUG: Testing MongoDB connection")
+        
+        # List all databases
+        databases = await client.list_database_names()
+        print(f"🔍 DEBUG: Available databases: {databases}")
+        
+        # Check if trinity_prod exists
+        if "trinity_prod" in databases:
+            print(f"🔍 DEBUG: trinity_prod database exists")
+            # List collections in trinity_prod
+            collections = await client["trinity_prod"].list_collection_names()
+            print(f"🔍 DEBUG: Collections in trinity_prod: {collections}")
+        else:
+            print(f"🔍 DEBUG: trinity_prod database does not exist")
+        
+        return {
+            "success": True,
+            "databases": databases,
+            "trinity_prod_exists": "trinity_prod" in databases,
+            "collections_in_trinity_prod": collections if "trinity_prod" in databases else []
+        }
+        
+    except Exception as e:
+        print(f"Error testing MongoDB connection: {str(e)}")
+        return {
+            "success": False,
+            "error": str(e)
+        }

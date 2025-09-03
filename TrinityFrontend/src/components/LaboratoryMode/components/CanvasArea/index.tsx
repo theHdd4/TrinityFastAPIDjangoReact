@@ -349,6 +349,39 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
     }
   };
 
+  const prefillScopeSelector = async (atomId: string) => {
+    const prev = await findLatestDataSource();
+    if (!prev || !prev.csv) {
+      console.warn('⚠️ no data source found for scope selector');
+      return;
+    }
+    await prefetchDataframe(prev.csv);
+    const rawMapping = await fetchDimensionMapping();
+    const identifiers = Object.entries(rawMapping || {})
+      .filter(
+        ([k]) =>
+          k.toLowerCase() !== 'unattributed' &&
+          k.toLowerCase() !== 'unattributed_dimensions'
+      )
+      .flatMap(([, v]) => v)
+      .filter(Boolean);
+    const allColumns = Array.isArray(prev.summary) ? prev.summary.filter(Boolean) : [];
+    const allCats = allColumns
+      .filter(col => {
+        const dataType = col.data_type?.toLowerCase() || '';
+        return (dataType === 'object' || dataType === 'category') && col.column;
+      })
+      .map(col => col.column);
+    const selected = identifiers.filter(id => allCats.includes(id));
+    console.log('✅ pre-filling scope selector with', prev.csv);
+    updateAtomSettings(atomId, {
+      dataSource: prev.csv,
+      allColumns,
+      availableIdentifiers: allCats,
+      selectedIdentifiers: selected,
+    });
+  };
+
   // Load saved layout and workflow rendering
   useEffect(() => {
     let initialCards: LayoutCard[] | null = null;
@@ -436,10 +469,14 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
             ? raw.map((c: any) => ({
                 id: c.id,
                 atoms: Array.isArray(c.atoms)
-                  ? c.atoms.map((a: any) => ({
-                      ...a,
-                      llm: a.llm || LLM_MAP[a.atomId],
-                    }))
+                  ? c.atoms.map((a: any) => {
+                      const info = allAtoms.find(at => at.id === a.atomId);
+                      return {
+                        ...a,
+                        llm: a.llm || LLM_MAP[a.atomId],
+                        color: a.color || info?.color || 'bg-gray-400',
+                      };
+                    })
                   : [],
                 isExhibited: !!c.isExhibited,
                 moleculeId: c.moleculeId,
@@ -584,6 +621,8 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
         prefillFeatureOverview(cardId, newAtom.id);
       } else if (atom.id === 'column-classifier') {
         prefillColumnClassifier(newAtom.id);
+      } else if (atom.id === 'scope-selector') {
+        prefillScopeSelector(newAtom.id);
       }
     }
   };
@@ -663,6 +702,8 @@ const addNewCardWithAtom = (
     prefillFeatureOverview(newCard.id, newAtom.id);
   } else if (atomId === 'column-classifier') {
     prefillColumnClassifier(newAtom.id);
+  } else if (atomId === 'scope-selector') {
+    prefillScopeSelector(newAtom.id);
   }
 };
 
@@ -756,6 +797,8 @@ const handleAddDragLeave = (e: React.DragEvent) => {
       prefillFeatureOverview(cardId, newAtom.id);
     } else if (info.id === 'column-classifier') {
       prefillColumnClassifier(newAtom.id);
+    } else if (info.id === 'scope-selector') {
+      prefillScopeSelector(newAtom.id);
     }
   };
 
@@ -866,6 +909,8 @@ const handleAddDragLeave = (e: React.DragEvent) => {
         await prefillFeatureOverview(cardId, atom.id);
       } else if (atom.atomId === 'column-classifier') {
         await prefillColumnClassifier(atom.id);
+      } else if (atom.atomId === 'scope-selector') {
+        await prefillScopeSelector(atom.id);
       }
     }
   };

@@ -38,7 +38,7 @@ import { DATAFRAME_OPERATIONS_API, VALIDATE_API } from '@/lib/api';
   loadDataframeByKey,
 } from '../services/dataframeOperationsApi';
 import { toast } from '@/components/ui/use-toast';
-import '@/Templates/Table/table.css';
+import '@/templates/tables/table.css';
 
 interface DataFrameOperationsCanvasProps {
   data: DataFrameData | null;

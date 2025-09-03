@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
+import "./chart.css";
 import {
   BarChart,
   Bar,
