@@ -1665,8 +1665,8 @@ async def select_and_save_model_generic(selection_req: GenericModelSelectionRequ
             # Get combination_id for creating unique _id
             combination_id = cleaned_dict.get("combination_id") or cleaned_dict.get("Combination_ID") or cleaned_dict.get("combination") or "unknown"
             
-            # Create unique _id like build atom: client_name/app_name/project_name/combination_id
-            document_id = f"{client_name}/{app_name}/{project_name}/{combination_id}"
+            # Create unique _id like build atom: client_name/app_name/project_name (without combination_id)
+            document_id = f"{client_name}/{app_name}/{project_name}"
             
             # Prepare document for select_configs collection with client/app/project structure
             select_config_document = {
@@ -1678,45 +1678,13 @@ async def select_and_save_model_generic(selection_req: GenericModelSelectionRequ
                 "app_name": app_name,
                 "project_name": project_name,
                 
-                # Metadata from the selection - use get() with fallbacks
-                "combination_id": combination_id,
-                "scope": cleaned_dict.get("Scope") or cleaned_dict.get("scope") or cleaned_dict.get("scope_name") or "unknown",
-                "y_variable": cleaned_dict.get("y_variable") or cleaned_dict.get("Y_Variable") or cleaned_dict.get("target") or "unknown",
-                "x_variables": cleaned_dict.get("x_variables") or cleaned_dict.get("X_Variables") or cleaned_dict.get("features") or "unknown",
-                "model_name": cleaned_dict.get("model_name") or cleaned_dict.get("Model_Name") or cleaned_dict.get("Model") or "unknown",
-                
-                # Model performance metrics - use get() with fallbacks
-                "mape_train": cleaned_dict.get("mape_train") or cleaned_dict.get("MAPE_Train") or cleaned_dict.get("train_mape") or None,
-                "mape_test": cleaned_dict.get("mape_test") or cleaned_dict.get("MAPE_Test") or cleaned_dict.get("test_mape") or None,
-                "r2_train": cleaned_dict.get("r2_train") or cleaned_dict.get("R2_Train") or cleaned_dict.get("train_r2") or None,
-                "r2_test": cleaned_dict.get("r2_test") or cleaned_dict.get("R2_Test") or cleaned_dict.get("test_r2") or None,
-                "aic": cleaned_dict.get("aic") or cleaned_dict.get("AIC") or None,
-                "bic": cleaned_dict.get("bic") or cleaned_dict.get("BIC") or None,
-                "intercept": cleaned_dict.get("intercept") or cleaned_dict.get("Intercept") or None,
-                "n_parameters": cleaned_dict.get("n_parameters") or cleaned_dict.get("N_Parameters") or cleaned_dict.get("parameters") or None,
-                "price_elasticity": cleaned_dict.get("price_elasticity") or cleaned_dict.get("Price_Elasticity") or cleaned_dict.get("elasticity") or None,
-                
-                # Additional metadata
-                "run_id": cleaned_dict.get("run_id") or cleaned_dict.get("Run_ID") or cleaned_dict.get("run") or None,
-                "timestamp": cleaned_dict.get("timestamp") or cleaned_dict.get("Timestamp") or cleaned_dict.get("date") or None,
-                "source_file": selection_req.file_key,
-                "selection_criteria": {
-                    "row_index": selection_req.row_index,
-                    "filter_criteria": selection_req.filter_criteria
-                },
-                "tags": selection_req.tags,
-                "description": selection_req.description,
-                
                 # Timestamps
                 "created_at": datetime.now(),
                 "updated_at": datetime.now(),
                 
                 # Reference to the saved model
                 "saved_model_id": str(result.inserted_id),
-                "saved_model_collection": "saved_models_generic",
-                
-                # Store the complete cleaned_dict for reference
-                "complete_model_data": cleaned_dict
+                "saved_model_collection": "saved_models_generic"
             }
             
             # Get the select_configs collection dynamically
@@ -1725,28 +1693,146 @@ async def select_and_save_model_generic(selection_req: GenericModelSelectionRequ
                 logger.error("❌ Failed to get select_configs collection - cannot save metadata")
                 raise Exception("Select configs collection not available")
             
-            # Use replace_one with upsert=True like scope selector atom
-            result_select = await select_configs_coll.replace_one(
-                {"_id": document_id},
-                select_config_document,
-                upsert=True
-            )
+            # Check if document already exists to append results like build atom
+            existing_doc = await select_configs_coll.find_one({"_id": document_id})
             
-            # Determine operation type like scope selector
-            operation = "inserted" if result_select.upserted_id else "updated"
+            if existing_doc:
+                # Merge new data with existing data instead of replacing
+                merged_document = existing_doc.copy()
+                
+                # Update timestamp
+                merged_document["updated_at"] = datetime.now()
+                
+                # Initialize combinations array if it doesn't exist
+                if "combinations" not in merged_document:
+                    merged_document["combinations"] = []
+                
+                # Check if this combination already exists
+                existing_combination = None
+                for combo in merged_document["combinations"]:
+                    if combo.get("combination_id") == combination_id:
+                        existing_combination = combo
+                        break
+                
+                if existing_combination:
+                    # Update existing combination with new results
+                    existing_combination.update({
+                        "scope": cleaned_dict.get("Scope") or cleaned_dict.get("scope") or cleaned_dict.get("scope_name") or "unknown",
+                        "y_variable": cleaned_dict.get("y_variable") or cleaned_dict.get("Y_Variable") or cleaned_dict.get("target") or "unknown",
+                        "x_variables": cleaned_dict.get("x_variables") or cleaned_dict.get("X_Variables") or cleaned_dict.get("features") or "unknown",
+                        "model_name": cleaned_dict.get("model_name") or cleaned_dict.get("Model_Name") or cleaned_dict.get("Model") or "unknown",
+                        "mape_train": cleaned_dict.get("mape_train") or cleaned_dict.get("MAPE_Train") or cleaned_dict.get("train_mape") or None,
+                        "mape_test": cleaned_dict.get("mape_test") or cleaned_dict.get("MAPE_Test") or cleaned_dict.get("test_mape") or None,
+                        "r2_train": cleaned_dict.get("r2_train") or cleaned_dict.get("R2_Train") or cleaned_dict.get("train_r2") or None,
+                        "r2_test": cleaned_dict.get("r2_test") or cleaned_dict.get("R2_Test") or cleaned_dict.get("test_r2") or None,
+                        "aic": cleaned_dict.get("aic") or cleaned_dict.get("AIC") or None,
+                        "bic": cleaned_dict.get("bic") or cleaned_dict.get("BIC") or None,
+                        "intercept": cleaned_dict.get("intercept") or cleaned_dict.get("Intercept") or None,
+                        "n_parameters": cleaned_dict.get("n_parameters") or cleaned_dict.get("N_Parameters") or cleaned_dict.get("parameters") or None,
+                        "price_elasticity": cleaned_dict.get("price_elasticity") or cleaned_dict.get("Price_Elasticity") or cleaned_dict.get("elasticity") or None,
+                        "run_id": cleaned_dict.get("run_id") or cleaned_dict.get("Run_ID") or cleaned_dict.get("run") or None,
+                        "timestamp": cleaned_dict.get("timestamp") or cleaned_dict.get("Timestamp") or cleaned_dict.get("date") or None,
+                        "source_file": selection_req.file_key,
+                        "selection_criteria": {
+                            "row_index": selection_req.row_index,
+                            "filter_criteria": selection_req.filter_criteria
+                        },
+                        "tags": selection_req.tags,
+                        "description": selection_req.description,
+                        "complete_model_data": cleaned_dict,
+                        "updated_at": datetime.now()
+                    })
+                    logger.info(f"✅ Updated existing combination {combination_id} in document")
+                else:
+                    # Add new combination to the array
+                    new_combination = {
+                        "combination_id": combination_id,
+                        "scope": cleaned_dict.get("Scope") or cleaned_dict.get("scope") or cleaned_dict.get("scope_name") or "unknown",
+                        "y_variable": cleaned_dict.get("y_variable") or cleaned_dict.get("Y_Variable") or cleaned_dict.get("target") or "unknown",
+                        "x_variables": cleaned_dict.get("x_variables") or cleaned_dict.get("X_Variables") or cleaned_dict.get("features") or "unknown",
+                        "model_name": cleaned_dict.get("model_name") or cleaned_dict.get("Model_Name") or cleaned_dict.get("Model") or "unknown",
+                        "mape_train": cleaned_dict.get("mape_train") or cleaned_dict.get("MAPE_Train") or cleaned_dict.get("train_mape") or None,
+                        "mape_test": cleaned_dict.get("mape_test") or cleaned_dict.get("MAPE_Test") or cleaned_dict.get("test_mape") or None,
+                        "r2_train": cleaned_dict.get("r2_train") or cleaned_dict.get("R2_Train") or cleaned_dict.get("train_r2") or None,
+                        "r2_test": cleaned_dict.get("r2_test") or cleaned_dict.get("R2_Test") or cleaned_dict.get("test_r2") or None,
+                        "aic": cleaned_dict.get("aic") or cleaned_dict.get("AIC") or None,
+                        "bic": cleaned_dict.get("bic") or cleaned_dict.get("BIC") or None,
+                        "intercept": cleaned_dict.get("intercept") or cleaned_dict.get("Intercept") or None,
+                        "n_parameters": cleaned_dict.get("n_parameters") or cleaned_dict.get("N_Parameters") or cleaned_dict.get("parameters") or None,
+                        "price_elasticity": cleaned_dict.get("price_elasticity") or cleaned_dict.get("Price_Elasticity") or cleaned_dict.get("elasticity") or None,
+                        "run_id": cleaned_dict.get("run_id") or cleaned_dict.get("Run_ID") or cleaned_dict.get("run") or None,
+                        "timestamp": cleaned_dict.get("timestamp") or cleaned_dict.get("Timestamp") or cleaned_dict.get("date") or None,
+                        "source_file": selection_req.file_key,
+                        "selection_criteria": {
+                            "row_index": selection_req.row_index,
+                            "filter_criteria": selection_req.filter_criteria
+                        },
+                        "tags": selection_req.tags,
+                        "description": selection_req.description,
+                        "complete_model_data": cleaned_dict,
+                        "created_at": datetime.now(),
+                        "updated_at": datetime.now()
+                    }
+                    merged_document["combinations"].append(new_combination)
+                    logger.info(f"✅ Added new combination {combination_id} to document")
+                
+                # Update the existing document
+                result_select = await select_configs_coll.replace_one(
+                    {"_id": document_id},
+                    merged_document
+                )
+                operation = "updated"
+            else:
+                # Create new document with combinations array
+                select_config_document["combinations"] = [{
+                    "combination_id": combination_id,
+                    "scope": cleaned_dict.get("Scope") or cleaned_dict.get("scope") or cleaned_dict.get("scope_name") or "unknown",
+                    "y_variable": cleaned_dict.get("y_variable") or cleaned_dict.get("Y_Variable") or cleaned_dict.get("target") or "unknown",
+                    "x_variables": cleaned_dict.get("x_variables") or cleaned_dict.get("X_Variables") or cleaned_dict.get("features") or "unknown",
+                    "model_name": cleaned_dict.get("model_name") or cleaned_dict.get("Model_Name") or cleaned_dict.get("Model") or "unknown",
+                    "mape_train": cleaned_dict.get("mape_train") or cleaned_dict.get("MAPE_Train") or cleaned_dict.get("train_mape") or None,
+                    "mape_test": cleaned_dict.get("mape_test") or cleaned_dict.get("MAPE_Test") or cleaned_dict.get("test_mape") or None,
+                    "r2_train": cleaned_dict.get("r2_train") or cleaned_dict.get("R2_Train") or cleaned_dict.get("train_r2") or None,
+                    "r2_test": cleaned_dict.get("r2_test") or cleaned_dict.get("R2_Test") or cleaned_dict.get("test_r2") or None,
+                    "aic": cleaned_dict.get("aic") or cleaned_dict.get("AIC") or None,
+                    "bic": cleaned_dict.get("bic") or cleaned_dict.get("BIC") or None,
+                    "intercept": cleaned_dict.get("intercept") or cleaned_dict.get("Intercept") or None,
+                    "n_parameters": cleaned_dict.get("n_parameters") or cleaned_dict.get("N_Parameters") or cleaned_dict.get("parameters") or None,
+                        "price_elasticity": cleaned_dict.get("price_elasticity") or cleaned_dict.get("Price_Elasticity") or cleaned_dict.get("elasticity") or None,
+                    "run_id": cleaned_dict.get("run_id") or cleaned_dict.get("Run_ID") or cleaned_dict.get("run") or None,
+                    "timestamp": cleaned_dict.get("timestamp") or cleaned_dict.get("Timestamp") or cleaned_dict.get("date") or None,
+                    "source_file": selection_req.file_key,
+                    "selection_criteria": {
+                        "row_index": selection_req.row_index,
+                        "filter_criteria": selection_req.filter_criteria
+                    },
+                    "tags": selection_req.tags,
+                    "description": selection_req.description,
+                    "complete_model_data": cleaned_dict,
+                    "created_at": datetime.now(),
+                    "updated_at": datetime.now()
+                }]
+                
+                # Insert new document
+                result_select = await select_configs_coll.insert_one(select_config_document)
+                operation = "inserted"
+            
+            # Determine operation type
             logger.info(f"✅ Document saved with custom _id: {document_id}")
             logger.info(f"✅ Operation: {operation}")
-            logger.info(f"✅ Upserted ID: {result_select.upserted_id}")
-            logger.info(f"✅ Modified count: {result_select.modified_count}")
+            if operation == "inserted":
+                logger.info(f"✅ Inserted ID: {result_select.inserted_id}")
+            else:
+                logger.info(f"✅ Modified count: {result_select.modified_count}")
             
             # Create index for efficient queries (including client/app/project)
             await select_configs_coll.create_index([("client_name", 1), ("app_name", 1), ("project_name", 1)])
-            await select_configs_coll.create_index([("combination_id", 1)])
-            await select_configs_coll.create_index([("scope", 1)])
-            await select_configs_coll.create_index([("model_name", 1)])
+            await select_configs_coll.create_index([("combinations.combination_id", 1)])
+            await select_configs_coll.create_index([("combinations.scope", 1)])
+            await select_configs_coll.create_index([("combinations.model_name", 1)])
             await select_configs_coll.create_index([("created_at", -1)])
             
-            logger.info(f"✅ Successfully saved to select_configs collection for combination_id: {select_config_document['combination_id']}")
+            logger.info(f"✅ Successfully saved to select_configs collection for combination_id: {combination_id}")
             logger.info(f"✅ Document saved with custom _id: {document_id}")
             logger.info(f"✅ Operation: {operation}")
             logger.info(f"✅ Saved under client: {client_name}, app: {app_name}, project: {project_name}")
@@ -3452,15 +3538,16 @@ async def get_saved_combinations_status(
         
         # Find models saved by this atom for this file
         saved_models = await select_configs_coll.find({
-            "source_file": file_key,
-            "tags": {"$in": [f"select-models-feature-{atom_id}"]}
+            "combinations.source_file": file_key
         }).to_list(length=None)
         
         # Extract combination IDs from saved models
         saved_combination_ids = set()
         for model in saved_models:
-            if "combination_id" in model:
-                saved_combination_ids.add(str(model["combination_id"]))
+            if "combinations" in model:
+                for combination in model["combinations"]:
+                    if combination.get("source_file") == file_key:
+                        saved_combination_ids.add(str(combination.get("combination_id")))
         
         # Get all unique combination IDs from the source file
         if not minio_client:
