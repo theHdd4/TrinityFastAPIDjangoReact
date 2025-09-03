@@ -207,9 +207,6 @@ const Projects = () => {
           baseTemplate: p.base_template || null
         };
         setProjects([...projects, newProject]);
-        clearProjectState();
-        localStorage.setItem('current-project', JSON.stringify(newProject));
-        navigate('/');
       }
     } catch (err) {
       console.error('Create project error', err);
@@ -434,9 +431,6 @@ const Projects = () => {
           t.id === template.id ? { ...t, usageCount: t.usageCount + 1 } : t
         );
         setTemplates(updatedTemplates);
-        clearProjectState();
-        localStorage.setItem('current-project', JSON.stringify(newProject));
-        navigate('/');
       }
     } catch (err) {
       console.error('Use template error', err);
