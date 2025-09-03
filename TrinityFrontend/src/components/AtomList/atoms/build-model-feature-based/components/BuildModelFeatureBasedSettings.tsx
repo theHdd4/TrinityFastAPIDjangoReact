@@ -225,9 +225,7 @@ const BuildModelFeatureBasedSettings: React.FC<BuildModelFeatureBasedSettingsPro
     availableModels.every(model => data?.selectedModels?.includes(model.id));
   
   // Debug logging to ensure the logic works correctly
-  console.log('🔧 Settings: availableModels:', availableModels.map(m => m.id));
-  console.log('🔧 Settings: data.selectedModels:', data?.selectedModels);
-  console.log('🔧 Settings: allModelsSelected:', allModelsSelected);
+  
 
   return (
     <div className="space-y-6">

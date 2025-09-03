@@ -961,7 +961,7 @@ async def train_models_direct(request: dict):
                 project_id=None  # You can add project_id if available
             )
             
-            logger.info(f"🔍 DEBUG: MongoDB save result: {mongo_result}")
+    
             
             if mongo_result["status"] == "success":
                 logger.info(f"📦 Build configuration saved to MongoDB: {mongo_result['mongo_id']}")
@@ -2337,17 +2337,10 @@ async def save_build_data(
     project_id: int = Query(None, description="Project ID")
 ):
     """General save endpoint for build data - used by SAVE button"""
-    logger.info(f"🔍 DEBUG: /save endpoint called")
-    logger.info(f"🔍 DEBUG: client_name = {client_name}")
-    logger.info(f"🔍 DEBUG: app_name = {app_name}")
-    logger.info(f"🔍 DEBUG: project_name = {project_name}")
-    logger.info(f"🔍 DEBUG: user_id = {user_id}")
-    logger.info(f"🔍 DEBUG: project_id = {project_id}")
     
     try:
         # Get the request body
         body = await request.json()
-        logger.info(f"🔍 DEBUG: request body = {body}")
         
         # Save build configuration data
         result = await save_build_config(
@@ -2358,8 +2351,6 @@ async def save_build_data(
             user_id=user_id,
             project_id=project_id
         )
-        
-        logger.info(f"🔍 DEBUG: save_build_config result = {result}")
         
         if result["status"] == "success":
             return {
@@ -2381,20 +2372,16 @@ async def test_mongo_connection():
     """Test MongoDB connection and list databases"""
     try:
         from .mongodb_saver import client
-        logger.info(f"🔍 DEBUG: Testing MongoDB connection")
         
         # List all databases
         databases = await client.list_database_names()
-        logger.info(f"🔍 DEBUG: Available databases: {databases}")
         
         # Check if trinity_prod exists
         if "trinity_prod" in databases:
-            logger.info(f"🔍 DEBUG: trinity_prod database exists")
             # List collections in trinity_prod
             collections = await client["trinity_prod"].list_collection_names()
-            logger.info(f"🔍 DEBUG: Collections in trinity_prod: {collections}")
         else:
-            logger.warning(f"🔍 DEBUG: trinity_prod database does not exist")
+            logger.warning("trinity_prod database does not exist")
         
         return {
             "success": True,

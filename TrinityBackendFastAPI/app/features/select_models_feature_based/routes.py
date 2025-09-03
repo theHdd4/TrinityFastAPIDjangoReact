@@ -1373,11 +1373,9 @@ async def select_and_save_model_generic(selection_req: GenericModelSelectionRequ
             model_name = selection_req.filter_criteria['model_name']
             if 'ensemble' in model_name.lower() or model_name.lower() == 'ensemble':
                 is_ensemble = True
-                logger.info(f"🔍 DEBUG: Detected ensemble model selection: {model_name}")
                 # For ensemble, get the combination_id from filter criteria
                 if 'combination_id' in selection_req.filter_criteria:
                     selected_combination_id = selection_req.filter_criteria['combination_id']
-                    logger.info(f"🔍 DEBUG: Ensemble combination_id: {selected_combination_id}")
                 # For ensemble, we don't need to find existing data, we'll create new
                 model_data = None
             else:
@@ -1470,7 +1468,6 @@ async def select_and_save_model_generic(selection_req: GenericModelSelectionRequ
         # Convert to dictionary and handle special values
         if is_ensemble:
             # For ensemble, fetch the actual ensemble metrics data
-            logger.info(f"🔍 DEBUG: Fetching ensemble metrics for combination_id: {selected_combination_id}")
             
             try:
                 # Create ensemble request to get weighted metrics
@@ -1481,22 +1478,14 @@ async def select_and_save_model_generic(selection_req: GenericModelSelectionRequ
                     filter_criteria={"combination_id": selected_combination_id}
                 )
                 
-                logger.info(f"🔍 DEBUG: Ensemble request: {ensemble_req}")
-                
                 # Call the weighted ensemble endpoint to get actual metrics
                 ensemble_result = await weighted_ensemble(ensemble_req)
                 
-                logger.info(f"🔍 DEBUG: Ensemble result: {ensemble_result}")
-                logger.info(f"🔍 DEBUG: Ensemble result type: {type(ensemble_result)}")
-                
                 if ensemble_result and hasattr(ensemble_result, 'results') and ensemble_result.results:
-                    logger.info(f"🔍 DEBUG: Number of ensemble results: {len(ensemble_result.results)}")
                     ensemble_data = ensemble_result.results[0]  # Get the first (and should be only) result
-                    logger.info(f"🔍 DEBUG: Ensemble data: {ensemble_data}")
                     
                     if hasattr(ensemble_data, 'weighted'):
                         weighted_metrics = ensemble_data.weighted
-                        logger.info(f"🔍 DEBUG: Found ensemble metrics: {weighted_metrics}")
                     else:
                         logger.warning(f"⚠️ WARNING: No 'weighted' attribute in ensemble data")
                         weighted_metrics = {}
@@ -1532,18 +1521,11 @@ async def select_and_save_model_generic(selection_req: GenericModelSelectionRequ
                 }
                 
                 # Add all the weighted metrics to the model_dict
-                logger.info(f"🔍 DEBUG: Adding weighted metrics to model_dict. Keys: {list(weighted_metrics.keys())}")
                 for key, value in weighted_metrics.items():
                     if key not in model_dict:
                         model_dict[key] = value
-                        logger.info(f"🔍 DEBUG: Added {key} = {value}")
-                    else:
-                        logger.info(f"🔍 DEBUG: Skipped {key} (already exists in model_dict)")
                 
                 cleaned_dict = model_dict
-                logger.info(f"🔍 DEBUG: Created ensemble model_dict with actual metrics")
-                logger.info(f"🔍 DEBUG: Final model_dict keys: {list(model_dict.keys())}")
-                logger.info(f"🔍 DEBUG: Final model_dict values: {model_dict}")
                     
             except Exception as e:
                 logger.error(f"❌ Error fetching ensemble metrics: {str(e)}")
@@ -1638,9 +1620,6 @@ async def select_and_save_model_generic(selection_req: GenericModelSelectionRequ
         
         # Also save to select_configs collection with metadata and model results
         try:
-            # Log the available fields for debugging
-            logger.info(f"🔍 DEBUG: Available fields in cleaned_dict: {list(cleaned_dict.keys())}")
-            
             # Get client, app, and project from object prefix (like build atom)
             try:
                 object_prefix = await get_object_prefix()
@@ -1887,15 +1866,10 @@ async def select_and_save_model_generic(selection_req: GenericModelSelectionRequ
                 elif selection_req.filter_criteria and 'combination_id' in selection_req.filter_criteria:
                     selected_combination_id = selection_req.filter_criteria['combination_id']
                 
-                logger.info(f"🔍 DEBUG: Selected combination_id: {selected_combination_id}")
-                logger.info(f"🔍 DEBUG: Filter criteria: {selection_req.filter_criteria}")
-                
                 if selected_combination_id is not None:
                     # Set all rows with the same combination_id to 'no'
                     rows_to_reset = df[df['combination_id'] == selected_combination_id]
-                    logger.info(f"🔍 DEBUG: Rows to reset to 'no': {len(rows_to_reset)} rows with combination_id {selected_combination_id}")
                     df.loc[df['combination_id'] == selected_combination_id, 'selected_models'] = 'no'
-                    logger.info(f"🔍 DEBUG: Reset completed for combination_id {selected_combination_id}")
                 else:
                     logger.warning(f"⚠️ WARNING: Could not determine combination_id from request")
             
@@ -1903,7 +1877,6 @@ async def select_and_save_model_generic(selection_req: GenericModelSelectionRequ
             if selection_req.row_index is not None:
                 # Select by index
                 df.loc[selection_req.row_index, 'selected_models'] = 'yes'
-                logger.info(f"🔍 DEBUG: Set row {selection_req.row_index} to 'yes'")
             elif selection_req.filter_criteria:
                 # Check if this is an ensemble model selection
                 is_ensemble = False
@@ -1911,7 +1884,6 @@ async def select_and_save_model_generic(selection_req: GenericModelSelectionRequ
                     model_name = selection_req.filter_criteria['model_name']
                     if 'ensemble' in model_name.lower() or model_name.lower() == 'ensemble':
                         is_ensemble = True
-                        logger.info(f"🔍 DEBUG: Detected ensemble model selection: {model_name}")
                 
                 if is_ensemble:
                     # Check if ensemble already exists for this combination
@@ -1921,7 +1893,6 @@ async def select_and_save_model_generic(selection_req: GenericModelSelectionRequ
                     if len(existing_ensemble_rows) > 0:
                         # Ensemble already exists, just mark it as selected
                         df.loc[existing_ensemble_mask, 'selected_models'] = 'yes'
-                        logger.info(f"🔍 DEBUG: Ensemble already exists for combination {selected_combination_id}, marked as selected")
                     else:
                         # Create new ensemble row with actual ensemble data
                         # Get the weighted metrics from the ensemble calculation
@@ -1962,7 +1933,6 @@ async def select_and_save_model_generic(selection_req: GenericModelSelectionRequ
                         
                         # Append the ensemble row to the dataframe
                         df = pd.concat([df, pd.DataFrame([ensemble_row])], ignore_index=True)
-                        logger.info(f"🔍 DEBUG: Added new ensemble row to dataframe")
                     
                 else:
                     # Regular model selection - use filter criteria
@@ -1973,25 +1943,14 @@ async def select_and_save_model_generic(selection_req: GenericModelSelectionRequ
                         mask &= (col_str == value_str)
                     
                     rows_to_select = df[mask]
-                    logger.info(f"🔍 DEBUG: Rows matching filter criteria: {len(rows_to_select)} rows")
-                    logger.info(f"🔍 DEBUG: Filter mask: {mask.sum()} True values")
                     
                     df.loc[mask, 'selected_models'] = 'yes'
-                    logger.info(f"🔍 DEBUG: Set filtered rows to 'yes'")
             
             # Log the final state
             if 'combination_id' in df.columns:
                 final_selected = df[df['selected_models'] == 'yes']
-                logger.info(f"🔍 DEBUG: Final selected rows: {len(final_selected)} rows")
-                for _, row in final_selected.iterrows():
-                    logger.info(f"🔍 DEBUG: Selected - combination_id: {row.get('combination_id')}, model: {row.get('model_name', 'N/A')}")
             
             # Save the modified source file back to MinIO
-            # logger.info(f"🔍 DEBUG: About to save file back to MinIO: {selection_req.file_key}")
-            # logger.info(f"🔍 DEBUG: File type detected: {selection_req.file_key.split('.')[-1]}")
-            # logger.info(f"🔍 DEBUG: DataFrame shape after modifications: {df.shape}")
-            # logger.info(f"🔍 DEBUG: DataFrame columns: {df.columns.tolist()}")
-            # logger.info(f"🔍 DEBUG: Sample of 'selected_models' column values: {df['selected_models'].value_counts().to_dict()}")
             
             if selection_req.file_key.endswith(".csv"):
                 # Save as CSV
@@ -1999,23 +1958,18 @@ async def select_and_save_model_generic(selection_req: GenericModelSelectionRequ
                 df.to_csv(csv_buffer, index=False)
                 csv_content = csv_buffer.getvalue().encode('utf-8')
                 
-                logger.info(f"🔍 DEBUG: CSV content size: {len(csv_content)} bytes")
-                
                 try:
                     # Verify the file exists before upload
                     try:
                         existing_obj = minio_client.stat_object(MINIO_BUCKET, selection_req.file_key)
-                        logger.info(f"🔍 DEBUG: Existing file size before update: {existing_obj.size} bytes")
-                        logger.info(f"🔍 DEBUG: Existing file ETag before update: {existing_obj.etag}")
                     except Exception as stat_error:
-                        logger.info(f"🔍 DEBUG: File does not exist before update (will create new)")
+                        pass
                     
                     # Force overwrite by first removing the existing object
                     try:
                         minio_client.remove_object(MINIO_BUCKET, selection_req.file_key)
-                        logger.info(f"🔍 DEBUG: Removed existing file to force overwrite")
                     except Exception as remove_error:
-                        logger.info(f"🔍 DEBUG: Could not remove existing file (may not exist): {str(remove_error)}")
+                        pass
                     
                     # Now upload the new file
                     minio_client.put_object(
@@ -2025,18 +1979,10 @@ async def select_and_save_model_generic(selection_req: GenericModelSelectionRequ
                         length=len(csv_content),
                         content_type="text/csv",
                     )
-                    logger.info(f"🔍 DEBUG: CSV file uploaded to MinIO successfully")
                     
                     # Verify the file was updated
                     try:
                         updated_obj = minio_client.stat_object(MINIO_BUCKET, selection_req.file_key)
-                        logger.info(f"🔍 DEBUG: Updated file size after update: {updated_obj.size} bytes")
-                        logger.info(f"🔍 DEBUG: Updated file ETag after update: {updated_obj.etag}")
-                        if 'existing_obj' in locals():
-                            logger.info(f"🔍 DEBUG: File size change: {updated_obj.size - existing_obj.size} bytes")
-                            logger.info(f"🔍 DEBUG: ETag changed: {existing_obj.etag != updated_obj.etag}")
-                        else:
-                            logger.info(f"🔍 DEBUG: New file created")
                     except Exception as stat_error:
                         logger.warning(f"⚠️ WARNING: Could not verify file update: {str(stat_error)}")
                         
@@ -2050,23 +1996,18 @@ async def select_and_save_model_generic(selection_req: GenericModelSelectionRequ
                 df.to_excel(excel_buffer, index=False)
                 excel_content = excel_buffer.getvalue()
                 
-                logger.info(f"🔍 DEBUG: Excel content size: {len(excel_content)} bytes")
-                
                 try:
                     # Verify the file exists before upload
                     try:
                         existing_obj = minio_client.stat_object(MINIO_BUCKET, selection_req.file_key)
-                        logger.info(f"🔍 DEBUG: Existing file size before update: {existing_obj.size} bytes")
-                        logger.info(f"🔍 DEBUG: Existing file ETag before update: {existing_obj.etag}")
                     except Exception as stat_error:
-                        logger.info(f"🔍 DEBUG: File does not exist before update (will create new)")
+                        pass
                     
                     # Force overwrite by first removing the existing object
                     try:
                         minio_client.remove_object(MINIO_BUCKET, selection_req.file_key)
-                        logger.info(f"🔍 DEBUG: Removed existing file to force overwrite")
                     except Exception as remove_error:
-                        logger.info(f"🔍 DEBUG: Could not remove existing file (may not exist): {str(remove_error)}")
+                        pass
                     
                     # Now upload the new file
                     minio_client.put_object(
@@ -2076,18 +2017,10 @@ async def select_and_save_model_generic(selection_req: GenericModelSelectionRequ
                         length=len(excel_content),
                         content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     )
-                    logger.info(f"🔍 DEBUG: Excel file uploaded to MinIO successfully")
                     
                     # Verify the file was updated
                     try:
                         updated_obj = minio_client.stat_object(MINIO_BUCKET, selection_req.file_key)
-                        logger.info(f"🔍 DEBUG: Updated file size after update: {updated_obj.size} bytes")
-                        logger.info(f"🔍 DEBUG: Updated file ETag after update: {updated_obj.etag}")
-                        if 'existing_obj' in locals():
-                            logger.info(f"🔍 DEBUG: File size change: {updated_obj.size - existing_obj.size} bytes")
-                            logger.info(f"🔍 DEBUG: ETag changed: {existing_obj.etag != updated_obj.etag}")
-                        else:
-                            logger.info(f"🔍 DEBUG: New file created")
                     except Exception as stat_error:
                         logger.warning(f"⚠️ WARNING: Could not verify file update: {str(stat_error)}")
                         
@@ -2105,23 +2038,18 @@ async def select_and_save_model_generic(selection_req: GenericModelSelectionRequ
                     writer.write_table(table)
                 arrow_bytes = arrow_buffer.getvalue().to_pybytes()
                 
-                logger.info(f"🔍 DEBUG: Arrow content size: {len(arrow_bytes)} bytes")
-                
                 try:
                     # Verify the file exists before upload
                     try:
                         existing_obj = minio_client.stat_object(MINIO_BUCKET, selection_req.file_key)
-                        logger.info(f"🔍 DEBUG: Existing file size before update: {existing_obj.size} bytes")
-                        logger.info(f"🔍 DEBUG: Existing file ETag before update: {existing_obj.etag}")
                     except Exception as stat_error:
-                        logger.info(f"🔍 DEBUG: File does not exist before update (will create new)")
+                        pass
                     
                     # Force overwrite by first removing the existing object
                     try:
                         minio_client.remove_object(MINIO_BUCKET, selection_req.file_key)
-                        logger.info(f"🔍 DEBUG: Removed existing file to force overwrite")
                     except Exception as remove_error:
-                        logger.info(f"🔍 DEBUG: Could not remove existing file (may not exist): {str(remove_error)}")
+                        pass
                     
                     # Now upload the new file
                     minio_client.put_object(
@@ -2131,18 +2059,10 @@ async def select_and_save_model_generic(selection_req: GenericModelSelectionRequ
                         length=len(arrow_bytes),
                         content_type="application/octet-stream",
                     )
-                    logger.info(f"🔍 DEBUG: Arrow file uploaded to MinIO successfully")
                     
                     # Verify the file was updated
                     try:
                         updated_obj = minio_client.stat_object(MINIO_BUCKET, selection_req.file_key)
-                        logger.info(f"🔍 DEBUG: Updated file size after update: {updated_obj.size} bytes")
-                        logger.info(f"🔍 DEBUG: Updated file ETag after update: {updated_obj.etag}")
-                        if 'existing_obj' in locals():
-                            logger.info(f"🔍 DEBUG: File size change: {updated_obj.size - existing_obj.size} bytes")
-                            logger.info(f"🔍 DEBUG: ETag changed: {existing_obj.etag != updated_obj.etag}")
-                        else:
-                            logger.info(f"🔍 DEBUG: New file created")
                     except Exception as stat_error:
                         logger.warning(f"⚠️ WARNING: Could not verify file update: {str(stat_error)}")
                         
@@ -2473,13 +2393,7 @@ async def calculate_ensemble_actual_vs_predicted(
                             contribution = beta_value * x_value
                             predicted_value += contribution
                             
-                            # Debug logging for first few rows
-                            if index < 3:
-                                logger.info(f"🔍 DEBUG: Row {index}, {col}: {x_value}, Beta_{col}: {beta_value}, Contribution: {contribution}")
-                
-                # Debug logging for first few predictions
-                if index < 3:
-                    logger.info(f"🔍 DEBUG: Row {index}, Final predicted value: {predicted_value}")
+
                 
                 predicted_values.append(predicted_value)
             
@@ -2806,9 +2720,6 @@ async def get_ensemble_contribution(
         ensemble_data = ensemble_response.results[0]
         weighted_metrics = ensemble_data.weighted
         
-        # Debug logging to see what keys are available
-        logger.info(f"🔍 DEBUG: Available weighted metrics keys: {list(weighted_metrics.keys())}")
-        
         # Extract contribution data from ensemble weighted metrics
         contribution_data = []
         
@@ -2825,8 +2736,6 @@ async def get_ensemble_contribution(
         
         # If no contribution data found, try to calculate from betas and means
         if not contribution_data:
-            logger.info("🔍 DEBUG: No contribution columns found, calculating from betas and means")
-            
             # Get intercept and calculate contributions from betas and means
             intercept = weighted_metrics.get("intercept", 0)
             
@@ -2846,12 +2755,9 @@ async def get_ensemble_contribution(
                                 "name": variable_name,
                                 "value": contribution_value
                             })
-                            logger.info(f"🔍 DEBUG: Calculated contribution for {variable_name}: {contribution_value}")
         
         # If still no data, try using elasticities
         if not contribution_data:
-            logger.info("🔍 DEBUG: No beta contributions found, trying elasticities")
-            
             for key in weighted_metrics.keys():
                 if key.endswith('_elasticity'):
                     variable_name = key.replace('_elasticity', '').replace('_Elasticity', '')
@@ -2864,13 +2770,10 @@ async def get_ensemble_contribution(
                             "name": variable_name,
                             "value": contribution_value
                         })
-                        logger.info(f"🔍 DEBUG: Using elasticity as contribution for {variable_name}: {contribution_value}")
         
         if not contribution_data:
-            logger.error("🔍 DEBUG: No contribution data could be calculated from ensemble results")
+            logger.error("No contribution data could be calculated from ensemble results")
             raise HTTPException(status_code=404, detail="No valid contribution data found in ensemble results")
-        
-        logger.info(f"🔍 DEBUG: Final contribution data: {contribution_data}")
 
         return {
             "file_key": file_key,
@@ -2962,10 +2865,6 @@ async def calculate_actual_vs_predicted(
             actual_values = df[y_variable].tolist() if y_variable in df.columns else []
             predicted_values = []
             
-            # Debug logging
-            logger.info(f"🔍 DEBUG: Model coefficients - intercept: {intercept}, coefficients: {coefficients}")
-            logger.info(f"🔍 DEBUG: X variables: {x_variables}, Y variable: {y_variable}")
-            
             for index, row in df.iterrows():
                 # Calculate predicted value: intercept + sum(beta_i * x_i)
                 predicted_value = intercept
@@ -2977,14 +2876,6 @@ async def calculate_actual_vs_predicted(
                         beta_value = coefficients[beta_key]
                         contribution = beta_value * x_value
                         predicted_value += contribution
-                        
-                        # Debug logging for first few rows
-                        if index < 3:
-                            logger.info(f"🔍 DEBUG: Row {index}, {x_var}: {x_value}, Beta_{x_var}: {beta_value}, Contribution: {contribution}")
-                
-                # Debug logging for first few predictions
-                if index < 3:
-                    logger.info(f"🔍 DEBUG: Row {index}, Final predicted value: {predicted_value}")
                 
                 predicted_values.append(predicted_value)
             
@@ -2999,9 +2890,6 @@ async def calculate_actual_vs_predicted(
                 pred_1st = np.percentile(predicted_array, 1)
                 actual_99th = np.percentile(actual_array, 99)
                 actual_1st = np.percentile(actual_array, 1)
-                
-                logger.info(f"🔍 DEBUG: Predicted values - 1st percentile: {pred_1st}, 99th percentile: {pred_99th}")
-                logger.info(f"🔍 DEBUG: Actual values - 1st percentile: {actual_1st}, 99th percentile: {actual_99th}")
                 
                 # Filter out extreme outliers (beyond 99th percentile)
                 filtered_data = []
@@ -3418,10 +3306,7 @@ async def weighted_ensemble(req: WeightedEnsembleRequest):
     if mape_test_col not in numeric_candidates:
         numeric_candidates.append(mape_test_col)
     
-    # Debug logging
-    logger.info(f"🔍 DEBUG: Numeric candidates for weighting: {numeric_candidates}")
-    logger.info(f"🔍 DEBUG: All columns in dataframe: {list(df.columns)}")
-    logger.info(f"🔍 DEBUG: Excluded columns: {list(exclude)}")
+
 
     # ---- per-combo weighting + aggregation
     results: List[ComboResult] = []
@@ -3453,9 +3338,7 @@ async def weighted_ensemble(req: WeightedEnsembleRequest):
             val = _weighted_avg_series(combo_df[col], weights)
             weighted_dict[col] = None if val is None else float(val)
         
-        # Debug logging
-        logger.info(f"🔍 DEBUG: Weighted dict keys: {list(weighted_dict.keys())}")
-        logger.info(f"🔍 DEBUG: Weighted dict values: {weighted_dict}")
+
 
         # convenience aliases (if those columns exist)
         def pick_alias(*cols):

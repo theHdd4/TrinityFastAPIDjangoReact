@@ -99,20 +99,14 @@ const BuildModelFeatureBasedProperties: React.FC<Props> = (props) => {
       ...settings
     };
 
-    console.log('Properties - atomId:', atomId);
-    console.log('Properties - store data:', data);
-    console.log('Properties - complete data:', completeData);
-    console.log('Properties - store settings:', settings);
+    
 
     return (
       <InternalBuildModelFeatureBasedProperties
         data={completeData as any}
         settings={completeSettings as any}
         onDataChange={d => {
-          console.log('Properties - onDataChange called with:', d);
-          console.log('Properties - current store data:', data);
           const updatedData = { ...completeData, ...d };
-          console.log('Properties - updated data:', updatedData);
           updateSettings(atomId, { data: updatedData });
         }}
         onSettingsChange={s => updateSettings(atomId, { settings: { ...completeSettings, ...s } })}

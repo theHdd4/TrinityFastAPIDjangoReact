@@ -1746,16 +1746,25 @@ async def save_comments(
         except json.JSONDecodeError as e:
             raise HTTPException(status_code=400, detail=f"Invalid JSON format: {str(e)}")
         
+        # Create document ID like other atoms: client_name/app_name/project_name
+        document_id = f"{client_name}/{app_name}/{project_name}"
+        
         # Create document for MongoDB
         document = {
+            "_id": document_id,
             "client_name": client_name,
             "app_name": app_name,
             "project_name": project_name,
-            "combination_id": combination_id,
-            "graph_type": graph_type,
-            "comments": comments_data,
+            "operation_type": "evaluate",
             "created_at": datetime.utcnow(),
-            "updated_at": datetime.utcnow()
+            "updated_at": datetime.utcnow(),
+            "combinations": [{
+                "combination_id": combination_id,
+                "graph_type": graph_type,
+                "comments": comments_data,
+                "created_at": datetime.utcnow(),
+                "updated_at": datetime.utcnow()
+            }]
         }
         
         # Save to MongoDB
@@ -1763,36 +1772,53 @@ async def save_comments(
         collection = mongo_client[MONGO_DB]["evaluate_configs"]
         
         # Check if document already exists
-        existing_doc = await collection.find_one({
-            "client_name": client_name,
-            "app_name": app_name,
-            "project_name": project_name,
-            "combination_id": combination_id,
-            "graph_type": graph_type
-        })
+        existing_doc = await collection.find_one({"_id": document_id})
         
         if existing_doc:
-            # Update existing document
-            result = await collection.update_one(
-                {
-                    "client_name": client_name,
-                    "app_name": app_name,
-                    "project_name": project_name,
-                    "combination_id": combination_id,
-                    "graph_type": graph_type
-                },
-                {
-                    "$set": {
-                        "comments": comments_data,
-                        "updated_at": datetime.utcnow()
+            # Check if this combination already exists
+            existing_combination = None
+            for combo in existing_doc.get("combinations", []):
+                if combo.get("combination_id") == combination_id and combo.get("graph_type") == graph_type:
+                    existing_combination = combo
+                    break
+            
+            if existing_combination:
+                # Update existing combination
+                result = await collection.update_one(
+                    {"_id": document_id, "combinations.combination_id": combination_id, "combinations.graph_type": graph_type},
+                    {
+                        "$set": {
+                            "combinations.$.comments": comments_data,
+                            "combinations.$.updated_at": datetime.utcnow(),
+                            "updated_at": datetime.utcnow()
+                        }
                     }
-                }
-            )
-            # logger.info(f"Updated existing comments document: {result.modified_count} modified")
+                )
+                # logger.info(f"Updated existing combination comments: {result.modified_count} modified")
+            else:
+                # Add new combination to existing document
+                result = await collection.update_one(
+                    {"_id": document_id},
+                    {
+                        "$push": {
+                            "combinations": {
+                                "combination_id": combination_id,
+                                "graph_type": graph_type,
+                                "comments": comments_data,
+                                "created_at": datetime.utcnow(),
+                                "updated_at": datetime.utcnow()
+                            }
+                        },
+                        "$set": {
+                            "updated_at": datetime.utcnow()
+                        }
+                    }
+                )
+                # logger.info(f"Added new combination to existing document: {result.modified_count} modified")
         else:
             # Insert new document
             result = await collection.insert_one(document)
-            # logger.info(f"Inserted new comments document: {result.inserted_id}")
+            # logger.info(f"Inserted new evaluate document: {result.inserted_id}")
         
         return {
             "success": True,
