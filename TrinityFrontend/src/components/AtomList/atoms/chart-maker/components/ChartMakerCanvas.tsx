@@ -114,12 +114,20 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ atomId, charts, dat
   };
 
   const getFilteredData = (chart: ChartMakerConfig) => {
-    // Only use backend-generated chart data
+    // Prefer backend-provided data when available
     if (chart.chartConfig && chart.chartConfig.data) {
       return chart.chartConfig.data;
     }
-    // No fallback to frontend logic
-    return [];
+    // Fallback to filtering uploaded data based on selected identifiers
+    if (!typedData || !Array.isArray(typedData.rows)) return [];
+
+    const { filters = {} } = chart;
+    return typedData.rows.filter(row =>
+      Object.entries(filters).every(([col, values]) => {
+        if (!values || values.length === 0) return true;
+        return values.includes(String(row[col]));
+      })
+    );
   };
 
   const getChartColors = (index: number) => {
@@ -339,6 +347,11 @@ const renderChart = (chart: ChartMakerConfig, index: number, chartKey?: string, 
     yAxisLabel: yAxisConfig.label || yAxisConfig.dataKey,
     yAxisLabels: traces.length ? traces.map((t: any) => t.name || t.dataKey) : undefined,
     colors: [colors.primary, colors.secondary, colors.tertiary],
+    theme: chart.chartConfig?.theme,
+    showLegend: chart.chartConfig?.showLegend,
+    showAxisLabels: chart.chartConfig?.showAxisLabels,
+    showDataLabels: chart.chartConfig?.showDataLabels,
+    showGrid: chart.chartConfig?.showGrid,
   } as const;
 
   return (
