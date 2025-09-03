@@ -9,12 +9,9 @@ from minio.error import S3Error
 from .database import (
     column_coll, 
     cluster_coll,
-    save_clustering_config,
-    save_clustering_results,
-    save_clustering_metadata,
-    get_clustering_config_from_mongo,
-    get_clustering_results_from_mongo,
-    get_clustering_metadata_from_mongo
+    save_clustering_data,
+    get_clustering_data_from_mongo,
+    get_all_clustering_projects
 )
 from .schemas import (
     FilterPayload, 
@@ -67,12 +64,9 @@ async def root():
             "/save_clustering_config",
             "/save_clustering_results",
             "/save_clustering_metadata",
-            "/save-config-mongo",
-            "/save-results-mongo", 
-            "/save-metadata-mongo",
-            "/get-config-mongo",
-            "/get-results-mongo",
-            "/get-metadata-mongo",
+            "/save-clustering-data-mongo",
+            "/get-clustering-data-mongo",
+            "/get-all-clustering-projects",
             "/test-mongo",
             "/test-auto-save"
         ]
@@ -1142,9 +1136,9 @@ async def save_clustering_metadata_endpoint(
         raise HTTPException(status_code=400, detail=str(e))
 
 
-# ── 14. Save clustering configuration to MongoDB ────────────────────────────────────────────
-@router.post("/save-config-mongo")
-async def save_clustering_configuration_mongo(
+# ── 14. Save clustering data to MongoDB ────────────────────────────────────────────
+@router.post("/save-clustering-data-mongo")
+async def save_clustering_data_mongo(
     request: Request,
     client_name: str = Query(..., description="Client name"),
     app_name: str = Query(..., description="App name"),
@@ -1152,8 +1146,8 @@ async def save_clustering_configuration_mongo(
     user_id: str = Query("", description="User ID"),
     project_id: int = Query(None, description="Project ID")
 ):
-    """Save clustering configuration data to MongoDB - used by SAVE CONFIG button"""
-    print(f"🔍 DEBUG: /save-config-mongo endpoint called")
+    """Save clustering data (config, results, metadata) to MongoDB - unified endpoint"""
+    print(f"🔍 DEBUG: /save-clustering-data-mongo endpoint called")
     print(f"🔍 DEBUG: client_name = {client_name}")
     print(f"🔍 DEBUG: app_name = {app_name}")
     print(f"🔍 DEBUG: project_name = {project_name}")
@@ -1165,8 +1159,8 @@ async def save_clustering_configuration_mongo(
         body = await request.json()
         print(f"🔍 DEBUG: request body = {body}")
         
-        # Save clustering configuration data
-        result = await save_clustering_config(
+        # Save clustering data
+        result = await save_clustering_data(
             client_name=client_name,
             app_name=app_name,
             project_name=project_name,
@@ -1175,136 +1169,38 @@ async def save_clustering_configuration_mongo(
             project_id=project_id
         )
         
-        print(f"🔍 DEBUG: save_clustering_config result = {result}")
+        print(f"🔍 DEBUG: save_clustering_data result = {result}")
         
         if result["status"] == "success":
             return {
                 "success": True,
-                "message": f"Clustering configuration saved successfully",
+                "message": f"Clustering data saved successfully",
                 "mongo_id": result["mongo_id"],
                 "operation": result["operation"],
                 "collection": result["collection"]
             }
         else:
-            raise HTTPException(status_code=500, detail=f"Failed to save clustering configuration: {result['error']}")
+            raise HTTPException(status_code=500, detail=f"Failed to save clustering data: {result['error']}")
             
     except Exception as e:
-        print(f"Error saving clustering configuration: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to save clustering configuration: {str(e)}")
+        print(f"Error saving clustering data: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to save clustering data: {str(e)}")
 
 
-# ── 15. Save clustering results to MongoDB ────────────────────────────────────────────
-@router.post("/save-results-mongo")
-async def save_clustering_results_mongo(
-    request: Request,
-    client_name: str = Query(..., description="Client name"),
-    app_name: str = Query(..., description="App name"),
-    project_name: str = Query(..., description="Project name"),
-    user_id: str = Query("", description="User ID"),
-    project_id: int = Query(None, description="Project ID")
-):
-    """Save clustering results data to MongoDB - used by SAVE RESULTS button"""
-    print(f"🔍 DEBUG: /save-results-mongo endpoint called")
-    print(f"🔍 DEBUG: client_name = {client_name}")
-    print(f"🔍 DEBUG: app_name = {app_name}")
-    print(f"🔍 DEBUG: project_name = {project_name}")
-    print(f"🔍 DEBUG: user_id = {user_id}")
-    print(f"🔍 DEBUG: project_id = {project_id}")
-    
-    try:
-        # Get the request body
-        body = await request.json()
-        print(f"🔍 DEBUG: request body = {body}")
-        
-        # Save clustering results data
-        result = await save_clustering_results(
-            client_name=client_name,
-            app_name=app_name,
-            project_name=project_name,
-            clustering_results=body,
-            user_id=user_id,
-            project_id=project_id
-        )
-        
-        print(f"🔍 DEBUG: save_clustering_results result = {result}")
-        
-        if result["status"] == "success":
-            return {
-                "success": True,
-                "message": f"Clustering results saved successfully",
-                "mongo_id": result["mongo_id"],
-                "operation": result["operation"],
-                "collection": result["collection"]
-            }
-        else:
-            raise HTTPException(status_code=500, detail=f"Failed to save clustering results: {result['error']}")
-            
-    except Exception as e:
-        print(f"Error saving clustering results: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to save clustering results: {str(e)}")
+# Note: The separate save endpoints have been consolidated into /save-clustering-data-mongo
+# This endpoint handles all types of clustering data (config, results, metadata)
 
 
-# ── 16. Save clustering metadata to MongoDB ────────────────────────────────────────────
-@router.post("/save-metadata-mongo")
-async def save_clustering_metadata_mongo(
-    request: Request,
-    client_name: str = Query(..., description="Client name"),
-    app_name: str = Query(..., description="App name"),
-    project_name: str = Query(..., description="Project name"),
-    user_id: str = Query(..., description="User ID"),
-    project_id: int = Query(None, description="Project ID")
-):
-    """Save clustering metadata to MongoDB - used for tracking operations"""
-    print(f"🔍 DEBUG: /save-metadata-mongo endpoint called")
-    print(f"🔍 DEBUG: client_name = {client_name}")
-    print(f"🔍 DEBUG: app_name = {app_name}")
-    print(f"🔍 DEBUG: project_name = {project_name}")
-    print(f"🔍 DEBUG: user_id = {user_id}")
-    print(f"🔍 DEBUG: project_id = {project_id}")
-    
-    try:
-        # Get the request body
-        body = await request.json()
-        print(f"🔍 DEBUG: request body = {body}")
-        
-        # Save clustering metadata
-        result = await save_clustering_metadata(
-            client_name=client_name,
-            app_name=app_name,
-            project_name=project_name,
-            metadata=body,
-            user_id=user_id,
-            project_id=project_id
-        )
-        
-        print(f"🔍 DEBUG: save_clustering_metadata result = {result}")
-        
-        if result["status"] == "success":
-            return {
-                "success": True,
-                "message": f"Clustering metadata saved successfully",
-                "mongo_id": result["mongo_id"],
-                "operation": result["operation"],
-                "collection": result["collection"]
-            }
-        else:
-            raise HTTPException(status_code=500, detail=f"Failed to save clustering metadata: {result['error']}")
-            
-    except Exception as e:
-        print(f"Error saving clustering metadata: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to save clustering metadata: {str(e)}")
-
-
-# ── 17. Get clustering configuration from MongoDB ────────────────────────────────────────────
-@router.get("/get-config-mongo")
-async def get_clustering_configuration_mongo(
+# ── 17. Get clustering data from MongoDB ────────────────────────────────────────────
+@router.get("/get-clustering-data-mongo")
+async def get_clustering_data_mongo(
     client_name: str = Query(..., description="Client name"),
     app_name: str = Query(..., description="App name"),
     project_name: str = Query(..., description="Project name")
 ):
-    """Retrieve saved clustering configuration from MongoDB."""
+    """Retrieve all clustering data (config, results, metadata) from MongoDB."""
     try:
-        result = await get_clustering_config_from_mongo(client_name, app_name, project_name)
+        result = await get_clustering_data_from_mongo(client_name, app_name, project_name)
         
         if result:
             return {
@@ -1314,54 +1210,24 @@ async def get_clustering_configuration_mongo(
         else:
             return {
                 "success": False,
-                "message": "No clustering configuration found",
+                "message": "No clustering data found",
                 "data": None
             }
             
     except Exception as e:
-        print(f"Error retrieving clustering configuration: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to retrieve clustering configuration: {str(e)}")
+        print(f"Error retrieving clustering data: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve clustering data: {str(e)}")
 
 
-# ── 18. Get clustering results from MongoDB ────────────────────────────────────────────
-@router.get("/get-results-mongo")
-async def get_clustering_results_mongo(
-    client_name: str = Query(..., description="Client name"),
-    app_name: str = Query(..., description="App name"),
-    project_name: str = Query(..., description="Project name")
+# ── 18. Get all clustering projects ────────────────────────────────────────────
+@router.get("/get-all-clustering-projects")
+async def get_all_clustering_projects_endpoint(
+    client_name: str = Query(None, description="Filter by client name"),
+    app_name: str = Query(None, description="Filter by app name")
 ):
-    """Retrieve saved clustering results from MongoDB."""
+    """Get all clustering projects, optionally filtered by client and/or app."""
     try:
-        result = await get_clustering_results_from_mongo(client_name, app_name, project_name)
-        
-        if result:
-            return {
-                "success": True,
-                "data": result
-            }
-        else:
-            return {
-                "success": False,
-                "message": "No clustering results found",
-                "data": None
-            }
-            
-    except Exception as e:
-        print(f"Error retrieving clustering results: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to retrieve clustering results: {str(e)}")
-
-
-# ── 19. Get clustering metadata from MongoDB ────────────────────────────────────────────
-@router.get("/get-metadata-mongo")
-async def get_clustering_metadata_mongo(
-    client_name: str = Query(..., description="Client name"),
-    app_name: str = Query(..., description="App name"),
-    project_name: str = Query(..., description="Project name"),
-    limit: int = Query(10, description="Number of metadata entries to retrieve")
-):
-    """Retrieve clustering metadata history from MongoDB."""
-    try:
-        results = await get_clustering_metadata_from_mongo(client_name, app_name, project_name, limit)
+        results = await get_all_clustering_projects(client_name, app_name)
         
         return {
             "success": True,
@@ -1370,8 +1236,8 @@ async def get_clustering_metadata_mongo(
         }
             
     except Exception as e:
-        print(f"Error retrieving clustering metadata: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to retrieve clustering metadata: {str(e)}")
+        print(f"Error retrieving clustering projects: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve clustering projects: {str(e)}")
 
 
 # ── 20. Test MongoDB connection ────────────────────────────────────────────

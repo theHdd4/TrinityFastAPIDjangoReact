@@ -39,11 +39,7 @@ async def auto_save_clustering_data(
     """Automatically save clustering data to MongoDB during operations"""
     try:
         # Import database functions here to avoid circular imports
-        from .database import (
-            save_clustering_config,
-            save_clustering_results,
-            save_clustering_metadata
-        )
+        from .database import save_clustering_data
         
         # Add timestamp and operation metadata
         data_with_metadata = {
@@ -52,36 +48,15 @@ async def auto_save_clustering_data(
             "operation_type": operation_type
         }
         
-        if operation_type == "config":
-            result = await save_clustering_config(
-                client_name=client_name,
-                app_name=app_name,
-                project_name=project_name,
-                clustering_data=data_with_metadata,
-                user_id=user_id,
-                project_id=project_id
-            )
-        elif operation_type == "results":
-            result = await save_clustering_results(
-                client_name=client_name,
-                app_name=app_name,
-                project_name=project_name,
-                clustering_results=data_with_metadata,
-                user_id=user_id,
-                project_id=project_id
-            )
-        elif operation_type == "metadata":
-            result = await save_clustering_metadata(
-                client_name=client_name,
-                app_name=app_name,
-                project_name=project_name,
-                metadata=data_with_metadata,
-                user_id=user_id,
-                project_id=project_id
-            )
-        else:
-            print(f"⚠️ Unknown operation type for auto-save: {operation_type}")
-            return None
+        # Use the unified save function for all operation types
+        result = await save_clustering_data(
+            client_name=client_name,
+            app_name=app_name,
+            project_name=project_name,
+            clustering_data=data_with_metadata,
+            user_id=user_id,
+            project_id=project_id
+        )
             
         if result and result.get("status") == "success":
             print(f"✅ Auto-saved {operation_type} to MongoDB: {result.get('mongo_id')}")
