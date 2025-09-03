@@ -328,21 +328,18 @@ class ProjectViewSet(viewsets.ModelViewSet):
             return Response({"detail": "Template not found."}, status=status.HTTP_404_NOT_FOUND)
         overwrite = bool(request.data.get("overwrite"))
         if overwrite:
-            base_id = template.base_project.get("id") if template.base_project else None
-            source = None
-            if base_id:
-                try:
-                    source = Project.objects.get(id=base_id)
-                except Project.DoesNotExist:
-                    source = None
             project.state = template.state
             project.base_template = template
             project.save()
-            if source:
-                for mode in ["lab", "workflow", "exhibition"]:
-                    cfg = load_atom_list_configuration(source, mode)
-                    if cfg and cfg.get("cards"):
-                        save_atom_list_configuration(project, mode, cfg["cards"])
+            state = template.state or {}
+            for field, mode in [
+                ("laboratory_config", "lab"),
+                ("workflow_config", "workflow"),
+                ("exhibition_config", "exhibition"),
+            ]:
+                cfg = state.get(field)
+                if cfg and cfg.get("cards"):
+                    save_atom_list_configuration(project, mode, cfg["cards"])
         else:
             project.base_template = template
             project.save(update_fields=["base_template"])
@@ -356,13 +353,22 @@ class ProjectViewSet(viewsets.ModelViewSet):
             return Response({"detail": "Permission denied."}, status=status.HTTP_403_FORBIDDEN)
         project = self.get_object()
         serialized = ProjectSerializer(project).data
+        state = project.state or {}
+        for field, mode in [
+            ("laboratory_config", "lab"),
+            ("workflow_config", "workflow"),
+            ("exhibition_config", "exhibition"),
+        ]:
+            cfg = load_atom_list_configuration(project, mode)
+            if cfg:
+                state[field] = cfg
         template = Template.objects.create(
             name=f"{project.name} Template",
             slug=slugify(f"{project.slug}-template"),
             description=project.description,
             owner=request.user,
             app=project.app,
-            state=project.state,
+            state=state,
             base_project=serialized,
         )
         return Response(TemplateSerializer(template).data, status=status.HTTP_201_CREATED)
@@ -448,8 +454,13 @@ class TemplateViewSet(viewsets.ModelViewSet):
             base_template=template,
         )
 
-        for mode in ["lab", "workflow", "exhibition"]:
-            cfg = load_atom_list_configuration(source, mode)
+        state = template.state or {}
+        for field, mode in [
+            ("laboratory_config", "lab"),
+            ("workflow_config", "workflow"),
+            ("exhibition_config", "exhibition"),
+        ]:
+            cfg = state.get(field)
             if cfg and cfg.get("cards"):
                 save_atom_list_configuration(new_project, mode, cfg["cards"])
 
