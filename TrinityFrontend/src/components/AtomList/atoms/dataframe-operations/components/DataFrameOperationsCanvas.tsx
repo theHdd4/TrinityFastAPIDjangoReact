@@ -366,11 +366,16 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
         .map(item => item.row);
     }
 
-    // Unique values for filter UI (use originalData if available)
-    const sourceRows = originalData?.rows || data.rows;
+    // Unique values for filter UI
+    // Prefer the original unmodified data for existing columns so filters show all options.
+    // For newly added columns (e.g. after duplication) fall back to the current data rows.
     const uniqueValues: { [key: string]: string[] } = {};
     data.headers.forEach(header => {
-      const values = Array.from(new Set(sourceRows.map(row => safeToString(row[header]))))
+      const rowsForHeader =
+        originalData?.headers?.includes(header) ? originalData.rows : data.rows;
+      const values = Array.from(
+        new Set(rowsForHeader.map(row => safeToString(row[header])))
+      )
         .filter(val => val !== '')
         .sort();
       uniqueValues[header] = values.slice(0, 50);
