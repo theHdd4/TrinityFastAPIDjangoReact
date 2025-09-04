@@ -50,7 +50,7 @@ from .schemas import (
     SavedCombinationsStatusResponse
 )
 
-from .database import MINIO_BUCKET, MONGO_URI, MONGO_DB, OBJECT_PREFIX, SELECT_CONFIGS_COLLECTION_NAME
+from .database import MINIO_BUCKET, MONGO_URI, MONGO_DB, SELECT_CONFIGS_COLLECTION_NAME
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -127,15 +127,17 @@ async def get_unique_combination_ids(
         raise HTTPException(status_code=503, detail="MinIO connection is not available.")
 
     try:
-        # Use the same pattern as merge/concat atoms - construct full path with OBJECT_PREFIX
+        # Use dynamic object prefix like other atoms instead of hardcoded OBJECT_PREFIX
+        object_prefix = await get_object_prefix()
+        
         # Check if file_key already contains the prefix pattern
-        if file_key.startswith(OBJECT_PREFIX):
+        if file_key.startswith(object_prefix):
             full_file_key = file_key
         else:
-            full_file_key = f"{OBJECT_PREFIX}{file_key}"
+            full_file_key = f"{object_prefix}{file_key}"
         
         logger.info(f"Original file_key: {file_key}")
-        logger.info(f"OBJECT_PREFIX: {OBJECT_PREFIX}")
+        logger.info(f"Dynamic object_prefix: {object_prefix}")
         logger.info(f"Final full_file_key: {full_file_key}")
         response = minio_client.get_object(MINIO_BUCKET, full_file_key)
         content = response.read()
