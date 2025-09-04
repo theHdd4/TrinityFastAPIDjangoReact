@@ -221,9 +221,16 @@ const Projects = () => {
     try {
       const envStr = localStorage.getItem('env');
       const baseEnv = envStr ? JSON.parse(envStr) : {};
-      localStorage.setItem('env', JSON.stringify({ ...baseEnv, PROJECT_ID: project.id, PROJECT_NAME: project.name }));
+      const { CLIENT_NAME, APP_NAME } = baseEnv;
+      localStorage.setItem(
+        'env',
+        JSON.stringify({ CLIENT_NAME, APP_NAME, PROJECT_NAME: project.name })
+      );
     } catch {
-      localStorage.setItem('env', JSON.stringify({ PROJECT_ID: project.id, PROJECT_NAME: project.name }));
+      localStorage.setItem(
+        'env',
+        JSON.stringify({ PROJECT_NAME: project.name })
+      );
     }
 
     try {
@@ -231,7 +238,11 @@ const Projects = () => {
       if (res.ok) {
         const data = await res.json();
         if (data.environment) {
-          localStorage.setItem('env', JSON.stringify(data.environment));
+          const { CLIENT_NAME, APP_NAME, PROJECT_NAME } = data.environment;
+          localStorage.setItem(
+            'env',
+            JSON.stringify({ CLIENT_NAME, APP_NAME, PROJECT_NAME })
+          );
         }
       }
     } catch (err) {

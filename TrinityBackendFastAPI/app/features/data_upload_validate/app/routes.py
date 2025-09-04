@@ -185,9 +185,19 @@ async def get_object_prefix(
     """
     USER_ID = _parse_numeric_id(os.getenv("USER_ID"))
     PROJECT_ID = _parse_numeric_id(project_id or os.getenv("PROJECT_ID", "0"))
-    client_id_env = client_id or os.getenv("CLIENT_ID", "")
-    app_id_env = app_id or os.getenv("APP_ID", "")
-    project_id_env = project_id or os.getenv("PROJECT_ID", "")
+    # If explicit names are provided, avoid using potentially stale identifier
+    # values from ``os.environ``. This ensures that when the frontend sends the
+    # current ``client_name/app_name/project_name`` combo, we resolve the
+    # environment for that namespace rather than whatever IDs may have been set
+    # previously.
+    if client_name or app_name or project_name:
+        client_id_env = client_id or ""
+        app_id_env = app_id or ""
+        project_id_env = project_id or ""
+    else:
+        client_id_env = client_id or os.getenv("CLIENT_ID", "")
+        app_id_env = app_id or os.getenv("APP_ID", "")
+        project_id_env = project_id or os.getenv("PROJECT_ID", "")
 
     # Resolve environment variables using ``get_env_vars`` which consults the
     # Redis cache keyed by ``<client>/<app>/<project>`` and falls back to
