@@ -19,14 +19,12 @@ interface ChartMakerVisualizationProps {
   settings: ChartMakerSettings;
   onSettingsChange: (newSettings: Partial<ChartMakerSettings>) => void;
   onRenderCharts: () => void;
-  onChartSettingsImmediateChange?: (chartIndex: number, updates: Partial<ChartMakerConfig>) => void;
 }
 
 const ChartMakerVisualization: React.FC<ChartMakerVisualizationProps> = ({
   settings,
   onSettingsChange,
-  onRenderCharts,
-  onChartSettingsImmediateChange
+  onRenderCharts
 }) => {
   // Debounce timers for chart re-rendering (1.5 seconds)
   const debounceTimers = useRef<Record<string, NodeJS.Timeout>>({});
@@ -154,10 +152,6 @@ const ChartMakerVisualization: React.FC<ChartMakerVisualizationProps> = ({
 
     onSettingsChange({ charts: newCharts });
 
-    // If chart was previously rendered, trigger immediate backend re-render
-    if (prevChart.chartRendered && onChartSettingsImmediateChange) {
-      onChartSettingsImmediateChange(index, updatedChart);
-    }
   };
 
   const toggleMode = (chartIndex: number) => {
@@ -316,14 +310,14 @@ const ChartMakerVisualization: React.FC<ChartMakerVisualizationProps> = ({
       </Card>
 
       <div className="flex-1 overflow-hidden">
-        <ScrollArea>
-          <div className="space-y-4 pr-4">
+        <ScrollArea className="w-full">
+          <div className="space-y-4 pr-4 w-full">
             {settings.charts.slice(0, settings.numberOfCharts).map((chart, index) => {
               // Migrate legacy chart format
               const migratedChart = migrateLegacyChart(chart);
-              
+
               return (
-                <Card key={chart.id}>
+                <Card key={chart.id} className="w-full">
                   <CardHeader>
                     <div className="flex items-center justify-between">
                       <CardTitle className="text-sm">Chart {index + 1}</CardTitle>
@@ -412,7 +406,7 @@ const ChartMakerVisualization: React.FC<ChartMakerVisualizationProps> = ({
                             <SelectValue placeholder="Select X-axis column" />
                           </SelectTrigger>
                           <SelectContent>
-                            {settings.uploadedData.columns.map((column) => (
+                            {(settings.uploadedData.allColumns || settings.uploadedData.columns).map((column) => (
                               <SelectItem key={column} value={column}>{column}</SelectItem>
                             ))}
                           </SelectContent>
@@ -423,7 +417,7 @@ const ChartMakerVisualization: React.FC<ChartMakerVisualizationProps> = ({
                     {/* Mode-specific Configuration */}
                     {migratedChart.isAdvancedMode ? (
                       // Advanced Mode - Multiple Traces
-                      <div className="border-t pt-4">
+                      <div className="border-t pt-4 w-full">
                         <TraceManager
                           chart={migratedChart}
                           onUpdateChart={(updates) => updateChart(index, updates)}
@@ -440,16 +434,16 @@ const ChartMakerVisualization: React.FC<ChartMakerVisualizationProps> = ({
                             value={chart.yAxis} 
                             onValueChange={(value) => updateChart(index, { yAxis: value })}
                           >
-                            <SelectTrigger className="mt-1">
-                              <SelectValue placeholder="Select Y-axis column" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {settings.uploadedData.columns.map((column) => (
-                                <SelectItem key={column} value={column}>{column}</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
+                          <SelectTrigger className="mt-1">
+                            <SelectValue placeholder="Select Y-axis column" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {(settings.uploadedData.numericColumns || settings.uploadedData.columns).map((column) => (
+                              <SelectItem key={column} value={column}>{column}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
 
                         <div>
                           <Label className="text-xs">Filters</Label>

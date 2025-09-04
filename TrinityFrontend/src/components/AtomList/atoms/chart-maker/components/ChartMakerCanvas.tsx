@@ -315,15 +315,30 @@ const renderChart = (chart: ChartMakerConfig, index: number, chartKey?: string, 
   const rendererType = typeMap[rawType] || 'line_chart';
   const chartData = config.data || getFilteredData(chart);
   const traces = config.traces || [];
-  const xAxisConfig = chart.chartRendered && config.x_axis ? config.x_axis : { dataKey: chart.xAxis };
-  const yAxisConfig = chart.chartRendered && config.y_axis ? config.y_axis : { dataKey: chart.yAxis };
+  const xAxisConfig = chart.chartRendered && config.x_axis
+    ? {
+        ...config.x_axis,
+        dataKey: (config.x_axis as any).dataKey || (config.x_axis as any).data_key || chart.xAxis,
+      }
+    : { dataKey: chart.xAxis };
+  const yAxisConfig = chart.chartRendered && config.y_axis
+    ? {
+        ...config.y_axis,
+        dataKey: (config.y_axis as any).dataKey || (config.y_axis as any).data_key || chart.yAxis,
+      }
+    : { dataKey: chart.yAxis };
   const key = chartKey || chart.lastUpdateTime || chart.id;
   // Ensure charts have a visible height when rendered in card view
   // Default to responsive heights based on layout when none provided
   const chartHeightClass = heightClass || (isCompact ? 'h-56' : 'h-80');
   const chartHeightValue = heightClass ? undefined : (isCompact ? 224 : 320); // px values for reliability
 
-  if (!chartData.length || !xAxisConfig.dataKey || (!yAxisConfig.dataKey && traces.length === 0)) {
+  if (
+    !chart.chartRendered ||
+    !chartData.length ||
+    !xAxisConfig.dataKey ||
+    (!yAxisConfig.dataKey && traces.length === 0)
+  ) {
     return (
       <div
         className={`flex items-center justify-center ${chartHeightClass || 'h-64'} text-muted-foreground`}
