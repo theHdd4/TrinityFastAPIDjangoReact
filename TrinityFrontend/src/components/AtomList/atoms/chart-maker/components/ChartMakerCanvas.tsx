@@ -334,8 +334,10 @@ const renderChart = (
       }
     : { dataKey: chart.yAxis };
   const key = chartKey || chart.lastUpdateTime || chart.id;
-  // Provide a default height so charts render correctly in card view
-  const chartHeight = heightClass || 'h-64';
+  // Ensure charts occupy ample space within their cards
+  // Use responsive defaults when no explicit height is provided
+  const chartHeightClass = heightClass || (isCompact ? 'h-56' : 'h-80');
+  const chartHeightValue = heightClass ? undefined : (isCompact ? 224 : 320); // px fallback for reliability
 
   if (
     !chart.chartRendered ||
@@ -344,7 +346,10 @@ const renderChart = (
     (!yAxisConfig.dataKey && traces.length === 0)
   ) {
     return (
-      <div className={`flex items-center justify-center ${chartHeight} text-muted-foreground`}>
+      <div
+        className={`flex items-center justify-center ${chartHeightClass} text-muted-foreground`}
+        style={{ minHeight: chartHeightValue }}
+      >
         <div className="text-center">
           <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-gradient-to-br from-slate-100 to-slate-200 flex items-center justify-center">
             <LineChartIcon className="w-8 h-8 text-slate-400" />
@@ -374,10 +379,11 @@ const renderChart = (
     showAxisLabels: chart.chartConfig?.showAxisLabels,
     showDataLabels: chart.chartConfig?.showDataLabels,
     showGrid: chart.chartConfig?.showGrid,
+    height: chartHeightValue,
   } as const;
 
   return (
-    <div className={`w-full ${chartHeight}`}>
+    <div className={`w-full ${chartHeightClass}`} style={{ minHeight: chartHeightValue }}>
       <RechartsChartRenderer {...rendererProps} />
     </div>
   );
