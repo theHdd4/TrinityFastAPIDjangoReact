@@ -273,9 +273,15 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ atomId, charts, dat
   }, [chatBubble.visible, chatBubbleShouldRender, overlayActive]);
 
 
-const renderChart = (chart: ChartMakerConfig, index: number, chartKey?: string, heightClass?: string, isFullscreen = false) => {
+const renderChart = (
+  chart: ChartMakerConfig,
+  index: number,
+  chartKey?: string,
+  heightClass?: string,
+  _isFullscreen = false
+) => {
   if ((chart as any).chartLoading) {
-    const loadingHeight = isCompact ? 'h-56' : 'h-80';
+    const loadingHeight = heightClass || (isCompact ? 'h-56' : 'h-80');
     const colors = getChartColors(index);
     return (
       <div className={`flex flex-col items-center justify-center ${loadingHeight} bg-gradient-to-br from-white/50 to-gray-50/50 backdrop-blur-sm relative overflow-hidden`}>
@@ -328,10 +334,7 @@ const renderChart = (chart: ChartMakerConfig, index: number, chartKey?: string, 
       }
     : { dataKey: chart.yAxis };
   const key = chartKey || chart.lastUpdateTime || chart.id;
-  // Ensure charts have a visible height when rendered in card view
-  // Default to responsive heights based on layout when none provided
-  const chartHeightClass = heightClass || (isCompact ? 'h-56' : 'h-80');
-  const chartHeightValue = heightClass ? undefined : (isCompact ? 224 : 320); // px values for reliability
+  const chartHeight = heightClass || '';
 
   if (
     !chart.chartRendered ||
@@ -340,10 +343,7 @@ const renderChart = (chart: ChartMakerConfig, index: number, chartKey?: string, 
     (!yAxisConfig.dataKey && traces.length === 0)
   ) {
     return (
-      <div
-        className={`flex items-center justify-center ${chartHeightClass || 'h-64'} text-muted-foreground`}
-        style={{ minHeight: chartHeightValue }}
-      >
+      <div className={`flex items-center justify-center ${chartHeight || 'h-64'} text-muted-foreground`}>
         <div className="text-center">
           <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-gradient-to-br from-slate-100 to-slate-200 flex items-center justify-center">
             <LineChartIcon className="w-8 h-8 text-slate-400" />
@@ -373,11 +373,10 @@ const renderChart = (chart: ChartMakerConfig, index: number, chartKey?: string, 
     showAxisLabels: chart.chartConfig?.showAxisLabels,
     showDataLabels: chart.chartConfig?.showDataLabels,
     showGrid: chart.chartConfig?.showGrid,
-    height: chartHeightValue,
   } as const;
 
   return (
-    <div className={`w-full ${chartHeightClass}`} style={{ minHeight: chartHeightValue }}>
+    <div className={`w-full ${chartHeight}`}>
       <RechartsChartRenderer {...rendererProps} />
     </div>
   );
