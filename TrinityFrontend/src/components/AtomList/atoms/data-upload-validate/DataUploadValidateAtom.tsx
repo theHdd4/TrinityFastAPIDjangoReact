@@ -357,9 +357,6 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
           query =
             '?' +
             new URLSearchParams({
-              client_id: env.CLIENT_ID || '',
-              app_id: env.APP_ID || '',
-              project_id: env.PROJECT_ID || '',
               client_name: env.CLIENT_NAME || '',
               app_name: env.APP_NAME || '',
               project_name: env.PROJECT_NAME || ''
@@ -397,9 +394,6 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
     if (envStr) {
       try {
         const env = JSON.parse(envStr);
-        form.append('client_id', env.CLIENT_ID || '');
-        form.append('app_id', env.APP_ID || '');
-        form.append('project_id', env.PROJECT_ID || '');
         form.append('client_name', env.CLIENT_NAME || '');
         form.append('app_name', env.APP_NAME || '');
         form.append('project_name', env.PROJECT_NAME || '');
