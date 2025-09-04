@@ -109,13 +109,46 @@ const ChartMakerVisualization: React.FC<ChartMakerVisualizationProps> = ({
     // Migrate legacy chart format before applying updates
     const migratedChart = migrateLegacyChart(prevChart);
 
+    // Merge updates into migrated chart first
+    let updatedChart: ChartMakerConfig = { ...migratedChart, ...updates } as ChartMakerConfig;
+
+    // If axes changed, strip any existing filters that target those axes
+    const axisSelections: string[] = [];
+    if (updates.xAxis) axisSelections.push(updates.xAxis);
+    if (updates.yAxis) axisSelections.push(updates.yAxis);
+
+    if (axisSelections.length > 0) {
+      // Legacy single-series filters
+      if (updatedChart.filters) {
+        axisSelections.forEach(axis => {
+          if (updatedChart.filters && axis in updatedChart.filters) {
+            const { [axis]: _removed, ...rest } = updatedChart.filters;
+            updatedChart.filters = rest;
+          }
+        });
+      }
+
+      // Advanced-mode trace-specific filters
+      if (updatedChart.traces) {
+        updatedChart.traces = updatedChart.traces.map(trace => {
+          if (!trace.filters) return trace;
+          const newTraceFilters = { ...trace.filters } as Record<string, string[]>;
+          axisSelections.forEach(axis => {
+            if (axis in newTraceFilters) {
+              delete newTraceFilters[axis];
+            }
+          });
+          return { ...trace, filters: newTraceFilters };
+        });
+      }
+    }
+
     // Determine if changes require chart re-rendering
     const resetKeys: (keyof ChartMakerConfig)[] = ['xAxis', 'yAxis', 'filters', 'traces', 'type'];
     const needsReset = resetKeys.some(key => key in updates);
 
     newCharts[index] = {
-      ...migratedChart,
-      ...updates,
+      ...updatedChart,
       ...(needsReset ? { chartRendered: false, chartConfig: undefined, filteredData: undefined } : {})
     };
 
@@ -123,7 +156,7 @@ const ChartMakerVisualization: React.FC<ChartMakerVisualizationProps> = ({
 
     // If chart was previously rendered, trigger immediate backend re-render
     if (prevChart.chartRendered && onChartSettingsImmediateChange) {
-      onChartSettingsImmediateChange(index, { ...migratedChart, ...updates });
+      onChartSettingsImmediateChange(index, updatedChart);
     }
   };
 
