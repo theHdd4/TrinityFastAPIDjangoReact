@@ -60,11 +60,11 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
       const files: UploadedFileRef[] = (settings.uploadedFiles || []).map(name => ({
         name,
         path: settings.filePathMap?.[name] || '',
-        size: 0,
+        size: settings.fileSizeMap?.[name] || 0,
       }));
       setUploadedFiles(files);
     }
-  }, [settings.uploadedFiles, settings.filePathMap, uploadedFiles.length]);
+  }, [settings.uploadedFiles, settings.filePathMap, settings.fileSizeMap, uploadedFiles.length]);
 
   const handleFileUpload = async (files: File[]) => {
     const uploaded: UploadedFileRef[] = [];
@@ -104,6 +104,10 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
       filePathMap: {
         ...(settings.filePathMap || {}),
         ...Object.fromEntries(uploaded.map(f => [f.name, f.path]))
+      },
+      fileSizeMap: {
+        ...(settings.fileSizeMap || {}),
+        ...Object.fromEntries(uploaded.map(f => [f.name, f.size]))
       }
     });
     setFileAssignments(prev => ({
@@ -177,11 +181,17 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
       newFilePathMap[newName] = newFilePathMap[oldName];
       delete newFilePathMap[oldName];
     }
+    const newFileSizeMap = { ...(settings.fileSizeMap || {}) } as Record<string, number>;
+    if (newFileSizeMap[oldName] !== undefined) {
+      newFileSizeMap[newName] = newFileSizeMap[oldName];
+      delete newFileSizeMap[oldName];
+    }
     updateSettings(atomId, {
       validations: newValidations,
       columnConfig: newColumnConfig,
       fileKeyMap: newFileKeyMap,
       filePathMap: newFilePathMap,
+      fileSizeMap: newFileSizeMap,
     });
     if (openFile === oldName) setOpenFile(newName);
     setRenameTarget(null);
@@ -192,11 +202,13 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
     const newUploads = (settings.uploadedFiles || []).filter(n => n !== name);
     const { [name]: _, ...restAssignments } = fileAssignments;
     const { [name]: __, ...restPaths } = settings.filePathMap || {};
+    const { [name]: ___, ...restSizes } = settings.fileSizeMap || {};
     setFileAssignments(restAssignments);
     updateSettings(atomId, {
       uploadedFiles: newUploads,
       fileMappings: restAssignments,
       filePathMap: restPaths,
+      fileSizeMap: restSizes,
     });
     setValidationResults(prev => {
       const { [name]: _, ...rest } = prev;
