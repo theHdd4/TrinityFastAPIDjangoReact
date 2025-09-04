@@ -10,7 +10,7 @@ pipeline {
   stages {
     stage('Checkout Code') {
       steps {
-        echo "📦 Checking out branch: ${env.BRANCH_NAME}"
+        echo "Checking out branch: ${env.BRANCH_NAME}"
         checkout scm
         // Removed cleanWs() to preserve volumes
       }
@@ -18,7 +18,7 @@ pipeline {
 
     stage('Create Docker Compose Files with Correct HOST_IP') {
       steps {
-        echo "🔍 Creating docker-compose files from examples with HOST_IP set to ${env.EXPECTED_HOST_IP}..."
+        echo "Creating docker-compose files from examples with HOST_IP set to ${env.EXPECTED_HOST_IP}..."
         script {
           // Create docker-compose-dev.yml from example
           echo "Creating docker-compose-dev.yml from example..."
@@ -50,7 +50,7 @@ pipeline {
           
           // Write the updated dev compose file
           writeFile file: 'docker-compose-dev.yml', text: updatedDevCompose
-          echo "✅ Created docker-compose-dev.yml with HOST_IP=${env.EXPECTED_HOST_IP}"
+          echo "Created docker-compose-dev.yml with HOST_IP=${env.EXPECTED_HOST_IP}"
           
           // Create docker-compose.yml from example
           echo "Creating docker-compose.yml from example..."
@@ -82,7 +82,7 @@ pipeline {
           
           // Write the updated prod compose file
           writeFile file: 'docker-compose.yml', text: updatedProdCompose
-          echo "✅ Created docker-compose.yml with HOST_IP=${env.EXPECTED_HOST_IP}"
+          echo "Created docker-compose.yml with HOST_IP=${env.EXPECTED_HOST_IP}"
           
           // Check and fix FastAPI main.py
           echo "Checking TrinityBackendFastAPI/app/main.py..."
@@ -101,15 +101,15 @@ pipeline {
                 "origins = os.getenv(\n    \"FASTAPI_CORS_ORIGINS\",\n    \"${newOrigins}\""
               );
               writeFile file: 'TrinityBackendFastAPI/app/main.py', text: updatedFastapiContent
-              echo "🔧 Added ${env.EXPECTED_HOST_IP}:8080 to FastAPI CORS origins (preserved existing IPs)"
+              echo "Added ${env.EXPECTED_HOST_IP}:8080 to FastAPI CORS origins (preserved existing IPs)"
             } else {
-              echo "⚠️ Could not find FASTAPI_CORS_ORIGINS in main.py, skipping update"
+              echo "Could not find FASTAPI_CORS_ORIGINS in main.py, skipping update"
             }
           } else {
-            echo "✅ FastAPI main.py already contains ${env.EXPECTED_HOST_IP}:8080"
+            echo "FastAPI main.py already contains ${env.EXPECTED_HOST_IP}:8080"
           }
           
-          echo "🎯 All docker-compose files created with HOST_IP=${env.EXPECTED_HOST_IP}"
+          echo "All docker-compose files created with HOST_IP=${env.EXPECTED_HOST_IP}"
         }
       }
     }
@@ -119,11 +119,11 @@ pipeline {
         branch 'dev'
       }
       steps {
-        echo "🚀 Deploying DEV environment..."
+        echo "Deploying DEV environment..."
         script {
           // Set HOST_IP for dev environment
           env.HOST_IP = env.EXPECTED_HOST_IP
-          echo "🔧 Setting HOST_IP to: ${env.HOST_IP}"
+          echo " Setting HOST_IP to: ${env.HOST_IP}"
           
           // Start services (volumes persist)
           bat """
@@ -133,7 +133,7 @@ pipeline {
           """
           
           // Wait for services to be healthy
-          echo "⏳ Waiting for services to be ready..."
+          echo " Waiting for services to be ready..."
           bat """
             timeout /t 30
             docker compose -p ${env.DEV_PROJECT} -f docker-compose-dev.yml ps
@@ -145,13 +145,13 @@ pipeline {
           """
           
           // Execute tenant script
-          echo "🔧 Running tenant creation script..."
+          echo " Running tenant creation script..."
           bat """
             docker compose -p ${env.DEV_PROJECT} -f docker-compose-dev.yml exec web python create_tenant.py
           """
           
           // Verify HOST_IP is correctly applied
-          echo "🔍 Verifying HOST_IP configuration in running containers..."
+          echo " Verifying HOST_IP configuration in running containers..."
           bat """
             docker compose -p ${env.DEV_PROJECT} -f docker-compose-dev.yml exec web printenv HOST_IP
             docker compose -p ${env.DEV_PROJECT} -f docker-compose-dev.yml exec fastapi printenv HOST_IP
@@ -165,11 +165,11 @@ pipeline {
         branch 'main'
       }
       steps {
-        echo "🚀 Deploying PROD environment..."
+        echo " Deploying PROD environment..."
         script {
           // Set HOST_IP for prod environment
           env.HOST_IP = env.EXPECTED_HOST_IP
-          echo "🔧 Setting HOST_IP to: ${env.HOST_IP}"
+          echo " Setting HOST_IP to: ${env.HOST_IP}"
           
           // Start services (volumes persist)
           bat """
@@ -179,7 +179,7 @@ pipeline {
           """
           
           // Wait for services to be healthy
-          echo "⏳ Waiting for services to be ready..."
+          echo " Waiting for services to be ready..."
           bat """
             timeout /t 30
             docker compose -p ${env.PROD_PROJECT} -f docker-compose.yml ps
@@ -191,13 +191,13 @@ pipeline {
           """
           
           // Execute tenant script
-          echo "🔧 Running tenant creation script..."
+          echo " Running tenant creation script..."
           bat """
             docker compose -p ${env.PROD_PROJECT} -f docker-compose.yml exec web python create_tenant.py
           """
           
           // Verify HOST_IP is correctly applied
-          echo "🔍 Verifying HOST_IP configuration in running containers..."
+          echo " Verifying HOST_IP configuration in running containers..."
           bat """
             docker compose -p ${env.PROD_PROJECT} -f docker-compose.yml exec web printenv HOST_IP
             docker compose -p ${env.PROD_PROJECT} -f docker-compose.yml exec fastapi printenv HOST_IP
@@ -210,12 +210,12 @@ pipeline {
 
   post {
     failure {
-      echo "❌ Deployment failed on branch ${env.BRANCH_NAME}"
+      echo " Deployment failed on branch ${env.BRANCH_NAME}"
       // Show service status for debugging
       bat "docker compose -p ${env.DEV_PROJECT} -f docker-compose-dev.yml ps || docker compose -p ${env.PROD_PROJECT} -f docker-compose.yml ps"
     }
     success {
-      echo "✅ Deployment successful on branch ${env.BRANCH_NAME}"
+      echo " Deployment successful on branch ${env.BRANCH_NAME}"
     }
   }
 }
