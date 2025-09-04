@@ -122,6 +122,8 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
   // 1. Add a ref to track the currently editing cell/header
   const editingCellRef = useRef<{ row: number; col: string } | null>(null);
   const editingHeaderRef = useRef<string | null>(null);
+  // Track mapping from duplicated columns to their original source
+  const [duplicateMap, setDuplicateMap] = useState<{ [key: string]: string }>({});
 
   // Ref to store header cell elements for context-menu positioning
   const headerRefs = useRef<{ [key: string]: HTMLTableCellElement | null }>({});
@@ -366,23 +368,39 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
         .map(item => item.row);
     }
 
-    // Unique values for filter UI
-    // Prefer the original unmodified data for existing columns so filters show all options.
-    // For newly added columns (e.g. after duplication) fall back to the current data rows.
+    // Unique values for filter UI (support hierarchical filtering and duplicated columns)
     const uniqueValues: { [key: string]: string[] } = {};
+    const appliedFilters = settings.filters || {};
     data.headers.forEach(header => {
-      const rowsForHeader =
-        originalData?.headers?.includes(header) ? originalData.rows : data.rows;
+      const sourceCol = duplicateMap[header] || header;
+      // Start from the original unfiltered rows if available
+      let rowsForHeader = originalData?.rows ? [...originalData.rows] : [...data.rows];
+      // Apply all filters except the one for this header
+      Object.entries(appliedFilters).forEach(([col, val]) => {
+        if (col === header) return;
+        const filterCol = duplicateMap[col] || col;
+        rowsForHeader = rowsForHeader.filter(row => {
+          const cell = row[filterCol];
+          if (Array.isArray(val)) {
+            return val.includes(safeToString(cell));
+          }
+          if (val && typeof val === 'object' && 'min' in val && 'max' in val) {
+            const num = Number(cell);
+            return num >= val.min && num <= val.max;
+          }
+          return safeToString(cell) === safeToString(val);
+        });
+      });
       const values = Array.from(
-        new Set(rowsForHeader.map(row => safeToString(row[header])))
+        new Set(rowsForHeader.map(row => safeToString(row[sourceCol])))
       )
-        .filter(val => val !== '')
+        .filter(v => v !== '')
         .sort();
       uniqueValues[header] = values.slice(0, 50);
     });
 
     return { filteredRows, totalRows: filteredRows.length, uniqueValues };
-  }, [data, originalData, settings.searchTerm]);
+  }, [data, originalData, settings.searchTerm, settings.filters, duplicateMap]);
 
   // Pagination
   const totalPages = Math.ceil(processedData.totalRows / (settings.rowsPerPage || 15));
@@ -848,6 +866,8 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
         frozenColumns: data.frozenColumns,
         cellColors: data.cellColors,
       });
+      // Remember the source for this duplicated column
+      setDuplicateMap(prev => ({ ...prev, [newName]: prev[col] || col }));
     } catch (err) {
       handleApiError('Duplicate column failed', err);
     }
