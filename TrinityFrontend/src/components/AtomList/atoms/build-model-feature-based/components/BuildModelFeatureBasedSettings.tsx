@@ -225,9 +225,7 @@ const BuildModelFeatureBasedSettings: React.FC<BuildModelFeatureBasedSettingsPro
     availableModels.every(model => data?.selectedModels?.includes(model.id));
   
   // Debug logging to ensure the logic works correctly
-  console.log('🔧 Settings: availableModels:', availableModels.map(m => m.id));
-  console.log('🔧 Settings: data.selectedModels:', data?.selectedModels);
-  console.log('🔧 Settings: allModelsSelected:', allModelsSelected);
+  
 
   return (
     <div className="space-y-6">
@@ -304,6 +302,7 @@ const BuildModelFeatureBasedSettings: React.FC<BuildModelFeatureBasedSettingsPro
                       id={option.value}
                       checked={data?.selectedCombinations?.includes(option.value) || false}
                       onCheckedChange={(checked) => handleCombinationToggle(option.value, checked as boolean)}
+                      onClick={(e) => e.stopPropagation()}
                     />
                     <Label htmlFor={option.value} className="text-sm truncate">{option.label}</Label>
                   </div>

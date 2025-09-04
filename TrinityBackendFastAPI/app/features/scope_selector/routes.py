@@ -1336,6 +1336,7 @@ async def create_multi_filtered_scope(
                     "scope_id": new_scope_id,
                     "scope_name": auto_generated_name,
                     "file_key": request.file_key,
+                    "identifiers": list(set([col for result in filter_set_results for col in result.identifier_filters.keys()])),
                     "filter_set_results": [result.dict() for result in filter_set_results],
                     "total_filter_sets": len(filter_set_results),
                     "overall_filtered_records": overall_filtered_records,
@@ -1355,7 +1356,7 @@ async def create_multi_filtered_scope(
                     project_id=None  # You can add project_id if available
                 )
                 
-                logger.info(f"🔍 DEBUG: MongoDB save result: {mongo_result}")
+
                 
                 if mongo_result["status"] == "success":
                     logger.info(f"📦 Scope configuration saved to MongoDB: {mongo_result['mongo_id']}")
@@ -1539,17 +1540,10 @@ async def save_scope_data(
     project_id: int = Query(None, description="Project ID")
 ):
     """General save endpoint for scope data - used by SAVE button"""
-    logger.info(f"🔍 DEBUG: /save endpoint called")
-    logger.info(f"🔍 DEBUG: client_name = {client_name}")
-    logger.info(f"🔍 DEBUG: app_name = {app_name}")
-    logger.info(f"🔍 DEBUG: project_name = {project_name}")
-    logger.info(f"🔍 DEBUG: user_id = {user_id}")
-    logger.info(f"🔍 DEBUG: project_id = {project_id}")
     
     try:
         # Get the request body
         body = await request.json()
-        logger.info(f"🔍 DEBUG: request body = {body}")
         
         # Save scope configuration data
         result = await save_scope_config(
@@ -1560,8 +1554,6 @@ async def save_scope_data(
             user_id=user_id,
             project_id=project_id
         )
-        
-        logger.info(f"🔍 DEBUG: save_scope_config result = {result}")
         
         if result["status"] == "success":
             return {
@@ -1582,11 +1574,24 @@ async def save_scope_data(
 async def test_mongo_connection():
     """Test MongoDB connection and list databases"""
     try:
-        from .mongodb_saver import test_mongodb_connection
-        logger.info(f"🔍 DEBUG: Testing MongoDB connection")
+        from .mongodb_saver import client
         
-        result = await test_mongodb_connection()
-        return result
+        # List all databases
+        databases = await client.list_database_names()
+        
+        # Check if trinity_prod exists
+        if "trinity_prod" in databases:
+            # List collections in trinity_prod
+            collections = await client["trinity_prod"].list_collection_names()
+        else:
+            logger.warning("trinity_prod database does not exist")
+        
+        return {
+            "success": True,
+            "databases": databases,
+            "trinity_prod_exists": "trinity_prod" in databases,
+            "collections_in_trinity_prod": collections if "trinity_prod" in databases else []
+        }
         
     except Exception as e:
         logger.error(f"Error testing MongoDB connection: {str(e)}")

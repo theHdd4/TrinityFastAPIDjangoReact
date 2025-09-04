@@ -103,8 +103,10 @@ class AggregationService:
                     for r in filtered
                 ])
                 
-                # Process flat and hierarchical aggregations for this view
+                # Process flat aggregations for id_1 only and hierarchical aggregations for this view
+                logger.info(f"🔍 Processing flat aggregations for {view_id} (id_1 only)...")
                 flat_out = await cls._process_flat_aggregations_for_view(df, view_config, feat_set)
+                logger.info(f"🔍 Processing hierarchical aggregations for {view_id}...")
                 hier_list = await cls._process_hierarchical_aggregations_for_view(df, view_config, feat_set)
                 
                 # Store results for this view
@@ -130,17 +132,22 @@ class AggregationService:
     async def _process_flat_aggregations_for_view(
         cls, df: pd.DataFrame, view_config: Any, feat_set: set
     ) -> Dict[str, List[Dict[str, Any]]]:
-        """Compute flat aggregations for a specific view."""
+        """Compute flat aggregations for a specific view - ONLY for id_1."""
         sum_cols = ["baseline_pred", "scenario_pred"] + [f"{p}_{k}" for p in ("b","s") for k in feat_set]
         out: Dict[str, List[Dict[str, Any]]] = {}
         
-        # Process each identifier in the view
-        for id_key, identifier_config in view_config.selected_identifiers.items():
-            for col, vals in identifier_config.items():
+        # ONLY process id_1 (primary business dimension)
+        if "id_1" in view_config.selected_identifiers:
+            id_1_config = view_config.selected_identifiers["id_1"]
+            for col, vals in id_1_config.items():
                 # Group by this column and aggregate
                 g = df.groupby([col], dropna=False)[sum_cols].sum().reset_index()
                 g = cls._recalculate_metrics(g, feat_set)
                 out[col] = [_row_to_json(row, [col], feat_set) for _, row in g.iterrows()]
+                logger.info(f"✅ Flat aggregation calculated for id_1 column: {col}")
+        else:
+            logger.warning("⚠️ No id_1 found in view config - skipping flat aggregation")
+        
         return out
 
     # ✅ REMOVED: Old _process_flat_aggregations method - replaced by view-specific version
@@ -225,6 +232,7 @@ class AggregationService:
     async def _store_flat_aggregations_for_view(
         cls, flat_out: Dict[str, List[Dict[str, Any]]], view_id: str, run_id: str, feat_set: set
     ):
+        """Store flat aggregations for id_1 only."""
         docs = []
         for col, lst in flat_out.items():
             for rec in lst:
@@ -240,6 +248,7 @@ class AggregationService:
                 })
         if docs:
             await flat_aggregations_collection.insert_many(docs)
+            logger.info(f"✅ Stored {len(docs)} flat aggregation documents for view {view_id} (id_1 only)")
 
     # ✅ REMOVED: Old _store_flat_aggregations method - replaced by view-specific version
 

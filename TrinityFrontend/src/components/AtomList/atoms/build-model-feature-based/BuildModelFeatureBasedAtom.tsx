@@ -45,7 +45,7 @@ interface Props {
 }
 
 const BuildModelFeatureBasedAtom: React.FC<Props> = ({ atomId }) => {
-  console.log('🔧 BuildModelFeatureBasedAtom: Component rendered with atomId:', atomId);
+  
   
   try {
     const atom = useLaboratoryStore(state => state.getAtom(atomId));
@@ -93,9 +93,7 @@ const BuildModelFeatureBasedAtom: React.FC<Props> = ({ atomId }) => {
       ...settings.data
     };
 
-    console.log('🔧 BuildModelFeatureBasedAtom: Settings for atomId', atomId, ':', settings);
-    console.log('🔧 BuildModelFeatureBasedAtom: Selected scope:', completeData?.selectedScope);
-    console.log('🔧 BuildModelFeatureBasedAtom: Selected combinations:', completeData?.selectedCombinations);
+    
 
     return (
       <div className="w-full h-full bg-white rounded-lg overflow-hidden flex flex-col">

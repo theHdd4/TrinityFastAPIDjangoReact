@@ -83,13 +83,15 @@ ensure_minio_bucket()
 
 # MongoDB configuration
 MONGO_URI = os.getenv("MONGO_URI", "mongodb://root:rootpass@mongo:27017/trinity_prod?authSource=admin")
-MONGO_DB = os.getenv("MONGO_DB", "validator_atoms_db")
+MONGO_DB = os.getenv("MONGO_DB", "trinity_prod")
 COLLECTION_NAME = "validator_atoms"
+SELECT_CONFIGS_COLLECTION_NAME = "select_configs"
 
 # MongoDB Connection with Authentication
 client = None
 db = None
 scopes_collection = None
+select_configs_collection = None
 
 try:
     # Create connection string without exposing credentials in logs
@@ -110,11 +112,13 @@ try:
     
     db = client[MONGO_DB]
     scopes_collection = db.get_collection(COLLECTION_NAME)
+    select_configs_collection = db.get_collection(SELECT_CONFIGS_COLLECTION_NAME)
     logger.info(f"✅ MongoDB connection established: {MONGO_DB}.{COLLECTION_NAME}")
+    logger.info(f"✅ MongoDB connection established: {MONGO_DB}.{SELECT_CONFIGS_COLLECTION_NAME}")
     
 except Exception as e:
     logger.error(f"❌ MongoDB connection failed: {e}")
-    client, db, scopes_collection = None, None, None
+    client, db, scopes_collection, select_configs_collection = None, None, None, None
 
 def get_minio_df(bucket: str, file_key: str) -> pd.DataFrame:
     response = minio_client.get_object(bucket, file_key)
@@ -131,6 +135,41 @@ def get_minio_df(bucket: str, file_key: str) -> pd.DataFrame:
     else:
         raise ValueError("Unsupported file type")
     return df
+
+def get_select_configs_collection():
+    """Get the select_configs collection dynamically, ensuring connection is established."""
+    global client, db, select_configs_collection
+    
+    if select_configs_collection is None:
+        try:
+            if client is None:
+                # Re-establish connection if needed
+                mongo_url_safe = MONGO_URI.replace(
+                    MONGO_URI.split('@')[0].split('//')[1], 
+                    "***:***"
+                )
+                logger.info(f"Reconnecting to MongoDB: {mongo_url_safe}")
+                
+                client = AsyncIOMotorClient(
+                    MONGO_URI,
+                    serverSelectionTimeoutMS=5000,
+                    connectTimeoutMS=5000,
+                    socketTimeoutMS=5000,
+                    maxPoolSize=10,
+                    minPoolSize=1
+                )
+            
+            if db is None:
+                db = client[MONGO_DB]
+            
+            select_configs_collection = db.get_collection(SELECT_CONFIGS_COLLECTION_NAME)
+            logger.info(f"✅ Select configs collection re-established: {MONGO_DB}.{SELECT_CONFIGS_COLLECTION_NAME}")
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to get select_configs collection: {e}")
+            return None
+    
+    return select_configs_collection
 
 # Health check function
 async def check_database_health():
@@ -205,6 +244,8 @@ __all__ = [
     'client',
     'db',
     'scopes_collection',
+    'select_configs_collection',
+    'get_select_configs_collection',
     'check_database_health',
     'extract_unique_combinations',
     'get_filter_options',
