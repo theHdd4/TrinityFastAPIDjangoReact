@@ -33,6 +33,7 @@ import CorrelationAtom from '@/components/AtomList/atoms/correlation/Correlation
 import ChartMakerAtom from '@/components/AtomList/atoms/chart-maker/ChartMakerAtom';
 import BuildModelFeatureBasedAtom from '@/components/AtomList/atoms/build-model-feature-based/BuildModelFeatureBasedAtom';
 import ExploreAtom from '@/components/AtomList/atoms/explore/ExploreAtom';
+import EvaluateModelsFeatureAtom from '@/components/AtomList/atoms/evaluate-models-feature/EvaluateModelsFeatureAtom';
 import { fetchDimensionMapping } from '@/lib/dimensions';
 
 import {
@@ -1053,6 +1054,8 @@ const handleAddDragLeave = (e: React.DragEvent) => {
                                       <FeatureOverviewAtom atomId={atom.id} />
                                     ) : atom.atomId === 'chart-maker' ? (
                                       <ChartMakerAtom atomId={atom.id} />
+                                    ) : atom.atomId === 'evaluate-models-feature' ? (
+                                      <EvaluateModelsFeatureAtom atomId={atom.id} />
                                     ) : (
                                       <div>
                                         <h4 className="font-semibold text-gray-900 mb-1 text-sm">{atom.title}</h4>
@@ -1267,6 +1270,8 @@ const handleAddDragLeave = (e: React.DragEvent) => {
                           <BuildModelFeatureBasedAtom atomId={atom.id} />
                        ) : atom.atomId === 'select-models-feature' ? (
                         <SelectModelsFeatureAtom atomId={atom.id} />
+                       ) : atom.atomId === 'evaluate-models-feature' ? (
+                        <EvaluateModelsFeatureAtom atomId={atom.id} />
                        ) : atom.atomId === 'scope-selector' ? (
                         <ScopeSelectorAtom atomId={atom.id} />
                       ) : atom.atomId === 'correlation' ? (

@@ -9,7 +9,7 @@ class Settings(BaseSettings):
     
     # Database Configuration
     # Follow common atoms: MONGO_URI is the standard var name
-    mongo_details: str = "mongodb://mongo:27017/trinity"
+    mongo_details: str = "mongodb://root:rootpass@mongo:27017/trinity_prod?authSource=admin"
     database_name: str = "trinity_prod"
     collection_name: str = "build-model_featurebased_configs"
     

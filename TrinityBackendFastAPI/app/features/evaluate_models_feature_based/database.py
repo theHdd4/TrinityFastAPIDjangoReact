@@ -36,16 +36,77 @@ def get_minio() -> Minio:
     )
 
 
+# MongoDB Connection with Authentication (same pattern as select atom)
+# Force the correct URI to match select atom
+MONGO_URI = "mongodb://root:rootpass@mongo:27017/trinity_prod?authSource=admin"
+MONGO_DB = "trinity_prod"
+COLLECTION_NAME = "build-model_featurebased_configs"
+
+# MongoDB Connection with Authentication
+client = None
+db = None
+build_configs_collection = None
+
+def get_authenticated_client():
+    """Get authenticated MongoDB client (lazy initialization)"""
+    global client, db, build_configs_collection
+    
+    logger.info(f"get_authenticated_client() called, current client state: {client is not None}")
+    
+    if client is None:
+        try:
+            # Create connection string without exposing credentials in logs
+            mongo_url_safe = MONGO_URI.replace(
+                MONGO_URI.split('@')[0].split('//')[1], 
+                "***:***"
+            )
+            logger.info(f"Connecting to MongoDB: {mongo_url_safe}")
+            logger.info(f"MONGO_URI: {MONGO_URI}")
+            logger.info(f"MONGO_DB: {MONGO_DB}")
+            logger.info(f"COLLECTION_NAME: {COLLECTION_NAME}")
+            
+            client = AsyncIOMotorClient(
+                MONGO_URI,
+                serverSelectionTimeoutMS=5000,
+                connectTimeoutMS=5000,
+                socketTimeoutMS=5000,
+                maxPoolSize=10,
+                minPoolSize=1
+            )
+            
+            logger.info("AsyncIOMotorClient created successfully")
+            
+            db = client[MONGO_DB]
+            logger.info(f"Database object created: {db}")
+            
+            build_configs_collection = db.get_collection(COLLECTION_NAME)
+            logger.info(f"Collection object created: {build_configs_collection}")
+            
+            logger.info(f"✅ MongoDB connection established: {MONGO_DB}.{COLLECTION_NAME}")
+            
+        except Exception as e:
+            logger.error(f"❌ MongoDB connection failed: {e}")
+            logger.error(f"Exception type: {type(e)}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            client, db, build_configs_collection = None, None, None
+            raise e
+    else:
+        logger.info("Client already exists, returning existing client")
+    
+    return client
+
 @lru_cache()
 def get_mongo() -> AsyncIOMotorClient:
-    # Follow common default used by other atoms
-    mongo_uri = os.getenv("EVALUATE_MONGO_URI", os.getenv("MONGO_URI", settings.mongo_details))
+    # Use the same MongoDB configuration as select atom
+    mongo_uri = os.getenv("MONGO_URI", "mongodb://root:rootpass@mongo:27017/trinity_prod?authSource=admin")
     return AsyncIOMotorClient(
         mongo_uri,
         serverSelectionTimeoutMS=5000,
         connectTimeoutMS=5000,
         socketTimeoutMS=5000,
         maxPoolSize=10,
+        minPoolSize=1
     )
 
 
@@ -79,10 +140,25 @@ def get_redis():
 
 async def get_build_config(client_name: str, app_name: str, project_name: str) -> dict:
     """Fetch coefficients/configs for evaluate from Mongo in line with other atoms."""
-    m = get_mongo()
-    db = m["trinity_prod"]
+    # Use the same pattern as select atom - direct client access
+    logger.info(f"Getting build config for {client_name}/{app_name}/{project_name}")
+    logger.info(f"Current client state: {client is not None}")
+    
+    if client is None:
+        logger.info("Client is None, calling get_authenticated_client()")
+        get_authenticated_client()
+        logger.info(f"After get_authenticated_client(), client state: {client is not None}")
+    
+    if client is None:
+        logger.error("Client is still None after get_authenticated_client()")
+        raise RuntimeError("Failed to establish MongoDB connection")
+    
+    logger.info("Using client to access database")
+    db = client["trinity_prod"]
     _id = f"{client_name}/{app_name}/{project_name}"
+    logger.info(f"Looking for document with ID: {_id}")
     doc = await db["build-model_featurebased_configs"].find_one({"_id": _id})
     if not doc:
         raise RuntimeError(f"No build configuration for {_id}")
+    logger.info("Successfully retrieved build configuration")
     return doc
