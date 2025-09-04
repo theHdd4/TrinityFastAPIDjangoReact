@@ -334,7 +334,8 @@ const renderChart = (
       }
     : { dataKey: chart.yAxis };
   const key = chartKey || chart.lastUpdateTime || chart.id;
-  const chartHeight = heightClass || '';
+  // Provide a default height so charts render correctly in card view
+  const chartHeight = heightClass || 'h-64';
 
   if (
     !chart.chartRendered ||
@@ -343,7 +344,7 @@ const renderChart = (
     (!yAxisConfig.dataKey && traces.length === 0)
   ) {
     return (
-      <div className={`flex items-center justify-center ${chartHeight || 'h-64'} text-muted-foreground`}>
+      <div className={`flex items-center justify-center ${chartHeight} text-muted-foreground`}>
         <div className="text-center">
           <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-gradient-to-br from-slate-100 to-slate-200 flex items-center justify-center">
             <LineChartIcon className="w-8 h-8 text-slate-400" />
