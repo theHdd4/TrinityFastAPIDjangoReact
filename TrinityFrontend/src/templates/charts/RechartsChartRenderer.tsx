@@ -652,10 +652,14 @@ const RechartsChartRenderer: React.FC<Props> = ({
   // Handle right-click context menu
   const handleContextMenu = (e: React.MouseEvent) => {
     e.preventDefault();
+    e.stopPropagation();
+
     const { pageX, pageY, clientX, clientY } = e;
     setContextMenuPosition({ x: pageX || clientX, y: pageY || clientY });
+
     setShowContextMenu(true);
     setShowColorSubmenu(false); // Always close submenu when opening main menu
+    setShowSortSubmenu(false);
   };
 
   // Handle theme change
