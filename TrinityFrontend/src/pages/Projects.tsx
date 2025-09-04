@@ -30,7 +30,10 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuTrigger
+  DropdownMenuTrigger,
+  DropdownMenuSub,
+  DropdownMenuSubTrigger,
+  DropdownMenuSubContent
 } from '@/components/ui/dropdown-menu';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 
@@ -203,10 +206,8 @@ const Projects = () => {
           appTemplate: selectedApp || 'blank',
           baseTemplate: p.base_template || null
         };
-        setProjects([...projects, newProject]);
-        clearProjectState();
-        localStorage.setItem('current-project', JSON.stringify(newProject));
-        navigate('/');
+        setProjects(prev => [newProject, ...prev]);
+        setActiveTab('projects');
       }
     } catch (err) {
       console.error('Create project error', err);
@@ -238,7 +239,7 @@ const Projects = () => {
           appTemplate: project.appTemplate,
           baseTemplate: data.base_template || project.baseTemplate
         };
-        setProjects([...projects, dup]);
+        setProjects(prev => [dup, ...prev]);
       }
     } catch (err) {
       console.error('Duplicate project error', err);
@@ -265,6 +266,43 @@ const Projects = () => {
       }
     } catch (err) {
       console.error('Save template error', err);
+    }
+  };
+
+  const importTemplateToProject = async (project: Project, template: Template) => {
+    try {
+      let proceed = true;
+      try {
+        const res = await fetch(`${REGISTRY_API}/projects/${project.id}/`, {
+          credentials: 'include'
+        });
+        if (res.ok) {
+          const data = await res.json();
+          const state = data.state || {};
+          if (state && Object.keys(state).length > 0) {
+            proceed = confirm(`Do you want overwrite config for ${project.name}?`);
+          }
+        }
+      } catch (err) {
+        console.error('Project state fetch error', err);
+      }
+      if (!proceed) return;
+      const res = await fetch(`${REGISTRY_API}/projects/${project.id}/import_template/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ template_id: template.id, overwrite: true })
+      });
+      if (res.ok) {
+        const updated = await res.json();
+        setProjects(
+          projects.map(p =>
+            p.id === project.id ? { ...p, baseTemplate: updated.base_template } : p
+          )
+        );
+      }
+    } catch (err) {
+      console.error('Import template error', err);
     }
   };
 
@@ -389,14 +427,11 @@ const Projects = () => {
           appTemplate: selectedApp || 'blank',
           baseTemplate: p.base_template
         };
-        setProjects([...projects, newProject]);
+        setProjects(prev => [newProject, ...prev]);
         const updatedTemplates = templates.map(t =>
           t.id === template.id ? { ...t, usageCount: t.usageCount + 1 } : t
         );
         setTemplates(updatedTemplates);
-        clearProjectState();
-        localStorage.setItem('current-project', JSON.stringify(newProject));
-        navigate('/');
       }
     } catch (err) {
       console.error('Use template error', err);
@@ -590,6 +625,32 @@ const Projects = () => {
                                 <BookmarkPlus className="w-4 h-4 mr-2" />
                                 Save as Template
                               </DropdownMenuItem>
+                              <DropdownMenuSub>
+                                <DropdownMenuSubTrigger
+                                  onClick={(e) => e.stopPropagation()}
+                                  onPointerDown={(e) => e.stopPropagation()}
+                                >
+                                  <Bookmark className="w-4 h-4 mr-2" />
+                                  Import from Template
+                                </DropdownMenuSubTrigger>
+                                <DropdownMenuSubContent>
+                                  {templates.length === 0 ? (
+                                    <DropdownMenuItem disabled>None</DropdownMenuItem>
+                                  ) : (
+                                    templates.map((t) => (
+                                      <DropdownMenuItem
+                                        key={t.id}
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          importTemplateToProject(project, t);
+                                        }}
+                                      >
+                                        {t.name}
+                                      </DropdownMenuItem>
+                                    ))
+                                  )}
+                                </DropdownMenuSubContent>
+                              </DropdownMenuSub>
                               <DropdownMenuItem
                                 onClick={(e) => {
                                   e.stopPropagation();

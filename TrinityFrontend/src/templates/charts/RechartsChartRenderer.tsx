@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import "./chart.css";
 import {
   BarChart,
@@ -652,9 +653,13 @@ const RechartsChartRenderer: React.FC<Props> = ({
   // Handle right-click context menu
   const handleContextMenu = (e: React.MouseEvent) => {
     e.preventDefault();
+    e.stopPropagation();
+
     setContextMenuPosition({ x: e.clientX, y: e.clientY });
+
     setShowContextMenu(true);
     setShowColorSubmenu(false); // Always close submenu when opening main menu
+    setShowSortSubmenu(false);
   };
 
   // Handle theme change
@@ -803,13 +808,12 @@ const RechartsChartRenderer: React.FC<Props> = ({
   const ContextMenu = () => {
     if (!showContextMenu) return null;
 
-    return (
-      <div 
+    const menu = (
+      <div
         className="fixed z-[9999] bg-white border border-gray-200 rounded-lg shadow-lg py-2 min-w-48 context-menu"
-        style={{ 
-          left: contextMenuPosition.x, 
+        style={{
+          left: contextMenuPosition.x,
           top: contextMenuPosition.y,
-          transform: 'translate(-50%, -100%)',
           pointerEvents: 'auto'
         }}
         onClick={(e) => {
@@ -927,8 +931,6 @@ const RechartsChartRenderer: React.FC<Props> = ({
           </div>
         </button>
 
-
-
         {/* Save Action */}
         <button
           className="w-full px-4 py-2 text-sm text-left hover:bg-gray-50 flex items-center gap-3 text-gray-700"
@@ -941,13 +943,15 @@ const RechartsChartRenderer: React.FC<Props> = ({
         </button>
       </div>
     );
+
+    return createPortal(menu, document.body);
   };
 
   // Color theme submenu component
   const ColorThemeSubmenu = () => {
     if (!showColorSubmenu) return null;
 
-    return (
+    const submenu = (
       <div
         className="fixed z-[9999] bg-white border border-gray-300 rounded-lg shadow-xl p-3 color-submenu"
         style={{
@@ -999,13 +1003,15 @@ const RechartsChartRenderer: React.FC<Props> = ({
         </div>
       </div>
     );
+
+    return createPortal(submenu, document.body);
   };
 
   // Sort submenu component
   const SortSubmenu = () => {
     if (!showSortSubmenu) return null;
 
-    return (
+    const submenu = (
       <div
         className="fixed z-[9999] bg-white border border-gray-300 rounded-lg shadow-xl p-2 sort-submenu"
         style={{
@@ -1063,6 +1069,8 @@ const RechartsChartRenderer: React.FC<Props> = ({
         </div>
       </div>
     );
+
+    return createPortal(submenu, document.body);
   };
 
 
@@ -1149,23 +1157,30 @@ const RechartsChartRenderer: React.FC<Props> = ({
       }
     }
     
-    // Handle dual Y-axes detection
-    if (yKeys.length === 0 && yFields && yFields.length > 0) {
-      yKeys = yFields;
-    } else if (yKeys.length === 0 && firstItem) {
-      const availableKeys = Object.keys(firstItem);
-      // For dual Y-axes, try to find multiple numeric fields
-      const numericKeys = availableKeys.filter(key => 
-        key !== xKey && 
-        key !== 'category' && 
-        key !== 'label' &&
-        typeof firstItem[key] === 'number' && 
-        !isNaN(firstItem[key])
-      );
-      if (numericKeys.length >= 2) {
-        yKeys = numericKeys.slice(0, 2); // Take first two numeric fields
-      } else if (numericKeys.length === 1) {
-        yKeys = [numericKeys[0]];
+    // Determine which Y-axis fields to use. Only include a secondary axis when explicitly configured.
+    if (yKeys.length === 0) {
+      if (yFields && yFields.length > 0) {
+        // Use provided fields (may include multiple for dual axes)
+        yKeys = yFields;
+      } else if (yField) {
+        // Single field explicitly specified – use it as the only Y axis
+        yKeys = [yField];
+      } else if (firstItem) {
+        // Fallback: auto-detect the first numeric field for a single Y axis
+        const availableKeys = Object.keys(firstItem);
+        const numericKeys = availableKeys.filter(key =>
+          key !== xKey &&
+          key !== 'category' &&
+          key !== 'label' &&
+          typeof firstItem[key] === 'number' &&
+          !isNaN(firstItem[key])
+        );
+        if (numericKeys.length > 0) {
+          yKeys = [numericKeys[0]];
+        }
+      }
+      if (!yKey && yKeys.length > 0) {
+        yKey = yKeys[0];
       }
     }
     

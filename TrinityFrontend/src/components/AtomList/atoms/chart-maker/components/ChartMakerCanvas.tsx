@@ -114,12 +114,20 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ atomId, charts, dat
   };
 
   const getFilteredData = (chart: ChartMakerConfig) => {
-    // Only use backend-generated chart data
+    // Prefer backend-provided data when available
     if (chart.chartConfig && chart.chartConfig.data) {
       return chart.chartConfig.data;
     }
-    // No fallback to frontend logic
-    return [];
+    // Fallback to filtering uploaded data based on selected identifiers
+    if (!typedData || !Array.isArray(typedData.rows)) return [];
+
+    const { filters = {} } = chart;
+    return typedData.rows.filter(row =>
+      Object.entries(filters).every(([col, values]) => {
+        if (!values || values.length === 0) return true;
+        return values.includes(String(row[col]));
+      })
+    );
   };
 
   const getChartColors = (index: number) => {
@@ -310,11 +318,17 @@ const renderChart = (chart: ChartMakerConfig, index: number, chartKey?: string, 
   const xAxisConfig = config.x_axis || { dataKey: chart.xAxis };
   const yAxisConfig = config.y_axis || { dataKey: chart.yAxis };
   const key = chartKey || chart.lastUpdateTime || chart.id;
-  const chartHeight = heightClass || '';
+  // Ensure charts have a visible height when rendered in card view
+  // Default to responsive heights based on layout when none provided
+  const chartHeightClass = heightClass || (isCompact ? 'h-56' : 'h-80');
+  const chartHeightValue = heightClass ? undefined : (isCompact ? 224 : 320); // px values for reliability
 
   if (!chartData.length || !xAxisConfig.dataKey || (!yAxisConfig.dataKey && traces.length === 0)) {
     return (
-      <div className={`flex items-center justify-center ${chartHeight || 'h-64'} text-muted-foreground`}>
+      <div
+        className={`flex items-center justify-center ${chartHeightClass || 'h-64'} text-muted-foreground`}
+        style={{ minHeight: chartHeightValue }}
+      >
         <div className="text-center">
           <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-gradient-to-br from-slate-100 to-slate-200 flex items-center justify-center">
             <LineChartIcon className="w-8 h-8 text-slate-400" />
@@ -339,10 +353,16 @@ const renderChart = (chart: ChartMakerConfig, index: number, chartKey?: string, 
     yAxisLabel: yAxisConfig.label || yAxisConfig.dataKey,
     yAxisLabels: traces.length ? traces.map((t: any) => t.name || t.dataKey) : undefined,
     colors: [colors.primary, colors.secondary, colors.tertiary],
+    theme: chart.chartConfig?.theme,
+    showLegend: chart.chartConfig?.showLegend,
+    showAxisLabels: chart.chartConfig?.showAxisLabels,
+    showDataLabels: chart.chartConfig?.showDataLabels,
+    showGrid: chart.chartConfig?.showGrid,
+    height: chartHeightValue,
   } as const;
 
   return (
-    <div className={`w-full ${chartHeight}`}>
+    <div className={`w-full ${chartHeightClass}`} style={{ minHeight: chartHeightValue }}>
       <RechartsChartRenderer {...rendererProps} />
     </div>
   );
@@ -437,10 +457,6 @@ const renderChart = (chart: ChartMakerConfig, index: number, chartKey?: string, 
                    <Card
                      key={chart.id}
                     className="chart-card border border-black shadow-xl bg-white/95 backdrop-blur-sm overflow-hidden transform hover:scale-[1.02] transition-all duration-300 relative flex flex-col group hover:shadow-2xl"
-                     onContextMenu={e => {
-                       e.preventDefault(); // Disable right-click context menu
-                       e.stopPropagation();
-                     }}
                    >
                     <div className="bg-white border-b border-black p-4 relative flex-shrink-0 group-hover:shadow-lg transition-shadow duration-300">
                       <CardTitle className={`font-bold text-gray-900 flex items-center justify-between ${isCompact ? 'text-base' : 'text-lg'}`}>
@@ -483,12 +499,8 @@ const renderChart = (chart: ChartMakerConfig, index: number, chartKey?: string, 
                           }
                         }}
                         onMouseDown={e => handleMouseDown(e, chart.id)}
-                        onContextMenu={e => {
-                           e.preventDefault(); // Disable right-click context menu
-                           e.stopPropagation();
-                         }}
-                         title="Alt+Click to expand, Hold to change chart type"
-                       />
+                        title="Alt+Click to expand, Hold to change chart type"
+                      />
                      </div>
                      
                       {/* Filter Controls - Support both simple and multi-series modes */}
