@@ -457,10 +457,6 @@ const renderChart = (chart: ChartMakerConfig, index: number, chartKey?: string, 
                    <Card
                      key={chart.id}
                     className="chart-card border border-black shadow-xl bg-white/95 backdrop-blur-sm overflow-hidden transform hover:scale-[1.02] transition-all duration-300 relative flex flex-col group hover:shadow-2xl"
-                     onContextMenu={e => {
-                       e.preventDefault(); // Disable right-click context menu
-                       e.stopPropagation();
-                     }}
                    >
                     <div className="bg-white border-b border-black p-4 relative flex-shrink-0 group-hover:shadow-lg transition-shadow duration-300">
                       <CardTitle className={`font-bold text-gray-900 flex items-center justify-between ${isCompact ? 'text-base' : 'text-lg'}`}>
@@ -503,12 +499,8 @@ const renderChart = (chart: ChartMakerConfig, index: number, chartKey?: string, 
                           }
                         }}
                         onMouseDown={e => handleMouseDown(e, chart.id)}
-                        onContextMenu={e => {
-                           e.preventDefault(); // Disable right-click context menu
-                           e.stopPropagation();
-                         }}
-                         title="Alt+Click to expand, Hold to change chart type"
-                       />
+                        title="Alt+Click to expand, Hold to change chart type"
+                      />
                      </div>
                      
                       {/* Filter Controls - Support both simple and multi-series modes */}
