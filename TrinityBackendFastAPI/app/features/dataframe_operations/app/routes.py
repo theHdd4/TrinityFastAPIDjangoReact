@@ -37,10 +37,17 @@ def _get_df(df_id: str) -> pl.DataFrame:
     return df
 
 
-def _df_payload(df: pl.DataFrame, df_id: str, page: int = 1, page_size: int = 100) -> Dict[str, Any]:
-    start = (page - 1) * page_size
-    page_df = df.slice(start, page_size)
-    rows = page_df.to_dicts()
+def _df_payload(df: pl.DataFrame, df_id: str) -> Dict[str, Any]:
+    """
+    Serialize the entire dataframe for the frontend.
+
+    The previous implementation returned only the first 100 rows by default.
+    This caused the frontend to display at most 100 rows regardless of the
+    dataframe size.  By serializing the full dataframe here, the frontend can
+    handle pagination itself and expose all available rows to the user.
+    """
+
+    rows = df.to_dicts()
     return {
         "df_id": df_id,
         "headers": df.columns,
@@ -48,8 +55,6 @@ def _df_payload(df: pl.DataFrame, df_id: str, page: int = 1, page_size: int = 10
         "types": {col: str(dtype) for col, dtype in zip(df.columns, df.dtypes)},
         "row_count": df.height,
         "column_count": df.width,
-        "page": page,
-        "page_size": page_size,
     }
 
 
