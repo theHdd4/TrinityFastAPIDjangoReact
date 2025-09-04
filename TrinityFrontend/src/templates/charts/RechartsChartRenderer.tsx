@@ -652,7 +652,8 @@ const RechartsChartRenderer: React.FC<Props> = ({
   // Handle right-click context menu
   const handleContextMenu = (e: React.MouseEvent) => {
     e.preventDefault();
-    setContextMenuPosition({ x: e.clientX, y: e.clientY });
+    const { pageX, pageY, clientX, clientY } = e;
+    setContextMenuPosition({ x: pageX || clientX, y: pageY || clientY });
     setShowContextMenu(true);
     setShowColorSubmenu(false); // Always close submenu when opening main menu
   };
@@ -806,10 +807,9 @@ const RechartsChartRenderer: React.FC<Props> = ({
     return (
       <div 
         className="fixed z-[9999] bg-white border border-gray-200 rounded-lg shadow-lg py-2 min-w-48 context-menu"
-        style={{ 
-          left: contextMenuPosition.x, 
+        style={{
+          left: contextMenuPosition.x,
           top: contextMenuPosition.y,
-          transform: 'translate(-50%, -100%)',
           pointerEvents: 'auto'
         }}
         onClick={(e) => {
