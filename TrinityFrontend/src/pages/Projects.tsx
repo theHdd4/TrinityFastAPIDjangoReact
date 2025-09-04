@@ -6,7 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import Header from '@/components/Header';
 import { REGISTRY_API } from '@/lib/api';
-import { clearProjectState } from '@/utils/projectStorage';
+import { clearProjectState, saveCurrentProject } from '@/utils/projectStorage';
 import {
   Plus,
   FolderOpen,
@@ -214,9 +214,29 @@ const Projects = () => {
     }
   };
 
-  const openProject = (project: Project) => {
+  const openProject = async (project: Project) => {
     clearProjectState();
-    localStorage.setItem('current-project', JSON.stringify(project));
+    saveCurrentProject(project);
+
+    try {
+      const envStr = localStorage.getItem('env');
+      const baseEnv = envStr ? JSON.parse(envStr) : {};
+      localStorage.setItem('env', JSON.stringify({ ...baseEnv, PROJECT_ID: project.id, PROJECT_NAME: project.name }));
+    } catch {
+      localStorage.setItem('env', JSON.stringify({ PROJECT_ID: project.id, PROJECT_NAME: project.name }));
+    }
+
+    try {
+      const res = await fetch(`${REGISTRY_API}/projects/${project.id}/`, { credentials: 'include' });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.environment) {
+          localStorage.setItem('env', JSON.stringify(data.environment));
+        }
+      }
+    } catch (err) {
+      console.log('Project env fetch error', err);
+    }
     navigate('/');
   };
 
