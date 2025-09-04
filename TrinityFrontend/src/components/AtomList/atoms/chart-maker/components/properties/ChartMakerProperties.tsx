@@ -100,7 +100,10 @@ const ChartMakerProperties: React.FC<Props> = ({ atomId }) => {
         xAxis: '',
         yAxis: '',
         filters: {},
-        chartRendered: false
+        chartRendered: false,
+        chartConfig: undefined,
+        filteredData: undefined,
+        lastUpdateTime: undefined
       }));
       
       handleSettingsChange({
