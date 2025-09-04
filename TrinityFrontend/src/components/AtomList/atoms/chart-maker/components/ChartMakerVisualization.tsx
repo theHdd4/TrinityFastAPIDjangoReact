@@ -310,14 +310,14 @@ const ChartMakerVisualization: React.FC<ChartMakerVisualizationProps> = ({
       </Card>
 
       <div className="flex-1 overflow-hidden">
-        <ScrollArea>
-          <div className="space-y-4 pr-4">
+        <ScrollArea className="w-full">
+          <div className="space-y-4 pr-4 w-full">
             {settings.charts.slice(0, settings.numberOfCharts).map((chart, index) => {
               // Migrate legacy chart format
               const migratedChart = migrateLegacyChart(chart);
-              
+
               return (
-                <Card key={chart.id}>
+                <Card key={chart.id} className="w-full">
                   <CardHeader>
                     <div className="flex items-center justify-between">
                       <CardTitle className="text-sm">Chart {index + 1}</CardTitle>
@@ -417,7 +417,7 @@ const ChartMakerVisualization: React.FC<ChartMakerVisualizationProps> = ({
                     {/* Mode-specific Configuration */}
                     {migratedChart.isAdvancedMode ? (
                       // Advanced Mode - Multiple Traces
-                      <div className="border-t pt-4">
+                      <div className="border-t pt-4 w-full">
                         <TraceManager
                           chart={migratedChart}
                           onUpdateChart={(updates) => updateChart(index, updates)}
