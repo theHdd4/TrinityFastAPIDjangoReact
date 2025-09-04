@@ -108,9 +108,20 @@ const ChartMakerVisualization: React.FC<ChartMakerVisualizationProps> = ({
     const prevChart = newCharts[index];
     // Migrate legacy chart format before applying updates
     const migratedChart = migrateLegacyChart(prevChart);
-    newCharts[index] = { ...migratedChart, ...updates };
+
+    // Determine if changes require chart re-rendering
+    const resetKeys: (keyof ChartMakerConfig)[] = ['xAxis', 'yAxis', 'filters', 'traces', 'type'];
+    const needsReset = resetKeys.some(key => key in updates);
+
+    newCharts[index] = {
+      ...migratedChart,
+      ...updates,
+      ...(needsReset ? { chartRendered: false, chartConfig: undefined, filteredData: undefined } : {})
+    };
+
     onSettingsChange({ charts: newCharts });
-    // If chartRendered is true, trigger immediate backend re-render
+
+    // If chart was previously rendered, trigger immediate backend re-render
     if (prevChart.chartRendered && onChartSettingsImmediateChange) {
       onChartSettingsImmediateChange(index, { ...migratedChart, ...updates });
     }
