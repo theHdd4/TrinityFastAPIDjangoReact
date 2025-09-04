@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import "./chart.css";
 import {
   BarChart,
@@ -654,8 +655,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
     e.preventDefault();
     e.stopPropagation();
 
-    const { pageX, pageY, clientX, clientY } = e;
-    setContextMenuPosition({ x: pageX || clientX, y: pageY || clientY });
+    setContextMenuPosition({ x: e.clientX, y: e.clientY });
 
     setShowContextMenu(true);
     setShowColorSubmenu(false); // Always close submenu when opening main menu
@@ -808,8 +808,8 @@ const RechartsChartRenderer: React.FC<Props> = ({
   const ContextMenu = () => {
     if (!showContextMenu) return null;
 
-    return (
-      <div 
+    const menu = (
+      <div
         className="fixed z-[9999] bg-white border border-gray-200 rounded-lg shadow-lg py-2 min-w-48 context-menu"
         style={{
           left: contextMenuPosition.x,
@@ -931,8 +931,6 @@ const RechartsChartRenderer: React.FC<Props> = ({
           </div>
         </button>
 
-
-
         {/* Save Action */}
         <button
           className="w-full px-4 py-2 text-sm text-left hover:bg-gray-50 flex items-center gap-3 text-gray-700"
@@ -945,13 +943,15 @@ const RechartsChartRenderer: React.FC<Props> = ({
         </button>
       </div>
     );
+
+    return createPortal(menu, document.body);
   };
 
   // Color theme submenu component
   const ColorThemeSubmenu = () => {
     if (!showColorSubmenu) return null;
 
-    return (
+    const submenu = (
       <div
         className="fixed z-[9999] bg-white border border-gray-300 rounded-lg shadow-xl p-3 color-submenu"
         style={{
@@ -1003,13 +1003,15 @@ const RechartsChartRenderer: React.FC<Props> = ({
         </div>
       </div>
     );
+
+    return createPortal(submenu, document.body);
   };
 
   // Sort submenu component
   const SortSubmenu = () => {
     if (!showSortSubmenu) return null;
 
-    return (
+    const submenu = (
       <div
         className="fixed z-[9999] bg-white border border-gray-300 rounded-lg shadow-xl p-2 sort-submenu"
         style={{
@@ -1067,6 +1069,8 @@ const RechartsChartRenderer: React.FC<Props> = ({
         </div>
       </div>
     );
+
+    return createPortal(submenu, document.body);
   };
 
 
