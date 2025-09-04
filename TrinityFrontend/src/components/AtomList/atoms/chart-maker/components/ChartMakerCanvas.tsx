@@ -281,7 +281,7 @@ const renderChart = (
   _isFullscreen = false
 ) => {
   if ((chart as any).chartLoading) {
-    const loadingHeight = heightClass || (isCompact ? 'h-56' : 'h-80');
+    const loadingHeight = heightClass || (isCompact ? 'h-64' : 'h-96');
     const colors = getChartColors(index);
     return (
       <div className={`flex flex-col items-center justify-center ${loadingHeight} bg-gradient-to-br from-white/50 to-gray-50/50 backdrop-blur-sm relative overflow-hidden`}>
@@ -336,8 +336,8 @@ const renderChart = (
   const key = chartKey || chart.lastUpdateTime || chart.id;
   // Ensure charts occupy ample space within their cards
   // Use responsive defaults when no explicit height is provided
-  const chartHeightClass = heightClass || (isCompact ? 'h-56' : 'h-80');
-  const chartHeightValue = heightClass ? undefined : (isCompact ? 224 : 320); // px fallback for reliability
+  const chartHeightClass = heightClass || (isCompact ? 'h-64' : 'h-96');
+  const chartHeightValue = heightClass ? undefined : (isCompact ? 256 : 384); // px fallback for reliability
 
   if (
     !chart.chartRendered ||
@@ -925,7 +925,7 @@ const renderChart = (
                         }
                       })()}
                      
-                     <CardContent className={`${isCompact ? 'p-2' : 'p-4'}`}>
+                     <CardContent className={`${isCompact ? 'px-2 pb-2 pt-1' : 'px-4 pb-4 pt-2'}`}>
                        <div className="overflow-hidden">
                          {renderChart(chart, index)}
                        </div>
