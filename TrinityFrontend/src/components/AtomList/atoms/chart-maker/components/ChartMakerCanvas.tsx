@@ -333,7 +333,12 @@ const renderChart = (chart: ChartMakerConfig, index: number, chartKey?: string, 
   const chartHeightClass = heightClass || (isCompact ? 'h-56' : 'h-80');
   const chartHeightValue = heightClass ? undefined : (isCompact ? 224 : 320); // px values for reliability
 
-  if (!chartData.length || !xAxisConfig.dataKey || (!yAxisConfig.dataKey && traces.length === 0)) {
+  if (
+    !chart.chartRendered ||
+    !chartData.length ||
+    !xAxisConfig.dataKey ||
+    (!yAxisConfig.dataKey && traces.length === 0)
+  ) {
     return (
       <div
         className={`flex items-center justify-center ${chartHeightClass || 'h-64'} text-muted-foreground`}

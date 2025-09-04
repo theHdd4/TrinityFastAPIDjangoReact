@@ -296,69 +296,6 @@ const ChartMakerProperties: React.FC<Props> = ({ atomId }) => {
     }
   };
 
-  const handleImmediateChartSettingsChange = async (chartIndex: number, updates: Partial<SettingsType['charts'][0]>) => {
-    const latestAtom = useLaboratoryStore.getState().getAtom(atomId);
-    const latestSettings = (latestAtom?.settings as SettingsType) || { ...DEFAULT_CHART_MAKER_SETTINGS };
-    const chart = latestSettings.charts[chartIndex];
-    if (!chart || !latestSettings.fileId) return;
-    // Only trigger if chartRendered is true
-    if (!chart.chartRendered) return;
-    
-    // Migrate and prepare updated chart
-    const migratedChart = migrateLegacyChart(chart);
-    const updatedChart = { ...migratedChart, ...updates, chartRendered: false, chartLoading: true };
-    
-    // Optimistically update settings
-    const newCharts = [...latestSettings.charts];
-    newCharts[chartIndex] = updatedChart;
-    updateSettings(atomId, { ...latestSettings, charts: newCharts });
-    
-    try {
-      // Build traces for API
-      const traces = buildTracesForAPI(updatedChart);
-      
-      // For advanced mode, filters are included in individual traces
-      // For legacy mode, use merged filters for backward compatibility
-      const legacyFilters = updatedChart.isAdvancedMode ? {} : mergeTraceFilters(updatedChart);
-      
-      const chartRequest = {
-        file_id: latestSettings.fileId,
-        chart_type: updatedChart.type,
-        traces: traces,
-        title: updatedChart.title,
-        filters: Object.keys(legacyFilters).length > 0 ? legacyFilters : undefined,
-      };
-      const chartResponse = await chartMakerApi.generateChart(chartRequest);
-      const renderedChart = {
-        ...updatedChart,
-        chartConfig: chartResponse.chart_config,
-        filteredData: chartResponse.chart_config.data,
-        lastUpdateTime: Date.now(),
-        chartRendered: true,
-        chartLoading: false,
-      };
-      const finalCharts = [...newCharts];
-      finalCharts[chartIndex] = renderedChart;
-      updateSettings(atomId, { ...latestSettings, charts: finalCharts });
-      toast({
-        title: 'Chart updated',
-        description: 'Chart re-rendered with new settings.',
-        variant: 'default',
-        duration: 2000,
-      });
-    } catch (error) {
-      const failedCharts = [...newCharts];
-      failedCharts[chartIndex] = { ...updatedChart, chartRendered: false, chartLoading: false };
-      updateSettings(atomId, { ...latestSettings, charts: failedCharts });
-      toast({
-        title: 'Chart update failed',
-        description: error instanceof Error ? error.message : 'Failed to update chart',
-        variant: 'destructive',
-        duration: 2000,
-      });
-    }
-  };
-
   // REMOVE notification useEffects
 
   return (
@@ -394,7 +331,6 @@ const ChartMakerProperties: React.FC<Props> = ({ atomId }) => {
             settings={settings}
             onSettingsChange={handleSettingsChange}
             onRenderCharts={handleRenderCharts}
-            onChartSettingsImmediateChange={handleImmediateChartSettingsChange}
           />
         </TabsContent>
       </div>

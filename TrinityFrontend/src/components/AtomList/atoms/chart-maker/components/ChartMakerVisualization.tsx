@@ -19,14 +19,12 @@ interface ChartMakerVisualizationProps {
   settings: ChartMakerSettings;
   onSettingsChange: (newSettings: Partial<ChartMakerSettings>) => void;
   onRenderCharts: () => void;
-  onChartSettingsImmediateChange?: (chartIndex: number, updates: Partial<ChartMakerConfig>) => void;
 }
 
 const ChartMakerVisualization: React.FC<ChartMakerVisualizationProps> = ({
   settings,
   onSettingsChange,
-  onRenderCharts,
-  onChartSettingsImmediateChange
+  onRenderCharts
 }) => {
   // Debounce timers for chart re-rendering (1.5 seconds)
   const debounceTimers = useRef<Record<string, NodeJS.Timeout>>({});
@@ -154,10 +152,6 @@ const ChartMakerVisualization: React.FC<ChartMakerVisualizationProps> = ({
 
     onSettingsChange({ charts: newCharts });
 
-    // If chart was previously rendered, trigger immediate backend re-render
-    if (prevChart.chartRendered && onChartSettingsImmediateChange) {
-      onChartSettingsImmediateChange(index, updatedChart);
-    }
   };
 
   const toggleMode = (chartIndex: number) => {
