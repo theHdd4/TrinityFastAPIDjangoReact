@@ -281,10 +281,14 @@ const renderChart = (
   _isFullscreen = false
 ) => {
   if ((chart as any).chartLoading) {
-    const loadingHeight = heightClass || (isCompact ? 'h-64' : 'h-96');
+    const loadingHeight = heightClass || (isCompact ? 'h-96' : 'h-[32rem]');
+    const loadingHeightValue = heightClass ? undefined : (isCompact ? 384 : 512);
     const colors = getChartColors(index);
     return (
-      <div className={`flex flex-col items-center justify-center ${loadingHeight} bg-gradient-to-br from-white/50 to-gray-50/50 backdrop-blur-sm relative overflow-hidden`}>
+      <div
+        className={`flex flex-col items-center justify-center ${loadingHeight} bg-gradient-to-br from-white/50 to-gray-50/50 backdrop-blur-sm relative overflow-hidden`}
+        style={{ minHeight: loadingHeightValue }}
+      >
         <div className="absolute inset-0 chart-loading"></div>
         <div className="relative z-10 flex flex-col items-center space-y-4">
           <div className="relative">
@@ -336,8 +340,8 @@ const renderChart = (
   const key = chartKey || chart.lastUpdateTime || chart.id;
   // Ensure charts occupy ample space within their cards
   // Use responsive defaults when no explicit height is provided
-  const chartHeightClass = heightClass || (isCompact ? 'h-64' : 'h-96');
-  const chartHeightValue = heightClass ? undefined : (isCompact ? 256 : 384); // px fallback for reliability
+  const chartHeightClass = heightClass || (isCompact ? 'h-96' : 'h-[32rem]');
+  const chartHeightValue = heightClass ? undefined : (isCompact ? 384 : 512); // px fallback for reliability
 
   if (
     !chart.chartRendered ||
@@ -925,7 +929,7 @@ const renderChart = (
                         }
                       })()}
                      
-                     <CardContent className={`${isCompact ? 'px-2 pb-2 pt-1' : 'px-4 pb-4 pt-2'}`}>
+                    <CardContent className={`${isCompact ? 'px-2 pb-2 pt-1' : 'px-4 pb-4 pt-1'}`}>
                        <div className="overflow-hidden">
                          {renderChart(chart, index)}
                        </div>
