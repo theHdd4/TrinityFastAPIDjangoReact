@@ -12,7 +12,6 @@ pipeline {
       steps {
         echo "📦 Checking out branch: ${env.BRANCH_NAME}"
         checkout scm
-        // Removed cleanWs() to preserve volumes
       }
     }
  
@@ -32,8 +31,7 @@ pipeline {
             echo "✅ docker-compose-dev.example.yml found"
           } else {
             echo "❌ docker-compose-dev.example.yml not found"
-            // Try to find it anywhere in the workspace
-            bat "dir /s docker-compose-dev.example.yml || echo 'File not found anywhere'"
+            bat "dir /s docker-compose-dev.example.yml 2>nul || echo File not found anywhere"
             error "❌ docker-compose-dev.example.yml not found in workspace root"
           }
           
@@ -42,8 +40,7 @@ pipeline {
             echo "✅ docker-compose.example.yml found"
           } else {
             echo "❌ docker-compose.example.yml not found"
-            // Try to find it anywhere in the workspace
-            bat "dir /s docker-compose.example.yml || echo 'File not found anywhere'"
+            bat "dir /s docker-compose.example.yml 2>nul || echo File not found anywhere"
             error "❌ docker-compose.example.yml not found in workspace root"
           }
           
@@ -58,9 +55,8 @@ pipeline {
             "HOST_IP: \${HOST_IP:-${env.EXPECTED_HOST_IP}}"
           )
          
-          // Ensure 10.2.1.65:8081 is present in CORS origins (preserve other important IPs)
+          // Ensure 10.2.1.65:8081 is present in CORS origins
           if (!updatedDevCompose.contains("http://${env.EXPECTED_HOST_IP}:8081")) {
-            // Add 10.2.1.65:8081 to CORS origins while preserving existing ones
             updatedDevCompose = updatedDevCompose.replaceAll(
               '(CORS_ALLOWED_ORIGINS: "[^"]*)"',
               "\$1,http://${env.EXPECTED_HOST_IP}:8081\""
@@ -90,9 +86,8 @@ pipeline {
             "HOST_IP: \${HOST_IP:-${env.EXPECTED_HOST_IP}}"
           )
          
-          // Ensure 10.2.1.65:8080 is present in CORS origins (preserve other important IPs)
+          // Ensure 10.2.1.65:8080 is present in CORS origins
           if (!updatedProdCompose.contains("http://${env.EXPECTED_HOST_IP}:8080")) {
-            // Add 10.2.1.65:8080 to CORS origins while preserving existing ones
             updatedProdCompose = updatedProdCompose.replaceAll(
               '(CORS_ALLOWED_ORIGINS: "[^"]*)"',
               "\$1,http://${env.EXPECTED_HOST_IP}:8080\""
@@ -117,19 +112,19 @@ pipeline {
             def fastapiContent = readFile('TrinityBackendFastAPI/app/main.py')
             def updatedFastapiContent = fastapiContent
            
-            // Only add 10.2.1.65:8080 if it's not already present, preserve other IPs
+            // Only add 10.2.1.65:8080 if it's not already present
             if (!fastapiContent.contains("http://${env.EXPECTED_HOST_IP}:8080")) {
-              // Extract the current origins string and add our IP
-              def originsMatch = fastapiContent =~ /origins = os\.getenv\(\s*"FASTAPI_CORS_ORIGINS",\s*"([^"]+)"/
+              def originsPattern = ~/origins = os\.getenv\(\s*"FASTAPI_CORS_ORIGINS",\s*"([^"]+)"/
+              def originsMatch = fastapiContent =~ originsPattern
               if (originsMatch) {
                 def currentOrigins = originsMatch[0][1]
                 def newOrigins = currentOrigins + ",http://${env.EXPECTED_HOST_IP}:8080"
                 updatedFastapiContent = updatedFastapiContent.replaceAll(
-                  /origins = os\.getenv\(\s*"FASTAPI_CORS_ORIGINS",\s*"[^"]+"/,
+                  ~/origins = os\.getenv\(\s*"FASTAPI_CORS_ORIGINS",\s*"[^"]+"/,
                   "origins = os.getenv(\n    \"FASTAPI_CORS_ORIGINS\",\n    \"${newOrigins}\""
                 )
                 writeFile file: 'TrinityBackendFastAPI/app/main.py', text: updatedFastapiContent
-                echo "🔧 Added ${env.EXPECTED_HOST_IP}:8080 to FastAPI CORS origins (preserved existing IPs)"
+                echo "🔧 Added ${env.EXPECTED_HOST_IP}:8080 to FastAPI CORS origins"
               } else {
                 echo "⚠️ Could not find FASTAPI_CORS_ORIGINS in main.py, skipping update"
               }
@@ -156,7 +151,7 @@ pipeline {
           env.HOST_IP = env.EXPECTED_HOST_IP
           echo "🔧 Setting HOST_IP to: ${env.HOST_IP}"
          
-          // Start services (volumes persist)
+          // Start services
           bat """
             set HOST_IP=${env.HOST_IP}
             docker compose -p ${env.DEV_PROJECT} -f docker-compose-dev.yml down || exit 0
@@ -202,7 +197,7 @@ pipeline {
           env.HOST_IP = env.EXPECTED_HOST_IP
           echo "🔧 Setting HOST_IP to: ${env.HOST_IP}"
          
-          // Start services (volumes persist)
+          // Start services
           bat """
             set HOST_IP=${env.HOST_IP}
             docker compose -p ${env.PROD_PROJECT} -f docker-compose.yml down || exit 0
@@ -236,19 +231,17 @@ pipeline {
         }
       }
     }
- 
   }
  
   post {
     failure {
       echo "❌ Deployment failed on branch ${env.BRANCH_NAME}"
-      // Show service status for debugging - only if files exist
       script {
         if (fileExists('docker-compose-dev.yml')) {
-          bat "docker compose -p ${env.DEV_PROJECT} -f docker-compose-dev.yml ps || echo 'Could not get dev service status'"
+          bat "docker compose -p ${env.DEV_PROJECT} -f docker-compose-dev.yml ps || echo Could not get dev service status"
         }
         if (fileExists('docker-compose.yml')) {
-          bat "docker compose -p ${env.PROD_PROJECT} -f docker-compose.yml ps || echo 'Could not get prod service status'"
+          bat "docker compose -p ${env.PROD_PROJECT} -f docker-compose.yml ps || echo Could not get prod service status"
         }
       }
     }
