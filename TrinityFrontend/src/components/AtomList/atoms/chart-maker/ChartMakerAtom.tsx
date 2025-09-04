@@ -89,7 +89,6 @@ const ChartMakerAtom: React.FC<Props> = ({ atomId }) => {
               traces: traces,
               title: updatedChart.title,
               filters: Object.keys(legacyFilters).length > 0 ? legacyFilters : undefined,
-              filtered_data: chart.filteredData,
             };
             const chartResponse = await chartMakerApi.generateChart(chartRequest);
             if (chartLoadingTimers.current[chartId]) {
@@ -165,7 +164,6 @@ const ChartMakerAtom: React.FC<Props> = ({ atomId }) => {
               traces: traces,
               title: chart.title,
               filters: Object.keys(legacyFilters).length > 0 ? legacyFilters : undefined,
-              filtered_data: chart.filteredData,
             };
             const chartResponse = await chartMakerApi.generateChart(chartRequest);
             if (chartLoadingTimers.current[chartId]) {
@@ -251,7 +249,6 @@ const ChartMakerAtom: React.FC<Props> = ({ atomId }) => {
               traces: traces,
               title: chart.title,
               filters: Object.keys(legacyFilters).length > 0 ? legacyFilters : undefined,
-              filtered_data: chart.filteredData,
             };
             const chartResponse = await chartMakerApi.generateChart(chartRequest);
             if (chartLoadingTimers.current[chartId]) {
@@ -397,7 +394,6 @@ const ChartMakerAtom: React.FC<Props> = ({ atomId }) => {
             traces: traces,
             title: chart.title,
             filters: Object.keys(legacyFilters).length > 0 ? legacyFilters : undefined,
-            filtered_data: chart.filteredData,
           };
           const chartResponse = await chartMakerApi.generateChart(chartRequest);
           updateSettings(atomId, {

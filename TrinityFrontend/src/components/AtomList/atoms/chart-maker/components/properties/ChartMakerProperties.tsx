@@ -100,7 +100,10 @@ const ChartMakerProperties: React.FC<Props> = ({ atomId }) => {
         xAxis: '',
         yAxis: '',
         filters: {},
-        chartRendered: false
+        chartRendered: false,
+        chartConfig: undefined,
+        filteredData: undefined,
+        lastUpdateTime: undefined
       }));
       
       handleSettingsChange({
@@ -251,7 +254,6 @@ const ChartMakerProperties: React.FC<Props> = ({ atomId }) => {
             traces: traces,
             title: migratedChart.title,
             filters: Object.keys(legacyFilters).length > 0 ? legacyFilters : undefined,
-            filtered_data: migratedChart.filteredData // Use cached filtered data if available
           };
 
           // Log the data being sent to /charts endpoint
@@ -325,7 +327,6 @@ const ChartMakerProperties: React.FC<Props> = ({ atomId }) => {
         traces: traces,
         title: updatedChart.title,
         filters: Object.keys(legacyFilters).length > 0 ? legacyFilters : undefined,
-        filtered_data: updatedChart.filteredData,
       };
       const chartResponse = await chartMakerApi.generateChart(chartRequest);
       const renderedChart = {
