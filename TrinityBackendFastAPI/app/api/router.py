@@ -14,20 +14,17 @@ from app.features.scope_selector.endpoint import router as scope_selector_router
 from app.features.user_apps.endpoint import router as user_apps_router
 from app.features.chart_maker.endpoint import router as chart_maker_router
 from app.features.build_model_feature_based.endpoint import router as build_model_router
-# from app.features.build_autoregressive.endpoint import router as autoregressive_router
-from app.features.select_models_feature_based.endpoint import router as select_router
-from app.features.explore.endpoint import router as explore_router
-from app.features.correlation.endpoint import router as correlation_router
-
-from app.features.correlation.endpoint import router as correlation_router
-from app.features.build_autoregressive.endpoint import router as autoregressive_router
 from app.features.select_models_feature_based.endpoint import router as select_models_router
 from app.features.evaluate_models_feature_based.endpoint import router as evaluate_router
+from app.features.explore.endpoint import router as explore_router
+from app.features.correlation.endpoint import router as correlation_router
+from app.features.build_autoregressive.endpoint import router as autoregressive_router
 
 api_router = APIRouter()
-text_router  = APIRouter()
+text_router = APIRouter()
+
+# Core feature routers
 api_router.include_router(feature_overview_router)
-text_router.include_router(textbox_router)
 api_router.include_router(card_archive_router)
 api_router.include_router(data_upload_validate_router)
 api_router.include_router(concat_router)
@@ -45,15 +42,13 @@ api_router.include_router(scope_selector_router)
 api_router.include_router(user_apps_router)
 api_router.include_router(chart_maker_router)
 api_router.include_router(explore_router)
-
-api_router.include_router(build_model_router)
-# api_router.include_router(autoregressive_router)
-
 api_router.include_router(correlation_router)
 
-api_router.include_router(select_router)
-
+# Machine learning and model routers
+api_router.include_router(build_model_router)
 api_router.include_router(autoregressive_router)
 api_router.include_router(select_models_router)
-
 api_router.include_router(evaluate_router)
+
+# Text router for text-based features
+text_router.include_router(textbox_router)
