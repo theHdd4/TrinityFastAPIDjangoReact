@@ -90,6 +90,9 @@ CUSTOM_CONFIG_DIR.mkdir(exist_ok=True)
 # In-memory storage
 extraction_results = {}
 
+# Common Polars CSV options to improve schema inference on large files
+CSV_READ_KWARGS = {"low_memory": True, "infer_schema_length": 10_000}
+
 # Health check
 @router.get("/health")
 async def health_check():
@@ -492,7 +495,7 @@ async def create_new(
         # Parse file to DataFrame using Polars for efficient serialization
         try:
             if file.filename.lower().endswith(".csv"):
-                df_pl = pl.read_csv(io.BytesIO(content), low_memory=True)
+                df_pl = pl.read_csv(io.BytesIO(content), **CSV_READ_KWARGS)
             elif file.filename.lower().endswith((".xls", ".xlsx")):
                 df_pl = pl.from_pandas(pd.read_excel(io.BytesIO(content)))
             else:
@@ -1507,7 +1510,7 @@ async def validate(
                 size_bytes = len(content)
 
                 if file.filename.lower().endswith(".csv"):
-                    df_pl = pl.read_csv(io.BytesIO(content), low_memory=True)
+                    df_pl = pl.read_csv(io.BytesIO(content), **CSV_READ_KWARGS)
                 elif file.filename.lower().endswith((".xls", ".xlsx")):
                     df_pl = pl.from_pandas(pd.read_excel(io.BytesIO(content)))
                 else:
@@ -1526,7 +1529,7 @@ async def validate(
                 size_bytes = len(data)
                 filename = Path(path).name
                 if filename.lower().endswith(".csv"):
-                    df_pl = pl.read_csv(io.BytesIO(data), low_memory=True)
+                    df_pl = pl.read_csv(io.BytesIO(data), **CSV_READ_KWARGS)
                 elif filename.lower().endswith((".xls", ".xlsx")):
                     df_pl = pl.from_pandas(pd.read_excel(io.BytesIO(data)))
                 else:
@@ -1943,7 +1946,7 @@ async def validate_mmm_endpoint(
 
             # Parse file based on extension using Polars, then convert to pandas
             if file.filename.lower().endswith(".csv"):
-                df_pl = pl.read_csv(io.BytesIO(content), low_memory=True)
+                df_pl = pl.read_csv(io.BytesIO(content), **CSV_READ_KWARGS)
             elif file.filename.lower().endswith((".xls", ".xlsx")):
                 df_pl = pl.from_pandas(pd.read_excel(io.BytesIO(content)))
             else:
@@ -2312,7 +2315,7 @@ async def validate_category_forecasting_endpoint(
         
         # Parse file based on extension using Polars
         if file.filename.lower().endswith(".csv"):
-            df_pl = pl.read_csv(io.BytesIO(content), low_memory=True)
+            df_pl = pl.read_csv(io.BytesIO(content), **CSV_READ_KWARGS)
         elif file.filename.lower().endswith((".xls", ".xlsx")):
             df_pl = pl.from_pandas(pd.read_excel(io.BytesIO(content)))
         else:
@@ -2504,7 +2507,7 @@ async def validate_promo_endpoint(
         
         # Parse file based on extension
         if file.filename.lower().endswith(".csv"):
-            df_pl = pl.read_csv(io.BytesIO(content), low_memory=True)
+            df_pl = pl.read_csv(io.BytesIO(content), **CSV_READ_KWARGS)
         elif file.filename.lower().endswith((".xls", ".xlsx")):
             df_pl = pl.from_pandas(pd.read_excel(io.BytesIO(content)))
         else:
@@ -2736,7 +2739,7 @@ async def save_dataframes(
         if filename.lower().endswith(".csv"):
             csv_path = getattr(fileobj, "name", None)
             if csv_path and os.path.exists(csv_path):
-                reader = pl.read_csv_batched(csv_path, batch_size=1_000_000)
+                reader = pl.read_csv_batched(csv_path, batch_size=1_000_000, **CSV_READ_KWARGS)
                 try:
                     first_chunk = next(reader)
                 except StopIteration:
@@ -2752,7 +2755,7 @@ async def save_dataframes(
                 df_pl = None
             else:
                 data_bytes = fileobj.read()
-                df_pl = pl.read_csv(io.BytesIO(data_bytes), low_memory=True)
+                df_pl = pl.read_csv(io.BytesIO(data_bytes), **CSV_READ_KWARGS)
                 arrow_buf = io.BytesIO()
                 df_pl.write_ipc(arrow_buf)
                 arrow_bytes = arrow_buf.getvalue()

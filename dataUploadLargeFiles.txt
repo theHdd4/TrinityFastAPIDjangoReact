@@ -26,3 +26,7 @@ To avoid `TypeError: expected str, bytes or os.PathLike object, not BytesIO` whe
 very large uploads, the chunked reader now points Polars at the on-disk temporary file path
 for each CSV. Smaller in-memory uploads fall back to `pl.read_csv`, ensuring both paths are
 handled correctly without exhausting memory.
+
+CSV parsing now scans the first 10k rows when inferring column types. This prevents
+`ComputeError: could not parse '...' as dtype i64` failures when later rows contain
+floating-point values in columns that initially appear integer-only.
