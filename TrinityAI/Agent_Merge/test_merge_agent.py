@@ -18,7 +18,7 @@ def test_merge_agent():
     # Mock configuration for testing
     config = {
         "api_url": "http://localhost:11434/api/chat",
-        "model_name": "deepseek-r1:32b",
+        "model_name": "qwen3:30b",
         "bearer_token": "test_token",
         "minio_endpoint": "localhost:9000",
         "access_key": "test",
