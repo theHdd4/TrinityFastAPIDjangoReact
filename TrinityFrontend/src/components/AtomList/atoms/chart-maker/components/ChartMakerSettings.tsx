@@ -21,9 +21,9 @@ interface ChartMakerSettingsProps {
   dataSource?: string;
 }
 
-interface Frame { 
-  object_name: string; 
-  csv_name: string; 
+interface Frame {
+  object_name: string;
+  arrow_name: string;
 }
 
 const ChartMakerSettings: React.FC<ChartMakerSettingsProps> = ({ 
@@ -45,7 +45,18 @@ const ChartMakerSettings: React.FC<ChartMakerSettingsProps> = ({
   useEffect(() => {
     fetch(`${VALIDATE_API}/list_saved_dataframes`)
       .then(r => r.json())
-      .then(d => setFrames(Array.isArray(d.files) ? d.files : []))
+      .then(d =>
+        setFrames(
+          Array.isArray(d.files)
+            ? d.files
+                .filter((f: any) => !!f.arrow_name)
+                .map((f: any) => ({
+                  object_name: f.object_name,
+                  arrow_name: f.arrow_name,
+                }))
+            : []
+        )
+      )
       .catch(() => setFrames([]));
   }, []);
 
@@ -86,7 +97,10 @@ const ChartMakerSettings: React.FC<ChartMakerSettingsProps> = ({
         console.log('[ChartMakerSettings] Direct loading failed, falling back to download/upload method:', error);
         
         // Fallback to the original download/upload method
-        const displayName = frames.find(df => df.object_name === objectName)?.csv_name.split('/').pop()?.replace('.arrow', '') || objectName;
+        const displayName =
+          frames
+            .find(df => df.object_name === objectName)
+            ?.arrow_name.split('/').pop()?.replace('.arrow', '') || objectName;
         const isArrow = processedObjectName.endsWith('.arrow');
         
         if (isArrow) {
@@ -166,7 +180,7 @@ const ChartMakerSettings: React.FC<ChartMakerSettingsProps> = ({
             <SelectContent>
               {frames.map(f => (
                 <SelectItem key={f.object_name} value={f.object_name}>
-                  {f.csv_name.split('/').pop()?.replace('.arrow', '')}
+              {f.arrow_name.split('/').pop()?.replace('.arrow', '')}
                 </SelectItem>
               ))}
             </SelectContent>

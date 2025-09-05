@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import RechartsChartRenderer from '@/templates/charts/RechartsChartRenderer';
 import { BarChart3, TrendingUp, BarChart2, Triangle, Zap, Maximize2, ChevronDown, ChevronLeft, ChevronRight, Filter, X, LineChart as LineChartIcon, PieChart as PieChartIcon } from 'lucide-react';
@@ -57,9 +57,6 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ atomId, charts, dat
   const [chatBubbleShouldRender, setChatBubbleShouldRender] = useState(false);
   const [overlayActive, setOverlayActive] = useState(false);
 
-  // Mouse hold detection refs
-  const longPressTimerRef = useRef<NodeJS.Timeout | null>(null);
-  const holdTargetRef = useRef<{ chartId: string; element: HTMLElement } | null>(null);
   const debounceTimers = useRef<Record<string, NodeJS.Timeout | number | null>>({});
   
   // Container ref for responsive layout
@@ -114,12 +111,20 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ atomId, charts, dat
   };
 
   const getFilteredData = (chart: ChartMakerConfig) => {
-    // Only use backend-generated chart data
+    // Prefer backend-provided data when available
     if (chart.chartConfig && chart.chartConfig.data) {
       return chart.chartConfig.data;
     }
-    // No fallback to frontend logic
-    return [];
+    // Fallback to filtering uploaded data based on selected identifiers
+    if (!typedData || !Array.isArray(typedData.rows)) return [];
+
+    const { filters = {} } = chart;
+    return typedData.rows.filter(row =>
+      Object.entries(filters).every(([col, values]) => {
+        if (!values || values.length === 0) return true;
+        return values.includes(String(row[col]));
+      })
+    );
   };
 
   const getChartColors = (index: number) => {
@@ -183,54 +188,23 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ atomId, charts, dat
     },
   };
 
-  // Chat bubble handlers
-  const handleMouseDown = (e: React.MouseEvent, chartId: string) => {
-    if (e.button !== 0) return; // Only left click
-    
+  // Chat bubble handler - trigger chart type tray on right click
+  const handleContextMenu = (e: React.MouseEvent, chartId: string) => {
+    e.preventDefault();
     e.stopPropagation();
-    
-    // Store the target element reference
-    const target = e.currentTarget as HTMLElement;
-    
-    // Start the long press timer
-    longPressTimerRef.current = setTimeout(() => {
-      // Check if target still exists before calling getBoundingClientRect
-      if (!target || !target.getBoundingClientRect) {
-        return;
-      }
-      
-      try {
-        // Calculate bubble position
-        const rect = target.getBoundingClientRect();
-        const position = {
-          x: rect.left + rect.width / 2,
-          y: rect.bottom + 10
-        };
-        
-        setChatBubble({
-          visible: true,
-          chartId,
-          anchor: position
-        });
-        setChatBubbleShouldRender(true);
-        setOverlayActive(false); // Will be activated after animation
-      } catch (error) {
-        console.warn('Error calculating bubble position:', error);
-      }
-    }, 700);
-    
-    // Setup cleanup listeners on window
-    const cleanup = () => {
-      if (longPressTimerRef.current) {
-        clearTimeout(longPressTimerRef.current);
-        longPressTimerRef.current = null;
-      }
-      window.removeEventListener('mouseup', cleanup);
-      window.removeEventListener('mouseleave', cleanup);
+
+    const position = {
+      x: e.clientX,
+      y: e.clientY
     };
-    
-    window.addEventListener('mouseup', cleanup);
-    window.addEventListener('mouseleave', cleanup);
+
+    setChatBubble({
+      visible: true,
+      chartId,
+      anchor: position
+    });
+    setChatBubbleShouldRender(true);
+    setOverlayActive(false);
   };
 
   const handleChartTypeSelect = (type: string) => {
@@ -265,12 +239,22 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ atomId, charts, dat
   }, [chatBubble.visible, chatBubbleShouldRender, overlayActive]);
 
 
-const renderChart = (chart: ChartMakerConfig, index: number, chartKey?: string, heightClass?: string, isFullscreen = false) => {
+const renderChart = (
+  chart: ChartMakerConfig,
+  index: number,
+  chartKey?: string,
+  heightClass?: string,
+  _isFullscreen = false
+) => {
   if ((chart as any).chartLoading) {
-    const loadingHeight = isCompact ? 'h-56' : 'h-80';
+    const loadingHeight = heightClass || (isCompact ? 'h-96' : 'h-[32rem]');
+    const loadingHeightValue = heightClass ? undefined : (isCompact ? 384 : 512);
     const colors = getChartColors(index);
     return (
-      <div className={`flex flex-col items-center justify-center ${loadingHeight} bg-gradient-to-br from-white/50 to-gray-50/50 backdrop-blur-sm relative overflow-hidden`}>
+      <div
+        className={`flex flex-col items-center justify-center ${loadingHeight} bg-gradient-to-br from-white/50 to-gray-50/50 backdrop-blur-sm relative overflow-hidden`}
+        style={{ minHeight: loadingHeightValue }}
+      >
         <div className="absolute inset-0 chart-loading"></div>
         <div className="relative z-10 flex flex-col items-center space-y-4">
           <div className="relative">
@@ -307,14 +291,35 @@ const renderChart = (chart: ChartMakerConfig, index: number, chartKey?: string, 
   const rendererType = typeMap[rawType] || 'line_chart';
   const chartData = config.data || getFilteredData(chart);
   const traces = config.traces || [];
-  const xAxisConfig = config.x_axis || { dataKey: chart.xAxis };
-  const yAxisConfig = config.y_axis || { dataKey: chart.yAxis };
+  const xAxisConfig = chart.chartRendered && config.x_axis
+    ? {
+        ...config.x_axis,
+        dataKey: (config.x_axis as any).dataKey || (config.x_axis as any).data_key || chart.xAxis,
+      }
+    : { dataKey: chart.xAxis };
+  const yAxisConfig = chart.chartRendered && config.y_axis
+    ? {
+        ...config.y_axis,
+        dataKey: (config.y_axis as any).dataKey || (config.y_axis as any).data_key || chart.yAxis,
+      }
+    : { dataKey: chart.yAxis };
   const key = chartKey || chart.lastUpdateTime || chart.id;
-  const chartHeight = heightClass || '';
+  // Ensure charts occupy ample space within their cards
+  // Use responsive defaults when no explicit height is provided
+  const chartHeightClass = heightClass || (isCompact ? 'h-96' : 'h-[32rem]');
+  const chartHeightValue = heightClass ? undefined : (isCompact ? 384 : 512); // px fallback for reliability
 
-  if (!chartData.length || !xAxisConfig.dataKey || (!yAxisConfig.dataKey && traces.length === 0)) {
+  if (
+    !chart.chartRendered ||
+    !chartData.length ||
+    !xAxisConfig.dataKey ||
+    (!yAxisConfig.dataKey && traces.length === 0)
+  ) {
     return (
-      <div className={`flex items-center justify-center ${chartHeight || 'h-64'} text-muted-foreground`}>
+      <div
+        className={`flex items-center justify-center ${chartHeightClass} text-muted-foreground`}
+        style={{ minHeight: chartHeightValue }}
+      >
         <div className="text-center">
           <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-gradient-to-br from-slate-100 to-slate-200 flex items-center justify-center">
             <LineChartIcon className="w-8 h-8 text-slate-400" />
@@ -339,10 +344,16 @@ const renderChart = (chart: ChartMakerConfig, index: number, chartKey?: string, 
     yAxisLabel: yAxisConfig.label || yAxisConfig.dataKey,
     yAxisLabels: traces.length ? traces.map((t: any) => t.name || t.dataKey) : undefined,
     colors: [colors.primary, colors.secondary, colors.tertiary],
+    theme: chart.chartConfig?.theme,
+    showLegend: chart.chartConfig?.showLegend,
+    showAxisLabels: chart.chartConfig?.showAxisLabels,
+    showDataLabels: chart.chartConfig?.showDataLabels,
+    showGrid: chart.chartConfig?.showGrid,
+    height: chartHeightValue,
   } as const;
 
   return (
-    <div className={`w-full ${chartHeight}`}>
+    <div className={`w-full ${chartHeightClass}`} style={{ minHeight: chartHeightValue }}>
       <RechartsChartRenderer {...rendererProps} />
     </div>
   );
@@ -437,10 +448,6 @@ const renderChart = (chart: ChartMakerConfig, index: number, chartKey?: string, 
                    <Card
                      key={chart.id}
                     className="chart-card border border-black shadow-xl bg-white/95 backdrop-blur-sm overflow-hidden transform hover:scale-[1.02] transition-all duration-300 relative flex flex-col group hover:shadow-2xl"
-                     onContextMenu={e => {
-                       e.preventDefault(); // Disable right-click context menu
-                       e.stopPropagation();
-                     }}
                    >
                     <div className="bg-white border-b border-black p-4 relative flex-shrink-0 group-hover:shadow-lg transition-shadow duration-300">
                       <CardTitle className={`font-bold text-gray-900 flex items-center justify-between ${isCompact ? 'text-base' : 'text-lg'}`}>
@@ -482,13 +489,9 @@ const renderChart = (chart: ChartMakerConfig, index: number, chartKey?: string, 
                             setFullscreenIndex(index);
                           }
                         }}
-                        onMouseDown={e => handleMouseDown(e, chart.id)}
-                        onContextMenu={e => {
-                           e.preventDefault(); // Disable right-click context menu
-                           e.stopPropagation();
-                         }}
-                         title="Alt+Click to expand, Hold to change chart type"
-                       />
+                        onContextMenu={e => handleContextMenu(e, chart.id)}
+                        title="Alt+Click to expand, Right-click to change chart type"
+                      />
                      </div>
                      
                       {/* Filter Controls - Support both simple and multi-series modes */}
@@ -892,7 +895,7 @@ const renderChart = (chart: ChartMakerConfig, index: number, chartKey?: string, 
                         }
                       })()}
                      
-                     <CardContent className={`${isCompact ? 'p-2' : 'p-4'}`}>
+                    <CardContent className={`${isCompact ? 'px-2 pb-2 pt-1' : 'px-4 pb-4 pt-1'}`}>
                        <div className="overflow-hidden">
                          {renderChart(chart, index)}
                        </div>

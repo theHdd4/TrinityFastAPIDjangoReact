@@ -183,7 +183,7 @@ const TraceManager: React.FC<TraceManagerProps> = ({
   };
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 w-full">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
@@ -204,7 +204,7 @@ const TraceManager: React.FC<TraceManagerProps> = ({
 
       {/* Global Filter Management - only show if we have traces */}
       {traces.length > 0 && (
-        <Card>
+        <Card className="w-full">
           <CardHeader className="pb-2">
             <CardTitle className="text-sm flex items-center gap-2">
               <Filter className="w-4 h-4" />
@@ -283,9 +283,9 @@ const TraceManager: React.FC<TraceManagerProps> = ({
       )}
 
       {/* Traces List */}
-      <div className="space-y-3">
+      <div className="space-y-3 w-full">
         {traces.map((trace, index) => (
-          <Card key={index} className="relative">
+          <Card key={index} className="relative w-full">
             <CardHeader className="pb-3">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
@@ -389,7 +389,7 @@ const TraceManager: React.FC<TraceManagerProps> = ({
 
       {/* Empty State */}
       {traces.length === 0 && (
-        <Card className="border-dashed">
+        <Card className="border-dashed w-full">
           <CardContent className="flex flex-col items-center justify-center py-6">
             <div className="text-center space-y-2">
               <Palette className="w-8 h-8 mx-auto text-muted-foreground" />
