@@ -10,7 +10,6 @@ export interface DataFrameResponse {
 }
 
 async function postJSON(url: string, body: any) {
-  console.log('[DataFrameOperationsAPI] POST', url, body);
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -18,21 +17,16 @@ async function postJSON(url: string, body: any) {
   });
   const text = await res.text();
   if (!res.ok) {
-    console.error('[DataFrameOperationsAPI] error', url, text);
     throw new Error(text);
   }
   try {
-    const data = JSON.parse(text);
-    console.log('[DataFrameOperationsAPI] response', url, data);
-    return data;
+    return JSON.parse(text);
   } catch {
-    console.error('[DataFrameOperationsAPI] invalid JSON response', text);
     throw new Error(text);
   }
 }
 
 export async function loadDataframe(file: File): Promise<DataFrameResponse> {
-  console.log('[DataFrameOperationsAPI] uploading file', file.name);
   const form = new FormData();
   form.append('file', file);
   const res = await fetch(`${DATAFRAME_OPERATIONS_API}/load`, {
@@ -41,16 +35,12 @@ export async function loadDataframe(file: File): Promise<DataFrameResponse> {
   });
   const text = await res.text();
   if (!res.ok) {
-    console.error('[DataFrameOperationsAPI] load error', text);
     throw new Error(text);
   }
-  const data = JSON.parse(text);
-  console.log('[DataFrameOperationsAPI] load response', data);
-  return data;
+  return JSON.parse(text);
 }
 
 export function loadDataframeByKey(objectName: string): Promise<DataFrameResponse> {
-  console.log('[DataFrameOperationsAPI] load by key', objectName);
   return postJSON(`${DATAFRAME_OPERATIONS_API}/load_cached`, { object_name: objectName });
 }
 
