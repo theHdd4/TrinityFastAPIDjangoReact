@@ -253,6 +253,71 @@ class SingleCombinationReferenceResponse(BaseModel):
         description="Human-readable message about the calculation"
     )
 
+class AutoPopulateReferenceRequest(BaseModel):
+    """Request schema for POST /api/scenario/auto-populate-reference endpoint"""
+    model_id: str = Field(
+        ...,
+        description="Model _id to fetch and process"
+    )
+    stat: str = Field(
+        ...,
+        description="Statistic to calculate: mean, median, sum, min, max, period-mean, period-median, period-sum, period-min, period-max, rolling-mean"
+    )
+    start_date: str = Field(
+        ...,
+        description="Start date for period-based calculations (YYYY-MM-DD)"
+    )
+    end_date: str = Field(
+        ...,
+        description="End date for period-based calculations (YYYY-MM-DD)"
+    )
+    combination_id: str = Field(
+        ...,
+        description="Single combination ID to fetch reference values for"
+    )
+    
+    class Config:
+        schema_extra = {
+            "example": {
+                "model_id": "default_client/default_app/default_project",
+                "stat": "period-mean",
+                "start_date": "2024-01-01",
+                "end_date": "2024-12-31",
+                "combination_id": "cat1_supermarkets_allppg"
+            }
+        }
+
+class AutoPopulateReferenceResponse(BaseModel):
+    """Response schema for POST /api/scenario/auto-populate-reference endpoint"""
+    combination_id: str = Field(
+        ...,
+        description="The combination ID that was processed"
+    )
+    reference_values: Dict[str, float] = Field(
+        ...,
+        description="Dictionary mapping feature names to their reference values"
+    )
+    statistic_used: str = Field(
+        ...,
+        description="The statistic that was applied (e.g., period-mean, median)"
+    )
+    date_range: Dict[str, str] = Field(
+        ...,
+        description="The date range used for calculation"
+    )
+    data_info: Dict[str, Any] = Field(
+        ...,
+        description="Information about the dataset used for calculation"
+    )
+    success: bool = Field(
+        ...,
+        description="Whether the calculation was successful"
+    )
+    message: str = Field(
+        ...,
+        description="Human-readable message about the calculation"
+    )
+
 # ────────────────────────────────────────────────────────────────────────────
 #  Reference Endpoint Request/Response
 # ────────────────────────────────────────────────────────────────────────────

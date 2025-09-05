@@ -80,7 +80,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
   const [editingScenario, setEditingScenario] = useState<string | null>(null);
 
   
-
+  
   // ✅ NEW: Initialize scenarioNames from global store or local storage
 
   const [scenarioNames, setScenarioNames] = useState<Record<string, string>>(() => {
@@ -96,7 +96,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
     }
 
     
-
+    
     // Fallback to local storage
 
     try {
@@ -120,7 +120,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
     }
 
     
-
+    
     // Default names if nothing stored
 
     const defaultNames = {
@@ -156,7 +156,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
   const currentScenarioData = settings?.scenarios?.[currentScenario];
 
   
-
+  
   // ✅ FIXED: Use scenario-specific data merged with global updates
 
   const computedSettings = useMemo(() => {
@@ -170,7 +170,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
     });
 
     
-
+    
     if (currentScenarioData) {
 
       const result = {
@@ -196,7 +196,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
         originalReferenceValues: currentScenarioData.originalReferenceValues || {},
 
         
-
+        
         // Merge with global updates from Settings component
 
         ...(settings.backendIdentifiers && Array.isArray(settings.backendIdentifiers) && { identifiers: settings.backendIdentifiers }),
@@ -218,7 +218,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
       };
 
       
-
+      
       console.log('✅ Computed settings result:', {
 
         combinationsCount: result.combinations.length,
@@ -227,7 +227,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
       });
 
       
-
+      
       return result;
 
     } else {
@@ -264,8 +264,8 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
 
 
 
-  
 
+  
   // ✅ FIXED: Use scenario-specific combination inputs
 
   const combinationInputs = currentScenarioData?.combinationInputs || {}; 
@@ -285,13 +285,13 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
     if (value === null || value === undefined) return '0';
 
     
-
+    
     const numValue = typeof value === 'number' ? value : parseFloat(value);
 
     if (isNaN(numValue)) return '0';
 
     
-
+    
     // Round to 3 decimal places and convert to string
 
     return (Math.round(numValue * 1000) / 1000).toFixed(3);
@@ -309,7 +309,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
     const currentViewResults = currentScenarioData?.viewResults?.[computedSettings.selectedView];
 
     
-
+    
     if (!currentViewResults?.individuals || !computedSettings.selectedView) {
 
       return [];
@@ -317,13 +317,13 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
     }
 
     
-
+    
     // Get the selected aggregated view configuration
 
     const selectedAggregatedView = computedSettings.aggregatedViews?.find(v => v.id === computedSettings.selectedView);
 
     
-
+    
     // Filter individuals based on the selected view's identifier configuration
 
     const filteredIndividuals = (currentViewResults.individuals || []).filter((individual: any) => {
@@ -331,7 +331,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
       if (!selectedAggregatedView || !individual.identifiers) return false;
 
       
-
+      
           // Check if this individual matches the selected view's identifier configuration
 
     for (const identifierId of selectedAggregatedView.identifierOrder) {
@@ -341,7 +341,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
       const individualValue = individual.identifiers[identifierId];
 
       
-
+      
       // If this identifier has selected values, check if individual's value is included
 
       if (selectedValues.length > 0 && !selectedValues.includes(individualValue)) {
@@ -353,17 +353,17 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
     }
 
     
-
+    
     return true; // This individual matches the view's configuration
 
   });
 
     
-
+    
     return filteredIndividuals.map((individual: any, index: number) => {
 
       
-
+      
       // Create combination label from identifiers (only show identifiers that are in the selected view)
 
       const relevantIdentifiers = selectedAggregatedView?.identifierOrder.reduce((acc: any, identifierId: string) => {
@@ -379,15 +379,15 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
       }, {}) || individual.identifiers;
 
       
-
+      
       const identifierParts = Object.entries(relevantIdentifiers)
 
         .map(([key, value]) => `${key}: ${value}`)
 
         .join(', ');
-
       
-
+      
+      
       // Extract the correct values based on the actual data structure
 
       let prediction = 0;
@@ -395,7 +395,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
       let pct_uplift = 0;
 
       
-
+      
       // Handle prediction
 
       if (individual.scenario?.prediction) {
@@ -409,7 +409,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
       }
 
       
-
+      
       // Handle pct_uplift
 
       if (individual.pct_uplift?.prediction) {
@@ -423,7 +423,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
       }
 
       
-
+      
       console.log(`🔍 Processed individual ${index}:`, {
 
         combinationLabel: identifierParts,
@@ -435,7 +435,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
       });
 
       
-
+      
       return {
 
         identifiers: individual.identifiers || {},
@@ -455,21 +455,21 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
   }, [currentScenarioData?.viewResults, computedSettings?.selectedView, computedSettings?.aggregatedViews]);
 
   
-
+  
   // ✅ FIXED: Use computed settings for original reference values
 
   const originalReferenceValues = computedSettings?.originalReferenceValues || {};
 
   
-
+  
   // State for cleared combinations removed - only clear functionality needed
 
   
-
+  
   // Use a ref to track which scenarios have been cleared to prevent infinite loops
 
   const clearedScenariosRef = useRef<Set<string>>(new Set());
-
+  
   
 
   // ✅ NEW: Use selected combinations from current scenario instead of global
@@ -583,7 +583,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
     console.log('🎯 Context menu action:', { action, scenarioId });
 
     
-
+    
     if (action === 'rename') {
 
       console.log('✏️ Setting editing scenario to:', scenarioId);
@@ -591,7 +591,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
       console.log('📊 Current editingScenario before:', editingScenario);
 
       
-
+      
       // ✅ NEW: Set both editing state and temporary input value
 
       const currentName = scenarioNames[scenarioId] || `Scenario ${scenarioId.replace('scenario-', '')}`;
@@ -601,7 +601,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
       setEditingScenario(scenarioId);
 
       
-
+      
       console.log('📊 editingScenario should now be:', scenarioId);
 
       console.log('📝 tempRenameValue set to:', currentName);
@@ -617,7 +617,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
     }
 
     
-
+    
     setContextMenu(null);
 
   };
@@ -637,13 +637,13 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
     console.log('🔄 handleScenarioRename called:', { scenarioId, newName });
 
     
-
+    
     // ✅ SIMPLE: Just save the new name if it's not empty
 
     const trimmedNewName = newName.trim();
 
     
-
+    
     if (!trimmedNewName) {
 
       console.log('⏭️ Empty name, not saving');
@@ -655,7 +655,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
     }
 
     
-
+    
     console.log('✅ Saving new name:', trimmedNewName);
 
     setScenarioNames(prev => ({
@@ -667,7 +667,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
     }));
 
     
-
+    
     setEditingScenario(null);
 
   };
@@ -739,7 +739,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
     }
 
     
-
+    
     // If it's an aggregated view object, generate name from selected identifiers
 
     if (view.selectedIdentifiers && Object.keys(view.selectedIdentifiers).length > 0) {
@@ -747,7 +747,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
       const identifierNames: string[] = [];
 
       
-
+      
       // Extract identifier names from the selected identifiers
 
       Object.entries(view.selectedIdentifiers).forEach(([identifierId, valueIds]) => {
@@ -769,7 +769,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
       });
 
       
-
+      
       // If we have identifier names, join them with underscore
 
       if (identifierNames.length > 0) {
@@ -785,7 +785,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
     }
 
     
-
+    
     // Fallback to view name or default
 
     const fallbackName = view.name || view.id.replace('view-', 'View ');
@@ -860,7 +860,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
           const input = combinationInputs[combinationId][feature.id];
           const referenceValue = getReferenceValue(combinationId, feature.id);
           
-
+          
           if (referenceValue !== null) {
 
             const inputValue = parseFloat(input.input) || 0;
@@ -868,7 +868,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
             const changeValue = parseFloat(input.change) || 0;
 
             
-
+            
             if (changeValue !== 0) {
 
               // User modified percentage - use that
@@ -920,7 +920,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
     const views: { [key: string]: any } = {};
 
     
-
+    
     if (computedSettings.aggregatedViews && computedSettings.aggregatedViews.length > 0) {
 
       // ✅ NEW: Process ALL aggregated views, not just the current one
@@ -932,7 +932,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
           const viewSelectedIdentifiers: { [key: string]: { [key: string]: string[] } } = {};
 
           
-
+          
           // Convert aggregated view format to backend format
 
           let idCounter = 1;
@@ -946,7 +946,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
               const identifier = (computedSettings.identifiers || []).find(id => id.id === identifierId);
 
               
-
+              
               if (identifier) {
 
                 // Convert value IDs to value names for backend
@@ -960,7 +960,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
                 }).filter(Boolean); // Remove any null/undefined values
 
                 
-
+                
                 if (valueNames.length > 0) {
 
                   const idKey = `id${idCounter}`;
@@ -982,7 +982,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
           });
 
           
-
+          
           // Only add view if it has valid selected identifiers
 
           if (Object.keys(viewSelectedIdentifiers).length > 0) {
@@ -1008,7 +1008,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
         const defaultViewSelectedIdentifiers: { [key: string]: { [key: string]: string[] } } = {};
 
         
-
+        
         let idCounter = 1;
 
         (computedSettings.identifiers || []).forEach(identifier => {
@@ -1018,7 +1018,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
           const checkedValues = (identifier.values || []).filter(v => v.checked);
 
           
-
+          
           if (checkedValues.length > 0) {
 
             const idKey = `id${idCounter}`;
@@ -1026,7 +1026,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
             const valueNames = checkedValues.map(v => v.name);
 
             
-
+            
             defaultViewSelectedIdentifiers[idKey] = {
 
               [identifier.name]: valueNames
@@ -1040,7 +1040,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
         });
 
         
-
+        
         // Create default view if we have any identifiers
 
         if (Object.keys(defaultViewSelectedIdentifiers).length > 0) {
@@ -1262,7 +1262,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
       setRunningScenario(true);
 
       
-
+      
       console.log('🎯 RUNNING SCENARIO FOR ALL VIEWS:', {
 
         currentScenario,
@@ -1280,15 +1280,15 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
       });
 
       
-
+      
       // ✅ NEW: Prepare the request payload with ALL views
 
       const runRequest = prepareRunRequest(settings);
-
+      
       
 
 
-
+      
 
 
       const response = await fetch(`${SCENARIO_PLANNER_API}/run`, {
@@ -1306,13 +1306,13 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
       });
 
       
-
+      
       if (response.ok) {
 
         const result = await response.json();
 
         
-
+        
         // ✅ NEW: Process view_results for ALL views returned from backend
 
         const updatedScenarios = { ...settings.scenarios };
@@ -1324,7 +1324,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
         }
 
         
-
+        
         // Initialize viewResults if it doesn't exist
 
         if (!updatedScenarios[currentScenario].viewResults) {
@@ -1334,7 +1334,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
         }
 
         
-
+        
         // ✅ NEW: Store results for ALL views returned from backend
 
         if (result.view_results) {
@@ -1358,7 +1358,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
             }
 
             
-
+            
             updatedScenarios[currentScenario].viewResults[viewId] = {
 
               runId: result.run_id,
@@ -1386,7 +1386,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
         }
 
         
-
+        
         onSettingsChange({
 
           scenarios: updatedScenarios
@@ -1394,11 +1394,11 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
         });
 
         
-
+        
         const viewsProcessed = result.view_results ? Object.keys(result.view_results).length : 0;
 
         
-
+        
         toast({
 
           title: "Scenario Completed",
@@ -1408,9 +1408,9 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
           variant: "default",
 
         });
-
         
-
+        
+        
       } else {
 
         const errorText = await response.text();
@@ -1418,9 +1418,9 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
         throw new Error(`Failed to run scenario: ${response.status} - ${errorText}`);
 
       }
-
       
-
+      
+      
     } catch (error) {
 
       console.error('❌ Error running scenario:', error);
@@ -1454,13 +1454,13 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
     const currentScenario = settings?.selectedScenario;
 
     
-
+    
     // Get all scenarios from settings if they exist, with fallback to base scenarios
 
     const allScenarios = settings?.allScenarios || baseScenarios;
 
     
-
+    
     // Ensure allScenarios is always an array
 
     if (!Array.isArray(allScenarios)) {
@@ -1470,7 +1470,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
     }
 
     
-
+    
     // If current scenario is not in all scenarios, add it
 
     if (currentScenario && !allScenarios.includes(currentScenario)) {
@@ -1480,7 +1480,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
     }
 
     
-
+    
     return allScenarios;
 
   }, [settings?.selectedScenario, settings?.allScenarios]);
@@ -1502,13 +1502,13 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
     }
 
     
-
+    
     const nextScenarioNumber = availableScenarios.length + 1;
 
     const newScenarioId = `scenario-${nextScenarioNumber}`;
 
   
-
+  
     try {
 
       // ✅ CHANGED: Duplicate current scenario instead of creating fresh one
@@ -1516,7 +1516,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
       const updatedSettings = addNewScenario(settings, newScenarioId);
 
       
-
+      
       // ✅ NEW: Update both the selected scenario, all scenarios list, and the scenarios data
 
       onSettingsChange({ 
@@ -1530,7 +1530,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
       });
 
       
-
+      
       // ✅ DEBUG: Log new scenario creation and initialization
 
       console.log('🆕 New Scenario Created and Initialized:', {
@@ -1550,11 +1550,11 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
       });
 
       
-
+      
       // ✅ CHANGED: No need to auto-load reference values since we're duplicating existing scenario
 
       
-
+      
       toast({
 
         title: "Scenario Duplicated",
@@ -1564,9 +1564,9 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
         variant: "default",
 
       });
-
       
-
+      
+      
     } catch (error) {
 
       console.error('❌ Error creating new scenario:', error);
@@ -1602,15 +1602,15 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
 
 
             const updatedScenarios = (availableScenarios || []).filter(id => id !== scenarioId);
-
     
-
+    
+    
     // If we're removing the currently selected scenario, switch to Scenario 1
 
     const newSelectedScenario = settings?.selectedScenario === scenarioId ? 'scenario-1' : settings?.selectedScenario;
 
     
-
+    
     // ✅ FIXED: Remove scenario data from scenarios object
 
     const updatedScenariosData = { ...settings.scenarios };
@@ -1618,7 +1618,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
     delete updatedScenariosData[scenarioId];
 
     
-
+    
     onSettingsChange({ 
 
       selectedScenario: newSelectedScenario,
@@ -1672,7 +1672,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
       };
 
       
-
+      
       const response = await fetch(`${SCENARIO_PLANNER_API}/reference`, {
 
         method: 'POST',
@@ -1688,13 +1688,13 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
       });
 
       
-
+      
       if (response.ok) {
 
         const data = await response.json();
 
         
-
+        
         // ✅ DEBUG: Log reference values data for verification
 
         console.log('🔍 Reference Values Debug (New Scenario):', {
@@ -1712,7 +1712,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
         });
 
         
-
+        
         // Process the specific combinations with the same data
 
         const newInputs = { ...combinationInputs };
@@ -1722,7 +1722,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
         let totalPopulated = 0;
 
         
-
+        
         // ✅ DEBUG: Log what we're working with
 
         console.log('🔍 Processing combinations for reference values:', {
@@ -1738,7 +1738,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
         });
 
         
-
+        
         specificCombinations.forEach(combination => {
 
           // ✅ FIXED: Preserve existing user input - don't overwrite if user has data
@@ -1756,7 +1756,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
           }
 
           
-
+          
           // Extract identifiers for this combination
 
           // ✅ NEW: Use combination_id directly instead of extracting identifiers
@@ -1772,13 +1772,13 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
           if (matchingCombination) {
             const modelData = matchingCombination;
             
-
+            
             // Map features to their reference values
 
             const features = computedSettings?.features || [];
 
             
-
+            
             features.forEach(feature => {
 
               if (feature.selected && (modelData as any).reference_values?.[feature.name]) {
@@ -1790,11 +1790,11 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
                 }
 
                 
-
+                
                 const referenceValue = (modelData as any).reference_values[feature.name];
 
                 
-
+                
                 // Set both Abs (input) and Pct (change) fields
 
                 newInputs[combination.id][feature.id].input = formatToThreeDecimals(referenceValue);
@@ -1802,7 +1802,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
                 newInputs[combination.id][feature.id].change = '0'; // Auto-populate percentage with 0
 
                 
-
+                
                 // ✅ NEW: Store original reference values for this combination
 
                 if (!newOriginalRefs[combination.id][feature.id]) {
@@ -1812,7 +1812,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
                 }
 
                 
-
+                
                 totalPopulated++;
 
               }
@@ -1824,7 +1824,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
         });
 
         
-
+        
         // ✅ FIXED: Update scenario-specific data in global store
 
         // ✅ NEW: Use the new scenario ID that was passed to this function
@@ -1834,7 +1834,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
         const updatedScenarios = { ...settings.scenarios };
 
         
-
+        
         if (!updatedScenarios[newScenarioId]) {
 
           updatedScenarios[newScenarioId] = {};
@@ -1842,13 +1842,13 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
         }
 
         
-
+        
         updatedScenarios[newScenarioId].combinationInputs = newInputs;
 
         updatedScenarios[newScenarioId].originalReferenceValues = newOriginalRefs;
 
         
-
+        
         onSettingsChange({ 
 
           scenarios: updatedScenarios
@@ -1856,17 +1856,17 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
         });
 
         
-
+        
         // Mark all combinations as having reference values loaded
 
         setLoadedReferenceCombinations(prev => new Set([...prev, ...specificCombinations.map(c => c.id)]));
 
         
-
+        
         console.log(`✅ Successfully populated reference values for ${totalPopulated} feature-combination pairs`);
 
         
-
+        
         toast({
 
           title: "Reference Values Loaded",
@@ -1876,9 +1876,9 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
           variant: "default",
 
         });
-
         
-
+        
+        
       } else {
 
         throw new Error(`Failed to fetch reference values: ${response.status}`);
@@ -1956,7 +1956,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
       };
 
       
-
+      
       const response = await fetch(`${SCENARIO_PLANNER_API}/reference`, {
 
         method: 'POST',
@@ -1972,13 +1972,13 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
       });
 
       
-
+      
       if (response.ok) {
 
         const data = await response.json();
 
         
-
+        
         // ✅ DEBUG: Log reference values data for verification
 
         console.log('🔍 Reference Values Debug:', {
@@ -1992,7 +1992,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
           requestBody
 
         });
-
+        
         
 
         // Process ONLY the selected combinations from the backend response
@@ -2014,7 +2014,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
           ).map(c => c.combination_id)
         });
         
-
+        
         combinations.forEach(combination => {
 
           // ✅ FIXED: Preserve existing user input - don't overwrite if user has data
@@ -2068,7 +2068,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
           if (matchingCombination) {
             const modelData = matchingCombination;
             
-
+            
             // Populate features for this combination
 
             const features = computedSettings?.features || [];
@@ -2084,11 +2084,11 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
                 }
 
                 
-
+                
                 const referenceValue = (modelData as any).reference_values[feature.name];
 
                 
-
+                
                 // ✅ DEBUG: Log reference value assignment
 
                 console.log(`📊 Reference Value Assigned:`, {
@@ -2104,13 +2104,13 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
                 });
 
                 
-
+                
                 // ✅ NEW: Store ORIGINAL reference value (never changes)
 
                 newOriginalRefs[combination.id][feature.id] = referenceValue;
 
                 
-
+                
                                   // ✅ FIXED: Only set input to reference value if user doesn't have input
 
                   if (!combinationInputs[combination.combination_id || combination.id]?.[feature.id]?.input) {
@@ -2147,7 +2147,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
                 }
 
                 
-
+                
                 // Find best available reference value
 
                 let bestReferenceValue = null;
@@ -2163,7 +2163,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
                 });
 
                 
-
+                
                 if (bestReferenceValue !== null) {
 
                   // ✅ NEW: Store ORIGINAL reference value
@@ -2171,7 +2171,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
                   newOriginalRefs[combination.id][feature.id] = bestReferenceValue;
 
                   
-
+                  
                   // ✅ FIXED: Only set input to reference value if user doesn't have input
 
                   if (!combinationInputs[combination.combination_id || combination.id]?.[feature.id]?.input) {
@@ -2198,7 +2198,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
                   newOriginalRefs[combination.id][feature.id] = fallbackValue;
 
                   
-
+                  
                   // ✅ FIXED: Only set input to reference value if user doesn't have input
 
                   if (!combinationInputs[combination.combination_id || combination.id]?.[feature.id]?.input) {
@@ -2223,7 +2223,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
           }
 
           
-
+          
           // ✅ NEW: Add to processed combinations set
 
           processedCombinationIds.add(combination.id);
@@ -2231,7 +2231,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
         });
 
         
-
+        
         // ✅ FIXED: Update loaded combinations state ONCE after processing all combinations
 
         setLoadedReferenceCombinations(prev => {
@@ -2255,7 +2255,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
         });
 
         
-
+        
         // ✅ FIXED: Update scenario-specific data in global store
 
         const updatedScenarios = { ...settings.scenarios };
@@ -2271,7 +2271,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
         updatedScenarios[currentScenario].originalReferenceValues = newOriginalRefs;
 
         
-
+        
         onSettingsChange({ 
 
           scenarios: updatedScenarios
@@ -2279,11 +2279,11 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
         });
 
         
-
+        
         // Cleared combinations state removed
 
         
-
+        
         toast({
 
           title: "Reference Values Loaded",
@@ -2293,17 +2293,17 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
           variant: "default",
 
         });
-
         
-
+        
+        
       } else {
 
         throw new Error(`Failed to fetch reference values: ${response.statusText}`);
 
       }
-
       
-
+      
+      
     } catch (error) {
 
       console.error('❌ Error fetching reference values for all combinations:', error);
@@ -2342,7 +2342,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
       }
 
       
-
+      
       // Call the reference endpoint
 
       // ✅ FIXED: Backend requires dates for ALL methods, not just period-based ones
@@ -2352,7 +2352,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
       const isPeriodBased = statMethod.startsWith('period-');
 
       
-
+      
       // Backend schema requires start_date and end_date for ALL methods
 
       const modelId = generateModelId();
@@ -2368,7 +2368,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
       };
 
       
-
+      
       const response = await fetch(`${SCENARIO_PLANNER_API}/reference`, {
 
         method: 'POST',
@@ -2384,11 +2384,11 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
       });
 
       
-
+      
       if (response.ok) {
 
         const data = await response.json();
-
+        
         
 
         // ✅ NEW: Find the combination by combination_id instead of identifier matching
@@ -2398,7 +2398,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
         if (matchingCombination) {
           const modelData = matchingCombination;
           
-
+          
           // Populate the Abs boxes with reference values
 
           const newInputs = { ...combinationInputs };
@@ -2410,13 +2410,13 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
           }
 
           
-
+          
           // Map features to their reference values
 
           const features = computedSettings?.features || [];
 
           
-
+          
           features.forEach(feature => {
 
             if (feature.selected && (modelData as any).reference_values?.[feature.name]) {
@@ -2428,11 +2428,11 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
               }
 
               
-
+              
               const referenceValue = (modelData as any).reference_values[feature.name];
 
               
-
+              
               // Set both Abs (input) and Pct (change) fields
 
               newInputs[combination.id][feature.id].input = formatToThreeDecimals(referenceValue);
@@ -2444,7 +2444,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
           });
 
           
-
+          
           // ✅ FIXED: Update scenario-specific data in global store
 
           const updatedScenarios = { ...settings.scenarios };
@@ -2458,7 +2458,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
           updatedScenarios[currentScenario].combinationInputs = newInputs;
 
           
-
+          
           onSettingsChange({ 
 
             scenarios: updatedScenarios
@@ -2466,20 +2466,20 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
           });
 
           
-
+          
           // Mark this combination as having reference values loaded
 
           setLoadedReferenceCombinations(prev => new Set([...prev, combination.id]));
 
           
-
+          
           return true; // Success
 
         } else {
 
           console.warn('⚠️ No exact model match found for combination:', combinationId);
           
-
+          
           // Try to find the best available reference values from any model
 
           // This ensures ALL combinations get reference values populated
@@ -2493,13 +2493,13 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
           }
 
           
-
+          
           const features = computedSettings?.features || [];
 
           console.log('🔄 Trying to find best available reference values for features:', (features || []).map(f => f.name));
 
           
-
+          
           features.forEach(feature => {
 
             if (feature.selected) {
@@ -2511,11 +2511,11 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
               }
 
               
-
+              
               // Try to find reference value from any available model
 
               let bestReferenceValue = null;
-
+              
               
 
               // Look through all combinations to find the best match
@@ -2527,7 +2527,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
               });
 
               
-
+              
               if (bestReferenceValue !== null) {
 
                 newInputs[combination.id][feature.id].input = formatToThreeDecimals(bestReferenceValue);
@@ -2551,7 +2551,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
           });
 
           
-
+          
           // ✅ FIXED: Update scenario-specific data in global store
 
           const updatedScenarios = { ...settings.scenarios };
@@ -2565,7 +2565,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
           updatedScenarios[currentScenario].combinationInputs = newInputs;
 
           
-
+          
           onSettingsChange({ 
 
             scenarios: updatedScenarios
@@ -2573,13 +2573,13 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
           });
 
           
-
+          
           // Mark this combination as having reference values loaded
 
           setLoadedReferenceCombinations(prev => new Set([...prev, combination.id]));
 
           
-
+          
           return true; // Success with best available or fallback values
 
         }
@@ -2629,7 +2629,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
     const newInputs = { ...combinationInputs };
 
     
-
+    
     if (newInputs[combinationId]) {
 
       // ✅ FIXED: Restore reference values instead of clearing
@@ -2643,7 +2643,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
           const referenceValue = originalReferenceValues[combinationId]?.[featureId];
 
           
-
+          
           if (referenceValue !== undefined) {
 
             // Restore Abs to original reference value
@@ -2669,7 +2669,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
       });
 
       
-
+      
       // ✅ FIXED: Update scenario-specific data in global store
 
       const updatedScenarios = { ...settings.scenarios };
@@ -2683,7 +2683,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
       updatedScenarios[currentScenario].combinationInputs = newInputs;
 
       
-
+      
       onSettingsChange({ 
 
         scenarios: updatedScenarios
@@ -2691,7 +2691,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
       });
 
       
-
+      
       toast({
 
         title: "Reference Values Restored",
@@ -2721,7 +2721,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
     e.stopPropagation();
 
     
-
+    
     // ✅ FIXED: Position context menu to the right of the scenario tab
 
     const rect = e.currentTarget.getBoundingClientRect();
@@ -2731,7 +2731,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
     const menuY = rect.top; // Align with the top of the tab
 
     
-
+    
     setContextMenu({
 
       visible: true,
@@ -2763,7 +2763,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
       const needsCombinationRestoration = !combinations.length && computedSettings.identifiers?.length;
 
       
-
+      
       if (needsCombinationRestoration) {
 
         // Combinations need restoration, but this should be handled by Settings component
@@ -2797,7 +2797,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
   }, [combinations.length]); // Only depend on combinations length, not the full array
 
   
-
+  
   // ✅ FIXED: Only clear reference values when settings change - manual reload with Ctrl+Enter
 
   useEffect(() => {
@@ -2813,13 +2813,13 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
     });
 
     
-
+    
     if (settings.referenceValuesNeedRefresh && combinations.length > 0) {
 
       console.log('🧹 Canvas: CLEARING reference values - user must press Ctrl+Enter to reload');
 
       
-
+      
       // ✅ NEW: Only clear existing reference values - don't auto-reload
 
       const updatedScenarios = { ...settings.scenarios };
@@ -2831,7 +2831,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
       }
 
       
-
+      
       // Clear combination inputs and original reference values
 
       updatedScenarios[currentScenario].combinationInputs = {};
@@ -2839,7 +2839,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
       updatedScenarios[currentScenario].originalReferenceValues = {};
 
       
-
+      
       onSettingsChange({ 
 
         scenarios: updatedScenarios
@@ -2847,11 +2847,11 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
       });
 
       
-
+      
       setLoadedReferenceCombinations(new Set());
 
       
-
+      
       // ✅ FIXED: Use setTimeout to break the circular dependency
 
       setTimeout(() => {
@@ -2871,7 +2871,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
       }, 0);
 
       
-
+      
       toast({
 
         title: "Reference Values Cleared",
@@ -2899,7 +2899,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
         !settings.selectedScenario.startsWith('scenario-1') && 
 
     
-
+    
         combinations.length === 0) { // Only clear if no combinations exist
 
       // This is a newly added scenario (3, 4, 5, etc.) - clear everything
@@ -2909,7 +2909,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
       const shouldClear = !clearedScenariosRef.current.has(settings.selectedScenario);
 
       
-
+      
       if (shouldClear) {
 
         onSettingsChange({ 
@@ -2993,7 +2993,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
     }
 
     
-
+    
     // Priority 2: Use loaded reference values from backend (fallback)
 
     if (loadedReferenceCombinations.has(combinationId)) {
@@ -3009,7 +3009,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
     }
 
     
-
+    
     // Priority 3: Use fallback reference value (default: 100)
 
     const fallbackValue = 100;
@@ -3025,7 +3025,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
     const numValue = parseFloat(value) || 0;
 
     
-
+    
     // ✅ FIXED: Use global store instead of local state for user input persistence
 
     const newInputs = { ...combinationInputs };
@@ -3055,7 +3055,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
       const referenceValue = getReferenceValue(combinationId, featureId);
 
       
-
+      
       if (referenceValue !== null && !isNaN(referenceValue)) {
 
         // Live calculation based on which field changed
@@ -3095,7 +3095,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
       updatedScenarios[currentScenario].combinationInputs = newInputs;
 
       
-
+      
       onSettingsChange({ 
 
         scenarios: updatedScenarios
@@ -3135,15 +3135,15 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
         delete updatedCombinationInputs[combinationId];
         
         // Update the scenario data with both selectedCombinations and combinationInputs
-        updatedScenarios[currentScenario] = {
+      updatedScenarios[currentScenario] = {
           ...updatedScenarios[currentScenario],
           selectedCombinations: updatedSelectedCombinations,
           combinationInputs: updatedCombinationInputs
         };
         
-        onSettingsChange({ 
-          scenarios: updatedScenarios
-        });
+      onSettingsChange({ 
+        scenarios: updatedScenarios
+      });
       }
       
       // Show success message
@@ -3155,9 +3155,9 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
         variant: "default",
 
       });
-
       
-
+      
+      
     } else {
 
       console.log('❌ Combination not found in selected list');
@@ -3177,13 +3177,13 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
   const analyzeIdentifierUsage = () => {
 
     const usedIdentifierValues = new Set<string>();
-
+    
     
 
     // ✅ NEW: With direct combination selection, we don't need to track identifier usage
     // Combinations are now selected directly from backend, not generated from identifiers
     
-
+    
     console.log('🔍 Current identifier usage analysis:', {
 
       totalCombinations: combinations.length,
@@ -3205,7 +3205,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
     });
 
     
-
+    
     return usedIdentifierValues;
 
   };
@@ -3221,7 +3221,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
       console.log('🔄 Starting global refresh for all combinations...');
 
       
-
+      
       // Show confirmation toast
 
       toast({
@@ -3241,17 +3241,17 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
       await fetchReferenceValuesForAll();
 
       
-
+      
       // 2. Now clear all inputs and reset to the fresh reference values
 
       const clearedInputs: Record<string, Record<string, { input: string; change: string }>> = {};
-
+      
       
 
       const features = computedSettings?.features || [];
 
       
-
+      
       combinations.forEach(combination => {
 
         clearedInputs[combination.id] = {};
@@ -3291,11 +3291,11 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
       }
 
       
-
+      
       updatedScenarios[currentScenario].combinationInputs = clearedInputs;
 
       
-
+      
       // 4. Save to global store
 
       onSettingsChange({ 
@@ -3353,7 +3353,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
   }, [computedSettings?.features]);
 
   
-
+  
   const selectedOutputs = useMemo(() => {
 
     const outputs = computedSettings?.outputs || [];
@@ -3409,7 +3409,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
       });
 
       
-
+      
       if (currentMode === 'hierarchy') {
 
         if (!viewResults?.hierarchy) {
@@ -3423,7 +3423,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
         console.log('✅ Processing hierarchy results:', viewResults.hierarchy.length, 'items');
 
         
-
+        
         return viewResults.hierarchy.map((hierarchicalResult: any) => ({
 
           identifiers: hierarchicalResult.identifiers || {},
@@ -3461,7 +3461,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
         console.log('✅ Processing flat results:', Object.keys(viewResults.flat).length, 'identifier groups');
 
         
-
+        
         // Process flat results - they have a different structure
 
         const flatData = [];
@@ -3521,7 +3521,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
       const currentMode = resultViewMode[viewId] || 'hierarchy';
 
       
-
+      
       if (currentMode === 'hierarchy') {
 
         // ✅ CHANGED: Check for hierarchical results
@@ -3565,7 +3565,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
       console.log('🕒 Created At:', currentViewResults.createdAt);
 
       
-
+      
       console.log('📈 Flat Results:', currentViewResults.flat);
 
       console.log('🌳 Hierarchy Results (NOW DISPLAYED):', currentViewResults.hierarchy);
@@ -3573,7 +3573,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
       console.log('👥 Individual Results (NOT DISPLAYED):', currentViewResults.individuals);
 
       
-
+      
       console.log('=== VIEW RESULTS COMPLETED ===');
 
     }
@@ -3747,7 +3747,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
             </div>
 
             
-
+            
             <div className="flex items-center space-x-2">
 
                          <Button 
@@ -3767,7 +3767,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
              </Button>
 
              
-
+             
              {/* ✅ NEW: Maximize/Minimize Button */}
 
              <Button 
@@ -3798,8 +3798,8 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
 
 
 
-        
 
+        
         {/* Main Editor Table */}
 
         <Card className={`${isMaximized ? 'p-3' : 'p-4'} shadow-sm border-gray-200`}>
@@ -4117,9 +4117,9 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
               </div>
 
             </div>
-
             
-
+            
+            
           </div>
 
         </Card>
@@ -4234,8 +4234,8 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
 
 
 
-            
 
+            
             {/* ✅ Scenario Results Tabs - Synchronized with top scenario selection */}
 
             <Tabs 
@@ -4293,7 +4293,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
               </TabsList>
 
               
-
+              
               {/* ✅ Scenario Content - Each scenario shows its own view tabs and results */}
 
               {availableScenarios?.map((scenarioId) => (
@@ -4349,7 +4349,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
                   const viewDisplayName = getViewDisplayName(view);
 
                   
-
+                  
                   return (
 
                     <TabsTrigger 
@@ -4373,7 +4373,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
               </TabsList>
 
               
-
+              
                       {/* ✅ View Content for this specific scenario */}
 
                       {(computedSettings.aggregatedViews || ['view-1', 'view-2', 'view-3']).map((view) => {
@@ -4385,7 +4385,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
                         const hasResults = hasResultsForScenarioAndView(scenarioId, viewId);
 
                         
-
+                        
                         return (
 
                           <TabsContent key={viewId} value={viewId} className="mt-4">
@@ -4428,7 +4428,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
 
                                             </div>
 
-                                            {resultViewMode[viewId] === 'flat' ? 'Show Hierarchy' : 'Show Flat'}
+                                            {resultViewMode[viewId] === 'flat' ? 'Show Individual' : 'Show Aggregate'}
 
                                           </button>
 
@@ -4439,18 +4439,18 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
                                     </div>
 
                                     <div className="w-full overflow-x-auto">
-                                      <ScenarioResultsChart 
+                                    <ScenarioResultsChart 
 
-                                        data={chartData} 
+                                      data={chartData} 
 
-                                        width={900} 
+                                      width={900} 
 
-                                        height={450}
+                                      height={450}
 
-                                        viewMode={resultViewMode[viewId] || 'hierarchy'}
+                                      viewMode={resultViewMode[viewId] || 'hierarchy'}
 
-                                      />
-                                    </div>
+                                    />
+                                  </div>
 
                                   </div>
 
@@ -4563,7 +4563,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
           </button>
 
           
-
+          
           {contextMenu.scenarioId !== 'scenario-1' && (
 
             <button
