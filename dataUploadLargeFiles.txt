@@ -16,3 +16,8 @@ and Arrow serialization fit in memory.
 Fastexcel is now included to enable Polars to read Excel files efficiently for large uploads.
 The MinIO 'trinity' bucket now enforces a 10GB quota via the admin API so
 uploads well over 500MB are accepted without hitting bucket-size limits.
+
+Large CSV uploads now stream through Polars in 1M-row batches, keeping memory use low while
+writing Arrow bytes. A Redis key tracks progress for each file (`uploading` → `parsing` →
+`saved`) so the frontend can display status updates. Files exceeding 512 MB are rejected with
+HTTP 413 before parsing begins.

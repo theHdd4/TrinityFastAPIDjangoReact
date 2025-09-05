@@ -7,6 +7,7 @@ import polars as pl
 import io
 import os
 import openpyxl
+import pyarrow as pa
 from app.core.utils import get_env_vars
 from pathlib import Path
 import re
@@ -2710,34 +2711,66 @@ async def save_dataframes(
             data = read_minio_object(p)
             iter_sources.append((Path(p).name, io.BytesIO(data)))
 
+    MAX_FILE_SIZE = 512 * 1024 * 1024  # 512 MB
+    STATUS_TTL = 3600
+
     for (filename, fileobj), key in zip(iter_sources, keys):
+        progress_key = f"upload_status:{validator_atom_id}:{key}"
+        redis_client.set(progress_key, "uploading", ex=STATUS_TTL)
+
         arrow_name = Path(filename).stem + ".arrow"
         exists = await arrow_dataset_exists(numeric_pid, validator_atom_id, key)
         if exists and not overwrite:
             uploads.append({"file_key": key, "already_saved": True})
             flights.append({"file_key": key})
+            redis_client.set(progress_key, "saved", ex=STATUS_TTL)
             continue
 
+        fileobj.seek(0, os.SEEK_END)
+        size = fileobj.tell()
         fileobj.seek(0)
+        if size > MAX_FILE_SIZE:
+            redis_client.set(progress_key, "rejected", ex=STATUS_TTL)
+            raise HTTPException(status_code=413, detail=f"{filename} exceeds 512MB limit")
+
+        redis_client.set(progress_key, "parsing", ex=STATUS_TTL)
+
         if filename.lower().endswith(".csv"):
-            df_pl = pl.read_csv(fileobj, low_memory=True)
+            reader = pl.read_csv_batched(fileobj, batch_size=1_000_000)
+            try:
+                first_chunk = next(reader)
+            except StopIteration:
+                uploads.append({"file_key": key, "already_saved": False, "error": "empty file"})
+                flights.append({"file_key": key})
+                continue
+            arrow_buf = io.BytesIO()
+            with pa.ipc.new_file(arrow_buf, first_chunk.to_arrow().schema) as writer:
+                writer.write(first_chunk.to_arrow())
+                for chunk in reader:
+                    writer.write(chunk.to_arrow())
+            arrow_bytes = arrow_buf.getvalue()
         elif filename.lower().endswith((".xls", ".xlsx")):
             df_pl = pl.read_excel(fileobj)
+            if df_pl.height == 0:
+                uploads.append({"file_key": key, "already_saved": False, "error": "empty file"})
+                flights.append({"file_key": key})
+                continue
+            arrow_buf = io.BytesIO()
+            df_pl.write_ipc(arrow_buf)
+            arrow_bytes = arrow_buf.getvalue()
         else:
             raise HTTPException(status_code=400, detail="Unsupported file type")
 
-        if df_pl.height == 0:
-            uploads.append({"file_key": key, "already_saved": False, "error": "empty file"})
-            flights.append({"file_key": key})
-            continue
-
-        arrow_buf = io.BytesIO()
-        df_pl.write_ipc(arrow_buf)
-
-        result = upload_to_minio(arrow_buf.getvalue(), arrow_name, prefix)
+        result = upload_to_minio(arrow_bytes, arrow_name, prefix)
         saved_name = Path(result.get("object_name", "")).name or arrow_name
         flight_path = f"{validator_atom_id}/{saved_name}"
-        upload_dataframe(df_pl.to_pandas(), flight_path)
+
+        # If df_pl is None (chunked csv), upload via polars scan
+        if filename.lower().endswith(".csv"):
+            reader_for_flight = pl.read_ipc(io.BytesIO(arrow_bytes))
+            upload_dataframe(reader_for_flight.to_pandas(), flight_path)
+        else:
+            upload_dataframe(df_pl.to_pandas(), flight_path)
 
         set_ticket(
             key,
@@ -2755,6 +2788,8 @@ async def save_dataframes(
             flight_path,
             filename,
         )
+
+        redis_client.set(progress_key, "saved", ex=STATUS_TTL)
 
         uploads.append({
             "file_key": key,
