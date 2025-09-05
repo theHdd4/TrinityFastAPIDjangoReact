@@ -3,6 +3,7 @@ from fastapi import APIRouter, HTTPException, File, Form, UploadFile, Query, Req
 from typing import List, Dict, Any
 import json
 import pandas as pd
+import polars as pl
 import io
 import os
 import openpyxl
@@ -124,8 +125,6 @@ from app.DataStorageRetrieval.minio_utils import (
     ARROW_DIR,
     get_arrow_dir,
 )
-import pyarrow as pa
-import pyarrow.ipc as ipc
 from pathlib import Path
 import asyncio
 import os
@@ -136,26 +135,6 @@ MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "minio:9000")
 MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY", "minio")
 MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY", "minio123")
 MINIO_BUCKET = os.getenv("MINIO_BUCKET", "trinity")
-
-
-CHUNK_ROWS = 10000
-
-
-def stream_excel(file_obj, chunk_rows: int = CHUNK_ROWS):
-    """Yield DataFrame chunks from an Excel file-like object."""
-    wb = openpyxl.load_workbook(file_obj, read_only=True, data_only=True)
-    ws = wb.active
-    rows = ws.iter_rows(values_only=True)
-    headers = next(rows, [])
-    chunk: list[list[Any]] = []
-    for row in rows:
-        chunk.append(list(row))
-        if len(chunk) == chunk_rows:
-            yield pd.DataFrame(chunk, columns=headers)
-            chunk = []
-    if chunk:
-        yield pd.DataFrame(chunk, columns=headers)
-    file_obj.seek(0)
 
 
 def _parse_numeric_id(value: str | int | None) -> int:
@@ -509,16 +488,16 @@ async def create_new(
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"Error reading file {file.filename}: {str(e)}")
 
-        # Parse file to DataFrame
+        # Parse file to DataFrame using Polars for efficient serialization
         try:
             if file.filename.lower().endswith(".csv"):
-                df = pd.read_csv(
-                    io.BytesIO(content), parse_dates=True, infer_datetime_format=True
-                )
+                df_pl = pl.read_csv(io.BytesIO(content))
             elif file.filename.lower().endswith(".xlsx"):
-                df = pd.read_excel(io.BytesIO(content), parse_dates=True)
+                df_pl = pl.read_excel(io.BytesIO(content))
             else:
                 raise HTTPException(status_code=400, detail="Only CSV and XLSX files supported")
+
+            df = df_pl.to_pandas()
 
             # Attempt to convert object columns that look like dates or datetimes
             date_pat = re.compile(
@@ -1528,18 +1507,12 @@ async def validate(
                 file.file.seek(0)
 
                 if file.filename.lower().endswith(".csv"):
-                    reader = pd.read_csv(
-                        file.file,
-                        chunksize=CHUNK_ROWS,
-                        parse_dates=True,
-                        infer_datetime_format=True,
-                    )
-                    df = pd.concat(reader, ignore_index=True)
+                    df_pl = pl.read_csv(file.file)
                 elif file.filename.lower().endswith((".xls", ".xlsx")):
-                    reader = stream_excel(file.file, CHUNK_ROWS)
-                    df = pd.concat(reader, ignore_index=True)
+                    df_pl = pl.read_excel(file.file)
                 else:
                     raise HTTPException(status_code=400, detail="Only CSV and XLSX files supported")
+                df = df_pl.to_pandas()
 
                 df.columns = [preprocess_column_name(col) for col in df.columns]
                 files_data.append((key, df))
@@ -1553,18 +1526,12 @@ async def validate(
                 size_bytes = len(data)
                 filename = Path(path).name
                 if filename.lower().endswith(".csv"):
-                    reader = pd.read_csv(
-                        io.BytesIO(data),
-                        chunksize=CHUNK_ROWS,
-                        parse_dates=True,
-                        infer_datetime_format=True,
-                    )
-                    df = pd.concat(reader, ignore_index=True)
+                    df_pl = pl.read_csv(io.BytesIO(data))
                 elif filename.lower().endswith((".xls", ".xlsx")):
-                    reader = stream_excel(io.BytesIO(data), CHUNK_ROWS)
-                    df = pd.concat(reader, ignore_index=True)
+                    df_pl = pl.read_excel(io.BytesIO(data))
                 else:
                     raise HTTPException(status_code=400, detail="Only CSV and XLSX files supported")
+                df = df_pl.to_pandas()
 
                 df.columns = [preprocess_column_name(col) for col in df.columns]
                 files_data.append((key, df))
@@ -1973,21 +1940,21 @@ async def validate_mmm_endpoint(
         try:
             content = await file.read()
             file_contents.append((content, file.filename, key))
-            
-            # Parse file based on extension
+
+            # Parse file based on extension using Polars, then convert to pandas
             if file.filename.lower().endswith(".csv"):
-                df = pd.read_csv(
-                    io.BytesIO(content), parse_dates=True, infer_datetime_format=True
-                )
+                df_pl = pl.read_csv(io.BytesIO(content))
             elif file.filename.lower().endswith(".xlsx"):
-                df = pd.read_excel(io.BytesIO(content), parse_dates=True)
+                df_pl = pl.read_excel(io.BytesIO(content))
             else:
                 raise HTTPException(status_code=400, detail="Only CSV and XLSX files supported")
-            
+
+            df = df_pl.to_pandas()
+
             # ✅ FIXED: Preprocess columns to match MMM validation expectations
             df.columns = [preprocess_column_name(col) for col in df.columns]
             files_data[key] = df
-            
+
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"Error parsing file {file.filename}: {str(e)}")
     
@@ -2343,16 +2310,16 @@ async def validate_category_forecasting_endpoint(
     try:
         content = await file.read()
         
-        # Parse file based on extension
+        # Parse file based on extension using Polars
         if file.filename.lower().endswith(".csv"):
-            df = pd.read_csv(
-                io.BytesIO(content), parse_dates=True, infer_datetime_format=True
-            )
+            df_pl = pl.read_csv(io.BytesIO(content))
         elif file.filename.lower().endswith(".xlsx"):
-            df = pd.read_excel(io.BytesIO(content), parse_dates=True)
+            df_pl = pl.read_excel(io.BytesIO(content))
         else:
             raise HTTPException(status_code=400, detail="Only CSV and XLSX files supported")
-        
+
+        df = df_pl.to_pandas()
+
         # Light preprocessing (CF validation handles most column standardization)
         df.columns = [preprocess_column_name(col) for col in df.columns]
         
@@ -2537,14 +2504,14 @@ async def validate_promo_endpoint(
         
         # Parse file based on extension
         if file.filename.lower().endswith(".csv"):
-            df = pd.read_csv(
-                io.BytesIO(content), parse_dates=True, infer_datetime_format=True
-            )
+            df_pl = pl.read_csv(io.BytesIO(content))
         elif file.filename.lower().endswith(".xlsx"):
-            df = pd.read_excel(io.BytesIO(content), parse_dates=True)
+            df_pl = pl.read_excel(io.BytesIO(content))
         else:
             raise HTTPException(status_code=400, detail="Only CSV and XLSX files supported")
-        
+
+        df = df_pl.to_pandas()
+
         # Light preprocessing (Promo validation handles column standardization)
         df.columns = [preprocess_column_name(col) for col in df.columns]
         
@@ -2752,48 +2719,24 @@ async def save_dataframes(
 
         fileobj.seek(0)
         if filename.lower().endswith(".csv"):
-            reader = pd.read_csv(
-                fileobj,
-                chunksize=CHUNK_ROWS,
-                parse_dates=True,
-                infer_datetime_format=True,
-            )
+            df_pl = pl.read_csv(fileobj)
         elif filename.lower().endswith((".xls", ".xlsx")):
-            reader = stream_excel(fileobj, CHUNK_ROWS)
+            df_pl = pl.read_excel(fileobj)
         else:
             raise HTTPException(status_code=400, detail="Unsupported file type")
 
-        arrow_buf = io.BytesIO()
-        df_chunks: List[pd.DataFrame] = []
-        try:
-            first_chunk = next(reader)
-        except StopIteration:
+        if df_pl.height == 0:
             uploads.append({"file_key": key, "already_saved": False, "error": "empty file"})
             flights.append({"file_key": key})
             continue
 
-        first_chunk.columns = first_chunk.columns.map(str)
-        string_cols = first_chunk.select_dtypes(include=["object"]).columns
-        for col in string_cols:
-            first_chunk[col] = first_chunk[col].astype(str)
-        df_chunks.append(first_chunk)
-        schema = pa.Table.from_pandas(first_chunk).schema
-        with ipc.new_file(arrow_buf, schema) as writer:
-            writer.write_table(pa.Table.from_pandas(first_chunk, schema=schema))
-            for chunk in reader:
-                chunk.columns = chunk.columns.map(str)
-                for col in string_cols:
-                    if col in chunk.columns:
-                        chunk[col] = chunk[col].astype(str)
-                df_chunks.append(chunk)
-                writer.write_table(pa.Table.from_pandas(chunk, schema=schema))
-
-        df = pd.concat(df_chunks, ignore_index=True)
+        arrow_buf = io.BytesIO()
+        df_pl.write_ipc(arrow_buf)
 
         result = upload_to_minio(arrow_buf.getvalue(), arrow_name, prefix)
         saved_name = Path(result.get("object_name", "")).name or arrow_name
         flight_path = f"{validator_atom_id}/{saved_name}"
-        upload_dataframe(df, flight_path)
+        upload_dataframe(df_pl.to_pandas(), flight_path)
 
         set_ticket(
             key,
