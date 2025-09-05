@@ -2734,19 +2734,28 @@ async def save_dataframes(
         redis_client.set(progress_key, "parsing", ex=STATUS_TTL)
 
         if filename.lower().endswith(".csv"):
-            reader = pl.read_csv_batched(fileobj, batch_size=1_000_000)
-            try:
-                first_chunk = next(reader)
-            except StopIteration:
-                uploads.append({"file_key": key, "already_saved": False, "error": "empty file"})
-                flights.append({"file_key": key})
-                continue
-            arrow_buf = io.BytesIO()
-            with pa.ipc.new_file(arrow_buf, first_chunk.to_arrow().schema) as writer:
-                writer.write(first_chunk.to_arrow())
-                for chunk in reader:
-                    writer.write(chunk.to_arrow())
-            arrow_bytes = arrow_buf.getvalue()
+            csv_path = getattr(fileobj, "name", None)
+            if csv_path and os.path.exists(csv_path):
+                reader = pl.read_csv_batched(csv_path, batch_size=1_000_000)
+                try:
+                    first_chunk = next(reader)
+                except StopIteration:
+                    uploads.append({"file_key": key, "already_saved": False, "error": "empty file"})
+                    flights.append({"file_key": key})
+                    continue
+                arrow_buf = io.BytesIO()
+                with pa.ipc.new_file(arrow_buf, first_chunk.to_arrow().schema) as writer:
+                    writer.write(first_chunk.to_arrow())
+                    for chunk in reader:
+                        writer.write(chunk.to_arrow())
+                arrow_bytes = arrow_buf.getvalue()
+                df_pl = None
+            else:
+                data_bytes = fileobj.read()
+                df_pl = pl.read_csv(io.BytesIO(data_bytes), low_memory=True)
+                arrow_buf = io.BytesIO()
+                df_pl.write_ipc(arrow_buf)
+                arrow_bytes = arrow_buf.getvalue()
         elif filename.lower().endswith((".xls", ".xlsx")):
             data_bytes = fileobj.read()
             df_pl = pl.from_pandas(pd.read_excel(io.BytesIO(data_bytes)))
@@ -2766,8 +2775,11 @@ async def save_dataframes(
 
         # If df_pl is None (chunked csv), upload via polars scan
         if filename.lower().endswith(".csv"):
-            reader_for_flight = pl.read_ipc(io.BytesIO(arrow_bytes))
-            upload_dataframe(reader_for_flight.to_pandas(), flight_path)
+            if df_pl is None:
+                reader_for_flight = pl.read_ipc(io.BytesIO(arrow_bytes))
+                upload_dataframe(reader_for_flight.to_pandas(), flight_path)
+            else:
+                upload_dataframe(df_pl.to_pandas(), flight_path)
         else:
             upload_dataframe(df_pl.to_pandas(), flight_path)
 

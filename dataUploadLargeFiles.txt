@@ -21,3 +21,8 @@ Large CSV uploads now stream through Polars in 1M-row batches, keeping memory us
 writing Arrow bytes. A Redis key tracks progress for each file (`uploading` → `parsing` →
 `saved`) so the frontend can display status updates. Files exceeding 512 MB are rejected with
 HTTP 413 before parsing begins.
+
+To avoid `TypeError: expected str, bytes or os.PathLike object, not BytesIO` when processing
+very large uploads, the chunked reader now points Polars at the on-disk temporary file path
+for each CSV. Smaller in-memory uploads fall back to `pl.read_csv`, ensuring both paths are
+handled correctly without exhausting memory.
