@@ -1,5 +1,6 @@
 from fastapi import APIRouter, HTTPException, Query, Body
 import logging
+import urllib.parse
 from ..config import cache, scenario_values_collection, select_models_collection, saved_predictions_collection
 from ..schemas import RunRequest, RunResponse, CacheWarmResponse, StatusResponse, IdentifiersResponse, FeaturesResponse, CacheClearResponse, ReferenceRequest, ReferenceResponse, ScenarioValuesRequest, ScenarioValuesResponse, SingleCombinationReferenceRequest, SingleCombinationReferenceResponse
 
@@ -25,6 +26,10 @@ async def init_cache(
         description="Object key of the raw data file in MinIO "
                     "(csv, tsv, xlsx, parquet, or arrow/feather)",
     ),
+    model_id: str = Query(
+        ...,
+        description="Model _id to fetch and process"
+    ),
     force_refresh: bool = Query(
         False,
         description="Force refresh cache even if data hasn't changed"
@@ -44,10 +49,24 @@ async def init_cache(
     specifying the file key again.
     """
     try:
-        logger.info("🧠 Starting SMART init-cache for: %s", d0_key)
+        # URL decode d0_key to handle encoded characters like %2F and %20
+        decoded_d0_key = urllib.parse.unquote(d0_key)
         
-        # Use smart caching logic
-        result = await DataService.cache_dataset_smart(d0_key, force_refresh=force_refresh)
+        # Handle both URL-encoded and non-URL-encoded model_ids
+        if '%' in model_id:
+            # URL-encoded, decode it
+            decoded_model_id = urllib.parse.unquote(model_id)
+            logger.info("🔧 URL-decoded model_id: %s -> %s", model_id, decoded_model_id)
+        else:
+            # Not URL-encoded, use as-is
+            decoded_model_id = model_id
+            logger.info("🔧 Using model_id as-is: %s", model_id)
+        
+        logger.info("🧠 Starting SMART init-cache for: %s (original: %s)", decoded_d0_key, d0_key)
+        logger.info("🔧 Using model_id: %s (original: %s)", decoded_model_id, model_id)
+        
+        # Use smart caching logic with decoded parameters
+        result = await DataService.cache_dataset_smart(decoded_d0_key, decoded_model_id, force_refresh=force_refresh)
         
         logger.info("✅ Smart init-cache completed: %s", result["action"])
         return result
@@ -95,7 +114,9 @@ async def get_reference_values(
         current_file_key = DataService.get_current_d0_file_key()
         
         # ✅ Get features from cached models
-        models = await DataService.fetch_selected_models()
+        decoded_model_id = urllib.parse.unquote(payload.model_id)
+        logger.info("🔧 Calculating reference for model_id: %s (original: %s)", decoded_model_id, payload.model_id)
+        models = await DataService.fetch_selected_models(decoded_model_id)
         if not models:
             raise HTTPException(
                 status_code=400,
@@ -107,17 +128,25 @@ async def get_reference_values(
         start_date = payload.start_date
         end_date = payload.end_date
         
-        # ✅ Calculate reference values PER MODEL (same logic as run_scenario)
+        # ✅ Calculate reference values PER COMBINATION (grouped by combination_id)
         from ..scenario.scenario_service import ScenarioService
-        reference_values_by_model = {}
+        reference_values_by_combination = {}
         
         for meta in models:
-            model_id = meta.get("training_id", "unknown")
+            combination_id = meta.get("combination", "unknown")
             ident = meta["identifiers"]
             
             try:
-                # Get the same sliced data that would be used in scenario planning
-                df_slice = DataService.get_cluster_dataframe(current_file_key, ident, combination=meta.get("combination"))
+                # Get the model's specific data using its source file
+                model_file_key = meta.get("file_key", "")
+                if model_file_key:
+                    # Load data directly from the model's source file
+                    df_slice = DataService.get_d0_dataframe(model_file_key)
+                    logger.info("✅ Loaded data from model's source file: %s (%d rows)", model_file_key, len(df_slice))
+                else:
+                    # Fallback to cluster dataframe if no file_key
+                    logger.warning("⚠️ No file_key found for model, trying cluster approach")
+                    df_slice = DataService.get_cluster_dataframe(current_file_key, ident, combination=meta.get("combination"))
                 
                 # Calculate reference for this model's slice (same as run_scenario)
                 ref_vals = ScenarioService._calc_reference(
@@ -128,27 +157,39 @@ async def get_reference_values(
                     end=end_date
                 )
                 
-                reference_values_by_model[model_id] = {
-                    "identifiers": ident,
-                    "features": meta["x_variables"],
-                    "reference_values": ref_vals,
-                    "data_slice_rows": len(df_slice)
-                }
+                # Group by combination_id instead of training_id
+                if combination_id not in reference_values_by_combination:
+                    reference_values_by_combination[combination_id] = {
+                        "features": meta["x_variables"],
+                        "reference_values": ref_vals,
+                        "data_slice_rows": len(df_slice)
+                    }
+                else:
+                    # If combination already exists, merge the reference values
+                    existing_ref_vals = reference_values_by_combination[combination_id]["reference_values"]
+                    for feature, value in ref_vals.items():
+                        if feature not in existing_ref_vals:
+                            existing_ref_vals[feature] = value
+                    # Update data slice rows (use the larger count)
+                    reference_values_by_combination[combination_id]["data_slice_rows"] = max(
+                        reference_values_by_combination[combination_id]["data_slice_rows"],
+                        len(df_slice)
+                    )
                 
             except KeyError as e:
                 # Handle missing cluster slice
-                logger.warning(f"Missing cluster slice for model {model_id}: {e}")
-                reference_values_by_model[model_id] = {
-                    "identifiers": ident,
-                    "features": meta["x_variables"],
-                    "reference_values": {},
-                    "data_slice_rows": 0,
-                    "error": "Cluster slice not found"
-                }
+                logger.warning(f"Missing cluster slice for combination {combination_id}: {e}")
+                if combination_id not in reference_values_by_combination:
+                    reference_values_by_combination[combination_id] = {
+                        "features": meta["x_variables"],
+                        "reference_values": {},
+                        "data_slice_rows": 0,
+                        "error": "Cluster slice not found"
+                    }
         
         # ✅ Prepare response
         response = {
-            "reference_values_by_model": reference_values_by_model,
+            "reference_values_by_combination": reference_values_by_combination,
             "statistic_used": stat,
             "date_range": {
                 "start_date": start_date,
@@ -157,10 +198,10 @@ async def get_reference_values(
             "data_info": {
                 "dataset_key": current_file_key,
                 "total_rows": len(df),
-                "models_processed": len(models),
-                "total_features": sum(len(model["x_variables"]) for model in models)
+                "combinations_processed": len(reference_values_by_combination),
+                "total_features": sum(len(combo["features"]) for combo in reference_values_by_combination.values())
             },
-            "message": f"Reference values calculated per model using {stat} statistic"
+            "message": f"Reference values calculated per combination using {stat} statistic"
         }
         
         logger.info("✅ Reference values calculated for %d models using %s", len(models), stat)
@@ -174,12 +215,13 @@ async def get_reference_values(
 
 
 
+
 # -------------------------------------------------------------------------------------------------------------------------------------------
 #  Get Identifiers for User Selection
 # --------------------------------------------------------------------------------------------------------------------------------------------
 
 @router.get("/identifiers", response_model=IdentifiersResponse)
-async def get_available_identifiers():
+async def get_available_identifiers(model_id: str = Query(..., description="Model _id to fetch")):
     """
     Get all available identifiers and their possible values from cached dataset.
     
@@ -198,25 +240,43 @@ async def get_available_identifiers():
             )
 
         # ✅ Get models to know which columns are used as identifiers
-        models = await DataService.fetch_selected_models()
+        # Handle both URL-encoded and non-URL-encoded model_ids
+        if '%' in model_id:
+            # URL-encoded, decode it
+            decoded_model_id = urllib.parse.unquote(model_id)
+            logger.info("🔧 URL-decoded model_id: %s -> %s", model_id, decoded_model_id)
+        else:
+            # Not URL-encoded, use as-is
+            decoded_model_id = model_id
+            logger.info("🔧 Using model_id as-is: %s", model_id)
+        
+        logger.info("🔧 Fetching identifiers for model_id: %s (original: %s)", decoded_model_id, model_id)
+        models = await DataService.fetch_selected_models(decoded_model_id)
         
         # ✅ Extract identifier columns from models
         identifier_columns = set()
         for model in models:
             identifier_columns.update(model["identifiers"].keys())
         
-        # ✅ Get identifier values from models (not all unique values from d0)
+        logger.info("🔍 DEBUG: Found identifier columns: %s", list(identifier_columns))
+        logger.info("🔍 DEBUG: Dataframe columns: %s", list(df.columns) if df is not None else "No dataframe")
+        logger.info("🔍 DEBUG: Models count: %d", len(models))
+        if models:
+            logger.info("🔍 DEBUG: Sample model identifiers: %s", models[0].get("identifiers", {}))
+        
+        # ✅ Get identifier values from models (not from d0 - just extract from model metadata)
         identifier_values = {}
         for col in identifier_columns:
-            if col in df.columns:
-                # Extract only the values that are actually used by models for this column
-                model_values = set()
-                for model in models:
-                    if col in model.get("identifiers", {}):
-                        model_values.add(model["identifiers"][col])
-                
-                # Convert to sorted list
+            # Extract the values directly from models without checking dataframe columns
+            model_values = set()
+            for model in models:
+                if col in model.get("identifiers", {}):
+                    model_values.add(model["identifiers"][col])
+            
+            # Convert to sorted list
+            if model_values:  # Only add if we found values
                 identifier_values[col] = sorted(list(model_values))
+                logger.info("🔍 DEBUG: For column '%s', found values: %s", col, identifier_values[col])
         
         # ✅ Show what's currently used by models
         models_identifiers = {}
@@ -237,11 +297,73 @@ async def get_available_identifiers():
 
 
 # -----------------------------------------------------------------------------------------------------------
+#                             Get Available Combinations (Better than identifiers)
+# ------------------------------------------------------------------------------------------------------------
+
+@router.get("/combinations")
+async def get_available_combinations(model_id: str = Query(..., description="Model _id to fetch")):
+    """
+    Get all available combinations that have trained models.
+    This is better than constructing combinations from identifiers.
+    
+    Returns:
+    - combinations: list of combination objects with details
+    - total_combinations: count of available combinations
+    """
+    try:
+        # Get models to extract available combinations
+        # Handle both URL-encoded and non-URL-encoded model_ids
+        if '%' in model_id:
+            # URL-encoded, decode it
+            decoded_model_id = urllib.parse.unquote(model_id)
+            logger.info("🔧 URL-decoded model_id: %s -> %s", model_id, decoded_model_id)
+        else:
+            # Not URL-encoded, use as-is
+            decoded_model_id = model_id
+            logger.info("🔧 Using model_id as-is: %s", model_id)
+        
+        logger.info("🔧 Fetching combinations for model_id: %s (original: %s)", decoded_model_id, model_id)
+        models = await DataService.fetch_selected_models(decoded_model_id)
+        
+        if not models:
+            raise HTTPException(status_code=404, detail="No selected models found.")
+
+        # ✅ Extract unique combinations with full data
+        combinations = []
+        seen_combinations = set()
+        
+        for model in models:
+            combination_id = model.get("combination", "")
+            if combination_id and combination_id not in seen_combinations:
+                seen_combinations.add(combination_id)
+                # Return full combination object with identifiers
+                combinations.append({
+                    "combination_id": combination_id,
+                    "identifiers": model.get("identifiers", {})
+                })
+        
+        # Sort for consistent ordering
+        combinations.sort(key=lambda x: x["combination_id"])
+        
+        logger.info("Found %d unique combinations with trained models", len(combinations))
+        
+        return {
+            "combinations": combinations,
+            "total_combinations": len(combinations),
+            "message": f"Found {len(combinations)} combinations with trained models"
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to fetch combinations: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# -----------------------------------------------------------------------------------------------------------
 #                             Features for user Selection
 # ------------------------------------------------------------------------------------------------------------
 
 @router.get("/features", response_model=FeaturesResponse)
-async def get_available_features():
+async def get_available_features(model_id: str = Query(..., description="Model _id to fetch")):
     """
     Extract and return features grouped by models,
     plus a combined list of all unique features.
@@ -249,7 +371,18 @@ async def get_available_features():
     Updated to work with new model metadata structure.
     """
     try:
-        models = await DataService.fetch_selected_models()
+        # Handle both URL-encoded and non-URL-encoded model_ids
+        if '%' in model_id:
+            # URL-encoded, decode it
+            decoded_model_id = urllib.parse.unquote(model_id)
+            logger.info("🔧 URL-decoded model_id: %s -> %s", model_id, decoded_model_id)
+        else:
+            # Not URL-encoded, use as-is
+            decoded_model_id = model_id
+            logger.info("🔧 Using model_id as-is: %s", model_id)
+        
+        logger.info("🔧 Fetching features for model_id: %s (original: %s)", decoded_model_id, model_id)
+        models = await DataService.fetch_selected_models(decoded_model_id)
         if not models:
             raise HTTPException(status_code=404, detail="No selected models found.")
 
@@ -348,19 +481,26 @@ async def run_scenario(
         logger.info("Using cached dataset: %s (%d rows)", current_file_key, len(df))
 
         # ✅ Ensure models are available
-        models = await DataService.fetch_selected_models()
+        decoded_model_id = urllib.parse.unquote(payload.model_id)
+        logger.info("🔧 Running scenario for model_id: %s (original: %s)", decoded_model_id, payload.model_id)
+        models = await DataService.fetch_selected_models(decoded_model_id)
         if not models:
             raise HTTPException(
                 status_code=400,
                 detail="No selected models found. Please ensure models are configured."
             )
 
+        # ✅ Update payload with decoded model_id for scenario service
+        # Create a new payload object with the decoded model_id to avoid modifying the original
+        updated_payload = payload.model_copy()
+        updated_payload.model_id = decoded_model_id
+
         # ✅ Run scenario pipeline with current dataset
-        result_rows = await ScenarioService.run_scenario(payload, run_id, current_file_key)
+        result_rows = await ScenarioService.run_scenario(updated_payload, run_id, current_file_key)
 
         # ✅ Aggregation + storage for multiple views - NOW WITH AWAIT!
         response_data = await AggregationService.aggregate_and_store(
-            result_rows, payload, run_id
+            result_rows, updated_payload, run_id
         )
 
         # ✅ Response with new view_results structure
@@ -430,7 +570,9 @@ async def get_single_combination_reference(
         current_file_key = DataService.get_current_d0_file_key()
         
         # ✅ Get features from cached models
-        models = await DataService.fetch_selected_models()
+        decoded_model_id = urllib.parse.unquote(payload.model_id)
+        logger.info("🔧 Single combination reference for model_id: %s (original: %s)", decoded_model_id, payload.model_id)
+        models = await DataService.fetch_selected_models(decoded_model_id)
         if not models:
             raise HTTPException(
                 status_code=400,
@@ -502,7 +644,8 @@ async def get_single_combination_reference(
 # ────────────────────────────────────────────────────────────────────────────
 @router.post("/force-refresh")
 async def force_refresh_cache(
-    d0_key: str = Body(..., embed=True, description="Dataset key to force refresh")
+    d0_key: str = Body(..., embed=True, description="Dataset key to force refresh"),
+    model_id: str = Body(..., embed=True, description="Model _id to fetch and process")
 ):
     """
     Force refresh cache for a dataset regardless of whether data has changed.
@@ -511,7 +654,7 @@ async def force_refresh_cache(
     try:
         logger.info("🔄 Force refreshing cache for: %s", d0_key)
         
-        result = await DataService.cache_dataset_smart(d0_key, force_refresh=True)
+        result = await DataService.cache_dataset_smart(d0_key, model_id, force_refresh=True)
         
         logger.info("✅ Force refresh completed for: %s", d0_key)
         return result
@@ -543,37 +686,6 @@ async def clear_dataset_cache(d0_key: str):
         logger.exception("Failed to clear cache for: %s", d0_key)
         raise HTTPException(status_code=500, detail=str(exc))
 
-
-# ────────────────────────────────────────────────────────────────────────────
-#  GET /api/scenario/test-fetch-scope
-# ────────────────────────────────────────────────────────────────────────────
-@router.get("/test-fetch-scope")
-async def test_fetch_scope():
-    """
-    Test endpoint to directly test the fetch_scope_metadata_by_model_id method.
-    """
-    try:
-        from ..scenario.data_service import DataService
-        
-        model_id = 'Quant_Matrix_AI_Schema/forecasting/New Forecasting Analysis Project'
-        logger.info("🔍 Testing fetch_scope_metadata_by_model_id with model_id: %s", model_id)
-        
-        # Test the method directly
-        scope_metadata = await DataService.fetch_scope_metadata_by_model_id(model_id)
-        
-        logger.info("🔍 fetch_scope_metadata_by_model_id returned: %s", scope_metadata)
-        
-        return {
-            "message": "Scope test completed",
-            "model_id": model_id,
-            "scope_metadata": scope_metadata,
-            "has_error": "error" in scope_metadata if isinstance(scope_metadata, dict) else False
-        }
-        
-    except Exception as exc:
-        logger.exception("🚨 Scope test failed: %s", str(exc))
-        raise HTTPException(status_code=500, detail=f"Scope test failed: {str(exc)}")
-
 # ────────────────────────────────────────────────────────────────────────────
 #  GET /api/scenario/test-fetch-by-id
 # ────────────────────────────────────────────────────────────────────────────
@@ -603,48 +715,6 @@ async def test_fetch_by_id():
     except Exception as exc:
         logger.exception("🚨 Test failed: %s", str(exc))
         raise HTTPException(status_code=500, detail=f"Test failed: {str(exc)}")
-
-# ────────────────────────────────────────────────────────────────────────────
-#  GET /api/scenario/get-all-scope
-# ────────────────────────────────────────────────────────────────────────────
-@router.get("/get-all-scope")
-async def get_all_scope():
-    """
-    Simple endpoint to fetch all scope metadata from the scope collection.
-    """
-    try:
-        from ..config import scope_collection
-        
-        logger.info("🔍 Fetching all scope metadata from collection...")
-        
-        # Get all documents from the scope collection
-        cursor = scope_collection.find({})
-        all_scope = await cursor.to_list(length=None)
-        
-        logger.info("✅ Found %d scope documents in collection", len(all_scope))
-        
-        # Extract just the _id and key fields for each scope document
-        scope_summary = []
-        for scope in all_scope:
-            scope_summary.append({
-                "_id": str(scope.get("_id", "NO_ID")),
-                "project_name": scope.get("project_name", "NO_NAME"),
-                "client_name": scope.get("client_name", "NO_CLIENT"),
-                "app_name": scope.get("app_name", "NO_APP"),
-                "operation_type": scope.get("operation_type", "NO_TYPE"),
-                "scope_id": scope.get("scope_id", "NO_SCOPE_ID"),
-                "scope_name": scope.get("scope_name", "NO_SCOPE_NAME")
-            })
-        
-        return {
-            "message": f"Successfully fetched {len(all_scope)} scope documents",
-            "total_scope": len(all_scope),
-            "scope_documents": scope_summary
-        }
-        
-    except Exception as exc:
-        logger.exception("🚨 Failed to fetch all scope: %s", str(exc))
-        raise HTTPException(status_code=500, detail=f"Failed to fetch scope: {str(exc)}")
 
 # ────────────────────────────────────────────────────────────────────────────
 #  GET /api/scenario/get-all-models
@@ -696,7 +766,8 @@ async def debug_database_connection():
     Debug endpoint to test database connection and see what's in the collections.
     """
     try:
-        from ..config import select_models_collection, scope_collection
+        from ..config import select_models_collection, scope_collection, column_classifier_configs
+        from ..config import db
         
         logger.info("🔍 DEBUG: Testing database connection...")
         
@@ -716,6 +787,23 @@ async def debug_database_connection():
         sample_scopes = await scope_collection.find({}).limit(5).to_list(length=None)
         scope_ids = [doc.get("_id", "NO_ID") for doc in sample_scopes]
         
+        # Test column classifier collection
+        column_classifier_count = await column_classifier_configs.count_documents({})
+        logger.info("🔍 DEBUG: Column classifier collection count: %d", column_classifier_count)
+        
+        # Get sample column classifier documents
+        sample_column_classifiers = await column_classifier_configs.find({}).limit(5).to_list(length=None)
+        column_classifier_ids = [doc.get("_id", "NO_ID") for doc in sample_column_classifiers]
+        
+        # Test build metadata collection
+        build_collection = db["build-model_featurebased_configs"]
+        build_count = await build_collection.count_documents({})
+        logger.info("🔍 DEBUG: Build metadata collection count: %d", build_count)
+        
+        # Get sample build metadata documents
+        sample_build_metadata = await build_collection.find({}).limit(5).to_list(length=None)
+        build_metadata_ids = [doc.get("_id", "NO_ID") for doc in sample_build_metadata]
+        
         return {
             "message": "Database connection test completed",
             "model_collection": {
@@ -729,6 +817,18 @@ async def debug_database_connection():
                 "database": scope_collection.database.name,
                 "total_documents": scope_count,
                 "sample_ids": scope_ids
+            },
+            "column_classifier_collection": {
+                "name": column_classifier_configs.name,
+                "database": column_classifier_configs.database.name,
+                "total_documents": column_classifier_count,
+                "sample_ids": column_classifier_ids
+            },
+            "build_metadata_collection": {
+                "name": build_collection.name,
+                "database": build_collection.database.name,
+                "total_documents": build_count,
+                "sample_ids": build_metadata_ids
             }
         }
         
@@ -744,7 +844,17 @@ async def get_flattened_models(model_id: str = Query(..., description="Model _id
     """
     Returns the flattened models for the given model_id.
     """
-    flattened_models = await DataService.fetch_selected_models(model_id=model_id)
+    # Handle both URL-encoded and non-URL-encoded model_ids
+    if '%' in model_id:
+        # URL-encoded, decode it
+        decoded_model_id = urllib.parse.unquote(model_id)
+        logger.info("🔧 URL-decoded model_id: %s -> %s", model_id, decoded_model_id)
+        flattened_models = await DataService.fetch_selected_models(model_id=decoded_model_id)
+    else:
+        # Not URL-encoded, use as-is
+        logger.info("🔧 Using model_id as-is: %s", model_id)
+        flattened_models = await DataService.fetch_selected_models(model_id=model_id)
+    
     if not flattened_models:
         raise HTTPException(status_code=404, detail="No models found for the given _id")
     return {"models": flattened_models}

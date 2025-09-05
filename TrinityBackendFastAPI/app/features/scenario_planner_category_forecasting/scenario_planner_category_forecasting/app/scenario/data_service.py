@@ -21,6 +21,8 @@ from ..config import (
     MINIO_BUCKET,
     MINIO_OUTPUT_BUCKET,
     select_models_collection,
+    column_classifier_configs,
+    build_collection,
 )
 from ..utils.file_loader import FileLoader
 
@@ -101,139 +103,207 @@ class DataService:
 
     # ----------  MODEL METADATA  (ASYNC) ------------------------------------
     @classmethod
-    async def fetch_selected_models(cls, model_id: Optional[str] = None) -> List[Dict[str, Any]]:
+    async def fetch_selected_models(cls, model_id: str) -> List[Dict[str, Any]]:
         """
-        Fetch model(s) by model_id (or cached id). Flatten nested model_coefficients into
-        per-(combination, model_type) flattened_model dicts suitable for scenario planner.
+        Fetch model(s) by model_id provided by user. Process combinations with complete_model_data
+        using column classifier metadata for identifier structure.
         """
         try:
-            logger.info("🔄 Fetching selected models in flattened structure...")
 
-            # 1) Determine model_id (explicitly provided or cached)
-            if model_id is None:
-                model_id = cls.get_current_model_id()
-                if not model_id:
-                    model_id = 'Quant_Matrix_AI_Schema/forecasting/New Forecasting Analysis Project'
-                    logger.info("No model_id provided or cached, using default: %s", model_id)
-            logger.info("Using model_id: %s", model_id)
-
-            # 2) Fetch model documents by _id
+            # 1) Fetch model documents by _id
             models = await cls.fetch_models_by_id(model_id)
             if not models:
                 logger.warning("No models found for model_id: %s", model_id)
                 return []
 
-            # 3) Fetch scope metadata (try by model_id; fallback by project_name)
-            scope_metadata_resp = await cls.fetch_scope_metadata_by_model_id(model_id, models=models)
-            if "error" in scope_metadata_resp:
-                logger.error("Failed to fetch scope metadata: %s", scope_metadata_resp["error"])
+            # 2) Process models using column classifier metadata for identifier structure
+            return await cls._process_models_with_column_classifier(models, model_id)
+
+
+        except Exception as e:
+            logger.error("Failed to fetch selected models: %s", str(e))
+            logger.error("Traceback: ", exc_info=True)
+            return []
+
+
+    @classmethod
+    async def fetch_models_by_id(cls, model_id: str) -> List[Dict[str, Any]]:
+        """Fetch model metadata from MongoDB using the model_id. Assumes _id stored as string."""
+        try:
+            cursor = select_models_collection.find({"_id": model_id})
+            docs = await cursor.to_list(length=None)
+            return docs
+        except Exception as e:
+            logger.error("Failed fetch_models_by_id: %s", e, exc_info=True)
+            return []
+
+    @classmethod
+    async def fetch_column_classifier_metadata(cls, model_id: str) -> Dict[str, Any]:
+        """
+        Fetch column classifier metadata using the model_id to get identifier structure.
+        """
+        try:
+            cursor = column_classifier_configs.find({"_id": model_id})
+            docs = await cursor.to_list(length=None)
+            
+            if not docs:
+                logger.warning("No column classifier metadata found for model_id: %s", model_id)
+                return {"error": f"No column classifier metadata found for model_id: {model_id}"}
+            
+            column_doc = docs[0]
+            result = {
+                "model_id": model_id,
+                "identifiers": column_doc.get("identifiers", []),
+                "measures": column_doc.get("measures", []),
+                "dimensions": column_doc.get("dimensions", {}),
+                "client_name": column_doc.get("client_name", ""),
+                "app_name": column_doc.get("app_name", ""),
+                "project_name": column_doc.get("project_name", "")
+            }
+            return result
+            
+        except Exception as e:
+            logger.error("Failed to fetch column classifier metadata: %s", e, exc_info=True)
+            return {"error": str(e)}
+
+    @classmethod
+    async def fetch_build_metadata(cls, model_id: str) -> Dict[str, Any]:
+        """
+        Fetch build metadata to get combination file keys.
+        """
+        try:
+            cursor = build_collection.find({"_id": model_id})
+            docs = await cursor.to_list(length=None)
+            
+            if not docs:
+                logger.warning("No build metadata found for model_id: %s", model_id)
+                return {"combination_file_keys": []}
+            
+            build_doc = docs[0]
+            combination_file_keys = build_doc.get("combination_file_keys", [])
+            
+            return build_doc
+            
+        except Exception as e:
+            logger.error("Failed to fetch build metadata: %s", e, exc_info=True)
+            return {"combination_file_keys": []}
+
+
+    @classmethod
+    async def _process_models_with_column_classifier(cls, models: List[Dict[str, Any]], model_id: str) -> List[Dict[str, Any]]:
+        """
+        Process models using column classifier metadata for identifier structure.
+        Each combination contains complete_model_data with identifiers and coefficients.
+        """
+        try:
+            # Fetch column classifier metadata to get identifier structure
+            column_metadata = await cls.fetch_column_classifier_metadata(model_id)
+            if "error" in column_metadata:
+                logger.error("Failed to fetch column classifier metadata: %s", column_metadata["error"])
+                return []
+            
+            identifier_fields = column_metadata.get("identifiers", [])
+            if not identifier_fields:
+                logger.warning("No identifier fields found in column classifier metadata")
                 return []
 
-            # unwrap scope document if wrapped
-            scope_doc = scope_metadata_resp.get("scope_metadata", scope_metadata_resp)
+            
+            # ✅ NEW: Fetch build metadata to get combination file keys
+            build_metadata = await cls.fetch_build_metadata(model_id)
+            combination_file_keys = build_metadata.get("combination_file_keys", [])
 
-            # 4) Extract identifier structure
-            identifier_structure = cls._extract_identifier_structure(scope_doc)
-            if not identifier_structure:
-                logger.error("No identifier structure found in scope metadata")
-                return []
-
-            logger.info("Found identifier structure with keys: %s", list(identifier_structure.keys()))
-
-            # 5) Transform models -> flattened list
             flattened_models: List[Dict[str, Any]] = []
             seen_training_ids: Set[str] = set()
 
             for model_doc in models:
-                combos = model_doc.get("combinations", [])
-                coeffs_map = model_doc.get("model_coefficients", {})
-
-                if not combos:
+                combinations = model_doc.get("combinations", [])
+                if not combinations:
                     logger.warning("Model document missing 'combinations' or it's empty. Skipping this doc.")
                     continue
-                if not coeffs_map:
-                    logger.warning("Model document missing 'model_coefficients' or it's empty. Skipping this doc.")
-                    continue
 
-                logger.info("Processing model_doc _id=%s with %d combinations", model_doc.get("_id"), len(combos))
 
-                # iterate combinations (use declared combinations to preserve ordering)
-                for combination in combos:
-                    if combination not in coeffs_map:
-                        logger.warning("Combination '%s' declared but not present in model_coefficients. Skipping.", combination)
+                for combination in combinations:
+                    if not isinstance(combination, dict):
+                        logger.warning("Combination is not a dict; skipping")
                         continue
 
-                    comb_models = coeffs_map[combination]
-                    if not isinstance(comb_models, dict):
-                        logger.warning("model_coefficients[%s] is not a dict; skipping", combination)
+                    # Extract data from the new format
+                    combination_id = combination.get("combination_id", "")
+                    complete_model_data = combination.get("complete_model_data", {})
+                    
+                    if not combination_id or not complete_model_data:
+                        logger.warning("Combination missing combination_id or complete_model_data; skipping")
                         continue
 
-                    for model_type, model_data in comb_models.items():
-                        # validate shape
-                        if not isinstance(model_data, dict):
-                            logger.warning("Model data not a dict for %s/%s; skipping", combination, model_type)
-                            continue
+                    # Extract identifiers from complete_model_data using column classifier metadata
+                    identifiers = cls._extract_identifiers_from_complete_model_data(complete_model_data, identifier_fields)
+                    
+                    # Extract model coefficients (convert from string format if needed)
+                    x_variables_str = complete_model_data.get("x_variables", "[]")
+                    x_variables = cls._parse_x_variables(x_variables_str)
+                    
+                    # Build coefficients dict from complete_model_data
+                    coefficients = cls._build_coefficients_from_complete_model_data(complete_model_data, x_variables)
+                    
+                    if not coefficients:
+                        logger.warning("No coefficients found for combination %s; skipping", combination_id)
+                        continue
 
-                        coefficients = model_data.get("coefficients", {})
-                        x_variables = model_data.get("x_variables", [])
-                        y_variable = model_data.get("y_variable", model_doc.get("y_variable", ""))
+                    # Extract other model data
+                    y_variable = complete_model_data.get("y_variable", "")
+                    intercept = complete_model_data.get("intercept", 0)
+                    model_name = complete_model_data.get("model_name", "Unknown Model")
+                    
+                    # ✅ NEW: Match combination_id with build metadata to get correct file_key
+                    file_key = ""
+                    for combo_file_info in combination_file_keys:
+                        if combo_file_info.get("combination") == combination_id:
+                            file_key = combo_file_info.get("file_key", "")
+                            break
+                    
+                    if not file_key:
+                        logger.warning("🔍 DEBUG: No file_key found for combination '%s' in build metadata", combination_id)
+                    
+                    # Generate training_id
+                    training_id = f"{combination_id}_{model_name}_{_hash_str(combination_id)}"
+                    if training_id in seen_training_ids:
+                        training_id = f"{training_id}_{uuid.uuid4()}"
+                    seen_training_ids.add(training_id)
 
-                        if not coefficients or not isinstance(coefficients, dict):
-                            logger.warning("Empty/invalid coefficients for %s/%s; skipping", combination, model_type)
-                            continue
-                        if not x_variables or not isinstance(x_variables, list):
-                            logger.warning("Empty/invalid x_variables for %s/%s; skipping", combination, model_type)
-                            continue
+                    flattened = {
+                        "training_id": training_id,
+                        "combination": combination_id,
+                        "identifiers": identifiers,
+                        "model_type": model_name,
+                        "coefficients": coefficients,
+                        "intercept": intercept,
+                        "x_variables": x_variables,
+                        "y_variable": y_variable,
+                        "transformations": {},
+                        "file_key": file_key,
+                        "scope_id": model_doc.get("_id", ""),
+                        "project_name": model_doc.get("project_name", ""),
+                        "client_name": model_doc.get("client_name", ""),
+                        "app_name": model_doc.get("app_name", ""),
+                        "training_status": model_doc.get("training_status", ""),
+                        "created_at": model_doc.get("created_at", ""),
+                        "updated_at": model_doc.get("updated_at", ""),
+                        # Additional fields from new format
+                        "mape_train": complete_model_data.get("mape_train"),
+                        "mape_test": complete_model_data.get("mape_test"),
+                        "r2_train": complete_model_data.get("r2_train"),
+                        "r2_test": complete_model_data.get("r2_test"),
+                        "aic": complete_model_data.get("aic"),
+                        "bic": complete_model_data.get("bic"),
+                        "n_parameters": complete_model_data.get("n_parameters"),
+                        "price_elasticity": complete_model_data.get("price_elasticity"),
+                        "run_id": complete_model_data.get("run_id"),
+                        "timestamp": complete_model_data.get("timestamp"),
+                        "tags": combination.get("tags", [])
+                    }
 
-                        # map combination -> identifiers (normalize & fallback)
-                        mapped_identifiers = cls._map_combination_to_identifiers(combination, identifier_structure)
-                        if not mapped_identifiers:
-                            logger.warning("Could not map combination '%s' to identifiers; attempting fallback mapping", combination)
-                            id_keys = list(identifier_structure.keys())
-                            parts = combination.split('_')
-                            if len(id_keys) >= 2:
-                                mapped_identifiers = {
-                                    id_keys[0]: parts[0] if len(parts) > 0 else "",
-                                    id_keys[1]: parts[1] if len(parts) > 1 else ""
-                                }
-                                logger.info("Fallback mapped_identifiers=%s", mapped_identifiers)
-                            else:
-                                mapped_identifiers = {"part_0": parts[0] if len(parts) > 0 else "", "part_1": parts[1] if len(parts) > 1 else ""}
+                    flattened_models.append(flattened)
 
-                        # file_key lookup
-                        file_key = cls._get_file_key_for_combination(combination, model_doc.get("combination_file_keys", []))
-                        if not file_key:
-                            logger.warning("No file_key for combination %s (project may not have saved the filtered D0)", combination)
-
-                        training_id = f"{combination}_{model_type}_{_hash_str(combination)}"
-                        if training_id in seen_training_ids:
-                            training_id = f"{training_id}_{uuid.uuid4()}"
-                        seen_training_ids.add(training_id)
-
-                        flattened = {
-                            "training_id": training_id,
-                            "combination": combination,
-                            "identifiers": mapped_identifiers,
-                            "model_type": model_type,
-                            "coefficients": coefficients,
-                            "intercept": model_data.get("intercept", 0),
-                            "x_variables": x_variables,
-                            "y_variable": y_variable,
-                            "transformations": {},
-                            "file_key": file_key,
-                            "scope_id": model_doc.get("_id", ""),
-                            "project_name": model_doc.get("project_name", ""),
-                            "client_name": model_doc.get("client_name", ""),
-                            "app_name": model_doc.get("app_name", ""),
-                            "training_status": model_doc.get("training_status", ""),
-                            "created_at": model_doc.get("created_at", ""),
-                            "updated_at": model_doc.get("updated_at", "")
-                        }
-
-                        flattened_models.append(flattened)
-                        logger.debug("Flattened model appended: %s", training_id)
-
-            logger.info("✅ Successfully fetched and flattened %d models", len(flattened_models))
             _redis_set(cls.MODELS_KEY, flattened_models)
             return flattened_models
 
@@ -243,164 +313,81 @@ class DataService:
             return []
 
     @classmethod
-    def get_current_model_id(cls) -> Optional[str]:
-        try:
-            return _redis_get("current_model_id")
-        except Exception as e:
-            logger.warning("Could not get current model_id: %s", e)
-            return None
+    def _extract_identifiers_from_complete_model_data(cls, complete_model_data: Dict[str, Any], identifier_fields: List[str] = None) -> Dict[str, str]:
+        """Extract identifiers from complete_model_data section using dynamic identifier fields."""
+        identifiers = {}
+        
+        # Use provided identifier fields or fallback to common ones
+        if not identifier_fields:
+            identifier_fields = ["Channel", "Market", "PPG", "Brand", "Category", "Region", "Country"]
+            logger.warning("No identifier fields provided, using fallback list: %s", identifier_fields)
+        
+        for field in identifier_fields:
+            # Try both original case and capitalized case
+            field_variations = [field, field.capitalize(), field.upper(), field.lower()]
+            
+            for field_var in field_variations:
+                if field_var in complete_model_data:
+                    value = complete_model_data[field_var]
+                    if value is not None and str(value).strip():
+                        # Use the original field name for consistency
+                        identifiers[field] = str(value).strip()
+                        break
+        
+        return identifiers
 
     @classmethod
-    def set_current_model_id(cls, model_id: str) -> None:
+    def _parse_x_variables(cls, x_variables_str: str) -> List[str]:
+        """Parse x_variables from string format like "['SalesValue' 'VolumeUnits' 'D1' 'Week']"."""
         try:
-            _redis_set("current_model_id", model_id)
-            logger.info("Set current model_id to: %s", model_id)
+            if not x_variables_str or x_variables_str == "[]":
+                return []
+            
+            # Handle the format: "['SalesValue' 'VolumeUnits' 'D1' 'Week']"
+            # Remove brackets and split by spaces, then clean up quotes
+            cleaned = x_variables_str.strip("[]")
+            if not cleaned:
+                return []
+            
+            # Split by spaces and clean up quotes
+            variables = []
+            for var in cleaned.split():
+                var = var.strip("'\"")
+                if var:
+                    variables.append(var)
+            
+            return variables
         except Exception as e:
-            logger.error("Failed to set current model_id: %s", e)
-
-    @classmethod
-    async def fetch_models_by_id(cls, model_id: str) -> List[Dict[str, Any]]:
-        """Fetch model metadata from MongoDB using the model_id. Assumes _id stored as string."""
-        try:
-            logger.info("🔍 DEBUG: Searching select_models_collection for _id=%s", model_id)
-            cursor = select_models_collection.find({"_id": model_id})
-            docs = await cursor.to_list(length=None)
-            logger.info("🔍 DEBUG: Found %d model docs for _id=%s", len(docs), model_id)
-            return docs
-        except Exception as e:
-            logger.error("Failed fetch_models_by_id: %s", e, exc_info=True)
+            logger.warning("Failed to parse x_variables '%s': %s", x_variables_str, e)
             return []
 
     @classmethod
-    async def fetch_scope_metadata_by_model_id(cls, model_id: str, models: List[dict] = None) -> Dict[str, Any]:
-        """
-        Fetch scope metadata. First try _id == model_id; if not found, fallback to project_name
-        using the first model doc if available.
-        """
-        try:
-            from ..config import scope_collection
-            logger.info("🔍 DEBUG: Searching scope_collection for _id=%s", model_id)
-            cursor = scope_collection.find({"_id": model_id})
-            scope_docs = await cursor.to_list(length=None)
-
-            if not scope_docs and models:
-                project_name = models[0].get("project_name")
-                if project_name:
-                    logger.info("🔍 DEBUG: fallback: searching scope_collection for project_name=%s", project_name)
-                    cursor2 = scope_collection.find({"project_name": project_name})
-                    scope_docs = await cursor2.to_list(length=None)
-
-            if not scope_docs:
-                logger.warning("No scope metadata found for model_id/project_name: %s", model_id)
-                return {"error": f"No scope metadata found for model_id: {model_id}"}
-
-            scope_doc = scope_docs[0]
-            result = {
-                "model_id": model_id,
-                "scope_metadata": scope_doc,
-                "has_filter_set_results": "filter_set_results" in scope_doc,
-                "filter_set_count": len(scope_doc.get("filter_set_results", [])),
-                "available_keys": list(scope_doc.keys())
-            }
-            if "filter_set_results" in scope_doc:
-                filter_sets = scope_doc["filter_set_results"]
-                result["filter_set_results"] = filter_sets
-                identifiers_by_set = {}
-                for fs in filter_sets:
-                    if "identifier_filters" in fs:
-                        identifiers_by_set[fs.get("set_name", "unknown")] = fs["identifier_filters"]
-                result["identifiers_by_set"] = identifiers_by_set
-
-            return result
-        except Exception as e:
-            logger.error("Failed to fetch scope metadata: %s", e, exc_info=True)
-            return {"error": str(e)}
-
-    @classmethod
-    def _extract_identifier_structure(cls, scope_metadata: Dict[str, Any]) -> Dict[str, List[str]]:
-        """
-        Extract identifier structure (identifier_name -> list_of_allowed_values)
-        from the scope document or wrapper.
-        """
-        identifier_structure: Dict[str, List[str]] = {}
-        actual_scope = scope_metadata.get("scope_metadata", scope_metadata)
-
-        if "filter_set_results" in actual_scope:
-            for filter_set in actual_scope["filter_set_results"]:
-                if "identifier_filters" in filter_set and isinstance(filter_set["identifier_filters"], dict):
-                    identifier_structure.update(filter_set["identifier_filters"])
+    def _build_coefficients_from_complete_model_data(cls, complete_model_data: Dict[str, Any], x_variables: List[str]) -> Dict[str, float]:
+        """Build coefficients dict from complete_model_data by looking for coefficient patterns."""
+        coefficients = {}
+        
+        # Look for coefficient patterns like "SalesValue_avg", "VolumeUnits_avg", etc.
+        for var in x_variables:
+            # Try different coefficient naming patterns
+            coeff_key = f"{var}_avg"
+            if coeff_key in complete_model_data:
+                value = complete_model_data[coeff_key]
+                if isinstance(value, (int, float)):
+                    coefficients[f"Beta_{var}"] = float(value)
                 else:
-                    logger.debug("Filter set missing identifier_filters or invalid format: %s", filter_set.get("set_name"))
-        else:
-            if "identifier_structure" in actual_scope:
-                identifier_structure = actual_scope["identifier_structure"]
-            elif "identifiers" in actual_scope:
-                identifier_structure = actual_scope["identifiers"]
+                    logger.warning("Coefficient %s is not numeric: %s", coeff_key, value)
+        
+        # If no coefficients found with _avg pattern, try other patterns
+        if not coefficients:
+            for var in x_variables:
+                # Try direct variable name
+                if var in complete_model_data:
+                    value = complete_model_data[var]
+                    if isinstance(value, (int, float)):
+                        coefficients[f"Beta_{var}"] = float(value)
+        
+        return coefficients
 
-        for k, v in list(identifier_structure.items()):
-            if not isinstance(v, list):
-                identifier_structure[k] = [v] if v is not None else []
-
-        logger.debug("Extracted identifier_structure keys=%s", list(identifier_structure.keys()))
-        return identifier_structure
-
-    @classmethod
-    def _map_combination_to_identifiers(cls, combination: str, identifier_structure: Dict[str, List[str]]) -> Dict[str, str]:
-        """
-        Map a combination string (e.g., 'Category_India') to identifier_name -> value.
-        This implementation normalizes case & whitespace and tries to match parts to allowed values.
-        """
-        try:
-            if not isinstance(combination, str):
-                return {}
-
-            parts = combination.split('__') if '__' in combination else combination.split('_')
-            parts = [p.strip() for p in parts if p.strip()]
-            if not parts:
-                return {}
-
-            reverse = {}
-            for ident_name, allowed in identifier_structure.items():
-                for val in allowed:
-                    if val is None:
-                        continue
-                    reverse[str(val).strip().lower()] = ident_name
-
-            mapped: Dict[str, str] = {}
-            for p in parts:
-                key = p.strip().lower()
-                if key in reverse and reverse[key] not in mapped:
-                    mapped[reverse[key]] = p  # preserve original casing
-
-            if len(mapped) < len(parts):
-                for p in parts:
-                    key = p.strip().lower()
-                    for allowed_norm, ident_name in reverse.items():
-                        if ident_name in mapped:
-                            continue
-                        if allowed_norm.startswith(key) or key in allowed_norm:
-                            mapped[ident_name] = next(
-                                (av for av in identifier_structure[ident_name] if str(av).strip().lower() == allowed_norm),
-                                p
-                            )
-
-            if not mapped:
-                id_keys = list(identifier_structure.keys())
-                for i, p in enumerate(parts):
-                    if i < len(id_keys):
-                        mapped[id_keys[i]] = p
-
-            return mapped
-        except Exception as e:
-            logger.error("Error mapping combination '%s' to identifiers: %s", combination, e, exc_info=True)
-            return {}
-
-    @classmethod
-    def _get_file_key_for_combination(cls, combination: str, combination_file_keys: List[Dict]) -> str:
-        for cfk in combination_file_keys:
-            if cfk.get("combination") == combination:
-                return cfk.get("file_key", "")
-        return ""
 
     # ----------  FULL D0 DATAFRAME  ----------------------------------------
     @classmethod
@@ -408,26 +395,22 @@ class DataService:
         rkey = f"d0:{d0_key}"
         df = _redis_get(rkey)
         if df is not None:
-            logger.info("Loaded D0 '%s' (%d rows) from Redis", d0_key, len(df))
             return df
 
         df = FileLoader.load_minio_object(minio_client, MINIO_BUCKET, d0_key)
         _redis_set(rkey, df)
-        logger.info("Cached D0 '%s' (%d rows) in Redis", d0_key, len(df))
         return df
 
     @classmethod
     def set_current_d0_dataframe(cls, d0_key: str, df: pd.DataFrame) -> None:
         _redis_set(cls.CURRENT_D0_KEY, df)
         _redis_set(cls.CURRENT_D0_FILE_KEY, d0_key)
-        logger.info("Set current D0 dataset: '%s' (%d rows)", d0_key, len(df))
 
     @classmethod
     def get_current_d0_dataframe(cls) -> Optional[pd.DataFrame]:
         df = _redis_get(cls.CURRENT_D0_KEY)
         if df is not None:
             current_file = _redis_get(cls.CURRENT_D0_FILE_KEY)
-            logger.info("Using current cached dataset: '%s' (%d rows)", current_file, len(df))
         return df
 
     @classmethod
@@ -438,7 +421,6 @@ class DataService:
     def clear_current_d0_cache(cls) -> None:
         cache.delete(cls.CURRENT_D0_KEY)
         cache.delete(cls.CURRENT_D0_FILE_KEY)
-        logger.info("Cleared current D0 dataset cache")
 
     # ----------  IDENTIFIER-VALUE SLICES  ----------------------------------
     @classmethod
@@ -471,7 +453,6 @@ class DataService:
                     length=buf.getbuffer().nbytes,
                     content_type="application/octet-stream",
                 )
-                logger.debug("Uploaded identifier slice: %s", out_key)
             except Exception as e:
                 logger.error("Failed to upload identifier slice %s: %s", out_key, e)
 
@@ -516,7 +497,6 @@ class DataService:
             logger.warning("No identifier columns from models found in D0 columns. Nothing to build.")
             return 0, [], {}
 
-        logger.info("Identifier columns used for cluster check: %s", ident_cols)
 
         # 2) compute values covered by models per column (normalized)
         covered_values: Dict[str, Set[str]] = {col: set() for col in ident_cols}
@@ -614,7 +594,6 @@ class DataService:
 
             missing_clusters.append(missing_entry)
 
-        logger.info("Cluster check complete. cached missing slices: %d, missing clusters: %d", cached_cluster_cnt, len(missing_clusters))
         return cached_cluster_cnt, missing_clusters, missing_id_values
 
     # ----------  Retrieve cached slice -------------------------------------
@@ -641,9 +620,12 @@ class DataService:
         models = _redis_get(cls.MODELS_KEY)
         if not models:
             raise KeyError("No cached models found. Please call fetch_selected_models first.")
+        
+        
         combo_model = next((m for m in models if m.get("combination") == combination and m.get("file_key")), None)
         if not combo_model:
             raise KeyError(f"No model with file_key found for combination: {combination}")
+        
         return cls.get_d0_dataframe(combo_model["file_key"])
 
     # ----------  SMART CACHE MANAGEMENT  ---------------------------------
@@ -680,7 +662,7 @@ class DataService:
             return True
 
     @classmethod
-    async def cache_dataset_smart(cls, d0_key: str, force_refresh: bool = False) -> dict:
+    async def cache_dataset_smart(cls, d0_key: str, model_id: str, force_refresh: bool = False) -> dict:
         if not force_refresh and await cls.is_cache_fresh(d0_key):
             cache_age = await cls.get_cache_age(d0_key)
             return {"message": "Using existing cache", "cache_age": cache_age, "action": "reused"}
@@ -689,10 +671,9 @@ class DataService:
             await cls.extend_cache_ttl(d0_key)
             return {"message": "Cache extended - data unchanged", "action": "extended"}
 
-        logger.info("🔄 Refreshing cache for %s - data changed or force", d0_key)
         cls.clear_dataset_cache(d0_key)
 
-        models = await cls.fetch_selected_models()
+        models = await cls.fetch_selected_models(model_id)
         df = cls.get_d0_dataframe(d0_key)
         cls.set_current_d0_dataframe(d0_key, df)
 
@@ -734,7 +715,6 @@ class DataService:
         if metadata:
             metadata["cached_at"] = datetime.utcnow().isoformat()
             _redis_set(cache_key, metadata, ttl=hours * 3600)
-            logger.info("Extended cache TTL for %s by %s hours", d0_key, hours)
 
     @classmethod
     def clear_dataset_cache(cls, d0_key: str):

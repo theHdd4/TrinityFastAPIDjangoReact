@@ -111,12 +111,21 @@ class ScenarioService:
             if t1.tzinfo is not None:
                 t1 = t1.replace(tzinfo=None)
 
+            # Debug: Log what columns we actually have
+            logger.info("🔍 DEBUG: DataFrame shape: %s", df.shape)
+            logger.info("🔍 DEBUG: Available columns: %s", list(df.columns))
+            logger.info("🔍 DEBUG: Looking for Date column...")
+
             if "Date" in df.columns:
                 date_col = "Date"
+                logger.info("✅ Found 'Date' column")
             elif "date" in df.columns:
                 date_col = "date"
+                logger.info("✅ Found 'date' column")
             else:
-                raise ValueError("No 'Date' or 'date' column found for period filter")
+                logger.error("❌ Date column not found! Available columns: %s", list(df.columns))
+                logger.error("❌ DataFrame info: shape=%s, dtypes=%s", df.shape, df.dtypes.to_dict())
+                raise ValueError(f"No 'Date' or 'date' column found for period filter. Available columns: {list(df.columns)}")
 
             if not is_dt(df[date_col]):
                 df[date_col] = pd.to_datetime(df[date_col], errors="coerce")
@@ -200,7 +209,7 @@ class ScenarioService:
         upload_to_minio: bool = True
     ) -> List[Dict[str, Any]]:
 
-        models = await DataService.fetch_selected_models()
+        models = await DataService.fetch_selected_models(payload.model_id)
         results: List[Dict[str, Any]] = []
 
         for meta in models:
@@ -222,14 +231,15 @@ class ScenarioService:
             local_defs = {}
             for cl in getattr(payload, "clusters", []):
                 # Handle both Pydantic model and dict access
-                if hasattr(cl, 'identifiers'):
-                    cl_identifiers = cl.identifiers
+                if hasattr(cl, 'combination_id'):
+                    cl_combination_id = cl.combination_id
                     cl_scenario_defs = getattr(cl, 'scenario_defs', {})
                 else:
-                    cl_identifiers = cl["identifiers"]
+                    cl_combination_id = cl["combination_id"]
                     cl_scenario_defs = cl.get("scenario_defs", {})
                     
-                if cl_identifiers == ident:
+                # Match by combination_id instead of identifiers
+                if cl_combination_id == combination:
                     local_defs = cl_scenario_defs
                     # Convert Pydantic models to dict if needed
                     if hasattr(local_defs, 'dict'):

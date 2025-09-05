@@ -26,16 +26,19 @@ mongo_client = motor.motor_asyncio.AsyncIOMotorClient(MONGO_URI, serverSelection
 # Get database
 db = mongo_client.get_default_database()
 
-# Primary collections - use the same as build atom
-scope_collection = db["scopeselector_configs"]
-select_models_collection = db["build-model_featurebased_configs"]  # Same collection as build atom
+# Primary collections - use select_configs for model selection
+select_models_collection = db["select_configs"]  # Correct collection for selected models
 reference_points_collection = db["calculated_reference_points_promo"]
+build_collection = db["build-model_featurebased_configs"]
 saved_predictions_collection = db["save_prediction_promo"]
 flat_aggregations_collection = db["flat_aggregations"]
 hierarchical_aggregations_collection = db["hierarchical_aggregations"]
 
 # New collection for scenario values
 scenario_values_collection = db["scenario_values_promo"]
+
+# Column classifier collection for identifier structure
+column_classifier_configs = db["column_classifier_configs"]
 
 logger.info("Mongo URI: %s", MONGO_URI)
 

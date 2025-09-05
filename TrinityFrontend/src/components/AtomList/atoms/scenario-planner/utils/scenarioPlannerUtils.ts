@@ -1,21 +1,43 @@
 import { SCENARIO_PLANNER_API } from '@/lib/api';
 import { ScenarioPlannerSettings } from '@/components/LaboratoryMode/store/laboratoryStore';
 
+// ✅ NEW: Utility function to generate model_id from session context
+export const generateModelId = (): string => {
+  const envStr = localStorage.getItem('env');
+  if (!envStr) {
+    console.warn('No env found in localStorage, using default model_id');
+    return 'default_client/default_app/default_project';
+  }
+  
+  try {
+    const env = JSON.parse(envStr);
+    const modelId = `${env.CLIENT_NAME || 'default_client'}/${env.APP_NAME || 'default_app'}/${env.PROJECT_NAME || 'default_project'}`;
+    console.log('🔧 Generated model_id:', modelId);
+    return modelId;
+  } catch (error) {
+    console.error('Error parsing env from localStorage:', error);
+    return 'default_client/default_app/default_project';
+  }
+};
+
 // ✅ NEW: Dedicated function to initialize a new scenario with fresh backend data
 export const initializeNewScenario = async (settings: ScenarioPlannerSettings, scenarioId: string) => {
   try {
     console.log('🔄 Starting new scenario initialization for:', scenarioId);
     
-    // 1. Fetch fresh identifiers from backend
-    const identifiersResponse = await fetch(`${SCENARIO_PLANNER_API}/identifiers`);
+    // 1. Generate model_id from session context
+    const modelId = generateModelId();
+    
+    // 2. Fetch fresh identifiers from backend
+    const identifiersResponse = await fetch(`${SCENARIO_PLANNER_API}/identifiers?model_id=${encodeURIComponent(modelId)}`);
     if (!identifiersResponse.ok) {
       throw new Error(`Failed to fetch identifiers: ${identifiersResponse.status}`);
     }
     const identifiersData = await identifiersResponse.json();
     console.log('📊 Identifiers response:', identifiersData);
     
-    // 2. Fetch fresh features from backend
-    const featuresResponse = await fetch(`${SCENARIO_PLANNER_API}/features`);
+    // 3. Fetch fresh features from backend
+    const featuresResponse = await fetch(`${SCENARIO_PLANNER_API}/features?model_id=${encodeURIComponent(modelId)}`);
     if (!featuresResponse.ok) {
       throw new Error(`Failed to fetch features: ${featuresResponse.status}`);
     }
@@ -305,6 +327,7 @@ export const createNewScenario = (settings: ScenarioPlannerSettings, scenarioId:
           { id: 'view-3', name: 'View 3', selectedCombinations: [] }
         ],
         selectedView: 'view-1',
+        selectedCombinations: [],
         combinationInputs: {},
         originalReferenceValues: {},
         aggregatedViews: [] // Will be created from fresh identifiers
@@ -323,8 +346,24 @@ export const duplicateCurrentScenario = (settings: ScenarioPlannerSettings, newS
     return createNewScenario(settings, newScenarioId);
   }
   
-  // Deep clone the current scenario data to avoid reference issues
-  const duplicatedScenarioData = JSON.parse(JSON.stringify(currentScenarioData));
+  // ✅ FIXED: Proper deep clone to avoid reference issues between scenarios
+  const duplicatedScenarioData = {
+    ...currentScenarioData,
+    // Deep clone combinationInputs to prevent sharing references
+    combinationInputs: currentScenarioData.combinationInputs ? 
+      Object.keys(currentScenarioData.combinationInputs).reduce((acc, key) => {
+        acc[key] = { ...currentScenarioData.combinationInputs[key] };
+        return acc;
+      }, {} as any) : {},
+    // Deep clone originalReferenceValues to prevent sharing references
+    originalReferenceValues: currentScenarioData.originalReferenceValues ? 
+      Object.keys(currentScenarioData.originalReferenceValues).reduce((acc, key) => {
+        acc[key] = { ...currentScenarioData.originalReferenceValues[key] };
+        return acc;
+      }, {} as any) : {},
+    // ✅ NEW: Copy selectedCombinations to make each scenario independent
+    selectedCombinations: currentScenarioData.selectedCombinations ? [...currentScenarioData.selectedCombinations] : []
+  };
   
   // Clear results and reset some fields for the new scenario
   duplicatedScenarioData.viewResults = {}; // Clear all view results
@@ -336,7 +375,8 @@ export const duplicateCurrentScenario = (settings: ScenarioPlannerSettings, newS
     scenarios: {
       ...settings.scenarios,
       [newScenarioId]: duplicatedScenarioData
-    }
+    },
+    selectedScenario: newScenarioId
   };
 };
 

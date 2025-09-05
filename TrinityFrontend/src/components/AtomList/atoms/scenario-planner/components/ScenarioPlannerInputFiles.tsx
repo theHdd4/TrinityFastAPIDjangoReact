@@ -6,6 +6,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { VALIDATE_API, FEATURE_OVERVIEW_API, SCENARIO_PLANNER_API } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
+import { generateModelId } from '../utils/scenarioPlannerUtils';
 
 interface Props {
   atomId: string;
@@ -54,7 +55,7 @@ const ScenarioPlannerInputFiles: React.FC<Props> = ({ atomId, onCacheInitialized
             setSelectedFile(savedFile);
             
             // Also restore the cache if the file was previously initialized
-            if (settings.backendIdentifiers && settings.backendFeatures) {
+            if (settings.backendIdentifiers && settings.backendFeatures && settings.backendCombinations) {
               console.log('🔄 Restoring backend data from store');
               // The backend data is already in the store, so we don't need to re-fetch
             }
@@ -70,7 +71,7 @@ const ScenarioPlannerInputFiles: React.FC<Props> = ({ atomId, onCacheInitialized
     };
 
     fetchFiles();
-  }, [scenarioData.selectedDataFile, settings.backendIdentifiers, settings.backendFeatures]); // Re-run when store data changes
+  }, [scenarioData.selectedDataFile, settings.backendIdentifiers, settings.backendFeatures, settings.backendCombinations]); // Re-run when store data changes
 
   // Restore selected file from store when component mounts (if files are already available)
   useEffect(() => {
@@ -86,7 +87,8 @@ const ScenarioPlannerInputFiles: React.FC<Props> = ({ atomId, onCacheInitialized
   // Fetch identifiers from backend
   const fetchIdentifiers = async (fileName: string) => {
     try {
-      const response = await fetch(`${SCENARIO_PLANNER_API}/identifiers`);
+      const modelId = generateModelId();
+      const response = await fetch(`${SCENARIO_PLANNER_API}/identifiers?model_id=${encodeURIComponent(modelId)}`);
       if (response.ok) {
         const data = await response.json();
         console.log('Identifiers loaded:', data);
@@ -110,7 +112,8 @@ const ScenarioPlannerInputFiles: React.FC<Props> = ({ atomId, onCacheInitialized
   // Fetch features from backend
   const fetchFeatures = async (fileName: string) => {
     try {
-      const response = await fetch(`${SCENARIO_PLANNER_API}/features`);
+      const modelId = generateModelId();
+      const response = await fetch(`${SCENARIO_PLANNER_API}/features?model_id=${encodeURIComponent(modelId)}`);
       if (response.ok) {
         const data = await response.json();
         console.log('Features loaded:', data);
@@ -131,13 +134,39 @@ const ScenarioPlannerInputFiles: React.FC<Props> = ({ atomId, onCacheInitialized
     }
   };
 
+  // ✅ NEW: Fetch combinations from backend
+  const fetchCombinations = async (fileName: string) => {
+    try {
+      const modelId = generateModelId();
+      const response = await fetch(`${SCENARIO_PLANNER_API}/combinations?model_id=${encodeURIComponent(modelId)}`);
+      if (response.ok) {
+        const data = await response.json();
+        console.log('Combinations loaded:', data);
+        
+        // Store combinations in shared store so Settings component can access them
+        console.log('Storing combinations in shared store:', data);
+        updateSettings(atomId, {
+          backendCombinations: data
+        });
+        
+        return data;
+      } else {
+        throw new Error(`Failed to fetch combinations: ${response.statusText}`);
+      }
+    } catch (error) {
+      console.error('Error fetching combinations:', error);
+      throw error;
+    }
+  };
+
   // Initialize cache for scenario planning
   const initializeScenarioCache = async (fileName: string) => {
     try {
       setInitializingCache(true);
       
       // Step 1: Initialize cache
-      const response = await fetch(`${SCENARIO_PLANNER_API}/init-cache?d0_key=${encodeURIComponent(fileName)}&force_refresh=false`, {
+      const modelId = generateModelId();
+      const response = await fetch(`${SCENARIO_PLANNER_API}/init-cache?d0_key=${encodeURIComponent(fileName)}&model_id=${encodeURIComponent(modelId)}&force_refresh=false`, {
         method: 'GET'
       });
       
@@ -149,11 +178,12 @@ const ScenarioPlannerInputFiles: React.FC<Props> = ({ atomId, onCacheInitialized
           variant: "default",
         });
         
-        // Step 2: Automatically fetch identifiers and features
+        // Step 2: Automatically fetch identifiers, features, and combinations
         try {
           await Promise.all([
             fetchIdentifiers(fileName),
-            fetchFeatures(fileName)
+            fetchFeatures(fileName),
+            fetchCombinations(fileName)
           ]);
           
           // Step 3: Notify parent component that cache is ready
@@ -163,12 +193,12 @@ const ScenarioPlannerInputFiles: React.FC<Props> = ({ atomId, onCacheInitialized
           
           toast({
             title: "✅ Scenario Planner Ready",
-            description: "Identifiers and features loaded automatically",
+            description: "Identifiers, features, and combinations loaded automatically",
             variant: "default",
           });
           
         } catch (fetchError) {
-          console.error('Failed to fetch identifiers/features:', fetchError);
+          console.error('Failed to fetch identifiers/features/combinations:', fetchError);
           toast({
             title: "⚠️ Partial Success",
             description: "Cache initialized but failed to load some data",

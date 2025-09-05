@@ -47,9 +47,9 @@ class ScenarioDefinition(BaseModel):
 
 class ClusterConfig(BaseModel):
     """Schema for cluster-specific configuration"""
-    identifiers: Dict[str, str] = Field(
+    combination_id: str = Field(
         ..., 
-        description="Cluster identifiers (e.g., {'Category': 'Beverages', 'SubCategory': 'Soft Drinks'})"
+        description="Combination ID that identifies the specific model combination (e.g., 'iceland_gb_small_multi_branston')"
     )
     scenario_defs: Optional[Dict[str, ScenarioDefinition]] = Field(
         default={}, 
@@ -84,6 +84,7 @@ class ViewConfig(BaseModel):
 
 class RunRequest(BaseModel):
     """Request schema for POST /run endpoint"""
+    model_id: str = Field(..., description="Model _id to fetch and process")
     start_date: str = Field(..., description="Start date for the scenario period (YYYY-MM-DD format)")
     end_date: str = Field(..., description="End date for the scenario period (YYYY-MM-DD format)")
     stat: str = Field(..., description="Statistical measure to use: 'period-mean', 'period-median', etc.")
@@ -93,19 +94,20 @@ class RunRequest(BaseModel):
     class Config:
         schema_extra = {
             "example": {
+                "model_id": "default_client/default_app/default_project",
                 "start_date": "2024-01-01",
                 "end_date": "2024-12-31",
                 "stat": "period-mean",
                 "clusters": [
                     {
-                        "identifiers": {"Brand": "heinz", "Channel": "supermarkets"},
+                        "combination_id": "supermarkets_small_multi_heinz_standard_",
                         "scenario_defs": {
                             "Price": {"type": "pct", "value": 10},
                             "Marketing_Spend": {"type": "pct", "value": -5}
                         }
                     },
                     {
-                        "identifiers": {"Brand": "pl std", "Channel": "supermarkets"},
+                        "combination_id": "supermarkets_small_single_branston",
                         "scenario_defs": {
                             "Price": {"type": "pct", "value": 15}
                         }
@@ -181,6 +183,10 @@ class CacheClearResponse(BaseModel):
 # ────────────────────────────────────────────────────────────────────────────
 class SingleCombinationReferenceRequest(BaseModel):
     """Request schema for POST /api/scenario/single-combination-reference endpoint"""
+    model_id: str = Field(
+        ...,
+        description="Model _id to fetch and process"
+    )
     stat: str = Field(
         ...,
         description="Statistic to calculate: mean, median, sum, min, max, period-mean, period-median, period-sum, period-min, period-max, rolling-mean"
@@ -252,6 +258,10 @@ class SingleCombinationReferenceResponse(BaseModel):
 # ────────────────────────────────────────────────────────────────────────────
 class ReferenceRequest(BaseModel):
     """Request schema for POST /api/scenario/reference endpoint"""
+    model_id: str = Field(
+        ...,
+        description="Model _id to fetch and process"
+    )
     stat: str = Field(
         ...,
         description="Statistic to calculate: mean, median, sum, min, max, period-mean, period-median, period-sum, period-min, period-max, rolling-mean"
@@ -268,6 +278,7 @@ class ReferenceRequest(BaseModel):
     class Config:
         schema_extra = {
             "example": {
+                "model_id": "default_client/default_app/default_project",
                 "stat": "period-mean",
                 "start_date": "2023-01-01",
                 "end_date": "2023-12-31"
@@ -276,9 +287,9 @@ class ReferenceRequest(BaseModel):
 
 class ReferenceResponse(BaseModel):
     """Response schema for POST /api/scenario/reference endpoint"""
-    reference_values_by_model: Dict[str, Dict[str, Any]] = Field(
+    reference_values_by_combination: Dict[str, Dict[str, Any]] = Field(
         ...,
-        description="Dictionary mapping model IDs to their reference data including identifiers, features, and reference values"
+        description="Dictionary mapping combination IDs to their reference data including identifiers, features, and reference values"
     )
     statistic_used: str = Field(
         ...,
@@ -315,7 +326,7 @@ class ScenarioValuesRequest(BaseModel):
                 "stat": "period-mean",
                 "clusters": [
                     {
-                        "identifiers": {"SubCategory": "SPBIO+"},
+                        "combination_id": "iceland_gb_small_multi_branston",
                         "scenario_defs": {
                             "PFCE": {"type": "pct", "value": 2},
                             "IIP": {"type": "pct", "value": 1}

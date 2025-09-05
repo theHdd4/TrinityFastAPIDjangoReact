@@ -658,7 +658,7 @@ export interface ScenarioPlannerSettings {
       }>;
       combinations: Array<{
         id: string;
-        identifiers: string[];
+        combination_id: string;
       }>;
       referenceMethod: 'period-mean' | 'mean' | 'period-median' | 'median';
       referencePeriod: {
@@ -741,6 +741,7 @@ export interface ScenarioPlannerSettings {
   };
   backendIdentifiers?: any;
   backendFeatures?: any;
+  backendCombinations?: any;
   
   // ✅ NEW: Properties for auto-refresh functionality
   referenceValuesNeedRefresh?: boolean;
@@ -777,13 +778,14 @@ export interface ScenarioPlannerSettings {
   }>;
   combinations?: Array<{
     id: string;
-    identifiers: string[];
+    combination_id: string;
   }>;
   resultViews?: Array<{
     id: string;
     name: string;
     selectedCombinations: string[];
   }>;
+  selectedCombinations?: string[];
   combinationInputs?: {
     [combinationId: string]: {
       [featureId: string]: {

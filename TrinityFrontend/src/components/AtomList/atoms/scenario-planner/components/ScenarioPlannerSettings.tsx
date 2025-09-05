@@ -10,6 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Badge } from '@/components/ui/badge';
 import { SCENARIO_PLANNER_API } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
+import { generateModelId } from '../utils/scenarioPlannerUtils';
 import {
   DndContext,
   closestCenter,
@@ -214,26 +215,42 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
   // API state
   const [loadingIdentifiers, setLoadingIdentifiers] = useState(false);
   const [loadingFeatures, setLoadingFeatures] = useState(false);
+  const [loadingCombinations, setLoadingCombinations] = useState(false);
   
   // Removed unused refs to simplify the solution
   
-  // Read identifiers and features from shared store (data prop)
+  // Read identifiers, features, and combinations from shared store (data prop)
   const backendIdentifiers = data.backendIdentifiers || null;
   const backendFeatures = data.backendFeatures || null;
+  const backendCombinations = data.backendCombinations || null;
   
   // Debug logging to see data flow
   console.log('Settings Component - Data from store:', {
     backendIdentifiers: !!backendIdentifiers,
     backendFeatures: !!backendFeatures,
+    backendCombinations: !!backendCombinations,
     identifiersCount: backendIdentifiers?.identifier_columns?.length || 0,
     featuresCount: backendFeatures?.all_unique_features?.length || 0,
+    combinationsCount: backendCombinations?.total_combinations || 0,
     hasIdentifiers: !!data.identifiers?.length,
     hasFeatures: !!data.features?.length,
     hasCombinations: !!data.combinations?.length,
     // ✅ NEW: Check if data is real or dummy
     hasRealData: data.identifiers?.some(id => 
       id.name && id.name !== 'Identifier 1' && id.name !== 'Identifier 2'
-    ) || false
+    ) || false,
+    selectedCombinations: data.selectedCombinations?.length || 0,
+    fullDataObject: data,
+    dataBackendCombinations: data.backendCombinations
+  });
+  
+  // ✅ NEW: Debug backendCombinations specifically
+  console.log('🔍 backendCombinations debug:', {
+    exists: !!backendCombinations,
+    type: typeof backendCombinations,
+    combinations: backendCombinations?.combinations,
+    total_combinations: backendCombinations?.total_combinations,
+    fullObject: backendCombinations
   });
 
   // Restore state from store when component mounts or data changes
@@ -457,7 +474,8 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
   // API functions
   const initializeCache = async (d0_key: string, force_refresh: boolean = false) => {
     try {
-      const response = await fetch(`${SCENARIO_PLANNER_API}/init-cache?d0_key=${encodeURIComponent(d0_key)}&force_refresh=${force_refresh}`, {
+      const modelId = generateModelId();
+      const response = await fetch(`${SCENARIO_PLANNER_API}/init-cache?d0_key=${encodeURIComponent(d0_key)}&model_id=${encodeURIComponent(modelId)}&force_refresh=${force_refresh}`, {
         method: 'GET'
       });
       if (response.ok) {
@@ -495,7 +513,8 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
   const fetchIdentifiers = async () => {
     try {
       setLoadingIdentifiers(true);
-      const response = await fetch(`${SCENARIO_PLANNER_API}/identifiers`);
+      const modelId = generateModelId();
+      const response = await fetch(`${SCENARIO_PLANNER_API}/identifiers?model_id=${encodeURIComponent(modelId)}`);
       if (response.ok) {
         const data = await response.json();
         // Store in shared store instead of local state
@@ -523,7 +542,8 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
   const fetchFeatures = async () => {
     try {
       setLoadingFeatures(true);
-      const response = await fetch(`${SCENARIO_PLANNER_API}/features`);
+      const modelId = generateModelId();
+      const response = await fetch(`${SCENARIO_PLANNER_API}/features?model_id=${encodeURIComponent(modelId)}`);
       if (response.ok) {
         const data = await response.json();
         // Store in shared store instead of local state
@@ -548,12 +568,49 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
     }
   };
 
+  // ✅ NEW: Fetch combinations from backend
+  const fetchCombinations = async () => {
+    try {
+      setLoadingCombinations(true);
+      const modelId = generateModelId();
+      const response = await fetch(`${SCENARIO_PLANNER_API}/combinations?model_id=${encodeURIComponent(modelId)}`);
+      if (response.ok) {
+        const data = await response.json();
+        console.log('🔍 fetchCombinations - Received data:', data);
+        console.log('🔍 fetchCombinations - Combinations array:', data.combinations);
+        // Store combinations in shared store
+        onDataChange({ backendCombinations: data });
+        console.log('🔍 fetchCombinations - Called onDataChange with:', { backendCombinations: data });
+        toast({
+          title: "Success",
+          description: `Loaded ${data.total_combinations || 0} combinations`,
+          variant: "default",
+        });
+      } else {
+        throw new Error(`Failed to fetch combinations: ${response.statusText}`);
+      }
+    } catch (error) {
+      console.error('Error fetching combinations:', error);
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "Failed to fetch combinations",
+        variant: "destructive",
+      });
+    } finally {
+      setLoadingCombinations(false);
+    }
+  };
+
   // ✅ FIXED: Auto-fetch backend data on mount if not already loaded
   useEffect(() => {
     // Only fetch if we don't have backend data yet
-    if (!backendIdentifiers || !backendFeatures) {
+    if (!backendIdentifiers || !backendFeatures || !backendCombinations) {
+      console.log('🔄 Auto-fetching backend data on mount...');
       fetchIdentifiers();
       fetchFeatures();
+      fetchCombinations();
+    } else {
+      console.log('✅ Backend data already available, skipping auto-fetch');
     }
   }, []); // Only run on mount
 
@@ -562,10 +619,12 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
     console.log('🔍 Backend Data Status:', {
       hasIdentifiers: !!backendIdentifiers,
       hasFeatures: !!backendFeatures,
+      hasCombinations: !!backendCombinations,
       identifiersCount: backendIdentifiers?.identifier_columns?.length || 0,
-      featuresCount: backendFeatures?.all_unique_features?.length || 0
+      featuresCount: backendFeatures?.all_unique_features?.length || 0,
+      combinationsCount: backendCombinations?.total_combinations || 0
     });
-  }, [backendIdentifiers, backendFeatures]);
+  }, [backendIdentifiers, backendFeatures, backendCombinations]);
 
   // ✅ SIMPLE LOG: Check if reference values are being received
   useEffect(() => {
@@ -648,37 +707,6 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
     }
   }, [backendIdentifiers, backendFeatures, data.identifiers]); // ✅ FIXED: Removed data.features - features shouldn't trigger combination regeneration
 
-  // ✅ FIXED: Regenerate combinations when identifiers change (after backend sync)
-  useEffect(() => {
-    if (data.identifiers && data.identifiers.length > 0) {
-      // ✅ SIMPLIFIED: No more dummy identifier checks - generate combinations for any valid identifiers
-      if (data.identifiers && data.identifiers.length > 0) {
-        const newCombinations = generateCombinationsFromIdentifiers(data.identifiers);
-        
-        // Only update if combinations are actually different to prevent infinite loop
-        if (JSON.stringify(newCombinations) !== JSON.stringify(data.combinations)) {
-          // ✅ FIXED: Update both global data and current scenario data
-          const updateData: Partial<SettingsType> = {
-            combinations: newCombinations
-          };
-          
-          // Also update the current scenario's data if we have scenario-specific structure
-          if (data.scenarios && data.selectedScenario) {
-            const updatedScenarios = { ...data.scenarios };
-            if (updatedScenarios[data.selectedScenario]) {
-              updatedScenarios[data.selectedScenario] = {
-                ...updatedScenarios[data.selectedScenario],
-                combinations: newCombinations
-              };
-              updateData.scenarios = updatedScenarios;
-            }
-          }
-          
-          onDataChange(updateData);
-        }
-      }
-    }
-  }, [data.identifiers]); // ✅ FIXED: Only watch identifiers, not features (features shouldn't regenerate combinations)
 
   // Initialize filters when aggregated views change
   useEffect(() => {
@@ -1021,126 +1049,6 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
     handleIdentifierFilterChange(identifier, []);
   };
 
-  // Select all values for an identifier
-  const selectAllIdentifierValues = (identifierId: string) => {
-    const updatedIdentifiers = (data.identifiers || []).map(identifier => {
-      if (identifier.id === identifierId) {
-        return {
-          ...identifier,
-          values: identifier.values.map(value => ({ ...value, checked: true }))
-        };
-      }
-      return identifier;
-    });
-    
-    const updatedCombinations = generateCombinationsFromIdentifiers(updatedIdentifiers);
-    onDataChange({ 
-      identifiers: updatedIdentifiers,
-      combinations: updatedCombinations
-    });
-  };
-
-  // Deselect all values for an identifier
-  const deselectAllIdentifierValues = (identifierId: string) => {
-    const updatedIdentifiers = (data.identifiers || []).map(identifier => {
-      if (identifier.id === identifierId) {
-        return {
-          ...identifier,
-          values: (identifier.values || []).map(value => ({ ...value, checked: false }))
-        };
-      }
-      return identifier;
-    });
-    
-    const updatedCombinations = generateCombinationsFromIdentifiers(updatedIdentifiers);
-    onDataChange({ 
-      identifiers: updatedIdentifiers,
-      combinations: updatedCombinations
-    });
-  };
-
-  const generateCombinationsFromIdentifiers = (identifiers: any[]) => {
-    const selectedValues = identifiers
-              .filter(identifier => (identifier.values || []).some((value: any) => value.checked))
-      .map(identifier => ({
-        id: identifier.id,
-        name: identifier.name,
-                  values: (identifier.values || []).filter((value: any) => value.checked)
-      }))
-      .filter(identifier => identifier.values.length > 0);
-
-    if (selectedValues.length === 0) {
-      return [];
-    }
-
-    const generateCombinations = (arrays: any[], index = 0, current: any[] = []): any[] => {
-      if (index === arrays.length) {
-        return [current.slice()];
-      }
-
-      const combinations: any[] = [];
-      for (const value of arrays[index]) {
-        current[index] = value;
-        combinations.push(...generateCombinations(arrays, index + 1, current));
-      }
-      return combinations;
-    };
-
-    const valueArrays = selectedValues.map(identifier => identifier.values);
-    
-    const combinations = generateCombinations(valueArrays);
-
-    const finalCombinations = combinations.map((combination, index) => {
-      // Create a descriptive name for the combination
-      const combinationName = combination.map((value: any, valueIndex: number) => 
-        `${selectedValues[valueIndex].name}: ${value.name}`
-      ).join(' × ');
-      
-      return {
-        id: `combination-${index + 1}`,
-        identifiers: combination.map((value: any, valueIndex: number) => 
-          `${selectedValues[valueIndex].id}:${value.id}` // Use colon separator for better parsing
-        ),
-      values: Object.fromEntries(
-        (data.features || []).filter(f => f.selected).map(feature => [
-          feature.id,
-          {
-            input: 0,
-            change: 0,
-            reference: Math.round(Math.random() * 100 + 50)
-          }
-        ])
-      )
-      };
-    });
-    
-    return finalCombinations;
-  };
-
-  const toggleIdentifierValue = (identifierId: string, valueId: string) => {
-    const updatedIdentifiers = (data.identifiers || []).map(identifier => {
-      if (identifier.id === identifierId) {
-        return {
-          ...identifier,
-          values: (identifier.values || []).map(value => 
-            value.id === valueId ? { ...value, checked: !value.checked } : value
-          )
-        };
-      }
-      return identifier;
-    });
-    
-    // Generate new combinations based on updated identifiers
-    const updatedCombinations = generateCombinationsFromIdentifiers(updatedIdentifiers);
-    
-         // Update both identifiers and combinations together
-    const updateData = { 
-       identifiers: updatedIdentifiers,
-       combinations: updatedCombinations
-    };
-    
-    onDataChange(updateData);
-  };
 
   const selectAllFeatures = () => {
     const updatedFeatures = (data.features || []).map(feature => ({ ...feature, selected: true }));
@@ -1199,73 +1107,115 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
                 )}
             </CollapsibleTrigger>
             <CollapsibleContent className="px-2 py-1">
-                <div className="space-y-2">
-          {data.identifiers && Array.isArray(data.identifiers) ? data.identifiers.map((identifier, index) => (
-                    <Card key={identifier.id} className="p-0.5">
-            <Collapsible 
-                        open={openSections[`identifier${index + 1}` as keyof typeof openSections] as boolean} 
-              onOpenChange={() => toggleSection(`identifier${index + 1}`)}
-            >
-                        <CollapsibleTrigger className="flex items-center justify-between w-full p-0.5 hover:bg-gray-50 rounded-md">
-                          <span className="font-medium text-sm">{identifier.name}</span>
-                          {openSections[`identifier${index + 1}` as keyof typeof openSections] ? (
-                            <ChevronDown className="h-3 w-3" />
-                          ) : (
-                            <ChevronRight className="h-3 w-3" />
-                          )}
-              </CollapsibleTrigger>
-              <CollapsibleContent className="px-2 py-2">
-                          <div className="space-y-2">
-                            {/* Select All / Deselect All Checkbox */}
-                            <div className="flex items-center space-x-2">
-                              <Checkbox 
-                                id={`select-all-${identifier.id}`}
-                                checked={(identifier.values || []).every(value => value.checked)}
-                                onCheckedChange={(checked) => {
-                                  if (checked === true) {
-                                    selectAllIdentifierValues(identifier.id);
-                                  } else {
-                                    deselectAllIdentifierValues(identifier.id);
-                                  }
-                                }}
-                                className="data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600 data-[state=checked]:text-white data-[state=indeterminate]:bg-blue-400 data-[state=indeterminate]:border-blue-400"
-                                ref={(el) => {
-                                  if (el) {
-                                    // Set indeterminate state when some items are selected
-                                    (el as HTMLInputElement).indeterminate = (identifier.values || []).some(value => value.checked) && !(identifier.values || []).every(value => value.checked);
-                                  }
-                                }}
-                              />
-                                                              <label htmlFor={`select-all-${identifier.id}`} className="text-sm font-medium cursor-pointer">
-                                  Select All
-                                </label>
+              <div className="space-y-2">
+                  
+                  {/* ✅ NEW: Direct Combination Selection */}
+                  {(() => {
+                    console.log('🔍 Settings: Rendering condition check:', {
+                      backendCombinations: !!backendCombinations,
+                      hasCombinations: !!backendCombinations?.combinations,
+                      combinationsLength: backendCombinations?.combinations?.length,
+                      fullBackendCombinations: backendCombinations
+                    });
+                    return backendCombinations && backendCombinations.combinations;
+                  })() ? (
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm font-medium">Available Combinations ({backendCombinations.total_combinations || 0})</span>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={fetchCombinations}
+                          disabled={loadingCombinations}
+                        >
+                          {loadingCombinations ? "Loading..." : "Refresh"}
+                        </Button>
+                      </div>
+                      
+                      {/* Select All / Deselect All for Combinations */}
+                      <div className="flex items-center space-x-2">
+                        <Checkbox 
+                          id="select-all-combinations"
+                          checked={data.selectedCombinations?.length === backendCombinations.combinations?.length}
+                          onCheckedChange={(checked) => {
+                            if (checked === true) {
+                              // Select all combinations
+                              const allCombinationIds = backendCombinations.combinations.map((c: any) => c.combination_id);
+                              onDataChange({ selectedCombinations: allCombinationIds });
+                            } else {
+                              // Deselect all combinations
+                              onDataChange({ selectedCombinations: [] });
+                            }
+                          }}
+                          className="data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600 data-[state=checked]:text-white"
+                        />
+                        <label htmlFor="select-all-combinations" className="text-sm">
+                          Select All Combinations
+                        </label>
+                      </div>
+                      
+                      {/* Individual Combination Selection */}
+                      <div className="max-h-60 overflow-y-auto space-y-1">
+                        {backendCombinations.combinations.map((combination: any) => (
+                          <div key={combination.combination_id} className="flex items-center space-x-2 p-2 border rounded">
+                            <Checkbox 
+                              id={`combination-${combination.combination_id}`}
+                              checked={data.selectedCombinations?.includes(combination.combination_id) || false}
+                              onCheckedChange={(checked) => {
+                                const currentSelected = data.selectedCombinations || [];
+                                console.log('🔍 Settings: Combination toggle:', {
+                                  combinationId: combination.combination_id,
+                                  checked,
+                                  currentSelected,
+                                  dataSelectedCombinations: data.selectedCombinations
+                                });
+                                
+                                if (checked === true) {
+                                  // Add combination
+                                  const newSelected = [...currentSelected, combination.combination_id];
+                                  console.log('🔍 Settings: Adding combination, new selection:', newSelected);
+                                  onDataChange({ 
+                                    selectedCombinations: [...currentSelected, combination.combination_id] 
+                                  });
+                                } else {
+                                  // Remove combination
+                                  const newSelected = currentSelected.filter((id: string) => id !== combination.combination_id);
+                                  console.log('🔍 Settings: Removing combination, new selection:', newSelected);
+                                  onDataChange({ 
+                                    selectedCombinations: currentSelected.filter((id: string) => id !== combination.combination_id) 
+                                  });
+                                }
+                              }}
+                              className="data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600 data-[state=checked]:text-white"
+                            />
+                            <div className="flex-1">
+                              <label htmlFor={`combination-${combination.combination_id}`} className="text-sm font-medium cursor-pointer">
+                                {combination.combination_id}
+                              </label>
+                              <div className="text-xs text-gray-500">
+                                {combination.identifiers ? Object.entries(combination.identifiers).map(([key, value]) => `${key}: ${value}`).join(', ') : 'No identifiers'}
+                              </div>
                             </div>
-                            
-                            {/* Individual Checkboxes */}
-                <div className="space-y-2">
-                  {identifier.values && Array.isArray(identifier.values) ? identifier.values.map(value => (
-                    <div key={value.id} className="flex items-center space-x-2">
-                      <Checkbox 
-                        id={value.id}
-                        checked={value.checked}
-                        onCheckedChange={(checked) => {
-                                      if (checked === true || checked === false) {
-                            toggleIdentifierValue(identifier.id, value.id);
-                          }
-                        }}
-                        className="data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600 data-[state=checked]:text-white"
-                      />
-                      <label htmlFor={value.id} className="text-sm text-foreground cursor-pointer">
-                        {value.name}
-                      </label>
+                          </div>
+                        ))}
+                      </div>
                     </div>
-                  )) : null}
-                            </div>
-                </div>
-              </CollapsibleContent>
-            </Collapsible>
-                    </Card>
-                  )) : null}
+                  ) : (
+                    <div className="text-center py-4">
+                      <p className="text-sm text-gray-500 mb-2">No combinations available</p>
+                      <div className="space-y-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={fetchCombinations}
+                          disabled={loadingCombinations}
+                        >
+                          {loadingCombinations ? "Loading..." : "Load Combinations"}
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                  
                 </div>
               </CollapsibleContent>
             </Collapsible>

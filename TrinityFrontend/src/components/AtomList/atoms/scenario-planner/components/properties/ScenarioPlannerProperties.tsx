@@ -46,6 +46,8 @@ export const ScenarioPlannerProperties: React.FC<ScenarioPlannerPropertiesProps>
         // Merge with global backend data
         backendIdentifiers: settings.backendIdentifiers,
         backendFeatures: settings.backendFeatures,
+        backendCombinations: settings.backendCombinations,
+        selectedCombinations: currentScenarioData?.selectedCombinations || [],
         referenceMethod: settings.referenceMethod,
         referencePeriod: settings.referencePeriod
       };
@@ -53,13 +55,20 @@ export const ScenarioPlannerProperties: React.FC<ScenarioPlannerPropertiesProps>
       console.log('🔍 Properties: scenarioSettingsForSettings result:', {
         identifiersCount: result.identifiers.length,
         featuresCount: result.features.length,
-        hasBackendData: !!(settings.backendIdentifiers && settings.backendFeatures)
+        hasBackendData: !!(settings.backendIdentifiers && settings.backendFeatures),
+        selectedCombinations: result.selectedCombinations?.length || 0,
+        backendCombinations: result.backendCombinations?.combinations?.length || 0
       });
       
       return result;
     } else {
       // Fallback to global settings if no scenario data exists
-      return settings;
+      return {
+        ...settings,
+        // Ensure these fields are always available
+        selectedCombinations: [],
+        backendCombinations: settings.backendCombinations
+      };
     }
   }, [settings, currentScenario, currentScenarioData]);
 
@@ -137,6 +146,8 @@ export const ScenarioPlannerProperties: React.FC<ScenarioPlannerPropertiesProps>
     const globalUpdates: Partial<SettingsType> = {};
     if (newData.backendIdentifiers) globalUpdates.backendIdentifiers = newData.backendIdentifiers;
     if (newData.backendFeatures) globalUpdates.backendFeatures = newData.backendFeatures;
+    if (newData.backendCombinations) globalUpdates.backendCombinations = newData.backendCombinations;
+    if (newData.selectedCombinations) globalUpdates.selectedCombinations = newData.selectedCombinations;
     if (newData.referenceMethod) globalUpdates.referenceMethod = newData.referenceMethod;
     if (newData.referencePeriod) globalUpdates.referencePeriod = newData.referencePeriod;
     if (newData.referenceValuesNeedRefresh !== undefined) globalUpdates.referenceValuesNeedRefresh = newData.referenceValuesNeedRefresh;
