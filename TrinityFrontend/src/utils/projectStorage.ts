@@ -16,6 +16,22 @@ function stripCards(cards: any[]): any[] {
           color: atom.color || info?.color || 'bg-gray-400',
         };
       }
+
+      if (atom.atomId === 'chart-maker' && atom.settings) {
+        const { charts = [], ...restSettings } = atom.settings;
+        const sanitizedCharts = Array.isArray(charts)
+          ? charts.map((chart: any) => {
+              const { chartLoading, filteredData, lastUpdateTime, ...chartRest } = chart;
+              return chartRest;
+            })
+          : charts;
+        return {
+          ...atom,
+          settings: { ...restSettings, charts: sanitizedCharts },
+          color: atom.color || info?.color || 'bg-gray-400',
+        };
+      }
+
       return { ...atom, color: atom.color || info?.color || 'bg-gray-400' };
     }),
   }));

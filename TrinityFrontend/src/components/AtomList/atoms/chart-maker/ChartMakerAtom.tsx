@@ -31,6 +31,7 @@ const ChartMakerAtom: React.FC<Props> = ({ atomId }) => {
 
   // Store per-chart loading timers
   const chartLoadingTimers = useRef<Record<string, NodeJS.Timeout | number | null>>({});
+  const initialMount = useRef(true);
 
   // Memoize chart properties that should trigger auto-rendering to prevent infinite loops
   const chartAutoRenderDeps = useMemo(() => 
@@ -311,8 +312,9 @@ const ChartMakerAtom: React.FC<Props> = ({ atomId }) => {
 
   // Auto-render charts based on chartRendered status and different conditions for single/multi-series
   useEffect(() => {
-    if (!settings.fileId) return;
+    if (!settings.fileId || !settings.uploadedData) return;
     settings.charts.forEach(async (chart) => {
+      if (initialMount.current && chart.chartRendered && chart.chartConfig) return;
       // Skip if chart is already loading to prevent infinite loops
       if (chart.chartLoading) return;
       
@@ -431,10 +433,11 @@ const ChartMakerAtom: React.FC<Props> = ({ atomId }) => {
         }
       }
     });
-  }, [settings.fileId, atomId, updateSettings, chartAutoRenderDeps]);
+    initialMount.current = false;
+  }, [settings.fileId, settings.uploadedData, atomId, updateSettings, chartAutoRenderDeps]);
 
   // Only show rendered charts if they've been marked as rendered
-  const chartsToShow = settings.uploadedData ? settings.charts : [];
+  const chartsToShow = settings.charts;
 
   return (
     <div className="w-full h-full min-h-[28rem]">
