@@ -1,4 +1,5 @@
 import type { Atom } from '@/components/AtomCategory/data/atomCategories';
+import SelectModelsAutoRegressiveAtom from './SelectModelsAutoRegressiveAtom';
 
 const selectModelsAutoRegressive: Atom = {
   id: 'select-models-auto-regressive',
@@ -9,4 +10,5 @@ const selectModelsAutoRegressive: Atom = {
   color: 'bg-orange-500'
 };
 
+export { SelectModelsAutoRegressiveAtom };
 export default selectModelsAutoRegressive;

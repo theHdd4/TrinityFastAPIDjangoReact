@@ -7,6 +7,9 @@ from io import BytesIO
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorCollection
 from .config import settings
 from fastapi import HTTPException
+import logging
+
+logger = logging.getLogger(__name__)
 
 # MinIO config
 # Default to the development MinIO service if not explicitly configured
@@ -56,14 +59,33 @@ def get_minio_df(bucket: str, file_key: str) -> pd.DataFrame:
 # MongoDB configuration
 MONGO_URI = os.getenv(
     "AUTOREG_MONGO_URI",
-    os.getenv("MONGO_URI", "mongodb://mongo:27017/trinity"),
+    os.getenv("MONGO_URI", "mongodb://root:rootpass@mongo:27017/trinity_prod?authSource=admin"),
 )
 
-client = AsyncIOMotorClient(MONGO_URI)
-autoregressive_db = client["autoregressive_db"]
-validator_db = client["validator_atoms_db"]
+# MongoDB client initialization - lazy loading
+client = None
+autoregressive_db = None
+validator_db = None
+
+def get_mongo_client():
+    """Get MongoDB client with lazy initialization."""
+    global client, autoregressive_db, validator_db
+    
+    if client is None:
+        try:
+            client = AsyncIOMotorClient(MONGO_URI)
+            autoregressive_db = client["trinity_prod"]  # Use the database from docker-compose
+            validator_db = client["validator_atoms_db"]
+        except Exception as e:
+            logger.error(f"❌ MongoDB connection failed: {e}")
+            client = None
+            autoregressive_db = None
+            validator_db = None
+    
+    return client
 
 async def get_column_classifications_collection() -> AsyncIOMotorCollection:
+    get_mongo_client()  # Initialize connection if needed
     return validator_db["column_classifications"]
 
 async def fetch_measures_list(
@@ -84,6 +106,7 @@ async def fetch_measures_list(
     return identifiers, measures
 
 async def get_autoreg_identifiers_list() -> AsyncIOMotorCollection:
+    get_mongo_client()  # Initialize connection if needed
     return autoregressive_db["autoreg_identifiers"]
 
 async def fetch_autoreg_identifiers_list(

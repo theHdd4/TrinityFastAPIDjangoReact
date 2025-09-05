@@ -1,4 +1,5 @@
 import type { Atom } from '@/components/AtomCategory/data/atomCategories';
+import EvaluateModelsAutoRegressiveAtom from './EvaluateModelsAutoRegressiveAtom';
 
 const evaluateModelsAutoRegressive: Atom = {
   id: 'evaluate-models-auto-regressive',
@@ -6,7 +7,8 @@ const evaluateModelsAutoRegressive: Atom = {
   category: 'Machine Learning',
   description: 'Evaluate auto-regressive model performance',
   tags: ['evaluation', 'autoregressive', 'models'],
-  color: 'bg-orange-500'
+  color: 'bg-green-500'
 };
 
+export { EvaluateModelsAutoRegressiveAtom };
 export default evaluateModelsAutoRegressive;

@@ -14,6 +14,7 @@ class AutoregressiveModelConfig(BaseModel):
 
 class AutoregressiveTrainingResponse(BaseModel):
     """Response for autoregressive model training endpoint."""
+    run_id: str
     status: str
     message: str
     scope_id: str

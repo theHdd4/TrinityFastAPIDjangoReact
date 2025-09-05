@@ -1,4 +1,5 @@
 import type { Atom } from '@/components/AtomCategory/data/atomCategories';
+import AutoRegressiveModelsAtom from './AutoRegressiveModelsAtom';
 
 const autoRegressiveModels: Atom = {
   id: 'auto-regressive-models',
@@ -9,4 +10,5 @@ const autoRegressiveModels: Atom = {
   color: 'bg-orange-500'
 };
 
+export { AutoRegressiveModelsAtom };
 export default autoRegressiveModels;
