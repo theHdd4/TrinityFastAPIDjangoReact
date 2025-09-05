@@ -2,8 +2,7 @@ import os
 import io
 from pathlib import Path
 import pandas as pd
-import pyarrow as pa
-import pyarrow.ipc as ipc
+import polars as pl
 from minio import Minio
 from minio.error import S3Error
 
@@ -53,13 +52,14 @@ def get_arrow_dir() -> Path:
     return dir_path
 
 
-def save_arrow_table(df: pd.DataFrame, path: Path) -> None:
-    """Save a DataFrame to a local Arrow file."""
-    table = pa.Table.from_pandas(df)
+def save_arrow_table(df: pd.DataFrame | pl.DataFrame, path: Path) -> None:
+    """Save a DataFrame to a local Arrow file using Polars IPC serialization."""
+    if isinstance(df, pd.DataFrame):
+        df_pl = pl.from_pandas(df)
+    else:
+        df_pl = df
     path.parent.mkdir(parents=True, exist_ok=True)
-    with pa.OSFile(str(path), "wb") as sink:
-        with ipc.new_file(sink, table.schema) as writer:
-            writer.write_table(table)
+    df_pl.write_ipc(path)
 
 
 def upload_to_minio(file_content_bytes: bytes, filename: str, object_prefix: str) -> dict:

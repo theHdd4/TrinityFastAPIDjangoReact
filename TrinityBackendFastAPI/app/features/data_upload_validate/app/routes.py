@@ -491,7 +491,7 @@ async def create_new(
         # Parse file to DataFrame using Polars for efficient serialization
         try:
             if file.filename.lower().endswith(".csv"):
-                df_pl = pl.read_csv(io.BytesIO(content))
+                df_pl = pl.read_csv(io.BytesIO(content), low_memory=True)
             elif file.filename.lower().endswith(".xlsx"):
                 df_pl = pl.read_excel(io.BytesIO(content))
             else:
@@ -1507,7 +1507,7 @@ async def validate(
                 file.file.seek(0)
 
                 if file.filename.lower().endswith(".csv"):
-                    df_pl = pl.read_csv(file.file)
+                    df_pl = pl.read_csv(file.file, low_memory=True)
                 elif file.filename.lower().endswith((".xls", ".xlsx")):
                     df_pl = pl.read_excel(file.file)
                 else:
@@ -1526,7 +1526,7 @@ async def validate(
                 size_bytes = len(data)
                 filename = Path(path).name
                 if filename.lower().endswith(".csv"):
-                    df_pl = pl.read_csv(io.BytesIO(data))
+                    df_pl = pl.read_csv(io.BytesIO(data), low_memory=True)
                 elif filename.lower().endswith((".xls", ".xlsx")):
                     df_pl = pl.read_excel(io.BytesIO(data))
                 else:
@@ -1943,7 +1943,7 @@ async def validate_mmm_endpoint(
 
             # Parse file based on extension using Polars, then convert to pandas
             if file.filename.lower().endswith(".csv"):
-                df_pl = pl.read_csv(io.BytesIO(content))
+                df_pl = pl.read_csv(io.BytesIO(content), low_memory=True)
             elif file.filename.lower().endswith(".xlsx"):
                 df_pl = pl.read_excel(io.BytesIO(content))
             else:
@@ -2312,7 +2312,7 @@ async def validate_category_forecasting_endpoint(
         
         # Parse file based on extension using Polars
         if file.filename.lower().endswith(".csv"):
-            df_pl = pl.read_csv(io.BytesIO(content))
+            df_pl = pl.read_csv(io.BytesIO(content), low_memory=True)
         elif file.filename.lower().endswith(".xlsx"):
             df_pl = pl.read_excel(io.BytesIO(content))
         else:
@@ -2504,7 +2504,7 @@ async def validate_promo_endpoint(
         
         # Parse file based on extension
         if file.filename.lower().endswith(".csv"):
-            df_pl = pl.read_csv(io.BytesIO(content))
+            df_pl = pl.read_csv(io.BytesIO(content), low_memory=True)
         elif file.filename.lower().endswith(".xlsx"):
             df_pl = pl.read_excel(io.BytesIO(content))
         else:
@@ -2719,7 +2719,7 @@ async def save_dataframes(
 
         fileobj.seek(0)
         if filename.lower().endswith(".csv"):
-            df_pl = pl.read_csv(fileobj)
+            df_pl = pl.read_csv(fileobj, low_memory=True)
         elif filename.lower().endswith((".xls", ".xlsx")):
             df_pl = pl.read_excel(fileobj)
         else:
