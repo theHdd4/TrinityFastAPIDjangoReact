@@ -38,15 +38,12 @@ def _get_df(df_id: str) -> pl.DataFrame:
 
 
 def _df_payload(df: pl.DataFrame, df_id: str) -> Dict[str, Any]:
-    """Serialize the entire dataframe for the frontend."""
+    """Serialize the entire dataframe for the frontend using Polars."""
 
-    # Using PyArrow for row conversion is considerably faster and scales
-    # better for large dataframes than converting each row in Python.
-    rows = df.to_arrow().to_pylist()
     return {
         "df_id": df_id,
         "headers": df.columns,
-        "rows": rows,
+        "rows": df.to_dicts(),
         "types": {col: str(dtype) for col, dtype in zip(df.columns, df.dtypes)},
         "row_count": df.height,
         "column_count": df.width,
