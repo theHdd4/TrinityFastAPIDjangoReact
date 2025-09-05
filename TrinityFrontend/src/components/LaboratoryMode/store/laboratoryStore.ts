@@ -55,6 +55,8 @@ export interface DataUploadSettings {
   fileKeyMap?: Record<string, string>;
   /** Map of uploaded file display names to the stored MinIO object path */
   filePathMap?: Record<string, string>;
+  /** Map of uploaded file display names to their file size in bytes */
+  fileSizeMap?: Record<string, number>;
 }
 
 export const DEFAULT_DATAUPLOAD_SETTINGS: DataUploadSettings = {
@@ -72,6 +74,7 @@ export const DEFAULT_DATAUPLOAD_SETTINGS: DataUploadSettings = {
   fileMappings: {},
   fileKeyMap: {},
   filePathMap: {},
+  fileSizeMap: {},
 };
 
 export const createDefaultDataUploadSettings = (): DataUploadSettings => ({
@@ -89,6 +92,7 @@ export const createDefaultDataUploadSettings = (): DataUploadSettings => ({
   fileMappings: {},
   fileKeyMap: {},
   filePathMap: {},
+  fileSizeMap: {},
 });
 
 export interface FeatureOverviewSettings {
