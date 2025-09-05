@@ -12,3 +12,5 @@ Reverting the permissive CORS changes restores the previous origin
 configuration. To handle very large files, consider streaming parses with
 `pl.scan_csv` or increasing server resources so the temporary DataFrame
 and Arrow serialization fit in memory.
+
+Fastexcel is now included to enable Polars to read Excel files efficiently for large uploads.
