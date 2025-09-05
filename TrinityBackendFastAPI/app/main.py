@@ -13,20 +13,21 @@ from DataStorageRetrieval.arrow_client import load_env_from_redis
 
 app = FastAPI()
 
-origins = os.getenv(
-    "FASTAPI_CORS_ORIGINS",
-    "http://10.2.1.207:8080,http://127.0.0.1:8080,http://172.22.64.1:8080,http://10.2.1.65:8080,https://trinity.quantmatrixai.com",
-)
-allowed_origins = [o.strip() for o in origins.split(",") if o.strip()]
+origins = os.getenv("FASTAPI_CORS_ORIGINS")
+if origins:
+    allowed_origins = [o.strip() for o in origins.split(",") if o.strip()]
+    cors_params = {"allow_origins": allowed_origins}
+else:
+    # No origins configured – allow all origins via regex so credentials work.
+    cors_params = {"allow_origin_regex": ".*"}
 
-# Allow requests from the frontend hosts configured in FASTAPI_CORS_ORIGINS.
-# Fallback to a sensible default list if the variable is not set.
+# Allow requests from configured frontend hosts or fall back to all origins.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    **cors_params,
 )
 
 app.include_router(api_router, prefix="/api")

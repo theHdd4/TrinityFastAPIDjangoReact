@@ -1,0 +1,5 @@
+Large file uploads (>300MB) previously failed with CORS errors because the FastAPI service only allowed requests from a fixed set of origins.
+
+The main application now falls back to a permissive CORS policy when no `FASTAPI_CORS_ORIGINS` environment variable is provided, allowing all origins via a regex while still supporting credentials. The data upload & validation feature app was updated to use the same approach.
+
+With CORS configured correctly, the frontend can upload large CSV files that are parsed with Polars in low-memory mode and serialized to `.arrow` files in the same MinIO prefix as before.
