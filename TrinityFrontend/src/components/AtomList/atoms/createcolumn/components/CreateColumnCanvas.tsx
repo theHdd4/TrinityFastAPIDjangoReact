@@ -495,6 +495,7 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
       
       // Prepare operation details for MongoDB
       const operation_details = {
+        input_file: atom?.settings?.dataSource || 'unknown_input_file',
         operations: operations.map(op => {
           // Get the actual column name created (either rename or default)
           let created_column_name = '';

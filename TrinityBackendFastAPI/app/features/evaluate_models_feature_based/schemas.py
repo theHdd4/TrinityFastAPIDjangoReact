@@ -93,3 +93,16 @@ class ContributionsResponse(BaseModel):
     bucket: str
     models_count: int
     items: List[ContributionsItem]
+
+
+# ---------- Identifiers from dataset ----------
+
+class IdentifierData(BaseModel):
+    column_name: Optional[str] = Field(None, description="Actual column name found in dataset")
+    unique_values: List[str] = Field(..., description="List of unique values for this identifier")
+
+class IdentifiersResponse(BaseModel):
+    identifiers: Dict[str, IdentifierData] = Field(..., description="Identifier name to data mapping")
+    object_name: str = Field(..., description="MinIO key of the dataset file")
+    bucket: str = Field(..., description="Bucket name")
+    count: int = Field(..., description="Number of identifiers found")

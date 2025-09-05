@@ -31,57 +31,108 @@ async def save_createandtransform_configs(
     project_id: int | None = None,
 ):
     """Save createcolumn operation data to MongoDB createandtransform_configs collection"""
-    print(f"🔍 DEBUG: save_createandtransform_configs called with:")
-    print(f"🔍 DEBUG: client_name = {client_name}")
-    print(f"🔍 DEBUG: app_name = {app_name}")
-    print(f"🔍 DEBUG: project_name = {project_name}")
-    print(f"🔍 DEBUG: user_id = {user_id}")
-    print(f"🔍 DEBUG: project_id = {project_id}")
-    print(f"🔍 DEBUG: operation_data = {operation_data}")
-    
     try:
         document_id = f"{client_name}/{app_name}/{project_name}"
-        print(f"🔍 DEBUG: document_id = {document_id}")
         
-        document = {
-            "_id": document_id,
-            "client_name": client_name,
-            "app_name": app_name,
-            "project_name": project_name,
-            "operation_type": "createcolumn",
-            "updated_at": datetime.utcnow(),
-            "user_id": user_id,
-            "project_id": project_id,
-            **operation_data,
-        }
+        # Check if document already exists
+        existing_doc = await client["trinity_prod"]["createandtransform_configs"].find_one({"_id": document_id})
         
-        print(f"🔍 DEBUG: document to save = {document}")
-        print(f"🔍 DEBUG: MongoDB client = {client}")
-        print(f"🔍 DEBUG: Database = {MONGO_DB}")
-        print(f"🔍 DEBUG: Collection = createandtransform_configs")
+        if existing_doc:
+            # Merge new data with existing data instead of replacing
+            merged_document = existing_doc.copy()
+            
+            # Update timestamp
+            merged_document["updated_at"] = datetime.utcnow()
+            
+            # Initialize files array if it doesn't exist
+            if "files" not in merged_document:
+                merged_document["files"] = []
+            
+            # Get the input file from operation data
+            input_file = operation_data.get("input_file")
+            
+            # Check if this file already exists
+            existing_file = None
+            for file_data in merged_document["files"]:
+                if file_data.get("input_file") == input_file:
+                    existing_file = file_data
+                    break
+            
+            if existing_file:
+                # For same input file, add a new file entry to the files array
+                # Each save gets its own entry with its own operations
+                new_file_entry = {
+                    "saved_file": operation_data.get("saved_file"),
+                    "operations": operation_data.get("operations", []),
+                    "input_file": input_file,
+                    "file_columns": operation_data.get("file_columns"),
+                    "file_shape": operation_data.get("file_shape"),
+                    "saved_at": operation_data.get("saved_at"),
+                    "created_at": datetime.utcnow()
+                }
+                
+                # Add the new file entry to the files array
+                merged_document["files"].append(new_file_entry)
+                
+                print(f"✅ Added new file entry for existing input file {input_file}")
+            else:
+                # Add new file to the array
+                new_file = {
+                    "saved_file": operation_data.get("saved_file"),
+                    "operations": operation_data.get("operations", []),
+                    "input_file": input_file,
+                    "file_columns": operation_data.get("file_columns"),
+                    "file_shape": operation_data.get("file_shape"),
+                    "saved_at": operation_data.get("saved_at"),
+                    "created_at": datetime.utcnow()
+                }
+                merged_document["files"].append(new_file)
+                print(f"✅ Added new file {input_file} to document")
+            
+            # Update the existing document
+            result = await client["trinity_prod"]["createandtransform_configs"].replace_one(
+                {"_id": document_id},
+                merged_document
+            )
+            operation = "updated"
+        else:
+            # Create new document with files array
+            document = {
+                "_id": document_id,
+                "client_name": client_name,
+                "app_name": app_name,
+                "project_name": project_name,
+                "operation_type": "createcolumn",
+                "created_at": datetime.utcnow(),
+                "updated_at": datetime.utcnow(),
+                "user_id": user_id,
+                "project_id": project_id,
+                "files": [{
+                    "saved_file": operation_data.get("saved_file"),
+                    "operations": operation_data.get("operations", []),
+                    "input_file": operation_data.get("input_file"),
+                    "file_columns": operation_data.get("file_columns"),
+                    "file_shape": operation_data.get("file_shape"),
+                    "saved_at": operation_data.get("saved_at"),
+                    "created_at": datetime.utcnow()
+                }]
+            }
+            
+            # Insert new document
+            result = await client["trinity_prod"]["createandtransform_configs"].insert_one(document)
+            operation = "inserted"
         
-        # Save to createandtransform_configs collection in trinity_prod database (same as column_classifier_configs)
-        result = await db["createandtransform_configs"].replace_one(
-            {"_id": document_id},
-            document,
-            upsert=True
-        )
-        print(f"📦 Stored in createandtransform_configs: {document}")
-        print(f"🔍 DEBUG: MongoDB result = {result}")
-        print(f"🔍 DEBUG: result.upserted_id = {result.upserted_id}")
-        print(f"🔍 DEBUG: result.modified_count = {result.modified_count}")
+        print(f"📦 Stored in createandtransform_configs: {document_id}")
         
         return {
             "status": "success", 
             "mongo_id": document_id,
-            "operation": "inserted" if result.upserted_id else "updated",
+            "operation": operation,
             "collection": "createandtransform_configs"
         }
         
     except Exception as e:
-        # print(f"❌ MongoDB save error for createandtransform_configs: {e}")
-        # print(f"🔍 DEBUG: Exception type = {type(e)}")
-        # print(f"🔍 DEBUG: Exception details = {str(e)}")
+        print(f"❌ MongoDB save error for createandtransform_configs: {e}")
         return {"status": "error", "error": str(e)}
 
 

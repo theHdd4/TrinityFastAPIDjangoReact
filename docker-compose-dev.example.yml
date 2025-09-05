@@ -194,7 +194,7 @@ services:
     env_file:
       - ./TrinityBackendDjango/.env
     environment:
-      OLLAMA_IP:10.2.1.65
+      OLLAMA_IP: 10.2.1.65
       MONGO_URI: "mongodb://root:rootpass@mongo:27017/trinity_dev?authSource=admin"
       CLASSIFY_MONGO_URI: "mongodb://root:rootpass@mongo:27017/?authSource=admin"
     volumes:

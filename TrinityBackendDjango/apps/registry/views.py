@@ -318,19 +318,67 @@ class ProjectViewSet(viewsets.ModelViewSet):
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=["post"])
+    def import_template(self, request, pk=None):
+        """Apply a template to an existing project."""
+        if not self._can_edit(request.user):
+            return Response({"detail": "Permission denied."}, status=status.HTTP_403_FORBIDDEN)
+        project = self.get_object()
+        template_id = request.data.get("template_id")
+        if not template_id:
+            return Response({"detail": "template_id required."}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            template = Template.objects.get(id=template_id, app=project.app)
+        except Template.DoesNotExist:
+            return Response({"detail": "Template not found."}, status=status.HTTP_404_NOT_FOUND)
+        overwrite = bool(request.data.get("overwrite"))
+        if overwrite:
+            project.state = template.state
+            project.base_template = template
+            project.save()
+            state = template.state or {}
+            for field, mode in [
+                ("laboratory_config", "lab"),
+                ("workflow_config", "workflow"),
+                ("exhibition_config", "exhibition"),
+            ]:
+                cfg = state.get(field)
+                if cfg and cfg.get("cards"):
+                    save_atom_list_configuration(project, mode, cfg["cards"])
+
+            projects = template.template_projects or []
+            if not any(p.get("id") == project.id for p in projects):
+                projects.append(ProjectSerializer(project).data)
+                template.template_projects = projects
+                template.save(update_fields=["template_projects"])
+        else:
+            project.base_template = template
+            project.save(update_fields=["base_template"])
+        serializer = self.get_serializer(project)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=["post"])
     def save_template(self, request, pk=None):
         """Persist the project as a reusable template."""
         if not self._can_edit(request.user):
             return Response({"detail": "Permission denied."}, status=status.HTTP_403_FORBIDDEN)
         project = self.get_object()
         serialized = ProjectSerializer(project).data
+        state = project.state or {}
+        for field, mode in [
+            ("laboratory_config", "lab"),
+            ("workflow_config", "workflow"),
+            ("exhibition_config", "exhibition"),
+        ]:
+            cfg = load_atom_list_configuration(project, mode)
+            if cfg:
+                state[field] = cfg
         template = Template.objects.create(
             name=f"{project.name} Template",
             slug=slugify(f"{project.slug}-template"),
             description=project.description,
             owner=request.user,
             app=project.app,
-            state=project.state,
+            state=state,
             base_project=serialized,
         )
         return Response(TemplateSerializer(template).data, status=status.HTTP_201_CREATED)
@@ -416,8 +464,13 @@ class TemplateViewSet(viewsets.ModelViewSet):
             base_template=template,
         )
 
-        for mode in ["lab", "workflow", "exhibition"]:
-            cfg = load_atom_list_configuration(source, mode)
+        state = template.state or {}
+        for field, mode in [
+            ("laboratory_config", "lab"),
+            ("workflow_config", "workflow"),
+            ("exhibition_config", "exhibition"),
+        ]:
+            cfg = state.get(field)
             if cfg and cfg.get("cards"):
                 save_atom_list_configuration(new_project, mode, cfg["cards"])
 
