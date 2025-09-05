@@ -5,7 +5,7 @@ redis
 boto3
 pandas
 polars>=0.20.0
-fastexcel>=0.7.0
+fastexcel>=0.15.1
 numba
 minio
 motor
