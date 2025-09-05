@@ -520,13 +520,17 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
 
       console.log('🔄 Switching view mode from', prev[viewId] || 'hierarchy', 'to', newMode);
 
-      return {
+      const newState = {
 
         ...prev,
 
         [viewId]: newMode
 
       };
+
+      console.log('🔄 New resultViewMode state:', newState);
+
+      return newState;
 
     });
 
@@ -3384,11 +3388,39 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
 
       const currentMode = resultViewMode[viewId] || 'hierarchy';
 
+      console.log('📊 getChartDataForScenarioAndView called:', {
+
+        scenarioId,
+
+        viewId,
+
+        currentMode,
+
+        hasViewResults: !!viewResults,
+
+        hasHierarchy: !!(viewResults?.hierarchy),
+
+        hasFlat: !!(viewResults?.flat),
+
+        hierarchyLength: viewResults?.hierarchy?.length || 0,
+
+        flatKeys: viewResults?.flat ? Object.keys(viewResults.flat) : []
+
+      });
+
       
 
       if (currentMode === 'hierarchy') {
 
-        if (!viewResults?.hierarchy) return [];
+        if (!viewResults?.hierarchy) {
+
+          console.log('❌ No hierarchy results found for view:', viewId);
+
+          return [];
+
+        }
+
+        console.log('✅ Processing hierarchy results:', viewResults.hierarchy.length, 'items');
 
         
 
@@ -3418,7 +3450,15 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
 
         // Flat mode
 
-        if (!viewResults?.flat) return [];
+        if (!viewResults?.flat) {
+
+          console.log('❌ No flat results found for view:', viewId);
+
+          return [];
+
+        }
+
+        console.log('✅ Processing flat results:', Object.keys(viewResults.flat).length, 'identifier groups');
 
         
 
@@ -3457,6 +3497,8 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
           }
 
         }
+
+        console.log('✅ Flat data processed:', flatData.length, 'items');
 
         return flatData;
 
