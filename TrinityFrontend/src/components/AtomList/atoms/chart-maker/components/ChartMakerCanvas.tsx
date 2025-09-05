@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import RechartsChartRenderer from '@/templates/charts/RechartsChartRenderer';
 import { BarChart3, TrendingUp, BarChart2, Triangle, Zap, Maximize2, ChevronDown, ChevronLeft, ChevronRight, Filter, X, LineChart as LineChartIcon, PieChart as PieChartIcon } from 'lucide-react';
@@ -57,9 +57,6 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ atomId, charts, dat
   const [chatBubbleShouldRender, setChatBubbleShouldRender] = useState(false);
   const [overlayActive, setOverlayActive] = useState(false);
 
-  // Mouse hold detection refs
-  const longPressTimerRef = useRef<NodeJS.Timeout | null>(null);
-  const holdTargetRef = useRef<{ chartId: string; element: HTMLElement } | null>(null);
   const debounceTimers = useRef<Record<string, NodeJS.Timeout | number | null>>({});
   
   // Container ref for responsive layout
@@ -191,54 +188,23 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ atomId, charts, dat
     },
   };
 
-  // Chat bubble handlers
-  const handleMouseDown = (e: React.MouseEvent, chartId: string) => {
-    if (e.button !== 0) return; // Only left click
-    
+  // Chat bubble handler - trigger chart type tray on right click
+  const handleContextMenu = (e: React.MouseEvent, chartId: string) => {
+    e.preventDefault();
     e.stopPropagation();
-    
-    // Store the target element reference
-    const target = e.currentTarget as HTMLElement;
-    
-    // Start the long press timer
-    longPressTimerRef.current = setTimeout(() => {
-      // Check if target still exists before calling getBoundingClientRect
-      if (!target || !target.getBoundingClientRect) {
-        return;
-      }
-      
-      try {
-        // Calculate bubble position
-        const rect = target.getBoundingClientRect();
-        const position = {
-          x: rect.left + rect.width / 2,
-          y: rect.bottom + 10
-        };
-        
-        setChatBubble({
-          visible: true,
-          chartId,
-          anchor: position
-        });
-        setChatBubbleShouldRender(true);
-        setOverlayActive(false); // Will be activated after animation
-      } catch (error) {
-        console.warn('Error calculating bubble position:', error);
-      }
-    }, 700);
-    
-    // Setup cleanup listeners on window
-    const cleanup = () => {
-      if (longPressTimerRef.current) {
-        clearTimeout(longPressTimerRef.current);
-        longPressTimerRef.current = null;
-      }
-      window.removeEventListener('mouseup', cleanup);
-      window.removeEventListener('mouseleave', cleanup);
+
+    const position = {
+      x: e.clientX,
+      y: e.clientY
     };
-    
-    window.addEventListener('mouseup', cleanup);
-    window.addEventListener('mouseleave', cleanup);
+
+    setChatBubble({
+      visible: true,
+      chartId,
+      anchor: position
+    });
+    setChatBubbleShouldRender(true);
+    setOverlayActive(false);
   };
 
   const handleChartTypeSelect = (type: string) => {
@@ -523,8 +489,8 @@ const renderChart = (
                             setFullscreenIndex(index);
                           }
                         }}
-                        onMouseDown={e => handleMouseDown(e, chart.id)}
-                        title="Alt+Click to expand, Hold to change chart type"
+                        onContextMenu={e => handleContextMenu(e, chart.id)}
+                        title="Alt+Click to expand, Right-click to change chart type"
                       />
                      </div>
                      
