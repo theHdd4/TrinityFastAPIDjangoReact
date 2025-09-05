@@ -11,6 +11,7 @@ import pyarrow as pa
 from app.core.utils import get_env_vars
 from pathlib import Path
 import re
+import fastexcel
 
 # Add this line with your other imports
 from datetime import datetime
@@ -2761,7 +2762,9 @@ async def save_dataframes(
                 arrow_bytes = arrow_buf.getvalue()
         elif filename.lower().endswith((".xls", ".xlsx")):
             data_bytes = fileobj.read()
-            df_pl = pl.from_pandas(pd.read_excel(io.BytesIO(data_bytes)))
+            reader = fastexcel.read_excel(data_bytes)
+            sheet = reader.load_sheet_by_idx(0)
+            df_pl = sheet.to_polars()
             if df_pl.height == 0:
                 uploads.append({"file_key": key, "already_saved": False, "error": "empty file"})
                 flights.append({"file_key": key})
@@ -2831,6 +2834,15 @@ async def save_dataframes(
         "prefix": prefix,
         "environment": env,
     }
+
+
+@router.get("/upload-status/{validator_atom_id}/{file_key}")
+async def get_upload_status(validator_atom_id: str, file_key: str) -> dict:
+    progress_key = f"upload_status:{validator_atom_id}:{file_key}"
+    status = redis_client.get(progress_key)
+    if isinstance(status, bytes):
+        status = status.decode()
+    return {"status": status}
 
 
 @router.get("/list_saved_dataframes")
