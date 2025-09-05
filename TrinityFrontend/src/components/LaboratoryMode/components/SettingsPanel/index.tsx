@@ -37,6 +37,7 @@ import CorrelationProperties from '@/components/AtomList/atoms/correlation/compo
 import ChartMakerProperties from '@/components/AtomList/atoms/chart-maker/components/properties/ChartMakerProperties';
 import ExploreProperties from '@/components/AtomList/atoms/explore/components/properties/ExploreProperties';
 import SelectModelsFeatureProperties from '@/components/AtomList/atoms/select-models-feature/components/properties/SelectModelsFeatureProperties';
+import EvaluateModelsFeatureProperties from '@/components/AtomList/atoms/evaluate-models-feature/components/properties/EvaluateModelsFeatureProperties';
 import AtomSettingsTabs from "./AtomSettingsTabs";
 
 interface SettingsPanelProps {
@@ -91,6 +92,8 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
   useEffect(() => {
     setTab('settings');
   }, [selectedAtomId, selectedCardId]);
+
+
   return (
     <div
       className={`bg-white border-l border-gray-200 transition-all duration-300 flex flex-col h-full ${
@@ -139,6 +142,8 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
             <BuildModelFeatureBasedPropertiesPanel atomId={selectedAtomId} />
           ) : selectedAtomId && atom?.atomId === 'select-models-feature' ? (
             <SelectModelsFeatureProperties atomId={selectedAtomId} />
+                     ) : selectedAtomId && atom?.atomId === 'evaluate-models-feature' ? (
+             <EvaluateModelsFeatureProperties atomId={selectedAtomId} />
           ) : selectedAtomId && atom?.atomId === 'concat' ? (
             <ConcatProperties atomId={selectedAtomId} />
           ) : selectedAtomId && atom?.atomId === 'scope-selector' ? (

@@ -130,4 +130,16 @@ TrinityBackendDjango/arrow_data/
 
 
 #jenkinsfile
-Jenkinsfile
+Jenkinsfile 
+
+# Ignore real env files
+TrinityBackendDjango/.env
+TrinityFrontend/.env
+
+# Ignore real docker-compose files
+docker-compose.yml
+docker-compose-dev.yml
+
+# Allow example files
+!*.example
+!*.example.yml

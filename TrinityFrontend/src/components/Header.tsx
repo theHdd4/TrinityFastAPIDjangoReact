@@ -116,7 +116,7 @@ const Header: React.FC<HeaderProps> = ({ projectCount = 0 }) => {
             <div className="flex items-center space-x-3">
               <div className="flex items-center text-sm text-gray-500">
                 <FolderOpen className="w-4 h-4 mr-1" />
-                <span>{projectCount}</span>
+                <span>{`${projectCount} Project${projectCount === 1 ? '' : 's'}`}</span>
               </div>
               <div className="flex items-center space-x-2">
                 <span className="text-sm font-medium text-gray-800">{appInfo.title}</span>

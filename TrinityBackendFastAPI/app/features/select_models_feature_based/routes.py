@@ -12,6 +12,8 @@ from typing import Dict, Any
 
 from .database import (
     scopes_collection,
+    select_configs_collection,
+    get_select_configs_collection,
     minio_client,
     check_database_health,
     extract_unique_combinations,
@@ -24,6 +26,9 @@ from .database import (
     get_transformation_metadata,
     get_model_by_transform_and_id  
 )
+
+# Import get_object_prefix for dynamic path construction
+from ..data_upload_validate.app.routes import get_object_prefix
 
 from .schemas import (
     CombinationSelectionOptions,
@@ -45,7 +50,7 @@ from .schemas import (
     SavedCombinationsStatusResponse
 )
 
-from .database import MINIO_BUCKET, MONGO_URI, MONGO_DB, OBJECT_PREFIX
+from .database import MINIO_BUCKET, MONGO_URI, MONGO_DB, SELECT_CONFIGS_COLLECTION_NAME
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -71,6 +76,42 @@ async def health_check():
         }
     )
 
+@router.get("/debug/mongodb", tags=["Debug"])
+async def debug_mongodb():
+    """Debug endpoint to check MongoDB connection and collections."""
+    try:
+        # Check basic connection
+        if db is None:
+            return {"status": "error", "message": "Database connection is None"}
+        
+        # Check select_configs collection
+        select_configs_coll = get_select_configs_collection()
+        if select_configs_coll is None:
+            return {"status": "error", "message": "select_configs collection is None"}
+        
+        # Try to ping MongoDB
+        await client.admin.command('ping')
+        
+        # Check if collection exists and is accessible
+        collection_info = await db.list_collection_names()
+        
+        return {
+            "status": "success",
+            "message": "MongoDB connection working",
+            "database": MONGO_DB,
+            "collections": collection_info,
+            "select_configs_collection": SELECT_CONFIGS_COLLECTION_NAME,
+            "collection_accessible": select_configs_coll is not None
+        }
+        
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": f"MongoDB connection failed: {str(e)}",
+            "error_type": type(e).__name__,
+            "database": MONGO_DB
+        }
+
 @router.get("/combination-ids", tags=["Combinations"])
 async def get_unique_combination_ids(
     file_key: str = Query(..., description="MinIO file key for the model results file (CSV/Arrow/Feather)")
@@ -86,15 +127,17 @@ async def get_unique_combination_ids(
         raise HTTPException(status_code=503, detail="MinIO connection is not available.")
 
     try:
-        # Use the same pattern as merge/concat atoms - construct full path with OBJECT_PREFIX
+        # Use dynamic object prefix like other atoms instead of hardcoded OBJECT_PREFIX
+        object_prefix = await get_object_prefix()
+        
         # Check if file_key already contains the prefix pattern
-        if file_key.startswith(OBJECT_PREFIX):
+        if file_key.startswith(object_prefix):
             full_file_key = file_key
         else:
-            full_file_key = f"{OBJECT_PREFIX}{file_key}"
+            full_file_key = f"{object_prefix}{file_key}"
         
         logger.info(f"Original file_key: {file_key}")
-        logger.info(f"OBJECT_PREFIX: {OBJECT_PREFIX}")
+        logger.info(f"Dynamic object_prefix: {object_prefix}")
         logger.info(f"Final full_file_key: {full_file_key}")
         response = minio_client.get_object(MINIO_BUCKET, full_file_key)
         content = response.read()
@@ -1332,11 +1375,9 @@ async def select_and_save_model_generic(selection_req: GenericModelSelectionRequ
             model_name = selection_req.filter_criteria['model_name']
             if 'ensemble' in model_name.lower() or model_name.lower() == 'ensemble':
                 is_ensemble = True
-                logger.info(f"🔍 DEBUG: Detected ensemble model selection: {model_name}")
                 # For ensemble, get the combination_id from filter criteria
                 if 'combination_id' in selection_req.filter_criteria:
                     selected_combination_id = selection_req.filter_criteria['combination_id']
-                    logger.info(f"🔍 DEBUG: Ensemble combination_id: {selected_combination_id}")
                 # For ensemble, we don't need to find existing data, we'll create new
                 model_data = None
             else:
@@ -1429,7 +1470,6 @@ async def select_and_save_model_generic(selection_req: GenericModelSelectionRequ
         # Convert to dictionary and handle special values
         if is_ensemble:
             # For ensemble, fetch the actual ensemble metrics data
-            logger.info(f"🔍 DEBUG: Fetching ensemble metrics for combination_id: {selected_combination_id}")
             
             try:
                 # Create ensemble request to get weighted metrics
@@ -1440,22 +1480,14 @@ async def select_and_save_model_generic(selection_req: GenericModelSelectionRequ
                     filter_criteria={"combination_id": selected_combination_id}
                 )
                 
-                logger.info(f"🔍 DEBUG: Ensemble request: {ensemble_req}")
-                
                 # Call the weighted ensemble endpoint to get actual metrics
                 ensemble_result = await weighted_ensemble(ensemble_req)
                 
-                logger.info(f"🔍 DEBUG: Ensemble result: {ensemble_result}")
-                logger.info(f"🔍 DEBUG: Ensemble result type: {type(ensemble_result)}")
-                
                 if ensemble_result and hasattr(ensemble_result, 'results') and ensemble_result.results:
-                    logger.info(f"🔍 DEBUG: Number of ensemble results: {len(ensemble_result.results)}")
                     ensemble_data = ensemble_result.results[0]  # Get the first (and should be only) result
-                    logger.info(f"🔍 DEBUG: Ensemble data: {ensemble_data}")
                     
                     if hasattr(ensemble_data, 'weighted'):
                         weighted_metrics = ensemble_data.weighted
-                        logger.info(f"🔍 DEBUG: Found ensemble metrics: {weighted_metrics}")
                     else:
                         logger.warning(f"⚠️ WARNING: No 'weighted' attribute in ensemble data")
                         weighted_metrics = {}
@@ -1491,18 +1523,11 @@ async def select_and_save_model_generic(selection_req: GenericModelSelectionRequ
                 }
                 
                 # Add all the weighted metrics to the model_dict
-                logger.info(f"🔍 DEBUG: Adding weighted metrics to model_dict. Keys: {list(weighted_metrics.keys())}")
                 for key, value in weighted_metrics.items():
                     if key not in model_dict:
                         model_dict[key] = value
-                        logger.info(f"🔍 DEBUG: Added {key} = {value}")
-                    else:
-                        logger.info(f"🔍 DEBUG: Skipped {key} (already exists in model_dict)")
                 
                 cleaned_dict = model_dict
-                logger.info(f"🔍 DEBUG: Created ensemble model_dict with actual metrics")
-                logger.info(f"🔍 DEBUG: Final model_dict keys: {list(model_dict.keys())}")
-                logger.info(f"🔍 DEBUG: Final model_dict values: {model_dict}")
                     
             except Exception as e:
                 logger.error(f"❌ Error fetching ensemble metrics: {str(e)}")
@@ -1582,16 +1607,251 @@ async def select_and_save_model_generic(selection_req: GenericModelSelectionRequ
             "total_rows_in_file": len(df)
         }
         
-        # Save to MongoDB
+        # Get saved_models_generic collection reference (required by code but not saved to MongoDB)
         saved_models_collection = db.get_collection("saved_models_generic")
         
-        # Insert the model
-        result = await saved_models_collection.insert_one(document)
+        # Create a mock result object to maintain compatibility
+        class MockResult:
+            def __init__(self):
+                self.inserted_id = "mock_id_not_saved_to_mongo"
         
-        # Create index for efficient queries
-        await saved_models_collection.create_index([("created_at", -1)])
-        await saved_models_collection.create_index([("tags", 1)])
-        await saved_models_collection.create_index([("model_name", 1)])
+        result = MockResult()
+        
+        # Note: Not actually saving to saved_models_generic collection in MongoDB
+        # Only saving to select_configs collection
+        
+        # Also save to select_configs collection with metadata and model results
+        try:
+            # Get client, app, and project from object prefix (like build atom)
+            try:
+                object_prefix = await get_object_prefix()
+                prefix_parts = object_prefix.strip('/').split('/')
+                
+                if len(prefix_parts) >= 2:
+                    client_name = prefix_parts[0]
+                    app_name = prefix_parts[1]
+                    project_name = prefix_parts[2] if len(prefix_parts) > 2 else "default_project"
+                    logger.info(f"✅ Extracted client: {client_name}, app: {app_name}, project: {project_name}")
+                else:
+                    client_name = "default_client"
+                    app_name = "default_app"
+                    project_name = "default_project"
+                    logger.warning(f"⚠️ Could not extract client/app/project from prefix: {object_prefix}")
+            except Exception as e:
+                logger.warning(f"⚠️ Failed to get object prefix: {e}")
+                client_name = "default_client"
+                app_name = "default_app"
+                project_name = "default_project"
+            
+            # Get combination_id for creating unique _id
+            combination_id = cleaned_dict.get("combination_id") or cleaned_dict.get("Combination_ID") or cleaned_dict.get("combination") or "unknown"
+            
+            # Create unique _id like build atom: client_name/app_name/project_name (without combination_id)
+            document_id = f"{client_name}/{app_name}/{project_name}"
+            
+            # Get the select_configs collection dynamically
+            select_configs_coll = get_select_configs_collection()
+            if select_configs_coll is None:
+                logger.error("❌ Failed to get select_configs collection - cannot save metadata")
+                raise Exception("Select configs collection not available")
+            
+            # Look up createandtransform_operations from scope selector collection based on document_id
+            createandtransform_operations = None
+            try:
+                # Use the same MongoDB client that's already connected
+                from .database import client as mongo_client
+                scopeselector_collection = mongo_client["trinity_prod"]["scopeselector_configs"]
+                
+                # Query by the same document_id (client/app/project) to get the scope selector document
+                scopeselector_doc = await scopeselector_collection.find_one({"_id": document_id})
+                
+                if scopeselector_doc and "createandtransform_operations" in scopeselector_doc:
+                    createandtransform_operations = scopeselector_doc["createandtransform_operations"]
+                    logger.info(f"🔍 Found createandtransform operations from scope selector for document_id: {document_id}")
+                else:
+                    logger.info(f"🔍 No createandtransform operations found in scope selector for document_id: {document_id}")
+                    createandtransform_operations = None
+                        
+            except Exception as e:
+                logger.warning(f"⚠️ Could not fetch createandtransform operations: {str(e)}")
+                createandtransform_operations = None
+            
+            # Prepare document for select_configs collection with client/app/project structure
+            select_config_document = {
+                # Custom _id like build atom
+                "_id": document_id,
+                
+                # Client/App/Project structure (like build atom)
+                "client_name": client_name,
+                "app_name": app_name,
+                "project_name": project_name,
+                
+                # Timestamps
+                "created_at": datetime.now(),
+                "updated_at": datetime.now(),
+                
+                # Reference to the saved model
+                "saved_model_id": str(result.inserted_id),
+                "saved_model_collection": "saved_models_generic",
+                
+                # Createandtransform operations from scope selector (before combinations)
+                "createandtransform_operations": createandtransform_operations
+            }
+            
+            # Check if document already exists to append results like build atom
+            existing_doc = await select_configs_coll.find_one({"_id": document_id})
+            
+            if existing_doc:
+                # Merge new data with existing data instead of replacing
+                merged_document = existing_doc.copy()
+                
+                # Update timestamp
+                merged_document["updated_at"] = datetime.now()
+                
+                # Update createandtransform_operations from scope selector
+                merged_document["createandtransform_operations"] = createandtransform_operations
+                
+                # Initialize combinations array if it doesn't exist
+                if "combinations" not in merged_document:
+                    merged_document["combinations"] = []
+                
+                # Check if this combination already exists
+                existing_combination = None
+                for combo in merged_document["combinations"]:
+                    if combo.get("combination_id") == combination_id:
+                        existing_combination = combo
+                        break
+                
+                if existing_combination:
+                    # Update existing combination with new results
+                    existing_combination.update({
+                        "scope": cleaned_dict.get("Scope") or cleaned_dict.get("scope") or cleaned_dict.get("scope_name") or "unknown",
+                        "y_variable": cleaned_dict.get("y_variable") or cleaned_dict.get("Y_Variable") or cleaned_dict.get("target") or "unknown",
+                        "x_variables": cleaned_dict.get("x_variables") or cleaned_dict.get("X_Variables") or cleaned_dict.get("features") or "unknown",
+                        "model_name": cleaned_dict.get("model_name") or cleaned_dict.get("Model_Name") or cleaned_dict.get("Model") or "unknown",
+                        "mape_train": cleaned_dict.get("mape_train") or cleaned_dict.get("MAPE_Train") or cleaned_dict.get("train_mape") or None,
+                        "mape_test": cleaned_dict.get("mape_test") or cleaned_dict.get("MAPE_Test") or cleaned_dict.get("test_mape") or None,
+                        "r2_train": cleaned_dict.get("r2_train") or cleaned_dict.get("R2_Train") or cleaned_dict.get("train_r2") or None,
+                        "r2_test": cleaned_dict.get("r2_test") or cleaned_dict.get("R2_Test") or cleaned_dict.get("test_r2") or None,
+                        "aic": cleaned_dict.get("aic") or cleaned_dict.get("AIC") or None,
+                        "bic": cleaned_dict.get("bic") or cleaned_dict.get("BIC") or None,
+                        "intercept": cleaned_dict.get("intercept") or cleaned_dict.get("Intercept") or None,
+                        "n_parameters": cleaned_dict.get("n_parameters") or cleaned_dict.get("N_Parameters") or cleaned_dict.get("parameters") or None,
+                        "price_elasticity": cleaned_dict.get("price_elasticity") or cleaned_dict.get("Price_Elasticity") or cleaned_dict.get("elasticity") or None,
+                        "run_id": cleaned_dict.get("run_id") or cleaned_dict.get("Run_ID") or cleaned_dict.get("run") or None,
+                        "timestamp": cleaned_dict.get("timestamp") or cleaned_dict.get("Timestamp") or cleaned_dict.get("date") or None,
+                        "source_file": selection_req.file_key,
+                        "selection_criteria": {
+                            "row_index": selection_req.row_index,
+                            "filter_criteria": selection_req.filter_criteria
+                        },
+                        "tags": selection_req.tags,
+                        "description": selection_req.description,
+                        "complete_model_data": cleaned_dict,
+                        "updated_at": datetime.now()
+                    })
+                    logger.info(f"✅ Updated existing combination {combination_id} in document")
+                else:
+                    # Add new combination to the array
+                    new_combination = {
+                        "combination_id": combination_id,
+                        "scope": cleaned_dict.get("Scope") or cleaned_dict.get("scope") or cleaned_dict.get("scope_name") or "unknown",
+                        "y_variable": cleaned_dict.get("y_variable") or cleaned_dict.get("Y_Variable") or cleaned_dict.get("target") or "unknown",
+                        "x_variables": cleaned_dict.get("x_variables") or cleaned_dict.get("X_Variables") or cleaned_dict.get("features") or "unknown",
+                        "model_name": cleaned_dict.get("model_name") or cleaned_dict.get("Model_Name") or cleaned_dict.get("Model") or "unknown",
+                        "mape_train": cleaned_dict.get("mape_train") or cleaned_dict.get("MAPE_Train") or cleaned_dict.get("train_mape") or None,
+                        "mape_test": cleaned_dict.get("mape_test") or cleaned_dict.get("MAPE_Test") or cleaned_dict.get("test_mape") or None,
+                        "r2_train": cleaned_dict.get("r2_train") or cleaned_dict.get("R2_Train") or cleaned_dict.get("train_r2") or None,
+                        "r2_test": cleaned_dict.get("r2_test") or cleaned_dict.get("R2_Test") or cleaned_dict.get("test_r2") or None,
+                        "aic": cleaned_dict.get("aic") or cleaned_dict.get("AIC") or None,
+                        "bic": cleaned_dict.get("bic") or cleaned_dict.get("BIC") or None,
+                        "intercept": cleaned_dict.get("intercept") or cleaned_dict.get("Intercept") or None,
+                        "n_parameters": cleaned_dict.get("n_parameters") or cleaned_dict.get("N_Parameters") or cleaned_dict.get("parameters") or None,
+                        "price_elasticity": cleaned_dict.get("price_elasticity") or cleaned_dict.get("Price_Elasticity") or cleaned_dict.get("elasticity") or None,
+                        "run_id": cleaned_dict.get("run_id") or cleaned_dict.get("Run_ID") or cleaned_dict.get("run") or None,
+                        "timestamp": cleaned_dict.get("timestamp") or cleaned_dict.get("Timestamp") or cleaned_dict.get("date") or None,
+                        "source_file": selection_req.file_key,
+                        "selection_criteria": {
+                            "row_index": selection_req.row_index,
+                            "filter_criteria": selection_req.filter_criteria
+                        },
+                        "tags": selection_req.tags,
+                        "description": selection_req.description,
+                        "complete_model_data": cleaned_dict,
+                        "created_at": datetime.now(),
+                        "updated_at": datetime.now()
+                    }
+                    merged_document["combinations"].append(new_combination)
+                    logger.info(f"✅ Added new combination {combination_id} to document")
+                
+                # Update the existing document
+                result_select = await select_configs_coll.replace_one(
+                    {"_id": document_id},
+                    merged_document
+                )
+                operation = "updated"
+            else:
+                # Create new document with combinations array
+                select_config_document["combinations"] = [{
+                    "combination_id": combination_id,
+                    "scope": cleaned_dict.get("Scope") or cleaned_dict.get("scope") or cleaned_dict.get("scope_name") or "unknown",
+                    "y_variable": cleaned_dict.get("y_variable") or cleaned_dict.get("Y_Variable") or cleaned_dict.get("target") or "unknown",
+                    "x_variables": cleaned_dict.get("x_variables") or cleaned_dict.get("X_Variables") or cleaned_dict.get("features") or "unknown",
+                    "model_name": cleaned_dict.get("model_name") or cleaned_dict.get("Model_Name") or cleaned_dict.get("Model") or "unknown",
+                    "mape_train": cleaned_dict.get("mape_train") or cleaned_dict.get("MAPE_Train") or cleaned_dict.get("train_mape") or None,
+                    "mape_test": cleaned_dict.get("mape_test") or cleaned_dict.get("MAPE_Test") or cleaned_dict.get("test_mape") or None,
+                    "r2_train": cleaned_dict.get("r2_train") or cleaned_dict.get("R2_Train") or cleaned_dict.get("train_r2") or None,
+                    "r2_test": cleaned_dict.get("r2_test") or cleaned_dict.get("R2_Test") or cleaned_dict.get("test_r2") or None,
+                    "aic": cleaned_dict.get("aic") or cleaned_dict.get("AIC") or None,
+                    "bic": cleaned_dict.get("bic") or cleaned_dict.get("BIC") or None,
+                    "intercept": cleaned_dict.get("intercept") or cleaned_dict.get("Intercept") or None,
+                    "n_parameters": cleaned_dict.get("n_parameters") or cleaned_dict.get("N_Parameters") or cleaned_dict.get("parameters") or None,
+                        "price_elasticity": cleaned_dict.get("price_elasticity") or cleaned_dict.get("Price_Elasticity") or cleaned_dict.get("elasticity") or None,
+                    "run_id": cleaned_dict.get("run_id") or cleaned_dict.get("Run_ID") or cleaned_dict.get("run") or None,
+                    "timestamp": cleaned_dict.get("timestamp") or cleaned_dict.get("Timestamp") or cleaned_dict.get("date") or None,
+                    "source_file": selection_req.file_key,
+                    "selection_criteria": {
+                        "row_index": selection_req.row_index,
+                        "filter_criteria": selection_req.filter_criteria
+                    },
+                    "tags": selection_req.tags,
+                    "description": selection_req.description,
+                    "complete_model_data": cleaned_dict,
+                    "created_at": datetime.now(),
+                    "updated_at": datetime.now()
+                }]
+                
+                # Insert new document
+                result_select = await select_configs_coll.insert_one(select_config_document)
+                operation = "inserted"
+            
+            # Determine operation type
+            logger.info(f"✅ Document saved with custom _id: {document_id}")
+            logger.info(f"✅ Operation: {operation}")
+            if operation == "inserted":
+                logger.info(f"✅ Inserted ID: {result_select.inserted_id}")
+            else:
+                logger.info(f"✅ Modified count: {result_select.modified_count}")
+            
+            # Create index for efficient queries (including client/app/project)
+            await select_configs_coll.create_index([("client_name", 1), ("app_name", 1), ("project_name", 1)])
+            await select_configs_coll.create_index([("combinations.combination_id", 1)])
+            await select_configs_coll.create_index([("combinations.scope", 1)])
+            await select_configs_coll.create_index([("combinations.model_name", 1)])
+            await select_configs_coll.create_index([("created_at", -1)])
+            
+            logger.info(f"✅ Successfully saved to select_configs collection for combination_id: {combination_id}")
+            logger.info(f"✅ Document saved with custom _id: {document_id}")
+            logger.info(f"✅ Operation: {operation}")
+            logger.info(f"✅ Saved under client: {client_name}, app: {app_name}, project: {project_name}")
+            logger.info(f"✅ Collection used: {MONGO_DB}.{SELECT_CONFIGS_COLLECTION_NAME}")
+            
+        except Exception as e:
+            logger.error(f"❌ Error: Failed to save to select_configs collection: {e}")
+            logger.error(f"❌ Error details: {type(e).__name__}: {str(e)}")
+            import traceback
+            logger.error(f"❌ Traceback: {traceback.format_exc()}")
+            # Continue with the main flow even if this fails
         
         # Now modify the source file to add 'selected_models' column
         try:
@@ -1608,15 +1868,10 @@ async def select_and_save_model_generic(selection_req: GenericModelSelectionRequ
                 elif selection_req.filter_criteria and 'combination_id' in selection_req.filter_criteria:
                     selected_combination_id = selection_req.filter_criteria['combination_id']
                 
-                logger.info(f"🔍 DEBUG: Selected combination_id: {selected_combination_id}")
-                logger.info(f"🔍 DEBUG: Filter criteria: {selection_req.filter_criteria}")
-                
                 if selected_combination_id is not None:
                     # Set all rows with the same combination_id to 'no'
                     rows_to_reset = df[df['combination_id'] == selected_combination_id]
-                    logger.info(f"🔍 DEBUG: Rows to reset to 'no': {len(rows_to_reset)} rows with combination_id {selected_combination_id}")
                     df.loc[df['combination_id'] == selected_combination_id, 'selected_models'] = 'no'
-                    logger.info(f"🔍 DEBUG: Reset completed for combination_id {selected_combination_id}")
                 else:
                     logger.warning(f"⚠️ WARNING: Could not determine combination_id from request")
             
@@ -1624,7 +1879,6 @@ async def select_and_save_model_generic(selection_req: GenericModelSelectionRequ
             if selection_req.row_index is not None:
                 # Select by index
                 df.loc[selection_req.row_index, 'selected_models'] = 'yes'
-                logger.info(f"🔍 DEBUG: Set row {selection_req.row_index} to 'yes'")
             elif selection_req.filter_criteria:
                 # Check if this is an ensemble model selection
                 is_ensemble = False
@@ -1632,7 +1886,6 @@ async def select_and_save_model_generic(selection_req: GenericModelSelectionRequ
                     model_name = selection_req.filter_criteria['model_name']
                     if 'ensemble' in model_name.lower() or model_name.lower() == 'ensemble':
                         is_ensemble = True
-                        logger.info(f"🔍 DEBUG: Detected ensemble model selection: {model_name}")
                 
                 if is_ensemble:
                     # Check if ensemble already exists for this combination
@@ -1642,7 +1895,6 @@ async def select_and_save_model_generic(selection_req: GenericModelSelectionRequ
                     if len(existing_ensemble_rows) > 0:
                         # Ensemble already exists, just mark it as selected
                         df.loc[existing_ensemble_mask, 'selected_models'] = 'yes'
-                        logger.info(f"🔍 DEBUG: Ensemble already exists for combination {selected_combination_id}, marked as selected")
                     else:
                         # Create new ensemble row with actual ensemble data
                         # Get the weighted metrics from the ensemble calculation
@@ -1683,7 +1935,6 @@ async def select_and_save_model_generic(selection_req: GenericModelSelectionRequ
                         
                         # Append the ensemble row to the dataframe
                         df = pd.concat([df, pd.DataFrame([ensemble_row])], ignore_index=True)
-                        logger.info(f"🔍 DEBUG: Added new ensemble row to dataframe")
                     
                 else:
                     # Regular model selection - use filter criteria
@@ -1694,25 +1945,14 @@ async def select_and_save_model_generic(selection_req: GenericModelSelectionRequ
                         mask &= (col_str == value_str)
                     
                     rows_to_select = df[mask]
-                    logger.info(f"🔍 DEBUG: Rows matching filter criteria: {len(rows_to_select)} rows")
-                    logger.info(f"🔍 DEBUG: Filter mask: {mask.sum()} True values")
                     
                     df.loc[mask, 'selected_models'] = 'yes'
-                    logger.info(f"🔍 DEBUG: Set filtered rows to 'yes'")
             
             # Log the final state
             if 'combination_id' in df.columns:
                 final_selected = df[df['selected_models'] == 'yes']
-                logger.info(f"🔍 DEBUG: Final selected rows: {len(final_selected)} rows")
-                for _, row in final_selected.iterrows():
-                    logger.info(f"🔍 DEBUG: Selected - combination_id: {row.get('combination_id')}, model: {row.get('model_name', 'N/A')}")
             
             # Save the modified source file back to MinIO
-            # logger.info(f"🔍 DEBUG: About to save file back to MinIO: {selection_req.file_key}")
-            # logger.info(f"🔍 DEBUG: File type detected: {selection_req.file_key.split('.')[-1]}")
-            # logger.info(f"🔍 DEBUG: DataFrame shape after modifications: {df.shape}")
-            # logger.info(f"🔍 DEBUG: DataFrame columns: {df.columns.tolist()}")
-            # logger.info(f"🔍 DEBUG: Sample of 'selected_models' column values: {df['selected_models'].value_counts().to_dict()}")
             
             if selection_req.file_key.endswith(".csv"):
                 # Save as CSV
@@ -1720,23 +1960,18 @@ async def select_and_save_model_generic(selection_req: GenericModelSelectionRequ
                 df.to_csv(csv_buffer, index=False)
                 csv_content = csv_buffer.getvalue().encode('utf-8')
                 
-                logger.info(f"🔍 DEBUG: CSV content size: {len(csv_content)} bytes")
-                
                 try:
                     # Verify the file exists before upload
                     try:
                         existing_obj = minio_client.stat_object(MINIO_BUCKET, selection_req.file_key)
-                        logger.info(f"🔍 DEBUG: Existing file size before update: {existing_obj.size} bytes")
-                        logger.info(f"🔍 DEBUG: Existing file ETag before update: {existing_obj.etag}")
                     except Exception as stat_error:
-                        logger.info(f"🔍 DEBUG: File does not exist before update (will create new)")
+                        pass
                     
                     # Force overwrite by first removing the existing object
                     try:
                         minio_client.remove_object(MINIO_BUCKET, selection_req.file_key)
-                        logger.info(f"🔍 DEBUG: Removed existing file to force overwrite")
                     except Exception as remove_error:
-                        logger.info(f"🔍 DEBUG: Could not remove existing file (may not exist): {str(remove_error)}")
+                        pass
                     
                     # Now upload the new file
                     minio_client.put_object(
@@ -1746,18 +1981,10 @@ async def select_and_save_model_generic(selection_req: GenericModelSelectionRequ
                         length=len(csv_content),
                         content_type="text/csv",
                     )
-                    logger.info(f"🔍 DEBUG: CSV file uploaded to MinIO successfully")
                     
                     # Verify the file was updated
                     try:
                         updated_obj = minio_client.stat_object(MINIO_BUCKET, selection_req.file_key)
-                        logger.info(f"🔍 DEBUG: Updated file size after update: {updated_obj.size} bytes")
-                        logger.info(f"🔍 DEBUG: Updated file ETag after update: {updated_obj.etag}")
-                        if 'existing_obj' in locals():
-                            logger.info(f"🔍 DEBUG: File size change: {updated_obj.size - existing_obj.size} bytes")
-                            logger.info(f"🔍 DEBUG: ETag changed: {existing_obj.etag != updated_obj.etag}")
-                        else:
-                            logger.info(f"🔍 DEBUG: New file created")
                     except Exception as stat_error:
                         logger.warning(f"⚠️ WARNING: Could not verify file update: {str(stat_error)}")
                         
@@ -1771,23 +1998,18 @@ async def select_and_save_model_generic(selection_req: GenericModelSelectionRequ
                 df.to_excel(excel_buffer, index=False)
                 excel_content = excel_buffer.getvalue()
                 
-                logger.info(f"🔍 DEBUG: Excel content size: {len(excel_content)} bytes")
-                
                 try:
                     # Verify the file exists before upload
                     try:
                         existing_obj = minio_client.stat_object(MINIO_BUCKET, selection_req.file_key)
-                        logger.info(f"🔍 DEBUG: Existing file size before update: {existing_obj.size} bytes")
-                        logger.info(f"🔍 DEBUG: Existing file ETag before update: {existing_obj.etag}")
                     except Exception as stat_error:
-                        logger.info(f"🔍 DEBUG: File does not exist before update (will create new)")
+                        pass
                     
                     # Force overwrite by first removing the existing object
                     try:
                         minio_client.remove_object(MINIO_BUCKET, selection_req.file_key)
-                        logger.info(f"🔍 DEBUG: Removed existing file to force overwrite")
                     except Exception as remove_error:
-                        logger.info(f"🔍 DEBUG: Could not remove existing file (may not exist): {str(remove_error)}")
+                        pass
                     
                     # Now upload the new file
                     minio_client.put_object(
@@ -1797,18 +2019,10 @@ async def select_and_save_model_generic(selection_req: GenericModelSelectionRequ
                         length=len(excel_content),
                         content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     )
-                    logger.info(f"🔍 DEBUG: Excel file uploaded to MinIO successfully")
                     
                     # Verify the file was updated
                     try:
                         updated_obj = minio_client.stat_object(MINIO_BUCKET, selection_req.file_key)
-                        logger.info(f"🔍 DEBUG: Updated file size after update: {updated_obj.size} bytes")
-                        logger.info(f"🔍 DEBUG: Updated file ETag after update: {updated_obj.etag}")
-                        if 'existing_obj' in locals():
-                            logger.info(f"🔍 DEBUG: File size change: {updated_obj.size - existing_obj.size} bytes")
-                            logger.info(f"🔍 DEBUG: ETag changed: {existing_obj.etag != updated_obj.etag}")
-                        else:
-                            logger.info(f"🔍 DEBUG: New file created")
                     except Exception as stat_error:
                         logger.warning(f"⚠️ WARNING: Could not verify file update: {str(stat_error)}")
                         
@@ -1826,23 +2040,18 @@ async def select_and_save_model_generic(selection_req: GenericModelSelectionRequ
                     writer.write_table(table)
                 arrow_bytes = arrow_buffer.getvalue().to_pybytes()
                 
-                logger.info(f"🔍 DEBUG: Arrow content size: {len(arrow_bytes)} bytes")
-                
                 try:
                     # Verify the file exists before upload
                     try:
                         existing_obj = minio_client.stat_object(MINIO_BUCKET, selection_req.file_key)
-                        logger.info(f"🔍 DEBUG: Existing file size before update: {existing_obj.size} bytes")
-                        logger.info(f"🔍 DEBUG: Existing file ETag before update: {existing_obj.etag}")
                     except Exception as stat_error:
-                        logger.info(f"🔍 DEBUG: File does not exist before update (will create new)")
+                        pass
                     
                     # Force overwrite by first removing the existing object
                     try:
                         minio_client.remove_object(MINIO_BUCKET, selection_req.file_key)
-                        logger.info(f"🔍 DEBUG: Removed existing file to force overwrite")
                     except Exception as remove_error:
-                        logger.info(f"🔍 DEBUG: Could not remove existing file (may not exist): {str(remove_error)}")
+                        pass
                     
                     # Now upload the new file
                     minio_client.put_object(
@@ -1852,18 +2061,10 @@ async def select_and_save_model_generic(selection_req: GenericModelSelectionRequ
                         length=len(arrow_bytes),
                         content_type="application/octet-stream",
                     )
-                    logger.info(f"🔍 DEBUG: Arrow file uploaded to MinIO successfully")
                     
                     # Verify the file was updated
                     try:
                         updated_obj = minio_client.stat_object(MINIO_BUCKET, selection_req.file_key)
-                        logger.info(f"🔍 DEBUG: Updated file size after update: {updated_obj.size} bytes")
-                        logger.info(f"🔍 DEBUG: Updated file ETag after update: {updated_obj.etag}")
-                        if 'existing_obj' in locals():
-                            logger.info(f"🔍 DEBUG: File size change: {updated_obj.size - existing_obj.size} bytes")
-                            logger.info(f"🔍 DEBUG: ETag changed: {existing_obj.etag != updated_obj.etag}")
-                        else:
-                            logger.info(f"🔍 DEBUG: New file created")
                     except Exception as stat_error:
                         logger.warning(f"⚠️ WARNING: Could not verify file update: {str(stat_error)}")
                         
@@ -2194,13 +2395,7 @@ async def calculate_ensemble_actual_vs_predicted(
                             contribution = beta_value * x_value
                             predicted_value += contribution
                             
-                            # Debug logging for first few rows
-                            if index < 3:
-                                logger.info(f"🔍 DEBUG: Row {index}, {col}: {x_value}, Beta_{col}: {beta_value}, Contribution: {contribution}")
-                
-                # Debug logging for first few predictions
-                if index < 3:
-                    logger.info(f"🔍 DEBUG: Row {index}, Final predicted value: {predicted_value}")
+
                 
                 predicted_values.append(predicted_value)
             
@@ -2527,9 +2722,6 @@ async def get_ensemble_contribution(
         ensemble_data = ensemble_response.results[0]
         weighted_metrics = ensemble_data.weighted
         
-        # Debug logging to see what keys are available
-        logger.info(f"🔍 DEBUG: Available weighted metrics keys: {list(weighted_metrics.keys())}")
-        
         # Extract contribution data from ensemble weighted metrics
         contribution_data = []
         
@@ -2546,8 +2738,6 @@ async def get_ensemble_contribution(
         
         # If no contribution data found, try to calculate from betas and means
         if not contribution_data:
-            logger.info("🔍 DEBUG: No contribution columns found, calculating from betas and means")
-            
             # Get intercept and calculate contributions from betas and means
             intercept = weighted_metrics.get("intercept", 0)
             
@@ -2567,12 +2757,9 @@ async def get_ensemble_contribution(
                                 "name": variable_name,
                                 "value": contribution_value
                             })
-                            logger.info(f"🔍 DEBUG: Calculated contribution for {variable_name}: {contribution_value}")
         
         # If still no data, try using elasticities
         if not contribution_data:
-            logger.info("🔍 DEBUG: No beta contributions found, trying elasticities")
-            
             for key in weighted_metrics.keys():
                 if key.endswith('_elasticity'):
                     variable_name = key.replace('_elasticity', '').replace('_Elasticity', '')
@@ -2585,13 +2772,10 @@ async def get_ensemble_contribution(
                             "name": variable_name,
                             "value": contribution_value
                         })
-                        logger.info(f"🔍 DEBUG: Using elasticity as contribution for {variable_name}: {contribution_value}")
         
         if not contribution_data:
-            logger.error("🔍 DEBUG: No contribution data could be calculated from ensemble results")
+            logger.error("No contribution data could be calculated from ensemble results")
             raise HTTPException(status_code=404, detail="No valid contribution data found in ensemble results")
-        
-        logger.info(f"🔍 DEBUG: Final contribution data: {contribution_data}")
 
         return {
             "file_key": file_key,
@@ -2683,10 +2867,6 @@ async def calculate_actual_vs_predicted(
             actual_values = df[y_variable].tolist() if y_variable in df.columns else []
             predicted_values = []
             
-            # Debug logging
-            logger.info(f"🔍 DEBUG: Model coefficients - intercept: {intercept}, coefficients: {coefficients}")
-            logger.info(f"🔍 DEBUG: X variables: {x_variables}, Y variable: {y_variable}")
-            
             for index, row in df.iterrows():
                 # Calculate predicted value: intercept + sum(beta_i * x_i)
                 predicted_value = intercept
@@ -2698,14 +2878,6 @@ async def calculate_actual_vs_predicted(
                         beta_value = coefficients[beta_key]
                         contribution = beta_value * x_value
                         predicted_value += contribution
-                        
-                        # Debug logging for first few rows
-                        if index < 3:
-                            logger.info(f"🔍 DEBUG: Row {index}, {x_var}: {x_value}, Beta_{x_var}: {beta_value}, Contribution: {contribution}")
-                
-                # Debug logging for first few predictions
-                if index < 3:
-                    logger.info(f"🔍 DEBUG: Row {index}, Final predicted value: {predicted_value}")
                 
                 predicted_values.append(predicted_value)
             
@@ -2720,9 +2892,6 @@ async def calculate_actual_vs_predicted(
                 pred_1st = np.percentile(predicted_array, 1)
                 actual_99th = np.percentile(actual_array, 99)
                 actual_1st = np.percentile(actual_array, 1)
-                
-                logger.info(f"🔍 DEBUG: Predicted values - 1st percentile: {pred_1st}, 99th percentile: {pred_99th}")
-                logger.info(f"🔍 DEBUG: Actual values - 1st percentile: {actual_1st}, 99th percentile: {actual_99th}")
                 
                 # Filter out extreme outliers (beyond 99th percentile)
                 filtered_data = []
@@ -3139,10 +3308,7 @@ async def weighted_ensemble(req: WeightedEnsembleRequest):
     if mape_test_col not in numeric_candidates:
         numeric_candidates.append(mape_test_col)
     
-    # Debug logging
-    logger.info(f"🔍 DEBUG: Numeric candidates for weighting: {numeric_candidates}")
-    logger.info(f"🔍 DEBUG: All columns in dataframe: {list(df.columns)}")
-    logger.info(f"🔍 DEBUG: Excluded columns: {list(exclude)}")
+
 
     # ---- per-combo weighting + aggregation
     results: List[ComboResult] = []
@@ -3174,9 +3340,7 @@ async def weighted_ensemble(req: WeightedEnsembleRequest):
             val = _weighted_avg_series(combo_df[col], weights)
             weighted_dict[col] = None if val is None else float(val)
         
-        # Debug logging
-        logger.info(f"🔍 DEBUG: Weighted dict keys: {list(weighted_dict.keys())}")
-        logger.info(f"🔍 DEBUG: Weighted dict values: {weighted_dict}")
+
 
         # convenience aliases (if those columns exist)
         def pick_alias(*cols):
@@ -3279,20 +3443,23 @@ async def get_saved_combinations_status(
         raise HTTPException(status_code=503, detail="MongoDB connection is not available.")
     
     try:
-        # Get all saved models for this file and atom
-        saved_models_collection = db.get_collection("saved_models_generic")
+        # Get all saved models from select_configs collection instead of saved_models_generic
+        select_configs_coll = get_select_configs_collection()
+        if select_configs_coll is None:
+            raise HTTPException(status_code=503, detail="Select configs collection not available.")
         
         # Find models saved by this atom for this file
-        saved_models = await saved_models_collection.find({
-            "source_file": file_key,
-            "tags": {"$in": [f"select-models-feature-{atom_id}"]}
+        saved_models = await select_configs_coll.find({
+            "combinations.source_file": file_key
         }).to_list(length=None)
         
         # Extract combination IDs from saved models
         saved_combination_ids = set()
         for model in saved_models:
-            if "model_data" in model and "combination_id" in model["model_data"]:
-                saved_combination_ids.add(str(model["model_data"]["combination_id"]))
+            if "combinations" in model:
+                for combination in model["combinations"]:
+                    if combination.get("source_file") == file_key:
+                        saved_combination_ids.add(str(combination.get("combination_id")))
         
         # Get all unique combination IDs from the source file
         if not minio_client:

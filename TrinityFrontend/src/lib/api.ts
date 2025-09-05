@@ -145,3 +145,7 @@ export const BUILD_MODEL_API =
 export const SELECT_API =
   normalizeUrl(import.meta.env.VITE_SELECT_API) ||
   `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/select`;
+
+export const EVALUATE_API =
+  normalizeUrl(import.meta.env.VITE_EVALUATE_API) ||
+  `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/evaluate`;
