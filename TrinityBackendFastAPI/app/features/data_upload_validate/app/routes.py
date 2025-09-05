@@ -494,8 +494,7 @@ async def create_new(
             if file.filename.lower().endswith(".csv"):
                 df_pl = pl.read_csv(io.BytesIO(content), low_memory=True)
             elif file.filename.lower().endswith((".xls", ".xlsx")):
-                
-                df_pl = pl.read_excel(io.BytesIO(content))
+                df_pl = pl.from_pandas(pd.read_excel(io.BytesIO(content)))
             else:
                 raise HTTPException(status_code=400, detail="Only CSV and XLSX files supported")
 
@@ -1504,14 +1503,13 @@ async def validate(
     if files_list:
         for file, key in zip(files_list, keys):
             try:
-                file.file.seek(0, os.SEEK_END)
-                size_bytes = file.file.tell()
-                file.file.seek(0)
+                content = await file.read()
+                size_bytes = len(content)
 
                 if file.filename.lower().endswith(".csv"):
-                    df_pl = pl.read_csv(file.file, low_memory=True)
+                    df_pl = pl.read_csv(io.BytesIO(content), low_memory=True)
                 elif file.filename.lower().endswith((".xls", ".xlsx")):
-                    df_pl = pl.read_excel(file.file)
+                    df_pl = pl.from_pandas(pd.read_excel(io.BytesIO(content)))
                 else:
                     raise HTTPException(status_code=400, detail="Only CSV and XLSX files supported")
                 df = df_pl.to_pandas()
@@ -1530,7 +1528,7 @@ async def validate(
                 if filename.lower().endswith(".csv"):
                     df_pl = pl.read_csv(io.BytesIO(data), low_memory=True)
                 elif filename.lower().endswith((".xls", ".xlsx")):
-                    df_pl = pl.read_excel(io.BytesIO(data))
+                    df_pl = pl.from_pandas(pd.read_excel(io.BytesIO(data)))
                 else:
                     raise HTTPException(status_code=400, detail="Only CSV and XLSX files supported")
                 df = df_pl.to_pandas()
@@ -1947,7 +1945,7 @@ async def validate_mmm_endpoint(
             if file.filename.lower().endswith(".csv"):
                 df_pl = pl.read_csv(io.BytesIO(content), low_memory=True)
             elif file.filename.lower().endswith((".xls", ".xlsx")):
-                df_pl = pl.read_excel(io.BytesIO(content))
+                df_pl = pl.from_pandas(pd.read_excel(io.BytesIO(content)))
             else:
                 raise HTTPException(status_code=400, detail="Only CSV and XLSX files supported")
 
@@ -2316,7 +2314,7 @@ async def validate_category_forecasting_endpoint(
         if file.filename.lower().endswith(".csv"):
             df_pl = pl.read_csv(io.BytesIO(content), low_memory=True)
         elif file.filename.lower().endswith((".xls", ".xlsx")):
-            df_pl = pl.read_excel(io.BytesIO(content))
+            df_pl = pl.from_pandas(pd.read_excel(io.BytesIO(content)))
         else:
             raise HTTPException(status_code=400, detail="Only CSV and XLSX files supported")
 
@@ -2508,7 +2506,7 @@ async def validate_promo_endpoint(
         if file.filename.lower().endswith(".csv"):
             df_pl = pl.read_csv(io.BytesIO(content), low_memory=True)
         elif file.filename.lower().endswith((".xls", ".xlsx")):
-            df_pl = pl.read_excel(io.BytesIO(content))
+            df_pl = pl.from_pandas(pd.read_excel(io.BytesIO(content)))
         else:
             raise HTTPException(status_code=400, detail="Only CSV and XLSX files supported")
 
@@ -2750,7 +2748,8 @@ async def save_dataframes(
                     writer.write(chunk.to_arrow())
             arrow_bytes = arrow_buf.getvalue()
         elif filename.lower().endswith((".xls", ".xlsx")):
-            df_pl = pl.read_excel(fileobj)
+            data_bytes = fileobj.read()
+            df_pl = pl.from_pandas(pd.read_excel(io.BytesIO(data_bytes)))
             if df_pl.height == 0:
                 uploads.append({"file_key": key, "already_saved": False, "error": "empty file"})
                 flights.append({"file_key": key})
