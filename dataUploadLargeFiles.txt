@@ -14,3 +14,5 @@ configuration. To handle very large files, consider streaming parses with
 and Arrow serialization fit in memory.
 
 Fastexcel is now included to enable Polars to read Excel files efficiently for large uploads.
+The MinIO 'trinity' bucket now enforces a 10GB quota via the admin API so
+uploads well over 500MB are accepted without hitting bucket-size limits.
