@@ -38,16 +38,11 @@ def _get_df(df_id: str) -> pl.DataFrame:
 
 
 def _df_payload(df: pl.DataFrame, df_id: str) -> Dict[str, Any]:
-    """
-    Serialize the entire dataframe for the frontend.
+    """Serialize the entire dataframe for the frontend."""
 
-    The previous implementation returned only the first 100 rows by default.
-    This caused the frontend to display at most 100 rows regardless of the
-    dataframe size.  By serializing the full dataframe here, the frontend can
-    handle pagination itself and expose all available rows to the user.
-    """
-
-    rows = df.to_dicts()
+    # Using PyArrow for row conversion is considerably faster and scales
+    # better for large dataframes than converting each row in Python.
+    rows = df.to_arrow().to_pylist()
     return {
         "df_id": df_id,
         "headers": df.columns,
@@ -68,18 +63,15 @@ def _fetch_df_from_object(object_name: str) -> pl.DataFrame:
     try:
         data = download_table_bytes(object_name)
         return pl.read_ipc(io.BytesIO(data))
-    except Exception as e:
-        print(f"[DFOPS] Flight/MinIO fetch error: {e}")
+    except Exception:
         raise HTTPException(status_code=404, detail="Not Found")
 
 @router.get("/test_alive")
 async def test_alive():
-    print("[DFOPS] test_alive endpoint hit")
     return {"status": "alive"}
 
 @router.get("/cached_dataframe")
 async def cached_dataframe(object_name: str):
-    print("[DFOPS] --- /cached_dataframe called ---")
     df = _fetch_df_from_object(object_name)
     buf = io.StringIO()
     df.write_csv(buf)
@@ -89,7 +81,6 @@ async def cached_dataframe(object_name: str):
 @router.post("/load_cached")
 async def load_cached_dataframe(object_name: str = Body(..., embed=True)):
     """Load a cached dataframe by object key and create a session."""
-    print(f"[DFOPS] /load_cached called object_name={object_name}")
     df = _fetch_df_from_object(object_name)
     df_id = str(uuid.uuid4())
     SESSIONS[df_id] = df
@@ -164,7 +155,6 @@ async def load_dataframe(file: UploadFile = File(...)):
 
 @router.post("/filter_rows")
 async def filter_rows(df_id: str = Body(...), column: str = Body(...), value: Any = Body(...)):
-    print(f"/filter_rows called df_id={df_id}, column={column}, value={value}", flush=True)
     df = _get_df(df_id)
     try:
         if isinstance(value, dict):
@@ -179,13 +169,11 @@ async def filter_rows(df_id: str = Body(...), column: str = Body(...), value: An
         raise HTTPException(status_code=400, detail=str(e))
     SESSIONS[df_id] = df
     result = _df_payload(df, df_id)
-    print("/filter_rows response", result, flush=True)
     return result
 
 
 @router.post("/sort")
 async def sort_dataframe(df_id: str = Body(...), column: str = Body(...), direction: str = Body("asc")):
-    print(f"/sort called df_id={df_id}, column={column}, direction={direction}", flush=True)
     df = _get_df(df_id)
     try:
         df = df.sort(column, descending=direction != "asc")
@@ -193,7 +181,6 @@ async def sort_dataframe(df_id: str = Body(...), column: str = Body(...), direct
         raise HTTPException(status_code=400, detail=str(e))
     SESSIONS[df_id] = df
     result = _df_payload(df, df_id)
-    print("/sort response", result, flush=True)
     return result
 
 
@@ -203,7 +190,6 @@ async def insert_row(
     index: int = Body(...),
     direction: str = Body("below"),
 ):
-    print(f"/insert_row called df_id={df_id}, index={index}, direction={direction}", flush=True)
     df = _get_df(df_id)
     empty = {col: None for col in df.columns}
     insert_at = index if direction == "above" else index + 1
@@ -213,13 +199,11 @@ async def insert_row(
     df = pl.concat([upper, pl.DataFrame([empty], schema=df.schema), lower])
     SESSIONS[df_id] = df
     result = _df_payload(df, df_id)
-    print("/insert_row response", result, flush=True)
     return result
 
 
 @router.post("/delete_row")
 async def delete_row(df_id: str = Body(...), index: int = Body(...)):
-    print(f"/delete_row called df_id={df_id}, index={index}", flush=True)
     df = _get_df(df_id)
     try:
         df = df.with_row_count().filter(pl.col("row_nr") != index).drop("row_nr")
@@ -227,7 +211,6 @@ async def delete_row(df_id: str = Body(...), index: int = Body(...)):
         raise HTTPException(status_code=400, detail=str(e))
     SESSIONS[df_id] = df
     result = _df_payload(df, df_id)
-    print("/delete_row response", result, flush=True)
     return result
 
 
@@ -238,7 +221,6 @@ async def insert_column(
     name: str = Body(...),
     default: Any = Body(None),
 ):
-    print(f"/insert_column called df_id={df_id}, index={index}, name={name}, default={default}", flush=True)
     df = _get_df(df_id)
     if index >= len(df.columns):
         df = df.with_columns(pl.lit(default).alias(name))
@@ -250,13 +232,11 @@ async def insert_column(
         df = df.select(cols)
     SESSIONS[df_id] = df
     result = _df_payload(df, df_id)
-    print("/insert_column response", result, flush=True)
     return result
 
 
 @router.post("/delete_column")
 async def delete_column(df_id: str = Body(...), name: str = Body(...)):
-    print(f"/delete_column called df_id={df_id}, name={name}", flush=True)
     df = _get_df(df_id)
     try:
         df = df.drop(name)
@@ -264,13 +244,11 @@ async def delete_column(df_id: str = Body(...), name: str = Body(...)):
         raise HTTPException(status_code=400, detail=str(e))
     SESSIONS[df_id] = df
     result = _df_payload(df, df_id)
-    print("/delete_column response", result, flush=True)
     return result
 
 
 @router.post("/edit_cell")
 async def edit_cell(df_id: str = Body(...), row: int = Body(...), column: str = Body(...), value: Any = Body(...)):
-    print(f"/edit_cell called df_id={df_id}, row={row}, column={column}, value={value}", flush=True)
     df = _get_df(df_id)
     try:
         df = df.with_row_count().with_columns(
@@ -283,7 +261,6 @@ async def edit_cell(df_id: str = Body(...), row: int = Body(...), column: str = 
         raise HTTPException(status_code=400, detail=str(e))
     SESSIONS[df_id] = df
     result = _df_payload(df, df_id)
-    print("/edit_cell response", result, flush=True)
     return result
 
 
@@ -310,18 +287,15 @@ async def apply_udf(
 
 @router.post("/rename_column")
 async def rename_column(df_id: str = Body(...), old_name: str = Body(...), new_name: str = Body(...)):
-    print(f"/rename_column called df_id={df_id}, old_name={old_name}, new_name={new_name}", flush=True)
     df = _get_df(df_id)
     df = df.rename({old_name: new_name})
     SESSIONS[df_id] = df
     result = _df_payload(df, df_id)
-    print("/rename_column response", result, flush=True)
     return result
 
 
 @router.post("/duplicate_row")
 async def duplicate_row(df_id: str = Body(...), index: int = Body(...)):
-    print(f"/duplicate_row called df_id={df_id}, index={index}", flush=True)
     df = _get_df(df_id)
     try:
         row = df.slice(index, 1)
@@ -330,13 +304,11 @@ async def duplicate_row(df_id: str = Body(...), index: int = Body(...)):
         raise HTTPException(status_code=400, detail=str(e))
     SESSIONS[df_id] = df
     result = _df_payload(df, df_id)
-    print("/duplicate_row response", result, flush=True)
     return result
 
 
 @router.post("/duplicate_column")
 async def duplicate_column(df_id: str = Body(...), name: str = Body(...), new_name: str = Body(...)):
-    print(f"/duplicate_column called df_id={df_id}, name={name}, new_name={new_name}", flush=True)
     df = _get_df(df_id)
     try:
         idx = df.columns.index(name)
@@ -349,13 +321,11 @@ async def duplicate_column(df_id: str = Body(...), name: str = Body(...), new_na
         raise HTTPException(status_code=400, detail=str(e))
     SESSIONS[df_id] = df
     result = _df_payload(df, df_id)
-    print("/duplicate_column response", result, flush=True)
     return result
 
 
 @router.post("/move_column")
 async def move_column(df_id: str = Body(...), from_col: str = Body(..., alias="from"), to_index: int = Body(...)):
-    print(f"/move_column called df_id={df_id}, from_col={from_col}, to_index={to_index}", flush=True)
     df = _get_df(df_id)
     try:
         cols = df.columns
@@ -366,13 +336,11 @@ async def move_column(df_id: str = Body(...), from_col: str = Body(..., alias="f
         raise HTTPException(status_code=400, detail=str(e))
     SESSIONS[df_id] = df
     result = _df_payload(df, df_id)
-    print("/move_column response", result, flush=True)
     return result
 
 
 @router.post("/retype_column")
 async def retype_column(df_id: str = Body(...), name: str = Body(...), new_type: str = Body(...)):
-    print(f"/retype_column called df_id={df_id}, name={name}, new_type={new_type}", flush=True)
     df = _get_df(df_id)
     try:
         if new_type == "number":
@@ -385,7 +353,6 @@ async def retype_column(df_id: str = Body(...), name: str = Body(...), new_type:
         raise HTTPException(status_code=400, detail=str(e))
     SESSIONS[df_id] = df
     result = _df_payload(df, df_id)
-    print("/retype_column response", result, flush=True)
     return result
 
 
