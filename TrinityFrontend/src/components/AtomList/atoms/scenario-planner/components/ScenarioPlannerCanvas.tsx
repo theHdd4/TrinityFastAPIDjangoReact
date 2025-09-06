@@ -748,25 +748,55 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
 
       
       
-      // Extract identifier names from the selected identifiers
+      // ✅ FIXED: Use identifierOrder to respect the reordered sequence
 
-      Object.entries(view.selectedIdentifiers).forEach(([identifierId, valueIds]) => {
+      if (view.identifierOrder && Array.isArray(view.identifierOrder)) {
 
-        if (Array.isArray(valueIds) && valueIds.length > 0) {
+        // Iterate through identifiers in the correct order
 
-          // Find the identifier name from the backend identifiers
+        view.identifierOrder.forEach((identifierId: string) => {
 
-          const identifier = computedSettings.identifiers.find(id => id.id === identifierId);
+          const valueIds = view.selectedIdentifiers[identifierId];
 
-          if (identifier) {
+          if (Array.isArray(valueIds) && valueIds.length > 0) {
 
-            identifierNames.push(identifier.name);
+            // Find the identifier name from the backend identifiers
+
+            const identifier = computedSettings.identifiers.find(id => id.id === identifierId);
+
+            if (identifier) {
+
+              identifierNames.push(identifier.name);
+
+            }
 
           }
 
-        }
+        });
 
-      });
+      } else {
+
+        // Fallback to old method if no identifierOrder
+
+        Object.entries(view.selectedIdentifiers).forEach(([identifierId, valueIds]) => {
+
+          if (Array.isArray(valueIds) && valueIds.length > 0) {
+
+            // Find the identifier name from the backend identifiers
+
+            const identifier = computedSettings.identifiers.find(id => id.id === identifierId);
+
+            if (identifier) {
+
+              identifierNames.push(identifier.name);
+
+            }
+
+          }
+
+        });
+
+      }
 
       
       
@@ -937,7 +967,15 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
 
           let idCounter = 1;
 
-          Object.entries(view.selectedIdentifiers).forEach(([identifierId, valueIds]) => {
+          // ✅ FIXED: Use identifierOrder to respect the reordered sequence
+
+          const orderedIdentifiers = view.identifierOrder && Array.isArray(view.identifierOrder) 
+            ? view.identifierOrder 
+            : Object.keys(view.selectedIdentifiers);
+
+          orderedIdentifiers.forEach((identifierId: string) => {
+
+            const valueIds = view.selectedIdentifiers[identifierId];
 
             if (Array.isArray(valueIds) && valueIds.length > 0) {
 

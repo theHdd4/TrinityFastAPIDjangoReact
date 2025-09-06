@@ -1056,7 +1056,7 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
     const { active, over } = event;
 
     if (active.id !== over?.id) {
-      setAggregatedViews(prev => prev.map(view => {
+      const updatedViews = aggregatedViews.map(view => {
         if (view.id === viewId) {
           const oldIndex = view.identifierOrder.indexOf(active.id as string);
           const newIndex = view.identifierOrder.indexOf(over?.id as string);
@@ -1069,7 +1069,19 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
           };
         }
         return view;
-      }));
+      });
+      
+      // Update local state
+      setAggregatedViews(updatedViews);
+      
+      // ✅ FIXED: Persist changes to scenario data
+      onDataChange({ aggregatedViews: updatedViews });
+      
+      console.log('🔄 Identifier reordered:', {
+        viewId,
+        oldOrder: aggregatedViews.find(v => v.id === viewId)?.identifierOrder,
+        newOrder: updatedViews.find(v => v.id === viewId)?.identifierOrder
+      });
     }
   };
 
