@@ -271,9 +271,13 @@ class AutoPopulateReferenceRequest(BaseModel):
         ...,
         description="End date for period-based calculations (YYYY-MM-DD)"
     )
-    combination_id: str = Field(
+    combination_ids: List[str] = Field(
         ...,
-        description="Single combination ID to fetch reference values for"
+        description="List of combination IDs to fetch reference values for"
+    )
+    features: List[str] = Field(
+        ...,
+        description="List of selected feature names to calculate reference values for"
     )
     
     class Config:
@@ -283,19 +287,16 @@ class AutoPopulateReferenceRequest(BaseModel):
                 "stat": "period-mean",
                 "start_date": "2024-01-01",
                 "end_date": "2024-12-31",
-                "combination_id": "cat1_supermarkets_allppg"
+                "combination_ids": ["cat1_supermarkets_allppg", "cat1_convenience_allppg"],
+                "features": ["PFCE", "IIP", "Sales"]
             }
         }
 
 class AutoPopulateReferenceResponse(BaseModel):
     """Response schema for POST /api/scenario/auto-populate-reference endpoint"""
-    combination_id: str = Field(
+    reference_values_by_combination: Dict[str, Dict[str, float]] = Field(
         ...,
-        description="The combination ID that was processed"
-    )
-    reference_values: Dict[str, float] = Field(
-        ...,
-        description="Dictionary mapping feature names to their reference values"
+        description="Dictionary mapping combination_id to feature reference values"
     )
     statistic_used: str = Field(
         ...,
@@ -309,13 +310,13 @@ class AutoPopulateReferenceResponse(BaseModel):
         ...,
         description="Information about the dataset used for calculation"
     )
-    success: bool = Field(
+    processed_combinations: List[str] = Field(
         ...,
-        description="Whether the calculation was successful"
+        description="List of combination IDs that were successfully processed"
     )
-    message: str = Field(
+    failed_combinations: List[str] = Field(
         ...,
-        description="Human-readable message about the calculation"
+        description="List of combination IDs that failed to process"
     )
 
 # ────────────────────────────────────────────────────────────────────────────

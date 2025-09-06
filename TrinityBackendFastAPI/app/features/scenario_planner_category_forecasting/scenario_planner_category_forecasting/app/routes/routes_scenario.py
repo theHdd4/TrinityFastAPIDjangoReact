@@ -535,30 +535,27 @@ async def clear_all_cache():
     return CacheClearResponse(message="Cache cleared successfully")
 
 # ────────────────────────────────────────────────────────────────────────────
-#  POST /api/scenario/auto-populate-reference
+#  POST /api/scenario/single-combination-reference
 # ────────────────────────────────────────────────────────────────────────────
-@router.post("/auto-populate-reference", response_model=AutoPopulateReferenceResponse)
-async def auto_populate_reference_values(
-    payload: AutoPopulateReferenceRequest = Body(..., description="Auto-populate reference values for a single combination")
+@router.post("/single-combination-reference", response_model=SingleCombinationReferenceResponse)
+async def get_single_combination_reference(
+    payload: SingleCombinationReferenceRequest = Body(..., description="Single combination reference calculation parameters")
 ):
     """
-    Auto-populate reference values for a single combination and all its available features.
+    Calculate reference values for a single combination and selected features.
     
-    This endpoint is specifically designed for the frontend auto-population feature.
-    It calculates reference values for ALL available features of a single combination,
-    using combination_id matching. The frontend will then match the features that are
-    selected in the main canvas.
+    This endpoint calculates reference values for one specific combination
+    without requiring the full matching logic or scenario processing.
     
     Prerequisites:
     - Must call GET /init-cache first to load and cache a dataset
     
     Returns:
-    - combination_id: The combination ID that was processed
+    - combination: The combination identifiers that were processed
+    - features: List of features that were processed
     - reference_values: Dictionary mapping feature names to their reference values
     - statistic_used: The statistic that was applied
     - date_range: The date range used for calculation
-    - success: Whether the calculation was successful
-    - message: Human-readable message about the calculation
     """
     try:
         # ✅ Check if dataset is cached
@@ -572,9 +569,9 @@ async def auto_populate_reference_values(
         # ✅ Get current file key for reference
         current_file_key = DataService.get_current_d0_file_key()
         
-        # ✅ Get models from cached data
+        # ✅ Get features from cached models
         decoded_model_id = urllib.parse.unquote(payload.model_id)
-        logger.info("🔧 Auto-populate reference for model_id: %s, combination_id: %s", decoded_model_id, payload.combination_id)
+        logger.info("🔧 Single combination reference for model_id: %s (original: %s)", decoded_model_id, payload.model_id)
         models = await DataService.fetch_selected_models(decoded_model_id)
         if not models:
             raise HTTPException(
@@ -582,69 +579,40 @@ async def auto_populate_reference_values(
                 detail="No models available. Please ensure models are selected and cached."
             )
         
-        # ✅ Find the model that matches this combination_id
-        matching_model = None
-        for model in models:
-            if model.get('combination_id') == payload.combination_id:
-                matching_model = model
-                break
+        # ✅ Extract features from models
+        available_features = extract_features_from_models(models)
         
-        if not matching_model:
-            error_msg = f"No model found for combination_id: {payload.combination_id}"
-            logger.warning("⚠️ %s", error_msg)
-            return {
-                "combination_id": payload.combination_id,
-                "reference_values": {},
-                "statistic_used": payload.stat,
-                "date_range": {
-                    "start_date": payload.start_date,
-                    "end_date": payload.end_date
-                },
-                "data_info": {
-                    "file_key": current_file_key,
-                    "features_processed": 0
-                },
-                "success": False,
-                "message": error_msg
-            }
+        # ✅ Validate requested features exist
+        invalid_features = [f for f in payload.features if f not in available_features]
+        if invalid_features:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid features requested: {invalid_features}. Available features: {list(available_features.keys())}"
+            )
         
-        # ✅ Extract ALL available features from the matching model
-        available_features = extract_features_from_models([matching_model])
-        
-        # ✅ Calculate reference values for ALL available features
+        # ✅ Calculate reference values for the single combination
         scenario_service = ScenarioService()
         reference_values = {}
-        successful_features = 0
-        failed_features = 0
         
-        for feature_name in available_features.keys():
+        for feature in payload.features:
             try:
-                reference_value = await scenario_service.calculate_reference_value(
-                    df=df,
-                    model_metadata=matching_model,
-                    feature_name=feature_name,
+                # Calculate reference value for this feature and combination
+                ref_value = await scenario_service._calc_reference(
                     stat=payload.stat,
                     start_date=payload.start_date,
-                    end_date=payload.end_date
+                    end_date=payload.end_date,
+                    identifiers=payload.combination,
+                    feature=feature
                 )
-                reference_values[feature_name] = reference_value
-                successful_features += 1
-                logger.debug("✅ Calculated reference for %s: %s = %f", payload.combination_id, feature_name, reference_value)
-            except Exception as feature_error:
-                logger.warning("⚠️ Failed to calculate reference for combination %s, feature %s: %s", 
-                             payload.combination_id, feature_name, str(feature_error))
-                # Use fallback value
-                reference_values[feature_name] = 0.0
-                failed_features += 1
+                reference_values[feature] = ref_value
+            except Exception as feature_exc:
+                logger.warning(f"Failed to calculate reference for feature {feature}: {feature_exc}")
+                reference_values[feature] = 0.0  # Default to 0 if calculation fails
         
-        # ✅ Prepare response data
-        success = successful_features > 0
-        message = f"Successfully calculated reference values for {successful_features} features"
-        if failed_features > 0:
-            message += f" ({failed_features} features failed and set to 0.0)"
-        
+        # ✅ Prepare response
         response_data = {
-            "combination_id": payload.combination_id,
+            "combination": payload.combination,
+            "features": payload.features,
             "reference_values": reference_values,
             "statistic_used": payload.stat,
             "date_range": {
@@ -652,25 +620,24 @@ async def auto_populate_reference_values(
                 "end_date": payload.end_date
             },
             "data_info": {
-                "file_key": current_file_key,
-                "features_processed": len(reference_values),
-                "successful_features": successful_features,
-                "failed_features": failed_features
+                "dataset_key": current_file_key,
+                "models_processed": len(models),
+                "features_available": list(available_features.keys()),
+                "calculation_timestamp": datetime.utcnow().isoformat()
             },
-            "success": success,
-            "message": message
+            "message": f"Successfully calculated reference values for {len(payload.features)} features in combination {payload.combination}"
         }
         
-        logger.info("🎉 Auto-populate reference completed for %s: %d features processed (%d successful, %d failed)", 
-                   payload.combination_id, len(reference_values), successful_features, failed_features)
+        logger.info("✅ Single combination reference calculated: %s features for combination %s", 
+                   len(payload.features), payload.combination)
         
         return response_data
         
     except HTTPException:
         raise
     except Exception as exc:
-        logger.exception("🚨 Auto-populate reference calculation failed: %s", str(exc))
-        raise HTTPException(status_code=500, detail=f"Auto-populate reference calculation failed: {str(exc)}")
+        logger.exception("🚨 Single combination reference calculation failed: %s", str(exc))
+        raise HTTPException(status_code=500, detail=f"Single combination reference calculation failed: {str(exc)}")
 
 # ────────────────────────────────────────────────────────────────────────────
 #  POST /api/scenario/force-refresh
