@@ -216,6 +216,13 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
   const [loadingIdentifiers, setLoadingIdentifiers] = useState(false);
   const [loadingFeatures, setLoadingFeatures] = useState(false);
   const [loadingCombinations, setLoadingCombinations] = useState(false);
+  const [loadingYVariable, setLoadingYVariable] = useState(false);
+  const [yVariableInfo, setYVariableInfo] = useState<{
+    y_variable: string;
+    model_info: any;
+    models_count: number;
+    message: string;
+  } | null>(null);
   
   // Removed unused refs to simplify the solution
   
@@ -601,6 +608,36 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
     }
   };
 
+  // ✅ NEW: Fetch y_variable information from backend
+  const fetchYVariableInfo = async () => {
+    try {
+      setLoadingYVariable(true);
+      const modelId = generateModelId();
+      const response = await fetch(`${SCENARIO_PLANNER_API}/y-variable?model_id=${encodeURIComponent(modelId)}`);
+      if (response.ok) {
+        const data = await response.json();
+        console.log('🎯 fetchYVariableInfo - Received data:', data);
+        setYVariableInfo(data);
+        toast({
+          title: "Target Variable Loaded",
+          description: data.message || `Target variable: ${data.y_variable}`,
+          variant: "default",
+        });
+      } else {
+        throw new Error(`Failed to fetch y_variable info: ${response.statusText}`);
+      }
+    } catch (error) {
+      console.error('Error fetching y_variable info:', error);
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "Failed to fetch target variable info",
+        variant: "destructive",
+      });
+    } finally {
+      setLoadingYVariable(false);
+    }
+  };
+
   // ✅ FIXED: Auto-fetch backend data on mount if not already loaded
   useEffect(() => {
     // Only fetch if we don't have backend data yet
@@ -611,6 +648,12 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
       fetchCombinations();
     } else {
       console.log('✅ Backend data already available, skipping auto-fetch');
+    }
+    
+    // Always fetch y_variable info as it's independent
+    if (!yVariableInfo) {
+      console.log('🎯 Auto-fetching y_variable info on mount...');
+      fetchYVariableInfo();
     }
   }, []); // Only run on mount
 
@@ -1405,11 +1448,11 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
           </Collapsible>
           </Card>
 
-          {/* Output Selection Box */}
+          {/* Target Variable Information Box */}
           <Card className="p-2">
           <Collapsible open={openSections.output} onOpenChange={() => toggleSection('output')}>
               <CollapsibleTrigger className="flex items-center justify-between w-full p-2 hover:bg-gray-50 rounded-md">
-                <span className="font-medium text-sm">Output Selection</span>
+                <span className="font-medium text-sm">Target Variable</span>
                 {openSections.output ? (
                   <ChevronDown className="h-4 w-4" />
                 ) : (
@@ -1418,19 +1461,30 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
             </CollapsibleTrigger>
             <CollapsibleContent className="px-2 py-2">
               <div className="space-y-2">
-                {data.outputs && Array.isArray(data.outputs) ? data.outputs.map(output => (
-                  <div key={output.id} className="flex items-center space-x-2">
-                      <Checkbox 
-                        id={output.id}
-                        checked={output.selected}
-                        onCheckedChange={() => toggleOutput(output.id)}
-                        className="data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600 data-[state=checked]:text-white"
-                      />
-                      <label htmlFor={output.id} className="text-sm text-foreground cursor-pointer">
-                        {output.name}
-                      </label>
+                {/* Y-Variable Information */}
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-2">
+                      <span className="text-sm font-medium text-gray-700">Target Variable:</span>
+                      <span className="text-sm font-semibold text-blue-800">
+                        {yVariableInfo?.y_variable || 'Not loaded'}
+                      </span>
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={fetchYVariableInfo}
+                      disabled={loadingYVariable}
+                      className="h-6 px-2 text-xs"
+                    >
+                      {loadingYVariable ? (
+                        <RefreshCw className="h-3 w-3 animate-spin" />
+                      ) : (
+                        <RefreshCw className="h-3 w-3" />
+                      )}
+                    </Button>
                   </div>
-                )) : null}
+                </div>
               </div>
             </CollapsibleContent>
           </Collapsible>

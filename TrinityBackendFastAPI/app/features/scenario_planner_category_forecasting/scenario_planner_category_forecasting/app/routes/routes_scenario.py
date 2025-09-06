@@ -431,6 +431,67 @@ async def get_available_features(model_id: str = Query(..., description="Model _
 
 
 # -----------------------------------------------------------------------------------------------------------
+#                                        Get Y-Variable Info
+# -----------------------------------------------------------------------------------------------------------
+@router.get("/y-variable")
+async def get_y_variable_info(model_id: str = Query(..., description="Model _id to fetch y_variable info")):
+    """
+    Get the target variable (y_variable) information for the specified model.
+    
+    This endpoint helps users understand what variable they are planning for
+    before running scenarios.
+    
+    Returns:
+    - y_variable: The target variable name
+    - model_info: Additional model information
+    """
+    try:
+        # Decode the model_id
+        decoded_model_id = urllib.parse.unquote(model_id)
+        logger.info("🔍 Fetching y_variable info for model_id: %s", decoded_model_id)
+        
+        # Fetch models to get y_variable information
+        models = await DataService.fetch_selected_models(decoded_model_id)
+        if not models:
+            raise HTTPException(
+                status_code=404,
+                detail="No models found for the specified model_id"
+            )
+        
+        # Extract y_variable from the first model (all models should have the same y_variable)
+        y_variable = ""
+        model_info = {}
+        
+        if models and len(models) > 0:
+            first_model = models[0]
+            y_variable = first_model.get("y_variable", "")
+            
+            # Get additional model information
+            model_info = {
+                "model_type": first_model.get("model_type", "Unknown"),
+                "training_id": first_model.get("training_id", ""),
+                "combination": first_model.get("combination", ""),
+                "x_variables_count": len(first_model.get("x_variables", [])),
+                "x_variables": first_model.get("x_variables", [])
+            }
+            
+            logger.info("🎯 Found y_variable: %s", y_variable)
+        
+        return {
+            "y_variable": y_variable,
+            "model_info": model_info,
+            "models_count": len(models),
+            "message": f"Target variable: {y_variable}" if y_variable else "No target variable found"
+        }
+        
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        logger.error("Failed to fetch y_variable info: %s", str(e), exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# -----------------------------------------------------------------------------------------------------------
 #                                        Run the Scenario
 # -----------------------------------------------------------------------------------------------------------
 @router.post("/run", response_model=RunResponse)
