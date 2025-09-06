@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, ResponsiveContainer, Legend, Tooltip, LabelList } from 'recharts';
 import { Settings, ChevronDown } from 'lucide-react';
 
-// Color themes from chart template
+// Color themes from chart template - comprehensive set
 const COLOR_THEMES = {
   'default': {
     name: 'Default',
@@ -46,6 +46,139 @@ const COLOR_THEMES = {
     secondary: '#f87171',
     tertiary: '#fecaca',
     palette: ['#991b1b', '#ef4444', '#f87171', '#fca5a5', '#fecaca', '#fef2f2']
+  },
+  'teal': {
+    name: 'Teal',
+    primary: '#14b8a6',
+    secondary: '#5eead4',
+    tertiary: '#ccfbf1',
+    palette: ['#134e4a', '#14b8a6', '#5eead4', '#99f6e4', '#ccfbf1', '#f0fdfa']
+  },
+  'pink': {
+    name: 'Pink',
+    primary: '#ec4899',
+    secondary: '#f9a8d4',
+    tertiary: '#fce7f3',
+    palette: ['#831843', '#ec4899', '#f9a8d4', '#fbcfe8', '#fce7f3', '#fdf2f8']
+  },
+  'gray': {
+    name: 'Gray',
+    primary: '#6b7280',
+    secondary: '#9ca3af',
+    tertiary: '#f3f4f6',
+    palette: ['#374151', '#6b7280', '#9ca3af', '#d1d5db', '#f3f4f6', '#f9fafb']
+  },
+  'indigo': {
+    name: 'Indigo',
+    primary: '#4f46e5',
+    secondary: '#818cf8',
+    tertiary: '#e0e7ff',
+    palette: ['#312e81', '#4f46e5', '#818cf8', '#a5b4fc', '#e0e7ff', '#eef2ff']
+  },
+  'cyan': {
+    name: 'Cyan',
+    primary: '#06b6d4',
+    secondary: '#67e8f9',
+    tertiary: '#cffafe',
+    palette: ['#164e63', '#06b6d4', '#67e8f9', '#a5f3fc', '#cffafe', '#ecfeff']
+  },
+  'lime': {
+    name: 'Lime',
+    primary: '#84cc16',
+    secondary: '#bef264',
+    tertiary: '#f7fee7',
+    palette: ['#3f6212', '#84cc16', '#bef264', '#d9f99d', '#f7fee7', '#f7fee7']
+  },
+  'amber': {
+    name: 'Amber',
+    primary: '#f59e0b',
+    secondary: '#fbbf24',
+    tertiary: '#fef3c7',
+    palette: ['#78350f', '#f59e0b', '#fbbf24', '#fcd34d', '#fef3c7', '#fffbeb']
+  },
+  'emerald': {
+    name: 'Emerald',
+    primary: '#059669',
+    secondary: '#34d399',
+    tertiary: '#d1fae5',
+    palette: ['#064e3b', '#059669', '#34d399', '#6ee7b7', '#d1fae5', '#ecfdf5']
+  },
+  'violet': {
+    name: 'Violet',
+    primary: '#7c3aed',
+    secondary: '#a78bfa',
+    tertiary: '#ede9fe',
+    palette: ['#4c1d95', '#7c3aed', '#a78bfa', '#c4b5fd', '#ede9fe', '#faf5ff']
+  },
+  'fuchsia': {
+    name: 'Fuchsia',
+    primary: '#d946ef',
+    secondary: '#f0abfc',
+    tertiary: '#fae8ff',
+    palette: ['#701a75', '#d946ef', '#f0abfc', '#f5d0fe', '#fae8ff', '#fdf4ff']
+  },
+  'rose': {
+    name: 'Rose',
+    primary: '#e11d48',
+    secondary: '#fb7185',
+    tertiary: '#ffe4e6',
+    palette: ['#881337', '#e11d48', '#fb7185', '#fda4af', '#ffe4e6', '#fff1f2']
+  },
+  'slate': {
+    name: 'Slate',
+    primary: '#475569',
+    secondary: '#94a3b8',
+    tertiary: '#f1f5f9',
+    palette: ['#1e293b', '#475569', '#94a3b8', '#cbd5e1', '#f1f5f9', '#f8fafc']
+  },
+  'zinc': {
+    name: 'Zinc',
+    primary: '#71717a',
+    secondary: '#a1a1aa',
+    tertiary: '#f4f4f5',
+    palette: ['#27272a', '#71717a', '#a1a1aa', '#d4d4d8', '#f4f4f5', '#fafafa']
+  },
+  'neutral': {
+    name: 'Neutral',
+    primary: '#737373',
+    secondary: '#a3a3a3',
+    tertiary: '#f5f5f5',
+    palette: ['#262626', '#737373', '#a3a3a3', '#d4d4d4', '#f5f5f5', '#fafafa']
+  },
+  'stone': {
+    name: 'Stone',
+    primary: '#78716c',
+    secondary: '#a8a29e',
+    tertiary: '#f5f5f4',
+    palette: ['#292524', '#78716c', '#a8a29e', '#d6d3d1', '#f5f5f4', '#fafaf9']
+  },
+  'sky': {
+    name: 'Sky',
+    primary: '#0ea5e9',
+    secondary: '#38bdf8',
+    tertiary: '#e0f2fe',
+    palette: ['#0c4a6e', '#0ea5e9', '#38bdf8', '#7dd3fc', '#e0f2fe', '#f0f9ff']
+  },
+  'blue-gray': {
+    name: 'Blue Gray',
+    primary: '#64748b',
+    secondary: '#94a3b8',
+    tertiary: '#f1f5f9',
+    palette: ['#334155', '#64748b', '#94a3b8', '#cbd5e1', '#f1f5f9', '#f8fafc']
+  },
+  'cool-gray': {
+    name: 'Cool Gray',
+    primary: '#6b7280',
+    secondary: '#9ca3af',
+    tertiary: '#f3f4f6',
+    palette: ['#374151', '#6b7280', '#9ca3af', '#d1d5db', '#f3f4f6', '#f9fafb']
+  },
+  'warm-gray': {
+    name: 'Warm Gray',
+    primary: '#78716c',
+    secondary: '#a8a29e',
+    tertiary: '#f5f5f4',
+    palette: ['#292524', '#78716c', '#a8a29e', '#d6d3d1', '#f5f5f4', '#fafaf9']
   }
 };
 
@@ -108,6 +241,7 @@ export const ScenarioResultsChart: React.FC<ScenarioResultsChartProps> = ({
   // Menu state
   const [showMenu, setShowMenu] = useState(false);
   const [showColorSubmenu, setShowColorSubmenu] = useState(false);
+  const [colorSubmenuPos, setColorSubmenuPos] = useState({ x: 0, y: 0 });
   const menuRef = useRef<HTMLDivElement>(null);
   
   // Use external props if provided, otherwise use internal state
@@ -163,6 +297,19 @@ export const ScenarioResultsChart: React.FC<ScenarioResultsChartProps> = ({
   const handleColorThemeClick = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const submenuWidth = 220; // Width of the color submenu
+    const spacing = 4; // Spacing from the menu button
+    
+    // Calculate position to the left of the menu button
+    let x = rect.left - submenuWidth - spacing;
+    
+    // Ensure the menu doesn't go off-screen on the left
+    if (x < 10) {
+      x = 10; // Minimum 10px from screen edge
+    }
+    
+    setColorSubmenuPos({ x, y: rect.top });
     setShowColorSubmenu(!showColorSubmenu);
   };
 
@@ -178,15 +325,25 @@ export const ScenarioResultsChart: React.FC<ScenarioResultsChartProps> = ({
   // Close menu when clicking outside
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        setShowMenu(false);
-        setShowColorSubmenu(false);
+      const target = e.target as Element;
+      const isOutsideMainMenu = !target.closest('.dropdown-menu');
+      const isOutsideColorSubmenu = !target.closest('.color-submenu');
+
+      if (isOutsideMainMenu && isOutsideColorSubmenu) {
+        setTimeout(() => {
+          setShowMenu(false);
+          setShowColorSubmenu(false);
+        }, 50);
       }
     };
 
     if (showMenu || showColorSubmenu) {
-      document.addEventListener('click', handleClickOutside, false);
+      const timeoutId = setTimeout(() => {
+        document.addEventListener('click', handleClickOutside, false);
+      }, 200);
+      
       return () => {
+        clearTimeout(timeoutId);
         document.removeEventListener('click', handleClickOutside, false);
       };
     }
@@ -236,44 +393,18 @@ export const ScenarioResultsChart: React.FC<ScenarioResultsChartProps> = ({
     if (!showMenu) return null;
 
     return (
-      <div className="absolute top-full right-0 mt-1 w-48 bg-white border border-gray-200 rounded-lg shadow-lg py-2 z-50">
+      <div className="absolute top-full right-0 mt-1 w-48 bg-white border border-gray-200 rounded-lg shadow-lg py-2 z-50 dropdown-menu">
         {/* Color Theme Option */}
-        <div className="relative">
-          <button
-            className="w-full px-4 py-2 text-sm text-left hover:bg-gray-50 flex items-center gap-3 text-gray-700"
-            onClick={handleColorThemeClick}
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zM21 5a2 2 0 00-2-2h-4a2 2 0 00-2 2v12a4 4 0 004 4h4a2 2 0 002-2V5z" />
-            </svg>
-            <span>Color Theme</span>
-            <ChevronDown className="w-4 h-4 ml-auto" />
-          </button>
-          
-          {/* Color Theme Submenu */}
-          {showColorSubmenu && (
-            <div className="absolute left-full top-0 ml-1 w-40 bg-white border border-gray-300 rounded-lg shadow-xl p-2">
-              <div className="px-2 py-2 text-sm font-semibold text-gray-700 border-b border-gray-200 mb-2">
-                Color Themes
-              </div>
-              <div className="grid grid-cols-1 gap-1">
-                {Object.entries(COLOR_THEMES).map(([themeKey, themeData]) => (
-                  <button
-                    key={themeKey}
-                    className="px-3 py-2 text-xs text-left hover:bg-gray-50 flex items-center gap-2 rounded"
-                    onClick={() => handleThemeChange(themeKey)}
-                  >
-                    <div 
-                      className="w-3 h-3 rounded-full border border-gray-300"
-                      style={{ backgroundColor: themeData.primary }}
-                    />
-                    <span>{themeData.name}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
+        <button
+          className="w-full px-4 py-2 text-sm text-left hover:bg-gray-50 flex items-center gap-3 text-gray-700"
+          onClick={handleColorThemeClick}
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zM21 5a2 2 0 00-2-2h-4a2 2 0 00-2 2v12a4 4 0 004 4h4a2 2 0 002-2V5z" />
+          </svg>
+          <span>Color Theme</span>
+          <ChevronDown className="w-4 h-4 ml-auto" />
+        </button>
 
         {/* Grid Toggle */}
         <button
@@ -370,6 +501,57 @@ export const ScenarioResultsChart: React.FC<ScenarioResultsChartProps> = ({
     );
   };
 
+  // Color theme submenu component (portal-based)
+  const ColorThemeSubmenu = () => {
+    if (!showColorSubmenu) return null;
+
+    const submenu = (
+      <div
+        className="fixed z-[9999] bg-white border border-gray-300 rounded-lg shadow-xl p-3 color-submenu"
+        style={{
+          left: colorSubmenuPos.x,
+          top: colorSubmenuPos.y,
+          minWidth: '220px',
+          maxHeight: '280px',
+          overflowY: 'auto'
+        }}
+      >
+        <div className="px-2 py-2 text-sm font-semibold text-gray-700 border-b border-gray-200 mb-3">
+          Color Theme
+        </div>
+        
+        <div className="grid grid-cols-8 gap-1.5">
+          {Object.entries(COLOR_THEMES).map(([themeKey, themeData]) => (
+            <button
+              key={themeKey}
+              className={`w-6 h-6 rounded-md border-2 transition-all duration-200 hover:scale-110 hover:shadow-lg ${
+                currentTheme === themeKey 
+                  ? 'border-blue-500 shadow-lg ring-2 ring-blue-200 ring-opacity-50' 
+                  : 'border-gray-300 hover:border-gray-400 hover:shadow-md'
+              }`}
+              onClick={() => handleThemeChange(themeKey)}
+              title={themeData.name}
+            >
+              <div 
+                className="w-full h-full rounded-sm"
+                style={{ 
+                  background: `linear-gradient(135deg, ${themeData.primary} 0%, ${themeData.secondary} 100%)` 
+                }}
+              />
+            </button>
+          ))}
+        </div>
+        
+        <div className="mt-3 pt-2 border-t border-gray-200">
+          <div className="text-xs text-gray-500 px-2">
+            Click any color to apply the theme to your chart
+          </div>
+        </div>
+      </div>
+    );
+
+    return createPortal(submenu, document.body);
+  };
 
   if (!data || data.length === 0) {
     return (
@@ -392,31 +574,6 @@ export const ScenarioResultsChart: React.FC<ScenarioResultsChartProps> = ({
           
           {/* Controls */}
           <div className="flex gap-2">
-            {/* Theme Selector */}
-            <div className="flex gap-1">
-              {Object.entries(COLOR_THEMES).map(([themeKey, themeData]) => (
-                <button
-                  key={themeKey}
-                  onClick={() => {
-                    setSelectedTheme(themeKey);
-                    if (onThemeChange) {
-                      onThemeChange(themeKey);
-                    }
-                  }}
-                  className={`px-2 py-1 text-xs rounded-md border transition-colors ${
-                    currentTheme === themeKey
-                      ? 'bg-blue-100 border-blue-300 text-blue-700'
-                      : 'bg-white border-gray-300 text-gray-600 hover:bg-gray-50'
-                  }`}
-                  title={themeData.name}
-                >
-                  <div 
-                    className="w-3 h-3 rounded-full border border-gray-300"
-                    style={{ backgroundColor: themeData.primary }}
-                  />
-                </button>
-              ))}
-            </div>
             
             {/* Menu Button */}
             <div className="relative border-l border-gray-300 pl-2">
@@ -552,6 +709,9 @@ export const ScenarioResultsChart: React.FC<ScenarioResultsChartProps> = ({
           </Bar>
         </BarChart>
         </ResponsiveContainer>
+        
+        {/* Color Theme Submenu */}
+        <ColorThemeSubmenu />
       </div>
     </div>
   );
