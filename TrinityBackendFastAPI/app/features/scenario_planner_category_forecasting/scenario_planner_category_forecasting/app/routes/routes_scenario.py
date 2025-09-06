@@ -490,6 +490,12 @@ async def run_scenario(
                 detail="No selected models found. Please ensure models are configured."
             )
 
+        # ✅ Extract y_variable from the first model (all models should have the same y_variable)
+        y_variable = ""
+        if models and len(models) > 0:
+            y_variable = models[0].get("y_variable", "")
+            logger.info("🎯 Target variable (y_variable): %s", y_variable)
+
         # ✅ Update payload with decoded model_id for scenario service
         # Create a new payload object with the decoded model_id to avoid modifying the original
         updated_payload = payload.model_copy()
@@ -509,6 +515,7 @@ async def run_scenario(
             "dataset_used": current_file_key,
             "created_at": datetime.utcnow().isoformat(),
             "models_processed": len(models),
+            "y_variable": y_variable,
             **response_data,  # This now contains {"view_results": {...}}
         }
         

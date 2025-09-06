@@ -1373,6 +1373,8 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
 
               modelsProcessed: result.models_processed,
 
+              yVariable: result.y_variable,
+
               flat: viewData.flat,
 
               hierarchy: viewData.hierarchy,
@@ -4381,7 +4383,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
                         const viewId = typeof view === 'string' ? view : view.id;
 
                         const chartData = getChartDataForScenarioAndView(scenarioId, viewId);
-
+                        const viewResults = getResultsForScenarioAndView(scenarioId, viewId);
                         const hasResults = hasResultsForScenarioAndView(scenarioId, viewId);
 
                         
@@ -4448,6 +4450,8 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
                                       height={450}
 
                                       viewMode={resultViewMode[viewId] || 'hierarchy'}
+
+                                      yVariable={viewResults.yVariable}
 
                                     />
                                   </div>

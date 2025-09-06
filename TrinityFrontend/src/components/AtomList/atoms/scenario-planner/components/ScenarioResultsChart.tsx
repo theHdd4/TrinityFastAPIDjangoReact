@@ -199,6 +199,7 @@ interface ScenarioResultsChartProps {
   height?: number;
   viewMode?: 'hierarchy' | 'flat';
   viewIdentifiers?: Record<string, string[]>;
+  yVariable?: string;
   theme?: string;
   onThemeChange?: (theme: string) => void;
   onGridToggle?: (enabled: boolean) => void;
@@ -217,6 +218,7 @@ export const ScenarioResultsChart: React.FC<ScenarioResultsChartProps> = ({
   height = 400,
   viewMode = 'hierarchy',
   viewIdentifiers,
+  yVariable = 'Value',
   theme: propTheme,
   onThemeChange,
   onGridToggle,
@@ -241,8 +243,11 @@ export const ScenarioResultsChart: React.FC<ScenarioResultsChartProps> = ({
   // Menu state
   const [showMenu, setShowMenu] = useState(false);
   const [showColorSubmenu, setShowColorSubmenu] = useState(false);
+  const [showSortSubmenu, setShowSortSubmenu] = useState(false);
   const [colorSubmenuPos, setColorSubmenuPos] = useState({ x: 0, y: 0 });
+  const [sortSubmenuPos, setSortSubmenuPos] = useState({ x: 0, y: 0 });
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc' | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   
   // Use external props if provided, otherwise use internal state
@@ -322,6 +327,23 @@ export const ScenarioResultsChart: React.FC<ScenarioResultsChartProps> = ({
     setContextMenu(null);
   };
 
+  // Handle sort submenu toggle
+  const handleSortClick = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    setSortSubmenuPos({ x: rect.right + 4, y: rect.top });
+    setShowSortSubmenu(!showSortSubmenu);
+    setShowColorSubmenu(false);
+  };
+
+  // Apply selected sort order
+  const handleSortChange = (order: 'asc' | 'desc' | null) => {
+    setSortOrder(order);
+    setContextMenu(null);
+    setShowSortSubmenu(false);
+  };
+
   const handleColorThemeClick = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
@@ -356,18 +378,20 @@ export const ScenarioResultsChart: React.FC<ScenarioResultsChartProps> = ({
       const target = e.target as Element;
       const isOutsideMainMenu = !target.closest('.dropdown-menu');
       const isOutsideColorSubmenu = !target.closest('.color-submenu');
+      const isOutsideSortSubmenu = !target.closest('.sort-submenu');
       const isOutsideContextMenu = !target.closest('.context-menu');
 
-      if (isOutsideMainMenu && isOutsideColorSubmenu && isOutsideContextMenu) {
+      if (isOutsideMainMenu && isOutsideColorSubmenu && isOutsideSortSubmenu && isOutsideContextMenu) {
         setTimeout(() => {
           setShowMenu(false);
           setShowColorSubmenu(false);
+          setShowSortSubmenu(false);
           setContextMenu(null);
         }, 50);
       }
     };
 
-    if (showMenu || showColorSubmenu || contextMenu) {
+    if (showMenu || showColorSubmenu || showSortSubmenu || contextMenu) {
       const timeoutId = setTimeout(() => {
         document.addEventListener('click', handleClickOutside, false);
       }, 200);
@@ -377,16 +401,27 @@ export const ScenarioResultsChart: React.FC<ScenarioResultsChartProps> = ({
         document.removeEventListener('click', handleClickOutside, false);
       };
     }
-  }, [showMenu, showColorSubmenu, contextMenu]);
+  }, [showMenu, showColorSubmenu, showSortSubmenu, contextMenu]);
   
-  // Transform data for Recharts format
-  const chartData = data.map(item => ({
-    name: item.combinationLabel,
-    baseline: item.baseline || 0,
-    scenario: item.prediction,
-    uplift: item.pct_uplift,
-    delta: item.delta || 0
-  }));
+  // Transform data for Recharts format with sorting
+  const chartData = useMemo(() => {
+    const transformedData = data.map(item => ({
+      name: item.combinationLabel,
+      baseline: item.baseline || 0,
+      scenario: item.prediction,
+      uplift: item.pct_uplift,
+      delta: item.delta || 0
+    }));
+
+    // Apply sorting based on percentage uplift
+    if (sortOrder === 'asc') {
+      return [...transformedData].sort((a, b) => a.uplift - b.uplift);
+    } else if (sortOrder === 'desc') {
+      return [...transformedData].sort((a, b) => b.uplift - a.uplift);
+    }
+    
+    return transformedData;
+  }, [data, sortOrder]);
 
   // Custom tooltip content
   const CustomTooltip = ({ active, payload, label }: any) => {
@@ -464,6 +499,66 @@ export const ScenarioResultsChart: React.FC<ScenarioResultsChartProps> = ({
           <div className="text-xs text-gray-500 px-2">
             Click any color to apply the theme to your chart
           </div>
+        </div>
+      </div>
+    );
+
+    return createPortal(submenu, document.body);
+  };
+
+  // Sort submenu component
+  const SortSubmenu = () => {
+    if (!showSortSubmenu) return null;
+
+    const submenu = (
+      <div
+        className="fixed z-[9999] bg-white border border-gray-300 rounded-lg shadow-xl p-2 sort-submenu"
+        style={{
+          left: sortSubmenuPos.x,
+          top: sortSubmenuPos.y,
+          minWidth: '160px'
+        }}
+      >
+        <div className="px-2 py-2 text-sm font-semibold text-gray-700 border-b border-gray-200 mb-2">
+          Sort by Uplift
+        </div>
+        <div className="flex flex-col">
+          <button
+            className="px-4 py-2 text-sm text-left hover:bg-gray-50 flex items-center gap-2"
+            onMouseDown={(e) => {
+              e.preventDefault();
+              handleSortChange(null);
+            }}
+          >
+            <div className={`w-4 h-4 rounded border-2 ${sortOrder === null ? 'bg-blue-500 border-blue-500' : 'border-gray-300'}`}>
+              {sortOrder === null && <div className="w-full h-full bg-white rounded-sm scale-50" />}
+            </div>
+            <span>No Sort</span>
+          </button>
+          <button
+            className="px-4 py-2 text-sm text-left hover:bg-gray-50 flex items-center gap-2"
+            onMouseDown={(e) => {
+              e.preventDefault();
+              handleSortChange('asc');
+            }}
+          >
+            <div className={`w-4 h-4 rounded border-2 ${sortOrder === 'asc' ? 'bg-blue-500 border-blue-500' : 'border-gray-300'}`}>
+              {sortOrder === 'asc' && <div className="w-full h-full bg-white rounded-sm scale-50" />}
+            </div>
+            <span>Ascending (Low to High)</span>
+          </button>
+          <button
+            className="px-4 py-2 text-sm text-left hover:bg-gray-50 flex items-center gap-2"
+            onMouseDown={(e) => {
+              e.preventDefault();
+              handleSortChange('desc');
+            }}
+          >
+            <div className={`w-4 h-4 rounded border-2 ${sortOrder === 'desc' ? 'bg-blue-500 border-blue-500' : 'border-gray-300'}`}>
+              {sortOrder === 'desc' && <div className="w-full h-full bg-white rounded-sm scale-50" />}
+            </div>
+            <span>Descending (High to Low)</span>
+          </button>
         </div>
       </div>
     );
@@ -569,7 +664,7 @@ export const ScenarioResultsChart: React.FC<ScenarioResultsChartProps> = ({
               }
             }}
             label={currentShowAxisLabels ? { 
-              value: 'Values', 
+              value: yVariable, 
               angle: -90, 
               position: 'left', 
               style: { fontSize: '12px', fontWeight: 'bold', fill: '#374151' }
@@ -630,6 +725,9 @@ export const ScenarioResultsChart: React.FC<ScenarioResultsChartProps> = ({
         <ColorThemeSubmenu />
       </div>
       
+      {/* Sort Submenu */}
+      <SortSubmenu />
+      
       {/* Right-click Context Menu */}
       {contextMenu && (
         <div 
@@ -653,6 +751,23 @@ export const ScenarioResultsChart: React.FC<ScenarioResultsChartProps> = ({
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zM21 5a2 2 0 00-2-2h-4a2 2 0 00-2 2v12a4 4 0 004 4h4a2 2 0 002-2V5z" />
             </svg>
             <span>Color Theme</span>
+            <ChevronDown className="w-4 h-4 ml-auto" />
+          </button>
+
+          {/* Sort Option */}
+          <button
+            className="w-full px-4 py-2 text-sm text-left hover:bg-gray-50 flex items-center gap-3 text-gray-700"
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              handleSortClick(e);
+              setContextMenu(null);
+            }}
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 9l6-6 6 6M18 15l-6 6-6-6" />
+            </svg>
+            <span>Sort by Uplift</span>
             <ChevronDown className="w-4 h-4 ml-auto" />
           </button>
 

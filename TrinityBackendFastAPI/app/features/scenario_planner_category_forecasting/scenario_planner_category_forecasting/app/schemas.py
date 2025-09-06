@@ -145,6 +145,7 @@ class RunResponse(BaseModel):
     dataset_used: str = Field(..., description="Dataset key used for this run")
     created_at: str = Field(..., description="ISO timestamp when the run was created")
     models_processed: int = Field(..., description="Number of models processed")
+    y_variable: str = Field(..., description="The target variable being analyzed/predicted")
     view_results: Dict[str, Dict[str, Any]] = Field(..., description="Results organized by view ID")
 
 
