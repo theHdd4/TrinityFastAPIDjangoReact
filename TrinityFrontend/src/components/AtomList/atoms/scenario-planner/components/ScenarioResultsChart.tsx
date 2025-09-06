@@ -242,6 +242,7 @@ export const ScenarioResultsChart: React.FC<ScenarioResultsChartProps> = ({
   const [showMenu, setShowMenu] = useState(false);
   const [showColorSubmenu, setShowColorSubmenu] = useState(false);
   const [colorSubmenuPos, setColorSubmenuPos] = useState({ x: 0, y: 0 });
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   
   // Use external props if provided, otherwise use internal state
@@ -254,6 +255,19 @@ export const ScenarioResultsChart: React.FC<ScenarioResultsChartProps> = ({
   const theme = useMemo(() => {
     return COLOR_THEMES[currentTheme as keyof typeof COLOR_THEMES] || COLOR_THEMES.default;
   }, [currentTheme]);
+
+  // Helper function to format data labels in compact format
+  const formatDataLabel = (value: number) => {
+    if (value >= 1000000000) {
+      return `${(value / 1000000000).toFixed(1)}b`;
+    } else if (value >= 1000000) {
+      return `${(value / 1000000).toFixed(1)}m`;
+    } else if (value >= 1000) {
+      return `${(value / 1000).toFixed(1)}k`;
+    } else {
+      return value.toString();
+    }
+  };
   
   // Toggle handlers
   const handleGridToggle = () => {
@@ -294,6 +308,20 @@ export const ScenarioResultsChart: React.FC<ScenarioResultsChartProps> = ({
     setShowColorSubmenu(false);
   };
 
+  // Right-click context menu handler
+  const handleContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setContextMenu({ x: e.clientX, y: e.clientY });
+    setShowMenu(false);
+    setShowColorSubmenu(false);
+  };
+
+  // Close context menu
+  const closeContextMenu = () => {
+    setContextMenu(null);
+  };
+
   const handleColorThemeClick = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
@@ -328,16 +356,18 @@ export const ScenarioResultsChart: React.FC<ScenarioResultsChartProps> = ({
       const target = e.target as Element;
       const isOutsideMainMenu = !target.closest('.dropdown-menu');
       const isOutsideColorSubmenu = !target.closest('.color-submenu');
+      const isOutsideContextMenu = !target.closest('.context-menu');
 
-      if (isOutsideMainMenu && isOutsideColorSubmenu) {
+      if (isOutsideMainMenu && isOutsideColorSubmenu && isOutsideContextMenu) {
         setTimeout(() => {
           setShowMenu(false);
           setShowColorSubmenu(false);
+          setContextMenu(null);
         }, 50);
       }
     };
 
-    if (showMenu || showColorSubmenu) {
+    if (showMenu || showColorSubmenu || contextMenu) {
       const timeoutId = setTimeout(() => {
         document.addEventListener('click', handleClickOutside, false);
       }, 200);
@@ -347,7 +377,7 @@ export const ScenarioResultsChart: React.FC<ScenarioResultsChartProps> = ({
         document.removeEventListener('click', handleClickOutside, false);
       };
     }
-  }, [showMenu, showColorSubmenu]);
+  }, [showMenu, showColorSubmenu, contextMenu]);
   
   // Transform data for Recharts format
   const chartData = data.map(item => ({
@@ -388,118 +418,6 @@ export const ScenarioResultsChart: React.FC<ScenarioResultsChartProps> = ({
     return null;
   };
 
-  // Dropdown menu component
-  const DropdownMenu = () => {
-    if (!showMenu) return null;
-
-    return (
-      <div className="absolute top-full right-0 mt-1 w-48 bg-white border border-gray-200 rounded-lg shadow-lg py-2 z-50 dropdown-menu">
-        {/* Color Theme Option */}
-        <button
-          className="w-full px-4 py-2 text-sm text-left hover:bg-gray-50 flex items-center gap-3 text-gray-700"
-          onClick={handleColorThemeClick}
-        >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zM21 5a2 2 0 00-2-2h-4a2 2 0 00-2 2v12a4 4 0 004 4h4a2 2 0 002-2V5z" />
-          </svg>
-          <span>Color Theme</span>
-          <ChevronDown className="w-4 h-4 ml-auto" />
-        </button>
-
-        {/* Grid Toggle */}
-        <button
-          className="w-full px-4 py-2 text-sm text-left hover:bg-gray-50 flex items-center gap-3 text-gray-700"
-          onClick={() => {
-            handleGridToggle();
-            setShowMenu(false);
-          }}
-        >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
-          </svg>
-          <span>Grid</span>
-          <div className="ml-auto">
-            <div className={`w-4 h-3 rounded border ${currentShowGrid ? 'bg-blue-500 border-blue-500' : 'bg-gray-200 border-gray-300'}`}>
-              {currentShowGrid && (
-                <svg className="w-4 h-3 text-white" fill="currentColor" viewBox="0 0 20 20">
-                  <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                </svg>
-              )}
-            </div>
-          </div>
-        </button>
-
-        {/* Legend Toggle */}
-        <button
-          className="w-full px-4 py-2 text-sm text-left hover:bg-gray-50 flex items-center gap-3 text-gray-700"
-          onClick={() => {
-            handleLegendToggle();
-            setShowMenu(false);
-          }}
-        >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-          </svg>
-          <span>Legend</span>
-          <div className="ml-auto">
-            <div className={`w-4 h-3 rounded border ${currentShowLegend ? 'bg-blue-500 border-blue-500' : 'bg-gray-200 border-gray-300'}`}>
-              {currentShowLegend && (
-                <svg className="w-4 h-3 text-white" fill="currentColor" viewBox="0 0 20 20">
-                  <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                </svg>
-              )}
-            </div>
-          </div>
-        </button>
-
-        {/* Axis Labels Toggle */}
-        <button
-          className="w-full px-4 py-2 text-sm text-left hover:bg-gray-50 flex items-center gap-3 text-gray-700"
-          onClick={() => {
-            handleAxisLabelsToggle();
-            setShowMenu(false);
-          }}
-        >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
-          </svg>
-          <span>Axis Labels</span>
-          <div className="ml-auto">
-            <div className={`w-4 h-3 rounded border ${currentShowAxisLabels ? 'bg-blue-500 border-blue-500' : 'bg-gray-200 border-gray-300'}`}>
-              {currentShowAxisLabels && (
-                <svg className="w-4 h-3 text-white" fill="currentColor" viewBox="0 0 20 20">
-                  <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                </svg>
-              )}
-            </div>
-          </div>
-        </button>
-
-        {/* Data Labels Toggle */}
-        <button
-          className="w-full px-4 py-2 text-sm text-left hover:bg-gray-50 flex items-center gap-3 text-gray-700"
-          onClick={() => {
-            handleDataLabelsToggle();
-            setShowMenu(false);
-          }}
-        >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 20l4-16m2 16l4-16M6 9h14M4 15h14" />
-          </svg>
-          <span>Data Labels</span>
-          <div className="ml-auto">
-            <div className={`w-4 h-3 rounded border ${currentShowDataLabels ? 'bg-blue-500 border-blue-500' : 'bg-gray-200 border-gray-300'}`}>
-              {currentShowDataLabels && (
-                <svg className="w-4 h-3 text-white" fill="currentColor" viewBox="0 0 20 20">
-                  <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                </svg>
-              )}
-            </div>
-          </div>
-        </button>
-      </div>
-    );
-  };
 
   // Color theme submenu component (portal-based)
   const ColorThemeSubmenu = () => {
@@ -566,28 +484,20 @@ export const ScenarioResultsChart: React.FC<ScenarioResultsChartProps> = ({
 
   return (
     <div className="w-full">
-      {/* Header with title and menu button outside chart */}
+      {/* Header with title and right-click hint */}
       <div className="mb-3 flex justify-between items-center">
         <h3 className="text-lg font-semibold text-gray-800">
           {viewMode === 'hierarchy' ? 'Individual Results' : 'Aggregated Results'}
         </h3>
         
-        {/* Menu Button - Outside chart layout */}
-        <div className="relative">
-          <button
-            onClick={handleMenuToggle}
-            className="px-3 py-2 text-sm rounded-md border border-gray-300 bg-white text-gray-600 hover:bg-gray-50 transition-colors shadow-sm"
-            title="Chart Settings"
-            ref={menuRef}
-          >
-            <Settings className="w-4 h-4" />
-          </button>
-          <DropdownMenu />
+        {/* Right-click hint */}
+        <div className="text-xs text-gray-500">
+          Right-click chart for settings
         </div>
       </div>
       
       {/* Chart container with reduced size */}
-      <div className="w-full max-w-4xl mx-auto">
+      <div className="w-full max-w-4xl mx-auto" onContextMenu={handleContextMenu}>
         <ResponsiveContainer width="100%" height={Math.min(height, 350)}>
           <BarChart 
             data={chartData} 
@@ -690,7 +600,7 @@ export const ScenarioResultsChart: React.FC<ScenarioResultsChartProps> = ({
               <LabelList 
                 dataKey="baseline" 
                 position="top" 
-                formatter={(value) => value.toLocaleString()}
+                formatter={(value) => formatDataLabel(value)}
                 style={{ fontSize: '10px', fontWeight: '500', fill: '#374151' }}
               />
             )}
@@ -708,7 +618,7 @@ export const ScenarioResultsChart: React.FC<ScenarioResultsChartProps> = ({
               <LabelList 
                 dataKey="scenario" 
                 position="top" 
-                formatter={(value) => value.toLocaleString()}
+                formatter={(value) => formatDataLabel(value)}
                 style={{ fontSize: '10px', fontWeight: '500', fill: '#374151' }}
               />
             )}
@@ -719,6 +629,110 @@ export const ScenarioResultsChart: React.FC<ScenarioResultsChartProps> = ({
         {/* Color Theme Submenu */}
         <ColorThemeSubmenu />
       </div>
+      
+      {/* Right-click Context Menu */}
+      {contextMenu && (
+        <div 
+          className="fixed z-50 bg-white border border-gray-200 rounded-lg shadow-lg py-2 min-w-[160px] context-menu"
+          style={{
+            left: contextMenu.x,
+            top: contextMenu.y,
+          }}
+        >
+          {/* Color Theme Option */}
+          <button
+            className="w-full px-4 py-2 text-sm text-left hover:bg-gray-50 flex items-center gap-3 text-gray-700"
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              handleColorThemeClick(e);
+              setContextMenu(null);
+            }}
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zM21 5a2 2 0 00-2-2h-4a2 2 0 00-2 2v12a4 4 0 004 4h4a2 2 0 002-2V5z" />
+            </svg>
+            <span>Color Theme</span>
+            <ChevronDown className="w-4 h-4 ml-auto" />
+          </button>
+
+          {/* Grid Toggle */}
+          <button
+            className="w-full px-4 py-2 text-sm text-left hover:bg-gray-50 flex items-center gap-3 text-gray-700"
+            onClick={() => {
+              handleGridToggle();
+              setContextMenu(null);
+            }}
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
+            </svg>
+            <span>Toggle Grid</span>
+            <div className={`ml-auto w-4 h-4 rounded border-2 ${currentShowGrid ? 'bg-blue-500 border-blue-500' : 'border-gray-300'}`}>
+              {currentShowGrid && <div className="w-full h-full bg-white rounded-sm scale-50" />}
+            </div>
+          </button>
+
+          {/* Legend Toggle */}
+          <button
+            className="w-full px-4 py-2 text-sm text-left hover:bg-gray-50 flex items-center gap-3 text-gray-700"
+            onClick={() => {
+              handleLegendToggle();
+              setContextMenu(null);
+            }}
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+            </svg>
+            <span>Toggle Legend</span>
+            <div className={`ml-auto w-4 h-4 rounded border-2 ${currentShowLegend ? 'bg-blue-500 border-blue-500' : 'border-gray-300'}`}>
+              {currentShowLegend && <div className="w-full h-full bg-white rounded-sm scale-50" />}
+            </div>
+          </button>
+
+          {/* Axis Labels Toggle */}
+          <button
+            className="w-full px-4 py-2 text-sm text-left hover:bg-gray-50 flex items-center gap-3 text-gray-700"
+            onClick={() => {
+              handleAxisLabelsToggle();
+              setContextMenu(null);
+            }}
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 4V2a1 1 0 011-1h8a1 1 0 011 1v2m-9 0h10m-10 0a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V6a2 2 0 00-2-2M9 12h6m-6 4h6" />
+            </svg>
+            <span>Toggle Axis Labels</span>
+            <div className={`ml-auto w-4 h-4 rounded border-2 ${currentShowAxisLabels ? 'bg-blue-500 border-blue-500' : 'border-gray-300'}`}>
+              {currentShowAxisLabels && <div className="w-full h-full bg-white rounded-sm scale-50" />}
+            </div>
+          </button>
+
+          {/* Data Labels Toggle */}
+          <button
+            className="w-full px-4 py-2 text-sm text-left hover:bg-gray-50 flex items-center gap-3 text-gray-700"
+            onClick={() => {
+              handleDataLabelsToggle();
+              setContextMenu(null);
+            }}
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
+            </svg>
+            <span>Toggle Data Labels</span>
+            <div className={`ml-auto w-4 h-4 rounded border-2 ${currentShowDataLabels ? 'bg-blue-500 border-blue-500' : 'border-gray-300'}`}>
+              {currentShowDataLabels && <div className="w-full h-full bg-white rounded-sm scale-50" />}
+            </div>
+          </button>
+        </div>
+      )}
+      
+      {/* Click outside to close context menu */}
+      {contextMenu && (
+        <div 
+          className="fixed inset-0 z-40" 
+          onClick={closeContextMenu}
+        />
+      )}
     </div>
   );
 };
