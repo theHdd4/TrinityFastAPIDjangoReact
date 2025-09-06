@@ -200,6 +200,7 @@ interface ScenarioResultsChartProps {
   viewMode?: 'hierarchy' | 'flat';
   viewIdentifiers?: Record<string, string[]>;
   yVariable?: string;
+  xAxisLabel?: string;
   theme?: string;
   onThemeChange?: (theme: string) => void;
   onGridToggle?: (enabled: boolean) => void;
@@ -219,6 +220,7 @@ export const ScenarioResultsChart: React.FC<ScenarioResultsChartProps> = ({
   viewMode = 'hierarchy',
   viewIdentifiers,
   yVariable = 'Value',
+  xAxisLabel = 'Categories',
   theme: propTheme,
   onThemeChange,
   onGridToggle,
@@ -638,7 +640,7 @@ export const ScenarioResultsChart: React.FC<ScenarioResultsChartProps> = ({
             textAnchor="end"
             height={80}
             label={currentShowAxisLabels ? { 
-              value: 'Categories', 
+              value: xAxisLabel, 
               position: 'bottom', 
               style: { fontSize: '12px', fontWeight: 'bold', fill: '#374151' }
             } : undefined}

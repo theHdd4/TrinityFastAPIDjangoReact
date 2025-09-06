@@ -12,6 +12,7 @@ from ..scenario.scenario_service import ScenarioService
 from ..scenario.aggregation_service import AggregationService
 from ..scenario.data_service import DataService
 from ..utils.features import extract_features_from_models
+from ..mongodb_saver import save_reference_points, save_scenario_configurations, get_reference_points_from_mongo, get_scenario_configurations_from_mongo
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["Scenario"])
@@ -203,6 +204,74 @@ async def get_reference_values(
             },
             "message": f"Reference values calculated per combination using {stat} statistic"
         }
+        
+        # ✅ Auto-save reference points to MongoDB
+        try:
+            # Extract client, app, project from file_key
+            # file_key format: "default_client/default_app/default_project/20250814_135348_D0.arrow"
+            file_key_parts = current_file_key.split('/')
+            if len(file_key_parts) >= 3:
+                client_name = file_key_parts[0]
+                app_name = file_key_parts[1]
+                project_name = file_key_parts[2]
+                
+                # Prepare reference points data for saving
+                reference_points_data = {
+                    "reference_values_by_combination": reference_values_by_combination,
+                    "statistic_used": stat,
+                    "date_range": {
+                        "start_date": start_date,
+                        "end_date": end_date
+                    },
+                    "data_info": {
+                        "dataset_key": current_file_key,
+                        "total_rows": len(df),
+                        "combinations_processed": len(reference_values_by_combination),
+                        "total_features": sum(len(combo["features"]) for combo in reference_values_by_combination.values())
+                    },
+                    "models_processed": len(models),
+                    "created_at": datetime.utcnow().isoformat(),
+                    "description": f"Reference points calculated using {stat} statistic for {len(reference_values_by_combination)} combinations"
+                }
+                
+                # Save to MongoDB
+                mongo_result = await save_reference_points(
+                    client_name=client_name,
+                    app_name=app_name,
+                    project_name=project_name,
+                    reference_points_data=reference_points_data,
+                    user_id="",  # You can add user_id if available
+                    project_id=None  # You can add project_id if available
+                )
+                
+                if mongo_result["status"] == "success":
+                    logger.info(f"📦 Reference points saved to MongoDB: {mongo_result['mongo_id']}")
+                    # Add MongoDB save info to response
+                    response["mongo_save"] = {
+                        "status": "success",
+                        "mongo_id": mongo_result["mongo_id"],
+                        "operation": mongo_result["operation"],
+                        "collection": mongo_result["collection"]
+                    }
+                else:
+                    logger.error(f"❌ Failed to save reference points to MongoDB: {mongo_result['error']}")
+                    response["mongo_save"] = {
+                        "status": "error",
+                        "error": mongo_result["error"]
+                    }
+            else:
+                logger.warning("⚠️ Could not extract client/app/project from file_key for MongoDB save")
+                response["mongo_save"] = {
+                    "status": "skipped",
+                    "reason": "Could not extract client/app/project from file_key"
+                }
+        except Exception as mongo_error:
+            logger.error(f"❌ Error saving reference points to MongoDB: {str(mongo_error)}")
+            # Don't fail the entire request if MongoDB save fails
+            response["mongo_save"] = {
+                "status": "error",
+                "error": str(mongo_error)
+            }
         
         logger.info("✅ Reference values calculated for %d models using %s", len(models), stat)
         return response
@@ -754,155 +823,7 @@ async def clear_dataset_cache(d0_key: str):
         logger.exception("Failed to clear cache for: %s", d0_key)
         raise HTTPException(status_code=500, detail=str(exc))
 
-# ────────────────────────────────────────────────────────────────────────────
-#  GET /api/scenario/test-fetch-by-id
-# ────────────────────────────────────────────────────────────────────────────
-@router.get("/test-fetch-by-id")
-async def test_fetch_by_id():
-    """
-    Test endpoint to directly test the fetch_models_by_id method.
-    """
-    try:
-        from ..scenario.data_service import DataService
-        
-        model_id = 'Quant_Matrix_AI_Schema/forecasting/New Forecasting Analysis Project'
-        logger.info("🔍 Testing fetch_models_by_id with model_id: %s", model_id)
-        
-        # Test the method directly
-        models = await DataService.fetch_models_by_id(model_id)
-        
-        logger.info("🔍 fetch_models_by_id returned: %s", models)
-        
-        return {
-            "message": "Test completed",
-            "model_id": model_id,
-            "models_found": len(models) if models else 0,
-            "models": models
-        }
-        
-    except Exception as exc:
-        logger.exception("🚨 Test failed: %s", str(exc))
-        raise HTTPException(status_code=500, detail=f"Test failed: {str(exc)}")
 
-# ────────────────────────────────────────────────────────────────────────────
-#  GET /api/scenario/get-all-models
-# ────────────────────────────────────────────────────────────────────────────
-@router.get("/get-all-models")
-async def get_all_models():
-    """
-    Simple endpoint to fetch all models from the collection.
-    """
-    try:
-        from ..config import select_models_collection
-        
-        logger.info("🔍 Fetching all models from collection...")
-        
-        # Get all documents from the collection
-        cursor = select_models_collection.find({})
-        all_models = await cursor.to_list(length=None)
-        
-        logger.info("✅ Found %d models in collection", len(all_models))
-        
-        # Extract just the _id and project_name for each model
-        models_summary = []
-        for model in all_models:
-            models_summary.append({
-                "_id": str(model.get("_id", "NO_ID")),
-                "project_name": model.get("project_name", "NO_NAME"),
-                "client_name": model.get("client_name", "NO_CLIENT"),
-                "app_name": model.get("app_name", "NO_APP"),
-                "operation_type": model.get("operation_type", "NO_TYPE"),
-                "training_status": model.get("training_status", "NO_STATUS")
-            })
-        
-        return {
-            "message": f"Successfully fetched {len(all_models)} models",
-            "total_models": len(all_models),
-            "models": models_summary
-        }
-        
-    except Exception as exc:
-        logger.exception("🚨 Failed to fetch all models: %s", str(exc))
-        raise HTTPException(status_code=500, detail=f"Failed to fetch models: {str(exc)}")
-
-# ────────────────────────────────────────────────────────────────────────────
-#  GET /api/scenario/debug-db
-# ────────────────────────────────────────────────────────────────────────────
-@router.get("/debug-db")
-async def debug_database_connection():
-    """
-    Debug endpoint to test database connection and see what's in the collections.
-    """
-    try:
-        from ..config import select_models_collection, scope_collection, column_classifier_configs
-        from ..config import db
-        
-        logger.info("🔍 DEBUG: Testing database connection...")
-        
-        # Test model collection
-        model_count = await select_models_collection.count_documents({})
-        logger.info("🔍 DEBUG: Model collection count: %d", model_count)
-        
-        # Get sample model documents
-        sample_models = await select_models_collection.find({}).limit(5).to_list(length=None)
-        model_ids = [doc.get("_id", "NO_ID") for doc in sample_models]
-        
-        # Test scope collection
-        scope_count = await scope_collection.count_documents({})
-        logger.info("🔍 DEBUG: Scope collection count: %d", scope_count)
-        
-        # Get sample scope documents
-        sample_scopes = await scope_collection.find({}).limit(5).to_list(length=None)
-        scope_ids = [doc.get("_id", "NO_ID") for doc in sample_scopes]
-        
-        # Test column classifier collection
-        column_classifier_count = await column_classifier_configs.count_documents({})
-        logger.info("🔍 DEBUG: Column classifier collection count: %d", column_classifier_count)
-        
-        # Get sample column classifier documents
-        sample_column_classifiers = await column_classifier_configs.find({}).limit(5).to_list(length=None)
-        column_classifier_ids = [doc.get("_id", "NO_ID") for doc in sample_column_classifiers]
-        
-        # Test build metadata collection
-        build_collection = db["build-model_featurebased_configs"]
-        build_count = await build_collection.count_documents({})
-        logger.info("🔍 DEBUG: Build metadata collection count: %d", build_count)
-        
-        # Get sample build metadata documents
-        sample_build_metadata = await build_collection.find({}).limit(5).to_list(length=None)
-        build_metadata_ids = [doc.get("_id", "NO_ID") for doc in sample_build_metadata]
-        
-        return {
-            "message": "Database connection test completed",
-            "model_collection": {
-                "name": select_models_collection.name,
-                "database": select_models_collection.database.name,
-                "total_documents": model_count,
-                "sample_ids": model_ids
-            },
-            "scope_collection": {
-                "name": scope_collection.name,
-                "database": scope_collection.database.name,
-                "total_documents": scope_count,
-                "sample_ids": scope_ids
-            },
-            "column_classifier_collection": {
-                "name": column_classifier_configs.name,
-                "database": column_classifier_configs.database.name,
-                "total_documents": column_classifier_count,
-                "sample_ids": column_classifier_ids
-            },
-            "build_metadata_collection": {
-                "name": build_collection.name,
-                "database": build_collection.database.name,
-                "total_documents": build_count,
-                "sample_ids": build_metadata_ids
-            }
-        }
-        
-    except Exception as exc:
-        logger.exception("🚨 Database debug failed: %s", str(exc))
-        raise HTTPException(status_code=500, detail=f"Database debug failed: {str(exc)}")
 
 # ────────────────────────────────────────────────────────────────────────────
 #  GET /api/scenario/flattened-structure
@@ -926,5 +847,138 @@ async def get_flattened_models(model_id: str = Query(..., description="Model _id
     if not flattened_models:
         raise HTTPException(status_code=404, detail="No models found for the given _id")
     return {"models": flattened_models}
+
+
+@router.get("/get-reference-points")
+async def get_reference_points_endpoint(
+    client_name: str = Query(..., description="Client name"),
+    app_name: str = Query(..., description="App name"),
+    project_name: str = Query(..., description="Project name")
+):
+    """Get saved reference points from MongoDB"""
+    try:
+        result = await get_reference_points_from_mongo(
+            client_name=client_name,
+            app_name=app_name,
+            project_name=project_name
+        )
+        
+        if result:
+            return {
+                "success": True,
+                "message": "Reference points retrieved successfully",
+                "data": result
+            }
+        else:
+            return {
+                "success": False,
+                "message": "No reference points found",
+                "data": None
+            }
+            
+    except Exception as e:
+        logger.error(f"Error retrieving reference points: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve reference points: {str(e)}")
+
+@router.get("/get-scenario-configurations")
+async def get_scenario_configurations_endpoint(
+    client_name: str = Query(..., description="Client name"),
+    app_name: str = Query(..., description="App name"),
+    project_name: str = Query(..., description="Project name")
+):
+    """Get saved scenario configurations from MongoDB"""
+    try:
+        result = await get_scenario_configurations_from_mongo(
+            client_name=client_name,
+            app_name=app_name,
+            project_name=project_name
+        )
+        
+        if result:
+            return {
+                "success": True,
+                "message": "Scenario configurations retrieved successfully",
+                "data": result
+            }
+        else:
+            return {
+                "success": False,
+                "message": "No scenario configurations found",
+                "data": None
+            }
+            
+    except Exception as e:
+        logger.error(f"Error retrieving scenario configurations: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve scenario configurations: {str(e)}")
+
+@router.put("/update-reference-points")
+async def update_reference_points_endpoint(
+    client_name: str = Query(..., description="Client name"),
+    app_name: str = Query(..., description="App name"),
+    project_name: str = Query(..., description="Project name"),
+    reference_points_data: dict = Body(..., description="Reference points data to update/overwrite"),
+    user_id: str = Query("", description="User ID"),
+    project_id: int = Query(None, description="Project ID")
+):
+    """Update/overwrite reference points in MongoDB"""
+    try:
+        result = await save_reference_points(
+            client_name=client_name,
+            app_name=app_name,
+            project_name=project_name,
+            reference_points_data=reference_points_data,
+            user_id=user_id,
+            project_id=project_id
+        )
+        
+        if result["status"] == "success":
+            return {
+                "success": True,
+                "message": f"Reference points updated successfully",
+                "mongo_id": result["mongo_id"],
+                "operation": result["operation"],
+                "collection": result["collection"]
+            }
+        else:
+            raise HTTPException(status_code=500, detail=f"Failed to update reference points: {result['error']}")
+            
+    except Exception as e:
+        logger.error(f"Error updating reference points: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to update reference points: {str(e)}")
+
+@router.put("/update-scenario-configurations")
+async def update_scenario_configurations_endpoint(
+    client_name: str = Query(..., description="Client name"),
+    app_name: str = Query(..., description="App name"),
+    project_name: str = Query(..., description="Project name"),
+    scenario_config_data: dict = Body(..., description="Scenario configuration data to update/overwrite"),
+    user_id: str = Query("", description="User ID"),
+    project_id: int = Query(None, description="Project ID")
+):
+    """Update/overwrite scenario configurations in MongoDB"""
+    try:
+        result = await save_scenario_configurations(
+            client_name=client_name,
+            app_name=app_name,
+            project_name=project_name,
+            scenario_config_data=scenario_config_data,
+            user_id=user_id,
+            project_id=project_id
+        )
+        
+        if result["status"] == "success":
+            return {
+                "success": True,
+                "message": f"Scenario configurations updated successfully",
+                "mongo_id": result["mongo_id"],
+                "operation": result["operation"],
+                "collection": result["collection"]
+            }
+        else:
+            raise HTTPException(status_code=500, detail=f"Failed to update scenario configurations: {result['error']}")
+            
+    except Exception as e:
+        logger.error(f"Error updating scenario configurations: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to update scenario configurations: {str(e)}")
 
     

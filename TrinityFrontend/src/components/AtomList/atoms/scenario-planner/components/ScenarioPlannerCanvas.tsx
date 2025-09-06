@@ -3252,6 +3252,34 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
 
 
 
+  // ✅ NEW: Watch for reference method changes and auto-refresh
+  useEffect(() => {
+    // Only trigger if we have combinations and the reference method actually changed
+    if (combinations.length > 0 && settings.referenceMethod) {
+      console.log('🔄 Reference method changed, auto-refreshing combinations...', {
+        referenceMethod: settings.referenceMethod,
+        combinationsCount: combinations.length
+      });
+      
+      // Auto-refresh when reference method changes
+      handleGlobalRefresh();
+    }
+  }, [settings.referenceMethod]); // Watch for reference method changes
+
+  // ✅ NEW: Watch for reference period changes and auto-refresh
+  useEffect(() => {
+    // Only trigger if we have combinations and the reference period actually changed
+    if (combinations.length > 0 && settings.referencePeriod) {
+      console.log('🔄 Reference period changed, auto-refreshing combinations...', {
+        referencePeriod: settings.referencePeriod,
+        combinationsCount: combinations.length
+      });
+      
+      // Auto-refresh when reference period changes
+      handleGlobalRefresh();
+    }
+  }, [settings.referencePeriod]); // Watch for reference period changes
+
   // ✅ NEW: Global refresh function for all combinations
 
   const handleGlobalRefresh = async () => {
@@ -3276,46 +3304,57 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
 
 
 
-      // 1. First fetch fresh reference values from backend
-
-      await fetchReferenceValuesForAll();
-
+      // 1. First fetch fresh reference values from backend directly
+      const statMethod = settings.referenceMethod || 'period-mean';
+      const modelId = generateModelId();
+      const requestBody: any = {
+        model_id: modelId,
+        stat: statMethod,
+        start_date: settings.referencePeriod?.from || '2024-01-01',
+        end_date: settings.referencePeriod?.to || '2024-12-31'
+      };
       
+      const response = await fetch(`${SCENARIO_PLANNER_API}/reference`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(requestBody)
+      });
       
+      if (!response.ok) {
+        throw new Error(`Failed to fetch reference values: ${response.statusText}`);
+      }
+      
+      const data = await response.json();
+      console.log('🔄 Fresh reference values fetched:', data);
+
       // 2. Now clear all inputs and reset to the fresh reference values
-
       const clearedInputs: Record<string, Record<string, { input: string; change: string }>> = {};
+      const newOriginalRefs: Record<string, Record<string, number>> = {};
       
-      
-
       const features = computedSettings?.features || [];
 
-      
-      
       combinations.forEach(combination => {
-
         clearedInputs[combination.id] = {};
+        newOriginalRefs[combination.id] = {};
 
         features.forEach(feature => {
-
           if (feature.selected) {
-
-            // Use the fresh reference values that were just fetched
-
-            const referenceValue = originalReferenceValues[combination.id]?.[feature.id];
+            // Get reference value from the fresh API response
+            const combinationId = combination.combination_id || combination.id;
+            const modelData = data.reference_values_by_combination?.[combinationId];
+            const referenceValue = modelData?.reference_values?.[feature.name];
+            
+            // Store the original reference value
+            newOriginalRefs[combination.id][feature.id] = referenceValue || 0;
 
             clearedInputs[combination.id][feature.id] = {
-
-              input: formatToThreeDecimals(referenceValue || 0),
-
-              change: '0' // Set percentage to 0
-
+              input: referenceValue ? formatToThreeDecimals(referenceValue) : "",
+              change: "0" // Set percentage to 0
             };
-
           }
-
         });
-
       });
 
 
@@ -4490,6 +4529,8 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
                                       viewMode={resultViewMode[viewId] || 'hierarchy'}
 
                                       yVariable={viewResults.yVariable}
+
+                                      xAxisLabel={getViewDisplayName(view)}
 
                                     />
                                   </div>
