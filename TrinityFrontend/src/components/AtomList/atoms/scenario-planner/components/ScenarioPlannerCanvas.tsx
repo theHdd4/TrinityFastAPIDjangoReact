@@ -3304,57 +3304,46 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
 
 
 
-      // 1. First fetch fresh reference values from backend directly
-      const statMethod = settings.referenceMethod || 'period-mean';
-      const modelId = generateModelId();
-      const requestBody: any = {
-        model_id: modelId,
-        stat: statMethod,
-        start_date: settings.referencePeriod?.from || '2024-01-01',
-        end_date: settings.referencePeriod?.to || '2024-12-31'
-      };
-      
-      const response = await fetch(`${SCENARIO_PLANNER_API}/reference`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(requestBody)
-      });
-      
-      if (!response.ok) {
-        throw new Error(`Failed to fetch reference values: ${response.statusText}`);
-      }
-      
-      const data = await response.json();
-      console.log('🔄 Fresh reference values fetched:', data);
+      // 1. First fetch fresh reference values from backend
 
-      // 2. Now clear all inputs and reset to the fresh reference values
-      const clearedInputs: Record<string, Record<string, { input: string; change: string }>> = {};
-      const newOriginalRefs: Record<string, Record<string, number>> = {};
+      await fetchReferenceValuesForAll();
+
       
+      
+      // 2. Now clear all inputs and reset to the fresh reference values
+
+      const clearedInputs: Record<string, Record<string, { input: string; change: string }>> = {};
+      
+      
+
       const features = computedSettings?.features || [];
 
+      
+      
       combinations.forEach(combination => {
+
         clearedInputs[combination.id] = {};
-        newOriginalRefs[combination.id] = {};
 
         features.forEach(feature => {
+
           if (feature.selected) {
-            // Get reference value from the fresh API response
-            const combinationId = combination.combination_id || combination.id;
-            const modelData = data.reference_values_by_combination?.[combinationId];
-            const referenceValue = modelData?.reference_values?.[feature.name];
-            
-            // Store the original reference value
-            newOriginalRefs[combination.id][feature.id] = referenceValue || 0;
+
+            // Use the fresh reference values that were just fetched
+
+            const referenceValue = originalReferenceValues[combination.id]?.[feature.id];
 
             clearedInputs[combination.id][feature.id] = {
-              input: referenceValue ? formatToThreeDecimals(referenceValue) : "",
-              change: "0" // Set percentage to 0
+
+              input: "",
+
+              change: "" // Set percentage to 0
+
             };
+
           }
+
         });
+
       });
 
 
