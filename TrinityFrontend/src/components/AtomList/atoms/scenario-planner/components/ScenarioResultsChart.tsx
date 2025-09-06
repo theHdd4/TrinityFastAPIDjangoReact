@@ -566,36 +566,32 @@ export const ScenarioResultsChart: React.FC<ScenarioResultsChartProps> = ({
 
   return (
     <div className="w-full">
-      <div className="mb-4">
-        <div className="flex justify-between items-center">
-          <h3 className="text-lg font-semibold text-gray-800">
-            {viewMode === 'hierarchy' ? 'Individual Results' : 'Aggregated Results'}
-          </h3>
-          
-          {/* Controls */}
-          <div className="flex gap-2">
-            
-            {/* Menu Button */}
-            <div className="relative border-l border-gray-300 pl-2">
-              <button
-                onClick={handleMenuToggle}
-                className="px-2 py-1 text-xs rounded-md border border-gray-300 bg-white text-gray-600 hover:bg-gray-50 transition-colors"
-                title="Chart Settings"
-                ref={menuRef}
-              >
-                <Settings className="w-3 h-3" />
-              </button>
-              <DropdownMenu />
-            </div>
-          </div>
+      {/* Header with title and menu button outside chart */}
+      <div className="mb-3 flex justify-between items-center">
+        <h3 className="text-lg font-semibold text-gray-800">
+          {viewMode === 'hierarchy' ? 'Individual Results' : 'Aggregated Results'}
+        </h3>
+        
+        {/* Menu Button - Outside chart layout */}
+        <div className="relative">
+          <button
+            onClick={handleMenuToggle}
+            className="px-3 py-2 text-sm rounded-md border border-gray-300 bg-white text-gray-600 hover:bg-gray-50 transition-colors shadow-sm"
+            title="Chart Settings"
+            ref={menuRef}
+          >
+            <Settings className="w-4 h-4" />
+          </button>
+          <DropdownMenu />
         </div>
       </div>
       
-      <div className="w-full h-full relative">
-        <ResponsiveContainer width="100%" height={height}>
+      {/* Chart container with reduced size */}
+      <div className="w-full max-w-4xl mx-auto">
+        <ResponsiveContainer width="100%" height={Math.min(height, 350)}>
           <BarChart 
             data={chartData} 
-            margin={{ top: 20, right: 30, left: 20, bottom: 60 }}
+            margin={{ top: 15, right: 20, left: 60, bottom: 40 }}
           >
           <defs>
             {/* Baseline bar gradient */}
@@ -651,7 +647,17 @@ export const ScenarioResultsChart: React.FC<ScenarioResultsChartProps> = ({
             axisLine={false}
             tickMargin={8}
             width={60}
-            tickFormatter={(value) => value.toLocaleString()}
+            tickFormatter={(value) => {
+              if (value >= 1000000000) {
+                return `${(value / 1000000000).toFixed(1)}b`;
+              } else if (value >= 1000000) {
+                return `${(value / 1000000).toFixed(1)}m`;
+              } else if (value >= 1000) {
+                return `${(value / 1000).toFixed(1)}k`;
+              } else {
+                return value.toString();
+              }
+            }}
             label={currentShowAxisLabels ? { 
               value: 'Values', 
               angle: -90, 

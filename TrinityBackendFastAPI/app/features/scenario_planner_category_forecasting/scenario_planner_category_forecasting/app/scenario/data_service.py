@@ -369,7 +369,7 @@ class DataService:
         # Look for coefficient patterns like "SalesValue_avg", "VolumeUnits_avg", etc.
         for var in x_variables:
             # Try different coefficient naming patterns
-            coeff_key = f"{var}_avg"
+            coeff_key = f"{var}_beta"
             if coeff_key in complete_model_data:
                 value = complete_model_data[coeff_key]
                 if isinstance(value, (int, float)):
