@@ -1800,7 +1800,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
           // Extract identifiers for this combination
 
           // ✅ NEW: Use combination_id directly instead of extracting identifiers
-          const combinationId = combination.id || combination.combination_id;
+          const combinationId = combination.combination_id || combination.id;
           if (!combinationId) {
             console.warn(`No combination_id found in combination:`, combination);
             return;
@@ -2074,7 +2074,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
           
 
           // ✅ NEW: Use combination_id directly instead of extracting identifiers
-          const combinationId = combination.id || combination.combination_id;
+          const combinationId = combination.combination_id || combination.id;
           if (!combinationId) {
             console.warn(`No combination_id found in combination:`, combination);
             return;
@@ -2138,9 +2138,12 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
                   feature: feature.name,
 
                   referenceValue,
+                  type: typeof referenceValue,
+                  isZero: referenceValue === 0,
+                  isUndefined: referenceValue === undefined,
 
-                  hasUserInput: !!combinationInputs[combination.combination_id || combination.id]?.[feature.id]?.input,
-                  willPopulate: !combinationInputs[combination.combination_id || combination.id]?.[feature.id]?.input
+                  hasUserInput: !!combinationInputs[combination.id]?.[feature.id]?.input,
+                  willPopulate: !combinationInputs[combination.id]?.[feature.id]?.input
                 });
 
                 
@@ -2153,7 +2156,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
                 
                                   // ✅ FIXED: Only set input to reference value if user doesn't have input
 
-                  if (!combinationInputs[combination.combination_id || combination.id]?.[feature.id]?.input) {
+                  if (!combinationInputs[combination.id]?.[feature.id]?.input) {
                     newInputs[combination.id][feature.id].input = formatToThreeDecimals(referenceValue);
 
                     newInputs[combination.id][feature.id].change = '0';
@@ -2375,7 +2378,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
     try {
 
       // ✅ NEW: Use combination_id directly instead of extracting identifiers
-      const combinationId = combination.id || combination.combination_id;
+      const combinationId = combination.combination_id || combination.id;
       if (!combinationId) {
         console.error('No combination_id found in combination:', combination);
         return;
@@ -2432,7 +2435,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
         
 
         // ✅ NEW: Find the combination by combination_id instead of identifier matching
-        const combinationId = combination.id || combination.combination_id;
+        const combinationId = combination.combination_id || combination.id;
         const matchingCombination = data.reference_values_by_combination?.[combinationId];
         
         if (matchingCombination) {
@@ -2662,88 +2665,135 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
 
 
 
-  // Clear reference values for a combination
-
-  const clearReferenceValues = (combinationId: string) => {
-
-    const newInputs = { ...combinationInputs };
-
-    
-    
-    if (newInputs[combinationId]) {
-
-      // ✅ FIXED: Restore reference values instead of clearing
-
-      Object.keys(newInputs[combinationId]).forEach(featureId => {
-
-        if (newInputs[combinationId][featureId]) {
-
-          // Get the original reference value for this feature
-
-          const referenceValue = originalReferenceValues[combinationId]?.[featureId];
-
-          
-          
-          if (referenceValue !== undefined) {
-
-            // Restore Abs to original reference value
-
-            newInputs[combinationId][featureId].input = formatToThreeDecimals(referenceValue);
-
-            // Set Pct to 0 (no change from reference)
-
-            newInputs[combinationId][featureId].change = '0';
-
-          } else {
-
-            // Fallback: clear both fields if no reference value available
-
-          newInputs[combinationId][featureId].input = '';
-
-            newInputs[combinationId][featureId].change = '';
-
-          }
-
-        }
-
-      });
-
+  // Clear reference values for a combination - now fetches from MongoDB
+  const clearReferenceValues = async (combinationId: string) => {
+    try {
+      console.log(`🔄 Individual refresh for combination: ${combinationId}`);
       
+      // Show loading state
+      setLoadingReference(combinationId);
       
-      // ✅ FIXED: Update scenario-specific data in global store
-
-      const updatedScenarios = { ...settings.scenarios };
-
-      if (!updatedScenarios[currentScenario]) {
-
-        updatedScenarios[currentScenario] = { ...currentScenarioData };
-
+      // Extract client/app/project from localStorage (same as generateModelId)
+      const envStr = localStorage.getItem('env');
+      if (!envStr) {
+        throw new Error('No env found in localStorage for MongoDB query');
       }
-
-      updatedScenarios[currentScenario].combinationInputs = newInputs;
-
       
+      const env = JSON.parse(envStr);
+      const client_name = env.CLIENT_NAME || 'default_client';
+      const app_name = env.APP_NAME || 'default_app';
+      const project_name = env.PROJECT_NAME || 'default_project';
       
-      onSettingsChange({ 
-
-        scenarios: updatedScenarios
-
-      });
-
+      // Make GET call to retrieve reference points from MongoDB
+      const response = await fetch(
+        `${SCENARIO_PLANNER_API}/get-reference-points?client_name=${encodeURIComponent(client_name)}&app_name=${encodeURIComponent(app_name)}&project_name=${encodeURIComponent(project_name)}`,
+        {
+          method: 'GET',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        }
+      );
       
-      
+      if (response.ok) {
+        const data = await response.json();
+        
+        if (data.success && data.data) {
+          const referenceData = data.data;
+          
+          // Use the same combination ID logic as global refresh
+          const searchKey = combinationId; // combinationId is already the correct key
+          const matchingData = referenceData.reference_values_by_combination?.[searchKey];
+          
+          console.log(`🔍 Individual refresh - Looking for combination: ${searchKey}`, {
+            found: !!matchingData,
+            combinationId,
+            searchKey,
+            availableKeys: Object.keys(referenceData.reference_values_by_combination || {})
+          });
+          
+          if (matchingData) {
+            const newInputs = { ...combinationInputs };
+            const newOriginalRefs = { ...originalReferenceValues };
+            
+            // Initialize if not exists
+            if (!newInputs[combinationId]) {
+              newInputs[combinationId] = {};
+            }
+            if (!newOriginalRefs[combinationId]) {
+              newOriginalRefs[combinationId] = {};
+            }
+            
+            const features = computedSettings?.features || [];
+            features.forEach(feature => {
+              if (feature.selected && matchingData.reference_values?.[feature.name]) {
+                const referenceValue = matchingData.reference_values[feature.name];
+                
+                console.log(`📊 Individual refresh - Reference value for ${feature.name}:`, {
+                  featureName: feature.name,
+                  referenceValue,
+                  type: typeof referenceValue,
+                  isZero: referenceValue === 0,
+                  isUndefined: referenceValue === undefined
+                });
+                
+                // Store original reference value
+                newOriginalRefs[combinationId][feature.id] = referenceValue;
+                
+                // Always overwrite for individual refresh
+                newInputs[combinationId][feature.id] = {
+                  input: formatToThreeDecimals(referenceValue),
+                  change: '0'
+                };
+              }
+            });
+            
+            // Update global state
+            const updatedScenarios = { ...settings.scenarios };
+            if (!updatedScenarios[currentScenario]) {
+              updatedScenarios[currentScenario] = { ...currentScenarioData };
+            }
+            updatedScenarios[currentScenario].combinationInputs = newInputs;
+            updatedScenarios[currentScenario].originalReferenceValues = newOriginalRefs;
+            
+            onSettingsChange({ scenarios: updatedScenarios });
+            
+            console.log('✅ Individual refresh - Reference values processed successfully');
+            console.log('🔍 Individual refresh - Updated combinationInputs:', newInputs);
+            console.log('🔍 Individual refresh - Updated originalReferenceValues:', newOriginalRefs);
+            
+            toast({
+              title: "Reference Values Restored",
+              description: `Reference values restored for ${combinationId}`,
+              variant: "default",
+            });
+          } else {
+            toast({
+              title: "No Reference Data",
+              description: `No reference data found for ${combinationId}`,
+              variant: "destructive",
+            });
+          }
+        } else {
+          toast({
+            title: "No Reference Data",
+            description: "No reference data found in MongoDB",
+            variant: "destructive",
+          });
+        }
+      } else {
+        throw new Error(`Failed to fetch reference values: ${response.statusText}`);
+      }
+    } catch (error) {
+      console.error('❌ Error in individual refresh:', error);
       toast({
-
-        title: "Reference Values Restored",
-
-        description: `Reference values restored for ${combinationId}`,
-
-        variant: "default",
-
+        title: "Refresh Error",
+        description: "Failed to refresh reference values. Please try again.",
+        variant: "destructive",
       });
-
+    } finally {
+      setLoadingReference(null);
     }
-
   };
 
 
@@ -3262,7 +3312,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
       });
       
       // Auto-refresh when reference method changes
-      handleGlobalRefresh();
+      handleGlobalRefreshReferenceValues();
     }
   }, [settings.referenceMethod]); // Watch for reference method changes
 
@@ -3276,9 +3326,138 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
       });
       
       // Auto-refresh when reference period changes
-      handleGlobalRefresh();
+      handleGlobalRefreshReferenceValues();
     }
   }, [settings.referencePeriod]); // Watch for reference period changes
+
+  // ✅ NEW: Function to fetch reference values from MongoDB using GET call
+  const fetchReferenceValuesFromMongo = async (overwriteExisting = false) => {
+    try {
+      console.log('🔄 Fetching reference values from MongoDB...');
+      
+      // Extract client/app/project from localStorage (same as generateModelId)
+      const envStr = localStorage.getItem('env');
+      if (!envStr) {
+        throw new Error('No env found in localStorage for MongoDB query');
+      }
+      
+      const env = JSON.parse(envStr);
+      const client_name = env.CLIENT_NAME || 'default_client';
+      const app_name = env.APP_NAME || 'default_app';
+      const project_name = env.PROJECT_NAME || 'default_project';
+      
+      console.log('🔍 Debug - Extracted from localStorage:', { client_name, app_name, project_name });
+      
+      // Make GET call to retrieve reference points from MongoDB
+      const response = await fetch(
+        `${SCENARIO_PLANNER_API}/get-reference-points?client_name=${encodeURIComponent(client_name)}&app_name=${encodeURIComponent(app_name)}&project_name=${encodeURIComponent(project_name)}`,
+        {
+          method: 'GET',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        }
+      );
+      
+      if (response.ok) {
+        const data = await response.json();
+        console.log('✅ Reference values fetched from MongoDB:', data);
+        
+        if (data.success && data.data) {
+          // Process the MongoDB data and update the state
+          const newInputs = { ...combinationInputs };
+          const newOriginalRefs = { ...originalReferenceValues };
+          
+          // Extract reference values from MongoDB response
+          const referenceData = data.data;
+          
+          combinations.forEach(combination => {
+            if (!newInputs[combination.id]) {
+              newInputs[combination.id] = {};
+            }
+            if (!newOriginalRefs[combination.id]) {
+              newOriginalRefs[combination.id] = {};
+            }
+            
+            // Find matching combination in MongoDB data
+            // Use combination_id if available, otherwise fall back to id
+            const searchKey = combination.combination_id || combination.id;
+            const matchingData = referenceData.reference_values_by_combination?.[searchKey];
+            
+            console.log(`🔍 Looking for combination: ${searchKey}`, {
+              found: !!matchingData,
+              combinationId: combination.id,
+              combination_id: combination.combination_id,
+              searchKey,
+              availableKeys: Object.keys(referenceData.reference_values_by_combination || {})
+            });
+            
+            if (matchingData) {
+              const features = computedSettings?.features || [];
+              console.log(`🔍 Processing matching data for ${searchKey}:`, {
+                matchingData,
+                referenceValues: matchingData.reference_values,
+                features: features.map(f => ({ id: f.id, name: f.name, selected: f.selected }))
+              });
+              
+              features.forEach(feature => {
+                if (feature.selected && matchingData.reference_values?.[feature.name]) {
+                  const referenceValue = matchingData.reference_values[feature.name];
+                  
+                  console.log(`📊 Reference value for ${feature.name}:`, {
+                    featureName: feature.name,
+                    referenceValue,
+                    type: typeof referenceValue,
+                    isZero: referenceValue === 0,
+                    isUndefined: referenceValue === undefined
+                  });
+                  
+                  // Store original reference value
+                  newOriginalRefs[combination.id][feature.id] = referenceValue;
+                  
+                  // Only populate if user doesn't have input OR if we're overwriting existing values
+                  if (overwriteExisting || !combinationInputs[combination.id]?.[feature.id]?.input) {
+                    newInputs[combination.id][feature.id] = {
+                      input: formatToThreeDecimals(referenceValue),
+                      change: '0'
+                    };
+                  }
+                } else {
+                  console.log(`⚠️ Feature ${feature.name} not selected or no reference value:`, {
+                    featureName: feature.name,
+                    selected: feature.selected,
+                    hasReferenceValue: !!matchingData.reference_values?.[feature.name],
+                    referenceValue: matchingData.reference_values?.[feature.name]
+                  });
+                }
+              });
+            }
+          });
+          
+          // Update global state
+          const updatedScenarios = { ...settings.scenarios };
+          if (!updatedScenarios[currentScenario]) {
+            updatedScenarios[currentScenario] = { ...currentScenarioData };
+          }
+          updatedScenarios[currentScenario].combinationInputs = newInputs;
+          updatedScenarios[currentScenario].originalReferenceValues = newOriginalRefs;
+          
+          onSettingsChange({ scenarios: updatedScenarios });
+          
+          console.log('✅ Reference values from MongoDB processed successfully');
+          console.log('🔍 Updated combinationInputs:', newInputs);
+          console.log('🔍 Updated originalReferenceValues:', newOriginalRefs);
+        } else {
+          console.warn('⚠️ No reference data found in MongoDB response');
+        }
+      } else {
+        throw new Error(`Failed to fetch reference values: ${response.statusText}`);
+      }
+    } catch (error) {
+      console.error('❌ Error fetching reference values from MongoDB:', error);
+      throw error;
+    }
+  };
 
   // ✅ NEW: Global refresh function for all combinations
 
@@ -3304,75 +3483,10 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
 
 
 
-      // 1. First fetch fresh reference values from backend
-
-      await fetchReferenceValuesForAll();
-
-      
-      
-      // 2. Now clear all inputs and reset to the fresh reference values
-
-      const clearedInputs: Record<string, Record<string, { input: string; change: string }>> = {};
-      
-      
-
-      const features = computedSettings?.features || [];
-
-      
-      
-      combinations.forEach(combination => {
-
-        clearedInputs[combination.id] = {};
-
-        features.forEach(feature => {
-
-          if (feature.selected) {
-
-            // Use the fresh reference values that were just fetched
-
-            const referenceValue = originalReferenceValues[combination.id]?.[feature.id];
-
-            clearedInputs[combination.id][feature.id] = {
-
-              input: "",
-
-              change: "" // Set percentage to 0
-
-            };
-
-          }
-
-        });
-
-      });
-
-
-
-      // 3. Update the scenario with cleared inputs
-
-      const updatedScenarios = { ...settings.scenarios };
-
-      if (!updatedScenarios[currentScenario]) {
-
-        updatedScenarios[currentScenario] = { ...currentScenarioData };
-
-      }
-
-      
-      
-      updatedScenarios[currentScenario].combinationInputs = clearedInputs;
-
-      
-      
-      // 4. Save to global store
-
-      onSettingsChange({ 
-
-        scenarios: updatedScenarios
-
-      });
-
-
+      // 1. First fetch saved reference values from MongoDB using GET call
+      // This function already handles updating the state properly
+      // Pass true to overwrite existing user inputs
+      await fetchReferenceValuesFromMongo(true);
 
       // 5. Show success message
 
@@ -3410,6 +3524,96 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
 
   };
 
+  const handleGlobalRefreshReferenceValues = async () => {
+
+    try {
+
+      console.log('🔄 Starting global refresh for all combinations...');
+
+      
+      
+      // Show confirmation toast
+
+      toast({
+
+        title: "Refreshing All Combinations",
+
+        description: "Clearing inputs and resetting to reference values...",
+
+        variant: "default",
+
+      });
+
+
+
+      // 1. First fetch fresh reference values from backend
+      await fetchReferenceValuesForAll();
+      
+      // 2. Now clear all inputs and reset to the fresh reference values
+      const clearedInputs: Record<string, Record<string, { input: string; change: string }>> = {};
+      const features = computedSettings?.features || [];
+
+      combinations.forEach(combination => {
+        clearedInputs[combination.id] = {};
+        features.forEach(feature => {
+          if (feature.selected) {
+            // Use the fresh reference values that were just fetched
+            const referenceValue = originalReferenceValues[combination.id]?.[feature.id];
+            clearedInputs[combination.id][feature.id] = {
+              input: formatToThreeDecimals(referenceValue || "0"),
+              change: "0"// This clears the change
+            };
+          }
+        });
+      });
+
+      // 3. Update the scenario with cleared inputs
+      const updatedScenarios = { ...settings.scenarios };
+      if (!updatedScenarios[currentScenario]) {
+        updatedScenarios[currentScenario] = { ...currentScenarioData };
+      }
+      updatedScenarios[currentScenario].combinationInputs = clearedInputs;
+
+      // 4. Save to global store
+      onSettingsChange({ 
+        scenarios: updatedScenarios
+      });
+
+      // 5. Show success message
+
+      toast({
+
+        title: "Combinations Refreshed",
+
+        description: `Successfully reset ${combinations.length} combinations to fresh reference values`,
+
+        variant: "default",
+
+      });
+
+
+
+      console.log('✅ Global refresh completed successfully');
+
+
+
+    } catch (error) {
+
+      console.error('❌ Error during global refresh:', error);
+
+      toast({
+
+        title: "Refresh Error",
+
+        description: "Failed to refresh combinations. Please try again.",
+
+        variant: "destructive",
+
+      });
+
+    }
+
+  };
 
 
   const selectedFeatures = useMemo(() => {
@@ -4070,7 +4274,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
 
                                             e.stopPropagation();
 
-                                            clearReferenceValues(combination.id);
+                                            clearReferenceValues(combination.combination_id || combination.id);
 
                                           }}
 
