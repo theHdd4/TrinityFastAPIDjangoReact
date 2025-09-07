@@ -1105,7 +1105,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
 
       end_date: settings.referencePeriod?.to || '2024-12-31',
 
-      stat: settings.referenceMethod || 'period-mean',
+        stat: settings.referenceMethod || 'mean',
 
       clusters,
 
@@ -1697,7 +1697,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
 
       // ✅ OPTIMIZATION: Make ONE API call instead of multiple calls
 
-      const statMethod = settings.referenceMethod || 'period-mean';
+      const statMethod = settings.referenceMethod || 'mean';
 
       const modelId = generateModelId();
       const requestBody: any = {
@@ -1981,7 +1981,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
 
       // ✅ OPTIMIZATION: Make ONE API call instead of multiple calls
 
-      const statMethod = settings.referenceMethod || 'period-mean';
+      const statMethod = settings.referenceMethod || 'mean';
 
       const modelId = generateModelId();
       const requestBody: any = {
@@ -2390,7 +2390,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
 
       // ✅ FIXED: Backend requires dates for ALL methods, not just period-based ones
 
-      const statMethod = settings.referenceMethod || 'period-mean';
+      const statMethod = settings.referenceMethod || 'mean';
 
       const isPeriodBased = statMethod.startsWith('period-');
 
@@ -2966,7 +2966,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
 
         title: "Reference Values Cleared",
 
-        description: "Press Ctrl+Enter to load reference values with new settings",
+        description: "Reference values cleared. Use the refresh button to load new values.",
 
         variant: "default",
 
@@ -4248,23 +4248,23 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
 
                           </Button>
 
-                          <Button
+                        <Button
 
-                            onClick={handleGlobalRefresh}
+                          onClick={handleGlobalRefresh}
 
-                            variant="ghost"
+                          variant="ghost"
 
-                            size="sm"
+                          size="sm"
 
-                            className="h-6 w-6 p-0 text-blue-600 hover:text-blue-700 hover:bg-blue-50 transition-all duration-200"
+                          className="h-6 w-6 p-0 text-blue-600 hover:text-blue-700 hover:bg-blue-50 transition-all duration-200"
 
-                            title="Refresh all combinations - Clear inputs and reset to reference values"
+                          title="Refresh all combinations - Clear inputs and reset to reference values"
 
-                          >
+                        >
 
-                            <RefreshCw className="w-4 h-4" />
+                          <RefreshCw className="w-4 h-4" />
 
-                          </Button>
+                        </Button>
 
                         </div>
 
@@ -4376,7 +4376,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
 
                                   {/* Removed unnecessary checkbox - live calculations work automatically */}
 
-                                  <div className="text-[10px] font-medium text-gray-800 break-words leading-tight">
+                                  <div className="text-sm font-medium text-gray-800 break-words leading-tight">
                                     {combination.combination_id || combination.id || 'Unknown Combination'}
                                           </div>
 
@@ -4429,9 +4429,27 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
 
                                     ) : (
 
-                                      <span className="text-gray-400 text-xs">
+                                      <span className="flex items-center gap-1">
 
-                                        Press Ctrl+Enter to load
+                                        <button
+
+                                          onClick={(e) => {
+
+                                            e.stopPropagation();
+
+                                            clearReferenceValues(combination.combination_id || combination.id);
+
+                                          }}
+
+                                          className="text-blue-500 hover:text-blue-700 text-xs"
+
+                                          title="Load reference values"
+
+                                        >
+
+                                          <RefreshCw className="w-3 h-3" />
+
+                                        </button>
 
                                       </span>
 

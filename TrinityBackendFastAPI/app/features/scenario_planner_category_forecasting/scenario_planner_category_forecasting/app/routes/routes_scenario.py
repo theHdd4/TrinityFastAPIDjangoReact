@@ -914,6 +914,106 @@ async def get_reference_points_for_combinations_endpoint(
         logger.error(f"Error in auto-population: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to auto-populate reference points: {str(e)}")
 
+
+@router.get("/get-date-range")
+async def get_date_range_endpoint(
+    model_id: str = Query(..., description="Model ID")
+):
+    """Get the available date range from cluster slice data"""
+    try:
+        # Parse model_id to extract client/app/project
+        if '%' in model_id:
+            decoded_model_id = urllib.parse.unquote(model_id)
+        else:
+            decoded_model_id = model_id
+            
+        parts = decoded_model_id.split('/')
+        if len(parts) >= 3:
+            client_name = parts[0]
+            app_name = parts[1] 
+            project_name = '/'.join(parts[2:])
+        else:  
+            raise HTTPException(status_code=400, detail="Invalid model_id format")
+        
+        logger.info(f"🔍 Getting date range for: {client_name}/{app_name}/{project_name}")
+        
+        # Get models to find a sample combination for date range
+        models = await DataService.get_models_for_combinations(decoded_model_id)
+        
+        if not models:
+            raise HTTPException(status_code=404, detail="No models found for the given model_id")
+        
+        # Use the first model to get date range
+        sample_model = models[0]
+        sample_identifiers = sample_model.get("identifiers", {})
+        
+        try:
+            # Get a sample data slice to extract date range
+            df_slice = await DataService.get_data_slice_for_combination(
+                sample_identifiers, 
+                start=None,  # Get full range
+                end=None
+            )
+            
+            if df_slice is not None and not df_slice.empty:
+                # Find date column (assuming it's named 'date', 'Date', or similar)
+                date_columns = [col for col in df_slice.columns if 'date' in col.lower()]
+                
+                if date_columns:
+                    date_col = date_columns[0]
+                    min_date = df_slice[date_col].min()
+                    max_date = df_slice[date_col].max()
+                    
+                    # Convert to string format
+                    start_date = min_date.strftime('%Y-%m-%d') if hasattr(min_date, 'strftime') else str(min_date)
+                    end_date = max_date.strftime('%Y-%m-%d') if hasattr(max_date, 'strftime') else str(max_date)
+                    
+                    return {
+                        "success": True,
+                        "message": "Date range retrieved successfully",
+                        "data": {
+                            "start_date": start_date,
+                            "end_date": end_date,
+                            "date_column": date_col,
+                            "total_rows": len(df_slice)
+                        }
+                    }
+                else:
+                    # Fallback: use index if no date column found
+                    return {
+                        "success": True,
+                        "message": "No date column found, using default range",
+                        "data": {
+                            "start_date": "2024-01-01",
+                            "end_date": "2024-12-31",
+                            "date_column": None,
+                            "total_rows": len(df_slice)
+                        }
+                    }
+            else:
+                raise HTTPException(status_code=404, detail="No data found for date range extraction")
+                
+        except Exception as e:
+            logger.warning(f"Error getting date range from data slice: {str(e)}")
+            # Fallback to default range
+            return {
+                "success": True,
+                "message": "Using default date range",
+                "data": {
+                    "start_date": "2024-01-01",
+                    "end_date": "2024-12-31",
+                    "date_column": None,
+                    "total_rows": 0
+                }
+            }
+        
+    except Exception as e:
+        logger.error(f"Error getting date range: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to get date range: {str(e)}")
+
+
+
+
 @router.get("/get-scenario-configurations")
 async def get_scenario_configurations_endpoint(
     client_name: str = Query(..., description="Client name"),

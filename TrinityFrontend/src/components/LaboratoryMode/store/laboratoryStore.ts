@@ -664,7 +664,7 @@ export interface ScenarioPlannerSettings {
         id: string;
         combination_id: string;
       }>;
-      referenceMethod: 'period-mean' | 'mean' | 'period-median' | 'median';
+      referenceMethod: 'mean' | 'period-mean' | 'period-median' | 'median';
       referencePeriod: {
         from: string;
         to: string;
@@ -723,7 +723,7 @@ export interface ScenarioPlannerSettings {
   };
   
   // Global settings (shared across all scenarios)
-  referenceMethod: 'period-mean' | 'mean' | 'period-median' | 'median';
+  referenceMethod: 'mean' | 'period-mean' | 'period-median' | 'median';
   referencePeriod: {
     from: string;
     to: string;
@@ -749,7 +749,7 @@ export interface ScenarioPlannerSettings {
   
   // ✅ NEW: Properties for auto-refresh functionality
   referenceValuesNeedRefresh?: boolean;
-  lastReferenceMethod?: 'period-mean' | 'mean' | 'period-median' | 'median';
+  lastReferenceMethod?: 'mean' | 'period-mean' | 'period-median' | 'median';
   lastReferencePeriod?: {
     from: string;
     to: string;
@@ -823,7 +823,7 @@ export const DEFAULT_SCENARIO_PLANNER_SETTINGS: ScenarioPlannerSettings = {
       features: [], // Will be populated from backend
       outputs: [], // Will be populated from backend
       combinations: [], // Will be generated from identifiers
-      referenceMethod: 'period-mean',
+      referenceMethod: 'mean',
       referencePeriod: { from: '01-JAN-2020', to: '30-MAR-2024' },
       resultViews: [
         { id: 'view-1', name: 'View 1', selectedCombinations: [] },
@@ -838,7 +838,7 @@ export const DEFAULT_SCENARIO_PLANNER_SETTINGS: ScenarioPlannerSettings = {
   },
   
   // Global settings (shared across all scenarios)
-  referenceMethod: 'period-mean',
+  referenceMethod: 'mean',
   referencePeriod: { from: '01-JAN-2020', to: '30-MAR-2024' },
   selectedResultScenario: 'scenario-1',
   selectedView: 'view-1',
@@ -858,7 +858,7 @@ export const DEFAULT_SCENARIO_PLANNER_SETTINGS: ScenarioPlannerSettings = {
   
   // ✅ NEW: Default values for auto-refresh functionality
   referenceValuesNeedRefresh: false,
-  lastReferenceMethod: 'period-mean',
+  lastReferenceMethod: 'mean',
   lastReferencePeriod: { from: '01-JAN-2020', to: '30-MAR-2024' },
   
   // ✅ NEW: Default value for refresh functionality

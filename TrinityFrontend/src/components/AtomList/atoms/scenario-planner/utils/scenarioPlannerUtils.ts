@@ -319,7 +319,7 @@ export const createNewScenario = (settings: ScenarioPlannerSettings, scenarioId:
         features: [], // Will be populated by initializeNewScenario
         outputs: [], // Will be populated by initializeNewScenario
         combinations: [], // Will be generated from fresh identifiers
-        referenceMethod: settings.referenceMethod || 'period-mean',
+        referenceMethod: settings.referenceMethod || 'mean',
         referencePeriod: settings.referencePeriod || { from: '01-JAN-2020', to: '30-MAR-2024' },
         resultViews: [
           { id: 'view-1', name: 'View 1', selectedCombinations: [] },

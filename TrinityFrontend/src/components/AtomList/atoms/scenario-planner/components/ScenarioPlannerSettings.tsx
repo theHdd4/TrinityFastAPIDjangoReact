@@ -224,8 +224,53 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
     message: string;
   } | null>(null);
   
+  // Date range state
+  const [dateRange, setDateRange] = useState<{
+    start_date: string;
+    end_date: string;
+  } | null>(null);
+  const [loadingDateRange, setLoadingDateRange] = useState(false);
+  
+  // Function to fetch date range from backend
+  const fetchDateRange = async () => {
+    try {
+      setLoadingDateRange(true);
+      const modelId = generateModelId();
+      const response = await fetch(`${SCENARIO_PLANNER_API}/get-date-range?model_id=${encodeURIComponent(modelId)}`);
+      
+      if (response.ok) {
+        const result = await response.json();
+        if (result.success && result.data) {
+          setDateRange({
+            start_date: result.data.start_date,
+            end_date: result.data.end_date
+          });
+          
+          // Auto-populate reference period if not set
+          if (!data.referencePeriod?.from || !data.referencePeriod?.to) {
+            onDataChange({
+              referencePeriod: {
+                from: result.data.start_date,
+                to: result.data.end_date
+              }
+            });
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error fetching date range:', error);
+    } finally {
+      setLoadingDateRange(false);
+    }
+  };
+  
   // Removed unused refs to simplify the solution
   
+  // Fetch date range on component mount
+  useEffect(() => {
+    fetchDateRange();
+  }, []);
+
   // Read identifiers, features, and combinations from shared store (data prop)
   const backendIdentifiers = data.backendIdentifiers || null;
   const backendFeatures = data.backendFeatures || null;
@@ -382,9 +427,7 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
         
         // Notify parent component to refresh reference values
         if (onDataChange) {
-          // Set a flag to indicate reference values need refresh
           onDataChange({
-            referenceValuesNeedRefresh: true,
             lastReferenceMethod: data.referenceMethod,
             lastReferencePeriod: data.referencePeriod
           });
@@ -403,35 +446,6 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
       }
     }, [data.referenceMethod, data.referencePeriod, data.identifiers, data.combinations]); // Removed onDataChange to prevent infinite loops
     
-    // ✅ RESTORED & IMPROVED: Manual refresh function for user control
-    const handleManualRefresh = () => {
-      console.log('🔄 Settings: Manual refresh button clicked!', {
-        hasOnDataChange: !!onDataChange,
-        identifiersLength: data.identifiers?.length || 0,
-        combinationsLength: data.combinations?.length || 0,
-        referenceMethod: data.referenceMethod,
-        referencePeriod: data.referencePeriod
-      });
-      
-      if (onDataChange) {
-        const refreshData = {
-          referenceValuesNeedRefresh: true,
-          lastReferenceMethod: data.referenceMethod,
-          lastReferencePeriod: data.referencePeriod
-        };
-        
-        console.log('🔄 Settings: Calling onDataChange with:', refreshData);
-        onDataChange(refreshData);
-        
-        toast({
-          title: "Manual Refresh Triggered",
-          description: "Reference values will be refreshed with current settings",
-          variant: "default",
-        });
-      } else {
-        console.log('❌ Settings: onDataChange is not available!');
-      }
-    };
   
   const [openSections, setOpenSections] = useState({
     identifier1: true,
@@ -1177,14 +1191,6 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
                     <div className="space-y-2">
                       <div className="flex items-center justify-between">
                         <span className="text-sm font-medium">Available Combinations ({backendCombinations.total_combinations || 0})</span>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={fetchCombinations}
-                          disabled={loadingCombinations}
-                        >
-                          {loadingCombinations ? "Loading..." : "Refresh"}
-                        </Button>
                       </div>
                       
                       {/* Select All / Deselect All for Combinations */}
@@ -1209,50 +1215,52 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
                         </label>
                       </div>
                       
-                      {/* Individual Combination Selection */}
-                      <div className="max-h-60 overflow-y-auto space-y-1">
-                        {backendCombinations.combinations.map((combination: any) => (
-                          <div key={combination.combination_id} className="flex items-center space-x-2 p-2 border rounded">
-                            <Checkbox 
-                              id={`combination-${combination.combination_id}`}
-                              checked={data.selectedCombinations?.includes(combination.combination_id) || false}
-                              onCheckedChange={(checked) => {
-                                const currentSelected = data.selectedCombinations || [];
-                                console.log('🔍 Settings: Combination toggle:', {
-                                  combinationId: combination.combination_id,
-                                  checked,
-                                  currentSelected,
-                                  dataSelectedCombinations: data.selectedCombinations
-                                });
-                                
-                                if (checked === true) {
-                                  // Add combination
-                                  const newSelected = [...currentSelected, combination.combination_id];
-                                  console.log('🔍 Settings: Adding combination, new selection:', newSelected);
-                                  onDataChange({ 
-                                    selectedCombinations: [...currentSelected, combination.combination_id] 
+                      {/* Individual Combination Selection - Matching Build Atom Layout */}
+                      <div className="max-h-60 overflow-y-auto overflow-x-auto border rounded p-2">
+                        <div className="grid grid-cols-1 gap-2 min-w-max">
+                          {backendCombinations.combinations.map((combination: any) => (
+                            <div key={combination.combination_id} className="flex items-center space-x-2 p-2 border rounded hover:bg-muted/30">
+                              <Checkbox 
+                                id={`combination-${combination.combination_id}`}
+                                checked={data.selectedCombinations?.includes(combination.combination_id) || false}
+                                onCheckedChange={(checked) => {
+                                  const currentSelected = data.selectedCombinations || [];
+                                  console.log('🔍 Settings: Combination toggle:', {
+                                    combinationId: combination.combination_id,
+                                    checked,
+                                    currentSelected,
+                                    dataSelectedCombinations: data.selectedCombinations
                                   });
-                                } else {
-                                  // Remove combination
-                                  const newSelected = currentSelected.filter((id: string) => id !== combination.combination_id);
-                                  console.log('🔍 Settings: Removing combination, new selection:', newSelected);
-                                  onDataChange({ 
-                                    selectedCombinations: currentSelected.filter((id: string) => id !== combination.combination_id) 
-                                  });
-                                }
-                              }}
-                              className="data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600 data-[state=checked]:text-white"
-                            />
-                            <div className="flex-1">
-                              <label htmlFor={`combination-${combination.combination_id}`} className="text-sm font-medium cursor-pointer">
-                                {combination.combination_id}
-                              </label>
-                              <div className="text-xs text-gray-500">
-                                {combination.identifiers ? Object.entries(combination.identifiers).map(([key, value]) => `${key}: ${value}`).join(', ') : 'No identifiers'}
+                                  
+                                  if (checked === true) {
+                                    // Add combination
+                                    const newSelected = [...currentSelected, combination.combination_id];
+                                    console.log('🔍 Settings: Adding combination, new selection:', newSelected);
+                                    onDataChange({ 
+                                      selectedCombinations: [...currentSelected, combination.combination_id] 
+                                    });
+                                  } else {
+                                    // Remove combination
+                                    const newSelected = currentSelected.filter((id: string) => id !== combination.combination_id);
+                                    console.log('🔍 Settings: Removing combination, new selection:', newSelected);
+                                    onDataChange({ 
+                                      selectedCombinations: currentSelected.filter((id: string) => id !== combination.combination_id) 
+                                    });
+                                  }
+                                }}
+                                className="data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600 data-[state=checked]:text-white"
+                              />
+                              <div className="flex-1">
+                                <label htmlFor={`combination-${combination.combination_id}`} className="text-xs font-medium cursor-pointer truncate">
+                                  {combination.combination_id}
+                                </label>
+                                <div className="text-xs text-gray-500 truncate">
+                                  {combination.identifiers ? Object.entries(combination.identifiers).map(([key, value]) => `${key}: ${value}`).join(', ') : 'No identifiers'}
+                                </div>
                               </div>
                             </div>
-                          </div>
-                        ))}
+                          ))}
+                        </div>
                       </div>
                     </div>
                   ) : (
@@ -1282,12 +1290,6 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
               <CollapsibleTrigger className="flex items-center justify-between w-full p-2 hover:bg-gray-50 rounded-md">
                   <div className="flex items-center space-x-2">
                 <span className="font-medium text-sm">Reference Settings</span>
-                    {/* ✅ RESTORED: Visual indicator when refresh is needed */}
-                    {data.referenceValuesNeedRefresh && (
-                      <Badge variant="destructive" className="text-xs px-2 py-0.5">
-                        Refresh Needed
-                      </Badge>
-                    )}
                   </div>
                 {openSections.referenceSettings ? (
                   <ChevronDown className="h-4 w-4" />
@@ -1310,7 +1312,7 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
             <CollapsibleContent className="px-2 py-2">
               <div className="space-y-2">
                 <Select 
-                  value={data.referenceMethod || 'period-mean'} 
+                  value={data.referenceMethod || 'mean'} 
                   onValueChange={(value: 'period-mean' | 'period-median' | 'mean' | 'median') => onDataChange({ referenceMethod: value })}
                 >
                   <SelectTrigger className="w-full">
@@ -1345,16 +1347,22 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
                   </label>
                   <input
                     id="reference-start-date"
-                    type="text"
-                    value={data.referencePeriod?.from || ''}
+                    type="date"
+                    value={data.referencePeriod?.from || dateRange?.start_date || ''}
                     onChange={(e) => onDataChange({
                       referencePeriod: {
                         ...data.referencePeriod,
                         from: e.target.value
                       }
                     })}
-                    placeholder="01-JAN-2020"
-                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    min={dateRange?.start_date}
+                    max={dateRange?.end_date}
+                    disabled={data.referenceMethod === 'mean' || data.referenceMethod === 'median'}
+                    className={`w-full px-3 py-2 text-sm border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent ${
+                      data.referenceMethod === 'mean' || data.referenceMethod === 'median'
+                        ? 'border-gray-200 bg-gray-50 text-gray-500 cursor-not-allowed'
+                        : 'border-gray-300 bg-white'
+                    }`}
                   />
                 </div>
                 
@@ -1364,35 +1372,40 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
                   </label>
                   <input
                     id="reference-end-date"
-                    type="text"
-                    value={data.referencePeriod?.to || ''}
+                    type="date"
+                    value={data.referencePeriod?.to || dateRange?.end_date || ''}
                     onChange={(e) => onDataChange({
                       referencePeriod: {
                         ...data.referencePeriod,
                         to: e.target.value
                       }
                     })}
-                    placeholder="30-MAR-2024"
-                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                                      />
+                    min={data.referencePeriod?.from || dateRange?.start_date}
+                    max={dateRange?.end_date}
+                    disabled={data.referenceMethod === 'mean' || data.referenceMethod === 'median'}
+                    className={`w-full px-3 py-2 text-sm border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent ${
+                      data.referenceMethod === 'mean' || data.referenceMethod === 'median'
+                        ? 'border-gray-200 bg-gray-50 text-gray-500 cursor-not-allowed'
+                        : 'border-gray-300 bg-white'
+                    }`}
+                  />
+                </div>
+                
+                {/* Show loading indicator for date range */}
+                {loadingDateRange && (
+                  <div className="text-xs text-gray-500 flex items-center gap-2">
+                    <div className="w-3 h-3 border-2 border-gray-400 border-t-transparent rounded-full animate-spin"></div>
+                    Loading date range...
                   </div>
+                )}
+                
+                {/* Show info about disabled fields */}
+                {(data.referenceMethod === 'mean' || data.referenceMethod === 'median') && (
+                  <div className="text-xs text-gray-500 bg-blue-50 p-2 rounded">
+                    Date fields are disabled for {data.referenceMethod} method. Use Period Mean or Period Median to enable date selection.
+                  </div>
+                )}
                   
-                                    {/* ✅ RESTORED: Manual Refresh Button */}
-                  <div className="pt-2 space-y-2">
-                    <Button
-                      onClick={handleManualRefresh}
-                      variant="outline"
-                      size="sm"
-                      className="w-full"
-                      disabled={!data.identifiers?.length || !data.combinations?.length}
-                      title={(!data.identifiers?.length || !data.combinations?.length) ? 
-                        `Button disabled: ${!data.identifiers?.length ? 'No identifiers' : ''} ${!data.combinations?.length ? 'No combinations' : ''}` : 
-                        'Click to refresh reference values'}
-                    >
-                      <RefreshCw className="h-4 w-4 mr-2" />
-                      Refresh Reference Values
-                    </Button>
-                  </div>
                 </div>
                     </CollapsibleContent>
                   </Collapsible>
