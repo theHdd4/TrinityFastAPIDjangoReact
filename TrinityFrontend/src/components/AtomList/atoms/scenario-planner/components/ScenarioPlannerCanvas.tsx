@@ -1951,7 +1951,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
 
   // New function to fetch reference values for ALL combinations - OPTIMIZED!
 
-  const fetchReferenceValuesForAll = async () => {
+  const fetchReferenceValuesForAll = async (overwriteExisting = false) => {
 
     if (combinations.length === 0) {
 
@@ -2154,9 +2154,9 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
 
                 
                 
-                                  // ✅ FIXED: Only set input to reference value if user doesn't have input
+                                  // ✅ FIXED: Only set input to reference value if user doesn't have input OR if we're overwriting
 
-                  if (!combinationInputs[combination.id]?.[feature.id]?.input) {
+                  if (!combinationInputs[combination.id]?.[feature.id]?.input || overwriteExisting) {
                     newInputs[combination.id][feature.id].input = formatToThreeDecimals(referenceValue);
 
                     newInputs[combination.id][feature.id].change = '0';
@@ -2331,7 +2331,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
 
           title: "Reference Values Loaded",
 
-          description: `Successfully populated reference values for ${totalPopulated} new features (preserved existing user input)`,
+          description: `Successfully populated reference values for ${totalPopulated} features ${overwriteExisting ? '(overwrote existing values)' : '(preserved existing user input)'}`,
 
           variant: "default",
 
@@ -2657,7 +2657,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
 
       e.preventDefault();
 
-      fetchReferenceValuesForAll();
+      fetchReferenceValuesForAll(false); // ✅ Keep false to preserve user changes on manual refresh
 
     }
 
@@ -3548,7 +3548,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
 
       // 1. First fetch fresh reference values from backend
       // This function already handles updating the state properly
-      await fetchReferenceValuesForAll();
+      await fetchReferenceValuesForAll(true); // ✅ Pass true to overwrite existing values when method/period changes
 
       // 5. Show success message
 

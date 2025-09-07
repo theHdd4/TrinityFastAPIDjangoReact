@@ -2,7 +2,7 @@ from fastapi import APIRouter, HTTPException, Query, Body
 import logging
 import urllib.parse
 from ..config import cache, scenario_values_collection, select_models_collection, saved_predictions_collection
-from ..schemas import RunRequest, RunResponse, CacheWarmResponse, StatusResponse, IdentifiersResponse, FeaturesResponse, CacheClearResponse, ReferenceRequest, ReferenceResponse, ScenarioValuesRequest, ScenarioValuesResponse, SingleCombinationReferenceRequest, SingleCombinationReferenceResponse, AutoPopulateReferenceRequest, AutoPopulateReferenceResponse
+from ..schemas import RunRequest, RunResponse, CacheWarmResponse, StatusResponse, IdentifiersResponse, FeaturesResponse, CacheClearResponse, ReferenceRequest, ReferenceResponse, ScenarioValuesRequest, ScenarioValuesResponse, SingleCombinationReferenceRequest, SingleCombinationReferenceResponse, AutoPopulateReferenceRequest, AutoPopulateReferenceResponse, CalculateReferencePointsRequest
 
 from ..scenario.data_service import DataService
 import uuid, logging
@@ -271,7 +271,7 @@ async def get_reference_values(
             response["mongo_save"] = {
                 "status": "error",
                 "error": str(mongo_error)
-            }
+        }
         
         logger.info("✅ Reference values calculated for %d models using %s", len(models), stat)
         return response
@@ -880,6 +880,105 @@ async def get_reference_points_endpoint(
         logger.error(f"Error retrieving reference points: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to retrieve reference points: {str(e)}")
 
+
+@router.post("/calculate-reference-points")
+async def calculate_reference_points_endpoint(request: CalculateReferencePointsRequest):
+    """Calculate reference points for specific combinations and features"""
+    try:
+        # Get models to extract available combinations
+        model_id = request.model_id
+        if '%' in model_id:
+            decoded_model_id = urllib.parse.unquote(model_id)
+        else:
+            decoded_model_id = model_id
+            
+        models = await DataService.get_models_for_combinations(decoded_model_id)
+        
+        if not models:
+            raise HTTPException(status_code=404, detail="No models found for the given model_id")
+        
+        # Filter models to only include requested combinations and features
+        filtered_models = []
+        for model in models:
+            combination_id = model.get("combination", "")
+            if combination_id in request.combination_ids:
+                # Filter features to only include selected ones
+                x_variables = model.get("x_variables", [])
+                selected_features = [f for f in x_variables if f in request.feature_names]
+                
+                if selected_features:  # Only include if there are selected features
+                    filtered_model = model.copy()
+                    filtered_model["x_variables"] = selected_features
+                    filtered_models.append(filtered_model)
+        
+        if not filtered_models:
+            raise HTTPException(status_code=404, detail="No matching models found for the requested combinations and features")
+        
+        # Calculate reference values for filtered models
+        reference_values_by_combination = {}
+        
+        for model in filtered_models:
+            combination_id = model.get("combination", "unknown")
+            ident = model["identifiers"]
+            
+            try:
+                # Get the data slice for this combination
+                df_slice = await DataService.get_data_slice_for_combination(
+                    ident, 
+                    start=request.start_date,
+                    end=request.end_date
+                )
+                
+                if df_slice is not None and not df_slice.empty:
+                    # Calculate reference values for selected features only
+                    ref_vals = {}
+                    for feature in model["x_variables"]:
+                        if feature in df_slice.columns:
+                            if request.stat == 'period-mean':
+                                ref_vals[feature] = float(df_slice[feature].mean())
+                            elif request.stat == 'period-median':
+                                ref_vals[feature] = float(df_slice[feature].median())
+                            elif request.stat == 'period-max':
+                                ref_vals[feature] = float(df_slice[feature].max())
+                            elif request.stat == 'period-min':
+                                ref_vals[feature] = float(df_slice[feature].min())
+                            else:
+                                ref_vals[feature] = float(df_slice[feature].mean())
+                    
+                    reference_values_by_combination[combination_id] = {
+                        "features": model["x_variables"],
+                        "reference_values": ref_vals,
+                        "data_slice_rows": len(df_slice)
+                    }
+                    
+            except KeyError as e:
+                logger.warning(f"Missing cluster slice for combination {combination_id}: {e}")
+                reference_values_by_combination[combination_id] = {
+                    "features": model["x_variables"],
+                    "reference_values": {},
+                    "data_slice_rows": 0,
+                }
+        
+        return {
+            "success": True,
+            "message": f"Reference points calculated for {len(reference_values_by_combination)} combinations",
+            "data": {
+                "reference_values_by_combination": reference_values_by_combination,
+                "statistic_used": request.stat,
+                "date_range": {
+                    "start_date": request.start_date,
+                    "end_date": request.end_date
+                },
+                "combinations_requested": request.combination_ids,
+                "features_requested": request.feature_names,
+                "combinations_calculated": list(reference_values_by_combination.keys())
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Error calculating reference points: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to calculate reference points: {str(e)}")
+
 @router.get("/get-scenario-configurations")
 async def get_scenario_configurations_endpoint(
     client_name: str = Query(..., description="Client name"),
@@ -932,7 +1031,7 @@ async def update_reference_points_endpoint(
         )
         
         if result["status"] == "success":
-            return {
+           return {
                 "success": True,
                 "message": f"Reference points updated successfully",
                 "mongo_id": result["mongo_id"],
@@ -973,7 +1072,7 @@ async def update_scenario_configurations_endpoint(
                 "mongo_id": result["mongo_id"],
                 "operation": result["operation"],
                 "collection": result["collection"]
-            }
+             }
         else:
             raise HTTPException(status_code=500, detail=f"Failed to update scenario configurations: {result['error']}")
             
