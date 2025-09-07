@@ -149,14 +149,6 @@ class RunResponse(BaseModel):
     view_results: Dict[str, Dict[str, Any]] = Field(..., description="Results organized by view ID")
 
 
-class CalculateReferencePointsRequest(BaseModel):
-    """Request schema for POST /calculate-reference-points endpoint"""
-    model_id: str = Field(..., description="Model ID to calculate reference points for")
-    combination_ids: List[str] = Field(..., description="List of combination IDs to calculate reference points for")
-    feature_names: List[str] = Field(..., description="List of feature names to calculate reference points for")
-    stat: str = Field(default="period-mean", description="Statistic to use for calculation")
-    start_date: str = Field(..., description="Start date for the reference period")
-    end_date: str = Field(..., description="End date for the reference period")
 
 
 # ----------  Status ----------

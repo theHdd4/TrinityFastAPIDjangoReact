@@ -3330,6 +3330,150 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
     }
   }, [settings.referencePeriod]); // Watch for reference period changes
 
+  // ✅ NEW: Function to auto-populate reference values using the new endpoint
+  const autoPopulateReferenceValues = async () => {
+    try {
+      console.log('🔄 Auto-populating reference values for new combinations/features...');
+      
+      // Get current combinations and selected features
+      const combinationIds = combinations.map(c => c.combination_id || c.id);
+      const selectedFeatures = computedSettings?.features?.filter(f => f.selected) || [];
+      const featureNames = selectedFeatures.map(f => f.name);
+      
+      if (combinationIds.length === 0 || featureNames.length === 0) {
+        console.log('ℹ️ No combinations or features selected for auto-population');
+        return;
+      }
+      
+      // Prepare query parameters for GET call
+      const modelId = generateModelId();
+      const combinationIdsParam = combinationIds.join(',');
+      const featureNamesParam = featureNames.join(',');
+      
+      const queryParams = new URLSearchParams({
+        model_id: modelId,
+        combination_ids: combinationIdsParam,
+        feature_names: featureNamesParam
+      });
+      
+      console.log('🔍 Auto-population request:', {
+        model_id: modelId,
+        combination_ids: combinationIdsParam,
+        feature_names: featureNamesParam
+      });
+      
+      // Make GET call to auto-populate endpoint
+      const response = await fetch(`${SCENARIO_PLANNER_API}/get-reference-points-for-combinations?${queryParams}`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        }
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        
+        if (data.success && data.data) {
+          const referenceData = data.data.reference_values_by_combination;
+          const newInputs = { ...combinationInputs };
+          const newOriginalRefs = { ...originalReferenceValues };
+          let totalPopulated = 0;
+          
+          console.log('🔍 Auto-population response:', {
+            source: data.data.source,
+            combinationsFound: data.data.combinations_found,
+            referenceData
+          });
+          
+          combinations.forEach(combination => {
+            const searchKey = combination.combination_id || combination.id;
+            const matchingData = referenceData?.[searchKey];
+            
+            if (matchingData) {
+              // Initialize if not exists
+              if (!newInputs[combination.id]) {
+                newInputs[combination.id] = {};
+              }
+              if (!newOriginalRefs[combination.id]) {
+                newOriginalRefs[combination.id] = {};
+              }
+              
+              const features = computedSettings?.features || [];
+              features.forEach(feature => {
+                if (feature.selected && matchingData.reference_values?.[feature.name]) {
+                  const referenceValue = matchingData.reference_values[feature.name];
+                  
+                  // Store original reference value
+                  newOriginalRefs[combination.id][feature.id] = referenceValue;
+                  
+                  // Only populate if user doesn't have input (preserve user changes)
+                  if (!combinationInputs[combination.id]?.[feature.id]?.input) {
+                    newInputs[combination.id][feature.id] = {
+                      input: formatToThreeDecimals(referenceValue),
+                      change: '0'
+                    };
+                    totalPopulated++;
+                  }
+                }
+              });
+            }
+          });
+          
+          // Update global state only if we populated something
+          if (totalPopulated > 0) {
+            const updatedScenarios = { ...settings.scenarios };
+            if (!updatedScenarios[currentScenario]) {
+              updatedScenarios[currentScenario] = { ...currentScenarioData };
+            }
+            updatedScenarios[currentScenario].combinationInputs = newInputs;
+            updatedScenarios[currentScenario].originalReferenceValues = newOriginalRefs;
+            
+            onSettingsChange({ scenarios: updatedScenarios });
+            
+            console.log(`✅ Auto-populated ${totalPopulated} reference values from ${data.data.source}`);
+          } else {
+            console.log('ℹ️ No new reference values to populate (user changes preserved)');
+          }
+        }
+      } else {
+        console.warn('⚠️ Auto-population failed:', response.statusText);
+      }
+    } catch (error) {
+      console.error('❌ Error in auto-population:', error);
+      // Don't show error toast for auto-population failures
+    }
+  };
+
+  // ✅ NEW: Auto-populate reference values when combinations change
+  useEffect(() => {
+    console.log('🔍 useEffect triggered - combinations changed:', {
+      combinationsLength: combinations.length,
+      combinations: combinations.map(c => ({ id: c.id, combination_id: c.combination_id }))
+    });
+    
+    if (combinations.length > 0) {
+      console.log('🔄 Combinations changed, auto-populating reference values...');
+      autoPopulateReferenceValues();
+    }
+  }, [combinations.length]); // Watch for combination changes
+
+  // ✅ NEW: Auto-populate reference values when features change
+  useEffect(() => {
+    const selectedFeatures = computedSettings?.features?.filter(f => f.selected) || [];
+    const selectedFeatureIds = selectedFeatures.map(f => f.id).sort().join(',');
+    
+    console.log('🔍 useEffect triggered - features changed:', {
+      selectedFeaturesCount: selectedFeatures.length,
+      selectedFeatures: selectedFeatures.map(f => ({ id: f.id, name: f.name })),
+      selectedFeatureIds
+    });
+    
+    if (selectedFeatures.length > 0) {
+      console.log('🔄 Features changed, auto-populating reference values...');
+      autoPopulateReferenceValues();
+    }
+  }, [computedSettings?.features?.map(f => `${f.id}:${f.selected}`).sort().join(',')]); // Watch for feature selection changes
+
   // ✅ NEW: Function to fetch reference values from MongoDB using GET call
   const fetchReferenceValuesFromMongo = async (overwriteExisting = false) => {
     try {
@@ -4084,23 +4228,45 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
 
                         {/* ✅ NEW: Global Refresh Button for Combination Section */}
 
-                        <Button
+                        <div className="flex items-center space-x-1">
 
-                          onClick={handleGlobalRefresh}
+                          <Button
 
-                          variant="ghost"
+                            onClick={autoPopulateReferenceValues}
 
-                          size="sm"
+                            variant="ghost"
 
-                          className="h-6 w-6 p-0 text-blue-600 hover:text-blue-700 hover:bg-blue-50 transition-all duration-200"
+                            size="sm"
 
-                          title="Refresh all combinations - Clear inputs and reset to reference values"
+                            className="h-6 w-6 p-0 text-green-600 hover:text-green-700 hover:bg-green-50 transition-all duration-200"
 
-                        >
+                            title="Auto-populate reference values for new combinations/features"
 
-                          <RefreshCw className="w-4 h-4" />
+                          >
 
-                        </Button>
+                            <span className="text-xs font-bold">A</span>
+
+                          </Button>
+
+                          <Button
+
+                            onClick={handleGlobalRefresh}
+
+                            variant="ghost"
+
+                            size="sm"
+
+                            className="h-6 w-6 p-0 text-blue-600 hover:text-blue-700 hover:bg-blue-50 transition-all duration-200"
+
+                            title="Refresh all combinations - Clear inputs and reset to reference values"
+
+                          >
+
+                            <RefreshCw className="w-4 h-4" />
+
+                          </Button>
+
+                        </div>
 
                       </div>
 
@@ -4210,7 +4376,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
 
                                   {/* Removed unnecessary checkbox - live calculations work automatically */}
 
-                                  <div className="text-xs font-medium text-gray-800 break-words">
+                                  <div className="text-[10px] font-medium text-gray-800 break-words leading-tight">
                                     {combination.combination_id || combination.id || 'Unknown Combination'}
                                           </div>
 

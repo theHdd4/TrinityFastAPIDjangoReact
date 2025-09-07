@@ -2,7 +2,7 @@ from fastapi import APIRouter, HTTPException, Query, Body
 import logging
 import urllib.parse
 from ..config import cache, scenario_values_collection, select_models_collection, saved_predictions_collection
-from ..schemas import RunRequest, RunResponse, CacheWarmResponse, StatusResponse, IdentifiersResponse, FeaturesResponse, CacheClearResponse, ReferenceRequest, ReferenceResponse, ScenarioValuesRequest, ScenarioValuesResponse, SingleCombinationReferenceRequest, SingleCombinationReferenceResponse, AutoPopulateReferenceRequest, AutoPopulateReferenceResponse, CalculateReferencePointsRequest
+from ..schemas import RunRequest, RunResponse, CacheWarmResponse, StatusResponse, IdentifiersResponse, FeaturesResponse, CacheClearResponse, ReferenceRequest, ReferenceResponse, ScenarioValuesRequest, ScenarioValuesResponse, SingleCombinationReferenceRequest, SingleCombinationReferenceResponse, AutoPopulateReferenceRequest, AutoPopulateReferenceResponse
 
 from ..scenario.data_service import DataService
 import uuid, logging
@@ -671,110 +671,6 @@ async def clear_all_cache():
         raise HTTPException(status_code=500, detail=f"Failed to clear cache: {e}")
     return CacheClearResponse(message="Cache cleared successfully")
 
-# ────────────────────────────────────────────────────────────────────────────
-#  POST /api/scenario/single-combination-reference
-# ────────────────────────────────────────────────────────────────────────────
-@router.post("/single-combination-reference", response_model=SingleCombinationReferenceResponse)
-async def get_single_combination_reference(
-    payload: SingleCombinationReferenceRequest = Body(..., description="Single combination reference calculation parameters")
-):
-    """
-    Calculate reference values for a single combination and selected features.
-    
-    This endpoint calculates reference values for one specific combination
-    without requiring the full matching logic or scenario processing.
-    
-    Prerequisites:
-    - Must call GET /init-cache first to load and cache a dataset
-    
-    Returns:
-    - combination: The combination identifiers that were processed
-    - features: List of features that were processed
-    - reference_values: Dictionary mapping feature names to their reference values
-    - statistic_used: The statistic that was applied
-    - date_range: The date range used for calculation
-    """
-    try:
-        # ✅ Check if dataset is cached
-        df = DataService.get_current_d0_dataframe()
-        if df is None:
-            raise HTTPException(
-                status_code=400,
-                detail="No dataset cached. Please call GET /init-cache first."
-            )
-        
-        # ✅ Get current file key for reference
-        current_file_key = DataService.get_current_d0_file_key()
-        
-        # ✅ Get features from cached models
-        decoded_model_id = urllib.parse.unquote(payload.model_id)
-        logger.info("🔧 Single combination reference for model_id: %s (original: %s)", decoded_model_id, payload.model_id)
-        models = await DataService.fetch_selected_models(decoded_model_id)
-        if not models:
-            raise HTTPException(
-                status_code=400,
-                detail="No models available. Please ensure models are selected and cached."
-            )
-        
-        # ✅ Extract features from models
-        available_features = extract_features_from_models(models)
-        
-        # ✅ Validate requested features exist
-        invalid_features = [f for f in payload.features if f not in available_features]
-        if invalid_features:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Invalid features requested: {invalid_features}. Available features: {list(available_features.keys())}"
-            )
-        
-        # ✅ Calculate reference values for the single combination
-        scenario_service = ScenarioService()
-        reference_values = {}
-        
-        for feature in payload.features:
-            try:
-                # Calculate reference value for this feature and combination
-                ref_value = await scenario_service._calc_reference(
-                    stat=payload.stat,
-                    start_date=payload.start_date,
-                    end_date=payload.end_date,
-                    identifiers=payload.combination,
-                    feature=feature
-                )
-                reference_values[feature] = ref_value
-            except Exception as feature_exc:
-                logger.warning(f"Failed to calculate reference for feature {feature}: {feature_exc}")
-                reference_values[feature] = 0.0  # Default to 0 if calculation fails
-        
-        # ✅ Prepare response
-        response_data = {
-            "combination": payload.combination,
-            "features": payload.features,
-            "reference_values": reference_values,
-            "statistic_used": payload.stat,
-            "date_range": {
-                "start_date": payload.start_date,
-                "end_date": payload.end_date
-            },
-            "data_info": {
-                "dataset_key": current_file_key,
-                "models_processed": len(models),
-                "features_available": list(available_features.keys()),
-                "calculation_timestamp": datetime.utcnow().isoformat()
-            },
-            "message": f"Successfully calculated reference values for {len(payload.features)} features in combination {payload.combination}"
-        }
-        
-        logger.info("✅ Single combination reference calculated: %s features for combination %s", 
-                   len(payload.features), payload.combination)
-        
-        return response_data
-        
-    except HTTPException:
-        raise
-    except Exception as exc:
-        logger.exception("🚨 Single combination reference calculation failed: %s", str(exc))
-        raise HTTPException(status_code=500, detail=f"Single combination reference calculation failed: {str(exc)}")
 
 # ────────────────────────────────────────────────────────────────────────────
 #  POST /api/scenario/force-refresh
@@ -881,103 +777,142 @@ async def get_reference_points_endpoint(
         raise HTTPException(status_code=500, detail=f"Failed to retrieve reference points: {str(e)}")
 
 
-@router.post("/calculate-reference-points")
-async def calculate_reference_points_endpoint(request: CalculateReferencePointsRequest):
-    """Calculate reference points for specific combinations and features"""
+@router.get("/get-reference-points-for-combinations")
+async def get_reference_points_for_combinations_endpoint(
+    model_id: str = Query(..., description="Model ID"),
+    combination_ids: str = Query(..., description="Comma-separated combination IDs"),
+    feature_names: str = Query(..., description="Comma-separated feature names")
+):
+    """Get reference points for specific combinations and features"""
     try:
-        # Get models to extract available combinations
-        model_id = request.model_id
+        # Parse query parameters
         if '%' in model_id:
             decoded_model_id = urllib.parse.unquote(model_id)
         else:
             decoded_model_id = model_id
             
-        models = await DataService.get_models_for_combinations(decoded_model_id)
-        
-        if not models:
-            raise HTTPException(status_code=404, detail="No models found for the given model_id")
-        
-        # Filter models to only include requested combinations and features
-        filtered_models = []
-        for model in models:
-            combination_id = model.get("combination", "")
-            if combination_id in request.combination_ids:
-                # Filter features to only include selected ones
-                x_variables = model.get("x_variables", [])
-                selected_features = [f for f in x_variables if f in request.feature_names]
-                
-                if selected_features:  # Only include if there are selected features
-                    filtered_model = model.copy()
-                    filtered_model["x_variables"] = selected_features
-                    filtered_models.append(filtered_model)
-        
-        if not filtered_models:
-            raise HTTPException(status_code=404, detail="No matching models found for the requested combinations and features")
-        
-        # Calculate reference values for filtered models
-        reference_values_by_combination = {}
-        
-        for model in filtered_models:
-            combination_id = model.get("combination", "unknown")
-            ident = model["identifiers"]
+        # Parse combination_ids and feature_names from comma-separated strings
+        combination_ids_list = [id.strip() for id in combination_ids.split(',') if id.strip()]
+        feature_names_list = [name.strip() for name in feature_names.split(',') if name.strip()]
             
-            try:
-                # Get the data slice for this combination
-                df_slice = await DataService.get_data_slice_for_combination(
-                    ident, 
-                    start=request.start_date,
-                    end=request.end_date
-                )
+        # Parse model_id to extract client/app/project
+        parts = decoded_model_id.split('/')
+        if len(parts) >= 3:
+            client_name = parts[0]
+            app_name = parts[1] 
+            project_name = '/'.join(parts[2:])  # Handle project names with slashes
+        else:
+            raise HTTPException(status_code=400, detail="Invalid model_id format")
+        
+        logger.info(f"🔍 Auto-population request for: {client_name}/{app_name}/{project_name}")
+        logger.info(f"🔍 Requested combinations: {combination_ids_list}")
+        logger.info(f"🔍 Requested features: {feature_names_list}")
+        
+        # STEP 1: Check if reference points exist in scenario_reference_points collection
+        try:
+            existing_reference_points = await get_reference_points_from_mongo(
+                client_name=client_name,
+                app_name=app_name,
+                project_name=project_name
+            )
+            
+            if existing_reference_points and existing_reference_points.get('reference_values_by_combination'):
+                logger.info("✅ Found existing reference points in scenario_reference_points collection")
                 
-                if df_slice is not None and not df_slice.empty:
-                    # Calculate reference values for selected features only
-                    ref_vals = {}
-                    for feature in model["x_variables"]:
-                        if feature in df_slice.columns:
-                            if request.stat == 'period-mean':
-                                ref_vals[feature] = float(df_slice[feature].mean())
-                            elif request.stat == 'period-median':
-                                ref_vals[feature] = float(df_slice[feature].median())
-                            elif request.stat == 'period-max':
-                                ref_vals[feature] = float(df_slice[feature].max())
-                            elif request.stat == 'period-min':
-                                ref_vals[feature] = float(df_slice[feature].min())
-                            else:
-                                ref_vals[feature] = float(df_slice[feature].mean())
-                    
-                    reference_values_by_combination[combination_id] = {
-                        "features": model["x_variables"],
-                        "reference_values": ref_vals,
-                        "data_slice_rows": len(df_slice)
+                # Filter existing reference points for requested combinations and features
+                filtered_reference_values = {}
+                for combination_id in combination_ids_list:
+                    if combination_id in existing_reference_points['reference_values_by_combination']:
+                        combination_data = existing_reference_points['reference_values_by_combination'][combination_id]
+                        ref_values = combination_data.get('reference_values', {})
+                        
+                        # Filter for requested features only
+                        filtered_ref_values = {
+                            feature: value for feature, value in ref_values.items() 
+                            if feature in feature_names_list
+                        }
+                        
+                        if filtered_ref_values:
+                            filtered_reference_values[combination_id] = {
+                                "features": list(filtered_ref_values.keys()),
+                                "reference_values": filtered_ref_values
+                            }
+                
+                if filtered_reference_values:
+                    return {
+                        "success": True,
+                        "message": f"Reference points retrieved from saved data for {len(filtered_reference_values)} combinations",
+                        "data": {
+                            "reference_values_by_combination": filtered_reference_values,
+                            "source": "saved_reference_points",
+                            "combinations_requested": combination_ids_list,
+                            "features_requested": feature_names_list,
+                            "combinations_found": list(filtered_reference_values.keys())
+                        }
                     }
-                    
-            except KeyError as e:
-                logger.warning(f"Missing cluster slice for combination {combination_id}: {e}")
-                reference_values_by_combination[combination_id] = {
-                    "features": model["x_variables"],
-                    "reference_values": {},
-                    "data_slice_rows": 0,
-                }
+                else:
+                    logger.info("⚠️ No matching combinations found in saved reference points, falling back to select metadata")
+            else:
+                logger.info("ℹ️ No existing reference points found, falling back to select metadata")
+                
+        except Exception as e:
+            logger.warning(f"⚠️ Error checking existing reference points: {str(e)}, falling back to select metadata")
+        
+        # STEP 2: Fallback to select atom metadata
+        logger.info("🔄 Falling back to select atom metadata for auto-population")
+        
+        # Get select atom metadata using the same _id
+        from motor.motor_asyncio import AsyncIOMotorClient
+        import os
+
+        from ..config import select_models_collection, db
+        # Query select atom metadata
+        select_metadata = await select_models_collection.find_one({"_id": decoded_model_id})
+        
+        if not select_metadata:
+            raise HTTPException(status_code=404, detail="No select atom metadata found for the given model_id")
+        
+        # Extract reference values from select metadata
+        reference_values_by_combination = {}
+        combinations_data = select_metadata.get('combinations', [])
+        
+        for combination_data in combinations_data:
+            combination_id = combination_data.get('combination_id', '')
+            
+            if combination_id in combination_ids_list:
+                complete_model_data = combination_data.get('complete_model_data', {})
+                
+                # Extract mean values for requested features
+                ref_values = {}
+                for feature in feature_names_list:
+                    mean_key = f"{feature}_avg"
+                    if mean_key in complete_model_data:
+                        ref_values[feature] = float(complete_model_data[mean_key])
+                
+                if ref_values:
+                    reference_values_by_combination[combination_id] = {
+                        "features": list(ref_values.keys()),
+                        "reference_values": ref_values
+                    }
+        
+        if not reference_values_by_combination:
+            raise HTTPException(status_code=404, detail="No matching combinations found in select atom metadata")
         
         return {
             "success": True,
-            "message": f"Reference points calculated for {len(reference_values_by_combination)} combinations",
+            "message": f"Reference points retrieved from select metadata for {len(reference_values_by_combination)} combinations",
             "data": {
                 "reference_values_by_combination": reference_values_by_combination,
-                "statistic_used": request.stat,
-                "date_range": {
-                    "start_date": request.start_date,
-                    "end_date": request.end_date
-                },
-                "combinations_requested": request.combination_ids,
-                "features_requested": request.feature_names,
-                "combinations_calculated": list(reference_values_by_combination.keys())
+                "source": "select_metadata",
+                "combinations_requested": combination_ids_list,
+                "features_requested": feature_names_list,
+                "combinations_found": list(reference_values_by_combination.keys())
             }
         }
         
     except Exception as e:
-        logger.error(f"Error calculating reference points: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Failed to calculate reference points: {str(e)}")
+        logger.error(f"Error in auto-population: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to auto-populate reference points: {str(e)}")
 
 @router.get("/get-scenario-configurations")
 async def get_scenario_configurations_endpoint(
