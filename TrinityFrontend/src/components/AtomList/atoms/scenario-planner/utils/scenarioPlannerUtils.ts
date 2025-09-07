@@ -352,7 +352,10 @@ export const duplicateCurrentScenario = (settings: ScenarioPlannerSettings, newS
     // Deep clone combinationInputs to prevent sharing references
     combinationInputs: currentScenarioData.combinationInputs ? 
       Object.keys(currentScenarioData.combinationInputs).reduce((acc, key) => {
-        acc[key] = { ...currentScenarioData.combinationInputs[key] };
+        acc[key] = Object.keys(currentScenarioData.combinationInputs[key]).reduce((featureAcc, featureKey) => {
+          featureAcc[featureKey] = { ...currentScenarioData.combinationInputs[key][featureKey] };
+          return featureAcc;
+        }, {} as any);
         return acc;
       }, {} as any) : {},
     // Deep clone originalReferenceValues to prevent sharing references

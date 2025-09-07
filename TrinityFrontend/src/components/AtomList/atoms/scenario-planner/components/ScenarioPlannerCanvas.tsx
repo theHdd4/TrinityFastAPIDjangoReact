@@ -778,23 +778,23 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
 
         // Fallback to old method if no identifierOrder
 
-        Object.entries(view.selectedIdentifiers).forEach(([identifierId, valueIds]) => {
+      Object.entries(view.selectedIdentifiers).forEach(([identifierId, valueIds]) => {
 
-          if (Array.isArray(valueIds) && valueIds.length > 0) {
+        if (Array.isArray(valueIds) && valueIds.length > 0) {
 
-            // Find the identifier name from the backend identifiers
+          // Find the identifier name from the backend identifiers
 
-            const identifier = computedSettings.identifiers.find(id => id.id === identifierId);
+          const identifier = computedSettings.identifiers.find(id => id.id === identifierId);
 
-            if (identifier) {
+          if (identifier) {
 
-              identifierNames.push(identifier.name);
-
-            }
+            identifierNames.push(identifier.name);
 
           }
 
-        });
+        }
+
+      });
 
       }
 
@@ -2749,11 +2749,11 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
             });
             
             // Update global state
-            const updatedScenarios = { ...settings.scenarios };
-            if (!updatedScenarios[currentScenario]) {
-              updatedScenarios[currentScenario] = { ...currentScenarioData };
-            }
-            updatedScenarios[currentScenario].combinationInputs = newInputs;
+      const updatedScenarios = { ...settings.scenarios };
+      if (!updatedScenarios[currentScenario]) {
+        updatedScenarios[currentScenario] = { ...currentScenarioData };
+      }
+      updatedScenarios[currentScenario].combinationInputs = newInputs;
             updatedScenarios[currentScenario].originalReferenceValues = newOriginalRefs;
             
             onSettingsChange({ scenarios: updatedScenarios });
@@ -2761,11 +2761,11 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
             console.log('✅ Individual refresh - Reference values processed successfully');
             console.log('🔍 Individual refresh - Updated combinationInputs:', newInputs);
             console.log('🔍 Individual refresh - Updated originalReferenceValues:', newOriginalRefs);
-            
-            toast({
-              title: "Reference Values Restored",
-              description: `Reference values restored for ${combinationId}`,
-              variant: "default",
+      
+      toast({
+        title: "Reference Values Restored",
+        description: `Reference values restored for ${combinationId}`,
+        variant: "default",
             });
           } else {
             toast({
@@ -3547,37 +3547,8 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
 
 
       // 1. First fetch fresh reference values from backend
+      // This function already handles updating the state properly
       await fetchReferenceValuesForAll();
-      
-      // 2. Now clear all inputs and reset to the fresh reference values
-      const clearedInputs: Record<string, Record<string, { input: string; change: string }>> = {};
-      const features = computedSettings?.features || [];
-
-      combinations.forEach(combination => {
-        clearedInputs[combination.id] = {};
-        features.forEach(feature => {
-          if (feature.selected) {
-            // Use the fresh reference values that were just fetched
-            const referenceValue = originalReferenceValues[combination.id]?.[feature.id];
-            clearedInputs[combination.id][feature.id] = {
-              input: formatToThreeDecimals(referenceValue || "0"),
-              change: "0"// This clears the change
-            };
-          }
-        });
-      });
-
-      // 3. Update the scenario with cleared inputs
-      const updatedScenarios = { ...settings.scenarios };
-      if (!updatedScenarios[currentScenario]) {
-        updatedScenarios[currentScenario] = { ...currentScenarioData };
-      }
-      updatedScenarios[currentScenario].combinationInputs = clearedInputs;
-
-      // 4. Save to global store
-      onSettingsChange({ 
-        scenarios: updatedScenarios
-      });
 
       // 5. Show success message
 
