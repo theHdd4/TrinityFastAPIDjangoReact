@@ -56,19 +56,21 @@ pipeline {
 
                         // --- Patch Django + FastAPI for CORS/CSRF ---
                         echo "⚙️ Ensuring ${env.EXPECTED_HOST_IP} is present in CORS/CSRF..."
-                        writeFile file: 'patch_settings.py', text: """
+                        
+                        // Create Python script with proper encoding handling
+                        writeFile file: 'patch_settings.py', text: """# -*- coding: utf-8 -*-
 import os
 
 FILES = [
-    "TrinityBackendDjango/config/settings.py",   # Django
-    "TrinityBackendFastAPI/app/config.py",       # FastAPI (adjust if needed)
+    "TrinityBackendDjango/config/settings.py",
+    "TrinityBackendFastAPI/app/config.py"
 ]
 
 host_ip = "${env.EXPECTED_HOST_IP}"
 
 for f in FILES:
     if not os.path.exists(f):
-        print(f"⚠️ File not found: {f}")
+        print("File not found: " + f)
         continue
     
     try:
@@ -76,25 +78,29 @@ for f in FILES:
             content = fh.read()
         
         if host_ip in content:
-            print(f"✅ {host_ip} already present in {f}")
+            print(host_ip + " already present in " + f)
         else:
-            print(f"➕ Adding {host_ip} to {f}")
-            # More robust replacement for CORS/CSRF settings
+            print("Adding " + host_ip + " to " + f)
             if "ALLOWED_HOSTS" in content:
-                content = content.replace("ALLOWED_HOSTS = [", f"ALLOWED_HOSTS = ['{host_ip}', ")
+                content = content.replace("ALLOWED_HOSTS = [", "ALLOWED_HOSTS = ['" + host_ip + "', ")
             if "CORS_ALLOWED_ORIGINS" in content:
-                content = content.replace("CORS_ALLOWED_ORIGINS = [", f"CORS_ALLOWED_ORIGINS = ['http://{host_ip}:3000', ")
+                content = content.replace("CORS_ALLOWED_ORIGINS = [", "CORS_ALLOWED_ORIGINS = ['http://" + host_ip + ":3000', ")
             if "CSRF_TRUSTED_ORIGINS" in content:
-                content = content.replace("CSRF_TRUSTED_ORIGINS = [", f"CSRF_TRUSTED_ORIGINS = ['http://{host_ip}:3000', ")
+                content = content.replace("CSRF_TRUSTED_ORIGINS = [", "CSRF_TRUSTED_ORIGINS = ['http://" + host_ip + ":3000', ")
             
             with open(f, "w", encoding="utf-8") as fh:
                 fh.write(content)
-            print(f"✅ Updated {f}")
+            print("Updated " + f)
     
     except Exception as e:
-        print(f"❌ Error processing {f}: {e}")
-"""
-                        bat "python patch_settings.py"
+        print("Error processing " + f + ": " + str(e))
+""", encoding: 'UTF-8'
+                        
+                        // Run Python script with explicit UTF-8 handling
+                        bat """
+                            chcp 65001 >nul 2>&1
+                            python patch_settings.py
+                        """
                     }
                 }
             }
