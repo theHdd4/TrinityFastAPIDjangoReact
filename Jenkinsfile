@@ -2,12 +2,16 @@ pipeline {
     agent any
 
     environment {
-        DEV_PROJECT = 'trinity-dev'
-        PROD_PROJECT = 'trinity-prod'
-        EXPECTED_HOST_IP = '10.2.1.65'
+        DEV_PROJECT = "trinity-dev"
+        PROD_PROJECT = "trinity-prod"
+        EXPECTED_HOST_IP = "10.2.1.65"
+
+        DEV_PATH = "D:\\application\\dev\\TrinityFastAPIDjangoReact"
+        PROD_PATH = "D:\\application\\prod\\TrinityFastAPIDjangoReact"
     }
 
     stages {
+
         stage('Checkout Code') {
             steps {
                 echo "📦 Checking out branch: ${env.BRANCH_NAME}"
@@ -15,96 +19,131 @@ pipeline {
             }
         }
 
-        stage('Create Docker Compose Files') {
+        stage('Prepare Compose & Env Files') {
             steps {
-                echo "🔍 Creating docker-compose files with HOST_IP set to ${env.EXPECTED_HOST_IP}..."
                 script {
-                    // Create docker-compose-dev.yml from example
-                    echo "Creating docker-compose-dev.yml from example..."
-                    def devComposeContent = readFile('docker-compose-dev.example.yml')
-                    def updatedDevCompose = devComposeContent.replace('${HOST_IP:-localhost}', env.EXPECTED_HOST_IP)
-                    writeFile file: 'docker-compose-dev.yml', text: updatedDevCompose
-                    echo "✅ Created docker-compose-dev.yml"
+                    def targetPath   = (env.BRANCH_NAME == 'dev') ? env.DEV_PATH : env.PROD_PATH
+                    def composeExample = (env.BRANCH_NAME == 'dev') ? 'docker-compose-dev.example.yml' : 'docker-compose.example.yml'
+                    def composeFinal   = (env.BRANCH_NAME == 'dev') ? 'docker-compose-dev.yml' : 'docker-compose.yml'
 
-                    // Create docker-compose.yml from example
-                    echo "Creating docker-compose.yml from example..."
-                    def prodComposeContent = readFile('docker-compose.example.yml')
-                    def updatedProdCompose = prodComposeContent.replace('${HOST_IP:-localhost}', env.EXPECTED_HOST_IP)
-                    writeFile file: 'docker-compose.yml', text: updatedProdCompose
-                    echo "✅ Created docker-compose.yml"
+                    dir(targetPath) {
+                        echo "🔧 Preparing ${composeFinal} with HOST_IP=${env.EXPECTED_HOST_IP}..."
+
+                        // --- Docker Compose ---
+                        def composeContent = readFile(composeExample)
+                        def updatedCompose = composeContent
+                            .replace('${HOST_IP:-localhost}', env.EXPECTED_HOST_IP)
+                            .replace('${HOST_IP}', env.EXPECTED_HOST_IP)
+                        writeFile file: composeFinal, text: updatedCompose
+                        echo "✅ Created ${composeFinal}"
+
+                        // --- .env files ---
+                        def envFiles = [
+                            "TrinityBackendDjango/.env.example",
+                            "TrinityFrontend/.env.example"
+                        ]
+
+                        for (ef in envFiles) {
+                            def envFile = ef.replace(".env.example", ".env")
+                            if (fileExists(ef)) {
+                                def content = readFile(ef)
+                                def updated = content
+                                    .replace('${HOST_IP:-localhost}', env.EXPECTED_HOST_IP)
+                                    .replace('${HOST_IP}', env.EXPECTED_HOST_IP)
+                                writeFile file: envFile, text: updated
+                                echo "✅ Created ${envFile}"
+                            } else {
+                                echo "⚠️ Skipping missing file: ${ef}"
+                            }
+                        }
+                    }
                 }
             }
         }
 
         stage('Deploy Dev Environment') {
-            when {
-                branch 'dev'
-            }
+            when { branch 'dev' }
             steps {
-                echo "🚀 Deploying DEV environment..."
-                script {
-                    env.HOST_IP = env.EXPECTED_HOST_IP
-                    echo "🔧 Setting HOST_IP to: ${env.HOST_IP}"
-
+                dir("${env.DEV_PATH}") {
                     bat """
-                        set HOST_IP=${env.HOST_IP}
-                        docker network rm ${env.DEV_PROJECT}-net || exit 0
-                        docker compose -p ${env.DEV_PROJECT} -f docker-compose-dev.yml down
-                        docker compose -p ${env.DEV_PROJECT} -f docker-compose-dev.yml up --build -d
+                        echo 🚀 Deploying DEV environment...
+
+                        docker compose -p ${env.DEV_PROJECT} -f docker-compose-dev.yml down || echo "No stack to remove"
+
+                        docker compose -p ${env.DEV_PROJECT} -f docker-compose-dev.yml up -d --build
                     """
-
-                    echo "⏳ Waiting for services to be ready..."
-                    sleep 30 // Replaced timeout with sleep for reliability
-
-                    echo "📊 Checking service status..."
-                    bat "docker compose -p ${env.DEV_PROJECT} -f docker-compose-dev.yml ps"
-
-                    echo "🔧 Running tenant creation script..."
-                    bat "docker compose -p ${env.DEV_PROJECT} -f docker-compose-dev.yml exec web python create_tenant.py"
-
-
                 }
             }
         }
 
         stage('Deploy Prod Environment') {
-            when {
-                branch 'main'
-            }
+            when { branch 'main' }
             steps {
-                echo "🚀 Deploying PROD environment..."
-                script {
-                    env.HOST_IP = env.EXPECTED_HOST_IP
-                    echo "🔧 Setting HOST_IP to: ${env.HOST_IP}"
-
+                dir("${env.PROD_PATH}") {
                     bat """
-                        set HOST_IP=${env.HOST_IP}
-                        docker network rm ${env.PROD_PROJECT}-net || exit 0
-                        docker compose -p ${env.PROD_PROJECT} -f docker-compose.yml down
-                        docker compose -p ${env.PROD_PROJECT} -f docker-compose.yml up --build -d
+                        echo 🚀 Deploying PROD environment...
+
+                        docker compose -p ${env.PROD_PROJECT} -f docker-compose.yml down || echo "No stack to remove"
+
+                        docker compose -p ${env.PROD_PROJECT} -f docker-compose.yml up -d --build
                     """
+                }
+            }
+        }
 
-                    echo "⏳ Waiting for services to be ready..."
-                    sleep 30 // Replaced timeout with sleep for reliability
+        stage('Wait for Web Service') {
+            steps {
+                script {
+                    def targetPath   = (env.BRANCH_NAME == 'dev') ? env.DEV_PATH : env.PROD_PATH
+                    def composeFinal = (env.BRANCH_NAME == 'dev') ? 'docker-compose-dev.yml' : 'docker-compose.yml'
+                    def projectName  = (env.BRANCH_NAME == 'dev') ? env.DEV_PROJECT : env.PROD_PROJECT
 
-                    echo "📊 Checking service status..."
-                    bat "docker compose -p ${env.PROD_PROJECT} -f docker-compose.yml ps"
+                    dir(targetPath) {
+                        bat """
+                            echo ⏳ Waiting for web service to be available...
 
-                    echo "🔧 Running tenant creation script..."
-                    bat "docker compose -p ${env.PROD_PROJECT} -f docker-compose.yml exec web python create_tenant.py"
+                            set /a RETRIES=60
+                            :waitloop
+                            curl -s http://${env.EXPECTED_HOST_IP}:9001/health >nul 2>&1
+                            if %ERRORLEVEL%==0 (
+                                echo ✅ Web service is up!
+                                goto :ready
+                            )
+                            set /a RETRIES-=1
+                            if %RETRIES% gtr 0 (
+                                timeout /t 5 >nul
+                                goto :waitloop
+                            )
+                            echo ❌ Web service did not become ready in time.
+                            exit /b 1
 
+                            :ready
+                        """
+                    }
+                }
+            }
+        }
 
+        stage('Run Tenant Creation Script') {
+            steps {
+                script {
+                    def targetPath   = (env.BRANCH_NAME == 'dev') ? env.DEV_PATH : env.PROD_PATH
+                    def composeFinal = (env.BRANCH_NAME == 'dev') ? 'docker-compose-dev.yml' : 'docker-compose.yml'
+                    def projectName  = (env.BRANCH_NAME == 'dev') ? env.DEV_PROJECT : env.PROD_PROJECT
+
+                    dir(targetPath) {
+                        bat """
+                            echo 🔧 Running tenant creation script...
+                            docker compose -p ${projectName} -f ${composeFinal} exec web python create_tenant.py
+                        """
+                    }
                 }
             }
         }
     }
 
     post {
-        failure {
-            echo "❌ Deployment failed on branch ${env.BRANCH_NAME}"
-        }
-        success {
-            echo "✅ Deployment successful on branch ${env.BRANCH_NAME}"
-        }
+        failure { echo "❌ Deployment failed on branch ${env.BRANCH_NAME}" }
+        success { echo "✅ Deployment successful on branch ${env.BRANCH_NAME}" }
     }
 }
