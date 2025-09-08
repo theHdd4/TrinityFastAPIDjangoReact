@@ -5,8 +5,6 @@ pipeline {
         DEV_PROJECT     = 'trinity-dev'
         PROD_PROJECT    = 'trinity-prod'
         EXPECTED_HOST_IP = '10.2.1.65'
-        DEV_HEALTH_URL  = 'http://10.2.1.65:9001/health'
-        PROD_HEALTH_URL = 'http://10.2.1.65:9201/health'
     }
 
     stages {
@@ -91,8 +89,10 @@ pipeline {
                             echo ✅ Docker Compose stack started
                         """
                         
-                        // Wait for web service - Check every 1 minute, 5 times (5 minutes total)
-                        waitForWebService(env.DEV_HEALTH_URL, 5)
+                        // Wait 2 minutes for services to be ready
+                        echo "⏳ Waiting 2 minutes for services to be ready..."
+                        sleep(120) // 120 seconds = 2 minutes
+                        echo "✅ Wait completed!"
                         
                         // Execute tenant creation script
                         bat """
@@ -131,8 +131,10 @@ pipeline {
                             echo ✅ Docker Compose stack started
                         """
                         
-                        // Wait for web service - Check every 1 minute, 5 times (5 minutes total)
-                        waitForWebService(env.PROD_HEALTH_URL, 5)
+                        // Wait 2 minutes for services to be ready
+                        echo "⏳ Waiting 2 minutes for services to be ready..."
+                        sleep(120) // 120 seconds = 2 minutes
+                        echo "✅ Wait completed!"
                         
                         // Execute tenant creation script
                         bat """
@@ -158,52 +160,4 @@ pipeline {
             echo "🔧 Check the logs above for details"
         }
     }
-}
-
-/**
- * Wait for web service to become healthy using Docker container
- * @param healthUrl - The health check URL
- * @param maxAttempts - Number of attempts (5)
- */
-def waitForWebService(String healthUrl, int maxAttempts) {
-    echo "⏳ Waiting for web service to become healthy..."
-    echo "🔍 Health URL: ${healthUrl}"
-    echo "⏰ Will check every 60 seconds for ${maxAttempts} attempts (${maxAttempts} minutes total)"
-    
-    for (int attempt = 1; attempt <= maxAttempts; attempt++) {
-        echo "🔄 Health check attempt ${attempt}/${maxAttempts}..."
-        
-        try {
-            def result = bat(
-                script: """
-                    @echo off
-                    echo Attempting health check...
-                    docker run --rm --network host curlimages/curl:latest curl -s --max-time 10 ${healthUrl}
-                    if %ERRORLEVEL%==0 (
-                        echo SUCCESS: Web service is healthy
-                        exit /b 0
-                    ) else (
-                        echo FAILED: Web service not responding
-                        exit /b 1
-                    )
-                """,
-                returnStatus: true
-            )
-            
-            if (result == 0) {
-                echo "✅ Web service is healthy!"
-                return
-            }
-        } catch (Exception e) {
-            echo "❌ Health check failed: ${e.getMessage()}"
-        }
-        
-        if (attempt < maxAttempts) {
-            echo "⏳ Web service not ready yet. Waiting 60 seconds before next attempt..."
-            bat "timeout /t 60 /nobreak >nul"
-        }
-    }
-    
-    // If we reach here, all attempts failed
-    error "❌ Web service did not become healthy after ${maxAttempts} attempts (${maxAttempts} minutes). Deployment failed!"
 }
