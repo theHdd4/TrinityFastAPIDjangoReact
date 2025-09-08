@@ -143,7 +143,7 @@ def validate_python_syntax(file_path, content):
         compile(content, file_path, 'exec')
         return True
     except SyntaxError as e:
-        print(f"❌ Syntax error in {file_path}: {e}")
+        print(f"ERROR: Syntax error in {file_path}: {e}")
         return False
 
 def patch_django_settings(content, host_ip, domain, environment):
@@ -210,18 +210,18 @@ total_files = len(FILES)
 
 for file_path in FILES:
     if not os.path.exists(file_path):
-        print(f"⚠️ File not found: {file_path}")
+        print(f"WARNING: File not found: {file_path}")
         continue
     
     try:
-        print(f"🔍 Processing {file_path}...")
+        print(f"Processing {file_path}...")
         
         with open(file_path, "r", encoding="utf-8") as fh:
             content = fh.read()
         
         # Check if already patched
         if HOST_IP in content:
-            print(f"✅ {file_path} already contains HOST_IP, skipping")
+            print(f"SUCCESS: {file_path} already contains HOST_IP, skipping")
             success_count += 1
             continue
         
@@ -236,29 +236,29 @@ for file_path in FILES:
             if validate_python_syntax(file_path, new_content):
                 with open(file_path, "w", encoding="utf-8") as fh:
                     fh.write(new_content)
-                print(f"✅ Updated {file_path}")
+                print(f"SUCCESS: Updated {file_path}")
                 success_count += 1
             else:
-                print(f"❌ Syntax validation failed for {file_path}, skipping update")
+                print(f"ERROR: Syntax validation failed for {file_path}, skipping update")
         else:
-            print(f"ℹ️ No changes needed for {file_path}")
+            print(f"INFO: No changes needed for {file_path}")
             success_count += 1
     
     except Exception as e:
-        print(f"❌ Error processing {file_path}: {str(e)}")
+        print(f"ERROR: Error processing {file_path}: {str(e)}")
 
-print(f"\\n📊 Summary: {success_count}/{total_files} files processed successfully")
+print(f"\\nSummary: {success_count}/{total_files} files processed successfully")
 
 if success_count < total_files:
-    print("⚠️ Some files could not be processed. Check the logs above.")
+    print("WARNING: Some files could not be processed. Check the logs above.")
     sys.exit(1)
 else:
-    print("✅ All files processed successfully!")
+    print("SUCCESS: All files processed successfully!")
 """, encoding: 'UTF-8'
                         
                         // Run the improved patching script
                         bat """
-                            chcp 65001 >nul 2>&1
+                            set PYTHONIOENCODING=utf-8
                             python patch_settings.py
                         """
                         
