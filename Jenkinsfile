@@ -1,123 +1,145 @@
 pipeline {
-  agent any
+    agent any
 
-  environment {
-    DEV_COMPOSE_FILE = "docker-compose-dev.yml"
-    PROD_COMPOSE_FILE = "docker-compose.yml"
-    DEV_PROJECT = "trinity-dev"
-    PROD_PROJECT = "trinity-prod"
-  }
+    environment {
+        DEV_PROJECT = 'trinity-dev'
+        PROD_PROJECT = 'trinity-prod'
+        EXPECTED_HOST_IP = '10.2.1.65'
 
-  stages {
-
-    stage('Checkout Code') {
-      steps {
-        echo "📦 Checking out branch: ${env.BRANCH_NAME}"
-        checkout scm
-      }
+        DEV_PATH = 'D:\\application\\dev\\TrinityFastAPIDjangoReact'
+        PROD_PATH = 'D:\\application\\prod\\TrinityFastAPIDjangoReact'
     }
 
-    stage('Prepare Env & Compose Files') {
-      steps {
-        script {
-          dir("${WORKSPACE}") {
-            // Convert docker-compose-example.yml → docker-compose-dev.yml
-            if (fileExists("docker-compose-example.yml")) {
-              writeFile file: "${DEV_COMPOSE_FILE}", text: readFile("docker-compose-example.yml")
-              echo "✅ Created ${DEV_COMPOSE_FILE}"
+    stages {
+        stage('Checkout Code') {
+            steps {
+                script {
+                    def targetPath = (env.BRANCH_NAME == 'dev') ? env.DEV_PATH : env.PROD_PATH
+                    echo "📦 Checking out branch ${env.BRANCH_NAME} into ${targetPath}..."
+                    checkout([
+                        $class: 'GitSCM',
+                        branches: [[name: "*/${env.BRANCH_NAME}"]],
+                        userRemoteConfigs: [[url: 'https://github.com/theHdd4/TrinityFastAPIDjangoReact.git']],
+                        extensions: [[$class: 'RelativeTargetDirectory', relativeTargetDir: targetPath]]
+                    ])
+                }
             }
+        }
 
-            // Convert .env.example → .env
-            if (fileExists(".env.example")) {
-              writeFile file: ".env", text: readFile(".env.example")
-              echo "✅ Created .env"
+        stage('Prepare Compose & Env Files') {
+            steps {
+                script {
+                    def targetPath = (env.BRANCH_NAME == 'dev') ? env.DEV_PATH : env.PROD_PATH
+                    def composeExample = (env.BRANCH_NAME == 'dev') ? 'docker-compose-dev.example.yml' : 'docker-compose.example.yml'
+                    def composeFinal   = (env.BRANCH_NAME == 'dev') ? 'docker-compose-dev.yml'       : 'docker-compose.yml'
+
+                    dir(targetPath) {
+                        echo "🔍 Preparing ${composeFinal} with HOST_IP=${env.EXPECTED_HOST_IP}..."
+
+                        // Docker Compose
+                        def composeContent = readFile(composeExample)
+                        def updatedCompose = composeContent
+                            .replace('${HOST_IP:-localhost}', env.EXPECTED_HOST_IP)
+                            .replace('${HOST_IP}', env.EXPECTED_HOST_IP)
+                        writeFile file: composeFinal, text: updatedCompose
+                        echo "✅ Created ${composeFinal}"
+
+                        // .env files
+                        def envFiles = [
+                            "TrinityBackendDjango/.env.example",
+                            "TrinityFrontend/.env.example"
+                        ]
+                        for (ef in envFiles) {
+                            def envFile = ef.replace(".env.example", ".env")
+                            if (fileExists(ef)) {
+                                def content = readFile(ef)
+                                def updated = content
+                                    .replace('${HOST_IP:-localhost}', env.EXPECTED_HOST_IP)
+                                    .replace('${HOST_IP}', env.EXPECTED_HOST_IP)
+                                writeFile file: envFile, text: updated
+                                echo "✅ Created ${envFile}"
+                            } else {
+                                echo "⚠️ Skipping missing file: ${ef}"
+                            }
+                        }
+                    }
+                }
             }
-          }
         }
-      }
-    }
 
-    stage('Deploy Dev Environment') {
-      steps {
-        script {
-          dir("${WORKSPACE}") {
-            bat """
-              echo Checking if ${DEV_PROJECT}_web is running...
-              docker compose -p ${DEV_PROJECT} -f ${DEV_COMPOSE_FILE} ps -q web > tmp_container.txt
+        stage('Deploy Dev Environment') {
+            when { branch 'dev' }
+            steps {
+                dir("${env.DEV_PATH}") {
+                    bat """
+                        echo 🚀 Deploying DEV environment...
 
-              set /p WEB_ID=<tmp_container.txt
-              if not "%WEB_ID%"=="" (
-                echo Found running web container: %WEB_ID%
-                echo Bringing down stack...
-                docker compose -p ${DEV_PROJECT} -f ${DEV_COMPOSE_FILE} down
-              )
+                        docker compose -p ${env.DEV_PROJECT} -f docker-compose-dev.yml down || echo "No existing stack"
+                        docker compose -p ${env.DEV_PROJECT} -f docker-compose-dev.yml up --build -d --force-recreate
 
-              echo Starting fresh stack...
-              docker compose -p ${DEV_PROJECT} -f ${DEV_COMPOSE_FILE} up -d --build
-            """
-          }
+                        echo ⏳ Waiting up to 5 minutes for web service...
+
+                        set RETRIES=60
+                        :waitloop
+                        curl -s http://10.2.1.65:9001/health >nul 2>&1
+                        if %ERRORLEVEL%==0 (
+                            echo ✅ Web service is UP!
+                            goto :ready
+                        )
+                        set /a RETRIES-=1
+                        if %RETRIES% GTR 0 (
+                            ping -n 6 127.0.0.1 >nul
+                            goto :waitloop
+                        )
+                        echo ❌ Web service did not become healthy in time.
+                        exit /b 1
+
+                        :ready
+                        echo 🔧 Running tenant creation script...
+                        docker compose -p ${env.DEV_PROJECT} -f docker-compose-dev.yml exec web python create_tenant.py
+                    """
+                }
+            }
         }
-      }
-    }
 
-    stage('Wait for Web Service') {
-      steps {
-        script {
-          dir("${WORKSPACE}") {
-            bat """
-              setlocal enabledelayedexpansion
-              set RETRIES=60
-              set SERVICE_UP=0
+        stage('Deploy Prod Environment') {
+            when { branch 'main' }
+            steps {
+                dir("${env.PROD_PATH}") {
+                    bat """
+                        echo 🚀 Deploying PROD environment...
 
-              echo Waiting up to 5 minutes for web service...
+                        docker compose -p ${env.PROD_PROJECT} -f docker-compose.yml down || echo "No existing stack"
+                        docker compose -p ${env.PROD_PROJECT} -f docker-compose.yml up --build -d --force-recreate
 
-              :waitloop
-              curl -s http://10.2.1.65:9001/health >nul 2>&1
-              if !ERRORLEVEL! == 0 (
-                echo ✓ Web service is up!
-                set SERVICE_UP=1
-                goto :ready
-              )
+                        echo ⏳ Waiting up to 5 minutes for web service...
 
-              set /a RETRIES-=1
-              if !RETRIES! GTR 0 (
-                echo Web not up yet... retrying in 5s...
-                ping -n 6 127.0.0.1 >nul
-                goto :waitloop
-              )
+                        set RETRIES=60
+                        :waitloop
+                        curl -s http://10.2.1.65:9201/health >nul 2>&1
+                        if %ERRORLEVEL%==0 (
+                            echo ✅ Web service is UP!
+                            goto :ready
+                        )
+                        set /a RETRIES-=1
+                        if %RETRIES% GTR 0 (
+                            ping -n 6 127.0.0.1 >nul
+                            goto :waitloop
+                        )
+                        echo ❌ Web service did not become healthy in time.
+                        exit /b 1
 
-              :ready
-              if !SERVICE_UP! == 0 (
-                echo ✗ Web service did not come up in 5 minutes.
-                exit /b 1
-              )
-            """
-          }
+                        :ready
+                        echo 🔧 Running tenant creation script...
+                        docker compose -p ${env.PROD_PROJECT} -f docker-compose.yml exec web python create_tenant.py
+                    """
+                }
+            }
         }
-      }
     }
 
-    stage('Create Tenant') {
-      steps {
-        script {
-          dir("${WORKSPACE}") {
-            bat """
-              echo Running tenant creation script...
-              docker compose -p ${DEV_PROJECT} -f ${DEV_COMPOSE_FILE} exec -T web python manage.py create_tenant
-            """
-          }
-        }
-      }
+    post {
+        failure { echo "❌ Deployment failed on branch ${env.BRANCH_NAME}" }
+        success { echo "✅ Deployment successful on branch ${env.BRANCH_NAME}" }
     }
-
-  }
-
-  post {
-    failure {
-      echo "✗ Deployment failed on branch ${env.BRANCH_NAME}"
-    }
-    success {
-      echo "✅ Deployment succeeded on branch ${env.BRANCH_NAME}"
-    }
-  }
 }
