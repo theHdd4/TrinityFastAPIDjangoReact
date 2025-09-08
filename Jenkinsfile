@@ -14,7 +14,6 @@ pipeline {
             steps {
                 script {
                     echo "📦 Checking out code for branch: ${env.BRANCH_NAME}"
-                    // Code is automatically checked out by Jenkins
                     echo "✅ Code checked out to workspace: ${env.WORKSPACE}"
                 }
             }
@@ -74,34 +73,32 @@ pipeline {
                         echo "🚀 Deploying Development Environment..."
                         
                         // Stop existing stack if running, then start with new code
-                        powershell """
-                            Write-Host "Checking if Docker Compose stack is running..."
-                            try {
-                                \$existing = docker compose -p ${env.DEV_PROJECT} ps -q
-                                if (\$existing) {
-                                    Write-Host "📦 Stopping existing stack..."
-                                    docker compose -p ${env.DEV_PROJECT} -f docker-compose-dev.yml down
-                                    Write-Host "✅ Existing stack stopped"
-                                } else {
-                                    Write-Host "📦 No existing stack found"
-                                }
-                            } catch {
-                                Write-Host "📦 No existing stack to stop"
-                            }
+                        bat """
+                            echo Checking if Docker Compose stack is running...
                             
-                            Write-Host "🏗️ Starting Docker Compose with updated code..."
+                            REM Check if stack exists and stop it
+                            docker compose -p ${env.DEV_PROJECT} ps -q >nul 2>&1
+                            if %ERRORLEVEL%==0 (
+                                echo 📦 Stopping existing stack...
+                                docker compose -p ${env.DEV_PROJECT} -f docker-compose-dev.yml down
+                                echo ✅ Existing stack stopped
+                            ) else (
+                                echo 📦 No existing stack found
+                            )
+                            
+                            echo 🏗️ Starting Docker Compose with updated code...
                             docker compose -p ${env.DEV_PROJECT} -f docker-compose-dev.yml up --build -d --force-recreate
-                            Write-Host "✅ Docker Compose stack started"
+                            echo ✅ Docker Compose stack started
                         """
                         
                         // Wait for web service - Check every 1 minute, 5 times (5 minutes total)
-                        waitForWebService(env.DEV_HEALTH_URL, 5, 60)
+                        waitForWebService(env.DEV_HEALTH_URL, 5)
                         
                         // Execute tenant creation script
-                        powershell """
-                            Write-Host "🔧 Running tenant creation script..."
+                        bat """
+                            echo 🔧 Running tenant creation script...
                             docker compose -p ${env.DEV_PROJECT} -f docker-compose-dev.yml exec web python create_tenant.py
-                            Write-Host "✅ Tenant creation completed"
+                            echo ✅ Tenant creation completed
                         """
                     }
                 }
@@ -116,34 +113,32 @@ pipeline {
                         echo "🚀 Deploying Production Environment..."
                         
                         // Stop existing stack if running, then start with new code
-                        powershell """
-                            Write-Host "Checking if Docker Compose stack is running..."
-                            try {
-                                \$existing = docker compose -p ${env.PROD_PROJECT} ps -q
-                                if (\$existing) {
-                                    Write-Host "📦 Stopping existing stack..."
-                                    docker compose -p ${env.PROD_PROJECT} -f docker-compose.yml down
-                                    Write-Host "✅ Existing stack stopped"
-                                } else {
-                                    Write-Host "📦 No existing stack found"
-                                }
-                            } catch {
-                                Write-Host "📦 No existing stack to stop"
-                            }
+                        bat """
+                            echo Checking if Docker Compose stack is running...
                             
-                            Write-Host "🏗️ Starting Docker Compose with updated code..."
+                            REM Check if stack exists and stop it
+                            docker compose -p ${env.PROD_PROJECT} ps -q >nul 2>&1
+                            if %ERRORLEVEL%==0 (
+                                echo 📦 Stopping existing stack...
+                                docker compose -p ${env.PROD_PROJECT} -f docker-compose.yml down
+                                echo ✅ Existing stack stopped
+                            ) else (
+                                echo 📦 No existing stack found
+                            )
+                            
+                            echo 🏗️ Starting Docker Compose with updated code...
                             docker compose -p ${env.PROD_PROJECT} -f docker-compose.yml up --build -d --force-recreate
-                            Write-Host "✅ Docker Compose stack started"
+                            echo ✅ Docker Compose stack started
                         """
                         
                         // Wait for web service - Check every 1 minute, 5 times (5 minutes total)
-                        waitForWebService(env.PROD_HEALTH_URL, 5, 60)
+                        waitForWebService(env.PROD_HEALTH_URL, 5)
                         
                         // Execute tenant creation script
-                        powershell """
-                            Write-Host "🔧 Running tenant creation script..."
+                        bat """
+                            echo 🔧 Running tenant creation script...
                             docker compose -p ${env.PROD_PROJECT} -f docker-compose.yml exec web python create_tenant.py
-                            Write-Host "✅ Tenant creation completed"
+                            echo ✅ Tenant creation completed
                         """
                     }
                 }
@@ -166,35 +161,31 @@ pipeline {
 }
 
 /**
- * Wait for web service to become healthy
+ * Wait for web service to become healthy using Docker container
  * @param healthUrl - The health check URL
  * @param maxAttempts - Number of attempts (5)
- * @param intervalSeconds - Seconds between attempts (60 = 1 minute)
  */
-def waitForWebService(String healthUrl, int maxAttempts, int intervalSeconds) {
+def waitForWebService(String healthUrl, int maxAttempts) {
     echo "⏳ Waiting for web service to become healthy..."
     echo "🔍 Health URL: ${healthUrl}"
-    echo "⏰ Will check every ${intervalSeconds} seconds for ${maxAttempts} attempts (${maxAttempts * intervalSeconds / 60} minutes total)"
+    echo "⏰ Will check every 60 seconds for ${maxAttempts} attempts (${maxAttempts} minutes total)"
     
     for (int attempt = 1; attempt <= maxAttempts; attempt++) {
         echo "🔄 Health check attempt ${attempt}/${maxAttempts}..."
         
         try {
-            def result = powershell(
+            def result = bat(
                 script: """
-                    try {
-                        \$response = Invoke-WebRequest -Uri "${healthUrl}" -TimeoutSec 10 -UseBasicParsing
-                        if (\$response.StatusCode -eq 200) {
-                            Write-Host "SUCCESS"
-                            exit 0
-                        } else {
-                            Write-Host "FAILED - Status: \$(\$response.StatusCode)"
-                            exit 1
-                        }
-                    } catch {
-                        Write-Host "FAILED - Error: \$(\$_.Exception.Message)"
-                        exit 1
-                    }
+                    @echo off
+                    echo Attempting health check...
+                    docker run --rm --network host curlimages/curl:latest curl -s --max-time 10 ${healthUrl}
+                    if %ERRORLEVEL%==0 (
+                        echo SUCCESS: Web service is healthy
+                        exit /b 0
+                    ) else (
+                        echo FAILED: Web service not responding
+                        exit /b 1
+                    )
                 """,
                 returnStatus: true
             )
@@ -208,11 +199,11 @@ def waitForWebService(String healthUrl, int maxAttempts, int intervalSeconds) {
         }
         
         if (attempt < maxAttempts) {
-            echo "⏳ Web service not ready yet. Waiting ${intervalSeconds} seconds before next attempt..."
-            sleep(intervalSeconds)
+            echo "⏳ Web service not ready yet. Waiting 60 seconds before next attempt..."
+            bat "timeout /t 60 /nobreak >nul"
         }
     }
     
     // If we reach here, all attempts failed
-    error "❌ Web service did not become healthy after ${maxAttempts} attempts (${maxAttempts * intervalSeconds / 60} minutes). Deployment failed!"
+    error "❌ Web service did not become healthy after ${maxAttempts} attempts (${maxAttempts} minutes). Deployment failed!"
 }
