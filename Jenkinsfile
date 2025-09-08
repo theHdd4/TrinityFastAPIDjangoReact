@@ -321,11 +321,9 @@ else:
                         // Create backup of current deployment
                         echo "💾 Creating backup..."
                         bat """
-                            if exist "backup_$(date +%Y%m%d_%H%M%S)" (
-                                echo Backup directory already exists
-                            ) else (
-                                mkdir "backup_$(date +%Y%m%d_%H%M%S)"
-                            )
+                            set BACKUP_DIR=backup_%RANDOM%
+                            if not exist "%BACKUP_DIR%" mkdir "%BACKUP_DIR%"
+                            echo Backup directory created: %BACKUP_DIR%
                         """
                         
                         // Stop existing containers gracefully
@@ -379,24 +377,27 @@ else:
                             docker compose -p ${project} -f ${composeFile} ps
                             
                             echo 🔍 Checking container health...
-                            for /f %%i in ('docker compose -p ${project} -f ${composeFile} ps -q') do (
-                                echo Container %%i status: 
-                                docker inspect -f "{{.State.Status}}" %%i
-                            )
+                            docker compose -p ${project} -f ${composeFile} ps --format "table {{.Name}}\\t{{.Status}}"
                         """
                         
                         // Test endpoints
                         echo "🌐 Testing endpoints..."
-                        bat """
-                            echo Testing Django admin...
-                            curl -f http://localhost:8003/admin/ || echo "Django admin check failed"
+                        script {
+                            def djangoPort = (env.BRANCH_NAME == 'dev') ? '8003' : '8000'
+                            def fastapiPort = (env.BRANCH_NAME == 'dev') ? '8004' : '8001'
+                            def frontendPort = (env.BRANCH_NAME == 'dev') ? '8081' : '8080'
                             
-                            echo Testing FastAPI...
-                            curl -f http://localhost:8004/api/health || echo "FastAPI health check failed"
-                            
-                            echo Testing Frontend...
-                            curl -f http://localhost:8081/ || echo "Frontend check failed"
-                        """
+                            bat """
+                                echo Testing Django admin...
+                                curl -f http://localhost:${djangoPort}/admin/ || echo "Django admin check failed"
+                                
+                                echo Testing FastAPI...
+                                curl -f http://localhost:${fastapiPort}/api/health || echo "FastAPI health check failed"
+                                
+                                echo Testing Frontend...
+                                curl -f http://localhost:${frontendPort}/ || echo "Frontend check failed"
+                            """
+                        }
                     }
                 }
             }
