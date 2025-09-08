@@ -9,14 +9,12 @@ const isDevStack =
 
 const djangoPort =
   import.meta.env.VITE_DJANGO_PORT || (isDevStack ? '8003' : '8000');
-// Prefer the FastAPI dev port (8004) whenever a host IP is explicitly
-// provided or when running the standard dev stack, otherwise default to
-// the production port 8001. This avoids accidental calls to the wrong
-// port which surfaced as `ERR_CONNECTION_REFUSED` when the frontend
-// tried to reach FastAPI on 8001 while it was listening on 8004.
+// Use the FastAPI dev port (8004) only when the standard dev stack is
+// detected; otherwise always fall back to the production port 8001 so
+// deployments that supply a host IP still target the correct backend.
 const fastapiPort =
   import.meta.env.VITE_FASTAPI_PORT ||
-  (isDevStack || hostIp ? '8004' : '8001');
+  (isDevStack ? '8004' : '8001');
 const aiPort = import.meta.env.VITE_AI_PORT || (isDevStack ? '8005' : '8002');
 const frontendPort =
   import.meta.env.VITE_FRONTEND_PORT || (isDevStack ? '8081' : '8080');

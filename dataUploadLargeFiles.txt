@@ -36,7 +36,5 @@ Chunked CSV uploads now convert each batch to Arrow via PyArrow, avoiding
 when writing large string columns.
 A dedicated web worker now applies DataFrame operations in the background while the first page renders on the main thread. This keeps the interface responsive even when filtering or sorting very large uploads.
 A complementary Celery worker in the FastAPI backend now mirrors this behavior: the first page is rendered through a quick task while a separate background task applies the same operations to the remaining rows. This keeps server responses fast and offloads heavy work to asynchronous workers.
-When a `VITE_HOST_IP` is supplied the frontend now targets FastAPI on port
-8004 by default, preventing `ERR_CONNECTION_REFUSED` errors that surfaced
-when the server was listening on 8004 but the client attempted to reach
-8001.
+When a `VITE_HOST_IP` is supplied the frontend continues to target FastAPI on port
+8001 by default to align with production deployments.
