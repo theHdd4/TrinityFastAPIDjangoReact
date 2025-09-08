@@ -233,18 +233,47 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
   
   // Function to fetch date range from backend
   const fetchDateRange = async () => {
+    console.log('🔍 fetchDateRange function called!');
     try {
       setLoadingDateRange(true);
       const modelId = generateModelId();
-      const response = await fetch(`${SCENARIO_PLANNER_API}/get-date-range?model_id=${encodeURIComponent(modelId)}`);
+      const apiUrl = `${SCENARIO_PLANNER_API}/get-date-range?model_id=${encodeURIComponent(modelId)}`;
+      console.log('🔍 Fetching date range for model:', modelId);
+      console.log('🔍 API URL:', apiUrl);
+      
+      const response = await fetch(apiUrl);
+      console.log('🔍 Response status:', response.status, response.statusText);
       
       if (response.ok) {
         const result = await response.json();
+        console.log('🔍 Date range response:', result);
+        
         if (result.success && result.data) {
-          setDateRange({
-            start_date: result.data.start_date,
-            end_date: result.data.end_date
-          });
+          // Convert date format from DD-MMM-YYYY to YYYY-MM-DD if needed
+          const convertDateFormat = (dateStr: string) => {
+            if (!dateStr) return dateStr;
+            // Check if it's already in YYYY-MM-DD format
+            if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+              return dateStr;
+            }
+            // Try to convert from DD-MMM-YYYY format
+            try {
+              const date = new Date(dateStr);
+              if (!isNaN(date.getTime())) {
+                return date.toISOString().split('T')[0]; // Returns YYYY-MM-DD
+              }
+            } catch (e) {
+              console.warn('Could not convert date:', dateStr);
+            }
+            return dateStr;
+          };
+          
+          const dateRangeData = {
+            start_date: convertDateFormat(result.data.start_date),
+            end_date: convertDateFormat(result.data.end_date)
+          };
+          console.log('🔍 Setting date range:', dateRangeData);
+          setDateRange(dateRangeData);
           
           // Auto-populate reference period if not set
           if (!data.referencePeriod?.from || !data.referencePeriod?.to) {
@@ -255,10 +284,15 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
               }
             });
           }
+        } else {
+          console.error('🔍 Date range response not successful:', result);
         }
+      } else {
+        const errorText = await response.text();
+        console.error('🔍 Date range API error:', response.status, response.statusText, errorText);
       }
     } catch (error) {
-      console.error('Error fetching date range:', error);
+      console.error('🔍 Error fetching date range:', error);
     } finally {
       setLoadingDateRange(false);
     }
@@ -268,8 +302,28 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
   
   // Fetch date range on component mount
   useEffect(() => {
+    console.log('🔍 useEffect triggered - calling fetchDateRange');
+    console.log('🔍 Component mounted, data:', { 
+      hasData: !!data, 
+      referenceMethod: data?.referenceMethod,
+      hasBackendData: !!(data?.backendIdentifiers || data?.backendFeatures || data?.backendCombinations)
+    });
     fetchDateRange();
   }, []);
+
+  // Auto-populate date range when switching to period methods
+  useEffect(() => {
+    const isPeriodMethod = data.referenceMethod === 'period-mean' || data.referenceMethod === 'period-median';
+    if (isPeriodMethod && dateRange && (!data.referencePeriod?.from || !data.referencePeriod?.to)) {
+      console.log('🔍 Auto-populating date range for period method:', data.referenceMethod);
+      onDataChange({
+        referencePeriod: {
+          from: dateRange.start_date,
+          to: dateRange.end_date
+        }
+      });
+    }
+  }, [data.referenceMethod, dateRange]);
 
   // Read identifiers, features, and combinations from shared store (data prop)
   const backendIdentifiers = data.backendIdentifiers || null;
@@ -1215,8 +1269,8 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
                         </label>
                       </div>
                       
-                      {/* Individual Combination Selection - Matching Build Atom Layout */}
-                      <div className="max-h-60 overflow-y-auto overflow-x-auto border rounded p-2">
+                      {/* Individual Combination Selection - Exact Build Atom Layout */}
+                      <div className="max-h-60 overflow-y-auto overflow-x-auto mt-2 border rounded p-2">
                         <div className="grid grid-cols-1 gap-2 min-w-max">
                           {backendCombinations.combinations.map((combination: any) => (
                             <div key={combination.combination_id} className="flex items-center space-x-2 p-2 border rounded hover:bg-muted/30">
@@ -1249,12 +1303,13 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
                                   }
                                 }}
                                 className="data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600 data-[state=checked]:text-white"
+                                onClick={(e) => e.stopPropagation()}
                               />
-                              <div className="flex-1">
-                                <label htmlFor={`combination-${combination.combination_id}`} className="text-xs font-medium cursor-pointer truncate">
+                              <div className="min-w-0 flex-1">
+                                <label htmlFor={`combination-${combination.combination_id}`} className="text-xs font-medium cursor-pointer whitespace-nowrap">
                                   {combination.combination_id}
                                 </label>
-                                <div className="text-xs text-gray-500 truncate">
+                                <div className="text-xs text-gray-500 whitespace-nowrap">
                                   {combination.identifiers ? Object.entries(combination.identifiers).map(([key, value]) => `${key}: ${value}`).join(', ') : 'No identifiers'}
                                 </div>
                               </div>
@@ -1348,7 +1403,32 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
                   <input
                     id="reference-start-date"
                     type="date"
-                    value={data.referencePeriod?.from || dateRange?.start_date || ''}
+                    value={(() => {
+                      const isMeanOrMedian = data.referenceMethod === 'mean' || data.referenceMethod === 'median';
+                      const isPeriodMethod = data.referenceMethod === 'period-mean' || data.referenceMethod === 'period-median';
+                      
+                      let value = '';
+                      if (isMeanOrMedian) {
+                        // For mean/median: show the full date range (disabled)
+                        value = dateRange?.start_date || '';
+                      } else if (isPeriodMethod) {
+                        // For period-mean/period-median: show user input or fallback to date range
+                        value = data.referencePeriod?.from || dateRange?.start_date || '';
+                      } else {
+                        // Fallback: show user input or date range
+                        value = data.referencePeriod?.from || dateRange?.start_date || '';
+                      }
+                      
+                      console.log('🔍 Start date input value:', { 
+                        isMeanOrMedian, 
+                        isPeriodMethod, 
+                        value, 
+                        dateRange, 
+                        referenceMethod: data.referenceMethod,
+                        userInput: data.referencePeriod?.from
+                      });
+                      return value;
+                    })()}
                     onChange={(e) => onDataChange({
                       referencePeriod: {
                         ...data.referencePeriod,
@@ -1373,7 +1453,32 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
                   <input
                     id="reference-end-date"
                     type="date"
-                    value={data.referencePeriod?.to || dateRange?.end_date || ''}
+                    value={(() => {
+                      const isMeanOrMedian = data.referenceMethod === 'mean' || data.referenceMethod === 'median';
+                      const isPeriodMethod = data.referenceMethod === 'period-mean' || data.referenceMethod === 'period-median';
+                      
+                      let value = '';
+                      if (isMeanOrMedian) {
+                        // For mean/median: show the full date range (disabled)
+                        value = dateRange?.end_date || '';
+                      } else if (isPeriodMethod) {
+                        // For period-mean/period-median: show user input or fallback to date range
+                        value = data.referencePeriod?.to || dateRange?.end_date || '';
+                      } else {
+                        // Fallback
+                        value = data.referencePeriod?.to || dateRange?.end_date || '';
+                      }
+                      
+                      console.log('🔍 End date input value:', { 
+                        isMeanOrMedian, 
+                        isPeriodMethod, 
+                        value, 
+                        dateRange, 
+                        referenceMethod: data.referenceMethod,
+                        userInput: data.referencePeriod?.to
+                      });
+                      return value;
+                    })()}
                     onChange={(e) => onDataChange({
                       referencePeriod: {
                         ...data.referencePeriod,
@@ -1399,10 +1504,17 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
                   </div>
                 )}
                 
-                {/* Show info about disabled fields */}
+                {/* Show info about disabled fields and date range */}
                 {(data.referenceMethod === 'mean' || data.referenceMethod === 'median') && (
                   <div className="text-xs text-gray-500 bg-blue-50 p-2 rounded">
-                    Date fields are disabled for {data.referenceMethod} method. Use Period Mean or Period Median to enable date selection.
+                    <div className="mb-1">
+                      Date fields are disabled for <span className="font-medium">{data.referenceMethod}</span> method. Use Period Mean or Period Median to enable date selection.
+                    </div>
+                    {dateRange && (
+                      <div className="text-gray-600">
+                        <span className="font-medium">Available date range:</span> {dateRange.start_date} to {dateRange.end_date}
+                      </div>
+                    )}
                   </div>
                 )}
                   

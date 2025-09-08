@@ -938,35 +938,70 @@ async def get_date_range_endpoint(
         logger.info(f"🔍 Getting date range for: {client_name}/{app_name}/{project_name}")
         
         # Get models to find a sample combination for date range
-        models = await DataService.get_models_for_combinations(decoded_model_id)
+        models = await DataService.fetch_selected_models(decoded_model_id)
         
         if not models:
             raise HTTPException(status_code=404, detail="No models found for the given model_id")
         
         # Use the first model to get date range
-        sample_model = models[0]
+        sample_model = models[1]
         sample_identifiers = sample_model.get("identifiers", {})
         
         try:
             # Get a sample data slice to extract date range
-            df_slice = await DataService.get_data_slice_for_combination(
-                sample_identifiers, 
-                start=None,  # Get full range
-                end=None
-            )
+            # Use the same approach as /reference endpoint - get data from model's source file
+            model_file_key = sample_model.get("file_key", "")
+            logger.info(f"🔍 Date range - model_file_key: {model_file_key}")
+            
+            if model_file_key:
+                # Load data directly from the model's source file (same as /reference endpoint)
+                df_slice = DataService.get_d0_dataframe(model_file_key)
+                logger.info(f"🔍 Date range - df_slice shape: {df_slice.shape if df_slice is not None else 'None'}")
+                logger.info(f"🔍 Date range - df_slice columns: {list(df_slice.columns) if df_slice is not None else 'None'}")
+            else:
+                # Fallback to full dataset if no file_key
+                logger.warning("⚠️ No file_key found for model, using full dataset")
+                df_slice = DataService.get_current_d0_dataframe()
+                if df_slice is None:
+                    raise HTTPException(status_code=400, detail="No dataset cached. Please call GET /init-cache first.")
+                logger.info(f"🔍 Date range - full df_slice shape: {df_slice.shape if df_slice is not None else 'None'}")
             
             if df_slice is not None and not df_slice.empty:
                 # Find date column (assuming it's named 'date', 'Date', or similar)
                 date_columns = [col for col in df_slice.columns if 'date' in col.lower()]
+                logger.info(f"🔍 Date range - date_columns: {date_columns}")
                 
                 if date_columns:
                     date_col = date_columns[0]
                     min_date = df_slice[date_col].min()
                     max_date = df_slice[date_col].max()
                     
-                    # Convert to string format
-                    start_date = min_date.strftime('%Y-%m-%d') if hasattr(min_date, 'strftime') else str(min_date)
-                    end_date = max_date.strftime('%Y-%m-%d') if hasattr(max_date, 'strftime') else str(max_date)
+                    # Convert to string format - handle both datetime objects and string dates
+                    def format_date_for_html(date_value):
+                        if hasattr(date_value, 'strftime'):
+                            # It's a datetime object
+                            return date_value.strftime('%Y-%m-%d')
+                        else:
+                            # It's a string, try to parse and reformat
+                            date_str = str(date_value)
+                            try:
+                                # Try to parse DD-MMM-YYYY format
+                                from datetime import datetime
+                                parsed_date = datetime.strptime(date_str, '%d-%b-%Y')
+                                return parsed_date.strftime('%Y-%m-%d')
+                            except ValueError:
+                                try:
+                                    # Try to parse DD-MMM-YY format
+                                    parsed_date = datetime.strptime(date_str, '%d-%b-%y')
+                                    return parsed_date.strftime('%Y-%m-%d')
+                                except ValueError:
+                                    # If all parsing fails, return as is
+                                    return date_str
+                    
+                    start_date = format_date_for_html(min_date)
+                    end_date = format_date_for_html(max_date)
+                    
+                    logger.info(f"🔍 Date range conversion: {min_date} -> {start_date}, {max_date} -> {end_date}")
                     
                     return {
                         "success": True,
