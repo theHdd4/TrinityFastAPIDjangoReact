@@ -338,28 +338,27 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
     };
   }, [openDropdown, contextMenu, rowContextMenu]);
 
-  // Process and filter data progressively so the first page renders quickly
+  // Process and filter data so the first page renders immediately on the main thread while the rest runs in a worker
   const [processedData, setProcessedData] = useState<{
     filteredRows: DataFrameRow[];
     totalRows: number;
     uniqueValues: { [key: string]: string[] };
   }>({ filteredRows: [], totalRows: 0, uniqueValues: {} });
+  const workerRef = useRef<Worker | null>(null);
 
   useEffect(() => {
+    workerRef.current?.terminate();
+
     if (!data || !Array.isArray(data.headers) || !Array.isArray(data.rows)) {
       setProcessedData({ filteredRows: [], totalRows: 0, uniqueValues: {} });
       return;
     }
 
-    let cancelled = false;
-    let foregroundDone = false;
     const limit = settings.rowsPerPage || 15;
     const appliedFilters = settings.filters || {};
     const term = settings.searchTerm?.trim().toLowerCase() || '';
 
-    const filtered: DataFrameRow[] = [];
-    const uniqueSets: { [key: string]: Set<string> } = {};
-    data.headers.forEach(h => { uniqueSets[h] = new Set(); });
+    const immediate: DataFrameRow[] = [];
 
     const matchesRow = (row: DataFrameRow) => {
       if (term) {
@@ -385,38 +384,32 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
       return true;
     };
 
-    const processChunk = (start: number) => {
-      const CHUNK_SIZE = 1000;
-      for (let i = start; i < Math.min(start + CHUNK_SIZE, data.rows.length); i++) {
-        const row = data.rows[i];
-        if (matchesRow(row)) {
-          filtered.push(row);
-          data.headers.forEach(h => {
-            uniqueSets[h].add(safeToString(row[h]));
-          });
-          if (!foregroundDone && filtered.length === limit) {
-            foregroundDone = true;
-            setProcessedData({ filteredRows: [...filtered], totalRows: filtered.length, uniqueValues: {} });
-          }
-        }
+    for (const row of data.rows) {
+      if (matchesRow(row)) {
+        immediate.push(row);
+        if (immediate.length === limit) break;
       }
+    }
 
-      if (start + CHUNK_SIZE < data.rows.length && !cancelled) {
-        setTimeout(() => processChunk(start + CHUNK_SIZE), 0);
-      } else {
-        const uniqueValues: { [key: string]: string[] } = {};
-        Object.keys(uniqueSets).forEach(h => {
-          uniqueValues[h] = Array.from(uniqueSets[h]).filter(v => v !== '').sort().slice(0, 50);
-        });
-        if (!cancelled) {
-          setProcessedData({ filteredRows: [...filtered], totalRows: filtered.length, uniqueValues });
-        }
-      }
+    setProcessedData({ filteredRows: immediate, totalRows: immediate.length, uniqueValues: {} });
+
+    workerRef.current = new Worker(new URL('./dataframeWorker.ts', import.meta.url));
+    workerRef.current.onmessage = (evt: MessageEvent) => {
+      const { filteredRows, uniqueValues } = evt.data as {
+        filteredRows: DataFrameRow[];
+        uniqueValues: { [key: string]: string[] };
+      };
+      setProcessedData({ filteredRows, totalRows: filteredRows.length, uniqueValues });
     };
+    workerRef.current.postMessage({
+      headers: data.headers,
+      rows: data.rows,
+      filters: appliedFilters,
+      searchTerm: term,
+      duplicateMap
+    });
 
-    processChunk(0);
-
-    return () => { cancelled = true; };
+    return () => { workerRef.current?.terminate(); };
   }, [data, settings.searchTerm, settings.filters, duplicateMap, settings.rowsPerPage]);
 
   // Pagination

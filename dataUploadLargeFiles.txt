@@ -34,3 +34,4 @@ floating-point values in columns that initially appear integer-only.
 Chunked CSV uploads now convert each batch to Arrow via PyArrow, avoiding
 `ArrowTypeError: Extracting byte ranges not supported for type string_view`
 when writing large string columns.
+A dedicated web worker now applies DataFrame operations in the background while the first page renders on the main thread. This keeps the interface responsive even when filtering or sorting very large uploads.
