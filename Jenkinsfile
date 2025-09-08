@@ -263,7 +263,9 @@ else:
                         """
                         
                         // Clean up the patching script
-                        deleteFile 'patch_settings.py'
+                        bat """
+                            if exist patch_settings.py del patch_settings.py
+                        """
                     }
                 }
             }
