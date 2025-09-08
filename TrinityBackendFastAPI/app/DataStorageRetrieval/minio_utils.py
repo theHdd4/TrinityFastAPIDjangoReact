@@ -2,21 +2,30 @@ import os
 import io
 from pathlib import Path
 import pandas as pd
-import pyarrow as pa
-import pyarrow.ipc as ipc
-from minio import Minio
+import polars as pl
+from minio import Minio, MinioAdmin
 from minio.error import S3Error
+from minio.credentials import StaticProvider
 
 # Default to the development MinIO service if not explicitly configured
 MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "minio:9000")
 MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY", "minio")
 MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY", "minio123")
 MINIO_BUCKET = os.getenv("MINIO_BUCKET", "trinity")
+MINIO_BUCKET_QUOTA = int(
+    os.getenv("MINIO_BUCKET_QUOTA", str(10 * 1024**3))
+)  # default 10GB to handle >500MB uploads
 
 _client = Minio(
     MINIO_ENDPOINT,
     access_key=MINIO_ACCESS_KEY,
     secret_key=MINIO_SECRET_KEY,
+    secure=False,
+)
+
+_admin_client = MinioAdmin(
+    MINIO_ENDPOINT,
+    credentials=StaticProvider(MINIO_ACCESS_KEY, MINIO_SECRET_KEY),
     secure=False,
 )
 
@@ -27,10 +36,15 @@ def get_client() -> Minio:
 
 
 def ensure_minio_bucket() -> bool:
-    """Ensure the configured bucket exists."""
+    """Ensure the configured bucket exists and has sufficient quota."""
     try:
         if not _client.bucket_exists(MINIO_BUCKET):
             _client.make_bucket(MINIO_BUCKET)
+        if MINIO_BUCKET_QUOTA > 0:
+            try:
+                _admin_client.bucket_quota_set(MINIO_BUCKET, MINIO_BUCKET_QUOTA)
+            except Exception as e:
+                print(f"⚠️ could not set bucket quota: {e}")
         return True
     except Exception:
         return False
@@ -53,13 +67,14 @@ def get_arrow_dir() -> Path:
     return dir_path
 
 
-def save_arrow_table(df: pd.DataFrame, path: Path) -> None:
-    """Save a DataFrame to a local Arrow file."""
-    table = pa.Table.from_pandas(df)
+def save_arrow_table(df: pd.DataFrame | pl.DataFrame, path: Path) -> None:
+    """Save a DataFrame to a local Arrow file using Polars IPC serialization."""
+    if isinstance(df, pd.DataFrame):
+        df_pl = pl.from_pandas(df)
+    else:
+        df_pl = df
     path.parent.mkdir(parents=True, exist_ok=True)
-    with pa.OSFile(str(path), "wb") as sink:
-        with ipc.new_file(sink, table.schema) as writer:
-            writer.write_table(table)
+    df_pl.write_ipc(path)
 
 
 def upload_to_minio(file_content_bytes: bytes, filename: str, object_prefix: str) -> dict:
