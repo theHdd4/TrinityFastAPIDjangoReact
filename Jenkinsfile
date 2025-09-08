@@ -2,26 +2,17 @@ pipeline {
     agent any
 
     environment {
-        DEV_PROJECT = 'trinity-dev'
-        PROD_PROJECT = 'trinity-prod'
+        DEV_PROJECT     = 'trinity-dev'
+        PROD_PROJECT    = 'trinity-prod'
         EXPECTED_HOST_IP = '10.2.1.65'
-
-        DEV_PATH = 'D:\\application\\dev\\TrinityFastAPIDjangoReact'
-        PROD_PATH = 'D:\\application\\prod\\TrinityFastAPIDjangoReact'
     }
 
     stages {
         stage('Checkout Code') {
             steps {
                 script {
-                    def targetPath = (env.BRANCH_NAME == 'dev') ? env.DEV_PATH : env.PROD_PATH
-                    echo "📦 Checking out branch ${env.BRANCH_NAME} into ${targetPath}..."
-                    checkout([
-                        $class: 'GitSCM',
-                        branches: [[name: "*/${env.BRANCH_NAME}"]],
-                        userRemoteConfigs: [[url: 'https://github.com/theHdd4/TrinityFastAPIDjangoReact.git']],
-                        extensions: [[$class: 'RelativeTargetDirectory', relativeTargetDir: targetPath]]
-                    ])
+                    echo "📦 Code is already checked out into Jenkins workspace: ${env.WORKSPACE}"
+                    echo "Branch: ${env.BRANCH_NAME}"
                 }
             }
         }
@@ -29,11 +20,10 @@ pipeline {
         stage('Prepare Compose & Env Files') {
             steps {
                 script {
-                    def targetPath = (env.BRANCH_NAME == 'dev') ? env.DEV_PATH : env.PROD_PATH
                     def composeExample = (env.BRANCH_NAME == 'dev') ? 'docker-compose-dev.example.yml' : 'docker-compose.example.yml'
                     def composeFinal   = (env.BRANCH_NAME == 'dev') ? 'docker-compose-dev.yml'       : 'docker-compose.yml'
 
-                    dir(targetPath) {
+                    dir("${env.WORKSPACE}") {
                         echo "🔍 Preparing ${composeFinal} with HOST_IP=${env.EXPECTED_HOST_IP}..."
 
                         // Docker Compose
@@ -70,7 +60,7 @@ pipeline {
         stage('Deploy Dev Environment') {
             when { branch 'dev' }
             steps {
-                dir("${env.DEV_PATH}") {
+                dir("${env.WORKSPACE}") {
                     bat """
                         echo 🚀 Deploying DEV environment...
 
@@ -105,7 +95,7 @@ pipeline {
         stage('Deploy Prod Environment') {
             when { branch 'main' }
             steps {
-                dir("${env.PROD_PATH}") {
+                dir("${env.WORKSPACE}") {
                     bat """
                         echo 🚀 Deploying PROD environment...
 
