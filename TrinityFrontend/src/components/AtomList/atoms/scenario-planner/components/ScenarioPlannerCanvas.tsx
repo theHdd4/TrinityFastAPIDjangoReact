@@ -1102,9 +1102,9 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
 
       model_id: modelId,
       scenario_id: settings.activeScenarioId || 'scenario1',
-      start_date: settings.referencePeriod?.from || '2024-01-01',
+      start_date: settings.referencePeriod?.from || settings.backendDateRange?.start_date || '2024-01-01',
 
-      end_date: settings.referencePeriod?.to || '2024-12-31',
+      end_date: settings.referencePeriod?.to || settings.backendDateRange?.end_date || '2024-12-31',
 
         stat: settings.referenceMethod || 'mean',
 
@@ -1720,9 +1720,9 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
         model_id: modelId,
         stat: statMethod,
 
-        start_date: settings.referencePeriod?.from || '2024-01-01',
+        start_date: settings.referencePeriod?.from || settings.backendDateRange?.start_date || '2024-01-01',
 
-        end_date: settings.referencePeriod?.to || '2024-12-31'
+        end_date: settings.referencePeriod?.to || settings.backendDateRange?.end_date || '2024-12-31'
 
       };
 
@@ -2004,9 +2004,9 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
         model_id: modelId,
         stat: statMethod,
 
-        start_date: settings.referencePeriod?.from || '2024-01-01',
+        start_date: settings.referencePeriod?.from || settings.backendDateRange?.start_date || '2024-01-01',
 
-        end_date: settings.referencePeriod?.to || '2024-12-31'
+        end_date: settings.referencePeriod?.to || settings.backendDateRange?.end_date || '2024-12-31'
 
       };
 
@@ -2419,9 +2419,9 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
         model_id: modelId,
         stat: statMethod,
 
-        start_date: settings.referencePeriod?.from || '2024-01-01',
+        start_date: settings.referencePeriod?.from || settings.backendDateRange?.start_date || '2024-01-01',
 
-        end_date: settings.referencePeriod?.to || '2024-12-31'
+        end_date: settings.referencePeriod?.to || settings.backendDateRange?.end_date || '2024-12-31'
 
       };
 

@@ -275,6 +275,11 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
           console.log('🔍 Setting date range:', dateRangeData);
           setDateRange(dateRangeData);
           
+          // Also store in the global settings for use in other components
+          onDataChange({
+            backendDateRange: dateRangeData
+          });
+          
           // Auto-populate reference period if not set
           if (!data.referencePeriod?.from || !data.referencePeriod?.to) {
             onDataChange({
@@ -313,9 +318,23 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
 
   // Auto-populate date range when switching to period methods
   useEffect(() => {
-    const isPeriodMethod = data.referenceMethod === 'period-mean' || data.referenceMethod === 'period-median';
-    if (isPeriodMethod && dateRange && (!data.referencePeriod?.from || !data.referencePeriod?.to)) {
+    const isPeriodMethod = data.referenceMethod === 'period-mean';
+    const hasDefaultDates = data.referencePeriod?.from === '01-JAN-2020' && data.referencePeriod?.to === '30-MAR-2024';
+    const needsDatePopulation = !data.referencePeriod?.from || !data.referencePeriod?.to || hasDefaultDates;
+    
+    if (isPeriodMethod && dateRange && needsDatePopulation) {
       console.log('🔍 Auto-populating date range for period method:', data.referenceMethod);
+      console.log('🔍 Current dates:', data.referencePeriod);
+      console.log('🔍 Backend date range:', dateRange);
+      
+      // For period methods, auto-populate with the FULL backend date range
+      // User can then modify these dates if they want a custom period
+      console.log('🔍 Auto-populating period dates with FULL backend range:', {
+        method: data.referenceMethod,
+        backendRange: `${dateRange.start_date} to ${dateRange.end_date}`,
+        calculatedPeriod: `${dateRange.start_date} to ${dateRange.end_date}`
+      });
+      
       onDataChange({
         referencePeriod: {
           from: dateRange.start_date,
@@ -1368,16 +1387,14 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
               <div className="space-y-2">
                 <Select 
                   value={data.referenceMethod || 'mean'} 
-                  onValueChange={(value: 'period-mean' | 'period-median' | 'mean' | 'median') => onDataChange({ referenceMethod: value })}
+                  onValueChange={(value: 'period-mean' | 'mean') => onDataChange({ referenceMethod: value })}
                 >
                   <SelectTrigger className="w-full">
                     <SelectValue placeholder="Select method" />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="period-mean">Period Mean</SelectItem>
-                    <SelectItem value="period-median">Period Median</SelectItem>
                     <SelectItem value="mean">Mean</SelectItem>
-                    <SelectItem value="median">Median</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -1405,7 +1422,7 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
                     type="date"
                     value={(() => {
                       const isMeanOrMedian = data.referenceMethod === 'mean' || data.referenceMethod === 'median';
-                      const isPeriodMethod = data.referenceMethod === 'period-mean' || data.referenceMethod === 'period-median';
+                      const isPeriodMethod = data.referenceMethod === 'period-mean';
                       
                       let value = '';
                       if (isMeanOrMedian) {
@@ -1455,7 +1472,7 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
                     type="date"
                     value={(() => {
                       const isMeanOrMedian = data.referenceMethod === 'mean' || data.referenceMethod === 'median';
-                      const isPeriodMethod = data.referenceMethod === 'period-mean' || data.referenceMethod === 'period-median';
+                      const isPeriodMethod = data.referenceMethod === 'period-mean';
                       
                       let value = '';
                       if (isMeanOrMedian) {
@@ -1504,19 +1521,54 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
                   </div>
                 )}
                 
-                {/* Show info about disabled fields and date range */}
-                {(data.referenceMethod === 'mean' || data.referenceMethod === 'median') && (
-                  <div className="text-xs text-gray-500 bg-blue-50 p-2 rounded">
-                    <div className="mb-1">
-                      Date fields are disabled for <span className="font-medium">{data.referenceMethod}</span> method. Use Period Mean or Period Median to enable date selection.
-                    </div>
-                    {dateRange && (
-                      <div className="text-gray-600">
-                        <span className="font-medium">Available date range:</span> {dateRange.start_date} to {dateRange.end_date}
-                      </div>
-                    )}
-                  </div>
-                )}
+                 {/* Show info about disabled fields and date range */}
+                 {(data.referenceMethod === 'mean' || data.referenceMethod === 'median') && (
+                   <div className="text-xs text-gray-500 bg-blue-50 p-2 rounded">
+                     <div className="mb-1">
+                       Date fields are disabled for <span className="font-medium">{data.referenceMethod}</span> method. Use Period Mean or Period Median to enable date selection.
+                     </div>
+                     {dateRange && (
+                       <div className="text-gray-600">
+                         <span className="font-medium">Available date range:</span> {dateRange.start_date} to {dateRange.end_date}
+                       </div>
+                     )}
+                   </div>
+                 )}
+
+                 {/* Show period calculation info for period methods */}
+                 {(data.referenceMethod === 'period-mean') && (
+                   <div className="text-xs text-gray-600 bg-green-50 p-3 rounded border border-green-200">
+                     <div className="mb-2">
+                         <span className="font-medium text-green-800">
+                           Period Mean Calculation
+                         </span>
+                     </div>
+                     {data.referencePeriod?.from && data.referencePeriod?.to ? (
+                       <div className="space-y-1">
+                         <div className="text-green-700">
+                           <span className="font-medium">Selected Period:</span> {data.referencePeriod.from} to {data.referencePeriod.to}
+                         </div>
+                         <div className="text-green-600">
+                           Values will be calculated based on the mean of data within this period.
+                           {data.referencePeriod?.from === dateRange?.start_date && data.referencePeriod?.to === dateRange?.end_date && (
+                             <span className="block mt-1 text-green-500 font-medium">
+                               ✓ Using full available data range
+                             </span>
+                           )}
+                         </div>
+                       </div>
+                     ) : (
+                       <div className="text-green-600">
+                         Please select start and end dates to define the calculation period.
+                       </div>
+                     )}
+                     {dateRange && (
+                       <div className="mt-2 pt-2 border-t border-green-200 text-green-600">
+                         <span className="font-medium">Available data range:</span> {dateRange.start_date} to {dateRange.end_date}
+                       </div>
+                     )}
+                   </div>
+                 )}
                   
                 </div>
                     </CollapsibleContent>

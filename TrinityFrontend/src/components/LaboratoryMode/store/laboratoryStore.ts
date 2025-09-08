@@ -746,6 +746,10 @@ export interface ScenarioPlannerSettings {
   backendIdentifiers?: any;
   backendFeatures?: any;
   backendCombinations?: any;
+  backendDateRange?: {
+    start_date: string;
+    end_date: string;
+  };
   
   // ✅ NEW: Properties for auto-refresh functionality
   referenceValuesNeedRefresh?: boolean;
