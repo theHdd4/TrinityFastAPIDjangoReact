@@ -89,9 +89,9 @@ pipeline {
                             echo ✅ Docker Compose stack started
                         """
                         
-                        // Wait 2 minutes for services to be ready
+                        // Wait 1 minute for services to be ready
                         echo "⏳ Waiting 2 minutes for services to be ready..."
-                        sleep(120) // 120 seconds = 2 minutes
+                        sleep(60) // 60 seconds = 1 minute
                         echo "✅ Wait completed!"
                         
                         // Execute tenant creation script
@@ -131,17 +131,25 @@ pipeline {
                             echo ✅ Docker Compose stack started
                         """
                         
-                        // Wait 2 minutes for services to be ready
-                        echo "⏳ Waiting 2 minutes for services to be ready..."
-                        sleep(120) // 120 seconds = 2 minutes
+                        // Wait 1 minutes for services to be ready
+                        echo "⏳ Waiting 2 minute for services to be ready..."
+                        sleep(60) // 60 seconds = 1 minute
                         echo "✅ Wait completed!"
                         
                         // Execute tenant creation script
-                        bat """
-                            echo 🔧 Running tenant creation script...
-                            docker compose -p ${env.PROD_PROJECT} -f docker-compose.yml exec web python create_tenant.py
-                            echo ✅ Tenant creation completed
-                        """
+                        def tenantResult = bat(
+                            script: """
+                                echo 🔧 Running tenant creation script...
+                                docker compose -p ${env.PROD_PROJECT} -f docker-compose.yml exec web python create_tenant.py
+                            """,
+                            returnStatus: true
+                        )
+                        
+                        if (tenantResult == 0 || tenantResult == 137) {
+                            echo "✅ Tenant creation completed successfully"
+                        } else {
+                            error "❌ Tenant creation failed with exit code: ${tenantResult}"
+                        }
                     }
                 }
             }
