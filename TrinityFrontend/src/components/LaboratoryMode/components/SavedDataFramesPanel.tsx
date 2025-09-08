@@ -42,24 +42,31 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle }) => {
         }
 
         if (user) {
-            try {
-              const payload: any = { user_id: user.id };
-              const redisRes = await fetch(`${SESSION_API}/init`, {
-                method: 'POST',
-                credentials: 'include',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
-              });
+          try {
+            // Provide the full environment context so the session key is
+            // unique per client/app/project and Redis returns the correct
+            // envvars for the active project.
+            const payload: any = {
+              user_id: user.id,
+              client_id: env.CLIENT_ID || '',
+              app_id: env.APP_ID || '',
+              project_id: env.PROJECT_ID || '',
+              client_name: env.CLIENT_NAME || '',
+              app_name: env.APP_NAME || '',
+              project_name: env.PROJECT_NAME || '',
+            };
+            const redisRes = await fetch(`${SESSION_API}/init`, {
+              method: 'POST',
+              credentials: 'include',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload),
+            });
             if (redisRes.ok) {
               const redisData = await redisRes.json();
               const redisEnv = redisData.state?.envvars;
               if (redisEnv) {
                 env = { ...env, ...redisEnv };
-                const { CLIENT_NAME, APP_NAME, PROJECT_NAME } = env;
-                localStorage.setItem(
-                  'env',
-                  JSON.stringify({ CLIENT_NAME, APP_NAME, PROJECT_NAME })
-                );
+                localStorage.setItem('env', JSON.stringify(env));
               }
             }
           } catch (err) {
@@ -90,11 +97,7 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle }) => {
             setPrefix(prefData.prefix || '');
             if (prefData.environment) {
               env = { ...env, ...prefData.environment };
-              const { CLIENT_NAME, APP_NAME, PROJECT_NAME } = env;
-              localStorage.setItem(
-                'env',
-                JSON.stringify({ CLIENT_NAME, APP_NAME, PROJECT_NAME })
-              );
+              localStorage.setItem('env', JSON.stringify(env));
             }
             // Rebuild query using any refreshed environment variables so the
             // subsequent listing request targets the current namespace.
@@ -119,11 +122,7 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle }) => {
             setPrefix(data.prefix || '');
             if (data.environment) {
               env = { ...env, ...data.environment };
-              const { CLIENT_NAME, APP_NAME, PROJECT_NAME } = env;
-              localStorage.setItem(
-                'env',
-                JSON.stringify({ CLIENT_NAME, APP_NAME, PROJECT_NAME })
-              );
+              localStorage.setItem('env', JSON.stringify(env));
             }
             console.log(
               `📁 SavedDataFramesPanel looking in MinIO bucket "${data.bucket}" folder "${data.prefix}" via ${data.env_source} (CLIENT_NAME=${data.environment?.CLIENT_NAME} APP_NAME=${data.environment?.APP_NAME} PROJECT_NAME=${data.environment?.PROJECT_NAME})`

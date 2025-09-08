@@ -116,11 +116,10 @@ const handleAppSelect = async (appId: string) => {
       const data = await res.json();
       if (data.environment) {
         console.log('Environment after app select', data.environment);
-        const { CLIENT_NAME, APP_NAME, PROJECT_NAME } = data.environment;
-        localStorage.setItem(
-          'env',
-          JSON.stringify({ CLIENT_NAME, APP_NAME, PROJECT_NAME })
-        );
+        // Persist the full environment (including identifiers) so subsequent
+        // requests have access to CLIENT_ID/APP_ID/PROJECT_ID and the
+        // session namespace remains consistent.
+        localStorage.setItem('env', JSON.stringify(data.environment));
       }
     }
   } catch (err) {

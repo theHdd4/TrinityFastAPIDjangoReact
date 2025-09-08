@@ -221,15 +221,30 @@ const Projects = () => {
     try {
       const envStr = localStorage.getItem('env');
       const baseEnv = envStr ? JSON.parse(envStr) : {};
-      const { CLIENT_NAME, APP_NAME } = baseEnv;
+      const {
+        CLIENT_NAME,
+        CLIENT_ID,
+        APP_NAME,
+        APP_ID,
+      } = baseEnv;
+      // Seed local storage with the new project name while preserving any
+      // existing identifiers. This ensures components relying on
+      // CLIENT_ID/APP_ID/PROJECT_ID immediately reflect the selection.
       localStorage.setItem(
         'env',
-        JSON.stringify({ CLIENT_NAME, APP_NAME, PROJECT_NAME: project.name })
+        JSON.stringify({
+          CLIENT_NAME,
+          CLIENT_ID,
+          APP_NAME,
+          APP_ID,
+          PROJECT_NAME: project.name,
+          PROJECT_ID: project.id?.toString() || '',
+        })
       );
     } catch {
       localStorage.setItem(
         'env',
-        JSON.stringify({ PROJECT_NAME: project.name })
+        JSON.stringify({ PROJECT_NAME: project.name, PROJECT_ID: project.id?.toString() || '' })
       );
     }
 
@@ -238,11 +253,9 @@ const Projects = () => {
       if (res.ok) {
         const data = await res.json();
         if (data.environment) {
-          const { CLIENT_NAME, APP_NAME, PROJECT_NAME } = data.environment;
-          localStorage.setItem(
-            'env',
-            JSON.stringify({ CLIENT_NAME, APP_NAME, PROJECT_NAME })
-          );
+          // Persist the full environment returned by the backend so IDs are
+          // available for session lookups and MinIO prefixes.
+          localStorage.setItem('env', JSON.stringify(data.environment));
         }
       }
     } catch (err) {
