@@ -2740,18 +2740,28 @@ async def save_dataframes(
         if filename.lower().endswith(".csv"):
             csv_path = getattr(fileobj, "name", None)
             if csv_path and os.path.exists(csv_path):
-                reader = pl.read_csv_batched(csv_path, batch_size=1_000_000, **CSV_READ_KWARGS)
+                reader = pl.read_csv_batched(
+                    csv_path, batch_size=1_000_000, **CSV_READ_KWARGS
+                )
                 try:
                     first_chunk = next(reader)
                 except StopIteration:
-                    uploads.append({"file_key": key, "already_saved": False, "error": "empty file"})
+                    uploads.append(
+                        {
+                            "file_key": key,
+                            "already_saved": False,
+                            "error": "empty file",
+                        }
+                    )
                     flights.append({"file_key": key})
                     continue
                 arrow_buf = io.BytesIO()
-                with pa.ipc.new_file(arrow_buf, first_chunk.to_arrow().schema) as writer:
-                    writer.write(first_chunk.to_arrow())
+                # Use PyArrow conversion to avoid "string_view" byte-range errors
+                first_arrow = first_chunk.to_arrow(use_pyarrow=True)
+                with pa.ipc.new_file(arrow_buf, first_arrow.schema) as writer:
+                    writer.write(first_arrow)
                     for chunk in reader:
-                        writer.write(chunk.to_arrow())
+                        writer.write(chunk.to_arrow(use_pyarrow=True))
                 arrow_bytes = arrow_buf.getvalue()
                 df_pl = None
             else:

@@ -30,3 +30,7 @@ handled correctly without exhausting memory.
 CSV parsing now scans the first 10k rows when inferring column types. This prevents
 `ComputeError: could not parse '...' as dtype i64` failures when later rows contain
 floating-point values in columns that initially appear integer-only.
+
+Chunked CSV uploads now convert each batch to Arrow via PyArrow, avoiding
+`ArrowTypeError: Extracting byte ranges not supported for type string_view`
+when writing large string columns.
