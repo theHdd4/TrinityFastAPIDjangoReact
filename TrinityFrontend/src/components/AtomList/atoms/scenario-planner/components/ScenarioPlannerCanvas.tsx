@@ -502,9 +502,9 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
 
 
 
-  // ✅ NEW: State for toggling between hierarchical and flat results
+  // ✅ NEW: State for toggling between individual and aggregated results
 
-  const [resultViewMode, setResultViewMode] = useState<Record<string, 'hierarchy' | 'flat'>>({});
+  const [resultViewMode, setResultViewMode] = useState<Record<string, 'individual' | 'aggregated'>>({});
 
 
 
@@ -516,9 +516,9 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
 
     setResultViewMode(prev => {
 
-      const newMode = prev[viewId] === 'hierarchy' ? 'flat' : 'hierarchy';
+      const newMode = prev[viewId] === 'individual' ? 'aggregated' : 'individual';
 
-      console.log('🔄 Switching view mode from', prev[viewId] || 'hierarchy', 'to', newMode);
+      console.log('🔄 Switching view mode from', prev[viewId] || 'individual', 'to', newMode);
 
       const newState = {
 
@@ -1101,6 +1101,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
     const payload = {
 
       model_id: modelId,
+      scenario_id: settings.activeScenarioId || 'scenario1',
       start_date: settings.referencePeriod?.from || '2024-01-01',
 
       end_date: settings.referencePeriod?.to || '2024-12-31',
@@ -1543,9 +1544,23 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
 
     
     
-    const nextScenarioNumber = availableScenarios.length + 1;
-
+    // ✅ FIXED: Find the highest scenario number and add 1, instead of just counting scenarios
+    const scenarioNumbers = availableScenarios
+      .map(scenarioId => {
+        const match = scenarioId.match(/scenario-(\d+)/);
+        return match ? parseInt(match[1], 10) : 0;
+      })
+      .filter(num => num > 0);
+    
+    const nextScenarioNumber = scenarioNumbers.length > 0 ? Math.max(...scenarioNumbers) + 1 : 1;
     const newScenarioId = `scenario-${nextScenarioNumber}`;
+    
+    console.log('🔢 Scenario numbering:', {
+      availableScenarios,
+      scenarioNumbers,
+      nextScenarioNumber,
+      newScenarioId
+    });
 
   
   
@@ -3773,7 +3788,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
 
       const viewResults = getResultsForScenarioAndView(scenarioId, viewId);
 
-      const currentMode = resultViewMode[viewId] || 'hierarchy';
+      const currentMode = resultViewMode[viewId] || 'individual';
 
       console.log('📊 getChartDataForScenarioAndView called:', {
 
@@ -3785,11 +3800,11 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
 
         hasViewResults: !!viewResults,
 
-        hasHierarchy: !!(viewResults?.hierarchy),
+        hasIndividuals: !!(viewResults?.individuals),
 
         hasFlat: !!(viewResults?.flat),
 
-        hierarchyLength: viewResults?.hierarchy?.length || 0,
+        individualsLength: viewResults?.individuals?.length || 0,
 
         flatKeys: viewResults?.flat ? Object.keys(viewResults.flat) : []
 
@@ -3797,45 +3812,52 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
 
       
       
-      if (currentMode === 'hierarchy') {
+      if (currentMode === 'individual') {
 
-        if (!viewResults?.hierarchy) {
+        if (!viewResults?.individuals) {
 
-          console.log('❌ No hierarchy results found for view:', viewId);
+          console.log('❌ No individual results found for view:', viewId);
 
           return [];
 
         }
 
-        console.log('✅ Processing hierarchy results:', viewResults.hierarchy.length, 'items');
+        console.log('✅ Processing individual results:', viewResults.individuals.length, 'items');
 
-        
-        
-        return viewResults.hierarchy.map((hierarchicalResult: any) => ({
+        // Debug: Log the first individual result to see its structure
+        if (viewResults.individuals.length > 0) {
+          console.log('🔍 First individual result structure:', viewResults.individuals[0]);
+        }
 
-          identifiers: hierarchicalResult.identifiers || {},
+        return viewResults.individuals.map((individualResult: any) => {
+          // Debug: Log the extracted values
+          const scenarioValue = individualResult.scenario?.prediction || individualResult.prediction || 0;
+          const baselineValue = individualResult.baseline?.prediction || individualResult.baseline || 0;
+          
+          console.log('🔍 Individual result values:', {
+            identifiers: individualResult.identifiers,
+            scenarioValue,
+            baselineValue,
+            scenarioObject: individualResult.scenario,
+            baselineObject: individualResult.baseline
+          });
 
-          prediction: hierarchicalResult.scenario?.prediction || hierarchicalResult.prediction || 0,
-
-          pct_uplift: (hierarchicalResult.pct_uplift?.prediction) || hierarchicalResult.pct_uplift || 0,
-
-          combinationLabel: Object.values(hierarchicalResult.identifiers || {})
-
+          return {
+            identifiers: individualResult.identifiers || {},
+            scenario: scenarioValue,
+            pct_uplift: individualResult.pct_uplift?.prediction || individualResult.pct_uplift || 0,
+            combinationLabel: individualResult.combinationLabel || Object.values(individualResult.identifiers || {})
             .join(', '),
-
-          run_id: hierarchicalResult.run_id || viewResults.runId || '',
-
-          baseline: hierarchicalResult.baseline?.prediction || 0,
-
-          delta: hierarchicalResult.delta?.prediction || 0,
-
-          features: hierarchicalResult.scenario?.features || {}
-
-        }));
+            run_id: individualResult.run_id || viewResults.runId || '',
+            baseline: baselineValue,
+            delta: individualResult.delta?.prediction || individualResult.delta || 0,
+            features: individualResult.scenario?.features || individualResult.features || {}
+          };
+        });
 
       } else {
 
-        // Flat mode
+        // Aggregated mode (shows flat results)
 
         if (!viewResults?.flat) {
 
@@ -3845,9 +3867,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
 
         }
 
-        console.log('✅ Processing flat results:', Object.keys(viewResults.flat).length, 'identifier groups');
-
-        
+        console.log('✅ Processing aggregated (flat) results:', Object.keys(viewResults.flat).length, 'identifier groups');
         
         // Process flat results - they have a different structure
 
@@ -3858,12 +3878,27 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
           if (Array.isArray(identifierResults)) {
 
             identifierResults.forEach((result: any) => {
+              // Debug: Log the first aggregated result to see its structure
+              if (flatData.length === 0) {
+                console.log('🔍 First aggregated result structure:', result);
+              }
+
+              const scenarioValue = result.scenario?.prediction || result.prediction || 0;
+              const baselineValue = result.baseline?.prediction || 0;
+
+              console.log('🔍 Aggregated result values:', {
+                identifiers: result.identifiers,
+                scenarioValue,
+                baselineValue,
+                scenarioObject: result.scenario,
+                baselineObject: result.baseline
+              });
 
               flatData.push({
 
                 identifiers: result.identifiers || {},
 
-                prediction: result.scenario?.prediction || result.prediction || 0,
+                scenario: scenarioValue,
 
                 pct_uplift: (result.pct_uplift?.prediction) || result.pct_uplift || 0,
 
@@ -3871,7 +3906,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
 
                 run_id: result.run_id || viewResults.runId || '',
 
-                baseline: result.baseline?.prediction || 0,
+                baseline: baselineValue,
 
                 delta: result.delta?.prediction || 0,
 
@@ -3905,19 +3940,19 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
 
       const viewResults = getResultsForScenarioAndView(scenarioId, viewId);
 
-      const currentMode = resultViewMode[viewId] || 'hierarchy';
+      const currentMode = resultViewMode[viewId] || 'individual';
 
       
       
-      if (currentMode === 'hierarchy') {
+      if (currentMode === 'individual') {
 
-        // ✅ CHANGED: Check for hierarchical results
+        // ✅ CHANGED: Check for individual results
 
-        return !!(viewResults?.hierarchy && viewResults.hierarchy.length > 0);
+        return !!(viewResults?.individuals && viewResults.individuals.length > 0);
 
       } else {
 
-        // ✅ NEW: Check for flat results
+        // ✅ CHANGED: Check for aggregated (flat) results
 
         return !!(viewResults?.flat && Object.keys(viewResults.flat).length > 0);
 
@@ -3953,11 +3988,11 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
 
       
       
-      console.log('📈 Flat Results:', currentViewResults.flat);
+      console.log('📈 Flat Results (Aggregated Mode):', currentViewResults.flat);
 
-      console.log('🌳 Hierarchy Results (NOW DISPLAYED):', currentViewResults.hierarchy);
+      console.log('🌳 Hierarchy Results (NOT DISPLAYED):', currentViewResults.hierarchy);
 
-      console.log('👥 Individual Results (NOT DISPLAYED):', currentViewResults.individuals);
+      console.log('👥 Individual Results (Individual Mode):', currentViewResults.individuals);
 
       
       
@@ -4835,7 +4870,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
 
                                         <div className="text-right">
 
-                                          {/* ✅ NEW: Toggle button for switching between hierarchical and flat results */}
+                                          {/* ✅ NEW: Toggle button for switching between individual and aggregated results */}
 
                                           <button
 
@@ -4855,7 +4890,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
 
                                             </div>
 
-                                            {resultViewMode[viewId] === 'flat' ? 'Show Individual' : 'Show Aggregate'}
+                                            {resultViewMode[viewId] === 'aggregated' ? 'Show Individual' : 'Show Aggregate'}
 
                                           </button>
 
@@ -4874,11 +4909,13 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
 
                                       height={450}
 
-                                      viewMode={resultViewMode[viewId] || 'hierarchy'}
+                                      viewMode={resultViewMode[viewId] || 'individual'}
 
                                       yVariable={viewResults.yVariable}
 
                                       xAxisLabel={getViewDisplayName(view)}
+
+                                      viewSelectedIdentifiers={view?.selectedIdentifiers || {}}
 
                                     />
                                   </div>

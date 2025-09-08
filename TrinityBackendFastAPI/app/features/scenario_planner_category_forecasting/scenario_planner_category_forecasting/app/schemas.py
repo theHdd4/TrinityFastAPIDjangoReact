@@ -85,6 +85,7 @@ class ViewConfig(BaseModel):
 class RunRequest(BaseModel):
     """Request schema for POST /run endpoint"""
     model_id: str = Field(..., description="Model _id to fetch and process")
+    scenario_id: str = Field(..., description="Scenario ID (e.g., 'scenario1', 'scenario2', etc.)")
     start_date: str = Field(..., description="Start date for the scenario period (YYYY-MM-DD format)")
     end_date: str = Field(..., description="End date for the scenario period (YYYY-MM-DD format)")
     stat: str = Field(..., description="Statistical measure to use: 'period-mean', 'period-median', etc.")
@@ -95,6 +96,7 @@ class RunRequest(BaseModel):
         schema_extra = {
             "example": {
                 "model_id": "default_client/default_app/default_project",
+                "scenario_id": "scenario1",
                 "start_date": "2024-01-01",
                 "end_date": "2024-12-31",
                 "stat": "period-mean",

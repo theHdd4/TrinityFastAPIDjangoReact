@@ -197,10 +197,10 @@ interface ScenarioResultsChartProps {
   data: ScenarioData[];
   width?: number;
   height?: number;
-  viewMode?: 'hierarchy' | 'flat';
-  viewIdentifiers?: Record<string, string[]>;
+  viewMode?: 'individual' | 'aggregated';
   yVariable?: string;
   xAxisLabel?: string;
+  viewSelectedIdentifiers?: Record<string, string[]>;
   theme?: string;
   onThemeChange?: (theme: string) => void;
   onGridToggle?: (enabled: boolean) => void;
@@ -217,10 +217,10 @@ export const ScenarioResultsChart: React.FC<ScenarioResultsChartProps> = ({
   data, 
   width = 800, 
   height = 400,
-  viewMode = 'hierarchy',
-  viewIdentifiers,
+  viewMode = 'individual',
   yVariable = 'Value',
   xAxisLabel = 'Categories',
+  viewSelectedIdentifiers = {},
   theme: propTheme,
   onThemeChange,
   onGridToggle,
@@ -407,23 +407,64 @@ export const ScenarioResultsChart: React.FC<ScenarioResultsChartProps> = ({
   
   // Transform data for Recharts format with sorting
   const chartData = useMemo(() => {
-    const transformedData = data.map(item => ({
-      name: item.combinationLabel,
-      baseline: item.baseline || 0,
-      scenario: item.prediction,
-      uplift: item.pct_uplift,
-      delta: item.delta || 0
-    }));
+    const transformedData = data.map(item => {
+      const chartItem = {
+        name: item.combinationLabel,
+        baseline: item.baseline || 0,
+        scenario: item.scenario || 0,
+        uplift: item.pct_uplift,
+        delta: item.delta || 0,
+        // ✅ NEW: Store identifiers for multi-line labels
+        identifiers: item.identifiers || {}
+      };
+      
+      // Debug: Log the first item to see the values
+      if (data.indexOf(item) === 0) {
+        console.log('🔍 Chart data transformation:', {
+          originalItem: item,
+          transformedItem: chartItem
+        });
+      }
+      
+      return chartItem;
+    });
 
-    // Apply sorting based on percentage uplift
+    // ✅ MODIFIED: Respect backend sorting by default, allow user override for percentage uplift
+    // Backend already sorts by id1 values, so we only apply frontend sorting when user explicitly chooses it
     if (sortOrder === 'asc') {
+      // User chose to sort by percentage uplift (ascending)
       return [...transformedData].sort((a, b) => a.uplift - b.uplift);
     } else if (sortOrder === 'desc') {
+      // User chose to sort by percentage uplift (descending)
       return [...transformedData].sort((a, b) => b.uplift - a.uplift);
     }
     
+    // Default: Return data as-is (respecting backend sorting by id1)
     return transformedData;
   }, [data, sortOrder]);
+
+  // ✅ ENHANCED: Multi-line X-axis labels with identifier values
+  const formatXAxisTick = (tickItem: any, index: number) => {
+    const dataItem = chartData[index];
+    if (!dataItem) {
+      return tickItem;
+    }
+    
+    // First line: Combination name
+    const combinationText = dataItem.name || 'Unknown';
+    
+    // Second line: Identifier values
+    const identifierValuesText = dataItem.identifiers && Object.keys(dataItem.identifiers).length > 0
+      ? Object.entries(dataItem.identifiers)
+          .map(([key, value]) => value)
+          .join(' ')
+      : '';
+    
+    return {
+      combinationText,
+      identifierValuesText
+    };
+  };
 
   // Custom tooltip content
   const CustomTooltip = ({ active, payload, label }: any) => {
@@ -431,22 +472,50 @@ export const ScenarioResultsChart: React.FC<ScenarioResultsChartProps> = ({
       const baselineData = payload.find((p: any) => p.dataKey === 'baseline');
       const scenarioData = payload.find((p: any) => p.dataKey === 'scenario');
       
+      // Debug: Log the payload to see the actual data structure
+      console.log('🔍 Tooltip payload:', payload);
+      console.log('🔍 Baseline data:', baselineData);
+      console.log('🔍 Scenario data:', scenarioData);
+      
+      // Extract values safely
+      const baselineValue = baselineData?.value || baselineData?.payload?.baseline || 0;
+      const scenarioValue = scenarioData?.value || scenarioData?.payload?.prediction || 0;
+      
+      // Calculate uplift safely
+      let upliftPercentage = 'N/A';
+      if (baselineValue && baselineValue !== 0 && scenarioValue !== undefined) {
+        upliftPercentage = ((scenarioValue - baselineValue) / baselineValue * 100).toFixed(2) + '%';
+      }
+      
+      // Get identifier values for tooltip
+      const identifierValues = payload[0]?.payload?.identifiers || {};
+      const identifierValuesText = Object.keys(identifierValues).length > 0
+        ? Object.entries(identifierValues)
+            .map(([key, value]) => `${key}: ${value}`)
+            .join(', ')
+        : '';
+
       return (
         <div className="bg-white p-3 border border-gray-200 rounded-lg shadow-lg">
           <p className="font-semibold text-gray-800 mb-2">{label}</p>
+          {identifierValuesText && (
+            <p className="text-gray-600 text-xs mb-2 border-b pb-2">
+              {identifierValuesText}
+            </p>
+          )}
           {baselineData && (
             <p className="text-blue-600 text-sm">
-              Baseline: {baselineData.value?.toLocaleString() || 'N/A'}
+              Baseline: {typeof baselineValue === 'number' ? baselineValue.toLocaleString() : String(baselineValue)}
             </p>
           )}
           {scenarioData && (
             <p className="text-green-600 text-sm">
-              Scenario: {scenarioData.value?.toLocaleString() || 'N/A'}
+              Scenario: {typeof scenarioValue === 'number' ? scenarioValue.toLocaleString() : String(scenarioValue)}
             </p>
           )}
           {scenarioData && baselineData && (
             <p className="text-gray-600 text-sm">
-              Uplift: {((scenarioData.value - baselineData.value) / baselineData.value * 100).toFixed(2)}%
+              Uplift: {upliftPercentage}
             </p>
           )}
         </div>
@@ -547,7 +616,7 @@ export const ScenarioResultsChart: React.FC<ScenarioResultsChartProps> = ({
             <div className={`w-4 h-4 rounded border-2 ${sortOrder === 'asc' ? 'bg-blue-500 border-blue-500' : 'border-gray-300'}`}>
               {sortOrder === 'asc' && <div className="w-full h-full bg-white rounded-sm scale-50" />}
             </div>
-            <span>Ascending (Low to High)</span>
+            <span>Sort by Uplift (Low to High)</span>
           </button>
           <button
             className="px-4 py-2 text-sm text-left hover:bg-gray-50 flex items-center gap-2"
@@ -584,7 +653,7 @@ export const ScenarioResultsChart: React.FC<ScenarioResultsChartProps> = ({
       {/* Header with title and right-click hint */}
       <div className="mb-3 flex justify-between items-center">
         <h3 className="text-lg font-semibold text-gray-800">
-          {viewMode === 'hierarchy' ? 'Individual Results' : 'Aggregated Results'}
+          {viewMode === 'individual' ? 'Individual Results' : 'Aggregated Results'}
         </h3>
         
         {/* Right-click hint */}
@@ -593,13 +662,17 @@ export const ScenarioResultsChart: React.FC<ScenarioResultsChartProps> = ({
         </div>
       </div>
       
-      {/* Chart container with reduced size */}
-      <div className="w-full max-w-4xl mx-auto" onContextMenu={handleContextMenu}>
-        <ResponsiveContainer width="100%" height={Math.min(height, 350)}>
-          <BarChart 
-            data={chartData} 
-            margin={{ top: 15, right: 20, left: 60, bottom: 40 }}
-          >
+      {/* Scrollable chart container */}
+      <div className="w-full h-80 overflow-auto scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-gray-100" onContextMenu={handleContextMenu}>
+        <div className="min-w-full" style={{ 
+          minWidth: `${Math.max(chartData.length * 100, 600)}px`,
+          minHeight: `${Math.max(chartData.length * 50, 350)}px`
+        }}>
+          <ResponsiveContainer width="100%" height={Math.max(height, 350)}>
+            <BarChart 
+              data={chartData} 
+              margin={{ top: 10, right: 15, left: 50, bottom: 120 }}
+            >
           <defs>
             {/* Baseline bar gradient */}
             <linearGradient id="baselineGradient" x1="0" y1="0" x2="0" y2="1">
@@ -631,18 +704,111 @@ export const ScenarioResultsChart: React.FC<ScenarioResultsChartProps> = ({
           <XAxis 
             dataKey="name" 
             stroke="#64748b"
-            fontSize={11}
-            fontWeight={500}
+            fontSize={8}
+            fontWeight={400}
             tickLine={false}
             axisLine={false}
             tickMargin={8}
             angle={-45}
             textAnchor="end"
-            height={80}
+            height={160}
+            interval={0}
+            tick={({ x, y, payload, index }) => {
+              const dataItem = chartData[index];
+              if (!dataItem) {
+                return null;
+              }
+
+              // For hierarchical display: Group by view identifiers
+              const dataItemIdentifiers = dataItem.identifiers || {};
+              
+              // Find the primary view identifier (first one in viewSelectedIdentifiers)
+              const primaryIdentifierKey = Object.keys(viewSelectedIdentifiers)[0];
+              const primaryIdentifierValue = primaryIdentifierKey ? dataItemIdentifiers[primaryIdentifierKey] : '';
+              
+              // Get the combination details (excluding the primary identifier)
+              const combinationDetails = Object.entries(dataItemIdentifiers)
+                .filter(([key, value]) => key !== primaryIdentifierKey)
+                .map(([key, value]) => value)
+                .join(', ');
+
+              // Check if this is the first occurrence of this view identifier in the current group
+              // This will help us show the view identifier label only once per group
+              const isFirstInGroup = index === 0 || 
+                (index > 0 && chartData[index - 1] && 
+                 chartData[index - 1].identifiers && 
+                 chartData[index - 1].identifiers[primaryIdentifierKey] !== primaryIdentifierValue);
+
+              // Calculate the center position for the view identifier label
+              // Find the last bar in the current group to calculate the center
+              let groupEndIndex = index;
+              for (let i = index + 1; i < chartData.length; i++) {
+                if (chartData[i] && chartData[i].identifiers && 
+                    chartData[i].identifiers[primaryIdentifierKey] === primaryIdentifierValue) {
+                  groupEndIndex = i;
+                } else {
+                  break;
+                }
+              }
+
+              // Calculate center position more accurately
+              // Get the actual spacing between bars from the chart
+              const chartWidth = width || 800;
+              const dataLength = chartData.length;
+              const availableWidth = chartWidth - 100; // Account for margins
+              const barSpacing = availableWidth / dataLength;
+              
+              // Calculate center x position between first and last bar in the group
+              const firstBarX = x;
+              const lastBarX = x + (groupEndIndex - index) * barSpacing;
+              const groupCenterX = isFirstInGroup ? (firstBarX + lastBarX) / 2 : x;
+
+                return (
+                  <g>
+                    {/* Show combination labels only in individual mode */}
+                    {viewMode === 'individual' && (
+                      <text
+                        x={x}
+                        y={y}
+                        dx={0}
+                        dy={10}
+                        angle={-45}
+                        textAnchor="middle"
+                        fill="#64748b"
+                        fontSize={7}
+                        fontWeight={400}
+                      >
+                        <tspan x={x} dy={0} textAnchor="middle">
+                          {combinationDetails || 'Unknown Combination'}
+                        </tspan>
+                      </text>
+                    )}
+                    
+                    {/* Group label (view identifier) - show in both modes but adjust position */}
+                    {primaryIdentifierValue && isFirstInGroup && (
+                      <text
+                        x={groupCenterX}
+                        y={viewMode === 'aggregated' ? y + 10 : y + 25}
+                        dx={0}
+                        dy={0}
+                        angle={-45}
+                        textAnchor="middle"
+                        fill="#64748b"
+                        fontSize={9}
+                        fontWeight={600}
+                      >
+                        <tspan x={groupCenterX} textAnchor="middle">
+                          {primaryIdentifierValue}
+                        </tspan>
+                      </text>
+                    )}
+                  </g>
+                );
+            }}
             label={currentShowAxisLabels ? { 
               value: xAxisLabel, 
               position: 'bottom', 
-              style: { fontSize: '12px', fontWeight: 'bold', fill: '#374151' }
+              style: { fontSize: '10px', fontWeight: 'bold', fill: '#374151' }
             } : undefined}
           />
           
@@ -722,6 +888,14 @@ export const ScenarioResultsChart: React.FC<ScenarioResultsChartProps> = ({
           </Bar>
         </BarChart>
         </ResponsiveContainer>
+        </div>
+        
+        {/* Scroll hint */}
+        {chartData.length > 4 && (
+          <div className="text-center mt-2 text-xs text-gray-500">
+            ← → Scroll horizontally to see all categories | ↑ ↓ Scroll vertically for better view
+          </div>
+        )}
         
         {/* Color Theme Submenu */}
         <ColorThemeSubmenu />

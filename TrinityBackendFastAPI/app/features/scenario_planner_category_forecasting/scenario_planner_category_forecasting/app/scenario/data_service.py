@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 # ─────────────────────────────────────────────────────────────────────────── #
 # Redis helpers                                                              #
 # ─────────────────────────────────────────────────────────────────────────── #
-def _redis_set(key: str, obj, ttl: int = 60 * 60) -> None:
+def _redis_set(key: str, obj, ttl: int = 48 * 60 * 60) -> None:  # 2 days default TTL
     try:
         cache.set(key, pickle.dumps(obj), ex=ttl)
     except Exception:
@@ -762,7 +762,7 @@ class DataService:
                 "cache_version": "2.0"
             }
             cache_key = f"cache_metadata:{d0_key}"
-            _redis_set(cache_key, metadata, ttl=24 * 3600)
+            _redis_set(cache_key, metadata, ttl=48 * 3600)  # 2 days TTL
             logger.info("Stored cache metadata for %s", d0_key)
         except Exception as e:
             logger.error("Failed to store cache metadata: %s", e, exc_info=True)

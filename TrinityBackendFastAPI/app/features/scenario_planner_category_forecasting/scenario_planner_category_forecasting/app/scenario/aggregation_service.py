@@ -109,17 +109,21 @@ class AggregationService:
                 logger.info(f"🔍 Processing hierarchical aggregations for {view_id}...")
                 hier_list = await cls._process_hierarchical_aggregations_for_view(df, view_config, feat_set)
                 
+                # ✅ NEW: Sort individual and hierarchy results by id_1 value for consistent ordering
+                sorted_individuals = cls._sort_individuals_by_id1(filtered, view_config)
+                sorted_hierarchy = cls._sort_hierarchy_by_id1(hier_list, view_config)
+                
                 # Store results for this view
                 view_results[view_id] = {
                     "flat": flat_out,
-                    "hierarchy": hier_list,
-                    "individuals": filtered
+                    "hierarchy": sorted_hierarchy,
+                    "individuals": sorted_individuals
                 }
                 
                 # Store docs for this view
                 await asyncio.gather(
                     cls._store_flat_aggregations_for_view(flat_out, view_id, run_id, feat_set),
-                    cls._store_hierarchical_aggregations_for_view(hier_list, view_id, run_id, feat_set)
+                    cls._store_hierarchical_aggregations_for_view(sorted_hierarchy, view_id, run_id, feat_set)
                 )
             
             logger.info(f"✅ Aggregation completed for run_id: {run_id}, processed {len(view_results)} views")
@@ -182,6 +186,66 @@ class AggregationService:
         return [_row_to_json(row, id_cols, feat_set) for _, row in dfg.iterrows()]
 
     # ✅ REMOVED: Old _process_hierarchical_aggregations method - replaced by view-specific version
+
+    @classmethod
+    def _sort_individuals_by_id1(cls, individuals: List[Dict[str, Any]], view_config: Any) -> List[Dict[str, Any]]:
+        """Sort individual results by id_1 value for consistent X-axis ordering."""
+        try:
+            # Find the id_1 column name from the view configuration
+            id1_column = None
+            if "id1" in view_config.selected_identifiers:
+                id1_config = view_config.selected_identifiers["id1"]
+                # Get the first (and typically only) column from id1 configuration
+                id1_column = next(iter(id1_config.keys()), None)
+            
+            if not id1_column:
+                logger.warning("⚠️ No id1 column found for sorting individuals - returning unsorted")
+                return individuals
+            
+            logger.info(f"🔍 Sorting individuals by id1 column: {id1_column}")
+            
+            # Sort by the id1 column value
+            sorted_individuals = sorted(individuals, key=lambda x: x["identifiers"].get(id1_column, ""))
+            
+            # Log the sorting result for debugging
+            sorted_values = [x["identifiers"].get(id1_column, "") for x in sorted_individuals]
+            logger.info(f"✅ Sorted individuals by {id1_column}: {sorted_values}")
+            
+            return sorted_individuals
+            
+        except Exception as e:
+            logger.error(f"❌ Error sorting individuals by id1: {e}")
+            return individuals  # Return unsorted if sorting fails
+
+    @classmethod
+    def _sort_hierarchy_by_id1(cls, hierarchy: List[Dict[str, Any]], view_config: Any) -> List[Dict[str, Any]]:
+        """Sort hierarchy results by id_1 value for consistent X-axis ordering."""
+        try:
+            # Find the id_1 column name from the view configuration
+            id1_column = None
+            if "id1" in view_config.selected_identifiers:
+                id1_config = view_config.selected_identifiers["id1"]
+                # Get the first (and typically only) column from id1 configuration
+                id1_column = next(iter(id1_config.keys()), None)
+            
+            if not id1_column:
+                logger.warning("⚠️ No id1 column found for sorting hierarchy - returning unsorted")
+                return hierarchy
+            
+            logger.info(f"🔍 Sorting hierarchy by id1 column: {id1_column}")
+            
+            # Sort by the id1 column value
+            sorted_hierarchy = sorted(hierarchy, key=lambda x: x["identifiers"].get(id1_column, ""))
+            
+            # Log the sorting result for debugging
+            sorted_values = [x["identifiers"].get(id1_column, "") for x in sorted_hierarchy]
+            logger.info(f"✅ Sorted hierarchy by {id1_column}: {sorted_values}")
+            
+            return sorted_hierarchy
+            
+        except Exception as e:
+            logger.error(f"❌ Error sorting hierarchy by id1: {e}")
+            return hierarchy  # Return unsorted if sorting fails
 
     @classmethod
     def _recalculate_metrics(cls, df: pd.DataFrame, feat_set: set) -> pd.DataFrame:

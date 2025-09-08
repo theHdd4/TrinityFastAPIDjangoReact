@@ -649,6 +649,46 @@ async def run_scenario(
             **response_data,  # This now contains {"view_results": {...}}
         }
         
+        # ✅ Save scenario results to MongoDB (scenario-wise)
+        try:
+            # Extract client/app/project from model_id
+            parts = decoded_model_id.split('/')
+            if len(parts) >= 3:
+                client_name = parts[0]
+                app_name = parts[1] 
+                project_name = '/'.join(parts[2:])
+                
+                # Extract scenario_id from payload
+                scenario_id = payload.scenario_id
+                
+                # Prepare scenario results data
+                scenario_results_data = {
+                    "run_id": run_id,
+                    "dataset_used": current_file_key,
+                    "created_at": datetime.utcnow().isoformat(),
+                    "models_processed": len(models),
+                    "y_variable": y_variable,
+                    "payload": payload.dict() if hasattr(payload, 'dict') else payload,
+                    **response_data,  # Include all the view results
+                }
+                
+                # Save to MongoDB
+                mongo_result = await save_scenario_results(
+                    client_name=client_name,
+                    app_name=app_name,
+                    project_name=project_name,
+                    scenario_id=scenario_id,
+                    scenario_results_data=scenario_results_data,
+                    user_id="",  # You can add user_id if available
+                    project_id=None  # You can add project_id if available
+                )
+                
+                logger.info(f"📦 Scenario results saved to MongoDB: {mongo_result}")
+                
+        except Exception as mongo_error:
+            # Don't fail the main request if MongoDB save fails
+            logger.warning(f"⚠️ Failed to save scenario results to MongoDB: {mongo_error}")
+        
         logger.info("✅ Scenario run %s finished successfully", run_id)
         return RunResponse(**out)
 
@@ -1149,5 +1189,79 @@ async def update_scenario_configurations_endpoint(
     except Exception as e:
         logger.error(f"Error updating scenario configurations: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to update scenario configurations: {str(e)}")
+
+# ============================================================================
+# SCENARIO RESULTS ENDPOINTS
+# ============================================================================
+
+@router.post("/save-scenario-results")
+async def save_scenario_results_endpoint(
+    client_name: str = Query(..., description="Client name"),
+    app_name: str = Query(..., description="App name"),
+    project_name: str = Query(..., description="Project name"),
+    scenario_id: str = Query(..., description="Scenario ID"),
+    scenario_results_data: dict = Body(..., description="Scenario results data to save"),
+    user_id: str = Query("", description="User ID"),
+    project_id: int = Query(None, description="Project ID")
+):
+    """Save scenario results to MongoDB - scenario-wise"""
+    try:
+        result = await save_scenario_results(
+            client_name=client_name,
+            app_name=app_name,
+            project_name=project_name,
+            scenario_id=scenario_id,
+            scenario_results_data=scenario_results_data,
+            user_id=user_id,
+            project_id=project_id
+        )
+        
+        if result["status"] == "success":
+            return {
+                "success": True,
+                "message": f"Scenario results saved successfully for scenario {scenario_id}",
+                "mongo_id": result["mongo_id"],
+                "operation": result["operation"],
+                "collection": result["collection"]
+            }
+        else:
+            raise HTTPException(status_code=500, detail=f"Failed to save scenario results: {result['error']}")
+            
+    except Exception as e:
+        logger.error(f"Error saving scenario results: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to save scenario results: {str(e)}")
+
+@router.get("/get-scenario-results")
+async def get_scenario_results_endpoint(
+    client_name: str = Query(..., description="Client name"),
+    app_name: str = Query(..., description="App name"),
+    project_name: str = Query(..., description="Project name"),
+    scenario_id: str = Query(None, description="Specific scenario ID (optional)")
+):
+    """Retrieve saved scenario results. If scenario_id is provided, get specific scenario, otherwise get all scenarios."""
+    try:
+        result = await get_scenario_results_from_mongo(
+            client_name=client_name,
+            app_name=app_name,
+            project_name=project_name,
+            scenario_id=scenario_id
+        )
+        
+        if result is not None:
+            return {
+                "success": True,
+                "message": f"Scenario results retrieved successfully",
+                "data": result
+            }
+        else:
+            return {
+                "success": True,
+                "message": "No scenario results found",
+                "data": None
+            }
+            
+    except Exception as e:
+        logger.error(f"Error retrieving scenario results: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve scenario results: {str(e)}")
 
     

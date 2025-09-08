@@ -199,3 +199,93 @@ async def get_scenario_configurations_from_mongo(client_name: str, app_name: str
     except Exception as e:
         logger.error(f"❌ MongoDB read error for scenario_configurations: {e}")
         return None
+
+async def save_scenario_results(
+    client_name: str,
+    app_name: str,
+    project_name: str,
+    scenario_id: str,
+    scenario_results_data: dict,
+    *,
+    user_id: str = "",
+    project_id: int | None = None,
+):
+    """Save scenario results data to MongoDB scenario_results collection - scenario-wise"""
+    try:
+        # Create document ID with scenario_id to make it scenario-specific
+        document_id = f"{client_name}/{app_name}/{project_name}/{scenario_id}"
+        
+        # Check if document already exists
+        existing_doc = await db["scenario_results"].find_one({"_id": document_id})
+        
+        if existing_doc:
+            # Update existing document
+            merged_document = existing_doc.copy()
+            
+            # Update timestamp and user info
+            merged_document["updated_at"] = datetime.utcnow()
+            if user_id:
+                merged_document["user_id"] = user_id
+            if project_id is not None:
+                merged_document["project_id"] = project_id
+            
+            # Update scenario results data
+            merged_document.update(scenario_results_data)
+            
+            # Update the existing document
+            result = await db["scenario_results"].replace_one(
+                {"_id": document_id},
+                merged_document
+            )
+            
+            operation = "updated"
+        else:
+            # Create new document
+            document = {
+                "_id": document_id,
+                "client_name": client_name,
+                "app_name": app_name,
+                "project_name": project_name,
+                "scenario_id": scenario_id,
+                "operation_type": "scenario_planner_results",
+                "created_at": datetime.utcnow(),
+                "updated_at": datetime.utcnow(),
+                "user_id": user_id,
+                "project_id": project_id,
+                **scenario_results_data,
+            }
+            
+            # Insert new document
+            result = await db["scenario_results"].insert_one(document)
+            
+            operation = "inserted"
+        
+        logger.info(f"📦 Stored in scenario_results: {document_id}")
+        
+        return {
+            "status": "success", 
+            "mongo_id": document_id,
+            "operation": operation,
+            "collection": "scenario_results"
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ MongoDB save error for scenario_results: {e}")
+        return {"status": "error", "error": str(e)}
+
+async def get_scenario_results_from_mongo(client_name: str, app_name: str, project_name: str, scenario_id: str = None):
+    """Retrieve saved scenario results. If scenario_id is provided, get specific scenario, otherwise get all scenarios."""
+    try:
+        if scenario_id:
+            # Get specific scenario results
+            document_id = f"{client_name}/{app_name}/{project_name}/{scenario_id}"
+            result = await db["scenario_results"].find_one({"_id": document_id})
+            return result
+        else:
+            # Get all scenario results for this project
+            pattern = f"{client_name}/{app_name}/{project_name}/"
+            results = await db["scenario_results"].find({"_id": {"$regex": f"^{pattern}"}}).to_list(length=None)
+            return results
+    except Exception as e:
+        logger.error(f"❌ MongoDB read error for scenario_results: {e}")
+        return None
