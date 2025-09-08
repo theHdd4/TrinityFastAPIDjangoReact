@@ -10,6 +10,7 @@ import uuid
 from typing import Dict, Any, List
 from app.DataStorageRetrieval.arrow_client import download_table_bytes
 from app.features.data_upload_validate.app.routes import get_object_prefix
+from ..tasks import process_first_page, process_remaining
 
 router = APIRouter()
 
@@ -26,15 +27,23 @@ minio_client = Minio(
     secure=False
 )
 
-# In-memory storage for dataframe sessions
-SESSIONS: Dict[str, pl.DataFrame] = {}
+# In-memory registry of dataframe file paths
+SESSIONS: Dict[str, str] = {}
 
 
 def _get_df(df_id: str) -> pl.DataFrame:
-    df = SESSIONS.get(df_id)
-    if df is None:
+    path = SESSIONS.get(df_id)
+    if path is None or not os.path.exists(path):
         raise HTTPException(status_code=404, detail="DataFrame not found")
-    return df
+    return pl.read_ipc(path)
+
+
+def _save_df(df_id: str, df: pl.DataFrame) -> None:
+    path = SESSIONS.get(df_id)
+    if path is None:
+        path = f"/tmp/{df_id}.arrow"
+        SESSIONS[df_id] = path
+    df.write_ipc(path)
 
 
 def _df_payload(df: pl.DataFrame, df_id: str) -> Dict[str, Any]:
@@ -80,7 +89,7 @@ async def load_cached_dataframe(object_name: str = Body(..., embed=True)):
     """Load a cached dataframe by object key and create a session."""
     df = _fetch_df_from_object(object_name)
     df_id = str(uuid.uuid4())
-    SESSIONS[df_id] = df
+    _save_df(df_id, df)
     return _df_payload(df, df_id)
 
 @router.post("/save")
@@ -146,7 +155,7 @@ async def load_dataframe(file: UploadFile = File(...)):
     except Exception:
         raise HTTPException(status_code=400, detail="Failed to parse uploaded file")
     df_id = str(uuid.uuid4())
-    SESSIONS[df_id] = df
+    _save_df(df_id, df)
     return _df_payload(df, df_id)
 
 
@@ -164,7 +173,7 @@ async def filter_rows(df_id: str = Body(...), column: str = Body(...), value: An
             df = df.filter(pl.col(column) == value)
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
-    SESSIONS[df_id] = df
+    _save_df(df_id, df)
     result = _df_payload(df, df_id)
     return result
 
@@ -176,7 +185,7 @@ async def sort_dataframe(df_id: str = Body(...), column: str = Body(...), direct
         df = df.sort(column, descending=direction != "asc")
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
-    SESSIONS[df_id] = df
+    _save_df(df_id, df)
     result = _df_payload(df, df_id)
     return result
 
@@ -194,7 +203,7 @@ async def insert_row(
     upper = df.slice(0, insert_at)
     lower = df.slice(insert_at, df.height - insert_at)
     df = pl.concat([upper, pl.DataFrame([empty], schema=df.schema), lower])
-    SESSIONS[df_id] = df
+    _save_df(df_id, df)
     result = _df_payload(df, df_id)
     return result
 
@@ -206,7 +215,7 @@ async def delete_row(df_id: str = Body(...), index: int = Body(...)):
         df = df.with_row_count().filter(pl.col("row_nr") != index).drop("row_nr")
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
-    SESSIONS[df_id] = df
+    _save_df(df_id, df)
     result = _df_payload(df, df_id)
     return result
 
@@ -227,7 +236,7 @@ async def insert_column(
         cols.remove(name)
         cols.insert(index, name)
         df = df.select(cols)
-    SESSIONS[df_id] = df
+    _save_df(df_id, df)
     result = _df_payload(df, df_id)
     return result
 
@@ -239,7 +248,7 @@ async def delete_column(df_id: str = Body(...), name: str = Body(...)):
         df = df.drop(name)
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
-    SESSIONS[df_id] = df
+    _save_df(df_id, df)
     result = _df_payload(df, df_id)
     return result
 
@@ -256,7 +265,7 @@ async def edit_cell(df_id: str = Body(...), row: int = Body(...), column: str = 
         ).drop("row_nr")
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
-    SESSIONS[df_id] = df
+    _save_df(df_id, df)
     result = _df_payload(df, df_id)
     return result
 
@@ -278,7 +287,7 @@ async def apply_udf(
         df = df.with_columns(pl.col(column).apply(udf).alias(target))
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
-    SESSIONS[df_id] = df
+    _save_df(df_id, df)
     return _df_payload(df, df_id)
 
 
@@ -286,7 +295,7 @@ async def apply_udf(
 async def rename_column(df_id: str = Body(...), old_name: str = Body(...), new_name: str = Body(...)):
     df = _get_df(df_id)
     df = df.rename({old_name: new_name})
-    SESSIONS[df_id] = df
+    _save_df(df_id, df)
     result = _df_payload(df, df_id)
     return result
 
@@ -299,7 +308,7 @@ async def duplicate_row(df_id: str = Body(...), index: int = Body(...)):
         df = pl.concat([df.slice(0, index), row, df.slice(index, df.height - index)])
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
-    SESSIONS[df_id] = df
+    _save_df(df_id, df)
     result = _df_payload(df, df_id)
     return result
 
@@ -316,7 +325,7 @@ async def duplicate_column(df_id: str = Body(...), name: str = Body(...), new_na
         df = df.select(cols)
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
-    SESSIONS[df_id] = df
+    _save_df(df_id, df)
     result = _df_payload(df, df_id)
     return result
 
@@ -331,7 +340,7 @@ async def move_column(df_id: str = Body(...), from_col: str = Body(..., alias="f
         df = df.select(cols)
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
-    SESSIONS[df_id] = df
+    _save_df(df_id, df)
     result = _df_payload(df, df_id)
     return result
 
@@ -348,7 +357,7 @@ async def retype_column(df_id: str = Body(...), name: str = Body(...), new_type:
             df = df.with_columns(pl.col(name).cast(pl.Utf8))
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
-    SESSIONS[df_id] = df
+    _save_df(df_id, df)
     result = _df_payload(df, df_id)
     return result
 
@@ -377,29 +386,10 @@ async def info(df_id: str):
 
 @router.post("/ai/execute_operations")
 async def ai_execute(df_id: str = Body(...), operations: List[Dict[str, Any]] = Body(...)):
-    df = _get_df(df_id)
-    for op in operations:
-        name = op.get("op")
-        params = op.get("params", {})
-        if name == "filter_rows":
-            df = df.filter(pl.col(params.get("column")) == params.get("value"))
-        elif name == "sort":
-            df = df.sort(params.get("column"), descending=params.get("direction", "asc") != "asc")
-        elif name == "insert_column":
-            idx = params.get("index", len(df.columns))
-            df = df.with_columns(pl.lit(params.get("default")).alias(params.get("name")))
-            cols = df.columns
-            cols.remove(params.get("name"))
-            cols.insert(idx, params.get("name"))
-            df = df.select(cols)
-        elif name == "delete_row":
-            df = df.with_row_count().filter(pl.col("row_nr") != params.get("index")).drop("row_nr")
-        elif name == "edit_cell":
-            df = df.with_row_count().with_columns(
-                pl.when(pl.col("row_nr") == params.get("row"))
-                .then(pl.lit(params.get("value")))
-                .otherwise(pl.col(params.get("column")))
-                .alias(params.get("column"))
-            ).drop("row_nr")
-    SESSIONS[df_id] = df
-    return _df_payload(SESSIONS[df_id], df_id)
+    path = SESSIONS.get(df_id)
+    if path is None:
+        raise HTTPException(status_code=404, detail="DataFrame not found")
+    first_page = process_first_page.delay(path, operations).get()
+    process_remaining.delay(path, operations)
+    first_page["df_id"] = df_id
+    return first_page

@@ -35,3 +35,4 @@ Chunked CSV uploads now convert each batch to Arrow via PyArrow, avoiding
 `ArrowTypeError: Extracting byte ranges not supported for type string_view`
 when writing large string columns.
 A dedicated web worker now applies DataFrame operations in the background while the first page renders on the main thread. This keeps the interface responsive even when filtering or sorting very large uploads.
+A complementary Celery worker in the FastAPI backend now mirrors this behavior: the first page is rendered through a quick task while a separate background task applies the same operations to the remaining rows. This keeps server responses fast and offloads heavy work to asynchronous workers.
