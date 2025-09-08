@@ -71,14 +71,30 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
     for (const file of files) {
       const form = new FormData();
       form.append('file', file);
+      const envStr = localStorage.getItem('env');
+      if (envStr) {
+        try {
+          const env = JSON.parse(envStr);
+          form.append('client_id', env.CLIENT_ID || '');
+          form.append('app_id', env.APP_ID || '');
+          form.append('project_id', env.PROJECT_ID || '');
+          form.append('client_name', env.CLIENT_NAME || '');
+          form.append('app_name', env.APP_NAME || '');
+          form.append('project_name', env.PROJECT_NAME || '');
+        } catch {
+          /* ignore */
+        }
+      }
       try {
         const res = await fetch(`${VALIDATE_API}/upload-file`, {
           method: 'POST',
           body: form,
+          credentials: 'include',
         });
         if (res.ok) {
           const data = await res.json();
           uploaded.push({ name: file.name, path: data.file_path, size: file.size });
+          toast({ title: `${file.name} uploaded successfully` });
         } else {
           toast({ title: `Failed to upload ${file.name}`, variant: 'destructive' });
         }
