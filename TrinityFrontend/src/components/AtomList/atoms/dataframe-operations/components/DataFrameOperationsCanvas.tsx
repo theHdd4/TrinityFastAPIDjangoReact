@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef, useCallback, useEffect, useLayoutEffect } from 'react';
+import React, { useState, useRef, useCallback, useEffect, useLayoutEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -19,7 +19,7 @@ import {
   GripVertical, RotateCcw, FileText, Check, AlertCircle, Info, Edit2,
   ChevronDown, ChevronUp, X, PlusCircle, MinusCircle, Save
 } from 'lucide-react';
-import { DataFrameData, DataFrameSettings } from '../DataFrameOperationsAtom';
+import { DataFrameData, DataFrameSettings, DataFrameRow } from '../DataFrameOperationsAtom';
 import { DATAFRAME_OPERATIONS_API, VALIDATE_API } from '@/lib/api';
   import {
   loadDataframe,
@@ -338,69 +338,86 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
     };
   }, [openDropdown, contextMenu, rowContextMenu]);
 
-  // Process and filter data
-  const processedData = useMemo(() => {
+  // Process and filter data progressively so the first page renders quickly
+  const [processedData, setProcessedData] = useState<{
+    filteredRows: DataFrameRow[];
+    totalRows: number;
+    uniqueValues: { [key: string]: string[] };
+  }>({ filteredRows: [], totalRows: 0, uniqueValues: {} });
+
+  useEffect(() => {
     if (!data || !Array.isArray(data.headers) || !Array.isArray(data.rows)) {
-      return { filteredRows: [], totalRows: 0, uniqueValues: {} };
+      setProcessedData({ filteredRows: [], totalRows: 0, uniqueValues: {} });
+      return;
     }
 
-    let filteredRows = [...data.rows];
-
-    // Apply search filter locally
-    if (settings?.searchTerm?.trim()) {
-      const term = settings.searchTerm.trim();
-      const termLower = term.toLowerCase();
-      const exactRegex = new RegExp(`^(?:${term.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&')})$`, 'i');
-      filteredRows = filteredRows
-        .map((row, idx) => {
-          let score = 0;
-          for (const col of data.headers) {
-            const valStr = safeToString(row[col]);
-            if (exactRegex.test(valStr.trim())) { score = 2; break; }
-            if (valStr.toLowerCase().includes(termLower)) { score = Math.max(score, 1); }
-          }
-          return { row, idx, score };
-        })
-        .sort((a, b) => {
-          if (a.score !== b.score) return b.score - a.score;
-          return a.idx - b.idx;
-        })
-        .map(item => item.row);
-    }
-
-    // Unique values for filter UI (support hierarchical filtering and duplicated columns)
-    const uniqueValues: { [key: string]: string[] } = {};
+    let cancelled = false;
+    let foregroundDone = false;
+    const limit = settings.rowsPerPage || 15;
     const appliedFilters = settings.filters || {};
-    data.headers.forEach(header => {
-      const sourceCol = duplicateMap[header] || header;
-      // Start from the original unfiltered rows if available
-      let rowsForHeader = originalData?.rows ? [...originalData.rows] : [...data.rows];
-      // Apply all filters except the one for this header
-      Object.entries(appliedFilters).forEach(([col, val]) => {
-        if (col === header) return;
-        const filterCol = duplicateMap[col] || col;
-        rowsForHeader = rowsForHeader.filter(row => {
-          const cell = row[filterCol];
-          if (Array.isArray(val)) {
-            return val.includes(safeToString(cell));
-          }
-          if (val && typeof val === 'object' && 'min' in val && 'max' in val) {
-            const num = Number(cell);
-            return num >= val.min && num <= val.max;
-          }
-          return safeToString(cell) === safeToString(val);
-        });
-      });
-      const values = Array.from(
-        new Set(rowsForHeader.map(row => safeToString(row[sourceCol])))
-      )
-        .filter(v => v !== '')
-        .sort();
-      uniqueValues[header] = values.slice(0, 50);
-    });
+    const term = settings.searchTerm?.trim().toLowerCase() || '';
 
-    return { filteredRows, totalRows: filteredRows.length, uniqueValues };
-  }, [data, originalData, settings.searchTerm, settings.filters, duplicateMap]);
+    const filtered: DataFrameRow[] = [];
+    const uniqueSets: { [key: string]: Set<string> } = {};
+    data.headers.forEach(h => { uniqueSets[h] = new Set(); });
+
+    const matchesRow = (row: DataFrameRow) => {
+      if (term) {
+        let found = false;
+        for (const col of data.headers) {
+          const valStr = safeToString(row[col]);
+          if (valStr.toLowerCase().includes(term)) { found = true; break; }
+        }
+        if (!found) return false;
+      }
+      for (const [col, val] of Object.entries(appliedFilters)) {
+        const filterCol = duplicateMap[col] || col;
+        const cell = row[filterCol];
+        if (Array.isArray(val)) {
+          if (!val.includes(safeToString(cell))) return false;
+        } else if (val && typeof val === 'object' && 'min' in val && 'max' in val) {
+          const num = Number(cell);
+          if (num < val.min || num > val.max) return false;
+        } else {
+          if (safeToString(cell) !== safeToString(val)) return false;
+        }
+      }
+      return true;
+    };
+
+    const processChunk = (start: number) => {
+      const CHUNK_SIZE = 1000;
+      for (let i = start; i < Math.min(start + CHUNK_SIZE, data.rows.length); i++) {
+        const row = data.rows[i];
+        if (matchesRow(row)) {
+          filtered.push(row);
+          data.headers.forEach(h => {
+            uniqueSets[h].add(safeToString(row[h]));
+          });
+          if (!foregroundDone && filtered.length === limit) {
+            foregroundDone = true;
+            setProcessedData({ filteredRows: [...filtered], totalRows: filtered.length, uniqueValues: {} });
+          }
+        }
+      }
+
+      if (start + CHUNK_SIZE < data.rows.length && !cancelled) {
+        setTimeout(() => processChunk(start + CHUNK_SIZE), 0);
+      } else {
+        const uniqueValues: { [key: string]: string[] } = {};
+        Object.keys(uniqueSets).forEach(h => {
+          uniqueValues[h] = Array.from(uniqueSets[h]).filter(v => v !== '').sort().slice(0, 50);
+        });
+        if (!cancelled) {
+          setProcessedData({ filteredRows: [...filtered], totalRows: filtered.length, uniqueValues });
+        }
+      }
+    };
+
+    processChunk(0);
+
+    return () => { cancelled = true; };
+  }, [data, settings.searchTerm, settings.filters, duplicateMap, settings.rowsPerPage]);
 
   // Pagination
   const totalPages = Math.ceil(processedData.totalRows / (settings.rowsPerPage || 15));
