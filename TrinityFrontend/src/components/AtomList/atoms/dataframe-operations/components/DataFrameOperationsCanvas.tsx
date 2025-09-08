@@ -422,14 +422,19 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
   // Pagination
   const totalPages = Math.ceil(processedData.totalRows / (settings.rowsPerPage || 15));
 
-  // Ensure current page is valid when data size changes
+  // Ensure current page is within valid range
   useEffect(() => {
-    if (currentPage > totalPages) {
+    if (totalPages === 0) {
+      currentPage !== 1 && setCurrentPage(1);
+    } else if (currentPage > totalPages) {
       setCurrentPage(totalPages);
+    } else if (currentPage < 1) {
+      setCurrentPage(1);
     }
-  }, [totalPages]);
-  const startIndex = (currentPage - 1) * (settings.rowsPerPage || 15);
-  const paginatedRows = processedData.filteredRows.slice(startIndex, startIndex + (settings.rowsPerPage || 15));
+  }, [totalPages, currentPage]);
+  const pageSize = settings.rowsPerPage || 15;
+  const startIndex = Math.max(0, (currentPage - 1) * pageSize);
+  const paginatedRows = processedData.filteredRows.slice(startIndex, startIndex + pageSize);
 
   const handleFileUpload = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -1227,7 +1232,9 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
           {totalPages > 1 && (
             <div className="flex flex-col items-center py-4">
               <div className="text-sm text-muted-foreground mb-2">
-                {`Showing ${startIndex + 1} to ${Math.min(startIndex + (settings.rowsPerPage || 15), processedData.totalRows)} of ${processedData.totalRows} entries`}
+                {processedData.totalRows === 0
+                  ? 'Showing 0 to 0 of 0 entries'
+                  : `Showing ${startIndex + 1} to ${Math.min(startIndex + pageSize, processedData.totalRows)} of ${processedData.totalRows} entries`}
               </div>
               <Pagination>
                 <PaginationContent>
