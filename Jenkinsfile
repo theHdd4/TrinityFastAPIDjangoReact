@@ -57,9 +57,10 @@ pipeline {
                         // --- Patch Django + FastAPI for CORS/CSRF ---
                         echo "⚙️ Ensuring ${env.EXPECTED_HOST_IP} is present in CORS/CSRF..."
                         
-                        // Create Python script with proper encoding handling
+                        // Create Python script with proper encoding handling and smart patching
                         writeFile file: 'patch_settings.py', text: """# -*- coding: utf-8 -*-
 import os
+import re
 
 FILES = [
     "TrinityBackendDjango/config/settings.py",
@@ -67,6 +68,55 @@ FILES = [
 ]
 
 host_ip = "${env.EXPECTED_HOST_IP}"
+host_url = "http://" + host_ip + ":3000"
+
+def patch_django_settings(content, host_ip, host_url):
+    lines = content.split('\\n')
+    modified = False
+    
+    for i, line in enumerate(lines):
+        # Handle ALLOWED_HOSTS
+        if line.strip().startswith('ALLOWED_HOSTS') and host_ip not in content:
+            if '=' in line and '[' in line:
+                # Simple list assignment
+                if line.strip().endswith(']'):
+                    lines[i] = line.replace(']', ", '" + host_ip + "']")
+                    modified = True
+                else:
+                    # Multi-line or complex assignment - find the closing bracket
+                    for j in range(i, len(lines)):
+                        if ']' in lines[j]:
+                            lines[j] = lines[j].replace(']', ", '" + host_ip + "']")
+                            modified = True
+                            break
+        
+        # Handle CORS_ALLOWED_ORIGINS
+        elif line.strip().startswith('CORS_ALLOWED_ORIGINS') and host_url not in content:
+            if '=' in line and '[' in line:
+                if line.strip().endswith(']'):
+                    lines[i] = line.replace(']', ", '" + host_url + "']")
+                    modified = True
+                else:
+                    for j in range(i, len(lines)):
+                        if ']' in lines[j]:
+                            lines[j] = lines[j].replace(']', ", '" + host_url + "']")
+                            modified = True
+                            break
+        
+        # Handle CSRF_TRUSTED_ORIGINS  
+        elif line.strip().startswith('CSRF_TRUSTED_ORIGINS') and host_url not in content:
+            if '=' in line and '[' in line:
+                if line.strip().endswith(']'):
+                    lines[i] = line.replace(']', ", '" + host_url + "']")
+                    modified = True
+                else:
+                    for j in range(i, len(lines)):
+                        if ']' in lines[j] and 'for' not in lines[j]:  # Avoid list comprehensions
+                            lines[j] = lines[j].replace(']', ", '" + host_url + "']")
+                            modified = True
+                            break
+    
+    return '\\n'.join(lines), modified
 
 for f in FILES:
     if not os.path.exists(f):
@@ -77,20 +127,19 @@ for f in FILES:
         with open(f, "r", encoding="utf-8") as fh:
             content = fh.read()
         
-        if host_ip in content:
-            print(host_ip + " already present in " + f)
-        else:
-            print("Adding " + host_ip + " to " + f)
-            if "ALLOWED_HOSTS" in content:
-                content = content.replace("ALLOWED_HOSTS = [", "ALLOWED_HOSTS = ['" + host_ip + "', ")
-            if "CORS_ALLOWED_ORIGINS" in content:
-                content = content.replace("CORS_ALLOWED_ORIGINS = [", "CORS_ALLOWED_ORIGINS = ['http://" + host_ip + ":3000', ")
-            if "CSRF_TRUSTED_ORIGINS" in content:
-                content = content.replace("CSRF_TRUSTED_ORIGINS = [", "CSRF_TRUSTED_ORIGINS = ['http://" + host_ip + ":3000', ")
-            
+        if host_ip in content and host_url in content:
+            print("Host IP and URL already present in " + f)
+            continue
+        
+        print("Processing " + f)
+        new_content, was_modified = patch_django_settings(content, host_ip, host_url)
+        
+        if was_modified:
             with open(f, "w", encoding="utf-8") as fh:
-                fh.write(content)
+                fh.write(new_content)
             print("Updated " + f)
+        else:
+            print("No changes needed for " + f)
     
     except Exception as e:
         print("Error processing " + f + ": " + str(e))
