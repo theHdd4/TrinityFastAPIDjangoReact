@@ -4,6 +4,7 @@ pymongo
 redis
 boto3
 pandas
+numpy
 polars>=0.20.0
 fastexcel>=0.15.1
 numba
@@ -16,4 +17,5 @@ openpyxl
 xlsxwriter
 pydantic-settings==2.10.1
 statsmodels
+scikit-learn
 python-dotenv
