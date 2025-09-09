@@ -659,19 +659,22 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
         }
       }
 
-      // Add date filtering if we have date analysis and settings
-      if (data.dateAnalysis?.has_date_data && data.settings?.dateFrom && data.settings?.dateTo) {
-        const primaryDateColumn = data.dateAnalysis.date_columns[0]?.column_name;
+        // Add date filtering and time aggregation if available
+        const primaryDateColumn = data.dateAnalysis?.date_columns[0]?.column_name;
         if (primaryDateColumn) {
           request.date_column = primaryDateColumn;
+        }
+        if (data.dateAnalysis?.has_date_data && data.settings?.dateFrom && data.settings?.dateTo && primaryDateColumn) {
           request.date_range_filter = {
             start: data.settings.dateFrom,
             end: data.settings.dateTo
           };
         }
-      }
+        if (data.settings?.aggregationLevel && data.settings.aggregationLevel !== 'None' && primaryDateColumn) {
+          request.aggregation_level = data.settings.aggregationLevel.toLowerCase();
+        }
 
-      const result = await correlationAPI.filterAndCorrelate(request);
+        const result = await correlationAPI.filterAndCorrelate(request);
       
       // Update date analysis if included in response
       if (result.date_analysis) {

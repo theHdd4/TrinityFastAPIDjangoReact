@@ -553,12 +553,13 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
   useEffect(() => {
     if (!heatmapRef.current || !data.correlationMatrix) return;
 
-    const dataKey = JSON.stringify({
-      matrix: data.correlationMatrix,
-      variables: data.variables,
-      theme: matrixSettings.theme,
-      filters: data.settings?.filterDimensions,
-    });
+      const dataKey = JSON.stringify({
+        matrix: data.correlationMatrix,
+        variables: data.variables,
+        theme: matrixSettings.theme,
+        filters: data.settings?.filterDimensions,
+        aggregation: data.settings?.aggregationLevel,
+      });
     const shouldAnimate = prevMatrixRef.current !== dataKey;
     prevMatrixRef.current = dataKey;
 

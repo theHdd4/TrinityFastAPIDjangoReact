@@ -883,6 +883,32 @@ def apply_date_range_filter(df: pd.DataFrame, date_column: str, date_range: Dict
         return df
 
 
+def apply_time_aggregation(df: pd.DataFrame, date_column: str, level: str) -> pd.DataFrame:
+    """Aggregate dataframe by time period"""
+    if level.lower() == 'none':
+        return df
+    if date_column not in df.columns:
+        raise ValueError(f"Date column '{date_column}' not found in dataframe")
+
+    freq_map = {
+        'daily': 'D',
+        'weekly': 'W',
+        'monthly': 'M',
+        'quarterly': 'Q',
+        'yearly': 'Y',
+    }
+    freq = freq_map.get(level.lower())
+    if not freq:
+        return df
+
+    df = df.copy()
+    df[date_column] = pd.to_datetime(df[date_column], errors='coerce')
+    df = df.dropna(subset=[date_column])
+    aggregated = df.set_index(date_column).resample(freq).mean(numeric_only=True).reset_index()
+    print(f"⏱️ Aggregated {len(df)} → {len(aggregated)} rows using {level}")
+    return aggregated
+
+
 # ─── Time Series Functions ──────────────────────────────────────────────
 def get_time_series_axis_data(df: pd.DataFrame, start_date: str = None, end_date: str = None) -> Dict[str, Any]:
     """Get X-axis data for time series - datetime values or indices"""

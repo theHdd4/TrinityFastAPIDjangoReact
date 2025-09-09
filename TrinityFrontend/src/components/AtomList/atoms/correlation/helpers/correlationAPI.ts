@@ -40,6 +40,7 @@ export interface FilterAndCorrelateRequest {
     start: string;
     end: string;
   };
+  aggregation_level?: string;
 }
 
 export interface DateColumnInfo {

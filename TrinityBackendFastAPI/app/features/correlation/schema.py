@@ -55,6 +55,7 @@ class FilterAndCorrelateRequest(BaseModel):
     include_date_analysis: bool = Field(False, description="Include date column analysis")
     date_column: Optional[str] = Field(None, description="Specific date column to use for filtering")
     date_range_filter: Optional[dict] = Field(None, description="Date range filter {'start': 'YYYY-MM-DD', 'end': 'YYYY-MM-DD'}")
+    aggregation_level: Optional[str] = Field(None, description="Time aggregation level (e.g., 'daily','monthly')")
 
 
 # ─── Response Schemas ────────────────────────────────────────────────────
