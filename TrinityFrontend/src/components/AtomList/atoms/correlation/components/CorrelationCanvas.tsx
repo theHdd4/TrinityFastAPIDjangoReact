@@ -558,11 +558,14 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
           .attr("rx", 8)
           .attr("ry", 8);
 
+        const textBorder = '-1px 0 #000, 0 1px #000, 1px 0 #000, 0 -1px #000';
+
         const tooltip = d3.select("body").append("div")
           .attr("class", "correlation-tooltip")
           .style("position", "absolute")
           .style("background", "linear-gradient(135deg, hsl(var(--trinity-blue)), hsl(var(--trinity-green)))")
           .style("color", "white")
+          .style("text-shadow", textBorder)
           .style("padding", "16px 20px")
           .style("border-radius", "12px")
           .style("font-size", "14px")
@@ -578,9 +581,9 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
         const directionText = d.correlation > 0 ? "Positive" : "Negative";
 
         tooltip.html(`
-          <div style="font-size: 16px; margin-bottom: 8px;">📊 ${d.xVar} ↔ ${d.yVar}</div>
-          <div style="font-size: 18px; margin-bottom: 6px;">Correlation: <span style="color: #fbbf24;">${d.correlation.toFixed(3)}</span></div>
-          <div style="font-size: 12px; opacity: 0.9;">${strengthText} ${directionText} relationship</div>
+          <div style="font-size: 16px; margin-bottom: 8px; text-shadow: ${textBorder};">📊 ${d.xVar} ↔ ${d.yVar}</div>
+          <div style="font-size: 18px; margin-bottom: 6px;">Correlation: <span style="color: #fbbf24; text-shadow: ${textBorder};">${d.correlation.toFixed(3)}</span></div>
+          <div style="font-size: 12px; opacity: 0.9; text-shadow: ${textBorder};">${strengthText} ${directionText} relationship</div>
         `)
           .style("left", (event.pageX + 15) + "px")
           .style("top", (event.pageY - 10) + "px")
@@ -639,17 +642,11 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
       .attr("dominant-baseline", "middle")
       .attr("font-size", `${Math.max(10, Math.min(Math.min(cellWidth, cellHeight) / 4, 14))}px`)
       .attr("font-weight", "700")
-      .attr("fill", d => {
-        const color = d3.color(colorScale(d.correlation));
-        if (color) {
-          const rgb = color.rgb();
-          const luminance = (rgb.r * 299 + rgb.g * 587 + rgb.b * 114) / 1000;
-          return luminance > 128 ? "#000000" : "#ffffff";
-        }
-        return Math.abs(d.correlation) > 0.6 ? "#ffffff" : "hsl(var(--foreground))";
-      })
+      .attr("fill", "#ffffff")
+      .attr("stroke", "#000000")
+      .attr("stroke-width", 0.5)
+      .style("paint-order", "stroke")
       .style("pointer-events", "none")
-      .style("text-shadow", "0 1px 2px rgba(0,0,0,0.5)")
       .style("opacity", 0)
       .text(d => d.correlation.toFixed(2));
 
