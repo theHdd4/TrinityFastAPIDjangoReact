@@ -229,7 +229,8 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
     if (!data.selectedFile) return;
 
     try {
-      const filterDimensions = filtersOverride ?? data.settings?.filterDimensions || {};
+      const filterDimensions =
+        filtersOverride ?? data.settings?.filterDimensions ?? {};
 
       const request: FilterAndCorrelateRequest = {
         file_path: data.selectedFile,
