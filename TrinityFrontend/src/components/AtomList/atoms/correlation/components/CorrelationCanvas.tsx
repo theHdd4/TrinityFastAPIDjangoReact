@@ -17,11 +17,59 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { CorrelationSettings } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { correlationAPI } from '../helpers/correlationAPI';
+import type { FilterAndCorrelateRequest } from '../helpers/correlationAPI';
 
 interface CorrelationCanvasProps {
   data: CorrelationSettings;
   onDataChange: (newData: Partial<CorrelationSettings>) => void;
 }
+
+// Transform dictionary correlation matrix to 2D array, filtering out non-numeric columns
+const transformCorrelationMatrix = (
+  correlationDict: any,
+  variables: string[]
+): { matrix: number[][]; filteredVariables: string[] } => {
+  if (!correlationDict || typeof correlationDict !== 'object') {
+    return {
+      matrix: variables.map((_, i) =>
+        variables.map((_, j) => (i === j ? 1.0 : 0.0))
+      ),
+      filteredVariables: variables,
+    };
+  }
+
+  const validVariables = variables.filter(
+    (variable) => correlationDict[variable] && typeof correlationDict[variable] === 'object'
+  );
+
+  if (validVariables.length === 0) {
+    return {
+      matrix: [[1.0]],
+      filteredVariables: variables.length > 0 ? [variables[0]] : ['Unknown'],
+    };
+  }
+
+  try {
+    const matrix = validVariables.map((rowVar) => {
+      const rowData = correlationDict[rowVar];
+
+      return validVariables.map((colVar) => {
+        if (rowVar === colVar) return 1.0;
+        const value = rowData[colVar];
+        return typeof value === 'number' && isFinite(value) ? value : 0.0;
+      });
+    });
+
+    return { matrix, filteredVariables: validVariables };
+  } catch (error) {
+    return {
+      matrix: validVariables.map((_, i) =>
+        validVariables.map((_, j) => (i === j ? 1.0 : 0.0))
+      ),
+      filteredVariables: validVariables,
+    };
+  }
+};
 
 // MultiSelectValues component for filter value selection
 const MultiSelectValues: React.FC<{
@@ -174,6 +222,96 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
         filterDimensions: newFilters
       }
     });
+  };
+
+  // Apply filters to fetch new correlation data
+  const handleApplyFilters = async (filtersOverride?: Record<string, string[]>) => {
+    if (!data.selectedFile) return;
+
+    try {
+      const filterDimensions = filtersOverride ?? data.settings?.filterDimensions || {};
+
+      const request: FilterAndCorrelateRequest = {
+        file_path: data.selectedFile,
+        method: (data.settings?.correlationMethod || 'pearson').toLowerCase() as any,
+        include_preview: true,
+        preview_limit: 10,
+        save_filtered: true,
+        include_date_analysis: true,
+      };
+
+      const identifierFilters = Object.entries(filterDimensions)
+        .filter(([_, values]) => Array.isArray(values) && values.length > 0)
+        .map(([column, values]) => ({ column, values: values as string[] }));
+      if (identifierFilters.length > 0) {
+        request.identifier_filters = identifierFilters;
+      }
+
+      if (data.selectedColumns && data.selectedColumns.length > 0) {
+        const selectedIdentifiers = (data.selectedColumns || []).filter((col) =>
+          data.fileData?.categoricalColumns?.includes(col)
+        );
+        const selectedMeasures = (data.selectedColumns || []).filter((col) =>
+          data.fileData?.numericColumns?.includes(col)
+        );
+        if (selectedIdentifiers.length > 0) {
+          request.identifier_columns = selectedIdentifiers;
+        }
+        if (selectedMeasures.length > 0) {
+          request.measure_columns = selectedMeasures;
+        }
+      }
+
+      if (data.dateAnalysis?.has_date_data && data.settings?.dateFrom && data.settings?.dateTo) {
+        const primaryDateColumn = data.dateAnalysis.date_columns[0]?.column_name;
+        if (primaryDateColumn) {
+          request.date_column = primaryDateColumn;
+          request.date_range_filter = {
+            start: data.settings.dateFrom,
+            end: data.settings.dateTo,
+          };
+        }
+      }
+
+      const result = await correlationAPI.filterAndCorrelate(request);
+
+      if (result.date_analysis) {
+        onDataChange({ dateAnalysis: result.date_analysis });
+      }
+
+      const resultVariables = result.columns_used || [];
+      const { matrix: transformedMatrix, filteredVariables } = transformCorrelationMatrix(
+        result.correlation_results.correlation_matrix,
+        resultVariables
+      );
+
+      onDataChange({
+        correlationMatrix: transformedMatrix,
+        timeSeriesData: [],
+        variables: filteredVariables,
+        selectedVar1: null,
+        selectedVar2: null,
+        fileData: {
+          fileName: data.selectedFile,
+          rawData: result.preview_data || [],
+          numericColumns: filteredVariables,
+          dateColumns: result.date_analysis?.date_columns.map((c: any) => c.column_name) || [],
+          categoricalColumns: (result.columns_used || []).filter(
+            (col: string) => !filteredVariables.includes(col)
+          ),
+          isProcessed: true,
+        },
+      });
+    } catch (error) {
+      console.error('Error applying filters:', error);
+    }
+  };
+
+  const handleResetFilters = async () => {
+    onDataChange({
+      settings: { ...data.settings, filterDimensions: {} },
+    });
+    await handleApplyFilters({});
   };
 
   // Enhanced time series data fetching function
@@ -789,7 +927,7 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
                 <div className="flex gap-3 overflow-x-auto pb-2 max-w-full scroll-smooth scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-gray-100">
                   {Object.entries(data.settings?.filterDimensions || {}).map(([columnName, selectedValues]) => (
                     <div key={columnName} className="flex-shrink-0 min-w-[200px] max-w-[220px]">
-                      <FilterDimensionButton 
+                      <FilterDimensionButton
                         columnName={columnName}
                         selectedValues={Array.isArray(selectedValues) ? selectedValues : []}
                         availableValues={data.fileData?.columnValues?.[columnName] || []}
@@ -804,6 +942,23 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
                   No filters applied. Add filters in the settings panel to see them here.
                 </div>
               )}
+              <div className="flex gap-2 mt-4">
+                <Button
+                  size="sm"
+                  onClick={() => handleApplyFilters()}
+                  disabled={Object.keys(data.settings?.filterDimensions || {}).length === 0}
+                >
+                  Filter
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={handleResetFilters}
+                  disabled={Object.keys(data.settings?.filterDimensions || {}).length === 0}
+                >
+                  Reset
+                </Button>
+              </div>
             </Card>
 
       {/* Correlation Heatmap - Full Width */}
