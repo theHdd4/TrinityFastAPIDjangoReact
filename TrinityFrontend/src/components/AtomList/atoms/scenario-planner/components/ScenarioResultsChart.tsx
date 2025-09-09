@@ -198,6 +198,7 @@ interface ScenarioResultsChartProps {
   width?: number;
   height?: number;
   viewMode?: 'individual' | 'aggregated';
+  dataLabelType?: 'y-values' | 'uplift';
   yVariable?: string;
   xAxisLabel?: string;
   viewSelectedIdentifiers?: Record<string, string[]>;
@@ -218,6 +219,7 @@ export const ScenarioResultsChart: React.FC<ScenarioResultsChartProps> = ({
   width = 800, 
   height = 400,
   viewMode = 'individual',
+  dataLabelType = 'y-values',
   yVariable = 'Value',
   xAxisLabel = 'Categories',
   viewSelectedIdentifiers = {},
@@ -232,6 +234,8 @@ export const ScenarioResultsChart: React.FC<ScenarioResultsChartProps> = ({
   showDataLabels: propShowDataLabels,
   showGrid: propShowGrid
 }) => {
+
+  
   // Theme state management
   const [selectedTheme, setSelectedTheme] = useState<string>('default');
   const currentTheme = selectedTheme !== 'default' ? selectedTheme : (propTheme || 'default');
@@ -258,13 +262,25 @@ export const ScenarioResultsChart: React.FC<ScenarioResultsChartProps> = ({
   const currentShowAxisLabels = propShowAxisLabels !== undefined ? propShowAxisLabels : showAxisLabels;
   const currentShowDataLabels = propShowDataLabels !== undefined ? propShowDataLabels : showDataLabels;
   
+  
   // Get current theme colors
   const theme = useMemo(() => {
     return COLOR_THEMES[currentTheme as keyof typeof COLOR_THEMES] || COLOR_THEMES.default;
   }, [currentTheme]);
 
   // Helper function to format data labels in compact format
-  const formatDataLabel = (value: number) => {
+  const formatDataLabel = (value: number, dataKey: string) => {
+    // Safety check for value
+    if (typeof value !== 'number' || isNaN(value)) {
+      return '0';
+    }
+    
+    // For uplift chart, always show percentage with 3 decimal places
+    if (dataLabelType === 'uplift') {
+      return `${value.toFixed(3)}%`;
+    }
+    
+    // For y-values chart, show compact format
     if (value >= 1000000000) {
       return `${(value / 1000000000).toFixed(1)}b`;
     } else if (value >= 1000000) {
@@ -275,6 +291,7 @@ export const ScenarioResultsChart: React.FC<ScenarioResultsChartProps> = ({
       return value.toString();
     }
   };
+
   
   // Toggle handlers
   const handleGridToggle = () => {
@@ -405,43 +422,62 @@ export const ScenarioResultsChart: React.FC<ScenarioResultsChartProps> = ({
     }
   }, [showMenu, showColorSubmenu, showSortSubmenu, contextMenu]);
   
-  // Transform data for Recharts format with sorting
-  const chartData = useMemo(() => {
+  // Transform data for y-values chart
+  const yValuesChartData = useMemo(() => {
     const transformedData = data.map(item => {
       const chartItem = {
         name: item.combinationLabel,
         baseline: item.baseline || 0,
         scenario: item.scenario || 0,
-        uplift: item.pct_uplift,
-        delta: item.delta || 0,
         // ✅ NEW: Store identifiers for multi-line labels
         identifiers: item.identifiers || {}
       };
-      
-      // Debug: Log the first item to see the values
-      if (data.indexOf(item) === 0) {
-        console.log('🔍 Chart data transformation:', {
-          originalItem: item,
-          transformedItem: chartItem
-        });
-      }
-      
       return chartItem;
     });
 
-    // ✅ MODIFIED: Respect backend sorting by default, allow user override for percentage uplift
-    // Backend already sorts by id1 values, so we only apply frontend sorting when user explicitly chooses it
+    // Apply sorting if needed
     if (sortOrder === 'asc') {
-      // User chose to sort by percentage uplift (ascending)
-      return [...transformedData].sort((a, b) => a.uplift - b.uplift);
+      return [...transformedData].sort((a, b) => a.scenario - b.scenario);
     } else if (sortOrder === 'desc') {
-      // User chose to sort by percentage uplift (descending)
-      return [...transformedData].sort((a, b) => b.uplift - a.uplift);
+      return [...transformedData].sort((a, b) => b.scenario - a.scenario);
     }
     
-    // Default: Return data as-is (respecting backend sorting by id1)
     return transformedData;
   }, [data, sortOrder]);
+
+  // Transform data for uplift chart
+  const upliftChartData = useMemo(() => {
+    const transformedData = data.map(item => {
+      // Extract uplift value properly - it might still be an object from backend
+      let upliftValue = 0;
+      if (typeof item.pct_uplift === 'object' && item.pct_uplift?.prediction !== undefined) {
+        upliftValue = item.pct_uplift.prediction;
+      } else if (typeof item.pct_uplift === 'number') {
+        upliftValue = item.pct_uplift;
+      }
+      
+      const chartItem = {
+        name: item.combinationLabel,
+        baseline: 0, // No baseline for uplift chart
+        scenario: upliftValue, // Use uplift as the scenario value
+        // ✅ NEW: Store identifiers for multi-line labels
+        identifiers: item.identifiers || {}
+      };
+      return chartItem;
+    });
+
+    // Apply sorting if needed
+    if (sortOrder === 'asc') {
+      return [...transformedData].sort((a, b) => a.scenario - b.scenario);
+    } else if (sortOrder === 'desc') {
+      return [...transformedData].sort((a, b) => b.scenario - a.scenario);
+    }
+    
+    return transformedData;
+  }, [data, sortOrder]);
+
+  // Choose which chart data to use based on dataLabelType
+  const chartData = dataLabelType === 'uplift' ? upliftChartData : yValuesChartData;
 
   // ✅ ENHANCED: Multi-line X-axis labels with identifier values
   const formatXAxisTick = (tickItem: any, index: number) => {
@@ -472,10 +508,6 @@ export const ScenarioResultsChart: React.FC<ScenarioResultsChartProps> = ({
       const baselineData = payload.find((p: any) => p.dataKey === 'baseline');
       const scenarioData = payload.find((p: any) => p.dataKey === 'scenario');
       
-      // Debug: Log the payload to see the actual data structure
-      console.log('🔍 Tooltip payload:', payload);
-      console.log('🔍 Baseline data:', baselineData);
-      console.log('🔍 Scenario data:', scenarioData);
       
       // Extract values safely
       const baselineValue = baselineData?.value || baselineData?.payload?.baseline || 0;
@@ -653,7 +685,7 @@ export const ScenarioResultsChart: React.FC<ScenarioResultsChartProps> = ({
       {/* Header with title and right-click hint */}
       <div className="mb-3 flex justify-between items-center">
         <h3 className="text-lg font-semibold text-gray-800">
-          {viewMode === 'individual' ? 'Individual Results' : 'Aggregated Results'}
+          {viewMode === 'individual' ? 'Individual Results' : 'Aggregated Results'} - {dataLabelType === 'uplift' ? 'Uplift %' : 'Y-Values'}
         </h3>
         
         {/* Right-click hint */}
@@ -708,10 +740,10 @@ export const ScenarioResultsChart: React.FC<ScenarioResultsChartProps> = ({
             fontWeight={400}
             tickLine={false}
             axisLine={false}
-            tickMargin={8}
+            tickMargin={2}
             angle={-45}
             textAnchor="end"
-            height={160}
+            height={50}
             interval={0}
             tick={({ x, y, payload, index }) => {
               const dataItem = chartData[index];
@@ -771,7 +803,7 @@ export const ScenarioResultsChart: React.FC<ScenarioResultsChartProps> = ({
                         x={x}
                         y={y}
                         dx={0}
-                        dy={10}
+                        dy={5}
                         angle={-45}
                         textAnchor="middle"
                         fill="#64748b"
@@ -788,7 +820,7 @@ export const ScenarioResultsChart: React.FC<ScenarioResultsChartProps> = ({
                     {primaryIdentifierValue && isFirstInGroup && (
                       <text
                         x={groupCenterX}
-                        y={viewMode === 'aggregated' ? y + 10 : y + 25}
+                        y={viewMode === 'aggregated' ? y + 5 : y + 15}
                         dx={0}
                         dy={0}
                         angle={-45}
@@ -821,6 +853,12 @@ export const ScenarioResultsChart: React.FC<ScenarioResultsChartProps> = ({
             tickMargin={8}
             width={60}
             tickFormatter={(value) => {
+              // For uplift chart, show percentages with 3 decimal places
+              if (dataLabelType === 'uplift') {
+                return `${value.toFixed(3)}%`;
+              }
+              
+              // For y-values chart, show compact format
               if (value >= 1000000000) {
                 return `${(value / 1000000000).toFixed(1)}b`;
               } else if (value >= 1000000) {
@@ -832,7 +870,7 @@ export const ScenarioResultsChart: React.FC<ScenarioResultsChartProps> = ({
               }
             }}
             label={currentShowAxisLabels ? { 
-              value: yVariable, 
+              value: dataLabelType === 'uplift' ? 'Uplift %' : yVariable, 
               angle: -90, 
               position: 'left', 
               style: { fontSize: '12px', fontWeight: 'bold', fill: '#374151' }
@@ -851,23 +889,25 @@ export const ScenarioResultsChart: React.FC<ScenarioResultsChartProps> = ({
             />
           )}
           
-          {/* Baseline bars */}
-          <Bar 
-            dataKey="baseline" 
-            fill="url(#baselineGradient)"
-            radius={[4, 4, 0, 0]}
-            filter="url(#barShadow)"
-            name="Baseline"
-          >
-            {currentShowDataLabels && (
-              <LabelList 
-                dataKey="baseline" 
-                position="top" 
-                formatter={(value) => formatDataLabel(value)}
-                style={{ fontSize: '10px', fontWeight: '500', fill: '#374151' }}
-              />
-            )}
-          </Bar>
+          {/* Baseline bars - only show for y-values chart */}
+          {dataLabelType === 'y-values' && (
+            <Bar 
+              dataKey="baseline" 
+              fill="url(#baselineGradient)"
+              radius={[4, 4, 0, 0]}
+              filter="url(#barShadow)"
+              name="Baseline"
+            >
+              {currentShowDataLabels && (
+                <LabelList 
+                  dataKey="baseline" 
+                  position="top" 
+                  formatter={(value, entry, index) => formatDataLabel(value, 'baseline')}
+                  style={{ fontSize: '10px', fontWeight: '500', fill: '#374151' }}
+                />
+              )}
+            </Bar>
+          )}
           
           {/* Scenario bars */}
           <Bar 
@@ -875,13 +915,13 @@ export const ScenarioResultsChart: React.FC<ScenarioResultsChartProps> = ({
             fill="url(#scenarioGradient)"
             radius={[4, 4, 0, 0]}
             filter="url(#barShadow)"
-            name="Scenario"
+            name={dataLabelType === 'uplift' ? 'Uplift %' : 'Scenario'}
           >
             {currentShowDataLabels && (
               <LabelList 
                 dataKey="scenario" 
                 position="top" 
-                formatter={(value) => formatDataLabel(value)}
+                formatter={(value, entry, index) => formatDataLabel(value, 'scenario')}
                 style={{ fontSize: '10px', fontWeight: '500', fill: '#374151' }}
               />
             )}
@@ -958,7 +998,7 @@ export const ScenarioResultsChart: React.FC<ScenarioResultsChartProps> = ({
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
             </svg>
-            <span>Toggle Grid</span>
+            <span>Grid</span>
             <div className={`ml-auto w-4 h-4 rounded border-2 ${currentShowGrid ? 'bg-blue-500 border-blue-500' : 'border-gray-300'}`}>
               {currentShowGrid && <div className="w-full h-full bg-white rounded-sm scale-50" />}
             </div>
@@ -975,7 +1015,7 @@ export const ScenarioResultsChart: React.FC<ScenarioResultsChartProps> = ({
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
             </svg>
-            <span>Toggle Legend</span>
+            <span>Legend</span>
             <div className={`ml-auto w-4 h-4 rounded border-2 ${currentShowLegend ? 'bg-blue-500 border-blue-500' : 'border-gray-300'}`}>
               {currentShowLegend && <div className="w-full h-full bg-white rounded-sm scale-50" />}
             </div>
@@ -992,7 +1032,7 @@ export const ScenarioResultsChart: React.FC<ScenarioResultsChartProps> = ({
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 4V2a1 1 0 011-1h8a1 1 0 011 1v2m-9 0h10m-10 0a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V6a2 2 0 00-2-2M9 12h6m-6 4h6" />
             </svg>
-            <span>Toggle Axis Labels</span>
+            <span>Axis Labels</span>
             <div className={`ml-auto w-4 h-4 rounded border-2 ${currentShowAxisLabels ? 'bg-blue-500 border-blue-500' : 'border-gray-300'}`}>
               {currentShowAxisLabels && <div className="w-full h-full bg-white rounded-sm scale-50" />}
             </div>
@@ -1009,7 +1049,7 @@ export const ScenarioResultsChart: React.FC<ScenarioResultsChartProps> = ({
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
             </svg>
-            <span>Toggle Data Labels</span>
+            <span>Data Labels</span>
             <div className={`ml-auto w-4 h-4 rounded border-2 ${currentShowDataLabels ? 'bg-blue-500 border-blue-500' : 'border-gray-300'}`}>
               {currentShowDataLabels && <div className="w-full h-full bg-white rounded-sm scale-50" />}
             </div>

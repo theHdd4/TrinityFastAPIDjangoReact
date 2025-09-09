@@ -506,6 +506,12 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
 
   const [resultViewMode, setResultViewMode] = useState<Record<string, 'individual' | 'aggregated'>>({});
 
+  // ✅ NEW: State for toggling between y-values and uplift in data labels
+  const [dataLabelType, setDataLabelType] = useState<Record<string, 'y-values' | 'uplift'>>({});
+  
+  // ✅ NEW: State for controlling data labels visibility
+  const [showDataLabels, setShowDataLabels] = useState<Record<string, boolean>>({});
+
 
 
   // ✅ NEW: Function to toggle result view mode for a specific view
@@ -536,7 +542,43 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
 
   };
 
+  // ✅ NEW: Function to toggle data label type for a specific view
 
+  const toggleDataLabelType = (viewId: string) => {
+    console.log('🔄 Toggle button clicked for viewId:', viewId);
+    
+    setDataLabelType(prev => {
+      const currentType = prev[viewId] || 'y-values';
+      const newType = currentType === 'y-values' ? 'uplift' : 'y-values';
+      console.log('🔄 Switching dataLabelType from', currentType, 'to', newType, 'for viewId:', viewId);
+      const newState = {
+        ...prev,
+        [viewId]: newType
+      };
+      return newState;
+    });
+    
+    // ✅ NEW: Automatically enable data labels when switching to uplift mode
+    setShowDataLabels(prev => {
+      console.log('🔄 Enabling data labels for viewId:', viewId);
+      const newState = {
+        ...prev,
+        [viewId]: true
+      };
+      return newState;
+    });
+  };
+
+  // ✅ NEW: Function to toggle data labels visibility
+  const toggleDataLabels = (viewId: string) => {
+    setShowDataLabels(prev => {
+      const newState = {
+        ...prev,
+        [viewId]: !prev[viewId]
+      };
+      return newState;
+    });
+  };
 
   // ✅ NEW: Context menu state
 
@@ -1102,9 +1144,9 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
 
       model_id: modelId,
       scenario_id: settings.activeScenarioId || 'scenario1',
-      start_date: settings.referencePeriod?.from || settings.backendDateRange?.start_date || '2024-01-01',
+      start_date: settings.referencePeriod?.from || settings.backendDateRange?.start_date,
 
-      end_date: settings.referencePeriod?.to || settings.backendDateRange?.end_date || '2024-12-31',
+      end_date: settings.referencePeriod?.to || settings.backendDateRange?.end_date,
 
         stat: settings.referenceMethod || 'mean',
 
@@ -1720,10 +1762,9 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
         model_id: modelId,
         stat: statMethod,
 
-        start_date: settings.referencePeriod?.from || settings.backendDateRange?.start_date || '2024-01-01',
+        start_date: settings.referencePeriod?.from || settings.backendDateRange?.start_date ,
 
-        end_date: settings.referencePeriod?.to || settings.backendDateRange?.end_date || '2024-12-31'
-
+        end_date: settings.referencePeriod?.to || settings.backendDateRange?.end_date 
       };
 
       
@@ -2004,10 +2045,9 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
         model_id: modelId,
         stat: statMethod,
 
-        start_date: settings.referencePeriod?.from || settings.backendDateRange?.start_date || '2024-01-01',
+        start_date: settings.referencePeriod?.from || settings.backendDateRange?.start_date ,
 
-        end_date: settings.referencePeriod?.to || settings.backendDateRange?.end_date || '2024-12-31'
-
+        end_date: settings.referencePeriod?.to || settings.backendDateRange?.end_date 
       };
 
       
@@ -2419,10 +2459,9 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
         model_id: modelId,
         stat: statMethod,
 
-        start_date: settings.referencePeriod?.from || settings.backendDateRange?.start_date || '2024-01-01',
+        start_date: settings.referencePeriod?.from || settings.backendDateRange?.start_date ,
 
-        end_date: settings.referencePeriod?.to || settings.backendDateRange?.end_date || '2024-12-31'
-
+        end_date: settings.referencePeriod?.to || settings.backendDateRange?.end_date 
       };
 
       
@@ -4845,6 +4884,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
                         const chartData = getChartDataForScenarioAndView(scenarioId, viewId);
                         const viewResults = getResultsForScenarioAndView(scenarioId, viewId);
                         const hasResults = hasResultsForScenarioAndView(scenarioId, viewId);
+                        
 
                         
                         
@@ -4870,13 +4910,15 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
 
                                         <div className="text-right">
 
-                                          {/* ✅ NEW: Toggle button for switching between individual and aggregated results */}
+                                          {/* ✅ NEW: Toggle buttons for switching between individual/aggregated results and data label types */}
+
+                                          <div className="flex gap-2 mb-2">
 
                                           <button
 
                                             onClick={() => toggleResultViewMode(viewId)}
 
-                                            className="mb-2 px-3 py-1.5 text-xs bg-blue-100 border border-blue-400 hover:bg-blue-200 hover:border-blue-500 hover:text-blue-700 transition-all duration-200 font-medium rounded-md flex items-center gap-2"
+                                              className="px-3 py-1.5 text-xs bg-blue-100 border border-blue-400 hover:bg-blue-200 hover:border-blue-500 hover:text-blue-700 transition-all duration-200 font-medium rounded-md flex items-center gap-2"
 
                                           >
 
@@ -4894,6 +4936,30 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
 
                                           </button>
 
+                                            <button
+
+                                              onClick={() => toggleDataLabelType(viewId)}
+
+                                              className="px-3 py-1.5 text-xs bg-green-100 border border-green-400 hover:bg-green-200 hover:border-green-500 hover:text-green-700 transition-all duration-200 font-medium rounded-md flex items-center gap-2"
+
+                                            >
+
+                                              <div className="flex flex-col gap-0.5">
+
+                                                <div className="w-3 h-0.5 bg-current rounded-full"></div>
+
+                                                <div className="w-3 h-0.5 bg-current rounded-full"></div>
+
+                                                <div className="w-3 h-0.5 bg-current rounded-full"></div>
+
+                                              </div>
+
+                                              {dataLabelType[viewId] === 'uplift' ? 'Show Y-Values' : 'Show Uplift'}
+
+                                            </button>
+
+                                          </div>
+
                                         </div>
 
                                       </div>
@@ -4910,6 +4976,25 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
                                       height={450}
 
                                       viewMode={resultViewMode[viewId] || 'individual'}
+
+                                      dataLabelType={(() => {
+                                        const type = dataLabelType[viewId] || 'y-values';
+                                        console.log('🔍 Passing dataLabelType to chart:', type, 'for viewId:', viewId);
+                                        return type;
+                                      })()}
+
+                                      showDataLabels={(() => {
+                                        const show = showDataLabels[viewId] || false;
+                                        console.log('🔍 Passing showDataLabels to chart:', show, 'for viewId:', viewId);
+                                        return show;
+                                      })()}
+
+                                      onDataLabelsToggle={(enabled) => {
+                                        setShowDataLabels(prev => ({
+                                          ...prev,
+                                          [viewId]: enabled
+                                        }));
+                                      }}
 
                                       yVariable={viewResults.yVariable}
 

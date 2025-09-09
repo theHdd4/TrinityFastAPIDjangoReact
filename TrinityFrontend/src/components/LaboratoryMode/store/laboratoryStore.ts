@@ -828,7 +828,7 @@ export const DEFAULT_SCENARIO_PLANNER_SETTINGS: ScenarioPlannerSettings = {
       outputs: [], // Will be populated from backend
       combinations: [], // Will be generated from identifiers
       referenceMethod: 'mean',
-      referencePeriod: { from: '01-JAN-2020', to: '30-MAR-2024' },
+      referencePeriod: null,
       resultViews: [
         { id: 'view-1', name: 'View 1', selectedCombinations: [] },
         { id: 'view-2', name: 'View 2', selectedCombinations: [] },
@@ -843,7 +843,7 @@ export const DEFAULT_SCENARIO_PLANNER_SETTINGS: ScenarioPlannerSettings = {
   
   // Global settings (shared across all scenarios)
   referenceMethod: 'mean',
-  referencePeriod: { from: '01-JAN-2020', to: '30-MAR-2024' },
+  referencePeriod: null,
   selectedResultScenario: 'scenario-1',
   selectedView: 'view-1',
   
@@ -863,7 +863,7 @@ export const DEFAULT_SCENARIO_PLANNER_SETTINGS: ScenarioPlannerSettings = {
   // ✅ NEW: Default values for auto-refresh functionality
   referenceValuesNeedRefresh: false,
   lastReferenceMethod: 'mean',
-  lastReferencePeriod: { from: '01-JAN-2020', to: '30-MAR-2024' },
+  lastReferencePeriod: null,
   
   // ✅ NEW: Default value for refresh functionality
   refreshEnabled: false

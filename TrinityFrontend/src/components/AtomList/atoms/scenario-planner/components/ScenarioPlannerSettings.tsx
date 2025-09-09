@@ -233,20 +233,17 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
   
   // Function to fetch date range from backend
   const fetchDateRange = async () => {
-    console.log('🔍 fetchDateRange function called!');
     try {
       setLoadingDateRange(true);
       const modelId = generateModelId();
       const apiUrl = `${SCENARIO_PLANNER_API}/get-date-range?model_id=${encodeURIComponent(modelId)}`;
-      console.log('🔍 Fetching date range for model:', modelId);
-      console.log('🔍 API URL:', apiUrl);
       
       const response = await fetch(apiUrl);
-      console.log('🔍 Response status:', response.status, response.statusText);
+      // console.log('🔍 Response status:', response.status, response.statusText);
       
       if (response.ok) {
         const result = await response.json();
-        console.log('🔍 Date range response:', result);
+        // console.log('🔍 Date range response:', result);
         
         if (result.success && result.data) {
           // Convert date format from DD-MMM-YYYY to YYYY-MM-DD if needed
@@ -263,7 +260,7 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
                 return date.toISOString().split('T')[0]; // Returns YYYY-MM-DD
               }
             } catch (e) {
-              console.warn('Could not convert date:', dateStr);
+              // console.warn('Could not convert date:', dateStr);
             }
             return dateStr;
           };
@@ -272,7 +269,7 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
             start_date: convertDateFormat(result.data.start_date),
             end_date: convertDateFormat(result.data.end_date)
           };
-          console.log('🔍 Setting date range:', dateRangeData);
+          // console.log('🔍 Setting date range:', dateRangeData);
           setDateRange(dateRangeData);
           
           // Also store in the global settings for use in other components
@@ -290,14 +287,14 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
             });
           }
         } else {
-          console.error('🔍 Date range response not successful:', result);
+          // console.error('🔍 Date range response not successful:', result);
         }
       } else {
         const errorText = await response.text();
-        console.error('🔍 Date range API error:', response.status, response.statusText, errorText);
+        // console.error('🔍 Date range API error:', response.status, response.statusText, errorText);
       }
     } catch (error) {
-      console.error('🔍 Error fetching date range:', error);
+      // console.error('🔍 Error fetching date range:', error);
     } finally {
       setLoadingDateRange(false);
     }
@@ -307,34 +304,16 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
   
   // Fetch date range on component mount
   useEffect(() => {
-    console.log('🔍 useEffect triggered - calling fetchDateRange');
-    console.log('🔍 Component mounted, data:', { 
-      hasData: !!data, 
-      referenceMethod: data?.referenceMethod,
-      hasBackendData: !!(data?.backendIdentifiers || data?.backendFeatures || data?.backendCombinations)
-    });
     fetchDateRange();
   }, []);
 
   // Auto-populate date range when switching to period methods
   useEffect(() => {
     const isPeriodMethod = data.referenceMethod === 'period-mean';
-    const hasDefaultDates = data.referencePeriod?.from === '01-JAN-2020' && data.referencePeriod?.to === '30-MAR-2024';
+    const hasDefaultDates = false; // No longer using hardcoded default dates
     const needsDatePopulation = !data.referencePeriod?.from || !data.referencePeriod?.to || hasDefaultDates;
     
     if (isPeriodMethod && dateRange && needsDatePopulation) {
-      console.log('🔍 Auto-populating date range for period method:', data.referenceMethod);
-      console.log('🔍 Current dates:', data.referencePeriod);
-      console.log('🔍 Backend date range:', dateRange);
-      
-      // For period methods, auto-populate with the FULL backend date range
-      // User can then modify these dates if they want a custom period
-      console.log('🔍 Auto-populating period dates with FULL backend range:', {
-        method: data.referenceMethod,
-        backendRange: `${dateRange.start_date} to ${dateRange.end_date}`,
-        calculatedPeriod: `${dateRange.start_date} to ${dateRange.end_date}`
-      });
-      
       onDataChange({
         referencePeriod: {
           from: dateRange.start_date,
@@ -344,74 +323,82 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
     }
   }, [data.referenceMethod, dateRange]);
 
+  // Auto-populate reference period with backend dates when first loaded
+  useEffect(() => {
+    // Only auto-populate if no reference period is set and backend date range is available
+    if (!data.referencePeriod && dateRange) {
+      // console.log('🔍 Auto-populating reference period with backend date range:', dateRange);
+      
+      onDataChange({
+        referencePeriod: {
+          from: dateRange.start_date,
+          to: dateRange.end_date
+        }
+      });
+    }
+  }, [dateRange, data.referencePeriod]);
+
   // Read identifiers, features, and combinations from shared store (data prop)
   const backendIdentifiers = data.backendIdentifiers || null;
   const backendFeatures = data.backendFeatures || null;
   const backendCombinations = data.backendCombinations || null;
   
   // Debug logging to see data flow
-  console.log('Settings Component - Data from store:', {
-    backendIdentifiers: !!backendIdentifiers,
-    backendFeatures: !!backendFeatures,
-    backendCombinations: !!backendCombinations,
-    identifiersCount: backendIdentifiers?.identifier_columns?.length || 0,
-    featuresCount: backendFeatures?.all_unique_features?.length || 0,
-    combinationsCount: backendCombinations?.total_combinations || 0,
-    hasIdentifiers: !!data.identifiers?.length,
-    hasFeatures: !!data.features?.length,
-    hasCombinations: !!data.combinations?.length,
-    // ✅ NEW: Check if data is real or dummy
-    hasRealData: data.identifiers?.some(id => 
-      id.name && id.name !== 'Identifier 1' && id.name !== 'Identifier 2'
-    ) || false,
-    selectedCombinations: data.selectedCombinations?.length || 0,
-    fullDataObject: data,
-    dataBackendCombinations: data.backendCombinations
-  });
+  // console.log('Settings Component - Data from store:', {
+  //   backendIdentifiers: !!backendIdentifiers,
+  //   backendFeatures: !!backendFeatures,
+  //   backendCombinations: !!backendCombinations,
+  //   identifiersCount: backendIdentifiers?.identifier_columns?.length || 0,
+  //   featuresCount: backendFeatures?.all_unique_features?.length || 0,
+  //   combinationsCount: backendCombinations?.total_combinations || 0,
+  //   hasIdentifiers: !!data.identifiers?.length,
+  //   hasFeatures: !!data.features?.length,
+  //   hasCombinations: !!data.combinations?.length,
+  //   // ✅ NEW: Check if data is real or dummy
+  //   hasRealData: data.identifiers?.some(id => 
+  //     id.name && id.name !== 'Identifier 1' && id.name !== 'Identifier 2'
+  //   ) || false,
+  //   selectedCombinations: data.selectedCombinations?.length || 0,
+  //   fullDataObject: data,
+  //   dataBackendCombinations: data.backendCombinations
+  // });
   
-  // ✅ NEW: Debug backendCombinations specifically
-  console.log('🔍 backendCombinations debug:', {
-    exists: !!backendCombinations,
-    type: typeof backendCombinations,
-    combinations: backendCombinations?.combinations,
-    total_combinations: backendCombinations?.total_combinations,
-    fullObject: backendCombinations
-  });
+
 
   // Restore state from store when component mounts or data changes
   useEffect(() => {
-    console.log('🔄 Settings: Checking for state restoration...');
+    // console.log('🔄 Settings: Checking for state restoration...');
     
     if (backendIdentifiers && backendFeatures) {
-      console.log('✅ Settings: Backend data available, checking if state needs restoration');
+      // console.log('✅ Settings: Backend data available, checking if state needs restoration');
       
       // Check if we need to restore identifiers and features from backend data
       const needsRestoration = !data.identifiers?.length || !data.features?.length;
       
       if (needsRestoration) {
-        console.log('🔄 Settings: Restoring state from backend data...');
+        // console.log('🔄 Settings: Restoring state from backend data...');
         // The sync useEffect will handle this automatically
       } else {
-        console.log('✅ Settings: State already restored, no action needed');
+        // console.log('✅ Settings: State already restored, no action needed');
       }
     } else {
-      console.log('⏳ Settings: Waiting for backend data...');
+      // console.log('⏳ Settings: Waiting for backend data...');
     }
   }, [backendIdentifiers, backendFeatures, data.identifiers, data.features]);
   
   // ✅ FIXED: Prevent unnecessary data clearing when switching tabs
   useEffect(() => {
-    console.log('🔄 Settings: Component mounted/updated, checking data persistence...');
+    // console.log('🔄 Settings: Component mounted/updated, checking data persistence...');
     
     // If we have existing data, preserve it
     if (data.identifiers?.length && data.features?.length) {
-      console.log('✅ Settings: Existing data found, preserving state');
+      // console.log('✅ Settings: Existing data found, preserving state');
       return; // Don't clear existing data
     }
     
     // Only clear if we have no data at all
     if (!data.identifiers?.length && !data.features?.length) {
-      console.log('⚠️ Settings: No existing data, this is a fresh start');
+      // console.log('⚠️ Settings: No existing data, this is a fresh start');
     }
   }, []); // Only run on mount
   
@@ -448,11 +435,11 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
       );
       
       if (hasRealData) {
-        console.log('✅ Settings: Real data already exists, skipping backend sync');
+        // console.log('✅ Settings: Real data already exists, skipping backend sync');
         return; // Don't overwrite existing real data
       }
       
-      console.log('🔄 Settings: No real data exists, backend sync will proceed');
+      // console.log('🔄 Settings: No real data exists, backend sync will proceed');
     }
       }, [backendIdentifiers, backendFeatures, data.identifiers]);
     
@@ -483,20 +470,20 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
       );
       
       // ✅ DEBUG: Log reference period comparison
-      console.log('🔍 Reference period change detection:', {
-        currentMethod: data.referenceMethod,
-        lastMethod: data.lastReferenceMethod,
-        methodChanged: referenceMethodChanged,
-        currentPeriod: data.referencePeriod,
-        lastPeriod: data.lastReferencePeriod,
-        periodChanged: referencePeriodChanged,
-        hasRealData,
-        combinationsCount: data.combinations?.length || 0
-      });
+      // console.log('🔍 Reference period change detection:', {
+      //   currentMethod: data.referenceMethod,
+      //   lastMethod: data.lastReferenceMethod,
+      //   methodChanged: referenceMethodChanged,
+      //   currentPeriod: data.referencePeriod,
+      //   lastPeriod: data.lastReferencePeriod,
+      //   periodChanged: referencePeriodChanged,
+      //   hasRealData,
+      //   combinationsCount: data.combinations?.length || 0
+      // });
       
       if (hasRealData && data.combinations?.length > 0 && (referenceMethodChanged || referencePeriodChanged)) {
-        console.log('🔄 Reference settings actually changed, triggering auto-refresh of reference values');
-        console.log('Changes detected:', { referenceMethodChanged, referencePeriodChanged });
+        // console.log('🔄 Reference settings actually changed, triggering auto-refresh of reference values');
+        // console.log('Changes detected:', { referenceMethodChanged, referencePeriodChanged });
         
         // Notify parent component to refresh reference values
         if (onDataChange) {
@@ -506,11 +493,11 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
           });
         }
       } else if (hasRealData && data.combinations?.length > 0) {
-        console.log('✅ No reference settings changed, skipping auto-refresh to preserve user input');
+        // console.log('✅ No reference settings changed, skipping auto-refresh to preserve user input');
         
         // ✅ NEW: Initialize last values if they don't exist but we have current values
         if (!hasLastValues && data.referenceMethod && data.referencePeriod && onDataChange) {
-          console.log('🔧 Initializing last reference values for future change detection');
+          // console.log('🔧 Initializing last reference values for future change detection');
           onDataChange({
             lastReferenceMethod: data.referenceMethod,
             lastReferencePeriod: data.referencePeriod
@@ -545,13 +532,13 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
   // ✅ FIXED: Initialize aggregatedViews from global store data
   useEffect(() => {
     if (data.aggregatedViews && Array.isArray(data.aggregatedViews) && data.aggregatedViews.length > 0) {
-      console.log('🔄 Settings: Initializing aggregatedViews from global store:', data.aggregatedViews);
+      // console.log('🔄 Settings: Initializing aggregatedViews from global store:', data.aggregatedViews);
       setAggregatedViews(data.aggregatedViews);
     } else if (data.scenarios && data.selectedScenario && data.scenarios[data.selectedScenario]?.aggregatedViews) {
       // Fallback to scenario-specific aggregatedViews
       const scenarioViews = data.scenarios[data.selectedScenario].aggregatedViews;
       if (Array.isArray(scenarioViews) && scenarioViews.length > 0) {
-        console.log('🔄 Settings: Initializing aggregatedViews from scenario-specific data:', scenarioViews);
+        // console.log('🔄 Settings: Initializing aggregatedViews from scenario-specific data:', scenarioViews);
         setAggregatedViews(scenarioViews);
       }
     }
@@ -594,7 +581,7 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
         throw new Error(errorData.detail || `Failed to initialize cache: ${response.statusText}`);
       }
     } catch (error) {
-      console.error('Error initializing cache:', error);
+      // console.error('Error initializing cache:', error);
       toast({
         title: "Cache Error",
         description: error instanceof Error ? error.message : "Failed to initialize cache",
@@ -622,7 +609,7 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
         throw new Error(`Failed to fetch identifiers: ${response.statusText}`);
       }
     } catch (error) {
-      console.error('Error fetching identifiers:', error);
+      // console.error('Error fetching identifiers:', error);
       toast({
         title: "Error",
         description: "Failed to load identifiers from backend",
@@ -651,7 +638,7 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
         throw new Error(`Failed to fetch features: ${response.statusText}`);
       }
     } catch (error) {
-      console.error('Error fetching features:', error);
+      // console.error('Error fetching features:', error);
       toast({
         title: "Error",
         description: "Failed to load features from backend",
@@ -670,11 +657,9 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
       const response = await fetch(`${SCENARIO_PLANNER_API}/combinations?model_id=${encodeURIComponent(modelId)}`);
       if (response.ok) {
         const data = await response.json();
-        console.log('🔍 fetchCombinations - Received data:', data);
-        console.log('🔍 fetchCombinations - Combinations array:', data.combinations);
-        // Store combinations in shared store
+
         onDataChange({ backendCombinations: data });
-        console.log('🔍 fetchCombinations - Called onDataChange with:', { backendCombinations: data });
+        // console.log('🔍 fetchCombinations - Called onDataChange with:', { backendCombinations: data });
         toast({
           title: "Success",
           description: `Loaded ${data.total_combinations || 0} combinations`,
@@ -684,7 +669,7 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
         throw new Error(`Failed to fetch combinations: ${response.statusText}`);
       }
     } catch (error) {
-      console.error('Error fetching combinations:', error);
+
       toast({
         title: "Error",
         description: error instanceof Error ? error.message : "Failed to fetch combinations",
@@ -703,7 +688,7 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
       const response = await fetch(`${SCENARIO_PLANNER_API}/y-variable?model_id=${encodeURIComponent(modelId)}`);
       if (response.ok) {
         const data = await response.json();
-        console.log('🎯 fetchYVariableInfo - Received data:', data);
+
         setYVariableInfo(data);
         toast({
           title: "Target Variable Loaded",
@@ -714,7 +699,7 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
         throw new Error(`Failed to fetch y_variable info: ${response.statusText}`);
       }
     } catch (error) {
-      console.error('Error fetching y_variable info:', error);
+      // console.error('Error fetching y_variable info:', error);
       toast({
         title: "Error",
         description: error instanceof Error ? error.message : "Failed to fetch target variable info",
@@ -729,40 +714,36 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
   useEffect(() => {
     // Only fetch if we don't have backend data yet
     if (!backendIdentifiers || !backendFeatures || !backendCombinations) {
-      console.log('🔄 Auto-fetching backend data on mount...');
+      // console.log('🔄 Auto-fetching backend data on mount...');
       fetchIdentifiers();
       fetchFeatures();
       fetchCombinations();
     } else {
-      console.log('✅ Backend data already available, skipping auto-fetch');
+      // console.log('✅ Backend data already available, skipping auto-fetch');
     }
     
     // Always fetch y_variable info as it's independent
     if (!yVariableInfo) {
-      console.log('🎯 Auto-fetching y_variable info on mount...');
+      // console.log('🎯 Auto-fetching y_variable info on mount...');
       fetchYVariableInfo();
     }
   }, []); // Only run on mount
 
   // ✅ SIMPLE LOG: Check if backend data is being received
   useEffect(() => {
-    console.log('🔍 Backend Data Status:', {
-      hasIdentifiers: !!backendIdentifiers,
-      hasFeatures: !!backendFeatures,
-      hasCombinations: !!backendCombinations,
-      identifiersCount: backendIdentifiers?.identifier_columns?.length || 0,
-      featuresCount: backendFeatures?.all_unique_features?.length || 0,
-      combinationsCount: backendCombinations?.total_combinations || 0
-    });
+    // console.log('🔍 Backend Data Status:', {
+    //   hasIdentifiers: !!backendIdentifiers,
+    //   hasFeatures: !!backendFeatures,
+    //   hasCombinations: !!backendCombinations,
+    //   identifiersCount: backendIdentifiers?.identifier_columns?.length || 0,
+    //   featuresCount: backendFeatures?.all_unique_features?.length || 0,
+    //   combinationsCount: backendCombinations?.total_combinations || 0
+    // });
   }, [backendIdentifiers, backendFeatures, backendCombinations]);
 
   // ✅ SIMPLE LOG: Check if reference values are being received
   useEffect(() => {
-    console.log('🔍 Reference Values Status:', {
-      hasReferenceData: !!data.originalReferenceValues,
-      referenceValuesCount: Object.keys(data.originalReferenceValues || {}).length,
-      sampleReferenceData: Object.keys(data.originalReferenceValues || {}).slice(0, 2) // Show first 2 keys
-    });
+
   }, [data.originalReferenceValues]);
 
   // ✅ FIXED: Sync backend data with frontend settings when data changes
@@ -827,7 +808,7 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
           onDataChange(updateData);
         }
       } catch (error) {
-        console.error('❌ Error syncing backend data:', error);
+        // console.error('❌ Error syncing backend data:', error);
       }
     } else {
       // ✅ NEW: If we have backend data but it's not being used, force a sync
@@ -865,7 +846,7 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
       return newFilters;
     });
       } catch (error) {
-        console.error('Error initializing filters:', error);
+        // console.error('Error initializing filters:', error);
       }
     }
   }, [aggregatedViews]);
@@ -882,7 +863,7 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
     });
     setUniqueValues(newUniqueValues);
       } catch (error) {
-        console.error('Error initializing unique values:', error);
+        // console.error('Error initializing unique values:', error);
       }
     }
   }, [data.identifiers]);
@@ -900,7 +881,7 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
       }));
       setAggregatedViews(syncedViews);
       } catch (error) {
-        console.error('Error syncing aggregated views:', error);
+        // console.error('Error syncing aggregated views:', error);
       }
     }
   }, [data.resultViews]);
@@ -908,7 +889,7 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
      // ✅ NEW: Initialize aggregated views when backend identifiers are loaded
    useEffect(() => {
      if (data.identifiers && data.identifiers.length > 0 && aggregatedViews.length === 0) {
-       console.log('🔄 Initializing aggregated views with backend identifiers:', data.identifiers);
+       // console.log('🔄 Initializing aggregated views with backend identifiers:', data.identifiers);
        
        // Create default aggregated views with real backend identifiers and default selections
        const defaultViews: AggregatedView[] = [
@@ -961,24 +942,14 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
          }
        ];
        
-       console.log('🔄 Created default aggregated views with selections:', defaultViews);
+       // console.log('🔄 Created default aggregated views with selections:', defaultViews);
        setAggregatedViews(defaultViews);
      }
    }, [data.identifiers, aggregatedViews.length]);
 
      // ✅ NEW: Save aggregatedViews to both global store and scenario-specific data
    useEffect(() => {
-     if (aggregatedViews && aggregatedViews.length > 0) {
-       console.log('🔄 Saving aggregatedViews to global store and scenario-specific data:', aggregatedViews);
-       console.log('🔄 Current aggregatedViews selectedIdentifiers:', 
-         aggregatedViews.map(view => ({
-           id: view.id,
-           name: view.name,
-           selectedIdentifiers: view.selectedIdentifiers,
-           identifierOrder: view.identifierOrder
-         }))
-       );
-       
+     if (aggregatedViews && aggregatedViews.length > 0) {   
        // Save to global store
        onDataChange({ aggregatedViews: aggregatedViews });
        
@@ -994,7 +965,7 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
            aggregatedViews: aggregatedViews
          };
          
-         console.log('🔄 Updated scenario-specific aggregatedViews for:', data.selectedScenario);
+         // console.log('🔄 Updated scenario-specific aggregatedViews for:', data.selectedScenario);
          
          // Save scenario-specific data
          onDataChange({ 
@@ -1020,8 +991,8 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
       selectedIdentifiers: {}
     };
     
-    console.log('🔄 Adding new view:', newView);
-    console.log('🔄 Current aggregatedViews count:', aggregatedViews.length);
+    // console.log('🔄 Adding new view:', newView);
+    // console.log('🔄 Current aggregatedViews count:', aggregatedViews.length);
     
     // Update local state
     setAggregatedViews([...aggregatedViews, newView]);
@@ -1042,7 +1013,7 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
         ...updatedScenarios[data.selectedScenario],
         aggregatedViews: [...(updatedScenarios[data.selectedScenario].aggregatedViews || []), newView]
       };
-      console.log('🔄 Updated scenario-specific aggregatedViews for:', data.selectedScenario);
+      // console.log('🔄 Updated scenario-specific aggregatedViews for:', data.selectedScenario);
     }
     
     onDataChange({ 
@@ -1050,7 +1021,7 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
       scenarios: updatedScenarios
     });
     
-    console.log('🔄 Updated resultViews count:', updatedResultViews.length);
+    // console.log('🔄 Updated resultViews count:', updatedResultViews.length);
   };
 
     // Remove view
@@ -1069,7 +1040,7 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
           ...updatedScenarios[data.selectedScenario],
           aggregatedViews: (updatedScenarios[data.selectedScenario].aggregatedViews || []).filter(view => view.id !== viewId)
         };
-        console.log('🔄 Removed view from scenario-specific aggregatedViews for:', data.selectedScenario);
+        // console.log('🔄 Removed view from scenario-specific aggregatedViews for:', data.selectedScenario);
       }
       
       onDataChange({ 
@@ -1086,7 +1057,7 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
 
   // Update identifier order (drag and drop)
   const updateIdentifierOrder = (viewId: string, newOrder: string[]) => {
-    console.log('🔄 Updating identifier order for view:', viewId, 'new order:', newOrder);
+    // console.log('🔄 Updating identifier order for view:', viewId, 'new order:', newOrder);
     setAggregatedViews(prev => prev.map(view => 
       view.id === viewId ? { ...view, identifierOrder: newOrder } : view
     ));
@@ -1094,7 +1065,7 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
 
      // Toggle identifier selection
    const toggleIdentifierSelection = (viewId: string, identifierId: string, valueId: string) => {
-     console.log('🔄 toggleIdentifierSelection called:', { viewId, identifierId, valueId });
+     // console.log('🔄 toggleIdentifierSelection called:', { viewId, identifierId, valueId });
      
      setAggregatedViews(prev => {
        const updated = prev.map(view => {
@@ -1105,18 +1076,18 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
              // Select all values for this identifier
              const identifier = (data.identifiers || []).find(id => id.id === identifierId);
              newSelected = identifier ? (identifier.values || []).map(v => v.id) : [];
-             console.log('🔄 Selecting all values for', identifierId, ':', newSelected);
+             // console.log('🔄 Selecting all values for', identifierId, ':', newSelected);
            } else if (valueId === "clearAll") {
              // Clear all values for this identifier
              newSelected = [];
-             console.log('🔄 Clearing all values for', identifierId);
+             // console.log('🔄 Clearing all values for', identifierId);
            } else {
              // Toggle individual value
              const currentSelected = view.selectedIdentifiers[identifierId] || [];
              newSelected = currentSelected.includes(valueId)
                ? (currentSelected || []).filter(id => id !== valueId)
                : [...currentSelected, valueId];
-             console.log('🔄 Toggling value', valueId, 'for', identifierId, '. New selected:', newSelected);
+             // console.log('🔄 Toggling value', valueId, 'for', identifierId, '. New selected:', newSelected);
            }
            
            const updatedView = {
@@ -1127,13 +1098,13 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
              }
            };
            
-           console.log('🔄 Updated view:', updatedView);
+           // console.log('🔄 Updated view:', updatedView);
            return updatedView;
          }
          return view;
        });
        
-       console.log('🔄 All updated aggregated views:', updated);
+       // console.log('🔄 All updated aggregated views:', updated);
        return updated;
      });
    };
@@ -1164,11 +1135,6 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
       // ✅ FIXED: Persist changes to scenario data
       onDataChange({ aggregatedViews: updatedViews });
       
-      console.log('🔄 Identifier reordered:', {
-        viewId,
-        oldOrder: aggregatedViews.find(v => v.id === viewId)?.identifierOrder,
-        newOrder: updatedViews.find(v => v.id === viewId)?.identifierOrder
-      });
     }
   };
 
@@ -1220,17 +1186,7 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
     setOpenSections(prev => ({ ...prev, [section]: !prev[section] }));
   };
 
-  // ✅ FIXED: Show all identifiers in aggregated views (don't filter by unique values > 1)
-  // The clustering-style filter was too restrictive for aggregated views
   const filteredIdentifiers = data.identifiers || [];
-
-  // Debug logging for current identifiers
-  console.log('🎯 Current identifiers in render:', {
-    identifiers: data.identifiers,
-    backendIdentifiers: backendIdentifiers,
-    backendFeatures: backendFeatures,
-    filteredIdentifiers: filteredIdentifiers
-  });
 
   return (
     <div className="h-full flex flex-col">
@@ -1253,12 +1209,6 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
                   
                   {/* ✅ NEW: Direct Combination Selection */}
                   {(() => {
-                    console.log('🔍 Settings: Rendering condition check:', {
-                      backendCombinations: !!backendCombinations,
-                      hasCombinations: !!backendCombinations?.combinations,
-                      combinationsLength: backendCombinations?.combinations?.length,
-                      fullBackendCombinations: backendCombinations
-                    });
                     return backendCombinations && backendCombinations.combinations;
                   })() ? (
                     <div className="space-y-2">
@@ -1298,24 +1248,18 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
                                 checked={data.selectedCombinations?.includes(combination.combination_id) || false}
                                 onCheckedChange={(checked) => {
                                   const currentSelected = data.selectedCombinations || [];
-                                  console.log('🔍 Settings: Combination toggle:', {
-                                    combinationId: combination.combination_id,
-                                    checked,
-                                    currentSelected,
-                                    dataSelectedCombinations: data.selectedCombinations
-                                  });
                                   
                                   if (checked === true) {
                                     // Add combination
                                     const newSelected = [...currentSelected, combination.combination_id];
-                                    console.log('🔍 Settings: Adding combination, new selection:', newSelected);
+                                    // console.log('🔍 Settings: Adding combination, new selection:', newSelected);
                                     onDataChange({ 
                                       selectedCombinations: [...currentSelected, combination.combination_id] 
                                     });
                                   } else {
                                     // Remove combination
                                     const newSelected = currentSelected.filter((id: string) => id !== combination.combination_id);
-                                    console.log('🔍 Settings: Removing combination, new selection:', newSelected);
+                                    // console.log('🔍 Settings: Removing combination, new selection:', newSelected);
                                     onDataChange({ 
                                       selectedCombinations: currentSelected.filter((id: string) => id !== combination.combination_id) 
                                     });
@@ -1435,15 +1379,7 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
                         // Fallback: show user input or date range
                         value = data.referencePeriod?.from || dateRange?.start_date || '';
                       }
-                      
-                      console.log('🔍 Start date input value:', { 
-                        isMeanOrMedian, 
-                        isPeriodMethod, 
-                        value, 
-                        dateRange, 
-                        referenceMethod: data.referenceMethod,
-                        userInput: data.referencePeriod?.from
-                      });
+
                       return value;
                     })()}
                     onChange={(e) => onDataChange({
@@ -1485,15 +1421,7 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
                         // Fallback
                         value = data.referencePeriod?.to || dateRange?.end_date || '';
                       }
-                      
-                      console.log('🔍 End date input value:', { 
-                        isMeanOrMedian, 
-                        isPeriodMethod, 
-                        value, 
-                        dateRange, 
-                        referenceMethod: data.referenceMethod,
-                        userInput: data.referencePeriod?.to
-                      });
+
                       return value;
                     })()}
                     onChange={(e) => onDataChange({

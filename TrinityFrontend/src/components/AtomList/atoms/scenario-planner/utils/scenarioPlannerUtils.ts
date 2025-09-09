@@ -320,7 +320,10 @@ export const createNewScenario = (settings: ScenarioPlannerSettings, scenarioId:
         outputs: [], // Will be populated by initializeNewScenario
         combinations: [], // Will be generated from fresh identifiers
         referenceMethod: settings.referenceMethod || 'mean',
-        referencePeriod: settings.referencePeriod || { from: '01-JAN-2020', to: '30-MAR-2024' },
+        referencePeriod: settings.referencePeriod || (settings.backendDateRange ? {
+          from: settings.backendDateRange.start_date,
+          to: settings.backendDateRange.end_date
+        } : null),
         resultViews: [
           { id: 'view-1', name: 'View 1', selectedCombinations: [] },
           { id: 'view-2', name: 'View 2', selectedCombinations: [] },
