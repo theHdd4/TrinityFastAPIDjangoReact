@@ -16,6 +16,12 @@ export const COLOR_THEMES: Record<string, { name: string; primary: string; secon
     secondary: '#458EE2', // Trinity blue
     tertiary: '#E0E7FF',
   },
+  multicolor: {
+    name: 'Multicolor 1',
+    primary: '#6366f1',
+    secondary: '#FF8042',
+    tertiary: '#FFBB28',
+  },
   blue: {
     name: 'Blue',
     primary: '#3b82f6',

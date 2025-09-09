@@ -1369,7 +1369,10 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
           </Card>
 
           {/* Show All Columns Toggle */}
-          <div className="flex items-center space-x-2 justify-end mb-2">
+          <div
+            className="flex items-center space-x-2 justify-end w-full pr-4 mb-2"
+            style={{ width: canvasWidth }}
+          >
             <span className="text-xs text-gray-500">Show all columns</span>
             <Switch
               checked={data.showAllColumns || false}

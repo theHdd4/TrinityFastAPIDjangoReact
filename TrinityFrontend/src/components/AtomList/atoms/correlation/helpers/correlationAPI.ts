@@ -317,7 +317,14 @@ export class CorrelationAPI {
     if (!response.ok) {
       throw new Error(`Failed to fetch matrix settings: ${response.statusText}`);
     }
-    return response.json();
+    const saved = await response.json();
+    return {
+      theme: 'default',
+      showAxisLabels: true,
+      showDataLabels: true,
+      showLegend: true,
+      ...saved,
+    };
   }
 
   async saveMatrixSettings(settings: MatrixSettings): Promise<MatrixSettings> {
