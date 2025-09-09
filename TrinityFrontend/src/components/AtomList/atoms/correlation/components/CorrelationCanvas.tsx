@@ -444,9 +444,11 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
 
     // Determine container width for responsive layout
     const containerWidth = heatmapRef.current.parentElement?.clientWidth || 800;
-    const margin = { top: 80, right: 60, bottom: 120, left: 140 };
+    const margin = { top: 80, right: 80, bottom: 180, left: 80 };
     const width = containerWidth - margin.left - margin.right;
-    const height = 500 - margin.top - margin.bottom;
+
+    // Ensure svg spans the full card width and adequate height for legend/labels
+    svg.attr("width", containerWidth);
 
     const g = svg.append("g").attr("transform", `translate(${margin.left},${margin.top})`);
 
@@ -456,10 +458,13 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
       : (data.variables || []);
     const variables = getFilteredVariables(allVariables, data.correlationMatrix);
 
-    // Calculate optimal cell size
-    const cellSize = Math.min(width / variables.length, height / variables.length);
+    // Calculate cell size based solely on width to utilise entire canvas width
+    const cellSize = width / variables.length;
     const actualWidth = cellSize * variables.length;
     const actualHeight = cellSize * variables.length;
+
+    // Adjust svg height after computing actual heatmap dimensions
+    svg.attr("height", margin.top + actualHeight + margin.bottom);
 
     // Scales
     const xScale = d3.scaleBand().domain(variables).range([0, actualWidth]).padding(0.02);
@@ -1093,7 +1098,12 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
       <div className={isCompactMode ? 'mb-4' : 'mb-6'}>
         <Card className="overflow-hidden">
           <div className={isCompactMode ? 'p-4' : 'p-6'}>
-            <svg ref={heatmapRef} width="100%" height={isCompactMode ? "220" : "400"} className="w-full"></svg>
+            <svg
+              ref={heatmapRef}
+              width="100%"
+              height={isCompactMode ? '260' : '650'}
+              className="w-full"
+            ></svg>
           </div>
         </Card>
       </div>
