@@ -55,6 +55,8 @@ export interface DataUploadSettings {
   fileKeyMap?: Record<string, string>;
   /** Map of uploaded file display names to the stored MinIO object path */
   filePathMap?: Record<string, string>;
+  /** Map of uploaded file display names to their file size in bytes */
+  fileSizeMap?: Record<string, number>;
 }
 
 export const DEFAULT_DATAUPLOAD_SETTINGS: DataUploadSettings = {
@@ -72,6 +74,7 @@ export const DEFAULT_DATAUPLOAD_SETTINGS: DataUploadSettings = {
   fileMappings: {},
   fileKeyMap: {},
   filePathMap: {},
+  fileSizeMap: {},
 };
 
 export const createDefaultDataUploadSettings = (): DataUploadSettings => ({
@@ -89,6 +92,7 @@ export const createDefaultDataUploadSettings = (): DataUploadSettings => ({
   fileMappings: {},
   fileKeyMap: {},
   filePathMap: {},
+  fileSizeMap: {},
 });
 
 export interface FeatureOverviewSettings {
@@ -441,6 +445,430 @@ export const DEFAULT_CHART_MAKER_SETTINGS: ChartMakerSettings = {
   error: undefined,
 };
 
+export interface ClusteringData {
+  selectedIdentifiers: string[];
+  availableIdentifiers: string[]; // <-- Added to store all available identifier columns
+  availableMeasures: string[];
+  selectedMeasures: string[];
+  selectedDataFile: string;
+  objectName: string; // <-- Added default value
+  allColumns: string[]; // <-- Added to store all columns
+  
+  // Date range filtering
+  dateRange?: {
+    column: string;
+    fromDate: string;
+    toDate: string;
+  };
+  
+  // Output path management
+  outputPath?: string; // Full path to saved clustering results
+  outputFilename?: string; // Custom filename for the output
+  
+  // Algorithm configuration
+  algorithm?: string;
+  
+  // K-selection method
+  k_selection?: 'manual' | 'elbow' | 'silhouette' | 'gap';
+  
+  // Manual K selection
+  n_clusters?: number;
+  
+  // Auto-K selection parameters
+  k_min?: number;
+  k_max?: number;
+  gap_b?: number;
+  
+  // Legacy support
+  use_elbow?: boolean;
+  
+  // Algorithm-specific parameters
+  eps?: number;
+  min_samples?: number;
+  linkage?: 'ward' | 'complete' | 'average' | 'single';
+  threshold?: number;
+  covariance_type?: 'full' | 'tied' | 'diag' | 'spherical';
+  
+  // Performance parameters
+  random_state?: number;
+  n_init?: number;
+  
+  // Legacy support - keeping for backward compatibility
+  clusteringConfig?: ClusteringConfig;
+  clusterResults: ClusterResults | null;
+  isRunning: boolean;
+}
+
+export interface ClusteringConfig {
+  clusteringMethod: string;
+  numberOfClusters: number;
+  identifiers: Record<string, string>;
+  selectedMeasure: string;
+  // New algorithm-specific parameters
+  algorithmParams: {
+    // K-means parameters
+    n_clusters?: number;
+    // HAC parameters
+    linkage?: 'ward' | 'complete' | 'average' | 'single';
+    // BIRCH parameters
+    threshold?: number;
+    // DBSCAN parameters
+    eps?: number;
+    min_samples?: number;
+    // GMM parameters
+    covariance_type?: 'full' | 'tied' | 'diag' | 'spherical';
+    // Performance parameters
+    random_state?: number;
+    n_init?: number;
+  };
+}
+
+export interface ClusterResults {
+  // Data info
+  original_rows?: number;
+  filtered_rows?: number;
+  columns_used?: string[];
+  
+  // Filter info
+  filters_applied?: any;
+  filtered_file_path?: string;
+  
+  // Clustering results
+  algorithm_used?: string;
+  n_clusters_found?: number;
+  cluster_sizes?: Record<string, number>; // cluster_id -> count
+  cluster_stats?: Array<{
+    cluster_id: number | string;
+    size: number;
+    centroid: Record<string, number>; // column -> centroid value
+    min_values: Record<string, number>; // column -> min value
+    max_values: Record<string, number>; // column -> max value
+    column_names?: string[]; // List of column names
+  }>;
+  clustered_file_path?: string;
+  
+  // Output data with cluster IDs
+  output_data?: any[];  // Full dataframe with cluster_id column
+  
+  // Preview (optional)
+  preview_data?: any[];
+  
+  // Metadata
+  timestamp?: string;
+  processing_time_ms?: number;
+  
+  // Legacy support
+  message?: string;
+  clusters_path?: string;
+  filtered_path?: string;
+  duration_ms?: number;
+}
+
+export interface ClusteringSettings {
+  clusteringData: ClusteringData;
+}
+
+export const DEFAULT_CLUSTERING_SETTINGS: ClusteringSettings = {
+  clusteringData: {
+    selectedIdentifiers: [],
+    availableIdentifiers: [], // <-- Added to store all available identifier columns
+    availableMeasures: [],
+    selectedMeasures: [],
+    selectedDataFile: '',
+    objectName: '', // <-- Added default value
+    allColumns: [], // <-- Added to store all columns
+    
+    // Date range filtering
+    dateRange: undefined,
+    
+    // Output path management
+    outputPath: '',
+    outputFilename: '',
+    
+    // Algorithm configuration
+    algorithm: 'kmeans',
+    
+    // K-selection method
+    k_selection: 'elbow',
+    
+    // Manual K selection
+    n_clusters: 3,
+    
+    // Auto-K selection parameters
+    k_min: 2,
+    k_max: 10,
+    gap_b: 10,
+    
+    // Legacy support
+    use_elbow: false,
+    
+    // Algorithm-specific parameters
+    eps: 0.5,
+    min_samples: 5,
+    linkage: 'ward',
+    threshold: 0.5,
+    covariance_type: 'full',
+    
+    // Performance parameters
+    random_state: 0,
+    n_init: 10,
+    // Legacy support - keeping for backward compatibility
+    clusteringConfig: {
+      clusteringMethod: 'K-Means',
+      numberOfClusters: 3,
+      identifiers: {},
+      selectedMeasure: '',
+      algorithmParams: {
+        n_clusters: 3,
+        linkage: 'ward',
+        threshold: 0.5,
+        eps: 0.5,
+        min_samples: 5,
+        covariance_type: 'full',
+        random_state: 0,
+        n_init: 10
+      }
+    },
+    clusterResults: null,
+    isRunning: false
+  }
+};
+
+// ✅ UPDATED: New nested scenario structure for better isolation
+export interface ScenarioPlannerSettings {
+  // ✅ NEW: Scenario-specific data structure
+  allScenarios: string[];
+  selectedScenario: string;
+  scenarios: {
+    [scenarioId: string]: {
+      identifiers: Array<{
+        id: string;
+        name: string;
+        values: Array<{
+          id: string;
+          name: string;
+          checked: boolean;
+        }>;
+      }>;
+      features: Array<{
+        id: string;
+        name: string;
+        selected: boolean;
+      }>;
+      outputs: Array<{
+        id: string;
+        name: string;
+        selected: boolean;
+      }>;
+      combinations: Array<{
+        id: string;
+        combination_id: string;
+      }>;
+      referenceMethod: 'mean' | 'period-mean' | 'period-median' | 'median';
+      referencePeriod: {
+        from: string;
+        to: string;
+      };
+      resultViews: Array<{
+        id: string;
+        name: string;
+        selectedCombinations: string[];
+      }>;
+      selectedView: string;
+      combinationInputs?: {
+        [combinationId: string]: {
+          [featureId: string]: {
+            input: string;
+            change: string;
+          };
+        };
+      };
+      originalReferenceValues?: {
+        [combinationId: string]: {
+          [featureId: string]: number;
+        };
+      };
+      scenarioResults?: {
+        runId: string;
+        viewId: string;
+        viewName: string;
+        datasetUsed: string;
+        createdAt: string;
+        modelsProcessed: number;
+        flat: any;
+        hierarchy: any[];
+        individuals: any[];
+      };
+      // ✅ NEW: Per-view results storage
+      viewResults?: {
+        [viewId: string]: {
+          runId: string;
+          viewId: string;
+          viewName: string;
+          datasetUsed: string;
+          createdAt: string;
+          modelsProcessed: number;
+          flat: any;
+          hierarchy: any[];
+          individuals: any[];
+        };
+      };
+      aggregatedViews?: Array<{
+        id: string;
+        name: string;
+        identifierOrder: string[];
+        selectedIdentifiers: Record<string, string[]>;
+      }>;
+    };
+  };
+  
+  // Global settings (shared across all scenarios)
+  referenceMethod: 'mean' | 'period-mean' | 'period-median' | 'median';
+  referencePeriod: {
+    from: string;
+    to: string;
+  };
+  selectedResultScenario: string;
+  selectedView: string;
+  
+  // Backend data (shared across all scenarios)
+  scenarioData?: {
+    selectedDataFile?: string;
+    objectName?: string;
+    allColumns?: string[];
+    availableIdentifiers?: string[];
+    availableMeasures?: string[];
+    selectedIdentifiers?: string[];
+    selectedMeasures?: string[];
+    outputPath?: string;
+    outputFilename?: string;
+  };
+  backendIdentifiers?: any;
+  backendFeatures?: any;
+  backendCombinations?: any;
+  backendDateRange?: {
+    start_date: string;
+    end_date: string;
+  };
+  
+  // ✅ NEW: Properties for auto-refresh functionality
+  referenceValuesNeedRefresh?: boolean;
+  lastReferenceMethod?: 'mean' | 'period-mean' | 'period-median' | 'median';
+  lastReferencePeriod?: {
+    from: string;
+    to: string;
+  };
+  
+  // ✅ NEW: Property to control refresh functionality
+  refreshEnabled?: boolean;
+  
+  // ✅ NEW: Backward compatibility properties (computed from current scenario)
+  // These prevent infinite loops by providing the old flat structure
+  // NOTE: These are NOT stored in the store - they are computed on-demand
+  identifiers?: Array<{
+    id: string;
+    name: string;
+    values: Array<{
+      id: string;
+      name: string;
+      checked: boolean;
+    }>;
+  }>;
+  features?: Array<{
+    id: string;
+    name: string;
+    selected: boolean;
+  }>;
+  outputs?: Array<{
+    id: string;
+    name: string;
+    selected: boolean;
+  }>;
+  combinations?: Array<{
+    id: string;
+    combination_id: string;
+  }>;
+  resultViews?: Array<{
+    id: string;
+    name: string;
+    selectedCombinations: string[];
+  }>;
+  selectedCombinations?: string[];
+  combinationInputs?: {
+    [combinationId: string]: {
+      [featureId: string]: {
+        input: string;
+        change: string;
+      };
+    };
+  };
+  originalReferenceValues?: {
+    [combinationId: string]: {
+      [featureId: string]: number;
+    };
+  };
+  aggregatedViews?: Array<{
+    id: string;
+    name: string;
+    identifierOrder: string[];
+    selectedIdentifiers: Record<string, string[]>;
+  }>;
+  
+  // Legacy properties for backward compatibility
+  scenarioResults?: any;
+}
+
+export const DEFAULT_SCENARIO_PLANNER_SETTINGS: ScenarioPlannerSettings = {
+  allScenarios: ['scenario-1'],
+  selectedScenario: 'scenario-1',
+  scenarios: {
+    'scenario-1': {
+      identifiers: [], // Will be populated from backend
+      features: [], // Will be populated from backend
+      outputs: [], // Will be populated from backend
+      combinations: [], // Will be generated from identifiers
+      referenceMethod: 'mean',
+      referencePeriod: { from: '01-JAN-2020', to: '30-MAR-2024' },
+      resultViews: [
+        { id: 'view-1', name: 'View 1', selectedCombinations: [] },
+        { id: 'view-2', name: 'View 2', selectedCombinations: [] },
+        { id: 'view-3', name: 'View 3', selectedCombinations: [] }
+      ],
+      selectedView: 'view-1',
+      combinationInputs: {},
+      originalReferenceValues: {},
+      aggregatedViews: [] // Will be created from backend identifiers
+    }
+  },
+  
+  // Global settings (shared across all scenarios)
+  referenceMethod: 'mean',
+  referencePeriod: { from: '01-JAN-2020', to: '30-MAR-2024' },
+  selectedResultScenario: 'scenario-1',
+  selectedView: 'view-1',
+  
+  // Backend data (shared across all scenarios)
+  scenarioData: {
+    selectedDataFile: '',
+    objectName: '',
+    allColumns: [],
+    availableIdentifiers: [],
+    availableMeasures: [],
+    selectedIdentifiers: [],
+    selectedMeasures: [],
+    outputPath: '',
+    outputFilename: ''
+  },
+  
+  // ✅ NEW: Default values for auto-refresh functionality
+  referenceValuesNeedRefresh: false,
+  lastReferenceMethod: 'mean',
+  lastReferencePeriod: { from: '01-JAN-2020', to: '30-MAR-2024' },
+  
+  // ✅ NEW: Default value for refresh functionality
+  refreshEnabled: false
+};
+
 export interface ExploreData {
   dataframe?: string;
   dimensions: string[];
@@ -584,25 +1012,35 @@ export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
   },
 
   updateAtomSettings: (atomId: string, settings: any) => {
+    console.log('=== Store: updateAtomSettings called ===');
+    console.log('Store: atomId:', atomId);
+    console.log('Store: settings to update:', settings);
+    
     set((state) => {
       const updatedCards = state.cards.map((card) => ({
         ...card,
         atoms: card.atoms.map((atom) =>
           atom.id === atomId
-            ? { ...atom, settings: { ...(atom.settings || {}), ...settings } }
+            ? { 
+                ...atom, 
+                settings: { 
+                  ...(atom.settings || {}), 
+                  ...settings
+                } 
+              }
             : atom,
         ),
       }));
+      
       return { cards: updatedCards };
     });
   },
-  getAtom: (atomId) => {
-    for (const card of get().cards) {
-      const atom = card.atoms.find((a) => a.id === atomId);
-      if (atom) return atom;
-    }
-    return undefined;
+
+  getAtom: (atomId: string) => {
+    const state = get();
+    return state.cards.flatMap(card => card.atoms).find(atom => atom.id === atomId);
   },
+
   reset: () => {
     set({ cards: [] });
   },

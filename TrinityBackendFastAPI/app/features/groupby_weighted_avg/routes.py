@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Form, HTTPException, Query, Response, Body
 from typing import Dict, List
-from .deps import get_minio_df, get_validator_atoms_collection, fetch_dimensions_dict, get_column_classifications_collection, fetch_measures_list, fetch_identifiers_and_measures, minio_client, MINIO_BUCKET
+from .deps import get_minio_df, get_validator_atoms_collection, fetch_dimensions_dict, get_column_classifications_collection, fetch_measures_list, fetch_identifiers_and_measures, minio_client, MINIO_BUCKET, redis_client
 from app.features.data_upload_validate.app.routes import get_object_prefix
 from .mongodb_saver import save_groupby_result
 import io
@@ -378,31 +378,52 @@ async def save_groupby_dataframe(
 ):
     """Save grouped DataFrame CSV to MinIO bucket and return saved filename"""
     import uuid
+    import pandas as pd
+    import pyarrow as pa
+    import pyarrow.ipc as ipc
     try:
+        # Parse CSV to DataFrame
+        df = pd.read_csv(io.StringIO(csv_data))
+        
+        # Generate unique file key if not provided
         if not filename:
             gid = str(uuid.uuid4())[:8]
-            filename = f"groupby_{gid}.csv"
+            filename = f"groupby_{gid}.arrow"
+        if not filename.endswith('.arrow'):
+            filename += '.arrow'
         
-        # Convert CSV string to bytes
-        csv_bytes = csv_data.encode("utf-8")
+        # Get consistent object prefix and construct full path
+        prefix = await get_object_prefix()
+        filename = f"{prefix}groupby/{filename}"
+        print(f"🔍 GroupBy Save: prefix={prefix}, final filename={filename}")
         
-        # Save to MinIO
+        # Save to MinIO as Arrow file
+        table = pa.Table.from_pandas(df)
+        arrow_buffer = pa.BufferOutputStream()
+        with ipc.new_file(arrow_buffer, table.schema) as writer:
+            writer.write_table(table)
+        arrow_bytes = arrow_buffer.getvalue().to_pybytes()
         minio_client.put_object(
             bucket_name=MINIO_BUCKET,
             object_name=filename,
-            data=io.BytesIO(csv_bytes),
-            length=len(csv_bytes),
-            content_type="text/csv"
+            data=io.BytesIO(arrow_bytes),
+            length=len(arrow_bytes),
+            content_type="application/octet-stream"
         )
+        
+        # Cache in Redis for 1 hour
+        redis_client.setex(filename, 3600, arrow_bytes)
         
         return {
             "status": "SUCCESS",
             "message": "DataFrame saved successfully",
             "filename": filename,
-            "size_bytes": len(csv_bytes)
+            "size_bytes": len(arrow_bytes)
         }
     except Exception as e:
         print(f"⚠️ groupby save error: {e}")
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Save failed: {str(e)}")
 
 @router.get("/results")

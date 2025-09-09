@@ -282,23 +282,37 @@ async def get_env_vars(
                 source = "postgres"
             except Exception:
                 env = {
-                    "CLIENT_NAME": os.getenv("CLIENT_NAME", "default_client"),
-                    "APP_NAME": os.getenv("APP_NAME", "default_app"),
-                    "PROJECT_NAME": os.getenv("PROJECT_NAME", "default_project"),
+                    "CLIENT_NAME": resolved_client
+                    or os.getenv("CLIENT_NAME", "default_client"),
+                    "APP_NAME": resolved_app or os.getenv("APP_NAME", "default_app"),
+                    "PROJECT_NAME": resolved_project
+                    or os.getenv("PROJECT_NAME", "default_project"),
                 }
                 source = "defaults"
         else:
             env = {
-                "CLIENT_NAME": os.getenv("CLIENT_NAME", "default_client"),
-                "APP_NAME": os.getenv("APP_NAME", "default_app"),
-                "PROJECT_NAME": os.getenv("PROJECT_NAME", "default_project"),
+                "CLIENT_NAME": resolved_client
+                or os.getenv("CLIENT_NAME", "default_client"),
+                "APP_NAME": resolved_app or os.getenv("APP_NAME", "default_app"),
+                "PROJECT_NAME": resolved_project
+                or os.getenv("PROJECT_NAME", "default_project"),
             }
             source = "defaults"
 
     # Ensure the returned environment carries the authoritative names.
-    env_client = env.get("CLIENT_NAME") or resolved_client
-    env_app = env.get("APP_NAME") or resolved_app
-    env_project = env.get("PROJECT_NAME") or resolved_project
+    env_client = (
+        resolved_client
+        or env.get("CLIENT_NAME")
+        or os.getenv("CLIENT_NAME", "default_client")
+    )
+    env_app = (
+        resolved_app or env.get("APP_NAME") or os.getenv("APP_NAME", "default_app")
+    )
+    env_project = (
+        resolved_project
+        or env.get("PROJECT_NAME")
+        or os.getenv("PROJECT_NAME", "default_project")
+    )
     env.update(
         {
             "CLIENT_NAME": env_client,

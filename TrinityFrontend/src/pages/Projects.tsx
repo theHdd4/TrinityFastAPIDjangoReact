@@ -6,7 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import Header from '@/components/Header';
 import { REGISTRY_API } from '@/lib/api';
-import { clearProjectState } from '@/utils/projectStorage';
+import { clearProjectState, saveCurrentProject } from '@/utils/projectStorage';
 import {
   Plus,
   FolderOpen,
@@ -214,9 +214,52 @@ const Projects = () => {
     }
   };
 
-  const openProject = (project: Project) => {
+  const openProject = async (project: Project) => {
     clearProjectState();
-    localStorage.setItem('current-project', JSON.stringify(project));
+    saveCurrentProject(project);
+
+    // Construct an initial environment using any existing client identifiers
+    // and the currently selected app/project. This ensures env-dependent
+    // components (session state, MinIO prefixing, etc.) immediately reflect
+    // the user's context even before the backend responds with its
+    // canonical environment payload.
+    let env: Record<string, string> = {
+      APP_NAME: selectedApp || '',
+      APP_ID: appId?.toString() || '',
+      PROJECT_NAME: project.name,
+      PROJECT_ID: project.id?.toString() || '',
+    };
+    try {
+      const envStr = localStorage.getItem('env');
+      const baseEnv = envStr ? JSON.parse(envStr) : {};
+      if (baseEnv.CLIENT_NAME) env.CLIENT_NAME = baseEnv.CLIENT_NAME;
+      if (baseEnv.CLIENT_ID) env.CLIENT_ID = baseEnv.CLIENT_ID;
+    } catch {
+      /* ignore parse errors */
+    }
+    localStorage.setItem('env', JSON.stringify(env));
+
+    try {
+      const res = await fetch(`${REGISTRY_API}/projects/${project.id}/`, { credentials: 'include' });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.environment) {
+          // Persist the full environment returned by the backend, but ensure
+          // current app/project identifiers remain accurate.
+          env = {
+            ...env,
+            ...data.environment,
+            APP_NAME: selectedApp || env.APP_NAME,
+            APP_ID: appId?.toString() || env.APP_ID,
+            PROJECT_NAME: project.name,
+            PROJECT_ID: project.id?.toString() || env.PROJECT_ID,
+          };
+          localStorage.setItem('env', JSON.stringify(env));
+        }
+      }
+    } catch (err) {
+      console.log('Project env fetch error', err);
+    }
     navigate('/');
   };
 

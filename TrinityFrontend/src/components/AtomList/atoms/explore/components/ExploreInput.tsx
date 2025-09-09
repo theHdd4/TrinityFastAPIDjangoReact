@@ -32,11 +32,16 @@ interface ColumnSummary {
   is_numerical: boolean
 }
 
+interface Frame {
+  object_name: string
+  arrow_name: string
+}
+
 const ExploreInput: React.FC<ExploreInputProps> = ({ data, settings, onDataChange, onDataUpload }) => {
   /** --------------------------------------------------
    * Local state
    * --------------------------------------------------*/
-  const [frames, setFrames] = useState<{ object_name: string; csv_name: string }[]>([])
+  const [frames, setFrames] = useState<Frame[]>([])
   const [selected, setSelected] = useState<string>(data.dataframe || "")
 
   const [columnSummary, setColumnSummary] = useState<ColumnSummary[]>([])
@@ -56,7 +61,18 @@ const ExploreInput: React.FC<ExploreInputProps> = ({ data, settings, onDataChang
   useEffect(() => {
     fetch(`${VALIDATE_API}/list_saved_dataframes`)
       .then((r) => r.json())
-      .then((d) => setFrames(Array.isArray(d.files) ? d.files : []))
+      .then((d) =>
+        setFrames(
+          Array.isArray(d.files)
+            ? d.files
+                .filter((f: any) => !!f.arrow_name)
+                .map((f: any) => ({
+                  object_name: f.object_name,
+                  arrow_name: f.arrow_name
+                }))
+            : []
+        )
+      )
       .catch(() => setFrames([]))
   }, [])
 
@@ -316,11 +332,13 @@ const ExploreInput: React.FC<ExploreInputProps> = ({ data, settings, onDataChang
             <SelectValue placeholder="Select saved dataframe" />
           </SelectTrigger>
           <SelectContent>
-            {Array.isArray(frames) ? frames.map((f) => (
-              <SelectItem key={f.object_name} value={f.object_name}>
-                {f.csv_name.split("/").pop()}
-              </SelectItem>
-            )) : null}
+            {Array.isArray(frames)
+              ? frames.map((f) => (
+                  <SelectItem key={f.object_name} value={f.object_name}>
+                    {f.arrow_name.split("/").pop()?.replace(".arrow", "")}
+                  </SelectItem>
+                ))
+              : null}
           </SelectContent>
         </Select>
 

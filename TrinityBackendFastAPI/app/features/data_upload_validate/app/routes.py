@@ -3,12 +3,15 @@ from fastapi import APIRouter, HTTPException, File, Form, UploadFile, Query, Req
 from typing import List, Dict, Any
 import json
 import pandas as pd
+import polars as pl
 import io
 import os
 import openpyxl
+import pyarrow as pa
 from app.core.utils import get_env_vars
 from pathlib import Path
 import re
+import fastexcel
 
 # Add this line with your other imports
 from datetime import datetime
@@ -88,6 +91,9 @@ CUSTOM_CONFIG_DIR.mkdir(exist_ok=True)
 # In-memory storage
 extraction_results = {}
 
+# Common Polars CSV options to improve schema inference on large files
+CSV_READ_KWARGS = {"low_memory": True, "infer_schema_length": 10_000}
+
 # Health check
 @router.get("/health")
 async def health_check():
@@ -124,8 +130,6 @@ from app.DataStorageRetrieval.minio_utils import (
     ARROW_DIR,
     get_arrow_dir,
 )
-import pyarrow as pa
-import pyarrow.ipc as ipc
 from pathlib import Path
 import asyncio
 import os
@@ -136,26 +140,6 @@ MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "minio:9000")
 MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY", "minio")
 MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY", "minio123")
 MINIO_BUCKET = os.getenv("MINIO_BUCKET", "trinity")
-
-
-CHUNK_ROWS = 10000
-
-
-def stream_excel(file_obj, chunk_rows: int = CHUNK_ROWS):
-    """Yield DataFrame chunks from an Excel file-like object."""
-    wb = openpyxl.load_workbook(file_obj, read_only=True, data_only=True)
-    ws = wb.active
-    rows = ws.iter_rows(values_only=True)
-    headers = next(rows, [])
-    chunk: list[list[Any]] = []
-    for row in rows:
-        chunk.append(list(row))
-        if len(chunk) == chunk_rows:
-            yield pd.DataFrame(chunk, columns=headers)
-            chunk = []
-    if chunk:
-        yield pd.DataFrame(chunk, columns=headers)
-    file_obj.seek(0)
 
 
 def _parse_numeric_id(value: str | int | None) -> int:
@@ -185,9 +169,19 @@ async def get_object_prefix(
     """
     USER_ID = _parse_numeric_id(os.getenv("USER_ID"))
     PROJECT_ID = _parse_numeric_id(project_id or os.getenv("PROJECT_ID", "0"))
-    client_id_env = client_id or os.getenv("CLIENT_ID", "")
-    app_id_env = app_id or os.getenv("APP_ID", "")
-    project_id_env = project_id or os.getenv("PROJECT_ID", "")
+    # If explicit names are provided, avoid using potentially stale identifier
+    # values from ``os.environ``. This ensures that when the frontend sends the
+    # current ``client_name/app_name/project_name`` combo, we resolve the
+    # environment for that namespace rather than whatever IDs may have been set
+    # previously.
+    if client_name or app_name or project_name:
+        client_id_env = client_id or ""
+        app_id_env = app_id or ""
+        project_id_env = project_id or ""
+    else:
+        client_id_env = client_id or os.getenv("CLIENT_ID", "")
+        app_id_env = app_id or os.getenv("APP_ID", "")
+        project_id_env = project_id or os.getenv("PROJECT_ID", "")
 
     # Resolve environment variables using ``get_env_vars`` which consults the
     # Redis cache keyed by ``<client>/<app>/<project>`` and falls back to
@@ -499,16 +493,16 @@ async def create_new(
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"Error reading file {file.filename}: {str(e)}")
 
-        # Parse file to DataFrame
+        # Parse file to DataFrame using Polars for efficient serialization
         try:
             if file.filename.lower().endswith(".csv"):
-                df = pd.read_csv(
-                    io.BytesIO(content), parse_dates=True, infer_datetime_format=True
-                )
-            elif file.filename.lower().endswith(".xlsx"):
-                df = pd.read_excel(io.BytesIO(content), parse_dates=True)
+                df_pl = pl.read_csv(io.BytesIO(content), **CSV_READ_KWARGS)
+            elif file.filename.lower().endswith((".xls", ".xlsx")):
+                df_pl = pl.from_pandas(pd.read_excel(io.BytesIO(content)))
             else:
                 raise HTTPException(status_code=400, detail="Only CSV and XLSX files supported")
+
+            df = df_pl.to_pandas()
 
             # Attempt to convert object columns that look like dates or datetimes
             date_pat = re.compile(
@@ -1513,23 +1507,16 @@ async def validate(
     if files_list:
         for file, key in zip(files_list, keys):
             try:
-                file.file.seek(0, os.SEEK_END)
-                size_bytes = file.file.tell()
-                file.file.seek(0)
+                content = await file.read()
+                size_bytes = len(content)
 
                 if file.filename.lower().endswith(".csv"):
-                    reader = pd.read_csv(
-                        file.file,
-                        chunksize=CHUNK_ROWS,
-                        parse_dates=True,
-                        infer_datetime_format=True,
-                    )
-                    df = pd.concat(reader, ignore_index=True)
+                    df_pl = pl.read_csv(io.BytesIO(content), **CSV_READ_KWARGS)
                 elif file.filename.lower().endswith((".xls", ".xlsx")):
-                    reader = stream_excel(file.file, CHUNK_ROWS)
-                    df = pd.concat(reader, ignore_index=True)
+                    df_pl = pl.from_pandas(pd.read_excel(io.BytesIO(content)))
                 else:
                     raise HTTPException(status_code=400, detail="Only CSV and XLSX files supported")
+                df = df_pl.to_pandas()
 
                 df.columns = [preprocess_column_name(col) for col in df.columns]
                 files_data.append((key, df))
@@ -1543,18 +1530,12 @@ async def validate(
                 size_bytes = len(data)
                 filename = Path(path).name
                 if filename.lower().endswith(".csv"):
-                    reader = pd.read_csv(
-                        io.BytesIO(data),
-                        chunksize=CHUNK_ROWS,
-                        parse_dates=True,
-                        infer_datetime_format=True,
-                    )
-                    df = pd.concat(reader, ignore_index=True)
+                    df_pl = pl.read_csv(io.BytesIO(data), **CSV_READ_KWARGS)
                 elif filename.lower().endswith((".xls", ".xlsx")):
-                    reader = stream_excel(io.BytesIO(data), CHUNK_ROWS)
-                    df = pd.concat(reader, ignore_index=True)
+                    df_pl = pl.from_pandas(pd.read_excel(io.BytesIO(data)))
                 else:
                     raise HTTPException(status_code=400, detail="Only CSV and XLSX files supported")
+                df = df_pl.to_pandas()
 
                 df.columns = [preprocess_column_name(col) for col in df.columns]
                 files_data.append((key, df))
@@ -1781,8 +1762,8 @@ async def get_validator_config(validator_atom_id: str):
 #             # Parse file based on extension
 #             if file.filename.lower().endswith(".csv"):
 #                 df = pd.read_csv(io.BytesIO(content))
-#             elif file.filename.lower().endswith(".xlsx"):
-#                 df = pd.read_excel(io.BytesIO(content))
+#             elif file.filename.lower().endswith((".xls", ".xlsx")):
+#                 df = pl.read_excel(io.BytesIO(content))
 #             else:
 #                 raise HTTPException(status_code=400, detail="Only CSV and XLSX files supported")
             
@@ -1963,21 +1944,21 @@ async def validate_mmm_endpoint(
         try:
             content = await file.read()
             file_contents.append((content, file.filename, key))
-            
-            # Parse file based on extension
+
+            # Parse file based on extension using Polars, then convert to pandas
             if file.filename.lower().endswith(".csv"):
-                df = pd.read_csv(
-                    io.BytesIO(content), parse_dates=True, infer_datetime_format=True
-                )
-            elif file.filename.lower().endswith(".xlsx"):
-                df = pd.read_excel(io.BytesIO(content), parse_dates=True)
+                df_pl = pl.read_csv(io.BytesIO(content), **CSV_READ_KWARGS)
+            elif file.filename.lower().endswith((".xls", ".xlsx")):
+                df_pl = pl.from_pandas(pd.read_excel(io.BytesIO(content)))
             else:
                 raise HTTPException(status_code=400, detail="Only CSV and XLSX files supported")
-            
+
+            df = df_pl.to_pandas()
+
             # ✅ FIXED: Preprocess columns to match MMM validation expectations
             df.columns = [preprocess_column_name(col) for col in df.columns]
             files_data[key] = df
-            
+
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"Error parsing file {file.filename}: {str(e)}")
     
@@ -2185,8 +2166,8 @@ async def validate_mmm_endpoint(
 #         # Parse file based on extension
 #         if file.filename.lower().endswith(".csv"):
 #             df = pd.read_csv(io.BytesIO(content))
-#         elif file.filename.lower().endswith(".xlsx"):
-#             df = pd.read_excel(io.BytesIO(content))
+#         elif file.filename.lower().endswith((".xls", ".xlsx")):
+#             df = pl.read_excel(io.BytesIO(content))
 #         else:
 #             raise HTTPException(status_code=400, detail="Only CSV and XLSX files supported")
         
@@ -2333,16 +2314,16 @@ async def validate_category_forecasting_endpoint(
     try:
         content = await file.read()
         
-        # Parse file based on extension
+        # Parse file based on extension using Polars
         if file.filename.lower().endswith(".csv"):
-            df = pd.read_csv(
-                io.BytesIO(content), parse_dates=True, infer_datetime_format=True
-            )
-        elif file.filename.lower().endswith(".xlsx"):
-            df = pd.read_excel(io.BytesIO(content), parse_dates=True)
+            df_pl = pl.read_csv(io.BytesIO(content), **CSV_READ_KWARGS)
+        elif file.filename.lower().endswith((".xls", ".xlsx")):
+            df_pl = pl.from_pandas(pd.read_excel(io.BytesIO(content)))
         else:
             raise HTTPException(status_code=400, detail="Only CSV and XLSX files supported")
-        
+
+        df = df_pl.to_pandas()
+
         # Light preprocessing (CF validation handles most column standardization)
         df.columns = [preprocess_column_name(col) for col in df.columns]
         
@@ -2527,14 +2508,14 @@ async def validate_promo_endpoint(
         
         # Parse file based on extension
         if file.filename.lower().endswith(".csv"):
-            df = pd.read_csv(
-                io.BytesIO(content), parse_dates=True, infer_datetime_format=True
-            )
-        elif file.filename.lower().endswith(".xlsx"):
-            df = pd.read_excel(io.BytesIO(content), parse_dates=True)
+            df_pl = pl.read_csv(io.BytesIO(content), **CSV_READ_KWARGS)
+        elif file.filename.lower().endswith((".xls", ".xlsx")):
+            df_pl = pl.from_pandas(pd.read_excel(io.BytesIO(content)))
         else:
             raise HTTPException(status_code=400, detail="Only CSV and XLSX files supported")
-        
+
+        df = df_pl.to_pandas()
+
         # Light preprocessing (Promo validation handles column standardization)
         df.columns = [preprocess_column_name(col) for col in df.columns]
         
@@ -2732,58 +2713,91 @@ async def save_dataframes(
             data = read_minio_object(p)
             iter_sources.append((Path(p).name, io.BytesIO(data)))
 
+    MAX_FILE_SIZE = 512 * 1024 * 1024  # 512 MB
+    STATUS_TTL = 3600
+
     for (filename, fileobj), key in zip(iter_sources, keys):
+        progress_key = f"upload_status:{validator_atom_id}:{key}"
+        redis_client.set(progress_key, "uploading", ex=STATUS_TTL)
+
         arrow_name = Path(filename).stem + ".arrow"
         exists = await arrow_dataset_exists(numeric_pid, validator_atom_id, key)
         if exists and not overwrite:
             uploads.append({"file_key": key, "already_saved": True})
             flights.append({"file_key": key})
+            redis_client.set(progress_key, "saved", ex=STATUS_TTL)
             continue
 
+        fileobj.seek(0, os.SEEK_END)
+        size = fileobj.tell()
         fileobj.seek(0)
+        if size > MAX_FILE_SIZE:
+            redis_client.set(progress_key, "rejected", ex=STATUS_TTL)
+            raise HTTPException(status_code=413, detail=f"{filename} exceeds 512MB limit")
+
+        redis_client.set(progress_key, "parsing", ex=STATUS_TTL)
+
         if filename.lower().endswith(".csv"):
-            reader = pd.read_csv(
-                fileobj,
-                chunksize=CHUNK_ROWS,
-                parse_dates=True,
-                infer_datetime_format=True,
-            )
+            csv_path = getattr(fileobj, "name", None)
+            if csv_path and os.path.exists(csv_path):
+                reader = pl.read_csv_batched(
+                    csv_path, batch_size=1_000_000, **CSV_READ_KWARGS
+                )
+                try:
+                    first_chunk = next(reader)
+                except StopIteration:
+                    uploads.append(
+                        {
+                            "file_key": key,
+                            "already_saved": False,
+                            "error": "empty file",
+                        }
+                    )
+                    flights.append({"file_key": key})
+                    continue
+                arrow_buf = io.BytesIO()
+                # Use PyArrow conversion to avoid "string_view" byte-range errors
+                first_arrow = first_chunk.to_arrow(use_pyarrow=True)
+                with pa.ipc.new_file(arrow_buf, first_arrow.schema) as writer:
+                    writer.write(first_arrow)
+                    for chunk in reader:
+                        writer.write(chunk.to_arrow(use_pyarrow=True))
+                arrow_bytes = arrow_buf.getvalue()
+                df_pl = None
+            else:
+                data_bytes = fileobj.read()
+                df_pl = pl.read_csv(io.BytesIO(data_bytes), **CSV_READ_KWARGS)
+                arrow_buf = io.BytesIO()
+                df_pl.write_ipc(arrow_buf)
+                arrow_bytes = arrow_buf.getvalue()
         elif filename.lower().endswith((".xls", ".xlsx")):
-            reader = stream_excel(fileobj, CHUNK_ROWS)
+            data_bytes = fileobj.read()
+            reader = fastexcel.read_excel(data_bytes)
+            sheet = reader.load_sheet_by_idx(0)
+            df_pl = sheet.to_polars()
+            if df_pl.height == 0:
+                uploads.append({"file_key": key, "already_saved": False, "error": "empty file"})
+                flights.append({"file_key": key})
+                continue
+            arrow_buf = io.BytesIO()
+            df_pl.write_ipc(arrow_buf)
+            arrow_bytes = arrow_buf.getvalue()
         else:
             raise HTTPException(status_code=400, detail="Unsupported file type")
 
-        arrow_buf = io.BytesIO()
-        df_chunks: List[pd.DataFrame] = []
-        try:
-            first_chunk = next(reader)
-        except StopIteration:
-            uploads.append({"file_key": key, "already_saved": False, "error": "empty file"})
-            flights.append({"file_key": key})
-            continue
-
-        first_chunk.columns = first_chunk.columns.map(str)
-        string_cols = first_chunk.select_dtypes(include=["object"]).columns
-        for col in string_cols:
-            first_chunk[col] = first_chunk[col].astype(str)
-        df_chunks.append(first_chunk)
-        schema = pa.Table.from_pandas(first_chunk).schema
-        with ipc.new_file(arrow_buf, schema) as writer:
-            writer.write_table(pa.Table.from_pandas(first_chunk, schema=schema))
-            for chunk in reader:
-                chunk.columns = chunk.columns.map(str)
-                for col in string_cols:
-                    if col in chunk.columns:
-                        chunk[col] = chunk[col].astype(str)
-                df_chunks.append(chunk)
-                writer.write_table(pa.Table.from_pandas(chunk, schema=schema))
-
-        df = pd.concat(df_chunks, ignore_index=True)
-
-        result = upload_to_minio(arrow_buf.getvalue(), arrow_name, prefix)
+        result = upload_to_minio(arrow_bytes, arrow_name, prefix)
         saved_name = Path(result.get("object_name", "")).name or arrow_name
         flight_path = f"{validator_atom_id}/{saved_name}"
-        upload_dataframe(df, flight_path)
+
+        # If df_pl is None (chunked csv), upload via polars scan
+        if filename.lower().endswith(".csv"):
+            if df_pl is None:
+                reader_for_flight = pl.read_ipc(io.BytesIO(arrow_bytes))
+                upload_dataframe(reader_for_flight.to_pandas(), flight_path)
+            else:
+                upload_dataframe(df_pl.to_pandas(), flight_path)
+        else:
+            upload_dataframe(df_pl.to_pandas(), flight_path)
 
         set_ticket(
             key,
@@ -2801,6 +2815,8 @@ async def save_dataframes(
             flight_path,
             filename,
         )
+
+        redis_client.set(progress_key, "saved", ex=STATUS_TTL)
 
         uploads.append({
             "file_key": key,
@@ -2828,6 +2844,15 @@ async def save_dataframes(
         "prefix": prefix,
         "environment": env,
     }
+
+
+@router.get("/upload-status/{validator_atom_id}/{file_key}")
+async def get_upload_status(validator_atom_id: str, file_key: str) -> dict:
+    progress_key = f"upload_status:{validator_atom_id}:{file_key}"
+    status = redis_client.get(progress_key)
+    if isinstance(status, bytes):
+        status = status.decode()
+    return {"status": status}
 
 
 @router.get("/list_saved_dataframes")

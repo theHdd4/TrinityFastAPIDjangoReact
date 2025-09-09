@@ -24,7 +24,6 @@ import D3LineChart from "./D3LineChart";
 import { useAuth } from "@/contexts/AuthContext";
 import { logSessionState, addNavigationItem } from "@/lib/session";
 import { useLaboratoryStore } from "@/components/LaboratoryMode/store/laboratoryStore";
-import featureOverview from "../index";
 
 interface ColumnInfo {
   column: string;
@@ -712,7 +711,7 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
               colClasses={["w-[30%]", "w-[20%]", "w-[15%]", "w-[35%]"]}
               bodyClassName="max-h-[484px] overflow-y-auto"
               defaultMinimized={true}
-              borderColor={`border-${featureOverview.color.replace('bg-', '')}`}
+              borderColor="border-green-500"
               customHeader={{
                 title: "Cardinality View",
                 subtitle: "Click Here to View Data",
@@ -886,7 +885,7 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
                   "View Stat"
                 ]}
                 bodyClassName="max-h-[440px] overflow-y-auto"
-                borderColor={`border-${featureOverview.color.replace('bg-', '')}`}
+                borderColor="border-green-500"
                 customHeader={{
                   title: "SKU Table"
                 }}

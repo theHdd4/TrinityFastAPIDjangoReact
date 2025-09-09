@@ -36,7 +36,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # ------------------------------------------------------------------
 # Security
 # ------------------------------------------------------------------
-HOST_IP = os.getenv("HOST_IP", "192.168.1.98")
+HOST_IP = os.getenv("HOST_IP", "10.156.227.220")  # Fixed: Use correct default IP
 FRONTEND_PORT = os.getenv("FRONTEND_PORT", "8080")
 FRONTEND_URL = os.getenv("FRONTEND_URL", f"http://{HOST_IP}:{FRONTEND_PORT}")
 SECRET_KEY = os.getenv("SECRET_KEY", "change-me-in-production")
@@ -81,6 +81,16 @@ CORS_ALLOW_HEADERS = list(default_headers) + [
 CORS_ALLOW_METHODS = list(default_methods)
 
 CORS_PREFLIGHT_MAX_AGE = 86400            # 24h cache for pre-flight
+
+# Debug CORS configuration
+print(f"🔧 CORS Configuration:")
+print(f"   HOST_IP: {HOST_IP}")
+print(f"   FRONTEND_PORT: {FRONTEND_PORT}")
+print(f"   _frontend_origin: {_frontend_origin}")
+print(f"   CORS_ALLOWED_ORIGINS: {CORS_ALLOWED_ORIGINS}")
+print(f"   CORS_ALLOW_CREDENTIALS: {CORS_ALLOW_CREDENTIALS}")
+print(f"   CORS_ALLOW_HEADERS: {CORS_ALLOW_HEADERS}")
+print(f"   CORS_ALLOW_METHODS: {CORS_ALLOW_METHODS}")
 
 # ------------------------------------------------------------------
 # django-tenants configuration
@@ -195,7 +205,7 @@ ASGI_APPLICATION = "config.asgi.application"
 DATABASES = {
     "default": {
         "ENGINE": "django_tenants.postgresql_backend",
-        "NAME": os.getenv("POSTGRES_DB", "trinity_prod"),
+        "NAME": os.getenv("POSTGRES_DB", "trinity_db"),
         "USER": os.getenv("POSTGRES_USER", "trinity_user"),
         "PASSWORD": os.getenv("POSTGRES_PASSWORD", "trinity_pass"),
         "HOST": os.getenv("POSTGRES_HOST", "postgres"),

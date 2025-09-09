@@ -116,7 +116,20 @@ const handleAppSelect = async (appId: string) => {
       const data = await res.json();
       if (data.environment) {
         console.log('Environment after app select', data.environment);
-        localStorage.setItem('env', JSON.stringify(data.environment));
+        // Persist the full environment (including identifiers). Explicitly
+        // set the current app's slug/id so the session namespace reflects
+        // the user's selection even if the backend omits these fields.
+        const env = {
+          ...data.environment,
+          APP_NAME: appId,
+          APP_ID: backendId.toString(),
+        };
+        localStorage.setItem('env', JSON.stringify(env));
+      } else {
+        localStorage.setItem(
+          'env',
+          JSON.stringify({ APP_NAME: appId, APP_ID: backendId.toString() })
+        );
       }
     }
   } catch (err) {

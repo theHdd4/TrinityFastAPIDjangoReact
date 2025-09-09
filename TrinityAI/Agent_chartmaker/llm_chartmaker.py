@@ -16,6 +16,11 @@ from minio import Minio
 
 from .ai_logic import build_chart_prompt, call_chart_llm, extract_json
 
+# Import the file analyzer
+import sys
+sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+from file_analyzer import FileAnalyzer
+
 logger = logging.getLogger("smart.chart.agent")
 
 class ChartMakerAgent:
@@ -47,7 +52,17 @@ class ChartMakerAgent:
         self.prefix = prefix
         self.minio_client = Minio(minio_endpoint, access_key=access_key, secret_key=secret_key, secure=False)
         
-        # Load files on initialization (ACTIVE like Merge agent)
+        # Initialize file analyzer for enhanced file context
+        self.file_analyzer = FileAnalyzer(
+            minio_endpoint=minio_endpoint,
+            access_key=access_key,
+            secret_key=secret_key,
+            bucket=bucket,
+            prefix=prefix,
+            secure=False
+        )
+        
+        # Load files on initialization
         self._load_files()
 
     def _maybe_update_prefix(self) -> None:
@@ -79,6 +94,8 @@ class ChartMakerAgent:
                 if self.prefix != current:
                     logger.info("MinIO prefix updated from '%s' to '%s'", self.prefix, current)
                     self.prefix = current
+                    # Update file analyzer prefix
+                    self.file_analyzer.prefix = current
                     # Since prefix changed, we must reload the files.
                     self._load_files()
                     return
@@ -104,6 +121,8 @@ class ChartMakerAgent:
                 if self.prefix != current:
                     logger.info("MinIO prefix updated from '%s' to '%s'", self.prefix, current)
                     self.prefix = current
+                    # Update file analyzer prefix
+                    self.file_analyzer.prefix = current
                     # Since prefix changed, we must reload the files.
                     self._load_files()
                     return
@@ -151,128 +170,85 @@ class ChartMakerAgent:
 
     def _load_files(self) -> None:
         """
-        🔧 ENHANCED: ACTIVE MinIO file loading like Merge agent
-        Loads files from MinIO, intelligently reading various Arrow formats.
-        This method is streamlined to try reading files as Parquet, Feather, or Arrow IPC
-        and correctly extracts column names.
+        Load files using FileAnalyzer for comprehensive analysis.
+        This provides rich file context for better chart recommendations.
         """
-        logger.info(f"🔧 ENHANCED: Loading files from MinIO bucket '{self.bucket}' with prefix '{self.prefix}'...")
-        
-        # 🔍 CRITICAL DEBUG: Show current path configuration
-        print(f"\n🔍 ===== CHART MAKER PATH DEBUG =====")
-        print(f"📁 Current MinIO Prefix: '{self.prefix}'")
-        print(f"🪣 MinIO Bucket: '{self.bucket}'")
-        print(f"🌐 MinIO Endpoint: '{self.minio_endpoint}'")
-        
-        # Check if we're using default values
-        if self.prefix == "default_client/default_app/default_project/" or self.prefix == "":
-            print(f"❌ CRITICAL WARNING: Using default path - this will likely fail!")
-            print(f"❌ Expected: Your actual client/app/project path")
-            print(f"❌ Current: {self.prefix}")
-        else:
-            print(f"✅ Using custom path: {self.prefix}")
-        
-        print(f"🔍 ===== END PATH DEBUG =====")
-        
-        self.files_with_columns = {}
+        logger.info(f"Loading files from MinIO bucket '{self.bucket}' with prefix '{self.prefix}'...")
         
         try:
-            # 🔍 DEBUG: List all objects in the bucket with the current prefix
-            print(f"\n🔍 Listing objects in bucket '{self.bucket}' with prefix '{self.prefix}'...")
-            objects = list(self.minio_client.list_objects(self.bucket, prefix=self.prefix, recursive=True))
-            print(f"📊 Found {len(objects)} total objects in path")
+            # Use file analyzer to get comprehensive analysis
+            analysis_results = self.file_analyzer.analyze_files()
             
-            # Show first few objects for debugging
-            for i, obj in enumerate(objects[:5]):
-                print(f"  {i+1}. {obj.object_name}")
-            if len(objects) > 5:
-                print(f"  ... and {len(objects) - 5} more objects")
+            if 'error' in analysis_results:
+                logger.error(f"File analysis failed: {analysis_results['error']}")
+                self.files_with_columns = {}
+                self.files_metadata = {}
+                return
             
-            files_loaded = 0
-            for obj in objects:
-                # We are primarily interested in files with the .arrow extension
-                if not obj.object_name.endswith('.arrow'):
-                    continue
-
-                filename = os.path.basename(obj.object_name)
-                full_object_path = obj.object_name
-                logger.info(f"Processing file: {filename}")
-                logger.info(f"Full MinIO object path: {full_object_path}")
-                logger.info(f"Bucket: {self.bucket}, Prefix: {self.prefix}")
-
-                try:
-                    # Use the full object path, not just the filename
-                    response = self.minio_client.get_object(self.bucket, full_object_path)
-                    file_data = response.read()
-                    logger.info(f"Successfully read file from MinIO path: {full_object_path}")
-                finally:
-                    response.close()
-                    response.release_conn()
-
-                table = None
-                # --- Simplified Reading Logic ---
-                # Define a list of reading functions to try in order of likelihood.
-                # Each function takes a bytes buffer and returns a PyArrow Table.
-                readers = [
-                    ("Parquet", lambda buffer: pq.read_table(buffer)),
-                    ("Feather", lambda buffer: pf.read_table(buffer)),
-                    ("Arrow IPC", lambda buffer: pa.ipc.open_stream(buffer).read_all())
-                ]
-
-                for format_name, reader_func in readers:
-                    try:
-                        # Use a BytesIO buffer to read the in-memory file data
-                        buffer = BytesIO(file_data)
-                        table = reader_func(buffer)
-                        logger.info(f"Successfully read '{filename}' as {format_name} format.")
-                        break  # Stop on the first successful read
-                    except Exception as e:
-                        logger.debug(f"Could not read '{filename}' as {format_name}: {e}")
-
-                # --- Column Extraction ---
-                if table is not None:
-                    # 🔧 CRITICAL FIX: Store the FULL object path, not just filename
-                    # This ensures the frontend can properly load files from the backend
-                    columns = table.column_names
-                    self.files_with_columns[full_object_path] = columns  # Use full path, not filename
-                    files_loaded += 1
-                    
-                    # Store metadata for better context (like Merge agent)
-                    self.files_metadata[full_object_path] = {  # Use full path as key
-                        'row_count': table.num_rows,
-                        'file_size': len(file_data),
-                        'column_types': [table.schema.field(col).type for col in columns],
-                        'numeric_columns': [col for col in columns if str(table.schema.field(col).type).startswith(('int', 'float', 'decimal'))],
-                        'categorical_columns': [col for col in columns if str(table.schema.field(col).type).startswith(('string', 'utf8', 'binary'))]
-                    }
-                    
-                    # Clean logging - only essential info
-                    logger.info(f"Loaded file: {full_object_path} - {len(columns)} columns, {table.num_rows} rows")
-                    
-                    # Console output for visibility
-                    print(f"📁 {os.path.basename(full_object_path)}: {len(columns)} columns, {table.num_rows} rows")
-                    
-                else:
-                    # If all reading methods failed, log an error and store empty columns.
-                    self.files_with_columns[full_object_path] = []  # Use full path as key
-                    logger.error(f"All reading methods failed for '{full_object_path}'. Unable to determine format.")
-                    # Log the first 16 bytes (magic number) for manual inspection
-                    logger.error(f"File '{full_object_path}' starts with bytes: {file_data[:16]}")
-            
-            logger.info(f"Finished loading. Found and processed {files_loaded} files.")
-            
-            # Clean summary output
-            if files_loaded == 0:
-                print(f"❌ No files loaded from {self.prefix}")
-                logger.error(f"No files loaded from MinIO path: {self.prefix}")
-            else:
-                print(f"✅ Loaded {files_loaded} files successfully")
-                logger.info(f"Successfully loaded {files_loaded} files from MinIO")
-
-        except Exception as e:
-            logger.error(f"A critical error occurred while loading files from MinIO: {e}", exc_info=True)
-            print(f"\n❌ CRITICAL ERROR loading files: {e}")
+            # Convert file analyzer results to the format expected by the chart maker
             self.files_with_columns = {}
+            self.files_metadata = {}
+            
+            for filename, analysis in analysis_results.get('files', {}).items():
+                # Extract column names for compatibility
+                columns = list(analysis.get('columns', {}).keys())
+                self.files_with_columns[filename] = columns
+                
+                # Store comprehensive metadata with JSON-serializable values
+                def convert_to_json_serializable(obj):
+                    """Convert numpy types to Python types for JSON serialization."""
+                    if hasattr(obj, 'item'):  # numpy scalar
+                        return obj.item()
+                    elif isinstance(obj, dict):
+                        return {k: convert_to_json_serializable(v) for k, v in obj.items()}
+                    elif isinstance(obj, list):
+                        return [convert_to_json_serializable(item) for item in obj]
+                    else:
+                        return obj
+                
+                self.files_metadata[filename] = {
+                    'total_rows': int(analysis.get('total_rows', 0)),
+                    'row_count': int(analysis.get('total_rows', 0)),  # Compatibility field
+                    'total_columns': int(analysis.get('total_columns', 0)),
+                    'file_size_bytes': int(analysis.get('file_size_bytes', 0)),
+                    'file_size': int(analysis.get('file_size_bytes', 0)),  # Compatibility field
+                    'file_path': str(analysis.get('file_path', '')),
+                    'columns': convert_to_json_serializable(analysis.get('columns', {})),
+                    'data_types': convert_to_json_serializable(analysis.get('data_types', {})),
+                    'missing_values': convert_to_json_serializable(analysis.get('missing_values', {})),
+                    'sample_data': convert_to_json_serializable(analysis.get('sample_data', {})),
+                    'statistical_summary': convert_to_json_serializable(analysis.get('statistical_summary', {})),
+                    # Additional compatibility fields
+                    'column_types': [],  # Will be populated from data_types
+                    'numeric_columns': [],
+                    'categorical_columns': []
+                }
+                
+                # Populate compatibility fields from analysis data
+                if 'data_types' in analysis:
+                    column_types = []
+                    numeric_columns = []
+                    categorical_columns = []
+                    
+                    for col_name, col_info in analysis.get('columns', {}).items():
+                        data_type = str(col_info.get('data_type', 'unknown'))  # Ensure string
+                        column_types.append(data_type)
+                        
+                        if data_type in ['int64', 'float64', 'int32', 'float32']:
+                            numeric_columns.append(str(col_name))  # Ensure string
+                        elif data_type in ['object', 'string', 'category']:
+                            categorical_columns.append(str(col_name))  # Ensure string
+                    
+                    self.files_metadata[filename]['column_types'] = column_types
+                    self.files_metadata[filename]['numeric_columns'] = numeric_columns
+                    self.files_metadata[filename]['categorical_columns'] = categorical_columns
+            
+            logger.info(f"Successfully analyzed {len(self.files_with_columns)} files using FileAnalyzer")
+            
+        except Exception as e:
+            logger.error(f"Error during file analysis: {e}")
+            self.files_with_columns = {}
+            self.files_metadata = {}
 
     def set_file_context(self, file_id: str, columns: List[str], file_name: str = ""):
         """Set the current file context for chart generation"""
@@ -822,17 +798,21 @@ class ChartMakerAgent:
             return {"success": False, "error": "Prompt cannot be empty.", "session_id": session_id}
 
         # 🔍 COMPREHENSIVE LOGGING: Show what we're receiving
-        logger.info("🔍 ===== CHART MAKER AI AGENT - INPUT ANALYSIS =====")
-        logger.info(f"📝 User Prompt: {user_prompt}")
-        logger.info(f"🆔 Session ID: {session_id}")
-        logger.info(f"📁 Available Files: {list(self.files_with_columns.keys())}")
-        logger.info(f"📊 Files with Columns: {json.dumps(self.files_with_columns, indent=2)}")
-        logger.info(f"🔍 ===== END INPUT ANALYSIS =====")
+        # logger.info("🔍 ===== CHART MAKER AI AGENT - INPUT ANALYSIS =====")
+        # logger.info(f"📝 User Prompt: {user_prompt}")
+        # logger.info(f"🆔 Session ID: {session_id}")
+        # logger.info(f"📁 Available Files: {list(self.files_with_columns.keys())}")
+        # logger.info(f"📊 Files with Columns: {json.dumps(self.files_with_columns, indent=2)}")
+        # logger.info(f"🔍 ===== END INPUT ANALYSIS =====")
 
         session_id = self.create_session(session_id)
         
         # Check if MinIO prefix needs an update (and files need reloading) - like Merge agent
         self._maybe_update_prefix()
+        
+        # Debug logging for file loading
+        logger.info(f"🔍 Files loaded: {len(self.files_with_columns)} files")
+        logger.info(f"🔍 File names: {list(self.files_with_columns.keys())}")
         
         if not self.files_with_columns:
             logger.warning("No files are loaded. Cannot process chart request.")
@@ -850,8 +830,11 @@ class ChartMakerAgent:
         context = self._enhance_context_with_columns(context, user_prompt)
         logger.info(f"📁 Enhanced Context Built: {len(context)} characters")
         
-        # 3. Build the final prompt for the LLM
-        prompt = build_chart_prompt(user_prompt, self.files_with_columns, context)
+        # 3. Get detailed file analysis data for the LLM
+        file_analysis_data = self.file_analyzer.get_all_analyses()
+        
+        # 4. Build the final prompt for the LLM with complete file analysis
+        prompt = build_chart_prompt(user_prompt, self.files_with_columns, context, file_analysis_data)
         
         # 🔍 COMPREHENSIVE LOGGING: Show what we're sending to LLM
         logger.info("🔍 ===== LLM INPUT - COMPLETE PROMPT =====")
@@ -870,21 +853,55 @@ class ChartMakerAgent:
             logger.info(f"📥 Complete LLM Response:\n{llm_response}")
             logger.info(f"🔍 ===== END LLM OUTPUT =====")
             
-            logger.info("✅ LLM response received and logged")
+            # Enhanced JSON extraction with better error handling
+            result = extract_json(llm_response, self.files_with_columns, user_prompt)
             
-            result = extract_json(llm_response, self.files_with_columns)
             if not result:
                 logger.error("❌ Failed to extract valid JSON from LLM response")
                 logger.error(f"🔍 Raw LLM response that failed JSON extraction:\n{llm_response}")
-                raise ValueError("LLM did not return valid JSON.")
+                
+                # Return a helpful error response instead of raising an exception
+                return {
+                    "success": False,
+                    "message": "Could not parse JSON from LLM response",
+                    "suggestions": [
+                        "The AI response was not in valid JSON format",
+                        "Try rephrasing your request more clearly",
+                        "Make sure to ask for a specific chart type (bar, line, pie, scatter)",
+                        "Include the data file name in your request"
+                    ],
+                    "smart_response": "I had trouble understanding your request. Please try asking for a chart in a simpler way, like 'Create a bar chart showing sales by region' or 'Make a line chart of revenue over time'.",
+                    "reasoning": "JSON parsing failed",
+                    "used_memory": False
+                }
             
             # 🔍 COMPREHENSIVE LOGGING: Show extracted JSON
             logger.info("🔍 ===== EXTRACTED JSON FROM LLM =====")
             logger.info(f"📊 Extracted JSON:\n{json.dumps(result, indent=2)}")
             logger.info(f"🔍 ===== END EXTRACTED JSON =====")
             
-            # 🔧 PURELY LLM-DRIVEN: No manual transformations or validations
+            # 🔍 DEBUG: Check if smart_response is present
+            if "smart_response" in result:
+                logger.info(f"✅ Smart response found: {result['smart_response']}")
+            else:
+                logger.warning("⚠️ Smart response NOT found in LLM response")
+            
+            # 🔧 USE LLM RESPONSE DIRECTLY - NO MANUAL PROCESSING
             if result.get("success") and "chart_json" in result:
+                logger.info("🔍 Chart configuration successful, using LLM response directly...")
+                
+                # Use LLM response exactly as generated - no modifications
+                logger.info("🔍 Using LLM response directly - no manual processing")
+                for i, chart in enumerate(result["chart_json"]):
+                    chart_title = chart.get("title", f"Chart {i+1}")
+                    chart_filters = chart.get("filters", {})
+                    logger.info(f"🔍 Chart {i+1} ({chart_title}): LLM chart filters = {chart_filters}")
+                    
+                    # Log trace filters - no modifications
+                    for j, trace in enumerate(chart.get("traces", [])):
+                        trace_filters = trace.get("filters", {})
+                        logger.info(f"🔍 Chart {i+1}, Trace {j+1}: LLM trace filters = {trace_filters}")
+                
                 logger.info("🔍 LLM generated chart configuration successfully")
                 logger.info(f"📊 Number of charts: {len(result['chart_json']) if isinstance(result['chart_json'], list) else 1}")
                 
@@ -893,7 +910,18 @@ class ChartMakerAgent:
                 
         except Exception as e:
             logger.error(f"❌ Error in LLM processing: {e}", exc_info=True)
-            result = {"success": False, "error": f"A system error occurred: {e}"}
+            result = {
+                "success": False,
+                "message": f"System error occurred: {str(e)}",
+                "suggestions": [
+                    "There was a technical issue processing your request",
+                    "Please try again with a simpler request",
+                    "Make sure to specify a chart type and data file"
+                ],
+                "smart_response": "I encountered a technical issue while processing your request. Please try again with a simpler chart request, like 'Create a bar chart of sales by region'.",
+                "reasoning": f"System error: {str(e)}",
+                "used_memory": False
+            }
 
         # Store interaction in session history (like Merge agent)
         interaction = {

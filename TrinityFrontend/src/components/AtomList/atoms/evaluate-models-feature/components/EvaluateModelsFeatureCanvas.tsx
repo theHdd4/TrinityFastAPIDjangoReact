@@ -1193,8 +1193,10 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
     setCardinalityError(null);
     
     try {
+      // Add .arrow extension if not present, like other atoms do
+      const objectName = data.selectedDataframe.endsWith('.arrow') ? data.selectedDataframe : `${data.selectedDataframe}.arrow`;
       const res = await fetch(
-        `${FEATURE_OVERVIEW_API}/column_summary?object_name=${encodeURIComponent(data.selectedDataframe)}`
+        `${FEATURE_OVERVIEW_API}/column_summary?object_name=${encodeURIComponent(objectName)}`
       );
       
       if (!res.ok) {

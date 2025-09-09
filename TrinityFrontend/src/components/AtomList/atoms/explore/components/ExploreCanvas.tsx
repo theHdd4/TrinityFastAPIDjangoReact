@@ -484,6 +484,7 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
 
   const openChartTypeTray = (e: React.MouseEvent, index: number) => {
     e.preventDefault();
+    e.stopPropagation();
     setChatBubble({ visible: true, chartIndex: index, anchor: { x: e.clientX, y: e.clientY } });
     setChatBubbleShouldRender(true);
   };
@@ -1855,13 +1856,13 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
         <Card className="border-pink-200 h-full w-full explore-chart-card">
           <CardContent className="p-4 flex flex-col h-full w-full min-w-0 explore-chart-content">
                         {/* Chart Configuration Header with Toggle */}
-            <div className="flex items-center mb-4 p-3 bg-gray-50 rounded-lg" onDoubleClick={(e) => openChartTypeTray(e, index)}>
+            <div className="flex items-center mb-4 p-3 bg-gray-50 rounded-lg" onContextMenu={(e) => openChartTypeTray(e, index)}>
               <div className="flex items-center space-x-2">
                 <div className="flex items-center justify-center w-6 h-6 bg-pink-100 rounded-md">
                   <BarChart3 className="w-3 h-3 text-pink-600" />
                 </div>
                 <span className="font-semibold text-sm text-gray-800">Chart Configuration</span>
-                <span className="ml-2 text-xs text-gray-500 whitespace-nowrap">&lt;Double click to change chart type&gt;</span>
+                <span className="ml-2 text-xs text-gray-500 whitespace-nowrap">Right-click to change chart type</span>
               </div>
               <div className="flex items-center space-x-2 ml-auto">
                 <Button
@@ -1900,7 +1901,7 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                     </Button>
                   </DialogTrigger>
                   <DialogContent className="max-w-4xl">
-                    <div className="h-[500px] w-full">
+                    <div className="h-[500px] w-full" onContextMenu={(e) => openChartTypeTray(e, index)}>
                       <RechartsChartRenderer {...rendererProps} />
                     </div>
                   </DialogContent>
@@ -1924,7 +1925,7 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
               {/* Axis Selectors */}
               <div
                 className="flex items-center mb-3 p-3 pr-2 bg-gray-50 rounded-lg min-w-0 w-full explore-axis-selectors"
-                onDoubleClick={(e) => openChartTypeTray(e, index)}
+                onContextMenu={(e) => openChartTypeTray(e, index)}
                 style={{ position: 'relative', zIndex: 40 }}
               >
                 <div className="flex items-center space-x-2">
@@ -2625,7 +2626,7 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                             );
                           }
                           return (
-                            <div className="relative w-full h-full">
+                            <div className="relative w-full h-full" onContextMenu={(e) => openChartTypeTray(e, index)}>
                               <RechartsChartRenderer {...rendererProps} />
                             </div>
                           );

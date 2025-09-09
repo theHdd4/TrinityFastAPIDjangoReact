@@ -60,25 +60,41 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
       const files: UploadedFileRef[] = (settings.uploadedFiles || []).map(name => ({
         name,
         path: settings.filePathMap?.[name] || '',
-        size: 0,
+        size: settings.fileSizeMap?.[name] || 0,
       }));
       setUploadedFiles(files);
     }
-  }, [settings.uploadedFiles, settings.filePathMap, uploadedFiles.length]);
+  }, [settings.uploadedFiles, settings.filePathMap, settings.fileSizeMap, uploadedFiles.length]);
 
   const handleFileUpload = async (files: File[]) => {
     const uploaded: UploadedFileRef[] = [];
     for (const file of files) {
       const form = new FormData();
       form.append('file', file);
+      const envStr = localStorage.getItem('env');
+      if (envStr) {
+        try {
+          const env = JSON.parse(envStr);
+          form.append('client_id', env.CLIENT_ID || '');
+          form.append('app_id', env.APP_ID || '');
+          form.append('project_id', env.PROJECT_ID || '');
+          form.append('client_name', env.CLIENT_NAME || '');
+          form.append('app_name', env.APP_NAME || '');
+          form.append('project_name', env.PROJECT_NAME || '');
+        } catch {
+          /* ignore */
+        }
+      }
       try {
         const res = await fetch(`${VALIDATE_API}/upload-file`, {
           method: 'POST',
           body: form,
+          credentials: 'include',
         });
         if (res.ok) {
           const data = await res.json();
           uploaded.push({ name: file.name, path: data.file_path, size: file.size });
+          toast({ title: `${file.name} uploaded successfully` });
         } else {
           toast({ title: `Failed to upload ${file.name}`, variant: 'destructive' });
         }
@@ -104,6 +120,10 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
       filePathMap: {
         ...(settings.filePathMap || {}),
         ...Object.fromEntries(uploaded.map(f => [f.name, f.path]))
+      },
+      fileSizeMap: {
+        ...(settings.fileSizeMap || {}),
+        ...Object.fromEntries(uploaded.map(f => [f.name, f.size]))
       }
     });
     setFileAssignments(prev => ({
@@ -177,11 +197,17 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
       newFilePathMap[newName] = newFilePathMap[oldName];
       delete newFilePathMap[oldName];
     }
+    const newFileSizeMap = { ...(settings.fileSizeMap || {}) } as Record<string, number>;
+    if (newFileSizeMap[oldName] !== undefined) {
+      newFileSizeMap[newName] = newFileSizeMap[oldName];
+      delete newFileSizeMap[oldName];
+    }
     updateSettings(atomId, {
       validations: newValidations,
       columnConfig: newColumnConfig,
       fileKeyMap: newFileKeyMap,
       filePathMap: newFilePathMap,
+      fileSizeMap: newFileSizeMap,
     });
     if (openFile === oldName) setOpenFile(newName);
     setRenameTarget(null);
@@ -192,11 +218,13 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
     const newUploads = (settings.uploadedFiles || []).filter(n => n !== name);
     const { [name]: _, ...restAssignments } = fileAssignments;
     const { [name]: __, ...restPaths } = settings.filePathMap || {};
+    const { [name]: ___, ...restSizes } = settings.fileSizeMap || {};
     setFileAssignments(restAssignments);
     updateSettings(atomId, {
       uploadedFiles: newUploads,
       fileMappings: restAssignments,
       filePathMap: restPaths,
+      fileSizeMap: restSizes,
     });
     setValidationResults(prev => {
       const { [name]: _, ...rest } = prev;
@@ -345,6 +373,42 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
     }
   };
 
+  const pollUploadStatus = (
+    validatorId: string,
+    fileKeys: string[],
+    fileNames: string[],
+  ) => {
+    const seen: Record<string, string> = {};
+    const interval = setInterval(async () => {
+      await Promise.all(
+        fileKeys.map(async (key, idx) => {
+          try {
+            const res = await fetch(
+              `${VALIDATE_API}/upload-status/${validatorId}/${key}`,
+              { credentials: 'include' }
+            );
+            if (res.ok) {
+              const data = await res.json();
+              const status = data.status as string | null;
+              const name = fileNames[idx];
+              if (status && seen[name] !== status) {
+                seen[name] = status;
+                toast({ title: `${name}: ${status}` });
+              }
+            }
+          } catch {
+            /* ignore */
+          }
+        })
+      );
+      const done = fileKeys.every((_, idx) => {
+        const name = fileNames[idx];
+        return seen[name] === 'saved' || seen[name] === 'rejected';
+      });
+      if (done) clearInterval(interval);
+    }, 1000);
+  };
+
   const handleSaveDataFrames = async () => {
     if (!settings.validatorId && !settings.bypassMasterUpload) return;
     console.log('🔧 Running save dataframes util');
@@ -357,9 +421,6 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
           query =
             '?' +
             new URLSearchParams({
-              client_id: env.CLIENT_ID || '',
-              app_id: env.APP_ID || '',
-              project_id: env.PROJECT_ID || '',
               client_name: env.CLIENT_NAME || '',
               app_name: env.APP_NAME || '',
               project_name: env.PROJECT_NAME || ''
@@ -397,9 +458,6 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
     if (envStr) {
       try {
         const env = JSON.parse(envStr);
-        form.append('client_id', env.CLIENT_ID || '');
-        form.append('app_id', env.APP_ID || '');
-        form.append('project_id', env.PROJECT_ID || '');
         form.append('client_name', env.CLIENT_NAME || '');
         form.append('app_name', env.APP_NAME || '');
         form.append('project_name', env.PROJECT_NAME || '');
@@ -415,11 +473,17 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
     });
     form.append('file_keys', JSON.stringify(keys));
     form.append('overwrite', 'false');
-    const res = await fetch(`${VALIDATE_API}/save_dataframes`, {
+    const savePromise = fetch(`${VALIDATE_API}/save_dataframes`, {
       method: 'POST',
       body: form,
       credentials: 'include'
     });
+    pollUploadStatus(
+      vidSave,
+      keys,
+      uploadedFiles.map(f => f.name)
+    );
+    const res = await savePromise;
     if (res.ok) {
       const data = await res.json();
       if (data.environment) {

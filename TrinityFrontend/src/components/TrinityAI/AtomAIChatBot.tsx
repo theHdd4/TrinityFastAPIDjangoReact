@@ -36,7 +36,7 @@ const PERFORM_ENDPOINTS: Record<string, string> = {
   concat: `${CONCAT_API}/perform`,
   'create-column': `${CREATECOLUMN_API}/perform`,
   'groupby-wtg-avg': `${GROUPBY_API}/run`,
-  'chart-maker': `${CHART_MAKER_API}/generate`,
+  'chart-maker': `${CHART_MAKER_API}/charts`,
 };
 
 import { cn } from '@/lib/utils';
@@ -1204,13 +1204,29 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
             const traces = chartConfig.traces || [];
             const title = chartConfig.title || `Chart ${index + 1}`;
             
+            // 🔧 FILTER INTEGRATION: Process AI-generated filters
+            let filters: Record<string, string[]> = {};
+            if (chartConfig.filter_columns && chartConfig.filter_values) {
+              const filterColumn = chartConfig.filter_columns;
+              const filterValues = chartConfig.filter_values.split(',').map((v: string) => v.trim());
+              filters[filterColumn] = filterValues;
+              console.log('🔧 AI-generated filters applied:', { filterColumn, filterValues });
+            }
+            
+            // 🔧 ADDITIONAL FILTER SUPPORT: Check for direct filters object
+            if (chartConfig.filters && typeof chartConfig.filters === 'object') {
+              filters = { ...filters, ...chartConfig.filters };
+              console.log('🔧 Additional filters from chartConfig.filters:', chartConfig.filters);
+            }
+            
             return {
               id: `ai_chart_${chartConfig.chart_id || index + 1}_${Date.now()}`,
               title: title,
               type: chartType as 'line' | 'bar' | 'area' | 'pie' | 'scatter',
+              chart_type: chartType, // 🔧 CRITICAL FIX: Add chart_type field for backend compatibility
               xAxis: traces[0]?.x_column || '',
               yAxis: traces[0]?.y_column || '',
-              filters: {},
+              filters: filters, // 🔧 FILTER INTEGRATION: Use AI-generated filters
               chartRendered: false,
               isAdvancedMode: traces.length > 1,
               traces: traces.map((trace: any, traceIndex: number) => ({
@@ -1221,7 +1237,8 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
                 name: trace.name || `Trace ${traceIndex + 1}`,
                 color: trace.color || undefined,
                 aggregation: trace.aggregation || 'sum',
-                filters: {}
+                chart_type: trace.chart_type || chartType, // 🔧 CRITICAL FIX: Add chart_type to traces
+                filters: filters // 🔧 FILTER INTEGRATION: Apply same filters to traces
               }))
             };
           });
@@ -1295,28 +1312,83 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
               // Generate each chart separately by calling FastAPI multiple times
               const generatedCharts = [];
               
-              for (let i = 0; i < charts.length; i++) {
-                const chart = charts[i];
-                const chartType = chart.type;
+              // 🔧 CRITICAL FIX: Add debouncing to prevent multiple simultaneous requests
+              const generateChartWithDelay = async (chart: any, index: number, delay: number) => {
+                return new Promise((resolve) => {
+                  setTimeout(async () => {
+                    try {
+                      const result = await generateSingleChart(chart, index);
+                      resolve(result);
+                    } catch (error) {
+                      resolve({ ...chart, error: error.message, chartRendered: false });
+                    }
+                  }, delay);
+                });
+              };
+              
+              const generateSingleChart = async (chart: any, index: number) => {
+                const chartType = chart.type || chart.chart_type || 'bar'; // 🔧 CRITICAL FIX: Use chart_type as fallback
                 const traces = chart.traces || [];
                 const title = chart.title;
                 
-                console.log(`📊 Generating chart ${i + 1}/${charts.length}: ${title} (${chartType})`);
+                console.log(`📊 Generating chart ${index + 1}/${charts.length}: ${title} (${chartType})`);
+                
+                // 🔧 ENHANCED FILTER PROCESSING: Ensure filters are properly formatted
+                const processedFilters = chart.filters || {};
+                const processedTraceFilters = traces.map(trace => {
+                  const traceFilters = trace.filters || {};
+                  // Ensure trace filters are in the correct format
+                  const formattedTraceFilters = {};
+                  for (const [key, value] of Object.entries(traceFilters)) {
+                    if (Array.isArray(value)) {
+                      // Validate that all values are strings
+                      formattedTraceFilters[key] = value.filter(v => typeof v === 'string' && v.trim() !== '');
+                    } else if (typeof value === 'string' && value.trim() !== '') {
+                      formattedTraceFilters[key] = [value.trim()];
+                    }
+                  }
+                  return formattedTraceFilters;
+                });
+                
+                // 🔧 CRITICAL FIX: Ensure chart-level filters are also applied to traces
+                // This is important because the backend processes trace-level filters differently
+                const enhancedTraceFilters = traces.map((trace, traceIndex) => {
+                  const traceFilters = processedTraceFilters[traceIndex] || {};
+                  // Merge chart-level filters with trace-level filters
+                  const mergedFilters = { ...processedFilters, ...traceFilters };
+                  return mergedFilters;
+                });
+                
+                // 🔧 FILTER VALIDATION: Log any issues with filter processing
+                if (Object.keys(processedFilters).length > 0) {
+                  console.log(`✅ Chart ${index + 1} chart-level filters processed:`, processedFilters);
+                }
+                if (enhancedTraceFilters.some(tf => Object.keys(tf).length > 0)) {
+                  console.log(`✅ Chart ${index + 1} enhanced trace-level filters processed:`, enhancedTraceFilters);
+                }
                 
                 const chartRequest = {
                   file_id: fileData.file_id,
                   chart_type: chartType,
-                  traces: traces.map(trace => ({
+                  traces: traces.map((trace, traceIndex) => ({
                     x_column: trace.x_column || chart.xAxis,
                     y_column: trace.y_column || chart.yAxis,
-                    name: trace.name || `Trace ${traces.indexOf(trace) + 1}`,
+                    name: trace.name || `Trace ${traceIndex + 1}`,
                     chart_type: trace.chart_type || chartType,
-                    aggregation: trace.aggregation || 'sum'
+                    aggregation: trace.aggregation || 'sum',
+                    filters: enhancedTraceFilters[traceIndex] || {} // 🔧 CRITICAL FIX: Use enhanced trace filters
                   })),
-                  title: title
+                  title: title,
+                  filters: processedFilters // 🔧 FILTER INTEGRATION: Pass chart-level filters to backend
                 };
                 
-                console.log(`📊 Chart ${i + 1} request payload:`, chartRequest);
+                console.log(`📊 Chart ${index + 1} request payload:`, chartRequest);
+                console.log(`🔍 Chart ${index + 1} filters debug:`, {
+                  chartFilters: processedFilters,
+                  enhancedTraceFilters: enhancedTraceFilters,
+                  originalChartFilters: chart.filters,
+                  originalTraceFilters: traces.map(t => t.filters)
+                });
                 
                 try {
                   const chartResponse = await fetch(`${CHART_MAKER_API}/charts`, {
@@ -1327,7 +1399,7 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
                   
                   if (chartResponse.ok) {
                     const chartResult = await chartResponse.json();
-                    console.log(`✅ Chart ${i + 1} generated successfully:`, chartResult);
+                    console.log(`✅ Chart ${index + 1} generated successfully:`, chartResult);
                     
                     // Update chart configuration with backend-generated chart
                     const updatedChart = {
@@ -1339,10 +1411,10 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
                       lastUpdateTime: Date.now()
                     };
                     
-                    generatedCharts.push(updatedChart);
+                    return updatedChart;
                     
                   } else {
-                    console.error(`❌ Chart ${i + 1} generation failed:`, chartResponse.status);
+                    console.error(`❌ Chart ${index + 1} generation failed:`, chartResponse.status);
                     
                     // Try to get detailed error message
                     let errorDetail = chartResponse.statusText;
@@ -1353,44 +1425,58 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
                       // If we can't parse error response, use status text
                     }
                     
+                    // Check if it's a filter-related error
+                    const isFilterError = errorDetail.toLowerCase().includes('filter') || 
+                                       errorDetail.toLowerCase().includes('column') ||
+                                       errorDetail.toLowerCase().includes('not found');
+                    
                     // Add error message for this specific chart
                     const errorMsg: Message = {
-                      id: (Date.now() + i).toString(),
-                      content: `⚠️ Chart ${i + 1} generation failed: ${chartResponse.status}\n\nError: ${errorDetail}\n\nChart: ${title} (${chartType})\n\n💡 This chart may need manual generation.`,
+                      id: (Date.now() + index).toString(),
+                      content: `⚠️ Chart ${index + 1} generation failed: ${chartResponse.status}\n\nError: ${errorDetail}\n\nChart: ${title} (${chartType})\n${isFilterError ? '\n🔍 This might be a filter-related issue. Check if the filter columns exist in your data.' : ''}\n\n💡 This chart may need manual generation.`,
                       sender: 'ai',
                       timestamp: new Date(),
                     };
                     setMessages(prev => [...prev, errorMsg]);
                     
-                    // Add failed chart with error state
-                    generatedCharts.push({
+                    // Return failed chart with error state
+                    return {
                       ...chart,
                       chartRendered: false,
                       chartLoading: false,
                       error: errorDetail
-                    });
+                    };
                   }
                 } catch (error) {
-                  console.error(`❌ Error generating chart ${i + 1}:`, error);
+                  console.error(`❌ Error generating chart ${index + 1}:`, error);
                   
                   // Add error message for this specific chart
                   const errorMsg: Message = {
-                    id: (Date.now() + i).toString(),
-                    content: `❌ Error generating chart ${i + 1}: ${error.message || 'Unknown error occurred'}\n\nChart: ${title} (${chartType})\n\n💡 This chart may need manual generation.`,
+                    id: (Date.now() + index).toString(),
+                    content: `❌ Error generating chart ${index + 1}: ${error.message || 'Unknown error occurred'}\n\nChart: ${title} (${chartType})\n\n💡 This chart may need manual generation.`,
                     sender: 'ai',
                     timestamp: new Date(),
                   };
                   setMessages(prev => [...prev, errorMsg]);
                   
-                  // Add failed chart with error state
-                  generatedCharts.push({
+                  // Return failed chart with error state
+                  return {
                     ...chart,
                     chartRendered: false,
                     chartLoading: false,
                     error: error.message || 'Unknown error'
-                  });
+                  };
                 }
-              }
+              };
+              
+              // 🔧 CRITICAL FIX: Generate charts with proper debouncing to prevent multiple simultaneous requests
+              const chartPromises = charts.map((chart, index) => 
+                generateChartWithDelay(chart, index, index * 1000) // 1 second delay between each chart
+              );
+              
+              // Wait for all charts to be generated
+              const chartResults = await Promise.all(chartPromises);
+              generatedCharts.push(...chartResults);
               
               // 🔧 STEP 4: Update atom settings with all generated charts
               updateAtomSettings(atomId, {
@@ -1471,11 +1557,14 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
             setMessages(prev => [...prev, errorMsg]);
           }
           
-          // 🔧 CLEANED UP: Show only LLM suggestions for better user experience
+          // 🔧 SMART RESPONSE: Use smart_response if available, otherwise fallback to message
           let aiContent = '';
           
-          if (numberOfCharts > 1) {
-            // Multiple charts - show LLM suggestions
+          if (data.smart_response) {
+            // Use the smart response from AI - this is the clean, user-friendly message
+            aiContent = data.smart_response;
+          } else if (numberOfCharts > 1) {
+            // Fallback for multiple charts - show LLM suggestions
             aiContent = `💡 ${data.message || 'Multiple chart configuration completed successfully'}\n\n`;
             
             // Add LLM suggestions if available
@@ -1489,7 +1578,7 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
             }
             
           } else {
-            // Single chart - show LLM suggestions
+            // Fallback for single chart - show LLM suggestions
             aiContent = `💡 ${data.message || 'Chart configuration completed successfully'}\n\n`;
             
             // Add LLM suggestions if available
@@ -1503,7 +1592,7 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
             }
           }
           
-          // Single clean message with LLM suggestions
+          // Single clean message with smart response or fallback
           const aiMsg: Message = {
             id: (Date.now() + 1).toString(),
             content: aiContent,
@@ -1516,9 +1605,20 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
       } else {
         // Handle AI suggestions when complete info is not available
         if (data && data.suggestions && Array.isArray(data.suggestions)) {
+          // Use smart_response if available, otherwise use the verbose suggestions format
+          let suggestionsContent = '';
+          
+          if (data.smart_response) {
+            // Use the smart response from AI - this is the clean, user-friendly message
+            suggestionsContent = data.smart_response;
+          } else {
+            // Fallback to verbose suggestions format
+            suggestionsContent = `💡 ${data.message || 'AI needs more information'}\n\n${data.suggestions.join('\n')}\n\n${data.next_steps ? data.next_steps.join('\n') : ''}`;
+          }
+          
           const suggestionsMsg: Message = { 
             id: (Date.now() + 1).toString(), 
-            content: `💡 ${data.message || 'AI needs more information'}\n\n${data.suggestions.join('\n')}\n\n${data.next_steps ? data.next_steps.join('\n') : ''}`,
+            content: suggestionsContent,
             sender: 'ai', 
             timestamp: new Date() 
           };

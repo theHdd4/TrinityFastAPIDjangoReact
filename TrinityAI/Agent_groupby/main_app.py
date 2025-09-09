@@ -20,7 +20,7 @@ def get_llm_config():
     api_url = os.getenv("LLM_API_URL", f"http://{ollama_ip}:{llm_port}/api/chat")
     return {
         "api_url": api_url,
-        "model_name": os.getenv("LLM_MODEL_NAME", "deepseek-r1:32b"),
+        "model_name": os.getenv("LLM_MODEL_NAME", "qwen3:30b"),
         "bearer_token": os.getenv("LLM_BEARER_TOKEN", "aakash_api_key"),
     }
 

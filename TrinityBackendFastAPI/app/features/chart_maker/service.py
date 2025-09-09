@@ -84,7 +84,31 @@ class ChartMakerService:
         except Exception as e:
             print(f"❌ Error in load_saved_dataframe: {e}")
             print(f"🔍 ===== END SERVICE LOG =====")
-            raise HTTPException(status_code=404, detail=f"Error loading saved dataframe {object_name}: {str(e)}")
+            
+            # Try fallback to direct MinIO loading if Arrow Flight fails
+            if "No table for" in str(e) or "flight download failed" in str(e).lower():
+                print(f"🔄 Arrow Flight failed, trying direct MinIO fallback...")
+                try:
+                    from app.DataStorageRetrieval.arrow_client import get_minio_df
+                    df = get_minio_df("trinity", object_name)
+                    print(f"✅ MinIO fallback successful: {len(df)} rows, {len(df.columns)} columns")
+                    
+                    # Store it and return file_id
+                    file_id = self.store_file(df, filename=object_name, data_source="minio_fallback")
+                    print(f"✅ Dataframe stored with file ID: {file_id}")
+                    return file_id
+                except Exception as minio_error:
+                    print(f"❌ MinIO fallback also failed: {minio_error}")
+            
+            # Provide more specific error messages for common issues
+            if "No table for" in str(e):
+                error_msg = f"File {object_name} exists but no table is registered in Arrow Flight. The file may need to be re-uploaded or the table may not be properly cached. Detail: {str(e)}"
+            elif "not found" in str(e).lower():
+                error_msg = f"File {object_name} not found. Please check if the file exists and try again. Detail: {str(e)}"
+            else:
+                error_msg = f"Error loading saved dataframe {object_name}: {str(e)}. Detail: Unavailable"
+            
+            raise HTTPException(status_code=404, detail=error_msg)
     
     def get_all_columns(self, df: pd.DataFrame) -> List[str]:
         """Get all column names"""
