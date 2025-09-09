@@ -434,171 +434,298 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
   };
 
   // Draw correlation heatmap
+  // Draw enhanced full-width correlation heatmap with Trinity styling
   useEffect(() => {
     if (!heatmapRef.current || !data.correlationMatrix) return;
 
     const svg = d3.select(heatmapRef.current);
     svg.selectAll("*").remove();
 
-    // Adjust dimensions based on compact mode
-    const margin = isCompactMode 
-      ? { top: 20, right: 10, bottom: 35, left: 45 } 
-      : { top: 40, right: 20, bottom: 60, left: 80 };
-    
-    const baseWidth = isCompactMode ? 350 : 600;
-    const baseHeight = isCompactMode ? 180 : 300;
-    
-    const width = baseWidth - margin.left - margin.right;
-    const height = baseHeight - margin.top - margin.bottom;
+    // Determine container width for responsive layout
+    const containerWidth = heatmapRef.current.parentElement?.clientWidth || 800;
+    const margin = { top: 80, right: 60, bottom: 120, left: 140 };
+    const width = containerWidth - margin.left - margin.right;
+    const height = 500 - margin.top - margin.bottom;
 
-    const g = svg.append("g")
-      .attr("transform", `translate(${margin.left},${margin.top})`);
+    const g = svg.append("g").attr("transform", `translate(${margin.left},${margin.top})`);
 
-    // Get variables from file data or default
-    const allVariables = data.isUsingFileData && data.fileData?.numericColumns 
-      ? data.fileData.numericColumns 
+    // Resolve variables using existing helper to honour showAllColumns logic
+    const allVariables = data.isUsingFileData && data.fileData?.numericColumns
+      ? data.fileData.numericColumns
       : (data.variables || []);
-
-    // Filter variables based on showAllColumns setting
     const variables = getFilteredVariables(allVariables, data.correlationMatrix);
 
-    // Create scales
-    const xScale = d3.scaleBand()
-      .domain(variables)
-      .range([0, width])
-      .padding(0.05);
+    // Calculate optimal cell size
+    const cellSize = Math.min(width / variables.length, height / variables.length);
+    const actualWidth = cellSize * variables.length;
+    const actualHeight = cellSize * variables.length;
 
-    const yScale = d3.scaleBand()
-      .domain(variables)
-      .range([0, height])
-      .padding(0.05);
+    // Scales
+    const xScale = d3.scaleBand().domain(variables).range([0, actualWidth]).padding(0.02);
+    const yScale = d3.scaleBand().domain(variables).range([0, actualHeight]).padding(0.02);
 
-    // Get visualization options from data or use defaults
-    const vizOptions = data.visualizationOptions || {
-      heatmapColorScheme: 'RdBu',
-      var1Color: '#ef4444',
-      var2Color: '#3b82f6',
-      normalizeValues: false,
-      selectedVizType: 'heatmap'
-    };
-
-    // Color scheme mapping
-    const colorSchemeMap: Record<string, any> = {
-      'RdBu': d3.interpolateRdBu,
-      'RdYlBu': d3.interpolateRdYlBu,
-      'Spectral': d3.interpolateSpectral,
-      'Viridis': d3.interpolateViridis,
-      'Plasma': d3.interpolatePlasma
-    };
-
-    const selectedInterpolator = colorSchemeMap[vizOptions.heatmapColorScheme] || d3.interpolateRdBu;
-    const colorScale = d3.scaleSequential(selectedInterpolator)
+    // Trinity branded colour scale
+    const colorScale = d3.scaleSequential()
+      .interpolator(d3.interpolateRgb("#41C185", "#458EE2"))
       .domain([1, -1]);
 
-    // Add cells
+    // Background grid
+    g.selectAll(".grid-line-h")
+      .data(d3.range(variables.length + 1))
+      .enter().append("line")
+      .attr("class", "grid-line-h")
+      .attr("x1", 0)
+      .attr("x2", actualWidth)
+      .attr("y1", d => d * cellSize)
+      .attr("y2", d => d * cellSize)
+      .attr("stroke", "hsl(var(--border))")
+      .attr("stroke-width", 0.5)
+      .attr("opacity", 0.2);
+
+    g.selectAll(".grid-line-v")
+      .data(d3.range(variables.length + 1))
+      .enter().append("line")
+      .attr("class", "grid-line-v")
+      .attr("y1", 0)
+      .attr("y2", actualHeight)
+      .attr("x1", d => d * cellSize)
+      .attr("x2", d => d * cellSize)
+      .attr("stroke", "hsl(var(--border))")
+      .attr("stroke-width", 0.5)
+      .attr("opacity", 0.2);
+
+    // Prepare cell data, mapping through original indices
+    const cellData: Array<{x: number; y: number; xVar: string; yVar: string; correlation: number}> = [];
     variables.forEach((yVar, i) => {
       variables.forEach((xVar, j) => {
-        // Get the original indices for correlation matrix lookup
         const originalYIndex = allVariables.indexOf(yVar);
         const originalXIndex = allVariables.indexOf(xVar);
-        
-        // Validate correlation matrix access with proper 2D array handling
-        let correlation = 0.0;
-        if (data.correlationMatrix && 
-            Array.isArray(data.correlationMatrix) && 
-            originalYIndex >= 0 && originalYIndex < data.correlationMatrix.length &&
-            Array.isArray(data.correlationMatrix[originalYIndex]) &&
-            originalXIndex >= 0 && originalXIndex < data.correlationMatrix[originalYIndex].length) {
+        let correlation = 0;
+        if (
+          data.correlationMatrix &&
+          Array.isArray(data.correlationMatrix) &&
+          originalYIndex >= 0 &&
+          originalXIndex >= 0 &&
+          data.correlationMatrix[originalYIndex] &&
+          data.correlationMatrix[originalYIndex][originalXIndex] !== undefined
+        ) {
           const value = data.correlationMatrix[originalYIndex][originalXIndex];
-          if (typeof value === 'number' && !isNaN(value) && isFinite(value)) {
-            correlation = value;
-          } else {
-            correlation = originalYIndex === originalXIndex ? 1.0 : 0.0;
-          }
-        } else {
-          correlation = originalYIndex === originalXIndex ? 1.0 : 0.0;
+          correlation = typeof value === "number" && isFinite(value) ? value : 0;
         }
-        
-        g.append("rect")
-          .attr("x", xScale(xVar))
-          .attr("y", yScale(yVar))
-          .attr("width", xScale.bandwidth())
-          .attr("height", yScale.bandwidth())
-          .attr("fill", colorScale(correlation))
-          .attr("stroke", "white")
-          .attr("stroke-width", 1)
-          .style("cursor", "pointer")
-          .on("mouseover", function(event) {
-            d3.select(this).attr("stroke-width", 2).attr("stroke", "#333");
-            
-            // Tooltip
-            const tooltip = d3.select("body").append("div")
-              .attr("class", "tooltip")
-              .style("position", "absolute")
-              .style("background", "rgba(0,0,0,0.8)")
-              .style("color", "white")
-              .style("padding", "8px")
-              .style("border-radius", "4px")
-              .style("font-size", isCompactMode ? "10px" : "12px")
-              .style("pointer-events", "none")
-              .style("z-index", "1000");
-            
-            tooltip.html(`${xVar} vs ${yVar}<br/>Correlation: ${correlation.toFixed(3)}`)
-              .style("left", (event.pageX + 10) + "px")
-              .style("top", (event.pageY - 10) + "px");
-          })
-          .on("mouseout", function() {
-            d3.select(this).attr("stroke-width", 1).attr("stroke", "white");
-            d3.selectAll(".tooltip").remove();
-          })
-          .on("click", () => {
-            // Update both selected variables and fetch new time series data
-            handleVariableSelectionChange(xVar, yVar);
-          });
-
-        // Add correlation text for visible cells
-        if (Math.abs(correlation) > 0.1) {
-          g.append("text")
-            .attr("x", xScale(xVar)! + xScale.bandwidth() / 2)
-            .attr("y", yScale(yVar)! + yScale.bandwidth() / 2)
-            .attr("text-anchor", "middle")
-            .attr("dy", "0.35em")
-            .style("font-size", "10px")
-            .style("font-weight", "500")
-            .style("fill", Math.abs(correlation) > 0.6 ? "white" : "#333")
-            .style("pointer-events", "none")
-            .text(correlation.toFixed(2));
-        }
+        cellData.push({ x: j, y: i, xVar, yVar, correlation });
       });
     });
 
-    // Add axis labels
+    const cells = g.selectAll(".correlation-cell")
+      .data(cellData)
+      .enter().append("rect")
+      .attr("class", "correlation-cell")
+      .attr("x", d => d.x * cellSize + 3)
+      .attr("y", d => d.y * cellSize + 3)
+      .attr("width", 0)
+      .attr("height", 0)
+      .attr("fill", d => colorScale(d.correlation))
+      .attr("stroke", "#ffffff")
+      .attr("stroke-width", 2)
+      .attr("rx", 6)
+      .attr("ry", 6)
+      .style("cursor", "pointer")
+      .style("filter", "drop-shadow(0 2px 6px rgba(0,0,0,0.15))")
+      .on("mouseover", function (event, d) {
+        d3.select(this)
+          .transition().duration(200)
+          .attr("stroke-width", 4)
+          .attr("stroke", "hsl(var(--trinity-yellow))")
+          .style("filter", "drop-shadow(0 6px 20px rgba(0,0,0,0.3))")
+          .attr("rx", 8)
+          .attr("ry", 8);
+
+        const tooltip = d3.select("body").append("div")
+          .attr("class", "correlation-tooltip")
+          .style("position", "absolute")
+          .style("background", "linear-gradient(135deg, hsl(var(--trinity-blue)), hsl(var(--trinity-green)))")
+          .style("color", "white")
+          .style("padding", "16px 20px")
+          .style("border-radius", "12px")
+          .style("font-size", "14px")
+          .style("font-weight", "600")
+          .style("pointer-events", "none")
+          .style("z-index", "1000")
+          .style("box-shadow", "0 10px 25px rgba(0,0,0,0.3)")
+          .style("backdrop-filter", "blur(10px)")
+          .style("border", "1px solid rgba(255,255,255,0.2)");
+
+        const strengthText = Math.abs(d.correlation) > 0.7 ? "Strong" :
+                             Math.abs(d.correlation) > 0.3 ? "Moderate" : "Weak";
+        const directionText = d.correlation > 0 ? "Positive" : "Negative";
+
+        tooltip.html(`
+          <div style="font-size: 16px; margin-bottom: 8px;">📊 ${d.xVar} ↔ ${d.yVar}</div>
+          <div style="font-size: 18px; margin-bottom: 6px;">Correlation: <span style="color: #fbbf24;">${d.correlation.toFixed(3)}</span></div>
+          <div style="font-size: 12px; opacity: 0.9;">${strengthText} ${directionText} relationship</div>
+        `)
+          .style("left", (event.pageX + 15) + "px")
+          .style("top", (event.pageY - 10) + "px")
+          .style("opacity", 0)
+          .transition().duration(200).style("opacity", 1);
+      })
+      .on("mouseout", function () {
+        d3.select(this)
+          .transition().duration(200)
+          .attr("stroke-width", 2)
+          .attr("stroke", "#ffffff")
+          .style("filter", "drop-shadow(0 2px 6px rgba(0,0,0,0.15))")
+          .attr("rx", 6)
+          .attr("ry", 6);
+
+        d3.selectAll(".correlation-tooltip")
+          .transition().duration(200)
+          .style("opacity", 0)
+          .remove();
+      })
+      .on("click", (event, d) => {
+        const ripple = g.append("circle")
+          .attr("cx", d.x * cellSize + cellSize / 2)
+          .attr("cy", d.y * cellSize + cellSize / 2)
+          .attr("r", 0)
+          .attr("fill", "hsl(var(--trinity-yellow))")
+          .attr("opacity", 0.6)
+          .style("pointer-events", "none");
+
+        ripple.transition()
+          .duration(600)
+          .attr("r", cellSize)
+          .attr("opacity", 0)
+          .remove();
+
+        handleVariableSelectionChange(d.xVar, d.yVar);
+      });
+
+    // Animate cells
+    cells.transition()
+      .duration(800)
+      .delay((_, i) => i * 30)
+      .ease(d3.easeBounceOut)
+      .attr("width", cellSize - 6)
+      .attr("height", cellSize - 6);
+
+    // Correlation values
+    const textElements = g.selectAll(".correlation-text")
+      .data(cellData.filter(d => Math.abs(d.correlation) > 0.05))
+      .enter().append("text")
+      .attr("class", "correlation-text")
+      .attr("x", d => d.x * cellSize + cellSize / 2)
+      .attr("y", d => d.y * cellSize + cellSize / 2)
+      .attr("text-anchor", "middle")
+      .attr("dominant-baseline", "middle")
+      .attr("font-size", `${Math.max(10, Math.min(cellSize / 4, 14))}px`)
+      .attr("font-weight", "700")
+      .attr("fill", d => {
+        const color = d3.color(colorScale(d.correlation));
+        if (color) {
+          const rgb = color.rgb();
+          const luminance = (rgb.r * 299 + rgb.g * 587 + rgb.b * 114) / 1000;
+          return luminance > 128 ? "#000000" : "#ffffff";
+        }
+        return Math.abs(d.correlation) > 0.6 ? "#ffffff" : "hsl(var(--foreground))";
+      })
+      .style("pointer-events", "none")
+      .style("text-shadow", "0 1px 2px rgba(0,0,0,0.5)")
+      .style("opacity", 0)
+      .text(d => d.correlation.toFixed(2));
+
+    textElements.transition().duration(600).delay(1000).style("opacity", 1);
+
+    // Axis labels
     g.selectAll(".x-label")
       .data(variables)
       .enter().append("text")
       .attr("class", "x-label")
-      .attr("x", d => xScale(d)! + xScale.bandwidth() / 2)
-      .attr("y", height + 20)
+      .attr("x", (_, i) => i * cellSize + cellSize / 2)
+      .attr("y", actualHeight + 30)
       .attr("text-anchor", "middle")
-      .style("font-size", isCompactMode ? "10px" : "12px")
-      .style("font-weight", "500")
-      .style("fill", "#666")
-      .text(d => d);
+      .attr("dominant-baseline", "hanging")
+      .attr("font-size", "14px")
+      .attr("font-weight", "600")
+      .attr("fill", "hsl(var(--foreground))")
+      .attr("transform", (_, i) => `rotate(-45, ${i * cellSize + cellSize / 2}, ${actualHeight + 30})`)
+      .style("opacity", 0)
+      .text(d => d)
+      .transition().duration(600).delay(1200).style("opacity", 1);
 
     g.selectAll(".y-label")
       .data(variables)
       .enter().append("text")
       .attr("class", "y-label")
-      .attr("x", -10)
-      .attr("y", d => yScale(d)! + yScale.bandwidth() / 2)
+      .attr("x", -15)
+      .attr("y", (_, i) => i * cellSize + cellSize / 2)
       .attr("text-anchor", "end")
-      .attr("dy", "0.35em")
-      .style("font-size", isCompactMode ? "10px" : "12px")
-      .style("font-weight", "500")
-      .style("fill", "#666")
-      .text(d => d);
+      .attr("dominant-baseline", "middle")
+      .attr("font-size", "14px")
+      .attr("font-weight", "600")
+      .attr("fill", "hsl(var(--foreground))")
+      .style("opacity", 0)
+      .text(d => d)
+      .transition().duration(600).delay(1400).style("opacity", 1);
 
-  }, [data.correlationMatrix, data.variables, data.isUsingFileData, data.fileData, data.showAllColumns, data.visualizationOptions, isCompactMode]);
+    // Color legend
+    const legendWidth = 300;
+    const legendHeight = 20;
+    const legend = svg.append("g")
+      .attr("class", "color-legend")
+      .attr("transform", `translate(${margin.left + (actualWidth - legendWidth) / 2}, ${margin.top + actualHeight + 80})`);
+
+    const gradient = svg.append("defs")
+      .append("linearGradient")
+      .attr("id", "correlation-gradient")
+      .attr("x1", "0%")
+      .attr("x2", "100%");
+
+    gradient.selectAll("stop")
+      .data([
+        { offset: "0%", color: colorScale(1) },
+        { offset: "50%", color: colorScale(0) },
+        { offset: "100%", color: colorScale(-1) }
+      ])
+      .enter().append("stop")
+      .attr("offset", d => d.offset)
+      .attr("stop-color", d => d.color);
+
+    legend.append("rect")
+      .attr("width", legendWidth)
+      .attr("height", legendHeight)
+      .attr("fill", "url(#correlation-gradient)")
+      .attr("stroke", "hsl(var(--border))")
+      .attr("stroke-width", 1)
+      .attr("rx", 4);
+
+    legend.append("text")
+      .attr("x", 0)
+      .attr("y", legendHeight + 20)
+      .attr("text-anchor", "start")
+      .attr("font-size", "12px")
+      .attr("font-weight", "600")
+      .attr("fill", "hsl(var(--foreground))")
+      .text("Strong Positive (+1)");
+
+    legend.append("text")
+      .attr("x", legendWidth / 2)
+      .attr("y", legendHeight + 20)
+      .attr("text-anchor", "middle")
+      .attr("font-size", "12px")
+      .attr("font-weight", "600")
+      .attr("fill", "hsl(var(--foreground))")
+      .text("No Correlation (0)");
+
+    legend.append("text")
+      .attr("x", legendWidth)
+      .attr("y", legendHeight + 20)
+      .attr("text-anchor", "end")
+      .attr("font-size", "12px")
+      .attr("font-weight", "600")
+      .attr("fill", "hsl(var(--foreground))")
+      .text("Strong Negative (-1)");
+  }, [data.correlationMatrix, data.variables, data.isUsingFileData, data.fileData, data.showAllColumns, isCompactMode]);
 
   // Draw time series chart
   useEffect(() => {
@@ -685,8 +812,8 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
     // Get visualization options from data or use defaults
     const vizOptions = data.visualizationOptions || {
       heatmapColorScheme: 'RdBu',
-      var1Color: '#ef4444',
-      var2Color: '#3b82f6',
+      var1Color: '#41C185',
+      var2Color: '#458EE2',
       normalizeValues: false,
       selectedVizType: 'heatmap'
     };
@@ -831,7 +958,7 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
         .attr("y", height / 2)
         .attr("text-anchor", "middle")
         .style("font-size", "14px")
-        .style("fill", "#ef4444")
+        .style("fill", "hsl(var(--destructive))")
         .text("Error rendering time series chart");
     }
 
