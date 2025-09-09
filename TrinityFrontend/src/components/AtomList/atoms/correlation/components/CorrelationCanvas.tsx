@@ -18,6 +18,7 @@ import { CorrelationSettings } from '@/components/LaboratoryMode/store/laborator
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { correlationAPI } from '../helpers/correlationAPI';
 import type { FilterAndCorrelateRequest } from '../helpers/correlationAPI';
+import MatrixSettingsTray, { MatrixSettings, COLOR_THEMES } from './MatrixSettingsTray';
 
 interface CorrelationCanvasProps {
   data: CorrelationSettings;
@@ -193,6 +194,13 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
   const heatmapRef = useRef<SVGSVGElement>(null);
   const timeSeriesRef = useRef<SVGSVGElement>(null);
   const [canvasWidth, setCanvasWidth] = useState(0);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [matrixSettings, setMatrixSettings] = useState<MatrixSettings>({
+    theme: 'default',
+    showAxisLabels: true,
+    showDataLabels: true,
+    showLegend: true,
+  });
   const auxPanelActive = useLaboratoryStore(state => state.auxPanelActive);
 
   // Determine if we're in compact mode (when auxiliary panels are open)
@@ -214,6 +222,27 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
 
     return () => observer.disconnect();
   }, []);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const saved = await correlationAPI.getMatrixSettings();
+        setMatrixSettings(saved);
+      } catch (e) {
+        /* ignore */
+      }
+    })();
+  }, []);
+
+  const handleSaveSettings = async (newSettings: MatrixSettings) => {
+    setMatrixSettings(newSettings);
+    try {
+      await correlationAPI.saveMatrixSettings(newSettings);
+    } catch (e) {
+      /* ignore */
+    }
+    setSettingsOpen(false);
+  };
 
   // Filter management functions
   const handleFilterValuesChange = (columnName: string, newValues: string[]) => {
@@ -498,9 +527,10 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
       .range([0, actualHeight])
       .padding(0.02);
 
-    // Trinity branded colour scale
+    // Theme-based colour scale
+    const theme = COLOR_THEMES[matrixSettings.theme] || COLOR_THEMES.default;
     const colorScale = d3.scaleSequential()
-      .interpolator(d3.interpolateRgb("#41C185", "#458EE2"))
+      .interpolator(d3.interpolateRgb(theme.primary, theme.secondary))
       .domain([1, -1]);
 
     // Background grid
@@ -650,119 +680,125 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
       .attr("height", cellHeight - 6);
 
     // Correlation values
-    const textElements = g.selectAll(".correlation-text")
-      .data(cellData.filter(d => Math.abs(d.correlation) > 0.05))
-      .enter().append("text")
-      .attr("class", "correlation-text")
-      .attr("x", d => d.x * cellWidth + cellWidth / 2)
-      .attr("y", d => d.y * cellHeight + cellHeight / 2)
-      .attr("text-anchor", "middle")
-      .attr("dominant-baseline", "middle")
-      .attr("font-size", `${Math.max(10, Math.min(Math.min(cellWidth, cellHeight) / 4, 14))}px`)
-      .attr("font-weight", "700")
-      .attr("fill", "#ffffff")
-      .attr("stroke", "#000000")
-      .attr("stroke-width", 0.5)
-      .style("paint-order", "stroke")
-      .style("pointer-events", "none")
-      .style("opacity", 0)
-      .text(d => d.correlation.toFixed(2));
+    if (matrixSettings.showDataLabels) {
+      const textElements = g.selectAll(".correlation-text")
+        .data(cellData.filter(d => Math.abs(d.correlation) > 0.05))
+        .enter().append("text")
+        .attr("class", "correlation-text")
+        .attr("x", d => d.x * cellWidth + cellWidth / 2)
+        .attr("y", d => d.y * cellHeight + cellHeight / 2)
+        .attr("text-anchor", "middle")
+        .attr("dominant-baseline", "middle")
+        .attr("font-size", `${Math.max(10, Math.min(Math.min(cellWidth, cellHeight) / 4, 14))}px`)
+        .attr("font-weight", "700")
+        .attr("fill", "#ffffff")
+        .attr("stroke", "#000000")
+        .attr("stroke-width", 0.5)
+        .style("paint-order", "stroke")
+        .style("pointer-events", "none")
+        .style("opacity", 0)
+        .text(d => d.correlation.toFixed(2));
 
-    textElements.transition().duration(600).delay(1000).style("opacity", 1);
+      textElements.transition().duration(600).delay(1000).style("opacity", 1);
+    }
 
     // Axis labels
-    g.selectAll(".x-label")
-      .data(variables)
-      .enter().append("text")
-      .attr("class", "x-label")
-      .attr("x", (_, i) => i * cellWidth + cellWidth / 2)
-      .attr("y", actualHeight + 30)
-      .attr("text-anchor", "middle")
-      .attr("dominant-baseline", "hanging")
-      .attr("font-size", "14px")
-      .attr("font-weight", "600")
-      .attr("fill", "hsl(var(--foreground))")
-      .attr("transform", (_, i) => `rotate(-45, ${i * cellWidth + cellWidth / 2}, ${actualHeight + 30})`)
-      .style("opacity", 0)
-      .text(d => d)
-      .transition().duration(600).delay(1200).style("opacity", 1);
+    if (matrixSettings.showAxisLabels) {
+      g.selectAll(".x-label")
+        .data(variables)
+        .enter().append("text")
+        .attr("class", "x-label")
+        .attr("x", (_, i) => i * cellWidth + cellWidth / 2)
+        .attr("y", actualHeight + 30)
+        .attr("text-anchor", "middle")
+        .attr("dominant-baseline", "hanging")
+        .attr("font-size", "14px")
+        .attr("font-weight", "600")
+        .attr("fill", "hsl(var(--foreground))")
+        .attr("transform", (_, i) => `rotate(-45, ${i * cellWidth + cellWidth / 2}, ${actualHeight + 30})`)
+        .style("opacity", 0)
+        .text(d => d)
+        .transition().duration(600).delay(1200).style("opacity", 1);
 
-    g.selectAll(".y-label")
-      .data(variables)
-      .enter().append("text")
-      .attr("class", "y-label")
-      .attr("x", -15)
-      .attr("y", (_, i) => i * cellHeight + cellHeight / 2)
-      .attr("text-anchor", "end")
-      .attr("dominant-baseline", "middle")
-      .attr("font-size", "14px")
-      .attr("font-weight", "600")
-      .attr("fill", "hsl(var(--foreground))")
-      .style("opacity", 0)
-      .text(d => d)
-      .transition().duration(600).delay(1400).style("opacity", 1);
+      g.selectAll(".y-label")
+        .data(variables)
+        .enter().append("text")
+        .attr("class", "y-label")
+        .attr("x", -15)
+        .attr("y", (_, i) => i * cellHeight + cellHeight / 2)
+        .attr("text-anchor", "end")
+        .attr("dominant-baseline", "middle")
+        .attr("font-size", "14px")
+        .attr("font-weight", "600")
+        .attr("fill", "hsl(var(--foreground))")
+        .style("opacity", 0)
+        .text(d => d)
+        .transition().duration(600).delay(1400).style("opacity", 1);
+    }
 
     // Color legend
-    const legendWidth = Math.min(450, actualWidth);
-    const legendHeight = 20;
-    const legend = svg.append("g")
-      .attr("class", "color-legend")
-      .attr(
-        "transform",
-        `translate(${margin.left + (actualWidth - legendWidth) / 2}, ${margin.top + actualHeight + 80})`
-      );
+    if (matrixSettings.showLegend) {
+      const legendWidth = Math.min(450, actualWidth);
+      const legendHeight = 20;
+      const legend = svg.append("g")
+        .attr("class", "color-legend")
+        .attr(
+          "transform",
+          `translate(${margin.left + (actualWidth - legendWidth) / 2}, ${margin.top + actualHeight + 80})`
+        );
 
-    const gradient = svg.append("defs")
-      .append("linearGradient")
-      .attr("id", "correlation-gradient")
-      .attr("x1", "0%")
-      .attr("x2", "100%");
+      const gradient = svg.append("defs")
+        .append("linearGradient")
+        .attr("id", "correlation-gradient")
+        .attr("x1", "0%")
+        .attr("x2", "100%");
 
-    gradient.selectAll("stop")
-      .data([
-        { offset: "0%", color: colorScale(1) },
-        { offset: "50%", color: colorScale(0) },
-        { offset: "100%", color: colorScale(-1) }
-      ])
-      .enter().append("stop")
-      .attr("offset", d => d.offset)
-      .attr("stop-color", d => d.color);
+      gradient.selectAll("stop")
+        .data([
+          { offset: "0%", color: colorScale(1) },
+          { offset: "50%", color: colorScale(0) },
+          { offset: "100%", color: colorScale(-1) }
+        ])
+        .enter().append("stop")
+        .attr("offset", d => d.offset)
+        .attr("stop-color", d => d.color);
 
-    legend.append("rect")
-      .attr("width", legendWidth)
-      .attr("height", legendHeight)
-      .attr("fill", "url(#correlation-gradient)")
-      .attr("stroke", "hsl(var(--border))")
-      .attr("stroke-width", 1)
-      .attr("rx", 4);
+      legend.append("rect")
+        .attr("width", legendWidth)
+        .attr("height", legendHeight)
+        .attr("fill", "url(#correlation-gradient)")
+        .attr("stroke", "hsl(var(--border))")
+        .attr("stroke-width", 1)
+        .attr("rx", 4);
 
-    legend.append("text")
-      .attr("x", 0)
-      .attr("y", legendHeight + 20)
-      .attr("text-anchor", "start")
-      .attr("font-size", "12px")
-      .attr("font-weight", "600")
-      .attr("fill", "hsl(var(--foreground))")
-      .text("Strong Positive (+1)");
+      legend.append("text")
+        .attr("x", 0)
+        .attr("y", legendHeight + 20)
+        .attr("text-anchor", "start")
+        .attr("font-size", "12px")
+        .attr("font-weight", "600")
+        .attr("fill", "hsl(var(--foreground))")
+        .text("Strong Positive (+1)");
 
-    legend.append("text")
-      .attr("x", legendWidth / 2)
-      .attr("y", legendHeight + 20)
-      .attr("text-anchor", "middle")
-      .attr("font-size", "12px")
-      .attr("font-weight", "600")
-      .attr("fill", "hsl(var(--foreground))")
-      .text("No Correlation (0)");
+      legend.append("text")
+        .attr("x", legendWidth / 2)
+        .attr("y", legendHeight + 20)
+        .attr("text-anchor", "middle")
+        .attr("font-size", "12px")
+        .attr("font-weight", "600")
+        .attr("fill", "hsl(var(--foreground))")
+        .text("No Correlation (0)");
 
-    legend.append("text")
-      .attr("x", legendWidth)
-      .attr("y", legendHeight + 20)
-      .attr("text-anchor", "end")
-      .attr("font-size", "12px")
-      .attr("font-weight", "600")
-      .attr("fill", "hsl(var(--foreground))")
-      .text("Strong Negative (-1)");
-  }, [data.correlationMatrix, data.variables, data.isUsingFileData, data.fileData, data.showAllColumns, isCompactMode, canvasWidth]);
+      legend.append("text")
+        .attr("x", legendWidth)
+        .attr("y", legendHeight + 20)
+        .attr("text-anchor", "end")
+        .attr("font-size", "12px")
+        .attr("font-weight", "600")
+        .attr("fill", "hsl(var(--foreground))")
+        .text("Strong Negative (-1)");
+    }
+  }, [data.correlationMatrix, data.variables, data.isUsingFileData, data.fileData, data.showAllColumns, isCompactMode, canvasWidth, matrixSettings]);
 
   // Draw time series chart
   useEffect(() => {
@@ -1131,6 +1167,7 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
           <div className={isCompactMode ? 'p-4 flex justify-center' : 'p-6 flex justify-center'}>
             <svg
               ref={heatmapRef}
+              onContextMenu={(e) => { e.preventDefault(); setSettingsOpen(true); }}
               height={isCompactMode ? '260' : '650'}
               className="block"
             ></svg>
@@ -1224,6 +1261,12 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
           </>
         )}
       </div>
+      <MatrixSettingsTray
+        open={settingsOpen}
+        onOpenChange={setSettingsOpen}
+        settings={matrixSettings}
+        onSave={handleSaveSettings}
+      />
     </div>
   );
 };

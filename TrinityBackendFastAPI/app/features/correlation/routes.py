@@ -6,6 +6,7 @@ import time
 import numpy as np
 import pandas as pd
 from urllib.parse import unquote
+
 # MongoDB imports - optional (graceful degradation if not available)
 try:
     from .database import column_coll, correlation_coll
@@ -13,6 +14,8 @@ try:
 except ImportError:
     MONGODB_AVAILABLE = False
     print("⚠️ MongoDB collections not available - using fallback mode")
+
+from .matrix_settings import router as matrix_settings_router
 from .schema import (
     FilterPayload, 
     BucketCheckResponse,
@@ -52,6 +55,7 @@ from app.DataStorageRetrieval.db import get_dataset_info
 from app.features.data_upload_validate.app.routes import get_object_prefix
 
 router = APIRouter()
+router.include_router(matrix_settings_router, prefix="/matrix-settings")
 
 @router.get("/")
 async def root():
@@ -59,10 +63,10 @@ async def root():
     return {
         "message": "Correlation backend is running", 
         "endpoints": [
-            "/ping", 
-            "/check-file", 
-            "/columns", 
-            "/filter", 
+            "/ping",
+            "/check-file",
+            "/columns",
+            "/filter",
             "/filter-and-correlate",
             "/buckets",
             "/column-values",
@@ -72,7 +76,8 @@ async def root():
             "/load-dataframe",
             "/time-series-axis",
             "/highest-correlation-pair",
-            "/time-series-data"
+            "/time-series-data",
+            "/matrix-settings"
         ]
     }
 

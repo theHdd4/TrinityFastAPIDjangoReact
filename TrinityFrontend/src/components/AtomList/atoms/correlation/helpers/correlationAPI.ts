@@ -1,4 +1,5 @@
 import { CORRELATION_API } from '@/lib/api';
+import type { MatrixSettings } from '../components/MatrixSettingsTray';
 
 export interface IdentifierFilter {
   column: string;
@@ -307,6 +308,26 @@ export class CorrelationAPI {
     });
     if (!response.ok) {
       throw new Error(`Failed to fetch time series data: ${response.statusText}`);
+    }
+    return response.json();
+  }
+
+  async getMatrixSettings(): Promise<MatrixSettings> {
+    const response = await fetch(`${this.baseUrl}/matrix-settings`);
+    if (!response.ok) {
+      throw new Error(`Failed to fetch matrix settings: ${response.statusText}`);
+    }
+    return response.json();
+  }
+
+  async saveMatrixSettings(settings: MatrixSettings): Promise<MatrixSettings> {
+    const response = await fetch(`${this.baseUrl}/matrix-settings`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(settings)
+    });
+    if (!response.ok) {
+      throw new Error(`Failed to save matrix settings: ${response.statusText}`);
     }
     return response.json();
   }
