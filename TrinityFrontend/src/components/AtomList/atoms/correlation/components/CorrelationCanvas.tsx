@@ -683,14 +683,14 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
     // Correlation values
     if (matrixSettings.showDataLabels) {
       const textElements = g.selectAll(".correlation-text")
-        .data(cellData.filter(d => Math.abs(d.correlation) > 0.05))
+        .data(cellData)
         .enter().append("text")
         .attr("class", "correlation-text")
         .attr("x", d => d.x * cellWidth + cellWidth / 2)
         .attr("y", d => d.y * cellHeight + cellHeight / 2)
         .attr("text-anchor", "middle")
         .attr("dominant-baseline", "middle")
-        .attr("font-size", `${Math.max(9, Math.min(Math.min(cellWidth, cellHeight) / 4, 12))}px`)
+        .attr("font-size", `${Math.max(8, Math.min(Math.min(cellWidth, cellHeight) / 4.5, 11))}px`)
         .attr("font-weight", "700")
         .attr("fill", "#ffffff")
         .attr("stroke", "#000000")
@@ -717,7 +717,7 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
         .attr("font-weight", "600")
         .attr("fill", "hsl(var(--foreground))")
         .attr("transform", (_, i) => `rotate(-45, ${i * cellWidth + cellWidth / 2}, ${actualHeight + 30})`)
-        .style("font-style", "italic")
+        .style("font-style", "normal")
         .style("opacity", 0)
         .text(d => d)
         .transition().duration(600).delay(1200).style("opacity", 1);
@@ -726,14 +726,15 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
         .data(variables)
         .enter().append("text")
         .attr("class", "y-label")
-        .attr("x", -20)
+        .attr("x", -5)
         .attr("y", (_, i) => i * cellHeight + cellHeight / 2)
-        .attr("text-anchor", "end")
+        .attr("text-anchor", "start")
         .attr("dominant-baseline", "middle")
         .attr("font-size", "14px")
         .attr("font-weight", "600")
         .attr("fill", "hsl(var(--foreground))")
-        .style("font-style", "italic")
+        .attr("transform", (_, i) => `rotate(-45, -5, ${i * cellHeight + cellHeight / 2})`)
+        .style("font-style", "normal")
         .style("opacity", 0)
         .text(d => d)
         .transition().duration(600).delay(1400).style("opacity", 1);
@@ -994,7 +995,7 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
 
       xAxisG
         .selectAll("text")
-        .style("font-style", "italic")
+        .style("font-style", "normal")
         .attr("text-anchor", "end")
         .attr("transform", "rotate(-15)")
         .attr("dx", "-0.8em")
