@@ -981,13 +981,21 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
         .attr("d", line2);
 
       // Add axes with appropriate formatting
-      const xAxis = hasDatetime 
+      const xAxis = hasDatetime
         ? d3.axisBottom(xScale).tickFormat(d3.timeFormat("%b %d"))
         : d3.axisBottom(xScale).tickFormat(d3.format("d"));
 
-      g.append("g")
+      const xAxisG = g.append("g")
         .attr("transform", `translate(0,${height})`)
         .call(xAxis);
+
+      xAxisG
+        .selectAll("text")
+        .style("font-style", "italic")
+        .attr("text-anchor", "end")
+        .attr("transform", "rotate(-15)")
+        .attr("dx", "-0.8em")
+        .attr("dy", "0.15em");
 
       g.append("g")
         .call(d3.axisLeft(yScale1));

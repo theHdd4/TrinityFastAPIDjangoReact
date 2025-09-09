@@ -290,12 +290,22 @@ async def save_filtered_data_to_minio(df: pd.DataFrame, original_path: str, filt
     
     # Create new path for filtered file
     base_name = object_path.rsplit('.', 1)[0]
-    filtered_path = f"filtered/{base_name}-{filter_name}.csv"
-    
-    # Save to MinIO
-    csv_bytes = df.to_csv(index=False).encode()
-    minio_client.put_object(bucket_name, filtered_path, io.BytesIO(csv_bytes), len(csv_bytes))
-    
+    filtered_path = f"filtered/{base_name}-{filter_name}.arrow"
+
+    # Convert dataframe to Arrow and save to MinIO
+    table = pa.Table.from_pandas(df)
+    sink = io.BytesIO()
+    with ipc.new_file(sink, table.schema) as writer:
+        writer.write_table(table)
+    arrow_bytes = sink.getvalue()
+    minio_client.put_object(
+        bucket_name,
+        filtered_path,
+        io.BytesIO(arrow_bytes),
+        len(arrow_bytes),
+        content_type="application/vnd.apache.arrow.file",
+    )
+
     return f"{bucket_name}/{filtered_path}"
 
 

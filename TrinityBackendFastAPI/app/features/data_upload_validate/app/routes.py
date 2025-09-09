@@ -2890,12 +2890,11 @@ async def list_saved_dataframes(
         files = [
             {
                 "object_name": obj.object_name,
-                "arrow_name": Path(obj.object_name).name
-                if obj.object_name.endswith(".arrow")
-                else None,
+                "arrow_name": Path(obj.object_name).name,
                 "csv_name": Path(obj.object_name).name,
             }
             for obj in sorted(objects, key=lambda o: o.object_name)
+            if obj.object_name.endswith(".arrow")
         ]
         return {
             "bucket": MINIO_BUCKET,
