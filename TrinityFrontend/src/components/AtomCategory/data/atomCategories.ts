@@ -60,6 +60,7 @@ import readPresentationSummarize from '@/components/AtomList/atoms/read-presenta
 import basePriceEstimator from '@/components/AtomList/atoms/base-price-estimator';
 import promoEstimator from '@/components/AtomList/atoms/promo-estimator';
 import dataframeOperations from '@/components/AtomList/atoms/dataframe-operations';
+import clustering from '@/components/AtomList/atoms/clustering';
 
 export interface Atom {
   id: string;
@@ -128,7 +129,8 @@ export const atomCategories: AtomCategory[] = [
       autoRegressiveModels,
       selectModelsAutoRegressive,
       evaluateModelsAutoRegressive,
-      buildModelFeatureBased
+      buildModelFeatureBased, 
+      clustering
     ]
   },
   {
