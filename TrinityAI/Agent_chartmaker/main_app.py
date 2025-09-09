@@ -81,10 +81,37 @@ def chart_make(request: ChartRequest):
     """
     start = time.time()
     
+    # 🔍 CONSOLE LOGGING: Chart request initiation
+    print(f"🔍 AI CHART REQUEST INITIATED:")
+    print(f"   User prompt: {request.prompt}")
+    print(f"   Session ID: {request.session_id}")
+    print(f"   Timestamp: {time.strftime('%Y-%m-%d %H:%M:%S')}")
+    
     logger.info(f"Chart request: {request.prompt[:100]}... (Session: {request.session_id})")
     
     try:
+        # 🔍 CONSOLE LOGGING: Processing stage
+        print(f"🔍 AI CHART PROCESSING:")
+        print(f"   Calling agent.process()...")
+        
         result = agent.process(request.prompt, request.session_id)
+        
+        # 🔍 CONSOLE LOGGING: Processing result
+        print(f"🔍 AI CHART PROCESSING RESULT:")
+        print(f"   Success: {result.get('success', 'Unknown')}")
+        print(f"   Message: {result.get('message', 'No message')}")
+        if 'chart_json' in result:
+            charts = result['chart_json']
+            if isinstance(charts, list):
+                print(f"   Charts generated: {len(charts)}")
+                for i, chart in enumerate(charts):
+                    filters = chart.get('filters', {})
+                    print(f"   Chart {i+1} filters: {filters}")
+            else:
+                filters = charts.get('filters', {}) if isinstance(charts, dict) else {}
+                print(f"   Single chart filters: {filters}")
+        else:
+            print(f"   No chart_json in result")
         
         # Add processing time
         result["processing_time"] = round(time.time() - start, 2)
@@ -104,21 +131,44 @@ def chart_make(request: ChartRequest):
         # 🔧 SMART RESPONSE FALLBACK: Ensure smart_response is always present
         if "smart_response" not in result or not result["smart_response"]:
             if result.get("success") and result.get("chart_json"):
-                # Chart generation success - create smart response
+                # Chart generation success - create intelligent smart response
                 charts_list = result["chart_json"] if isinstance(result["chart_json"], list) else [result["chart_json"]]
                 if len(charts_list) > 1:
-                    result["smart_response"] = f"I've created {len(charts_list)} complementary charts for you. These charts provide different perspectives on your data - use the 2-chart layout option to view them simultaneously for better analysis."
+                    chart_types = [chart.get("chart_type", "chart") for chart in charts_list]
+                    result["smart_response"] = f"📊 **Multi-Chart Analysis Ready**: I've created {len(charts_list)} complementary charts ({', '.join(chart_types)}) that provide different analytical perspectives on your data. This multi-dimensional approach will help you identify patterns, correlations, and insights that single charts might miss. Use the 2-chart layout for side-by-side comparison and deeper analysis."
                 else:
                     chart = charts_list[0]
                     chart_type = chart.get("chart_type", "chart")
                     title = chart.get("title", "your data")
-                    result["smart_response"] = f"I've created a {chart_type} chart showing {title}. You can now view this chart in the interface or modify the settings as needed."
+                    traces = chart.get("traces", [])
+                    filters = chart.get("filters", {})
+                    
+                    # Build intelligent response based on chart details
+                    trace_info = ""
+                    if traces:
+                        trace_names = [trace.get("name", "data") for trace in traces]
+                        trace_info = f" featuring {', '.join(trace_names)}"
+                    
+                    filter_info = ""
+                    if filters:
+                        filter_cols = list(filters.keys())
+                        filter_info = f" with smart filtering on {', '.join(filter_cols)}"
+                    
+                    performance_note = ""
+                    if chart_type in ["bar", "line"]:
+                        performance_note = " This visualization will render efficiently and provide smooth interactions for data exploration."
+                    elif chart_type == "pie":
+                        performance_note = " The pie chart will clearly show proportional relationships and highlight dominant categories."
+                    elif chart_type == "scatter":
+                        performance_note = " This scatter plot will reveal correlations and patterns in your data points."
+                    
+                    result["smart_response"] = f"🎯 **{chart_type.title()} Chart Generated**: {title}{trace_info}{filter_info}.{performance_note} The chart is optimized for performance and ready for interactive analysis. You can now explore the data, apply additional filters, or modify the visualization settings as needed."
             else:
                 # Suggestions or error - create smart response
                 if result.get("suggestions"):
-                    result["smart_response"] = "I can help you create charts from your data. Based on your request, I have some suggestions to get you started. Please let me know what you'd like to visualize or ask me to suggest chart types for your data."
+                    result["smart_response"] = "💡 **Chart Suggestions Available**: I can help you create powerful visualizations from your data. Based on your request, I have some intelligent suggestions to get you started. Please let me know what specific insights you'd like to discover or ask me to recommend the best chart types for your data analysis needs."
                 else:
-                    result["smart_response"] = "I'm here to help you create charts and analyze your data. Please describe what you'd like to visualize or ask me for suggestions."
+                    result["smart_response"] = "🚀 **Ready to Visualize**: I'm here to help you create insightful charts and analyze your data effectively. Please describe what you'd like to visualize, and I'll generate the most appropriate chart type with performance optimizations and actionable insights."
         
         # Clean logging
         logger.info(f"Chart request completed: {result.get('success')} ({result.get('processing_time')}s)")

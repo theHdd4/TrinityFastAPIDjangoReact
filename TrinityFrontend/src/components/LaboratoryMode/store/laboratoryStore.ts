@@ -458,6 +458,8 @@ export interface ExploreData {
   columnSummary?: any[];
   showDataSummary?: boolean;
   filterUnique?: boolean;
+  filters?: Record<string, string[]>; // 🔧 FILTERS: Add filters field for AI integration
+  addNote?: string; // 🔧 ADD_NOTE: AI-generated insights about the chart
   chartType?: string;
   xAxis?: string;
   yAxis?: string;
@@ -489,6 +491,10 @@ export interface ExploreData {
   chartDataSets?: { [idx: number]: any };
   chartGenerated?: { [chartIndex: number]: boolean };
   chartNotes?: { [chartIndex: number]: string };
+  // 🔧 UI FILTER WORKFLOW: Fields for AI-driven filter workflow
+  showFilterSelector?: boolean;
+  selectedFilterColumns?: string[];
+  chartFilters?: { [chartIndex: number]: { [column: string]: string[] } };
   [key: string]: any;
 }
 

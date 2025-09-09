@@ -80,48 +80,50 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
   };
 
   const fetchChartNote = async (index: number) => {
-    const textId = getTextId(index);
-    try {
-      const res = await fetch(`${TEXT_API}/text/${textId}`);
-      if (res.ok) {
-        const data = await res.json();
-        setChartNotes(prev => ({ ...prev, [index]: data?.spec?.content?.value || '' }));
-      }
-    } catch (err) {
-      console.error('Failed to fetch note', err);
-    }
+    // Disabled text API functionality for now
+    // const textId = getTextId(index);
+    // try {
+    //   const res = await fetch(`${TEXT_API}/text/${textId}`);
+    //   if (res.ok) {
+    //     const data = await res.json();
+    //     setChartNotes(prev => ({ ...prev, [index]: data?.spec?.content?.value || '' }));
+    //   }
+    // } catch (err) {
+    //   console.error('Failed to fetch note', err);
+    // }
   };
 
   const saveChartNote = async (index: number) => {
-    const textId = getTextId(index);
-    const value = chartNotes[index] || '';
-    const payload = {
-      textId,
-      appId: 'explore',
-      type: 'widget',
-      name: 'chart-note',
-      spec: { content: { format: 'plain', value } }
-    };
-    try {
-      let res = await fetch(`${TEXT_API}/text/${textId}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-      if (res.status === 404) {
-        res = await fetch(`${TEXT_API}/text`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
-        });
-      }
-      if (!res.ok) {
-        throw new Error(`Failed to save note: ${res.status}`);
-      }
-    } catch (err) {
-      console.error('Error saving note', err);
-      toast({ description: 'Failed to save note', variant: 'destructive' });
-    }
+    // Disabled text API functionality for now
+    // const textId = getTextId(index);
+    // const value = chartNotes[index] || '';
+    // const payload = {
+    //   textId,
+    //   appId: 'explore',
+    //   type: 'widget',
+    //   name: 'chart-note',
+    //   spec: { content: { format: 'plain', value } }
+    // };
+    // try {
+    //   let res = await fetch(`${TEXT_API}/text/${textId}`, {
+    //     method: 'PUT',
+    //     headers: { 'Content-Type': 'application/json' },
+    //     body: JSON.stringify(payload)
+    //   });
+    //   if (res.status === 404) {
+    //     res = await fetch(`${TEXT_API}/text`, {
+    //       method: 'POST',
+    //       headers: { 'Content-Type': 'application/json' },
+    //       body: JSON.stringify(payload)
+    //     });
+    //   }
+    //   if (!res.ok) {
+    //     throw new Error(`Failed to save note: ${res.status}`);
+    //   }
+    // } catch (err) {
+    //   console.error('Error saving note', err);
+    //   toast({ description: 'Failed to save note', variant: 'destructive' });
+    // }
   };
 
   const handleNoteChange = (index: number, value: string) => {
@@ -168,8 +170,95 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
   const [dateRanges, setDateRanges] = useState<{ [columnName: string]: { min_date: string; max_date: string } }>({});
   const [showUniqueToggles, setShowUniqueToggles] = useState<{ [chartIndex: number]: boolean }>({});
 
+  // AI Filter Workflow state
+  const [aiFilterWorkflow, setAiFilterWorkflow] = useState<any>(null);
+  const [aiFilterProcessing, setAiFilterProcessing] = useState(false);
+
   // Debouncing mechanism to prevent multiple chart generations
   const chartGenerationTimeouts = useRef<{ [chartIndex: number]: NodeJS.Timeout | null }>({});
+
+  // AI Filter Workflow Integration
+  useEffect(() => {
+    // Check if AI has provided filter workflow configuration
+    if (data.aiConfig && data.aiConfig.chart_json) {
+      const charts = Array.isArray(data.aiConfig.chart_json) ? data.aiConfig.chart_json : [data.aiConfig.chart_json];
+      
+      // Look for UI filter workflow OR direct filters in any chart
+      let workflowFound = false;
+      charts.forEach((chart, index) => {
+        // Check for explicit UI filter workflow first
+        if (chart.ui_filter_workflow) {
+          console.log(`🔍 AI FILTER WORKFLOW DETECTED IN CANVAS - Chart ${index + 1}:`, chart.ui_filter_workflow);
+          setAiFilterWorkflow(chart.ui_filter_workflow);
+          setAiFilterProcessing(true);
+          workflowFound = true;
+          
+          // Process the AI filter workflow for chart filters
+          const workflow = chart.ui_filter_workflow;
+          
+          // Step 4: Apply specific filter values to chart filters if provided
+          if (workflow.filter_values && Object.keys(workflow.filter_values).length > 0) {
+            console.log(`🔍 AI FILTER: Applying filter values to chart ${index + 1}:`, workflow.filter_values);
+            
+            // Update chart filters with AI-provided values
+            setChartFilters(prev => ({
+              ...prev,
+              [index]: {
+                ...prev[index],
+                ...workflow.filter_values
+              }
+            }));
+          }
+          
+          // Step 5: Show filter dropdowns for AI-selected columns
+          if (workflow.selected_filter_columns && workflow.selected_filter_columns.length > 0) {
+            console.log(`🔍 AI FILTER: Showing filter dropdowns for chart ${index + 1}`);
+            setChartFiltersVisible(prev => ({
+              ...prev,
+              [index]: true
+            }));
+          }
+        }
+        // Check for direct filters object (fallback for when ui_filter_workflow is not present)
+        else if (chart.filters && typeof chart.filters === 'object' && Object.keys(chart.filters).length > 0) {
+          console.log(`🔍 AI DIRECT FILTERS DETECTED IN CANVAS - Chart ${index + 1}:`, chart.filters);
+          
+          // Create a synthetic workflow from direct filters
+          const syntheticWorkflow = {
+            enable_filter_selector: true,
+            selected_filter_columns: Object.keys(chart.filters),
+            filter_values: chart.filters,
+            auto_apply_filters: true
+          };
+          
+          setAiFilterWorkflow(syntheticWorkflow);
+          setAiFilterProcessing(true);
+          workflowFound = true;
+          
+          // Apply filter values to chart filters
+          console.log(`🔍 AI FILTER: Applying direct filter values to chart ${index + 1}:`, chart.filters);
+          setChartFilters(prev => ({
+            ...prev,
+            [index]: {
+              ...prev[index],
+              ...chart.filters
+            }
+          }));
+          
+          // Show filter dropdowns
+          console.log(`🔍 AI FILTER: Showing filter dropdowns for chart ${index + 1} with direct filters`);
+          setChartFiltersVisible(prev => ({
+            ...prev,
+            [index]: true
+          }));
+        }
+      });
+      
+      if (!workflowFound) {
+        console.log(`🔍 AI FILTER: No filters found in AI response for canvas`);
+      }
+    }
+  }, [data.aiConfig, data.aiFilterUpdateTime]);
 
   // Add error handling and default values
   const safeData = {
@@ -241,6 +330,148 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
   });
   const [chatBubbleShouldRender, setChatBubbleShouldRender] = useState(false);
 
+  // 🔧 CRITICAL: Handle AI data updates and trigger chart generation
+  useEffect(() => {
+    console.log('🔍 AI Data Detection - safeData:', {
+      chartConfigs: safeData.chartConfigs,
+      xAxis: safeData.xAxis,
+      yAxis: safeData.yAxis,
+      title: safeData.title,
+      chartType: safeData.chartType,
+      dataframe: safeData.dataframe,
+      graphLayout: safeData.graphLayout,
+      columnSummary: safeData.columnSummary ? safeData.columnSummary.length : 0
+    });
+    console.log('🔍 AI Data Detection - current chartConfigs:', chartConfigs);
+    console.log('🔍 AI Data Detection - isApplied:', isApplied);
+    
+    // Check if we have AI-generated data that needs to be applied
+    if (safeData.chartConfigs && Array.isArray(safeData.chartConfigs) && safeData.chartConfigs.length > 0) {
+      const currentConfig = chartConfigs[0] || {};
+      const aiConfig = safeData.chartConfigs[0] || {};
+      
+      console.log('🔍 AI Config Analysis:', {
+        aiConfig,
+        currentConfig,
+        hasAIData: aiConfig.xAxis || aiConfig.yAxes?.[0] || aiConfig.title,
+        hasCurrentData: currentConfig.xAxis || currentConfig.yAxes?.[0] || currentConfig.title,
+        yAxesValid: hasValidYAxes(aiConfig.yAxes || []),
+        totalAIConfigs: safeData.chartConfigs.length,
+        graphLayout: safeData.graphLayout
+      });
+      
+      // Check if AI has data and current config is empty (not manually modified)
+      const hasAIData = aiConfig.xAxis || aiConfig.yAxes?.[0] || aiConfig.title;
+      const hasCurrentData = currentConfig.xAxis || currentConfig.yAxes?.[0] || currentConfig.title;
+      
+      if (hasAIData && !hasCurrentData) {
+        console.log('🔄 AI data detected, updating chartConfigs:', safeData.chartConfigs);
+        console.log('📊 All AI Configurations:', safeData.chartConfigs.map((config, index) => ({
+          index,
+          title: config.title,
+          xAxis: config.xAxis,
+          yAxes: config.yAxes,
+          chartType: config.chartType
+        })));
+        console.log('🔄 Setting chartConfigs to:', safeData.chartConfigs);
+        setChartConfigs(safeData.chartConfigs);
+        console.log('✅ chartConfigs updated');
+        
+        // Trigger chart generation for each AI-generated config
+        safeData.chartConfigs.forEach((config, index) => {
+          console.log(`🔍 Checking AI config ${index}:`, {
+            xAxis: config.xAxis,
+            yAxes: config.yAxes,
+            hasValidYAxes: hasValidYAxes(config.yAxes || [])
+          });
+          if (config.xAxis && hasValidYAxes(config.yAxes)) {
+            console.log(`🚀 Triggering chart generation for AI config ${index}:`, config);
+            safeTriggerChartGeneration(index, config, 500); // Delay to allow state update
+          } else {
+            console.log(`❌ AI config ${index} validation failed:`, {
+              xAxis: config.xAxis,
+              yAxes: config.yAxes,
+              hasValidYAxes: hasValidYAxes(config.yAxes || [])
+            });
+          }
+        });
+        
+        // 🔧 CRITICAL: Force a re-render to ensure UI updates
+        setTimeout(() => {
+          console.log('🔄 Forcing re-render after AI data application');
+          setChartConfigs(prev => {
+            console.log('🔄 Current chartConfigs before re-render:', prev);
+            return [...prev];
+          });
+        }, 100);
+        
+        // 🔧 CRITICAL: Update graph layout to match AI-generated charts
+        if (safeData.chartConfigs.length > 1) {
+          console.log('🔄 Updating graph layout to match AI charts:', safeData.chartConfigs.length);
+          onDataChange({
+            graphLayout: {
+              numberOfGraphsInRow: Math.min(safeData.chartConfigs.length, 2), // Max 2 charts per row
+              rows: 1
+            }
+          });
+        }
+      }
+    } else if (safeData.xAxis || safeData.yAxis || safeData.title) {
+      // Fallback: Handle individual AI fields
+      console.log('🔍 Fallback AI fields detected:', {
+        xAxis: safeData.xAxis,
+        yAxis: safeData.yAxis,
+        title: safeData.title
+      });
+      
+      const currentConfig = chartConfigs[0] || {};
+      const hasAIData = safeData.xAxis || safeData.yAxis || safeData.title;
+      const hasCurrentData = currentConfig.xAxis || currentConfig.yAxes?.[0] || currentConfig.title;
+      
+      console.log('🔍 Fallback Analysis:', {
+        hasAIData,
+        hasCurrentData,
+        currentConfig
+      });
+      
+      if (hasAIData && !hasCurrentData) {
+        const aiConfig = {
+          xAxis: safeData.xAxis || '',
+          yAxes: [safeData.yAxis || ''],
+          xAxisLabel: safeData.xAxisLabel || safeData.xAxis || '',
+          yAxisLabels: [safeData.yAxisLabel || safeData.yAxis || ''],
+          chartType: safeData.chartType || 'line_chart',
+          aggregation: safeData.aggregation || 'no_aggregation',
+          weightColumn: safeData.weightColumn || '',
+          title: safeData.title || '',
+          legendField: safeData.legendField || '',
+          sortOrder: null,
+        };
+        
+        console.log('🔄 Individual AI fields detected, updating chartConfigs:', aiConfig);
+        console.log('🔍 AI Config Validation:', {
+          xAxis: aiConfig.xAxis,
+          yAxes: aiConfig.yAxes,
+          hasValidYAxes: hasValidYAxes(aiConfig.yAxes)
+        });
+        
+        setChartConfigs([aiConfig]);
+        
+        // Trigger chart generation
+        if (aiConfig.xAxis && hasValidYAxes(aiConfig.yAxes)) {
+          console.log('🚀 Triggering chart generation for individual AI fields:', aiConfig);
+          safeTriggerChartGeneration(0, aiConfig, 500);
+        } else {
+          console.log('❌ Individual AI fields validation failed:', {
+            xAxis: aiConfig.xAxis,
+            yAxes: aiConfig.yAxes,
+            hasValidYAxes: hasValidYAxes(aiConfig.yAxes)
+          });
+        }
+      }
+    }
+  }, [safeData.chartConfigs, safeData.xAxis, safeData.yAxis, safeData.title, safeData.chartType]);
+
   // Persist chart state changes to parent atom settings for saving/loading
   useEffect(() => {
     const primaryConfig = chartConfigs[0] || {};
@@ -279,11 +510,30 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
   useEffect(() => {
     chartConfigs.forEach((cfg, index) => {
       if (!chartDataSets[index] && cfg.xAxis && hasValidYAxes(cfg.yAxes)) {
+        console.log(`🔍 Auto-generating chart on mount for index ${index}:`, cfg);
         safeTriggerChartGeneration(index, cfg, 0);
       }
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // 🔧 CRITICAL: Auto-generate charts when data is applied (from AI or manual)
+  useEffect(() => {
+    if (isApplied && chartConfigs.length > 0) {
+      console.log('🔍 Data applied, checking for chart generation:', {
+        isApplied,
+        chartConfigs: chartConfigs.length,
+        chartDataSets: Object.keys(chartDataSets).length
+      });
+      
+      chartConfigs.forEach((cfg, index) => {
+        if (!chartDataSets[index] && cfg.xAxis && hasValidYAxes(cfg.yAxes)) {
+          console.log(`🚀 Auto-generating chart for applied data at index ${index}:`, cfg);
+          safeTriggerChartGeneration(index, cfg, 100);
+        }
+      });
+    }
+  }, [isApplied, chartConfigs, chartDataSets]);
 
   useEffect(() => {
     chartConfigs.forEach((_, idx) => fetchChartNote(idx));
@@ -377,8 +627,20 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
 
   // Update chartConfigs if layout changes
   useEffect(() => {
+    // 🔧 CRITICAL: Only add empty charts if we don't have AI-generated charts OR if user manually changed layout
+    const hasAIGeneratedCharts = safeData.chartConfigs && Array.isArray(safeData.chartConfigs) && safeData.chartConfigs.length > 0;
+    const aiChartCount = hasAIGeneratedCharts ? safeData.chartConfigs.length : 0;
+    
+    console.log('🔍 Layout Update Check:', {
+      numberOfGraphsInRow: safeData.graphLayout.numberOfGraphsInRow,
+      currentChartCount: chartConfigs.length,
+      hasAIGeneratedCharts,
+      aiChartCount
+    });
+    
+    // Allow manual chart addition even with AI charts, but only if layout was manually changed
     if (safeData.graphLayout.numberOfGraphsInRow === 2 && chartConfigs.length === 1) {
-      // Add a second chart card while preserving the first one
+      // Add a second chart card while preserving the first one (only if no AI charts)
       setChartConfigs(prev => [
         ...prev, // Keep existing chart
         {
@@ -429,6 +691,7 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
       
     } else if (safeData.graphLayout.numberOfGraphsInRow === 1 && chartConfigs.length > 1) {
       // Keep only the first chart when switching to 1 graph per row
+      console.log('🔄 Reducing charts to 1:', chartConfigs.length);
       setChartConfigs(prev => prev.slice(0, 1));
       
       // Clean up states for removed charts
@@ -587,7 +850,18 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
         return newState;
       });
     }
-  }, [safeData.graphLayout.numberOfGraphsInRow, safeData.columnClassifierConfig?.dimensions]);
+    
+    // 🔧 CRITICAL: If AI generated charts, ensure we don't have more charts than needed
+    // But only remove extra charts if they were added by AI, not by manual user action
+    if (hasAIGeneratedCharts && chartConfigs.length > aiChartCount && safeData.graphLayout.numberOfGraphsInRow <= aiChartCount) {
+      console.log('🔄 Removing extra charts to match AI count:', {
+        currentCount: chartConfigs.length,
+        aiCount: aiChartCount,
+        layoutCharts: safeData.graphLayout.numberOfGraphsInRow
+      });
+      setChartConfigs(prev => prev.slice(0, aiChartCount));
+    }
+  }, [safeData.graphLayout.numberOfGraphsInRow, safeData.columnClassifierConfig?.dimensions, safeData.chartConfigs]);
 
   // Notify parent component when chart data changes
   useEffect(() => {
@@ -651,6 +925,12 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
   const addChart = () => {
     const currentLayout = safeData.graphLayout.numberOfGraphsInRow;
     
+    console.log('🔧 Manual addChart called:', {
+      currentLayout,
+      currentChartCount: chartConfigs.length,
+      hasAIGeneratedCharts: safeData.chartConfigs && Array.isArray(safeData.chartConfigs) && safeData.chartConfigs.length > 0
+    });
+    
     if (currentLayout === 2) {
       // Add 2 chart cards for 2 graphs per row layout
       setChartConfigs((prev) => [
@@ -698,6 +978,8 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
         [newChartIndex]: false,
         [newChartIndex + 1]: false
       }));
+      
+      console.log('✅ Added 2 charts manually, new count:', chartConfigs.length + 2);
       
       // Initialize chart options for new charts
       setChartOptions(prev => ({
@@ -750,6 +1032,8 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
         ...prev,
         [newChartIndex]: false
       }));
+      
+      console.log('✅ Added 1 chart manually, new count:', chartConfigs.length + 1);
       
       // Initialize chart options for new chart
       setChartOptions(prev => ({
@@ -1244,11 +1528,23 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
   const generateChart = async (index: number, resetMode: boolean = false, customConfig?: any) => {
     const config = customConfig || chartConfigs[index];
     
+    console.log(`🔍 generateChart called for index ${index}:`, {
+      config,
+      resetMode,
+      customConfig,
+      hasDataframe: !!safeData.dataframe
+    });
+    
     try {
       setIsLoading(prev => ({ ...prev, [index]: true }));
       clearError();
 
       if (!config.xAxis || !hasValidYAxes(config.yAxes)) {
+        console.log(`❌ Chart generation failed for index ${index}: Missing axis data`, {
+          xAxis: config.xAxis,
+          yAxes: config.yAxes,
+          hasValidYAxes: hasValidYAxes(config.yAxes)
+        });
         setError('Please select both X and at least one Y axis');
         return;
       }
@@ -1394,14 +1690,26 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
 
       const result = await chartResponse.json();
       
+      console.log(`🔍 Chart response for index ${index}:`, {
+        status: chartResponse.status,
+        result,
+        dataLength: result.data?.length || 0
+      });
+      
       const chartData = result.data || [];
 
+      console.log(`🔍 Setting chart data for index ${index}:`, {
+        chartData,
+        dataLength: chartData.length,
+        sampleData: chartData.slice(0, 2)
+      });
 
       setChartDataSets(prev => {
         const newData = {
           ...prev,
           [index]: chartData
         };
+        console.log(`🔍 Updated chartDataSets for index ${index}:`, newData);
         // Store original data if no filters are applied
         const hasFilters = chartFilters[index] && Object.keys(chartFilters[index]).some(key =>
           Array.isArray(chartFilters[index][key]) && chartFilters[index][key].length > 0
@@ -1464,21 +1772,43 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
     setIsLoadingColumns(true);
 
     try {
-      const identifiers = safeData.columnClassifierConfig?.identifiers?.length
+      // 🔧 CRITICAL FIX: Use columnSummary as primary source for all available columns
+      let identifiers = safeData.columnClassifierConfig?.identifiers?.length
         ? safeData.columnClassifierConfig.identifiers
         : safeData.fallbackDimensions?.length
           ? safeData.fallbackDimensions
           : safeData.allColumns || [];
 
-      const measures = safeData.columnClassifierConfig?.measures?.length
+      let measures = safeData.columnClassifierConfig?.measures?.length
         ? safeData.columnClassifierConfig.measures
         : safeData.fallbackMeasures?.length
           ? safeData.fallbackMeasures
           : safeData.allColumns || [];
 
+      // 🔧 CRITICAL FIX: If we have columnSummary data, use it to populate ALL available columns
+      if (Array.isArray(safeData.columnSummary) && safeData.columnSummary.length > 0) {
+        console.log('🔧 Using columnSummary for dropdown population:', safeData.columnSummary.length, 'columns');
+        
+        // Extract all column names from columnSummary
+        const allColumnNames = safeData.columnSummary
+          .filter(col => col && col.column)
+          .map(col => col.column);
+        
+        // Use all columns for both identifiers and measures to populate dropdowns
+        identifiers = allColumnNames;
+        measures = allColumnNames;
+        
+        console.log('🔧 Populated dropdowns with all columns:', {
+          identifiers: identifiers.length,
+          measures: measures.length,
+          sampleColumns: allColumnNames.slice(0, 5)
+        });
+      }
+
       setAvailableIdentifiers(identifiers);
       setAvailableMeasures(measures);
     } catch (error) {
+      console.error('Error loading columns:', error);
       // Fall back to all columns if something goes wrong
       setAvailableIdentifiers(safeData.allColumns || []);
       setAvailableMeasures(safeData.allColumns || []);
@@ -1491,9 +1821,21 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
     safeData.fallbackDimensions,
     safeData.fallbackMeasures,
     safeData.allColumns,
+    safeData.columnSummary, // 🔧 CRITICAL: Add columnSummary as dependency
   ]);
 
   // Log available columns for debugging
+  useEffect(() => {
+    console.log('🔍 Available columns:', {
+      identifiers: availableIdentifiers.length,
+      measures: availableMeasures.length,
+      allColumns: safeData.allColumns?.length || 0,
+      columnSummary: safeData.columnSummary?.length || 0,
+      columnSummaryColumns: safeData.columnSummary?.map(col => col.column) || [],
+      allAvailableColumns: allAvailableColumns.length,
+      sampleAvailableColumns: allAvailableColumns.slice(0, 10)
+    });
+  }, [availableIdentifiers, availableMeasures, safeData.allColumns, safeData.columnSummary, allAvailableColumns]);
   
 
   // Sample dimensions with identifiers for the filter UI - ONLY show selected dimensions
@@ -1684,10 +2026,13 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                 <Button
                   variant="outline"
                   size="sm"
-                  className="h-8 w-8 p-0"
+                  className={`h-8 w-8 p-0 ${aiFilterProcessing && aiFilterWorkflow ? 'border-green-300 bg-green-50' : ''}`}
                   onClick={() => toggleChartFilters(index)}
                 >
-                  <Filter className="w-3 h-3" />
+                  <Filter className={`w-3 h-3 ${aiFilterProcessing && aiFilterWorkflow ? 'text-green-600' : ''}`} />
+                  {aiFilterProcessing && aiFilterWorkflow && (
+                    <div className="absolute -top-1 -right-1 w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+                  )}
                 </Button>
                 <Button
                   variant="outline"
@@ -2304,6 +2649,30 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                     </div>
                   )}
                   
+                  {/* AI Filter Processing Status */}
+                  {aiFilterProcessing && aiFilterWorkflow && (
+                    <div className="p-2 bg-green-50 border border-green-200 rounded-lg mb-2">
+                      <div className="flex items-center space-x-2 text-sm text-green-700">
+                        <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+                        <span className="font-medium">AI Filter Processing Active</span>
+                      </div>
+                      <div className="mt-1 text-xs text-green-600">
+                        {aiFilterWorkflow.selected_filter_columns && aiFilterWorkflow.selected_filter_columns.length > 0 ? (
+                          <div>
+                            <div>AI selected columns: {aiFilterWorkflow.selected_filter_columns.join(', ')}</div>
+                            {aiFilterWorkflow.filter_values && Object.keys(aiFilterWorkflow.filter_values).length > 0 && (
+                              <div>Pre-selected values: {Object.entries(aiFilterWorkflow.filter_values).map(([col, vals]) => 
+                                `${col}: ${Array.isArray(vals) ? vals.join(', ') : 'All'}`
+                              ).join('; ')}</div>
+                            )}
+                          </div>
+                        ) : (
+                          <div>AI is processing filter configuration</div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
                   {/* Filter Action Buttons with inline double-click hint */}
                   <div className="flex justify-between items-center pt-2 min-w-0">
                     {/* Double-click hint - inline with buttons */}
@@ -2384,13 +2753,21 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                   <>
                   <div className="w-full h-full min-w-0 flex-shrink-0" style={{ height: 'calc(100% - 60px)' }}>
                     {/* Check if chart data exists and has valid structure */}
-                    {(!chartDataSets[index] || (Array.isArray(chartDataSets[index]) && chartDataSets[index].length === 0)) ? (
+                    {(() => {
+                      console.log(`🔍 Chart rendering check for index ${index}:`, {
+                        hasChartData: !!chartDataSets[index],
+                        chartDataLength: chartDataSets[index]?.length || 0,
+                        chartData: chartDataSets[index],
+                        config: config
+                      });
+                      return !chartDataSets[index] || (Array.isArray(chartDataSets[index]) && chartDataSets[index].length === 0);
+                    })() ? (
                       <div className="text-center p-4 border-2 border-dashed border-gray-300 rounded-lg h-full flex items-center justify-center">
                         <div className="text-gray-500 text-sm">
                           {config.xAxis && config.yAxes && config.yAxes.length > 0 && config.yAxes.every(y => y) ?
                             (chartDataSets[index] && chartDataSets[index].length === 0 ?
                               'No data available for the selected filters. Try adjusting your filter criteria.' :
-                              `Chart ready: ${config.xAxis} vs ${config.yAxes.filter(y => y).join(', ')}`
+                              `Chart ready: ${config.xAxis} vs ${config.yAxes.filter(y => y).join(', ')}${safeData.dataframe ? ` (Data: ${safeData.dataframe})` : ''}`
                             ) :
                             'Select X and Y axes to generate chart'
                           }
@@ -2424,7 +2801,7 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                                     chartDataSets[index] && chartDataSets[index].length === 0 ? (
                                       'No data available for the selected filters. Try adjusting your filter criteria.'
                                     ) : (
-                                      `Chart ready: ${config.xAxis} vs ${config.yAxes.filter(y => y).join(', ')}`
+                                      `Chart ready: ${config.xAxis} vs ${config.yAxes.filter(y => y).join(', ')}${safeData.dataframe ? ` (Data: ${safeData.dataframe})` : ''}`
                                     )
                                   ) : (
                                     'Select X and Y axes to generate chart'
@@ -3206,6 +3583,17 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
 
           {safeData.graphLayout.numberOfGraphsInRow > 0 && (
             <div className="flex-1 explore-chart-container">
+              {console.log('🎨 Rendering charts:', {
+                numberOfGraphs: safeData.graphLayout.numberOfGraphsInRow,
+                chartConfigsCount: chartConfigs.length,
+                chartConfigs: chartConfigs.map((config, index) => ({
+                  index,
+                  title: config.title,
+                  xAxis: config.xAxis,
+                  yAxes: config.yAxes,
+                  chartType: config.chartType
+                }))
+              })}
               {safeData.graphLayout.numberOfGraphsInRow === 1 ? (
                 <div className="space-y-4">
                   {Array.isArray(chartConfigs) ? chartConfigs.map((_, index) => renderChartComponent(index)) : null}

@@ -291,11 +291,13 @@ CONCAT_PATH = Path(__file__).resolve().parent / "Agent_concat"
 CREATE_TRANSFORM_PATH = Path(__file__).resolve().parent / "Agent_create_transform"
 GROUPBY_PATH = Path(__file__).resolve().parent / "Agent_groupby"
 CHARTMAKER_PATH = Path(__file__).resolve().parent / "Agent_chartmaker"
+EXPLORE_PATH = Path(__file__).resolve().parent / "Agent_explore"
 sys.path.append(str(MERGE_PATH))
 sys.path.append(str(CONCAT_PATH))
 sys.path.append(str(CREATE_TRANSFORM_PATH))
 sys.path.append(str(GROUPBY_PATH))
 sys.path.append(str(CHARTMAKER_PATH))
+sys.path.append(str(EXPLORE_PATH))
 
 from single_llm_processor import SingleLLMProcessor
 from Agent_Merge.main_app import router as merge_router
@@ -303,6 +305,7 @@ from Agent_concat.main_app import router as concat_router
 from Agent_create_transform.main_app import router as create_transform_router
 from Agent_groupby.main_app import router as groupby_router
 from Agent_chartmaker.main_app import router as chartmaker_router
+from Agent_explore.main_app import router as explore_router
 
 def convert_numpy(obj):
     if isinstance(obj, dict):
@@ -485,6 +488,7 @@ api_router.include_router(concat_router)
 api_router.include_router(create_transform_router)
 api_router.include_router(groupby_router)
 api_router.include_router(chartmaker_router)
+api_router.include_router(explore_router)
 
 # Enable CORS for browser-based clients
 app.add_middleware(

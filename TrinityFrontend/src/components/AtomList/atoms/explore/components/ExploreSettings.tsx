@@ -68,6 +68,41 @@ const ExploreSettings = ({ data, settings, onDataChange, onApply }) => {
   // Settings panel filter selection state
   const [showFilterSelector, setShowFilterSelector] = useState(false);
   const [selectedFilterColumns, setSelectedFilterColumns] = useState<string[]>([]);
+  
+  // AI filter integration state
+  const [aiFilterWorkflow, setAiFilterWorkflow] = useState<any>(null);
+  const [aiFilterProcessing, setAiFilterProcessing] = useState(false);
+
+  // Function to sync AI filter changes with manual selection
+  const syncAiFiltersWithManual = (aiWorkflow: any) => {
+    console.log(`🔍 SYNCING AI FILTERS WITH MANUAL SELECTION:`, aiWorkflow);
+    
+    if (aiWorkflow.selected_filter_columns && Array.isArray(aiWorkflow.selected_filter_columns)) {
+      // Update selected filter columns to match AI selection
+      setSelectedFilterColumns(aiWorkflow.selected_filter_columns);
+      
+      // Update dimensions and identifiers to include AI-selected columns
+      const currentConfig = data.columnClassifierConfig || { identifiers: [], measures: [], dimensions: {} };
+      const newDims = { ...currentConfig.dimensions };
+      const newIdentifiers = { ...(data.selectedIdentifiers || {}) };
+      
+      aiWorkflow.selected_filter_columns.forEach(col => {
+        newDims[col] = [col];
+        newIdentifiers[col] = [col];
+      });
+      
+      const updatedConfig = { ...currentConfig, dimensions: newDims };
+      
+      // Update parent data
+      onDataChange({
+        columnClassifierConfig: updatedConfig,
+        selectedIdentifiers: newIdentifiers,
+        dimensions: Array.from(new Set([...(data.dimensions || []), ...aiWorkflow.selected_filter_columns]))
+      });
+      
+      console.log(`🔍 AI FILTERS SYNCED: Updated dimensions and identifiers`);
+    }
+  };
 
   // Prevent rendering if basic data is not available
   if (!data || !settings) {
@@ -108,6 +143,72 @@ const ExploreSettings = ({ data, settings, onDataChange, onApply }) => {
       setUsingColumnClassifier(false);
     }
   }, [data, data?.columnClassifierConfig]);
+
+  // AI Filter Workflow Integration
+  useEffect(() => {
+    console.log(`🔍 AI FILTER WORKFLOW TRIGGERED:`, {
+      hasAiConfig: !!data.aiConfig,
+      hasChartJson: !!(data.aiConfig && data.aiConfig.chart_json),
+      aiFilterUpdateTime: data.aiFilterUpdateTime,
+      timestamp: new Date().toISOString()
+    });
+    
+    // Check if AI has provided filter workflow configuration
+    if (data.aiConfig && data.aiConfig.chart_json) {
+      const charts = Array.isArray(data.aiConfig.chart_json) ? data.aiConfig.chart_json : [data.aiConfig.chart_json];
+      
+      // Look for UI filter workflow OR direct filters in any chart
+      let workflowFound = false;
+      charts.forEach((chart, index) => {
+        // Check for explicit UI filter workflow first
+        if (chart.ui_filter_workflow) {
+          console.log(`🔍 AI FILTER WORKFLOW DETECTED - Chart ${index + 1}:`, chart.ui_filter_workflow);
+          setAiFilterWorkflow(chart.ui_filter_workflow);
+          setAiFilterProcessing(true);
+          workflowFound = true;
+          
+          // Process the AI filter workflow
+          const workflow = chart.ui_filter_workflow;
+          
+          // Step 1: Enable filter selector if requested
+          if (workflow.enable_filter_selector) {
+            console.log(`🔍 AI FILTER: Enabling filter selector`);
+            setShowFilterSelector(true);
+          }
+          
+          // Step 2 & 3: Sync AI filter workflow with manual selection
+          syncAiFiltersWithManual(workflow);
+        }
+        // Check for direct filters object (fallback for when ui_filter_workflow is not present)
+        else if (chart.filters && typeof chart.filters === 'object' && Object.keys(chart.filters).length > 0) {
+          console.log(`🔍 AI DIRECT FILTERS DETECTED - Chart ${index + 1}:`, chart.filters);
+          
+          // Create a synthetic workflow from direct filters
+          const syntheticWorkflow = {
+            enable_filter_selector: true,
+            selected_filter_columns: Object.keys(chart.filters),
+            filter_values: chart.filters,
+            auto_apply_filters: true
+          };
+          
+          setAiFilterWorkflow(syntheticWorkflow);
+          setAiFilterProcessing(true);
+          workflowFound = true;
+          
+          // Enable filter selector
+          console.log(`🔍 AI FILTER: Enabling filter selector for direct filters`);
+          setShowFilterSelector(true);
+          
+          // Sync with manual selection
+          syncAiFiltersWithManual(syntheticWorkflow);
+        }
+      });
+      
+      if (!workflowFound) {
+        console.log(`🔍 AI FILTER: No filters found in AI response`);
+      }
+    }
+  }, [data.aiConfig, data.columnClassifierConfig, data.selectedIdentifiers, data.dimensions, data.aiFilterUpdateTime, onDataChange]);
 
   // Keep local graph layout in sync with external data
   useEffect(() => {
@@ -197,6 +298,14 @@ const ExploreSettings = ({ data, settings, onDataChange, onApply }) => {
       ...selectedFilterColumns.reduce((acc, col) => ({ ...acc, [col]: [col] }), {})
     };
 
+    // 🔍 CONSOLE LOGGING: Manual filter addition
+    console.log(`🔍 MANUAL FILTER ADDITION:`);
+    console.log(`   Selected columns: ${selectedFilterColumns.join(', ')}`);
+    console.log(`   AI workflow active: ${aiFilterProcessing}`);
+    if (aiFilterWorkflow) {
+      console.log(`   AI workflow:`, aiFilterWorkflow);
+    }
+
     // Update parent data without resetting applied state so filters appear immediately
     onDataChange({
       columnClassifierConfig: updatedConfig,
@@ -212,6 +321,11 @@ const ExploreSettings = ({ data, settings, onDataChange, onApply }) => {
       ...prev,
       ...selectedFilterColumns.reduce((acc, col) => ({ ...acc, [col]: [col] }), {})
     }));
+
+    // 🔍 CONSOLE LOGGING: Filter state synchronization
+    console.log(`🔍 FILTER STATE SYNCHRONIZATION:`);
+    console.log(`   Updated dimensions: ${Array.from(new Set([...(data.dimensions || []), ...selectedFilterColumns])).join(', ')}`);
+    console.log(`   Updated identifiers:`, newSelectedIdentifiers);
 
     setSelectedFilterColumns([]);
     setShowFilterSelector(false);
@@ -302,6 +416,12 @@ const ExploreSettings = ({ data, settings, onDataChange, onApply }) => {
           <div className="flex items-center space-x-2">
             <Filter className="w-5 h-5 text-blue-600" />
             <h3 className="text-base font-semibold text-gray-900">Add Filters</h3>
+            {aiFilterProcessing && (
+              <div className="flex items-center space-x-1 text-sm text-green-600">
+                <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+                <span>AI Processing</span>
+              </div>
+            )}
           </div>
           <div className="flex items-center space-x-2">
             <Switch
@@ -313,6 +433,29 @@ const ExploreSettings = ({ data, settings, onDataChange, onApply }) => {
           </div>
           {showFilterSelector && (
             <div className="space-y-2">
+              {aiFilterWorkflow && (
+                <div className="p-3 bg-green-50 border border-green-200 rounded-lg">
+                  <div className="flex items-center space-x-2 text-sm text-green-700">
+                    <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+                    <span className="font-medium">AI Filter Workflow Active</span>
+                  </div>
+                  <div className="mt-2 text-xs text-green-600">
+                    {aiFilterWorkflow.selected_filter_columns && aiFilterWorkflow.selected_filter_columns.length > 0 ? (
+                      <div>
+                        <div>✅ Selected columns: {aiFilterWorkflow.selected_filter_columns.join(', ')}</div>
+                        {aiFilterWorkflow.filter_values && Object.keys(aiFilterWorkflow.filter_values).length > 0 && (
+                          <div>✅ Filter values: {Object.entries(aiFilterWorkflow.filter_values).map(([col, vals]) => 
+                            `${col}: ${Array.isArray(vals) ? vals.join(', ') : 'All'}`
+                          ).join('; ')}</div>
+                        )}
+                        <div className="mt-1 text-green-500">🔄 AI filters are now integrated with manual selection</div>
+                      </div>
+                    ) : (
+                      <div>No specific filter columns selected by AI</div>
+                    )}
+                  </div>
+                </div>
+              )}
               <div className="max-h-40 overflow-y-auto space-y-2">
                 {categoricalColumns.map(col => (
                   <div key={col} className="flex items-center space-x-2">
@@ -325,7 +468,12 @@ const ExploreSettings = ({ data, settings, onDataChange, onApply }) => {
                         );
                       }}
                     />
-                    <Label htmlFor={`col-${col}`}>{col}</Label>
+                    <Label htmlFor={`col-${col}`} className={selectedFilterColumns.includes(col) ? "font-medium text-blue-600" : ""}>
+                      {col}
+                      {aiFilterWorkflow && aiFilterWorkflow.selected_filter_columns && aiFilterWorkflow.selected_filter_columns.includes(col) && (
+                        <span className="ml-1 text-xs text-green-600">(AI Selected)</span>
+                      )}
+                    </Label>
                   </div>
                 ))}
               </div>

@@ -71,6 +71,7 @@ const LLM_MAP: Record<string, string> = {
   merge: 'Agent Merge',
   'create-column': 'Agent Create Transform',
   'groupby-wtg-avg': 'Agent GroupBy',
+  'explore': 'Agent Explore',
 };
 
 const CanvasArea: React.FC<CanvasAreaProps> = ({

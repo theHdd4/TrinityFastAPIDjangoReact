@@ -31,13 +31,53 @@ def _detect_filter_intent(user_prompt: str) -> bool:
         "filtered by", "specific", "particular", "equals", "=", ":"
     ]
     up = user_prompt.lower()
-    return any(k in up for k in kws)
+    has_filter_intent = any(k in up for k in kws)
+    
+    # 🔍 CONSOLE LOGGING: Filter intent detection
+    print(f"🔍 AI FILTER DETECTION:")
+    print(f"   User prompt: {user_prompt[:100]}...")
+    print(f"   Has filter intent: {has_filter_intent}")
+    if has_filter_intent:
+        matched_keywords = [k for k in kws if k in up]
+        print(f"   Matched keywords: {matched_keywords}")
+    
+    return has_filter_intent
 
-# Removed helper functions - using simple JSON extraction only
-
-# Removed schema pruning - using simple JSON extraction only
-
-# Removed complex processing functions - using simple JSON extraction only
+def _build_column_metadata_section(available_files_with_columns: dict, file_analysis_data: dict = None) -> str:
+    """
+    Build a detailed column metadata section for the LLM prompt.
+    """
+    if not file_analysis_data:
+        return "No detailed file analysis available."
+    
+    metadata_sections = []
+    
+    for filename, columns in available_files_with_columns.items():
+        if filename in file_analysis_data:
+            analysis = file_analysis_data[filename]
+            
+            # Basic file info
+            row_count = analysis.get('total_rows', 0)
+            file_size = analysis.get('file_size_bytes', 0)
+            
+            # Column types
+            numeric_cols = analysis.get('numeric_columns', [])
+            categorical_cols = analysis.get('categorical_columns', [])
+            
+            metadata_sections.append(
+                f"{filename}:\n"
+                f"  Rows: {row_count}\n"
+                f"  Numeric columns: {', '.join(numeric_cols)}\n"
+                f"  Categorical columns: {', '.join(categorical_cols)}\n"
+            )
+        else:
+            metadata_sections.append(
+                f"{filename}:\n"
+                f"  Columns: {', '.join(columns)}\n"
+                f"  (No detailed analysis available)\n"
+            )
+    
+    return "\n".join(metadata_sections) if metadata_sections else "No file analysis data available."
 
 # ------------------------------------------------------------------------------
 # Prompt builders (minimal, deterministic, JSON-only)
@@ -66,9 +106,28 @@ def build_chart_prompt(user_prompt: str, available_files_with_columns: dict, con
         "- CRITICAL: Only include filters when user explicitly mentions filtering, sorting, or finding specific things.\n"
         "- CRITICAL: Do NOT add filters automatically - only when user context clearly indicates filtering is needed.\n"
         "- CRITICAL: For filters: If user mentions a filter column but no specific values, use {\"ColumnName\": []}. If user mentions specific values, use {\"ColumnName\": [\"Value1\", \"Value2\"]}. Use empty object {} when no filtering is needed.\n"
+        "- CRITICAL: smart_response must be intelligent and insightful, providing:\n"
+        "  * What the chart will show (data insights, trends, patterns)\n"
+        "  * Performance implications (data size, processing complexity)\n"
+        "  * Business value and actionable insights\n"
+        "  * Suggestions for further analysis or chart improvements\n"
+        "  * Technical details about the visualization approach\n"
         f"USER INPUT: {user_prompt}\n"
         f"AVAILABLE_FILES_WITH_COLUMNS: {json.dumps(available_files_with_columns)}\n"
         f"CONTEXT: {context}\n"
+        "\n"
+        "--- AVAILABLE FILES AND COLUMNS ---\n"
+        "Here are all the files available for charting with their column information:\n"
+        f"{json.dumps(available_files_with_columns, indent=2)}\n"
+        "\n"
+        "--- COLUMN METADATA ---\n"
+        f"{_build_column_metadata_section(available_files_with_columns, file_analysis_data)}\n"
+        "\n"
+        "--- INSTRUCTIONS FOR LLM ---\n"
+        "1. Analyze the user's request to identify which files they want to chart\n"
+        "2. Use the column information above to determine the best x/y columns\n"
+        "3. If the user's request is unclear, suggest appropriate files based on their description\n"
+        "4. Always verify that the suggested files exist in the available files list\n"
         "\n"
         "FILTER EXAMPLES:\n"
         "- User: 'Create chart filtered by PPG' → filters: {\"PPG\": []}\n"
@@ -141,8 +200,24 @@ def build_data_question_prompt(user_prompt: str, available_files_with_columns: d
 
 def build_smart_prompt(user_prompt: str, available_files_with_columns: dict, context: str, file_analysis_data: dict = None) -> str:
     logger.info(f"Building smart prompt for: {user_prompt[:1000]}...")
-    if _detect_chart_request(user_prompt):
+    
+    # 🔍 CONSOLE LOGGING: AI prompt building stage
+    print(f"🔍 AI PROMPT BUILDING:")
+    print(f"   User prompt: {user_prompt[:100]}...")
+    print(f"   Available files: {list(available_files_with_columns.keys())}")
+    print(f"   Context length: {len(context)}")
+    
+    is_chart_request = _detect_chart_request(user_prompt)
+    has_filter_intent = _detect_filter_intent(user_prompt)
+    
+    print(f"   Is chart request: {is_chart_request}")
+    print(f"   Has filter intent: {has_filter_intent}")
+    
+    if is_chart_request:
+        print(f"   📊 Building chart prompt with filter support...")
         return build_chart_prompt(user_prompt, available_files_with_columns, context, file_analysis_data)
+    
+    print(f"   ❓ Building data question prompt...")
     return build_data_question_prompt(user_prompt, available_files_with_columns, context, file_analysis_data, "")
 
 
@@ -229,7 +304,13 @@ def extract_json(response: str, available_files_with_columns: dict = None, user_
     """
     logger.info(f"Extracting JSON from LLM response (len={len(response) if response else 0})")
     
+    # 🔍 CONSOLE LOGGING: JSON extraction stage
+    print(f"🔍 AI JSON EXTRACTION:")
+    print(f"   Response length: {len(response) if response else 0}")
+    print(f"   User prompt: {user_prompt[:50]}...")
+    
     if not response:
+        print(f"   ❌ Empty response from LLM")
         return {
             "success": False,
             "message": "Empty response from LLM",
@@ -238,15 +319,32 @@ def extract_json(response: str, available_files_with_columns: dict = None, user_
 
     # Extract JSON from response (handles markdown code blocks)
     raw = _extract_outer_json_text(response)
+    print(f"   Raw JSON extracted: {raw[:200]}...")
     
     try:
         obj = json.loads(raw)
         logger.info(f"✅ Successfully extracted JSON from LLM response")
         logger.info(f"🔍 Extracted JSON: {json.dumps(obj, indent=2)}")
+        
+        # 🔍 CONSOLE LOGGING: Filter analysis in extracted JSON
+        print(f"   ✅ JSON extraction successful")
+        if isinstance(obj, dict) and 'chart_json' in obj:
+            charts = obj.get('chart_json', [])
+            print(f"   📊 Found {len(charts)} charts")
+            for i, chart in enumerate(charts):
+                filters = chart.get('filters', {})
+                print(f"   📊 Chart {i+1} filters: {filters}")
+                if filters:
+                    print(f"   🔍 Chart {i+1} has filters with values: {filters}")
+                else:
+                    print(f"   🔍 Chart {i+1} has no filters")
+        
         return obj
     except Exception as e:
         logger.error(f"❌ JSON parse failed: {e}")
         logger.error(f"🔍 Raw response that failed: {response[:500]}...")
+        print(f"   ❌ JSON parse failed: {e}")
+        print(f"   🔍 Raw response that failed: {response[:500]}...")
         
         # Try one more time with simple brace matching
         try:
@@ -255,9 +353,11 @@ def extract_json(response: str, available_files_with_columns: dict = None, user_
             if start != -1 and end != -1 and end > start:
                 obj = json.loads(response[start:end+1])
                 logger.info(f"✅ Successfully extracted JSON with fallback method")
+                print(f"   ✅ JSON extraction successful with fallback method")
                 return obj
         except Exception as e2:
             logger.error(f"❌ Fallback JSON parse also failed: {e2}")
+            print(f"   ❌ Fallback JSON parse also failed: {e2}")
         
         return {
             "success": False,
