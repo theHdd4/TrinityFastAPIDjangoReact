@@ -192,10 +192,28 @@ const FilterDimensionButton: React.FC<{
 const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChange }) => {
   const heatmapRef = useRef<SVGSVGElement>(null);
   const timeSeriesRef = useRef<SVGSVGElement>(null);
+  const [canvasWidth, setCanvasWidth] = useState(0);
   const auxPanelActive = useLaboratoryStore(state => state.auxPanelActive);
-  
+
   // Determine if we're in compact mode (when auxiliary panels are open)
   const isCompactMode = auxPanelActive !== null;
+
+  // Recalculate canvas width whenever its container resizes
+  useEffect(() => {
+    const container = heatmapRef.current?.parentElement;
+    if (!container) return;
+
+    const observer = new ResizeObserver(entries => {
+      for (const entry of entries) {
+        setCanvasWidth(entry.contentRect.width);
+      }
+    });
+
+    observer.observe(container);
+    setCanvasWidth(container.clientWidth);
+
+    return () => observer.disconnect();
+  }, []);
 
   // Filter management functions
   const handleFilterValuesChange = (columnName: string, newValues: string[]) => {
@@ -443,7 +461,7 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
     svg.selectAll("*").remove();
 
     // Determine container width for responsive layout
-    const containerWidth = heatmapRef.current.parentElement?.clientWidth || 800;
+    const containerWidth = canvasWidth || 800;
     const margin = { top: 80, right: 80, bottom: 180, left: 80 };
     const width = containerWidth - margin.left - margin.right;
 
@@ -744,7 +762,7 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
       .attr("font-weight", "600")
       .attr("fill", "hsl(var(--foreground))")
       .text("Strong Negative (-1)");
-  }, [data.correlationMatrix, data.variables, data.isUsingFileData, data.fileData, data.showAllColumns, isCompactMode]);
+  }, [data.correlationMatrix, data.variables, data.isUsingFileData, data.fileData, data.showAllColumns, isCompactMode, canvasWidth]);
 
   // Draw time series chart
   useEffect(() => {
@@ -1110,12 +1128,11 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
       {/* Correlation Heatmap - Full Width */}
       <div className={isCompactMode ? 'mb-4' : 'mb-6'}>
         <Card className="overflow-hidden">
-          <div className={isCompactMode ? 'p-4' : 'p-6'}>
+          <div className={isCompactMode ? 'p-4 flex justify-center' : 'p-6 flex justify-center'}>
             <svg
               ref={heatmapRef}
-              width="100%"
               height={isCompactMode ? '260' : '650'}
-              className="w-full"
+              className="block"
             ></svg>
           </div>
         </Card>
