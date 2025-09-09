@@ -1084,55 +1084,27 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
 
   return (
     <div className={`w-full h-full bg-background ${isCompactMode ? 'p-4' : 'p-6'} overflow-y-auto`}>
-      {/* Header */}
-      <div className={isCompactMode ? 'mb-4' : 'mb-6'}>
-        <div className={`flex items-center justify-between ${isCompactMode ? 'mb-3' : 'mb-4'}`}>
-          <div>
-            <h1 className="text-2xl font-bold text-foreground">Correlation Analysis</h1>
-            <p className="text-muted-foreground text-sm">
-              {data.isUsingFileData && data.fileData 
-                ? ``
-                : 'Upload a dataset to discover relationships between variables'
-              }
+      {/* Show default message when no data is loaded */}
+      {!data.isUsingFileData || !data.fileData ? (
+        <div className="flex flex-col items-center justify-center py-12 space-y-4 bg-muted/20 rounded-lg border-2 border-dashed border-muted-foreground/25">
+          <div className="p-4 bg-muted/50 rounded-full">
+            <BarChart3 className="w-8 h-8 text-muted-foreground" />
+          </div>
+          <div className="text-center space-y-2">
+            <h3 className="text-lg font-semibold text-foreground">No Dataset Loaded</h3>
+            <p className="text-muted-foreground max-w-md">
+              Select a dataset through the Settings tab to start analyzing correlations between your variables.
             </p>
           </div>
-          <Badge variant="outline" className="flex items-center gap-2">
-            <div className={`w-2 h-2 rounded-full ${data.isUsingFileData ? 'bg-blue-500' : 'bg-gray-400'}`}></div>
-            {data.isUsingFileData ? 'File Data' : 'No Data'}
-          </Badge>
         </div>
-
-        {/* Show default message when no data is loaded */}
-        {!data.isUsingFileData || !data.fileData ? (
-          <div className="flex flex-col items-center justify-center py-12 space-y-4 bg-muted/20 rounded-lg border-2 border-dashed border-muted-foreground/25">
-            <div className="p-4 bg-muted/50 rounded-full">
-              <BarChart3 className="w-8 h-8 text-muted-foreground" />
-            </div>
-            <div className="text-center space-y-2">
-              <h3 className="text-lg font-semibold text-foreground">No Dataset Loaded</h3>
-              <p className="text-muted-foreground max-w-md">
-                Select a dataset through the Settings tab to start analyzing correlations between your variables.
-              </p>
-            </div>
-          </div>
-        ) : (
-          <>
-            {/* Show All Columns Toggle */}
-            <div className="flex items-center space-x-2 mb-4">
-              <span className="text-xs text-gray-500">Show all columns</span>
-              <Switch
-                checked={data.showAllColumns || false}
-                onCheckedChange={(checked) => onDataChange({ showAllColumns: checked })}
-                className="data-[state=checked]:bg-[#458EE2]"
-              />
-            </div>
-
-            {/* Filter Dimensions - Dynamic from actual data */}
-            <Card className="p-4">
-              <h3 className="text-sm font-semibold text-foreground mb-3 flex items-center gap-2">
-                <Target className="w-4 h-4 text-primary" />
-                Filter Dimensions
-              </h3>
+      ) : (
+        <>
+          {/* Filter Dimensions - Dynamic from actual data */}
+          <Card className="p-4 mb-4">
+            <h3 className="text-sm font-semibold text-foreground mb-3 flex items-center gap-2">
+              <Target className="w-4 h-4 text-primary" />
+              Filter Dimensions
+            </h3>
               
               {/* Show active filter dimensions */}
               {Object.keys(data.settings?.filterDimensions || {}).length > 0 ? (
@@ -1173,59 +1145,69 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
               </div>
             </Card>
 
-      {/* Correlation Heatmap - Full Width */}
-      <div className={isCompactMode ? 'mb-4' : 'mb-6'}>
-        <Card className="overflow-hidden">
-          <div className={isCompactMode ? 'p-4 flex justify-center' : 'p-6 flex justify-center'}>
-            <svg
-              ref={heatmapRef}
-              onContextMenu={(e) => {
-                e.preventDefault();
-                setSettingsPosition({ x: e.clientX, y: e.clientY });
-                setSettingsOpen(true);
-              }}
-              height={isCompactMode ? '260' : '650'}
-              className="block"
-            ></svg>
+          {/* Show All Columns Toggle */}
+          <div className="flex items-center space-x-2 justify-end mb-2">
+            <span className="text-xs text-gray-500">Show all columns</span>
+            <Switch
+              checked={data.showAllColumns || false}
+              onCheckedChange={(checked) => onDataChange({ showAllColumns: checked })}
+              className="data-[state=checked]:bg-[#458EE2]"
+            />
           </div>
-        </Card>
-      </div>
 
-      {/* Time Series + Analysis Setup */}
-      <div className={`grid ${isCompactMode ? 'grid-cols-1 gap-4' : 'grid-cols-12 gap-6'}`}>
-        {/* Time Series Chart */}
-        <div className={isCompactMode ? '' : 'col-span-8'}>
-          <Card className="overflow-hidden">
-            <div className={`${isCompactMode ? 'p-3' : 'p-4'} border-b bg-muted/30`}>
-              <h3 className={`font-semibold text-foreground flex items-center gap-2 ${isCompactMode ? 'text-sm' : ''}`}>
-                <TrendingUp className={`${isCompactMode ? 'w-3 h-3' : 'w-4 h-4'} text-primary`} />
-                Time Series Comparison
-              </h3>
-              {!isCompactMode && (
-                <p className="text-sm text-muted-foreground mt-1">
-                  {data.selectedVar1 && data.selectedVar2 
-                    ? `Visualize how ${data.selectedVar1} and ${data.selectedVar2} change over time`
-                    : 'Click on a heatmap cell to compare variables over time'
-                  }
-                </p>
-              )}
-            </div>
-            <div className={isCompactMode ? 'p-4' : 'p-6'}>
-              <svg ref={timeSeriesRef} width="100%" height={isCompactMode ? "150" : "300"} className="w-full"></svg>
-            </div>
-          </Card>
-        </div>
+          {/* Correlation Heatmap - Full Width */}
+          <div className={isCompactMode ? 'mb-4' : 'mb-6'}>
+            <Card className="overflow-hidden">
+              <div className={isCompactMode ? 'p-4 flex justify-center' : 'p-6 flex justify-center'}>
+                <svg
+                  ref={heatmapRef}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    setSettingsPosition({ x: e.clientX, y: e.clientY });
+                    setSettingsOpen(true);
+                  }}
+                  height={isCompactMode ? '260' : '650'}
+                  className="block"
+                ></svg>
+              </div>
+            </Card>
+          </div>
 
-        {/* Analysis Setup */}
-        <div className={isCompactMode ? '' : 'col-span-4'}>
-          <Card className="overflow-hidden">
-            <div className={`${isCompactMode ? 'p-2' : 'p-4'} border-b bg-muted/30`}>
-              <h3 className={`font-semibold text-foreground flex items-center gap-2 ${isCompactMode ? 'text-sm' : ''}`}>
-                <BarChart3 className={`${isCompactMode ? 'w-3 h-3' : 'w-4 h-4'} text-primary`} />
-                Analysis Setup
-              </h3>
+          {/* Time Series + Analysis Setup */}
+          <div className={`grid ${isCompactMode ? 'grid-cols-1 gap-4' : 'grid-cols-12 gap-6'}`}>
+            {/* Time Series Chart */}
+            <div className={`${isCompactMode ? '' : 'col-span-8'} h-full`}>
+              <Card className="overflow-hidden h-full flex flex-col">
+                <div className={`${isCompactMode ? 'p-3' : 'p-4'} border-b bg-muted/30`}>
+                  <h3 className={`font-semibold text-foreground flex items-center gap-2 ${isCompactMode ? 'text-sm' : ''}`}>
+                    <TrendingUp className={`${isCompactMode ? 'w-3 h-3' : 'w-4 h-4'} text-primary`} />
+                    Time Series Comparison
+                  </h3>
+                  {!isCompactMode && (
+                    <p className="text-sm text-muted-foreground mt-1">
+                      {data.selectedVar1 && data.selectedVar2
+                        ? `Visualize how ${data.selectedVar1} and ${data.selectedVar2} change over time`
+                        : 'Click on a heatmap cell to compare variables over time'
+                      }
+                    </p>
+                  )}
+                </div>
+                <div className={`${isCompactMode ? 'p-4' : 'p-6'} flex-1`}>
+                  <svg ref={timeSeriesRef} width="100%" height={isCompactMode ? "150" : "300"} className="w-full"></svg>
+                </div>
+              </Card>
             </div>
-            <div className={`${isCompactMode ? 'p-3 space-y-2' : 'p-4 space-y-4'}`}>
+
+            {/* Analysis Setup */}
+            <div className={`${isCompactMode ? '' : 'col-span-4'} h-full`}>
+              <Card className="overflow-hidden h-full flex flex-col">
+                <div className={`${isCompactMode ? 'p-2' : 'p-4'} border-b bg-muted/30`}>
+                  <h3 className={`font-semibold text-foreground flex items-center gap-2 ${isCompactMode ? 'text-sm' : ''}`}>
+                    <BarChart3 className={`${isCompactMode ? 'w-3 h-3' : 'w-4 h-4'} text-primary`} />
+                    Analysis Setup
+                  </h3>
+                </div>
+                <div className={`${isCompactMode ? 'p-3 space-y-2' : 'p-4 space-y-4'} flex-1`}>
 
               {/* Correlation Result */}
               <div className={`bg-muted/50 rounded-lg ${isCompactMode ? 'p-3' : 'p-4'} border`}>
@@ -1274,9 +1256,8 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
           </Card>
         </div>
       </div>
-          </>
-        )}
-      </div>
+        </>
+      )}
       <MatrixSettingsTray
         open={settingsOpen}
         position={settingsPosition}
