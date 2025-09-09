@@ -101,9 +101,9 @@ const MatrixSettingsTray: React.FC<MatrixSettingsTrayProps> = ({
     setLocalSettings(settings);
   }, [settings]);
 
-  // Close when clicking outside
+  // Close when clicking or right-clicking outside
   useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
+    const handleOutside = (e: MouseEvent) => {
       const target = e.target as Element;
       const outsideMenu = !target.closest('.matrix-settings-menu');
       const outsideSubmenu = !target.closest('.color-submenu');
@@ -114,8 +114,12 @@ const MatrixSettingsTray: React.FC<MatrixSettingsTrayProps> = ({
     };
 
     if (open || showColorSubmenu) {
-      document.addEventListener('click', handleClickOutside, false);
-      return () => document.removeEventListener('click', handleClickOutside, false);
+      document.addEventListener('mousedown', handleOutside, false);
+      document.addEventListener('contextmenu', handleOutside, false);
+      return () => {
+        document.removeEventListener('mousedown', handleOutside, false);
+        document.removeEventListener('contextmenu', handleOutside, false);
+      };
     }
   }, [open, showColorSubmenu, onOpenChange]);
 

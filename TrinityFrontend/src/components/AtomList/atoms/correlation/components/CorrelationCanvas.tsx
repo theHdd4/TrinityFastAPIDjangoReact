@@ -556,6 +556,8 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
     const dataKey = JSON.stringify({
       matrix: data.correlationMatrix,
       variables: data.variables,
+      theme: matrixSettings.theme,
+      filters: data.settings?.filterDimensions,
     });
     const shouldAnimate = prevMatrixRef.current !== dataKey;
     prevMatrixRef.current = dataKey;
