@@ -1377,10 +1377,10 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
 
           {/* Settings hint and Show All Columns Toggle */}
           <div
-            className="flex items-center justify-between w-full pr-4 mb-2"
+            className="flex items-center w-full pr-4 mb-2"
             style={{ width: canvasWidth }}
           >
-            <span className="text-xs text-gray-500">
+            <span className="flex-1 text-center text-xs text-gray-500">
               Right click on matrix to open settings
             </span>
             <div className="flex items-center space-x-2">
@@ -1404,14 +1404,14 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
                     ? "p-4 flex justify-center"
                     : "p-6 flex justify-center"
                 }
-                onContextMenu={(e) => {
-                  e.preventDefault();
-                  setSettingsPosition({ x: e.clientX, y: e.clientY });
-                  setSettingsOpen(true);
-                }}
               >
                 <svg
                   ref={heatmapRef}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    setSettingsPosition({ x: e.clientX, y: e.clientY });
+                    setSettingsOpen(true);
+                  }}
                   height={isCompactMode ? "260" : "650"}
                   className="block"
                 ></svg>
