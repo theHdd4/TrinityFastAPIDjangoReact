@@ -27,6 +27,7 @@ interface ColumnClassifierCanvasProps {
   showColumnView: boolean;
   filterUnique: boolean;
   onFilterToggle: (val: boolean) => void;
+  atomId?: string;
 }
 
 const ColumnClassifierCanvas: React.FC<ColumnClassifierCanvasProps> = ({
@@ -36,6 +37,7 @@ const ColumnClassifierCanvas: React.FC<ColumnClassifierCanvasProps> = ({
   showColumnView,
   filterUnique,
   onFilterToggle,
+  atomId,
 }) => {
   const [activeId, setActiveId] = useState<string | null>(null);
 
@@ -238,6 +240,7 @@ const ColumnClassifierCanvas: React.FC<ColumnClassifierCanvasProps> = ({
               columns={columnsByCategory}
               filterUnique={filterUnique}
               onFilterToggle={onFilterToggle}
+              atomId={atomId}
             />
           )}
           <div className="grid grid-cols-3 gap-6">

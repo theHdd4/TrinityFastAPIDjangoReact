@@ -4,9 +4,14 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Save, Eye, Calculator, Trash2, Plus, ChevronUp, ChevronDown } from 'lucide-react';
+import Table from "@/templates/tables/table";
+import createColumn from "../index";
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSub, ContextMenuSubContent, ContextMenuSubTrigger, ContextMenuTrigger, ContextMenuSeparator } from '@/components/ui/context-menu';
+import { ArrowUp, ArrowDown, FilterIcon } from 'lucide-react';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useToast } from '@/hooks/use-toast';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { CREATECOLUMN_API, FEATURE_OVERVIEW_API } from '@/lib/api';
@@ -59,6 +64,17 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
   // Get columns from atom settings (from selected data source)
   const atom = useLaboratoryStore(state => state.getAtom(atomId));
   const updateSettings = useLaboratoryStore(state => state.updateAtomSettings);
+  
+  // Get input file name for clickable subtitle
+  const inputFileName = atom?.settings?.dataSource || '';
+
+  // Handle opening the input file in a new tab
+  const handleViewDataClick = () => {
+    if (inputFileName && atomId) {
+      window.open(`/dataframe?name=${encodeURIComponent(inputFileName)}`, '_blank');
+    }
+  };
+
   // Only show numerical columns
   const allColumns: any[] = Array.isArray(atom?.settings?.allColumns) ? atom.settings.allColumns : [];
   const numericalColumns: string[] = allColumns.filter((c: any) =>
@@ -159,6 +175,25 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
   const [catColumns, setCatColumns] = useState<string[]>([]);
   const [showCatSelector, setShowCatSelector] = useState(false);
   const [identifiersCollapsed, setIdentifiersCollapsed] = useState(false);
+
+  // Cardinality View state
+  const [cardinalityData, setCardinalityData] = useState<any[]>([]);
+  const [cardinalityLoading, setCardinalityLoading] = useState(false);
+  const [cardinalityError, setCardinalityError] = useState<string | null>(null);
+  
+  // Sorting and filtering state for Cardinality View
+  const [sortColumn, setSortColumn] = useState<string>('unique_count');
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
+  const [columnFilters, setColumnFilters] = useState<Record<string, string[]>>({});
+  
+  // Pagination state for results
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize] = useState(20);
+  
+  // Sorting and filtering state for results
+  const [resultsSortColumn, setResultsSortColumn] = useState<string>('');
+  const [resultsSortDirection, setResultsSortDirection] = useState<'asc' | 'desc'>('asc');
+  const [resultsColumnFilters, setResultsColumnFilters] = useState<{ [key: string]: string[] }>({});
 
   // Clear error when operations change
   React.useEffect(() => {
@@ -575,24 +610,576 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
   ];
   const hasIdentifierOp = operations.some(op => identifierOps.includes(op.type));
 
-  if (operations.length === 0) {
+  // Fetch cardinality data
+  const fetchCardinalityData = async () => {
+    if (!atom?.settings?.dataSource) return;
+    
+    setCardinalityLoading(true);
+    setCardinalityError(null);
+    
+    try {
+      const res = await fetch(
+        `${FEATURE_OVERVIEW_API}/column_summary?object_name=${encodeURIComponent(atom.settings.dataSource)}`
+      );
+      
+      if (!res.ok) {
+        setCardinalityError('Failed to fetch cardinality data');
+        return;
+      }
+      
+      const data = await res.json();
+      const summary = Array.isArray(data.summary) ? data.summary.filter(Boolean) : [];
+      
+      // Transform the data to match the expected format
+      const cardinalityData = summary.map((col: any) => ({
+        column: col.column,
+        data_type: col.data_type,
+        unique_count: col.unique_count,
+        unique_values: col.unique_values || []
+      }));
+      
+      setCardinalityData(cardinalityData);
+    } catch (e: any) {
+      setCardinalityError(e.message || 'Error fetching cardinality data');
+    } finally {
+      setCardinalityLoading(false);
+    }
+  };
+
+  // Cardinality filtering and sorting logic
+  const displayedCardinality = React.useMemo(() => {
+    let filtered = Array.isArray(cardinalityData) ? cardinalityData : [];
+
+    // Filter out columns with unique_count = 0 (only exclude zero values)
+    filtered = filtered.filter(c => c.unique_count > 0);
+
+    // Apply column filters
+    Object.entries(columnFilters).forEach(([column, values]) => {
+      if (Array.isArray(values) && values.length > 0) {
+        filtered = filtered.filter(item => {
+          const itemValue = item[column];
+          return values.some(value => 
+            String(itemValue).toLowerCase().includes(String(value).toLowerCase())
+          );
+        });
+      }
+    });
+
+    // Apply sorting
+    if (sortColumn) {
+      filtered.sort((a, b) => {
+        const aVal = a[sortColumn];
+        const bVal = b[sortColumn];
+        
+        if (typeof aVal === 'number' && typeof bVal === 'number') {
+          return sortDirection === 'asc' ? aVal - bVal : bVal - aVal;
+        }
+        
+        const aStr = String(aVal).toLowerCase();
+        const bStr = String(bVal).toLowerCase();
+        return sortDirection === 'asc' 
+          ? aStr.localeCompare(bStr)
+          : bStr.localeCompare(aStr);
+      });
+    }
+
+    return filtered;
+  }, [cardinalityData, columnFilters, sortColumn, sortDirection]);
+
+  // Sorting and filtering functions
+  const handleSort = (column: string, direction: 'asc' | 'desc') => {
+    setSortColumn(column);
+    setSortDirection(direction);
+  };
+
+  const handleColumnFilter = (column: string, values: string[]) => {
+    setColumnFilters(prev => ({
+      ...prev,
+      [column]: values
+    }));
+  };
+
+  const clearColumnFilter = (column: string) => {
+    setColumnFilters(prev => {
+      const newFilters = { ...prev };
+      delete newFilters[column];
+      return newFilters;
+    });
+  };
+
+  const getUniqueColumnValues = (column: string): string[] => {
+    let filteredData = Array.isArray(cardinalityData) ? cardinalityData : [];
+    
+    // Apply other active filters to get context-aware unique values
+    Object.entries(columnFilters).forEach(([filterColumn, values]) => {
+      if (filterColumn !== column && Array.isArray(values) && values.length > 0) {
+        filteredData = filteredData.filter(item => {
+          const itemValue = item[filterColumn];
+          return values.some(value => 
+            String(itemValue).toLowerCase().includes(String(value).toLowerCase())
+          );
+        });
+      }
+    });
+
+    // Filter out columns with unique_count = 0
+    filteredData = filteredData.filter(c => c.unique_count > 0);
+
+    const uniqueValues = [...new Set(filteredData.map(item => String(item[column])))];
+    return uniqueValues.sort();
+  };
+
+  const FilterMenu = ({ column }: { column: string }) => {
+    const [temp, setTemp] = useState<string[]>([]);
+    const [selectAll, setSelectAll] = useState(false);
+    const uniqueValues = getUniqueColumnValues(column);
+    const currentFilters = columnFilters[column] || [];
+
+    React.useEffect(() => {
+      setTemp(currentFilters);
+      setSelectAll(currentFilters.length === uniqueValues.length && uniqueValues.length > 0);
+    }, [currentFilters, uniqueValues.length]);
+
+    const handleSelectAll = () => {
+      if (selectAll) {
+        setTemp([]);
+        setSelectAll(false);
+      } else {
+        setTemp(uniqueValues);
+        setSelectAll(true);
+      }
+    };
+
+    const apply = () => {
+      handleColumnFilter(column, temp);
+    };
+
+    const cancel = () => {
+      setTemp(currentFilters);
+      setSelectAll(currentFilters.length === uniqueValues.length && uniqueValues.length > 0);
+    };
+
     return (
-      <Card className="h-full flex items-center justify-center">
-        <CardContent className="text-center">
-          <Calculator className="w-16 h-16 text-gray-400 mx-auto mb-4" />
-          <h3 className="text-lg font-semibold text-gray-900 mb-2">No Operations Selected</h3>
-          <p className="text-gray-600">
-            Go to Settings tab to select operations for creating new columns
-          </p>
-        </CardContent>
-      </Card>
+      <div className="p-3 max-h-64 overflow-y-auto">
+        <div className="flex items-center justify-between mb-2">
+          <Checkbox
+            checked={selectAll}
+            onCheckedChange={handleSelectAll}
+          />
+          <span className="text-sm font-medium">Select All</span>
+        </div>
+        <div className="space-y-1 mb-3">
+          {uniqueValues.map(value => (
+            <div key={value} className="flex items-center space-x-2">
+              <Checkbox
+                checked={temp.includes(value)}
+                onCheckedChange={(checked) => {
+                  if (checked) {
+                    setTemp([...temp, value]);
+                  } else {
+                    setTemp(temp.filter(v => v !== value));
+                  }
+                }}
+              />
+              <span className="text-sm">{value}</span>
+            </div>
+          ))}
+        </div>
+        <div className="flex space-x-2">
+          <Button size="sm" onClick={apply} className="flex-1">
+            Apply
+          </Button>
+          <Button size="sm" variant="outline" onClick={cancel} className="flex-1">
+            Cancel
+          </Button>
+        </div>
+      </div>
     );
-  }
+  };
 
+  // Fetch cardinality data on mount or when dataSource changes
+  React.useEffect(() => {
+    if (atom?.settings?.dataSource) {
+      fetchCardinalityData();
+    }
+  }, [atom?.settings?.dataSource]);
 
+  // Filtering and sorting logic for results (applied to whole dataset)
+  const allFilteredResults = React.useMemo(() => {
+    if (preview.length === 0) return [];
+    
+    let filtered = [...preview];
+    
+    // Apply column filters
+    Object.entries(resultsColumnFilters).forEach(([column, filterValues]) => {
+      if (Array.isArray(filterValues) && filterValues.length > 0) {
+        filtered = filtered.filter(row => 
+          filterValues.includes(String(row[column] || ''))
+        );
+      }
+    });
+    
+    // Apply sorting
+    if (resultsSortColumn) {
+      filtered = [...filtered].sort((a, b) => {
+        const aVal = a[resultsSortColumn];
+        const bVal = b[resultsSortColumn];
+        
+        // Handle null/undefined values
+        if (aVal == null && bVal == null) return 0;
+        if (aVal == null) return resultsSortDirection === 'asc' ? 1 : -1;
+        if (bVal == null) return resultsSortDirection === 'asc' ? -1 : 1;
+        
+        // Handle numeric values
+        if (typeof aVal === 'number' && typeof bVal === 'number') {
+          return resultsSortDirection === 'asc' ? aVal - bVal : bVal - aVal;
+        }
+        
+        // Handle string values
+        const aStr = String(aVal).toLowerCase();
+        const bStr = String(bVal).toLowerCase();
+        return resultsSortDirection === 'asc' 
+          ? aStr.localeCompare(bStr)
+          : bStr.localeCompare(aStr);
+      });
+    }
+    
+    return filtered;
+  }, [preview, resultsColumnFilters, resultsSortColumn, resultsSortDirection]);
+
+  // Pagination logic for results
+  const displayedResults = React.useMemo(() => {
+    const startIndex = (currentPage - 1) * pageSize;
+    const endIndex = startIndex + pageSize;
+    return allFilteredResults.slice(startIndex, endIndex);
+  }, [allFilteredResults, currentPage, pageSize]);
+
+  const totalPages = Math.ceil(allFilteredResults.length / pageSize);
+
+  const handlePageChange = (page: number) => {
+    setCurrentPage(page);
+  };
+
+  const handleResultsSort = (column: string, direction?: 'asc' | 'desc') => {
+    if (resultsSortColumn === column) {
+      if (resultsSortDirection === 'asc') {
+        setResultsSortDirection('desc');
+      } else if (resultsSortDirection === 'desc') {
+        setResultsSortColumn('');
+        setResultsSortDirection('asc');
+      }
+    } else {
+      setResultsSortColumn(column);
+      setResultsSortDirection(direction || 'asc');
+    }
+  };
+
+  const handleResultsColumnFilter = (column: string, values: string[]) => {
+    setResultsColumnFilters(prev => ({
+      ...prev,
+      [column]: values
+    }));
+  };
+
+  const clearResultsColumnFilter = (column: string) => {
+    setResultsColumnFilters(prev => {
+      const cpy = { ...prev };
+      delete cpy[column];
+      return cpy;
+    });
+  };
+
+  const getResultsUniqueColumnValues = (column: string): string[] => {
+    if (!preview.length) return [];
+
+    // Apply other active filters to get hierarchical filtering
+    const otherFilters = Object.entries(resultsColumnFilters).filter(([key]) => key !== column);
+    let dataToUse = preview;
+
+    if (otherFilters.length > 0) {
+      dataToUse = preview.filter(item => {
+        return otherFilters.every(([filterColumn, filterValues]) => {
+          if (!Array.isArray(filterValues) || filterValues.length === 0) return true;
+          const cellValue = String(item[filterColumn] || '');
+          return filterValues.includes(cellValue);
+        });
+      });
+    }
+
+    const values = dataToUse.map(item => String(item[column] || ''));
+    const uniqueValues = Array.from(new Set(values));
+    return uniqueValues.sort() as string[];
+  };
+
+  const ResultsFilterMenu = ({ column }: { column: string }) => {
+    const uniqueValues = getResultsUniqueColumnValues(column);
+    const current = resultsColumnFilters[column] || [];
+    const [temp, setTemp] = useState<string[]>(current);
+
+    const toggleVal = (val: string) => {
+      setTemp(prev => (prev.includes(val) ? prev.filter(v => v !== val) : [...prev, val]));
+    };
+
+    const selectAll = () => {
+      setTemp(temp.length === uniqueValues.length ? [] : uniqueValues);
+    };
+
+    const apply = () => {
+      handleResultsColumnFilter(column, temp);
+      setCurrentPage(1); // Reset to first page when filtering
+    };
+
+    return (
+      <div className="w-64 max-h-80 overflow-y-auto">
+        <div className="p-2 border-b">
+          <div className="flex items-center space-x-2 mb-2">
+            <Checkbox checked={temp.length === uniqueValues.length} onCheckedChange={selectAll} />
+            <span className="text-sm font-medium">Select All</span>
+          </div>
+        </div>
+        <div className="p-2 space-y-1">
+          {uniqueValues.map((v, i) => (
+            <div key={i} className="flex items-center space-x-2">
+              <Checkbox checked={temp.includes(v)} onCheckedChange={() => toggleVal(v)} />
+              <span className="text-sm">{v}</span>
+            </div>
+          ))}
+        </div>
+        <div className="p-2 border-t flex space-x-2">
+          <Button size="sm" onClick={apply}>Apply</Button>
+          <Button size="sm" variant="outline" onClick={() => setTemp(current)}>
+            Cancel
+          </Button>
+        </div>
+      </div>
+    );
+  };
+
+  // Reset to first page when new results are loaded
+  React.useEffect(() => {
+    setCurrentPage(1);
+  }, [preview]);
 
   return (
     <div className="space-y-6 h-full">
+      {/* Cardinality View - Show immediately after dataset input */}
+      {atom?.settings?.dataSource && (
+        <div className="space-y-4">
+          {cardinalityLoading && (
+            <div className="flex items-center justify-center p-8">
+              <div className="text-center">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-green-500 mx-auto mb-2"></div>
+                <span className="text-green-600">Loading cardinality data...</span>
+              </div>
+            </div>
+          )}
+          
+          {cardinalityError && (
+            <div className="p-4 bg-red-50 border border-red-200 rounded-md">
+              <p className="text-red-600 text-sm">Error loading cardinality data: {cardinalityError}</p>
+            </div>
+          )}
+          
+          {!cardinalityLoading && !cardinalityError && displayedCardinality.length > 0 && (
+            <Table
+              headers={[
+                <ContextMenu key="Column">
+                  <ContextMenuTrigger asChild>
+                    <div className="flex items-center gap-1 cursor-pointer">
+                      Column
+                      {sortColumn === 'column' && (
+                        sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />
+                      )}
+                    </div>
+                  </ContextMenuTrigger>
+                  <ContextMenuContent className="w-48 bg-white border border-gray-200 shadow-lg rounded-md">
+                    <ContextMenuSub>
+                      <ContextMenuSubTrigger className="flex items-center">
+                        <ArrowUp className="w-4 h-4 mr-2" /> Sort
+                      </ContextMenuSubTrigger>
+                      <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md">
+                        <ContextMenuItem onClick={() => handleSort('column', 'asc')}>
+                          <ArrowUp className="w-4 h-4 mr-2" /> Ascending
+                        </ContextMenuItem>
+                        <ContextMenuItem onClick={() => handleSort('column', 'desc')}>
+                          <ArrowDown className="w-4 h-4 mr-2" /> Descending
+                        </ContextMenuItem>
+                      </ContextMenuSubContent>
+                    </ContextMenuSub>
+                    <ContextMenuSeparator />
+                    <ContextMenuSub>
+                      <ContextMenuSubTrigger className="flex items-center">
+                        <FilterIcon className="w-4 h-4 mr-2" /> Filter
+                      </ContextMenuSubTrigger>
+                      <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md p-0">
+                        <FilterMenu column="column" />
+                      </ContextMenuSubContent>
+                    </ContextMenuSub>
+                    {columnFilters['column']?.length > 0 && (
+                      <>
+                        <ContextMenuSeparator />
+                        <ContextMenuItem onClick={() => clearColumnFilter('column')}>
+                          Clear Filter
+                        </ContextMenuItem>
+                      </>
+                    )}
+                  </ContextMenuContent>
+                </ContextMenu>,
+                <ContextMenu key="Data type">
+                  <ContextMenuTrigger asChild>
+                    <div className="flex items-center gap-1 cursor-pointer">
+                      Data type
+                      {sortColumn === 'data_type' && (
+                        sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />
+                      )}
+                    </div>
+                  </ContextMenuTrigger>
+                  <ContextMenuContent className="w-48 bg-white border border-gray-200 shadow-lg rounded-md">
+                    <ContextMenuSub>
+                      <ContextMenuSubTrigger className="flex items-center">
+                        <ArrowUp className="w-4 h-4 mr-2" /> Sort
+                      </ContextMenuSubTrigger>
+                      <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md">
+                        <ContextMenuItem onClick={() => handleSort('data_type', 'asc')}>
+                          <ArrowUp className="w-4 h-4 mr-2" /> Ascending
+                        </ContextMenuItem>
+                        <ContextMenuItem onClick={() => handleSort('data_type', 'desc')}>
+                          <ArrowDown className="w-4 h-4 mr-2" /> Descending
+                        </ContextMenuItem>
+                      </ContextMenuSubContent>
+                    </ContextMenuSub>
+                    <ContextMenuSeparator />
+                    <ContextMenuSub>
+                      <ContextMenuSubTrigger className="flex items-center">
+                        <FilterIcon className="w-4 h-4 mr-2" /> Filter
+                      </ContextMenuSubTrigger>
+                      <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md p-0">
+                        <FilterMenu column="data_type" />
+                      </ContextMenuSubContent>
+                    </ContextMenuSub>
+                    {columnFilters['data_type']?.length > 0 && (
+                      <>
+                        <ContextMenuSeparator />
+                        <ContextMenuItem onClick={() => clearColumnFilter('data_type')}>
+                          Clear Filter
+                        </ContextMenuItem>
+                      </>
+                    )}
+                  </ContextMenuContent>
+                </ContextMenu>,
+                <ContextMenu key="Unique count">
+                  <ContextMenuTrigger asChild>
+                    <div className="flex items-center gap-1 cursor-pointer">
+                      Unique count
+                      {sortColumn === 'unique_count' && (
+                        sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />
+                      )}
+                    </div>
+                  </ContextMenuTrigger>
+                  <ContextMenuContent className="w-48 bg-white border border-gray-200 shadow-lg rounded-md">
+                    <ContextMenuSub>
+                      <ContextMenuSubTrigger className="flex items-center">
+                        <ArrowUp className="w-4 h-4 mr-2" /> Sort
+                      </ContextMenuSubTrigger>
+                      <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md">
+                        <ContextMenuItem onClick={() => handleSort('unique_count', 'asc')}>
+                          <ArrowUp className="w-4 h-4 mr-2" /> Ascending
+                        </ContextMenuItem>
+                        <ContextMenuItem onClick={() => handleSort('unique_count', 'desc')}>
+                          <ArrowDown className="w-4 h-4 mr-2" /> Descending
+                        </ContextMenuItem>
+                      </ContextMenuSubContent>
+                    </ContextMenuSub>
+                    <ContextMenuSeparator />
+                    <ContextMenuSub>
+                      <ContextMenuSubTrigger className="flex items-center">
+                        <FilterIcon className="w-4 h-4 mr-2" /> Filter
+                      </ContextMenuSubTrigger>
+                      <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md p-0">
+                        <FilterMenu column="unique_count" />
+                      </ContextMenuSubContent>
+                    </ContextMenuSub>
+                    {columnFilters['unique_count']?.length > 0 && (
+                      <>
+                        <ContextMenuSeparator />
+                        <ContextMenuItem onClick={() => clearColumnFilter('unique_count')}>
+                          Clear Filter
+                        </ContextMenuItem>
+                      </>
+                    )}
+                  </ContextMenuContent>
+                </ContextMenu>,
+                "Sample values"
+              ]}
+              colClasses={["w-[30%]", "w-[20%]", "w-[15%]", "w-[35%]"]}
+              bodyClassName="max-h-[484px] overflow-y-auto"
+              defaultMinimized={true}
+              borderColor={`border-${createColumn.color.replace('bg-', '')}`}
+              customHeader={{
+                title: "Cardinality View",
+                subtitle: "Click Here to View Data",
+                subtitleClickable: !!inputFileName && !!atomId,
+                onSubtitleClick: handleViewDataClick
+              }}
+            >
+              {displayedCardinality.map((col, index) => (
+                <tr key={index} className="table-row">
+                  <td className="table-cell">{col.column || col.Column || ''}</td>
+                  <td className="table-cell">{col.data_type || col.Data_Type || ''}</td>
+                  <td className="table-cell">{col.unique_count || col.Unique_Count || 0}</td>
+                  <td className="table-cell">
+                    <div className="flex flex-wrap items-center gap-1">
+                      {Array.isArray(col.unique_values) && col.unique_values.length > 0 ? (
+                        <>
+                          {col.unique_values.slice(0, 2).map((val: any, i: number) => (
+                            <span
+                              key={i}
+                              className="inline-block bg-gray-100 text-gray-800 px-2 py-1 rounded text-xs mr-1 mb-1"
+                            >
+                              {String(val)}
+                            </span>
+                          ))}
+                          {col.unique_values.length > 2 && (
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <span className="flex items-center gap-0.5 text-xs text-slate-600 font-medium cursor-pointer">
+                                  <Plus className="w-3 h-3" />
+                                  {col.unique_values.length - 2} more
+                                </span>
+                              </TooltipTrigger>
+                              <TooltipContent className="text-xs max-w-xs whitespace-pre-wrap">
+                                {col.unique_values
+                                  .slice(2)
+                                  .map((val: any) => String(val))
+                                  .join(', ')}
+                              </TooltipContent>
+                            </Tooltip>
+                          )}
+                        </>
+                      ) : (
+                        <span className="text-gray-400">—</span>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </Table>
+          )}
+        </div>
+      )}
+
+      {/* Show operations message if no operations selected */}
+      {operations.length === 0 && (
+        <Card className="h-full flex items-center justify-center">
+          <CardContent className="text-center">
+            <Calculator className="w-16 h-16 text-gray-400 mx-auto mb-4" />
+            <h3 className="text-lg font-semibold text-gray-900 mb-2">No Operations Selected</h3>
+            <p className="text-gray-600">
+              Go to Settings tab to select operations for creating new columns
+            </p>
+          </CardContent>
+        </Card>
+      )}
       {periodPrompt && (
         <div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-40 z-50">
           <div className="bg-white p-6 rounded shadow-lg flex flex-col items-center">
@@ -668,6 +1255,7 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
         </Card>
       )}
 */}
+
       {/* Operations Configuration with Create Button on top right */}
       <Card>
         <div className="flex items-center justify-between px-4 pt-4 pb-2">
@@ -713,9 +1301,9 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
 
             return (
               <div key={operation.id} className="p-2 border border-blue-200 rounded-lg bg-gray-50 mb-1 flex items-center space-x-3">
-                <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200 min-w-[90px] text-center flex-shrink-0">
+                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-50 border border-green-200 text-green-700 min-w-[90px] text-center flex-shrink-0">
                     {operation.name}
-                  </Badge>
+                  </span>
                 <div className="flex items-center space-x-2 flex-1 min-w-0 overflow-x-auto px-2 custom-scrollbar">
                   {operation.type === 'residual' ? (
                     <>
@@ -992,106 +1580,190 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
 
       {/* Create Column Results */}
       {(preview.length > 0 || (previewFile && previewHeaders.length > 0 && previewData.length > 0) || (previewFile && preview.length > 0)) && !previewLoading && (
-        <Card className="border-0 shadow-xl bg-white/80 backdrop-blur-sm overflow-hidden">
-          <div className="bg-gradient-to-r from-green-500 to-green-600 p-1">
-            <div className="bg-white rounded-sm">
-              <div className="p-4">
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center">
-                    <div className="w-1 h-8 bg-gradient-to-b from-green-500 to-green-600 rounded-full mr-4"></div>
-                    <h3 className="text-xl font-bold text-gray-900">Results</h3>
-                    {preview.length > 0 && (
-                      <Badge variant="outline" className="bg-green-50 border-green-200 text-green-700 ml-3">
-                        {preview.length.toLocaleString()} rows • {Object.keys(preview[0] || {}).length} columns
-                      </Badge>
-                    )}
-                    {previewHeaders.length > 0 && previewData.length > 0 && (
-                      <Badge variant="outline" className="bg-green-50 border-green-200 text-green-700 ml-3">
-                        {previewData.length.toLocaleString()} rows • {previewHeaders.length} columns
-                      </Badge>
-                    )}
-                  </div>
-                  <div className="flex items-center">
-                    <Button
-                      onClick={handleSaveDataFrame}
-                      disabled={saveLoading}
-                      className="bg-blue-600 hover:bg-blue-700 text-white"
-                    >
-                      {saveLoading ? 'Saving...' : 'Save DataFrame'}
-                    </Button>
-                    {saveError && <span className="text-red-600 text-sm ml-2">{saveError}</span>}
-                    {saveSuccess && <span className="text-green-600 text-sm ml-2">Saved!</span>}
-                  </div>
-                </div>
-
+        <div className="p-4">
                 {((!previewFile && preview.length > 0) || (previewFile && preview.length > 0 && previewHeaders.length === 0)) && (
-                  <div className="rounded-md border border-green-100">
-                    <Table className="min-w-full" maxHeight="max-h-96">
-                      <TableHeader>
-                        <TableRow>
-                          {Object.keys(preview[0]).map((header, index) => (
-                            <TableHead key={index} className="sticky top-0 z-30 bg-green-50 border-b border-green-200 font-bold text-gray-800 text-center py-4">{header}</TableHead>
-                          ))}
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {preview.slice(0, 20).map((row, rowIndex) => (
-                          <TableRow
-                            key={rowIndex}
-                            className="bg-white hover:bg-gray-50 transition-all duration-200 border-b border-gray-100"
+                  <Table
+                    headers={Object.keys(preview[0] || {}).map(header => (
+                      <ContextMenu key={header}>
+                        <ContextMenuTrigger asChild>
+                          <div className="flex items-center gap-1 cursor-pointer">
+                            {header}
+                            {resultsSortColumn === header && (
+                              resultsSortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />
+                            )}
+                          </div>
+                        </ContextMenuTrigger>
+                        <ContextMenuContent className="w-48 bg-white border border-gray-200 shadow-lg rounded-md">
+                          <ContextMenuSub>
+                            <ContextMenuSubTrigger className="flex items-center">
+                              <ArrowUp className="w-4 h-4 mr-2" /> Sort
+                            </ContextMenuSubTrigger>
+                            <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md">
+                              <ContextMenuItem onClick={() => handleResultsSort(header, 'asc')}>
+                                <ArrowUp className="w-4 h-4 mr-2" /> Ascending
+                              </ContextMenuItem>
+                              <ContextMenuItem onClick={() => handleResultsSort(header, 'desc')}>
+                                <ArrowDown className="w-4 h-4 mr-2" /> Descending
+                              </ContextMenuItem>
+                            </ContextMenuSubContent>
+                          </ContextMenuSub>
+                          <ContextMenuSeparator />
+                          <ContextMenuSub>
+                            <ContextMenuSubTrigger className="flex items-center">
+                              <FilterIcon className="w-4 h-4 mr-2" /> Filter
+                            </ContextMenuSubTrigger>
+                            <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md p-0">
+                              <ResultsFilterMenu column={header} />
+                            </ContextMenuSubContent>
+                          </ContextMenuSub>
+                          {resultsColumnFilters[header]?.length > 0 && (
+                            <>
+                              <ContextMenuSeparator />
+                              <ContextMenuItem onClick={() => clearResultsColumnFilter(header)}>
+                                Clear Filter
+                              </ContextMenuItem>
+                            </>
+                          )}
+                        </ContextMenuContent>
+                      </ContextMenu>
+                    ))}
+                    colClasses={Object.keys(preview[0] || {}).map(() => "w-auto")}
+                    bodyClassName="max-h-[400px] overflow-y-auto"
+                    borderColor={`border-${createColumn.color.replace('bg-', '')}`}
+                    customHeader={{
+                      title: "Results",
+                      controls: (
+                        <>
+                          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-50 border border-green-200 text-green-700">
+                            {allFilteredResults.length.toLocaleString()} rows • {Object.keys(preview[0] || {}).length} columns
+                          </span>
+                          <Button
+                            onClick={handleSaveDataFrame}
+                            disabled={saveLoading}
+                            className="bg-blue-600 hover:bg-blue-700 text-white"
                           >
-                            {Object.keys(row).map((header, colIndex) => (
-                              <TableCell key={colIndex} className="py-4 text-center font-medium text-gray-700">
-                                {row[header] !== null && row[header] !== undefined && row[header] !== '' ? (
-                                  typeof row[header] === 'number' ? row[header] : String(row[header])
-                                ) : (
-                                  <Badge variant="outline" className="text-gray-500">null</Badge>
-                                )}
-                              </TableCell>
-                            ))}
-                          </TableRow>
+                            {saveLoading ? 'Saving...' : 'Save DataFrame'}
+                          </Button>
+                          {saveError && <span className="text-red-600 text-sm ml-2">{saveError}</span>}
+                          {saveSuccess && <span className="text-green-600 text-sm ml-2">Saved!</span>}
+                        </>
+                      )
+                    }}
+                  >
+                    {displayedResults.map((row, rowIndex) => (
+                      <tr key={rowIndex} className="table-row">
+                        {Object.keys(row).map((header, colIndex) => (
+                          <td key={colIndex} className="table-cell">
+                            {row[header] !== null && row[header] !== undefined && row[header] !== '' ? (
+                              typeof row[header] === 'number' ? row[header] : String(row[header])
+                            ) : (
+                              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-500">null</span>
+                            )}
+                          </td>
                         ))}
-                      </TableBody>
-                    </Table>
-                    <div className="text-sm text-gray-500 mt-2">Showing first 20 rows of {preview.length} total rows</div>
-                  </div>
+                      </tr>
+                    ))}
+                  </Table>
+                )}
+                
+                {/* Pagination for main results */}
+                {((!previewFile && preview.length > 0) || (previewFile && preview.length > 0 && previewHeaders.length === 0)) && totalPages > 1 && (
+                  <Card className="mt-4">
+                    <CardContent className="p-4">
+                      <div className="flex items-center justify-between">
+                        <div className="text-sm text-gray-600">
+                          Page {currentPage} of {totalPages}
+                        </div>
+                        <Pagination>
+                          <PaginationContent>
+                            <PaginationItem>
+                              <PaginationPrevious
+                                onClick={() => handlePageChange(Math.max(1, currentPage - 1))}
+                                className={currentPage === 1 ? 'pointer-events-none opacity-50' : 'cursor-pointer'}
+                              />
+                            </PaginationItem>
+                            {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                              let pageNum;
+                              if (totalPages <= 5) {
+                                pageNum = i + 1;
+                              } else if (currentPage <= 3) {
+                                pageNum = i + 1;
+                              } else if (currentPage >= totalPages - 2) {
+                                pageNum = totalPages - 4 + i;
+                              } else {
+                                pageNum = currentPage - 2 + i;
+                              }
+                              return (
+                                <PaginationItem key={pageNum}>
+                                  <PaginationLink
+                                    onClick={() => handlePageChange(pageNum)}
+                                    isActive={currentPage === pageNum}
+                                    className="cursor-pointer"
+                                  >
+                                    {pageNum}
+                                  </PaginationLink>
+                                </PaginationItem>
+                              );
+                            })}
+                            <PaginationItem>
+                              <PaginationNext
+                                onClick={() => handlePageChange(Math.min(totalPages, currentPage + 1))}
+                                className={currentPage === totalPages ? 'pointer-events-none opacity-50' : 'cursor-pointer'}
+                              />
+                            </PaginationItem>
+                          </PaginationContent>
+                        </Pagination>
+                      </div>
+                    </CardContent>
+                  </Card>
                 )}
                 
                 {(previewFile && previewHeaders.length > 0 && previewData.length > 0) && (
-                  <div className="rounded-md border border-green-100">
-                    <Table className="min-w-full" maxHeight="max-h-96">
-                      <TableHeader>
-                        <TableRow>
-                          {previewHeaders.map((header, index) => (
-                            <TableHead key={index} className="sticky top-0 z-30 bg-green-50 border-b border-green-200 font-bold text-gray-800 text-center py-4">{header}</TableHead>
-                          ))}
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {previewData.map((row, rowIndex) => (
-                          <TableRow
-                            key={rowIndex}
-                            className="bg-white hover:bg-gray-50 transition-all duration-200 border-b border-gray-100"
+                  <Table
+                    headers={previewHeaders.map(header => (
+                      <div key={header} className="flex items-center gap-1">
+                        {header}
+                      </div>
+                    ))}
+                    colClasses={previewHeaders.map(() => "w-auto")}
+                    bodyClassName="max-h-[400px] overflow-y-auto"
+                    borderColor={`border-${createColumn.color.replace('bg-', '')}`}
+                    customHeader={{
+                      title: "Results",
+                      controls: (
+                        <>
+                          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-50 border border-green-200 text-green-700">
+                            {previewData.length.toLocaleString()} rows • {previewHeaders.length} columns
+                          </span>
+                          <Button
+                            onClick={handleSaveDataFrame}
+                            disabled={saveLoading}
+                            className="bg-blue-600 hover:bg-blue-700 text-white"
                           >
-                            {previewHeaders.map((header, colIndex) => (
-                              <TableCell key={colIndex} className="py-4 text-center font-medium text-gray-700">
-                                {row[header] !== null && row[header] !== undefined && row[header] !== '' ? (
-                                  typeof row[header] === 'number' ? row[header] : String(row[header])
-                                ) : (
-                                  <Badge variant="outline" className="text-gray-500">null</Badge>
-                                )}
-                              </TableCell>
-                            ))}
-                          </TableRow>
+                            {saveLoading ? 'Saving...' : 'Save DataFrame'}
+                          </Button>
+                          {saveError && <span className="text-red-600 text-sm ml-2">{saveError}</span>}
+                          {saveSuccess && <span className="text-green-600 text-sm ml-2">Saved!</span>}
+                        </>
+                      )
+                    }}
+                  >
+                    {previewData.map((row, rowIndex) => (
+                      <tr key={rowIndex} className="table-row">
+                        {previewHeaders.map((header, colIndex) => (
+                          <td key={colIndex} className="table-cell">
+                            {row[header] !== null && row[header] !== undefined && row[header] !== '' ? (
+                              typeof row[header] === 'number' ? row[header] : String(row[header])
+                            ) : (
+                              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-500">null</span>
+                            )}
+                          </td>
                         ))}
-                      </TableBody>
-                    </Table>
-                  </div>
+                      </tr>
+                    ))}
+                  </Table>
                 )}
-              </div>
-            </div>
-          </div>
-        </Card>
+        </div>
       )}
 
       {/* Pagination */}

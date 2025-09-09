@@ -239,6 +239,9 @@ class GenericModelSelectionRequest(BaseModel):
     model_name: Optional[str] = None
     tags: Optional[List[str]] = Field(default_factory=list)
     description: Optional[str] = None
+    client_name: str = Field(..., description="Client name")
+    app_name: str = Field(..., description="App name")
+    project_name: str = Field(..., description="Project name")
 
 class SavedModelResponse(BaseModel):
     model_id: str

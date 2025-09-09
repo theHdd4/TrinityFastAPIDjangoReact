@@ -53,7 +53,6 @@ const MergeInputFiles: React.FC<MergeInputFilesProps> = ({ settings, onSettingsC
         <div>
           <label className="text-sm font-medium text-gray-700 block mb-2">Primary Source</label>
           <Select value={settings.file1} onValueChange={val => {
-            console.log('Primary file selected:', val);
             onSettingsChange({ ...settings, file1: val });
           }}>
             <SelectTrigger className="bg-blue-50 border border-blue-200 hover:bg-blue-100 transition-colors">
@@ -71,7 +70,6 @@ const MergeInputFiles: React.FC<MergeInputFilesProps> = ({ settings, onSettingsC
         <div>
           <label className="text-sm font-medium text-gray-700 block mb-2">Secondary Source</label>
           <Select value={settings.file2} onValueChange={val => {
-            console.log('Secondary file selected:', val);
             onSettingsChange({ ...settings, file2: val });
           }}>
             <SelectTrigger className="bg-green-50 border border-green-200 hover:bg-green-100 transition-colors">

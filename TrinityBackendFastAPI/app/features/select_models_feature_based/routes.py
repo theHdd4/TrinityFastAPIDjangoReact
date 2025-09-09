@@ -1622,26 +1622,11 @@ async def select_and_save_model_generic(selection_req: GenericModelSelectionRequ
         
         # Also save to select_configs collection with metadata and model results
         try:
-            # Get client, app, and project from object prefix (like build atom)
-            try:
-                object_prefix = await get_object_prefix()
-                prefix_parts = object_prefix.strip('/').split('/')
-                
-                if len(prefix_parts) >= 2:
-                    client_name = prefix_parts[0]
-                    app_name = prefix_parts[1]
-                    project_name = prefix_parts[2] if len(prefix_parts) > 2 else "default_project"
-                    logger.info(f"✅ Extracted client: {client_name}, app: {app_name}, project: {project_name}")
-                else:
-                    client_name = "default_client"
-                    app_name = "default_app"
-                    project_name = "default_project"
-                    logger.warning(f"⚠️ Could not extract client/app/project from prefix: {object_prefix}")
-            except Exception as e:
-                logger.warning(f"⚠️ Failed to get object prefix: {e}")
-                client_name = "default_client"
-                app_name = "default_app"
-                project_name = "default_project"
+            # Get client, app, and project from request parameters (like column classifier)
+            client_name = selection_req.client_name
+            app_name = selection_req.app_name
+            project_name = selection_req.project_name
+            logger.info(f"✅ Using client: {client_name}, app: {app_name}, project: {project_name} from request")
             
             # Get combination_id for creating unique _id
             combination_id = cleaned_dict.get("combination_id") or cleaned_dict.get("Combination_ID") or cleaned_dict.get("combination") or "unknown"
@@ -1924,14 +1909,27 @@ async def select_and_save_model_generic(selection_req: GenericModelSelectionRequ
                             'selected_models': 'yes'
                         }
                         
-                        # Add all other columns with default values or weighted metrics
+                        # Add all other columns with values from existing combination data or weighted metrics
                         for col in df.columns:
                             if col not in ensemble_row:
                                 # Check if this column exists in weighted metrics
                                 if col in weighted_metrics_for_file:
                                     ensemble_row[col] = weighted_metrics_for_file[col]
                                 else:
-                                    ensemble_row[col] = 0.0 if df[col].dtype in ['float64', 'int64'] else ''
+                                    # Get values for this column from existing rows with same combination_id
+                                    combination_rows = df[df['combination_id'] == selected_combination_id]
+                                    if len(combination_rows) > 0:
+                                        # Get unique values for this column in the combination
+                                        unique_values = combination_rows[col].dropna().unique()
+                                        if len(unique_values) == 1:
+                                            # If only one unique value, use that value
+                                            ensemble_row[col] = unique_values[0]
+                                        else:
+                                            # If multiple unique values, use default based on data type
+                                            ensemble_row[col] = 0.0 if df[col].dtype in ['float64', 'int64'] else ''
+                                    else:
+                                        # No existing combination data, use default based on data type
+                                        ensemble_row[col] = 0.0 if df[col].dtype in ['float64', 'int64'] else ''
                         
                         # Append the ensemble row to the dataframe
                         df = pd.concat([df, pd.DataFrame([ensemble_row])], ignore_index=True)
@@ -2271,6 +2269,57 @@ async def get_source_files_from_build_config(
     except Exception as e:
         logger.error(f"Error getting source files: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error getting source files: {str(e)}")
+
+@router.get("/list-model-results-files", tags=["Model Results Files"])
+async def list_model_results_files(
+    client_name: str = Query(..., description="Client name"),
+    app_name: str = Query(..., description="App name"),
+    project_name: str = Query(..., description="Project name"),
+    prefix: str = Query("model-results/", description="Prefix to filter files"),
+    limit: int = Query(100, description="Maximum number of files to return")
+):
+    """List files from the model-results folder in MinIO bucket"""
+    try:
+        if not minio_client:
+            raise HTTPException(status_code=503, detail="MinIO connection is not available.")
+        
+        # Construct the full prefix with client/app/project structure
+        full_prefix = f"{client_name}/{app_name}/{project_name}/{prefix}"
+        
+        # List objects in MinIO bucket with the prefix
+        objects = minio_client.list_objects(
+            MINIO_BUCKET,
+            prefix=full_prefix,
+            recursive=True
+        )
+        
+        files = []
+        count = 0
+        for obj in objects:
+            if count >= limit:
+                break
+                
+            # Only include files with supported extensions
+            if obj.object_name.lower().endswith(('.csv', '.xlsx', '.arrow', '.feather')):
+                files.append({
+                    "object_name": obj.object_name,
+                    "csv_name": obj.object_name,  # For compatibility with frontend
+                    "size": obj.size,
+                    "last_modified": obj.last_modified.isoformat() if obj.last_modified else None
+                })
+                count += 1
+        
+        return {
+            "success": True,
+            "files": files,
+            "total_files": len(files),
+            "prefix": full_prefix,
+            "bucket": MINIO_BUCKET
+        }
+        
+    except Exception as e:
+        logger.error(f"Error listing model results files: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error listing model results files: {str(e)}")
 
 @router.get("/models/actual-vs-predicted-ensemble", tags=["Ensemble Actual vs Predicted"])
 async def calculate_ensemble_actual_vs_predicted(

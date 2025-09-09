@@ -480,6 +480,73 @@ async def list_available_files():
         raise HTTPException(status_code=500, detail=f"Failed to list files: {str(e)}")
 
 
+@router.get("/column_summary")
+async def get_column_summary(object_name: str):
+    """
+    Get column summary information for cardinality view
+    Returns detailed information about each column including:
+    - Column name
+    - Data type
+    - Unique count
+    - Sample unique values
+    """
+    try:
+        print(f"🔍 ===== COLUMN SUMMARY REQUEST =====")
+        print(f"📥 Object name: {object_name}")
+        print(f"🔍 ===== END REQUEST LOG =====")
+        
+        # Check if the file exists in chart maker's in-memory storage
+        if object_name not in chart_service.file_storage:
+            print(f"❌ File {object_name} not found in chart maker storage")
+            raise HTTPException(status_code=404, detail=f"File {object_name} not found in chart maker storage")
+        
+        # Get the dataframe from chart maker's in-memory storage
+        print("🚀 Loading dataframe from chart maker storage...")
+        df = chart_service.get_file(object_name)
+        print(f"✅ Dataframe loaded: {len(df)} rows, {len(df.columns)} columns")
+        
+        # Generate column summary
+        summary = []
+        for column in df.columns:
+            # Get unique values
+            unique_values = df[column].dropna().unique()
+            unique_count = len(unique_values)
+            
+            # Determine data type (same format as feature overview)
+            data_type = str(df[column].dtype)
+            
+            # Get all unique values (no truncation)
+            sample_values = unique_values.tolist()
+            
+            summary.append({
+                "column": column,
+                "data_type": data_type,
+                "unique_count": unique_count,
+                "unique_values": sample_values
+            })
+        
+        print(f"✅ Column summary generated: {len(summary)} columns")
+        print(f"🔍 ===== END RESPONSE LOG =====")
+        
+        # Get the original object name from metadata for dataframe viewer
+        original_name = object_name
+        if object_name in chart_service.file_metadata:
+            metadata = chart_service.file_metadata[object_name]
+            if metadata.get("data_source") == "arrow_flight":
+                original_name = metadata.get("filename", object_name)
+        
+        return {
+            "summary": summary,
+            "original_name": original_name
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error generating column summary: {e}")
+        raise HTTPException(status_code=500, detail=f"Error generating column summary: {str(e)}")
+
+
 @router.get("/health")
 async def health_check():
     """Health check endpoint"""

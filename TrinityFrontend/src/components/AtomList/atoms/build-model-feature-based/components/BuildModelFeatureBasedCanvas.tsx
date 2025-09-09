@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -6,10 +6,20 @@ import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Plus, Play, X, Settings2, Target, Zap, ChevronDown, ChevronRight, BarChart3, TrendingUp, AlertTriangle, Calculator, Minimize2, Maximize2 } from 'lucide-react';
+import { Plus, Play, X, Settings2, Target, Zap, ChevronDown, ChevronRight, BarChart3, TrendingUp, AlertTriangle, Calculator, Minimize2, Maximize2, ArrowUp, ArrowDown, Filter as FilterIcon } from 'lucide-react';
 import { BuildModelFeatureBasedData, VariableTransformation, ModelConfig } from '../BuildModelFeatureBasedAtom';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { BUILD_MODEL_API } from '@/lib/api';
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuSub,
+  ContextMenuSubContent,
+  ContextMenuSubTrigger,
+  ContextMenuTrigger,
+} from '@/components/ui/context-menu';
 
 interface BuildModelFeatureBasedCanvasProps {
   data: BuildModelFeatureBasedData;
@@ -32,6 +42,11 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
   const [scopeSectionExpanded, setScopeSectionExpanded] = useState(true);
   const [modelingSectionExpanded, setModelingSectionExpanded] = useState(true);
   const [minimizedCombinations, setMinimizedCombinations] = useState<Set<number>>(new Set());
+  
+  // Model Performance Metrics sorting and filtering state - per combination
+  const [performanceSortColumn, setPerformanceSortColumn] = useState<{ [comboIndex: number]: string }>({});
+  const [performanceSortDirection, setPerformanceSortDirection] = useState<{ [comboIndex: number]: 'asc' | 'desc' }>({});
+  const [performanceColumnFilters, setPerformanceColumnFilters] = useState<{ [comboIndex: number]: { [key: string]: string[] } }>({});
   
   // Get latest data from store if in Laboratory Mode
   const storeAtom = useLaboratoryStore(state => (atomId ? state.getAtom(atomId) : undefined));
@@ -445,6 +460,221 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
     }
   }, [modelResult?.combination_results]);
 
+  // Model Performance Metrics sorting and filtering functions
+  const getPerformanceUniqueColumnValues = (column: string, modelResults: any[], comboIndex: number): string[] => {
+    if (!modelResults.length) return [];
+    
+    // Apply other active filters to get hierarchical filtering
+    const currentFilters = performanceColumnFilters[comboIndex] || {};
+    const otherFilters = Object.entries(currentFilters).filter(([key]) => key !== column);
+    let dataToUse = modelResults;
+    
+    if (otherFilters.length > 0) {
+      dataToUse = modelResults.filter(model => {
+        return otherFilters.every(([filterColumn, filterValues]) => {
+          if (!Array.isArray(filterValues) || filterValues.length === 0) return true;
+          let cellValue = '';
+          if (filterColumn === 'Model') {
+            cellValue = String(model.model_name || '');
+          } else if (filterColumn === 'MAPE Train') {
+            cellValue = model.mape_train ? String(model.mape_train.toFixed(1)) : 'N/A';
+          } else if (filterColumn === 'MAPE Test') {
+            cellValue = model.mape_test ? String(model.mape_test.toFixed(1)) : 'N/A';
+          } else if (filterColumn === 'R² Train') {
+            cellValue = model.r2_train ? String(model.r2_train.toFixed(1)) : 'N/A';
+          } else if (filterColumn === 'R² Test') {
+            cellValue = model.r2_test ? String(model.r2_test.toFixed(1)) : 'N/A';
+          } else if (filterColumn === 'AIC') {
+            cellValue = model.aic ? String(model.aic.toFixed(1)) : 'N/A';
+          } else if (filterColumn === 'BIC') {
+            cellValue = model.bic ? String(model.bic.toFixed(1)) : 'N/A';
+          }
+          return filterValues.includes(cellValue);
+        });
+      });
+    }
+    
+    const values: string[] = [];
+    dataToUse.forEach(model => {
+      let cellValue = '';
+      if (column === 'Model') {
+        cellValue = String(model.model_name || '');
+      } else if (column === 'MAPE Train') {
+        cellValue = model.mape_train ? String(model.mape_train.toFixed(1)) : 'N/A';
+      } else if (column === 'MAPE Test') {
+        cellValue = model.mape_test ? String(model.mape_test.toFixed(1)) : 'N/A';
+      } else if (column === 'R² Train') {
+        cellValue = model.r2_train ? String(model.r2_train.toFixed(1)) : 'N/A';
+      } else if (column === 'R² Test') {
+        cellValue = model.r2_test ? String(model.r2_test.toFixed(1)) : 'N/A';
+      } else if (column === 'AIC') {
+        cellValue = model.aic ? String(model.aic.toFixed(1)) : 'N/A';
+      } else if (column === 'BIC') {
+        cellValue = model.bic ? String(model.bic.toFixed(1)) : 'N/A';
+      }
+      if (cellValue && !values.includes(cellValue)) {
+        values.push(cellValue);
+      }
+    });
+    
+    return values.sort();
+  };
+
+  const handlePerformanceSort = (column: string, comboIndex: number, direction?: 'asc' | 'desc') => {
+    const currentSortColumn = performanceSortColumn[comboIndex] || '';
+    const currentSortDirection = performanceSortDirection[comboIndex] || 'asc';
+    
+    if (currentSortColumn === column) {
+      if (currentSortDirection === 'asc') {
+        setPerformanceSortDirection(prev => ({ ...prev, [comboIndex]: 'desc' }));
+      } else if (currentSortDirection === 'desc') {
+        setPerformanceSortColumn(prev => ({ ...prev, [comboIndex]: '' }));
+        setPerformanceSortDirection(prev => ({ ...prev, [comboIndex]: 'asc' }));
+      }
+    } else {
+      setPerformanceSortColumn(prev => ({ ...prev, [comboIndex]: column }));
+      setPerformanceSortDirection(prev => ({ ...prev, [comboIndex]: direction || 'asc' }));
+    }
+  };
+
+  const handlePerformanceColumnFilter = (column: string, values: string[], comboIndex: number) => {
+    setPerformanceColumnFilters(prev => ({
+      ...prev,
+      [comboIndex]: {
+        ...prev[comboIndex],
+        [column]: values
+      }
+    }));
+  };
+
+  const clearPerformanceColumnFilter = (column: string, comboIndex: number) => {
+    setPerformanceColumnFilters(prev => {
+      const cpy = { ...prev };
+      if (cpy[comboIndex]) {
+        const comboFilters = { ...cpy[comboIndex] };
+        delete comboFilters[column];
+        cpy[comboIndex] = comboFilters;
+      }
+      return cpy;
+    });
+  };
+
+  const PerformanceFilterMenu = ({ column, modelResults, comboIndex }: { column: string; modelResults: any[]; comboIndex: number }) => {
+    const uniqueValues = getPerformanceUniqueColumnValues(column, modelResults, comboIndex);
+    const current = performanceColumnFilters[comboIndex]?.[column] || [];
+    const [temp, setTemp] = useState<string[]>(current);
+
+    const toggleVal = (val: string) => {
+      setTemp(prev => (prev.includes(val) ? prev.filter(v => v !== val) : [...prev, val]));
+    };
+
+    const selectAll = () => {
+      setTemp(temp.length === uniqueValues.length ? [] : uniqueValues);
+    };
+
+    const apply = () => handlePerformanceColumnFilter(column, temp, comboIndex);
+
+    return (
+      <div className="w-64 max-h-80 overflow-y-auto">
+        <div className="p-2 border-b">
+          <div className="flex items-center space-x-2 mb-2">
+            <Checkbox checked={temp.length === uniqueValues.length} onCheckedChange={selectAll} />
+            <span className="text-sm font-medium">Select All</span>
+          </div>
+        </div>
+        <div className="p-2 space-y-1">
+          {uniqueValues.map((v, i) => (
+            <div key={i} className="flex items-center space-x-2">
+              <Checkbox checked={temp.includes(v)} onCheckedChange={() => toggleVal(v)} />
+              <span className="text-sm">{v}</span>
+            </div>
+          ))}
+        </div>
+        <div className="p-2 border-t flex space-x-2">
+          <Button size="sm" onClick={apply}>Apply</Button>
+          <Button size="sm" variant="outline" onClick={() => setTemp(current)}>
+            Cancel
+          </Button>
+        </div>
+      </div>
+    );
+  };
+
+  const getDisplayedPerformanceResults = (modelResults: any[], comboIndex: number) => {
+    let filtered = [...modelResults];
+    
+    // Apply column filters
+    const currentFilters = performanceColumnFilters[comboIndex] || {};
+    Object.entries(currentFilters).forEach(([column, filterValues]) => {
+      if (Array.isArray(filterValues) && filterValues.length > 0) {
+        filtered = filtered.filter(model => {
+          let cellValue = '';
+          if (column === 'Model') {
+            cellValue = String(model.model_name || '');
+          } else if (column === 'MAPE Train') {
+            cellValue = model.mape_train ? String(model.mape_train.toFixed(1)) : 'N/A';
+          } else if (column === 'MAPE Test') {
+            cellValue = model.mape_test ? String(model.mape_test.toFixed(1)) : 'N/A';
+          } else if (column === 'R² Train') {
+            cellValue = model.r2_train ? String(model.r2_train.toFixed(1)) : 'N/A';
+          } else if (column === 'R² Test') {
+            cellValue = model.r2_test ? String(model.r2_test.toFixed(1)) : 'N/A';
+          } else if (column === 'AIC') {
+            cellValue = model.aic ? String(model.aic.toFixed(1)) : 'N/A';
+          } else if (column === 'BIC') {
+            cellValue = model.bic ? String(model.bic.toFixed(1)) : 'N/A';
+          }
+          return filterValues.includes(cellValue);
+        });
+      }
+    });
+    
+    // Apply sorting
+    const currentSortColumn = performanceSortColumn[comboIndex] || '';
+    const currentSortDirection = performanceSortDirection[comboIndex] || 'asc';
+    
+    if (currentSortColumn) {
+      filtered = [...filtered].sort((a, b) => {
+        let aVal: any = '';
+        let bVal: any = '';
+        
+        if (currentSortColumn === 'Model') {
+          aVal = String(a.model_name || '');
+          bVal = String(b.model_name || '');
+        } else if (currentSortColumn === 'MAPE Train') {
+          aVal = a.mape_train || 0;
+          bVal = b.mape_train || 0;
+        } else if (currentSortColumn === 'MAPE Test') {
+          aVal = a.mape_test || 0;
+          bVal = b.mape_test || 0;
+        } else if (currentSortColumn === 'R² Train') {
+          aVal = a.r2_train || 0;
+          bVal = b.r2_train || 0;
+        } else if (currentSortColumn === 'R² Test') {
+          aVal = a.r2_test || 0;
+          bVal = b.r2_test || 0;
+        } else if (currentSortColumn === 'AIC') {
+          aVal = a.aic || 0;
+          bVal = b.aic || 0;
+        } else if (currentSortColumn === 'BIC') {
+          aVal = a.bic || 0;
+          bVal = b.bic || 0;
+        }
+        
+        if (aVal === bVal) return 0;
+        let comparison = 0;
+        if (typeof aVal === 'number' && typeof bVal === 'number') {
+          comparison = aVal - bVal;
+        } else {
+          comparison = String(aVal).localeCompare(String(bVal));
+        }
+        return currentSortDirection === 'desc' ? -comparison : comparison;
+      });
+    }
+    
+    return filtered;
+  };
+
   return (
     <div className="w-full h-full bg-background p-6 overflow-y-auto">
 
@@ -799,17 +1029,318 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
                               <Table className="bg-white rounded-lg border border-gray-200">
                                 <TableHeader>
                                   <TableRow className="bg-gradient-to-r from-blue-50 to-indigo-50 hover:bg-gradient-to-r hover:from-blue-100 hover:to-indigo-100">
-                                    <TableHead className="font-semibold text-gray-700 bg-blue-50">Model</TableHead>
-                                    <TableHead className="font-semibold text-gray-700">MAPE Train</TableHead>
-                                    <TableHead className="font-semibold text-gray-700">MAPE Test</TableHead>
-                                    <TableHead className="font-semibold text-gray-700">R² Train</TableHead>
-                                    <TableHead className="font-semibold text-gray-700">R² Test</TableHead>
-                                    <TableHead className="font-semibold text-gray-700">AIC</TableHead>
-                                    <TableHead className="font-semibold text-gray-700">BIC</TableHead>
+                                    <TableHead className="font-semibold text-gray-700 bg-blue-50">
+                                      <ContextMenu>
+                                        <ContextMenuTrigger asChild>
+                                          <div className="flex items-center gap-1 cursor-pointer">
+                                            Model
+                                            {(performanceSortColumn[comboIndex] || '') === 'Model' && (
+                                              (performanceSortDirection[comboIndex] || 'asc') === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />
+                                            )}
+                                          </div>
+                                        </ContextMenuTrigger>
+                                        <ContextMenuContent className="w-48 bg-white border border-gray-200 shadow-lg rounded-md">
+                                          <ContextMenuSub>
+                                            <ContextMenuSubTrigger className="flex items-center">
+                                              <ArrowUp className="w-4 h-4 mr-2" /> Sort
+                                            </ContextMenuSubTrigger>
+                                            <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md">
+                                              <ContextMenuItem onClick={() => handlePerformanceSort('Model', comboIndex, 'asc')}>
+                                                <ArrowUp className="w-4 h-4 mr-2" /> Ascending
+                                              </ContextMenuItem>
+                                              <ContextMenuItem onClick={() => handlePerformanceSort('Model', comboIndex, 'desc')}>
+                                                <ArrowDown className="w-4 h-4 mr-2" /> Descending
+                                              </ContextMenuItem>
+                                            </ContextMenuSubContent>
+                                          </ContextMenuSub>
+                                          <ContextMenuSeparator />
+                                          <ContextMenuSub>
+                                            <ContextMenuSubTrigger className="flex items-center">
+                                              <FilterIcon className="w-4 h-4 mr-2" /> Filter
+                                            </ContextMenuSubTrigger>
+                                            <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md p-0">
+                                              <PerformanceFilterMenu column="Model" modelResults={combination.model_results} comboIndex={comboIndex} />
+                                            </ContextMenuSubContent>
+                                          </ContextMenuSub>
+                                          {performanceColumnFilters[comboIndex]?.['Model']?.length > 0 && (
+                                            <>
+                                              <ContextMenuSeparator />
+                                              <ContextMenuItem onClick={() => clearPerformanceColumnFilter('Model', comboIndex)}>
+                                                Clear Filter
+                                              </ContextMenuItem>
+                                            </>
+                                          )}
+                                        </ContextMenuContent>
+                                      </ContextMenu>
+                                    </TableHead>
+                                    <TableHead className="font-semibold text-gray-700">
+                                      <ContextMenu>
+                                        <ContextMenuTrigger asChild>
+                                          <div className="flex items-center gap-1 cursor-pointer">
+                                            MAPE Train
+                                            {(performanceSortColumn[comboIndex] || '') === 'MAPE Train' && (
+                                              (performanceSortDirection[comboIndex] || 'asc') === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />
+                                            )}
+                                          </div>
+                                        </ContextMenuTrigger>
+                                        <ContextMenuContent className="w-48 bg-white border border-gray-200 shadow-lg rounded-md">
+                                          <ContextMenuSub>
+                                            <ContextMenuSubTrigger className="flex items-center">
+                                              <ArrowUp className="w-4 h-4 mr-2" /> Sort
+                                            </ContextMenuSubTrigger>
+                                            <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md">
+                                              <ContextMenuItem onClick={() => handlePerformanceSort('MAPE Train', comboIndex, 'asc')}>
+                                                <ArrowUp className="w-4 h-4 mr-2" /> Ascending
+                                              </ContextMenuItem>
+                                              <ContextMenuItem onClick={() => handlePerformanceSort('MAPE Train', comboIndex, 'desc')}>
+                                                <ArrowDown className="w-4 h-4 mr-2" /> Descending
+                                              </ContextMenuItem>
+                                            </ContextMenuSubContent>
+                                          </ContextMenuSub>
+                                          <ContextMenuSeparator />
+                                          <ContextMenuSub>
+                                            <ContextMenuSubTrigger className="flex items-center">
+                                              <FilterIcon className="w-4 h-4 mr-2" /> Filter
+                                            </ContextMenuSubTrigger>
+                                            <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md p-0">
+                                              <PerformanceFilterMenu column="MAPE Train" modelResults={combination.model_results} comboIndex={comboIndex} />
+                                            </ContextMenuSubContent>
+                                          </ContextMenuSub>
+                                          {performanceColumnFilters[comboIndex]?.['MAPE Train']?.length > 0 && (
+                                            <>
+                                              <ContextMenuSeparator />
+                                              <ContextMenuItem onClick={() => clearPerformanceColumnFilter('MAPE Train', comboIndex)}>
+                                                Clear Filter
+                                              </ContextMenuItem>
+                                            </>
+                                          )}
+                                        </ContextMenuContent>
+                                      </ContextMenu>
+                                    </TableHead>
+                                    <TableHead className="font-semibold text-gray-700">
+                                      <ContextMenu>
+                                        <ContextMenuTrigger asChild>
+                                          <div className="flex items-center gap-1 cursor-pointer">
+                                            MAPE Test
+                                            {(performanceSortColumn[comboIndex] || '') === 'MAPE Test' && (
+                                              (performanceSortDirection[comboIndex] || 'asc') === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />
+                                            )}
+                                          </div>
+                                        </ContextMenuTrigger>
+                                        <ContextMenuContent className="w-48 bg-white border border-gray-200 shadow-lg rounded-md">
+                                          <ContextMenuSub>
+                                            <ContextMenuSubTrigger className="flex items-center">
+                                              <ArrowUp className="w-4 h-4 mr-2" /> Sort
+                                            </ContextMenuSubTrigger>
+                                            <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md">
+                                              <ContextMenuItem onClick={() => handlePerformanceSort('MAPE Test', comboIndex, 'asc')}>
+                                                <ArrowUp className="w-4 h-4 mr-2" /> Ascending
+                                              </ContextMenuItem>
+                                              <ContextMenuItem onClick={() => handlePerformanceSort('MAPE Test', comboIndex, 'desc')}>
+                                                <ArrowDown className="w-4 h-4 mr-2" /> Descending
+                                              </ContextMenuItem>
+                                            </ContextMenuSubContent>
+                                          </ContextMenuSub>
+                                          <ContextMenuSeparator />
+                                          <ContextMenuSub>
+                                            <ContextMenuSubTrigger className="flex items-center">
+                                              <FilterIcon className="w-4 h-4 mr-2" /> Filter
+                                            </ContextMenuSubTrigger>
+                                            <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md p-0">
+                                              <PerformanceFilterMenu column="MAPE Test" modelResults={combination.model_results} comboIndex={comboIndex} />
+                                            </ContextMenuSubContent>
+                                          </ContextMenuSub>
+                                          {performanceColumnFilters[comboIndex]?.['MAPE Test']?.length > 0 && (
+                                            <>
+                                              <ContextMenuSeparator />
+                                              <ContextMenuItem onClick={() => clearPerformanceColumnFilter('MAPE Test', comboIndex)}>
+                                                Clear Filter
+                                              </ContextMenuItem>
+                                            </>
+                                          )}
+                                        </ContextMenuContent>
+                                      </ContextMenu>
+                                    </TableHead>
+                                    <TableHead className="font-semibold text-gray-700">
+                                      <ContextMenu>
+                                        <ContextMenuTrigger asChild>
+                                          <div className="flex items-center gap-1 cursor-pointer">
+                                            R² Train
+                                            {(performanceSortColumn[comboIndex] || '') === 'R² Train' && (
+                                              (performanceSortDirection[comboIndex] || 'asc') === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />
+                                            )}
+                                          </div>
+                                        </ContextMenuTrigger>
+                                        <ContextMenuContent className="w-48 bg-white border border-gray-200 shadow-lg rounded-md">
+                                          <ContextMenuSub>
+                                            <ContextMenuSubTrigger className="flex items-center">
+                                              <ArrowUp className="w-4 h-4 mr-2" /> Sort
+                                            </ContextMenuSubTrigger>
+                                            <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md">
+                                              <ContextMenuItem onClick={() => handlePerformanceSort('R² Train', comboIndex, 'asc')}>
+                                                <ArrowUp className="w-4 h-4 mr-2" /> Ascending
+                                              </ContextMenuItem>
+                                              <ContextMenuItem onClick={() => handlePerformanceSort('R² Train', comboIndex, 'desc')}>
+                                                <ArrowDown className="w-4 h-4 mr-2" /> Descending
+                                              </ContextMenuItem>
+                                            </ContextMenuSubContent>
+                                          </ContextMenuSub>
+                                          <ContextMenuSeparator />
+                                          <ContextMenuSub>
+                                            <ContextMenuSubTrigger className="flex items-center">
+                                              <FilterIcon className="w-4 h-4 mr-2" /> Filter
+                                            </ContextMenuSubTrigger>
+                                            <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md p-0">
+                                              <PerformanceFilterMenu column="R² Train" modelResults={combination.model_results} comboIndex={comboIndex} />
+                                            </ContextMenuSubContent>
+                                          </ContextMenuSub>
+                                          {performanceColumnFilters[comboIndex]?.['R² Train']?.length > 0 && (
+                                            <>
+                                              <ContextMenuSeparator />
+                                              <ContextMenuItem onClick={() => clearPerformanceColumnFilter('R² Train', comboIndex)}>
+                                                Clear Filter
+                                              </ContextMenuItem>
+                                            </>
+                                          )}
+                                        </ContextMenuContent>
+                                      </ContextMenu>
+                                    </TableHead>
+                                    <TableHead className="font-semibold text-gray-700">
+                                      <ContextMenu>
+                                        <ContextMenuTrigger asChild>
+                                          <div className="flex items-center gap-1 cursor-pointer">
+                                            R² Test
+                                            {(performanceSortColumn[comboIndex] || '') === 'R² Test' && (
+                                              (performanceSortDirection[comboIndex] || 'asc') === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />
+                                            )}
+                                          </div>
+                                        </ContextMenuTrigger>
+                                        <ContextMenuContent className="w-48 bg-white border border-gray-200 shadow-lg rounded-md">
+                                          <ContextMenuSub>
+                                            <ContextMenuSubTrigger className="flex items-center">
+                                              <ArrowUp className="w-4 h-4 mr-2" /> Sort
+                                            </ContextMenuSubTrigger>
+                                            <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md">
+                                              <ContextMenuItem onClick={() => handlePerformanceSort('R² Test', comboIndex, 'asc')}>
+                                                <ArrowUp className="w-4 h-4 mr-2" /> Ascending
+                                              </ContextMenuItem>
+                                              <ContextMenuItem onClick={() => handlePerformanceSort('R² Test', comboIndex, 'desc')}>
+                                                <ArrowDown className="w-4 h-4 mr-2" /> Descending
+                                              </ContextMenuItem>
+                                            </ContextMenuSubContent>
+                                          </ContextMenuSub>
+                                          <ContextMenuSeparator />
+                                          <ContextMenuSub>
+                                            <ContextMenuSubTrigger className="flex items-center">
+                                              <FilterIcon className="w-4 h-4 mr-2" /> Filter
+                                            </ContextMenuSubTrigger>
+                                            <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md p-0">
+                                              <PerformanceFilterMenu column="R² Test" modelResults={combination.model_results} comboIndex={comboIndex} />
+                                            </ContextMenuSubContent>
+                                          </ContextMenuSub>
+                                          {performanceColumnFilters[comboIndex]?.['R² Test']?.length > 0 && (
+                                            <>
+                                              <ContextMenuSeparator />
+                                              <ContextMenuItem onClick={() => clearPerformanceColumnFilter('R² Test', comboIndex)}>
+                                                Clear Filter
+                                              </ContextMenuItem>
+                                            </>
+                                          )}
+                                        </ContextMenuContent>
+                                      </ContextMenu>
+                                    </TableHead>
+                                    <TableHead className="font-semibold text-gray-700">
+                                      <ContextMenu>
+                                        <ContextMenuTrigger asChild>
+                                          <div className="flex items-center gap-1 cursor-pointer">
+                                            AIC
+                                            {(performanceSortColumn[comboIndex] || '') === 'AIC' && (
+                                              (performanceSortDirection[comboIndex] || 'asc') === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />
+                                            )}
+                                          </div>
+                                        </ContextMenuTrigger>
+                                        <ContextMenuContent className="w-48 bg-white border border-gray-200 shadow-lg rounded-md">
+                                          <ContextMenuSub>
+                                            <ContextMenuSubTrigger className="flex items-center">
+                                              <ArrowUp className="w-4 h-4 mr-2" /> Sort
+                                            </ContextMenuSubTrigger>
+                                            <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md">
+                                              <ContextMenuItem onClick={() => handlePerformanceSort('AIC', comboIndex, 'asc')}>
+                                                <ArrowUp className="w-4 h-4 mr-2" /> Ascending
+                                              </ContextMenuItem>
+                                              <ContextMenuItem onClick={() => handlePerformanceSort('AIC', comboIndex, 'desc')}>
+                                                <ArrowDown className="w-4 h-4 mr-2" /> Descending
+                                              </ContextMenuItem>
+                                            </ContextMenuSubContent>
+                                          </ContextMenuSub>
+                                          <ContextMenuSeparator />
+                                          <ContextMenuSub>
+                                            <ContextMenuSubTrigger className="flex items-center">
+                                              <FilterIcon className="w-4 h-4 mr-2" /> Filter
+                                            </ContextMenuSubTrigger>
+                                            <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md p-0">
+                                              <PerformanceFilterMenu column="AIC" modelResults={combination.model_results} comboIndex={comboIndex} />
+                                            </ContextMenuSubContent>
+                                          </ContextMenuSub>
+                                          {performanceColumnFilters[comboIndex]?.['AIC']?.length > 0 && (
+                                            <>
+                                              <ContextMenuSeparator />
+                                              <ContextMenuItem onClick={() => clearPerformanceColumnFilter('AIC', comboIndex)}>
+                                                Clear Filter
+                                              </ContextMenuItem>
+                                            </>
+                                          )}
+                                        </ContextMenuContent>
+                                      </ContextMenu>
+                                    </TableHead>
+                                    <TableHead className="font-semibold text-gray-700">
+                                      <ContextMenu>
+                                        <ContextMenuTrigger asChild>
+                                          <div className="flex items-center gap-1 cursor-pointer">
+                                            BIC
+                                            {(performanceSortColumn[comboIndex] || '') === 'BIC' && (
+                                              (performanceSortDirection[comboIndex] || 'asc') === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />
+                                            )}
+                                          </div>
+                                        </ContextMenuTrigger>
+                                        <ContextMenuContent className="w-48 bg-white border border-gray-200 shadow-lg rounded-md">
+                                          <ContextMenuSub>
+                                            <ContextMenuSubTrigger className="flex items-center">
+                                              <ArrowUp className="w-4 h-4 mr-2" /> Sort
+                                            </ContextMenuSubTrigger>
+                                            <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md">
+                                              <ContextMenuItem onClick={() => handlePerformanceSort('BIC', comboIndex, 'asc')}>
+                                                <ArrowUp className="w-4 h-4 mr-2" /> Ascending
+                                              </ContextMenuItem>
+                                              <ContextMenuItem onClick={() => handlePerformanceSort('BIC', comboIndex, 'desc')}>
+                                                <ArrowDown className="w-4 h-4 mr-2" /> Descending
+                                              </ContextMenuItem>
+                                            </ContextMenuSubContent>
+                                          </ContextMenuSub>
+                                          <ContextMenuSeparator />
+                                          <ContextMenuSub>
+                                            <ContextMenuSubTrigger className="flex items-center">
+                                              <FilterIcon className="w-4 h-4 mr-2" /> Filter
+                                            </ContextMenuSubTrigger>
+                                            <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md p-0">
+                                              <PerformanceFilterMenu column="BIC" modelResults={combination.model_results} comboIndex={comboIndex} />
+                                            </ContextMenuSubContent>
+                                          </ContextMenuSub>
+                                          {performanceColumnFilters[comboIndex]?.['BIC']?.length > 0 && (
+                                            <>
+                                              <ContextMenuSeparator />
+                                              <ContextMenuItem onClick={() => clearPerformanceColumnFilter('BIC', comboIndex)}>
+                                                Clear Filter
+                                              </ContextMenuItem>
+                                            </>
+                                          )}
+                                        </ContextMenuContent>
+                                      </ContextMenu>
+                                    </TableHead>
                                   </TableRow>
                                 </TableHeader>
                                 <TableBody>
-                                  {combination.model_results.map((model, modelIndex) => (
+                                  {getDisplayedPerformanceResults(combination.model_results, comboIndex).map((model, modelIndex) => (
                                     <TableRow key={modelIndex} className="hover:bg-blue-50/50 transition-colors duration-150">
                                       <TableCell className="font-semibold text-blue-600">{model.model_name}</TableCell>
                                       <TableCell className="font-mono text-sm">{model.mape_train?.toFixed(1) || 'N/A'}</TableCell>

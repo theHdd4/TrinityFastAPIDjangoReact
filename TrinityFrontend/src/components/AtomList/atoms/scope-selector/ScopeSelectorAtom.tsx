@@ -80,7 +80,7 @@ const ScopeSelectorAtom: React.FC<ScopeSelectorAtomProps> = ({ atomId, onPropert
 
   return (
     <div className="w-full h-full">
-      <ScopeSelectorCanvas data={data} onDataChange={handleDataChange} />
+      <ScopeSelectorCanvas data={data} onDataChange={handleDataChange} atomId={atomId} />
     </div>
   );
 };

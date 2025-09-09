@@ -72,6 +72,55 @@ async def column_summary(object_name: str):
         print(f"⚠️ column_summary error for {object_name}: {e}")
         raise HTTPException(status_code=400, detail=str(e))
 
+@router.post("/cardinality")
+async def cardinality(
+    validator_atom_id: str = Form(...),
+    file_key: str = Form(...),
+    bucket_name: str = Form(...),
+    object_names: str = Form(...),
+    source_type: str = Form(...)
+):
+    """Return cardinality data for a file (similar to merge API)."""
+    try:
+        df = load_dataframe(file_key)
+        df.columns = df.columns.str.lower()
+        cardinality = []
+        for col in df.columns:
+            column_series = df[col].dropna()
+            try:
+                vals = column_series.unique()
+            except TypeError:
+                vals = column_series.astype(str).unique()
+
+            def _serialize(v):
+                if isinstance(v, (pd.Timestamp, pd.Timestamp)):
+                    return pd.to_datetime(v).isoformat()
+                return str(v)
+
+            safe_vals = [_serialize(v) for v in vals]
+            cardinality.append(
+                {
+                    "column": col,
+                    "data_type": str(df[col].dtype),
+                    "unique_count": int(len(vals)),
+                    "unique_values": safe_vals,
+                }
+            )
+        return {
+            "status": "SUCCESS",
+            "source_type": source_type,
+            "cardinality": cardinality
+        }
+    except S3Error as e:
+        error_code = getattr(e, "code", "")
+        if error_code in {"NoSuchKey", "NoSuchBucket"}:
+            redis_client.delete(file_key)
+            raise HTTPException(status_code=404, detail="File not found")
+        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        print(f"⚠️ cardinality error for {file_key}: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+
 @router.get("/cached_dataframe")
 async def cached_dataframe(
     object_name: str,
@@ -271,8 +320,12 @@ async def perform_concat(
             "created_at": datetime.datetime.now().isoformat()
         })
 
+        # Return CSV as string (like Merge API does)
+        csv_text = result.to_csv(index=False)
+        
         return {
             "concat_id": concat_id,
+            "data": csv_text,  # Add CSV data to response
             "result_shape": result.shape,
             "columns": list(result.columns),
             "result_file": concat_key,

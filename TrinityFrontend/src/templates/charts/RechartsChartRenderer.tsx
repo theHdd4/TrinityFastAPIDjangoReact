@@ -232,6 +232,19 @@ const COLOR_THEMES = {
   }
 };
 
+const MODERN_PIE_COLORS = [
+  '#8884d8',
+  '#a5b4fc',
+  '#e0e7ff',
+  '#3b82f6',
+  '#f59e0b',
+  '#ef4444',
+  '#06b6d4',
+  '#84cc16',
+  '#f97316',
+  '#ec4899',
+];
+
 // Fallback flat palette (first scheme spread + legacy colors)
 // Default palette for explore charts - base colors with lighter shades
 const DEFAULT_COLORS = [
@@ -2000,23 +2013,37 @@ const RechartsChartRenderer: React.FC<Props> = ({
               {Object.entries(pieGroups).map(([legendValue, slices]) => (
                 <div key={legendValue} className="flex flex-col items-center">
                   <PieChart width={300} height={300}>
+                    <defs>
+                      {MODERN_PIE_COLORS.map((color, i) => (
+                        <linearGradient key={i} id={`pieGradient-${i}`} x1="0" y1="0" x2="1" y2="1">
+                          <stop offset="0%" stopColor={color} stopOpacity={1} />
+                          <stop offset="100%" stopColor={color} stopOpacity={0.8} />
+                        </linearGradient>
+                      ))}
+                      <filter id="pieShadow" x="-50%" y="-50%" width="200%" height="200%">
+                        <feDropShadow dx="0" dy="4" stdDeviation="6" floodOpacity="0.15" floodColor="#000000" />
+                      </filter>
+                    </defs>
                     <Pie
                       data={slices}
                       cx="50%"
                       cy="50%"
-                      outerRadius="80%"
-                      innerRadius="20%"
+                      outerRadius={95}
+                      innerRadius={35}
                       dataKey={measureKey}
                       nameKey={nameKey}
-                      label={showDataLabels ? <CustomPieLabel /> : null}
+                      stroke="white"
+                      strokeWidth={3}
+                      filter="url(#pieShadow)"
+                      label={showDataLabels ? (({ name, percent }) => percent > 0.05 ? `${name} ${(percent * 100).toFixed(0)}%` : '') : undefined}
                       labelLine={false}
+                      style={{ fontSize: '11px', fontWeight: 500 }}
                     >
                       {slices.map((entry: any, sliceIdx: number) => (
                         <Cell
                           key={`cell-${sliceIdx}`}
-                          fill={palette[sliceIdx % palette.length]}
-                          stroke="#fff"
-                          strokeWidth={2}
+                          fill={`url(#pieGradient-${sliceIdx % MODERN_PIE_COLORS.length})`}
+                          style={{ cursor: 'pointer' }}
                         />
                       ))}
                     </Pie>
@@ -2041,15 +2068,28 @@ const RechartsChartRenderer: React.FC<Props> = ({
 
           return (
             <PieChart margin={{ top: 20, right: 20, left: 20, bottom: 20 }}>
+              <defs>
+                {MODERN_PIE_COLORS.map((color, i) => (
+                  <linearGradient key={i} id={`pieGradient-${i}`} x1="0" y1="0" x2="1" y2="1">
+                    <stop offset="0%" stopColor={color} stopOpacity={1} />
+                    <stop offset="100%" stopColor={color} stopOpacity={0.8} />
+                  </linearGradient>
+                ))}
+                <filter id="pieShadow" x="-50%" y="-50%" width="200%" height="200%">
+                  <feDropShadow dx="0" dy="4" stdDeviation="6" floodOpacity="0.15" floodColor="#000000" />
+                </filter>
+              </defs>
               <Pie
                 data={chartDataForRendering}
                 cx="50%"
                 cy="50%"
-                label={showDataLabels ? <CustomPieLabel /> : null}
-                labelLine={false}
                 outerRadius="80%"
-                innerRadius="20%"
-                fill="#8884d8"
+                innerRadius="35%"
+                stroke="white"
+                strokeWidth={3}
+                filter="url(#pieShadow)"
+                label={showDataLabels ? (({ name, percent }) => percent > 0.05 ? `${name} ${(percent * 100).toFixed(0)}%` : '') : undefined}
+                labelLine={false}
                 dataKey={primaryYKey}
                 nameKey={xKey}
                 animationBegin={0}
@@ -2059,9 +2099,8 @@ const RechartsChartRenderer: React.FC<Props> = ({
                 {chartDataForRendering.map((entry, index) => (
                   <Cell
                     key={`cell-${index}`}
-                    fill={palette[index % palette.length]}
-                    stroke="#fff"
-                    strokeWidth={2}
+                    fill={`url(#pieGradient-${index % MODERN_PIE_COLORS.length})`}
+                    style={{ cursor: 'pointer' }}
                   />
                 ))}
               </Pie>
@@ -2132,27 +2171,40 @@ const RechartsChartRenderer: React.FC<Props> = ({
           // Single Y-axis pie chart (existing logic)
           return (
             <PieChart margin={{ top: 20, right: 20, left: 20, bottom: 20 }}>
+              <defs>
+                {MODERN_PIE_COLORS.map((color, i) => (
+                  <linearGradient key={i} id={`pieGradient-${i}`} x1="0" y1="0" x2="1" y2="1">
+                    <stop offset="0%" stopColor={color} stopOpacity={1} />
+                    <stop offset="100%" stopColor={color} stopOpacity={0.8} />
+                  </linearGradient>
+                ))}
+                <filter id="pieShadow" x="-50%" y="-50%" width="200%" height="200%">
+                  <feDropShadow dx="0" dy="4" stdDeviation="6" floodOpacity="0.15" floodColor="#000000" />
+                </filter>
+              </defs>
               <Pie
                 data={chartDataForRendering}
                 cx="50%"
                 cy="50%"
-                label={showDataLabels ? <CustomPieLabel /> : null}
-                labelLine={false}
                 outerRadius="80%"
-                innerRadius="20%"
-                fill="#8884d8"
+                innerRadius="35%"
+                stroke="white"
+                strokeWidth={3}
+                filter="url(#pieShadow)"
+                label={showDataLabels ? (({ name, percent }) => percent > 0.05 ? `${name} ${(percent * 100).toFixed(0)}%` : '') : undefined}
+                labelLine={false}
                 dataKey={yKey}
                 nameKey={xKey}
                 animationBegin={0}
                 animationDuration={1000}
                 animationEasing="ease-out"
+                style={{ fontSize: '11px', fontWeight: 500 }}
               >
                 {chartDataForRendering.map((entry, index) => (
                   <Cell
                     key={`cell-${index}`}
-                    fill={palette[index % palette.length]}
-                    stroke="#fff"
-                    strokeWidth={2}
+                    fill={`url(#pieGradient-${index % MODERN_PIE_COLORS.length})`}
+                    style={{ cursor: 'pointer' }}
                   />
                 ))}
               </Pie>

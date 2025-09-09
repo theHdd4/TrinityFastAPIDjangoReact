@@ -30,10 +30,7 @@ const MergeProperties: React.FC<Props> = ({ atomId }) => {
 
     const handleChange = (newSettings: any) => {
       try {
-        console.log('🔧 MergeProperties: Updating settings:', newSettings);
-        console.log('🔧 MergeProperties: atomId:', atomId);
         updateSettings(atomId, newSettings);
-        console.log('🔧 MergeProperties: Settings updated successfully');
       } catch (err) {
         console.error('🔧 MergeProperties: Error updating settings:', err);
         setError('Failed to update settings. Please try again.');
@@ -44,7 +41,6 @@ const MergeProperties: React.FC<Props> = ({ atomId }) => {
     React.useEffect(() => {
       // Fetch only if both files selected and we haven't already fetched columns
       if (settings.file1 && settings.file2 && settings.availableColumns.length === 0) {
-        console.log('Triggering /init fetch with:', settings.file1, settings.file2);
         fetch(`${MERGE_API}/init`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -94,7 +90,6 @@ const MergeProperties: React.FC<Props> = ({ atomId }) => {
     };
 
     const handlePerformMerge = async () => {
-      console.log('🔧 MergeProperties: handlePerformMerge called with settings:', settings);
       if (!isMergeReady()) {
         toast({
           title: "Error",
@@ -104,14 +99,6 @@ const MergeProperties: React.FC<Props> = ({ atomId }) => {
         return;
       }
       try {
-        console.log('🔧 MergeProperties: Making /perform request with:', {
-          file1: settings.file1,
-          file2: settings.file2,
-          bucket_name: 'trinity',
-          join_columns: JSON.stringify(settings.joinColumns),
-          join_type: settings.joinType,
-        });
-        
         const response = await fetch(`${MERGE_API}/perform`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -124,9 +111,6 @@ const MergeProperties: React.FC<Props> = ({ atomId }) => {
           }),
         });
         
-        console.log('🔧 MergeProperties: Response status:', response.status);
-        console.log('🔧 MergeProperties: Response ok:', response.ok);
-        
         if (!response.ok) {
           const errorText = await response.text();
           console.error('🔧 MergeProperties: Error response:', errorText);
@@ -134,7 +118,6 @@ const MergeProperties: React.FC<Props> = ({ atomId }) => {
         }
         
         const result = await response.json();
-        console.log('🔧 MergeProperties: Success result:', result);
         
         // Store the merge result without saving to file
         const newSettings = {
@@ -146,8 +129,6 @@ const MergeProperties: React.FC<Props> = ({ atomId }) => {
           },
         };
         
-        console.log('🔧 MergeProperties: Final newSettings:', newSettings);
-        console.log('🔧 MergeProperties: newSettings.mergeResults:', newSettings.mergeResults);
         handleChange(newSettings);
         
         toast({
