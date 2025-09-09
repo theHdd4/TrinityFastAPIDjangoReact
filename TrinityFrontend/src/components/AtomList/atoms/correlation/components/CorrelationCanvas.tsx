@@ -458,17 +458,27 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
       : (data.variables || []);
     const variables = getFilteredVariables(allVariables, data.correlationMatrix);
 
-    // Calculate cell size based solely on width to utilise entire canvas width
-    const cellSize = width / variables.length;
-    const actualWidth = cellSize * variables.length;
-    const actualHeight = cellSize * variables.length;
+    // Maintain previous matrix height while stretching width to fit container
+    const baseHeight = isCompactMode ? 220 : 400;
+    const cellWidth = width / variables.length;
+    const cellHeight = baseHeight / variables.length;
+    const actualWidth = cellWidth * variables.length; // equals available width
+    const actualHeight = cellHeight * variables.length; // fixed previous height
 
-    // Adjust svg height after computing actual heatmap dimensions
+    // Clamp svg height so overall canvas doesn't expand excessively
     svg.attr("height", margin.top + actualHeight + margin.bottom);
 
     // Scales
-    const xScale = d3.scaleBand().domain(variables).range([0, actualWidth]).padding(0.02);
-    const yScale = d3.scaleBand().domain(variables).range([0, actualHeight]).padding(0.02);
+    const xScale = d3
+      .scaleBand()
+      .domain(variables)
+      .range([0, actualWidth])
+      .padding(0.02);
+    const yScale = d3
+      .scaleBand()
+      .domain(variables)
+      .range([0, actualHeight])
+      .padding(0.02);
 
     // Trinity branded colour scale
     const colorScale = d3.scaleSequential()
@@ -478,24 +488,26 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
     // Background grid
     g.selectAll(".grid-line-h")
       .data(d3.range(variables.length + 1))
-      .enter().append("line")
+      .enter()
+      .append("line")
       .attr("class", "grid-line-h")
       .attr("x1", 0)
       .attr("x2", actualWidth)
-      .attr("y1", d => d * cellSize)
-      .attr("y2", d => d * cellSize)
+      .attr("y1", d => d * cellHeight)
+      .attr("y2", d => d * cellHeight)
       .attr("stroke", "hsl(var(--border))")
       .attr("stroke-width", 0.5)
       .attr("opacity", 0.2);
 
     g.selectAll(".grid-line-v")
       .data(d3.range(variables.length + 1))
-      .enter().append("line")
+      .enter()
+      .append("line")
       .attr("class", "grid-line-v")
       .attr("y1", 0)
       .attr("y2", actualHeight)
-      .attr("x1", d => d * cellSize)
-      .attr("x2", d => d * cellSize)
+      .attr("x1", d => d * cellWidth)
+      .attr("x2", d => d * cellWidth)
       .attr("stroke", "hsl(var(--border))")
       .attr("stroke-width", 0.5)
       .attr("opacity", 0.2);
@@ -526,8 +538,8 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
       .data(cellData)
       .enter().append("rect")
       .attr("class", "correlation-cell")
-      .attr("x", d => d.x * cellSize + 3)
-      .attr("y", d => d.y * cellSize + 3)
+      .attr("x", d => d.x * cellWidth + 3)
+      .attr("y", d => d.y * cellHeight + 3)
       .attr("width", 0)
       .attr("height", 0)
       .attr("fill", d => colorScale(d.correlation))
@@ -591,8 +603,8 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
       })
       .on("click", (event, d) => {
         const ripple = g.append("circle")
-          .attr("cx", d.x * cellSize + cellSize / 2)
-          .attr("cy", d.y * cellSize + cellSize / 2)
+          .attr("cx", d.x * cellWidth + cellWidth / 2)
+          .attr("cy", d.y * cellHeight + cellHeight / 2)
           .attr("r", 0)
           .attr("fill", "hsl(var(--trinity-yellow))")
           .attr("opacity", 0.6)
@@ -600,7 +612,7 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
 
         ripple.transition()
           .duration(600)
-          .attr("r", cellSize)
+          .attr("r", Math.min(cellWidth, cellHeight))
           .attr("opacity", 0)
           .remove();
 
@@ -608,23 +620,24 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
       });
 
     // Animate cells
-    cells.transition()
+    cells
+      .transition()
       .duration(800)
       .delay((_, i) => i * 30)
       .ease(d3.easeBounceOut)
-      .attr("width", cellSize - 6)
-      .attr("height", cellSize - 6);
+      .attr("width", cellWidth - 6)
+      .attr("height", cellHeight - 6);
 
     // Correlation values
     const textElements = g.selectAll(".correlation-text")
       .data(cellData.filter(d => Math.abs(d.correlation) > 0.05))
       .enter().append("text")
       .attr("class", "correlation-text")
-      .attr("x", d => d.x * cellSize + cellSize / 2)
-      .attr("y", d => d.y * cellSize + cellSize / 2)
+      .attr("x", d => d.x * cellWidth + cellWidth / 2)
+      .attr("y", d => d.y * cellHeight + cellHeight / 2)
       .attr("text-anchor", "middle")
       .attr("dominant-baseline", "middle")
-      .attr("font-size", `${Math.max(10, Math.min(cellSize / 4, 14))}px`)
+      .attr("font-size", `${Math.max(10, Math.min(Math.min(cellWidth, cellHeight) / 4, 14))}px`)
       .attr("font-weight", "700")
       .attr("fill", d => {
         const color = d3.color(colorScale(d.correlation));
@@ -647,14 +660,14 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
       .data(variables)
       .enter().append("text")
       .attr("class", "x-label")
-      .attr("x", (_, i) => i * cellSize + cellSize / 2)
+      .attr("x", (_, i) => i * cellWidth + cellWidth / 2)
       .attr("y", actualHeight + 30)
       .attr("text-anchor", "middle")
       .attr("dominant-baseline", "hanging")
       .attr("font-size", "14px")
       .attr("font-weight", "600")
       .attr("fill", "hsl(var(--foreground))")
-      .attr("transform", (_, i) => `rotate(-45, ${i * cellSize + cellSize / 2}, ${actualHeight + 30})`)
+      .attr("transform", (_, i) => `rotate(-45, ${i * cellWidth + cellWidth / 2}, ${actualHeight + 30})`)
       .style("opacity", 0)
       .text(d => d)
       .transition().duration(600).delay(1200).style("opacity", 1);
@@ -664,7 +677,7 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
       .enter().append("text")
       .attr("class", "y-label")
       .attr("x", -15)
-      .attr("y", (_, i) => i * cellSize + cellSize / 2)
+      .attr("y", (_, i) => i * cellHeight + cellHeight / 2)
       .attr("text-anchor", "end")
       .attr("dominant-baseline", "middle")
       .attr("font-size", "14px")
@@ -675,11 +688,14 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
       .transition().duration(600).delay(1400).style("opacity", 1);
 
     // Color legend
-    const legendWidth = 300;
+    const legendWidth = Math.min(450, actualWidth);
     const legendHeight = 20;
     const legend = svg.append("g")
       .attr("class", "color-legend")
-      .attr("transform", `translate(${margin.left + (actualWidth - legendWidth) / 2}, ${margin.top + actualHeight + 80})`);
+      .attr(
+        "transform",
+        `translate(${margin.left + (actualWidth - legendWidth) / 2}, ${margin.top + actualHeight + 80})`
+      );
 
     const gradient = svg.append("defs")
       .append("linearGradient")
