@@ -128,11 +128,12 @@ const MatrixSettingsTray: React.FC<MatrixSettingsTrayProps> = ({
     setColorSubmenuPos({ x, y: rect.top });
     setShowColorSubmenu(!showColorSubmenu);
   };
-
-  const handleSave = () => {
-    onSave(localSettings);
-    onOpenChange(false);
-    setShowColorSubmenu(false);
+  const updateSettings = (updates: Partial<MatrixSettings>) => {
+    setLocalSettings(prev => {
+      const next = { ...prev, ...updates };
+      onSave(next);
+      return next;
+    });
   };
 
   const menu = (
@@ -160,7 +161,7 @@ const MatrixSettingsTray: React.FC<MatrixSettingsTrayProps> = ({
       <button
         className="w-full px-4 py-2 text-sm text-left hover:bg-gray-50 flex items-center gap-3 text-gray-700"
         onClick={() =>
-          setLocalSettings((prev) => ({ ...prev, showAxisLabels: !prev.showAxisLabels }))
+          updateSettings({ showAxisLabels: !localSettings.showAxisLabels })
         }
       >
         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -192,7 +193,7 @@ const MatrixSettingsTray: React.FC<MatrixSettingsTrayProps> = ({
       <button
         className="w-full px-4 py-2 text-sm text-left hover:bg-gray-50 flex items-center gap-3 text-gray-700"
         onClick={() =>
-          setLocalSettings((prev) => ({ ...prev, showDataLabels: !prev.showDataLabels }))
+          updateSettings({ showDataLabels: !localSettings.showDataLabels })
         }
       >
         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -224,7 +225,7 @@ const MatrixSettingsTray: React.FC<MatrixSettingsTrayProps> = ({
       <button
         className="w-full px-4 py-2 text-sm text-left hover:bg-gray-50 flex items-center gap-3 text-gray-700"
         onClick={() =>
-          setLocalSettings((prev) => ({ ...prev, showLegend: !prev.showLegend }))
+          updateSettings({ showLegend: !localSettings.showLegend })
         }
       >
         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -252,16 +253,7 @@ const MatrixSettingsTray: React.FC<MatrixSettingsTrayProps> = ({
         </div>
       </button>
 
-      {/* Save Action */}
-      <button
-        className="w-full px-4 py-2 text-sm text-left hover:bg-gray-50 flex items-center gap-3 text-gray-700"
-        onClick={handleSave}
-      >
-        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
-        </svg>
-        <span>Save</span>
-      </button>
+      {/* No explicit save action - settings persist immediately */}
     </div>
   );
 
@@ -291,7 +283,7 @@ const MatrixSettingsTray: React.FC<MatrixSettingsTrayProps> = ({
                     : 'border-gray-300 hover:border-gray-400 hover:shadow-md'
                 }`}
                 onClick={() => {
-                  setLocalSettings((prev) => ({ ...prev, theme: key }));
+                  updateSettings({ theme: key });
                   setShowColorSubmenu(false);
                 }}
                 title={theme.name}

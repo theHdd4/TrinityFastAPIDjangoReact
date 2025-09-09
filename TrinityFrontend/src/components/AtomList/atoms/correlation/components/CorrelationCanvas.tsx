@@ -527,11 +527,12 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
       .range([0, actualHeight])
       .padding(0.02);
 
-    // Theme-based colour scale
+    // Theme-based colour scale using primary (positive), secondary (negative) and tertiary (neutral)
     const theme = COLOR_THEMES[matrixSettings.theme] || COLOR_THEMES.default;
-    const colorScale = d3.scaleSequential()
-      .interpolator(d3.interpolateRgb(theme.primary, theme.secondary))
-      .domain([1, -1]);
+    const colorScale = d3
+      .scaleLinear<string>()
+      .domain([-1, 0, 1])
+      .range([theme.secondary, theme.tertiary, theme.primary]);
 
     // Background grid
     g.selectAll(".grid-line-h")
