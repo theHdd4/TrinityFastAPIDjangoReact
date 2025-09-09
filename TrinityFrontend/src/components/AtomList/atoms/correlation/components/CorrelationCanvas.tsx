@@ -201,6 +201,7 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
     showDataLabels: true,
     showLegend: true,
   });
+  const [settingsPosition, setSettingsPosition] = useState<{ x: number; y: number } | null>(null);
   const auxPanelActive = useLaboratoryStore(state => state.auxPanelActive);
 
   // Determine if we're in compact mode (when auxiliary panels are open)
@@ -242,6 +243,7 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
       /* ignore */
     }
     setSettingsOpen(false);
+    setSettingsPosition(null);
   };
 
   // Filter management functions
@@ -1175,7 +1177,11 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
           <div className={isCompactMode ? 'p-4 flex justify-center' : 'p-6 flex justify-center'}>
             <svg
               ref={heatmapRef}
-              onContextMenu={(e) => { e.preventDefault(); setSettingsOpen(true); }}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                setSettingsPosition({ x: e.clientX, y: e.clientY });
+                setSettingsOpen(true);
+              }}
               height={isCompactMode ? '260' : '650'}
               className="block"
             ></svg>
@@ -1271,7 +1277,11 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
       </div>
       <MatrixSettingsTray
         open={settingsOpen}
-        onOpenChange={setSettingsOpen}
+        position={settingsPosition}
+        onOpenChange={(open) => {
+          setSettingsOpen(open);
+          if (!open) setSettingsPosition(null);
+        }}
         settings={matrixSettings}
         onSave={handleSaveSettings}
       />

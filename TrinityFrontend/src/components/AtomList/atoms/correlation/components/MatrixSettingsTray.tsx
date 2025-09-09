@@ -1,8 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
-import { Button } from '@/components/ui/button';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Switch } from '@/components/ui/switch';
+import { createPortal } from 'react-dom';
 
 export interface MatrixSettings {
   theme: string;
@@ -11,7 +8,7 @@ export interface MatrixSettings {
   showLegend: boolean;
 }
 
-// Reuse color themes from Explore atom
+// Reuse color themes from Explore/ChartMaker atoms
 export const COLOR_THEMES: Record<string, { name: string; primary: string; secondary: string; tertiary: string; }> = {
   default: {
     name: 'Default',
@@ -67,79 +64,265 @@ export const COLOR_THEMES: Record<string, { name: string; primary: string; secon
     secondary: '#9ca3af',
     tertiary: '#f3f4f6',
   },
+  yellow: {
+    name: 'Yellow',
+    primary: '#facc15',
+    secondary: '#fde047',
+    tertiary: '#fef9c3',
+  },
 };
 
 interface MatrixSettingsTrayProps {
   open: boolean;
+  position: { x: number; y: number } | null;
   onOpenChange: (open: boolean) => void;
   settings: MatrixSettings;
   onSave: (settings: MatrixSettings) => void;
 }
 
-const MatrixSettingsTray: React.FC<MatrixSettingsTrayProps> = ({ open, onOpenChange, settings, onSave }) => {
+const MatrixSettingsTray: React.FC<MatrixSettingsTrayProps> = ({
+  open,
+  position,
+  onOpenChange,
+  settings,
+  onSave,
+}) => {
   const [localSettings, setLocalSettings] = useState<MatrixSettings>(settings);
+  const [showColorSubmenu, setShowColorSubmenu] = useState(false);
+  const [colorSubmenuPos, setColorSubmenuPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
 
   useEffect(() => {
     setLocalSettings(settings);
   }, [settings]);
 
-  const handleSave = () => {
-    onSave(localSettings);
+  // Close when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      const target = e.target as Element;
+      const outsideMenu = !target.closest('.matrix-settings-menu');
+      const outsideSubmenu = !target.closest('.color-submenu');
+      if (outsideMenu && outsideSubmenu) {
+        onOpenChange(false);
+        setShowColorSubmenu(false);
+      }
+    };
+
+    if (open || showColorSubmenu) {
+      document.addEventListener('click', handleClickOutside, false);
+      return () => document.removeEventListener('click', handleClickOutside, false);
+    }
+  }, [open, showColorSubmenu, onOpenChange]);
+
+  if (!open || !position) return null;
+
+  const handleColorThemeClick = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const submenuWidth = 220;
+    const spacing = 4;
+    let x = rect.right + spacing;
+    if (window.innerWidth - rect.right < submenuWidth + 10) {
+      x = rect.left - submenuWidth - spacing;
+    }
+    setColorSubmenuPos({ x, y: rect.top });
+    setShowColorSubmenu(!showColorSubmenu);
   };
 
-  return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="w-80">
-        <SheetHeader>
-          <SheetTitle>Matrix Settings</SheetTitle>
-        </SheetHeader>
-        <div className="space-y-6 mt-6">
-          <div className="space-y-2">
-            <label className="text-sm font-medium">Color Theme</label>
-            <Select
-              value={localSettings.theme}
-              onValueChange={(value) => setLocalSettings((prev) => ({ ...prev, theme: value }))}
-            >
-              <SelectTrigger className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {Object.entries(COLOR_THEMES).map(([key, theme]) => (
-                  <SelectItem key={key} value={key}>{theme.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+  const handleSave = () => {
+    onSave(localSettings);
+    onOpenChange(false);
+    setShowColorSubmenu(false);
+  };
 
-          <div className="flex items-center justify-between">
-            <label className="text-sm font-medium">Axis Labels</label>
-            <Switch
-              checked={localSettings.showAxisLabels}
-              onCheckedChange={(checked) => setLocalSettings((prev) => ({ ...prev, showAxisLabels: checked }))}
-            />
-          </div>
+  const menu = (
+    <div
+      className="fixed z-[9999] bg-white border border-gray-200 rounded-lg shadow-lg py-2 min-w-48 matrix-settings-menu"
+      style={{ left: position.x, top: position.y }}
+      onClick={(e) => e.stopPropagation()}
+      onMouseDown={(e) => e.stopPropagation()}
+    >
+      {/* Color Theme Option */}
+      <button
+        className="w-full px-4 py-2 text-sm text-left hover:bg-gray-50 flex items-center gap-3 text-gray-700 relative"
+        onClick={handleColorThemeClick}
+      >
+        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zM21 5a2 2 0 00-2-2h-4a2 2 0 00-2 2v12a4 4 0 004 4h4a2 2 0 002-2V5z" />
+        </svg>
+        <span>Color Theme</span>
+        <svg className="w-4 h-4 ml-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+        </svg>
+      </button>
 
-          <div className="flex items-center justify-between">
-            <label className="text-sm font-medium">Data Labels</label>
-            <Switch
-              checked={localSettings.showDataLabels}
-              onCheckedChange={(checked) => setLocalSettings((prev) => ({ ...prev, showDataLabels: checked }))}
-            />
+      {/* Axis Labels Toggle */}
+      <button
+        className="w-full px-4 py-2 text-sm text-left hover:bg-gray-50 flex items-center gap-3 text-gray-700"
+        onClick={() =>
+          setLocalSettings((prev) => ({ ...prev, showAxisLabels: !prev.showAxisLabels }))
+        }
+      >
+        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
+        </svg>
+        <span>Axis Labels</span>
+        <div className="ml-auto">
+          <div
+            className={`w-4 h-3 rounded border ${
+              localSettings.showAxisLabels
+                ? 'bg-blue-500 border-blue-500'
+                : 'bg-gray-200 border-gray-300'
+            }`}
+          >
+            {localSettings.showAxisLabels && (
+              <svg className="w-4 h-3 text-white" fill="currentColor" viewBox="0 0 20 20">
+                <path
+                  fillRule="evenodd"
+                  d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                  clipRule="evenodd"
+                />
+              </svg>
+            )}
           </div>
-
-          <div className="flex items-center justify-between">
-            <label className="text-sm font-medium">Legend</label>
-            <Switch
-              checked={localSettings.showLegend}
-              onCheckedChange={(checked) => setLocalSettings((prev) => ({ ...prev, showLegend: checked }))}
-            />
-          </div>
-
-          <Button className="w-full" onClick={handleSave}>Save</Button>
         </div>
-      </SheetContent>
-    </Sheet>
+      </button>
+
+      {/* Data Labels Toggle */}
+      <button
+        className="w-full px-4 py-2 text-sm text-left hover:bg-gray-50 flex items-center gap-3 text-gray-700"
+        onClick={() =>
+          setLocalSettings((prev) => ({ ...prev, showDataLabels: !prev.showDataLabels }))
+        }
+      >
+        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+        </svg>
+        <span>Data Labels</span>
+        <div className="ml-auto">
+          <div
+            className={`w-4 h-3 rounded border ${
+              localSettings.showDataLabels
+                ? 'bg-blue-500 border-blue-500'
+                : 'bg-gray-200 border-gray-300'
+            }`}
+          >
+            {localSettings.showDataLabels && (
+              <svg className="w-4 h-3 text-white" fill="currentColor" viewBox="0 0 20 20">
+                <path
+                  fillRule="evenodd"
+                  d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                  clipRule="evenodd"
+                />
+              </svg>
+            )}
+          </div>
+        </div>
+      </button>
+
+      {/* Legend Toggle */}
+      <button
+        className="w-full px-4 py-2 text-sm text-left hover:bg-gray-50 flex items-center gap-3 text-gray-700"
+        onClick={() =>
+          setLocalSettings((prev) => ({ ...prev, showLegend: !prev.showLegend }))
+        }
+      >
+        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
+        </svg>
+        <span>Legend</span>
+        <div className="ml-auto">
+          <div
+            className={`w-4 h-3 rounded border ${
+              localSettings.showLegend
+                ? 'bg-blue-500 border-blue-500'
+                : 'bg-gray-200 border-gray-300'
+            }`}
+          >
+            {localSettings.showLegend && (
+              <svg className="w-4 h-3 text-white" fill="currentColor" viewBox="0 0 20 20">
+                <path
+                  fillRule="evenodd"
+                  d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                  clipRule="evenodd"
+                />
+              </svg>
+            )}
+          </div>
+        </div>
+      </button>
+
+      {/* Save Action */}
+      <button
+        className="w-full px-4 py-2 text-sm text-left hover:bg-gray-50 flex items-center gap-3 text-gray-700"
+        onClick={handleSave}
+      >
+        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
+        </svg>
+        <span>Save</span>
+      </button>
+    </div>
+  );
+
+  const colorSubmenu = showColorSubmenu
+    ? createPortal(
+        <div
+          className="fixed z-[10000] bg-white border border-gray-300 rounded-lg shadow-xl p-3 color-submenu"
+          style={{
+            left: colorSubmenuPos.x,
+            top: colorSubmenuPos.y,
+            minWidth: '220px',
+            maxHeight: '280px',
+            overflowY: 'auto',
+          }}
+        >
+          <div className="px-2 py-2 text-sm font-semibold text-gray-700 border-b border-gray-200 mb-3">
+            Color Theme
+          </div>
+
+          <div className="grid grid-cols-8 gap-1.5">
+            {Object.entries(COLOR_THEMES).map(([key, theme]) => (
+              <button
+                key={key}
+                className={`w-6 h-6 rounded-md border-2 transition-all duration-200 hover:scale-110 hover:shadow-lg ${
+                  localSettings.theme === key
+                    ? 'border-blue-500 shadow-lg ring-2 ring-blue-200 ring-opacity-50'
+                    : 'border-gray-300 hover:border-gray-400 hover:shadow-md'
+                }`}
+                onClick={() => {
+                  setLocalSettings((prev) => ({ ...prev, theme: key }));
+                  setShowColorSubmenu(false);
+                }}
+                title={theme.name}
+              >
+                <div
+                  className="w-full h-full rounded-sm"
+                  style={{
+                    background: `linear-gradient(135deg, ${theme.primary} 0%, ${theme.secondary} 100%)`,
+                  }}
+                />
+              </button>
+            ))}
+          </div>
+
+          <div className="mt-3 pt-2 border-t border-gray-200">
+            <div className="text-xs text-gray-500 px-2">
+              Click a color to select the theme
+            </div>
+          </div>
+        </div>,
+        document.body
+      )
+    : null;
+
+  return (
+    <>
+      {createPortal(menu, document.body)}
+      {colorSubmenu}
+    </>
   );
 };
 
 export default MatrixSettingsTray;
+
