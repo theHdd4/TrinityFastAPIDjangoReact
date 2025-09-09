@@ -706,15 +706,21 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
         selectedVar1: null, // No default selection
         selectedVar2: null, // No default selection
         fileData: {
+          ...(data.fileData || {}),
           fileName: filePath,
           rawData: result.preview_data || [],
           numericColumns: filteredVariables, // Use filtered variables for numeric columns
-          dateColumns: result.date_analysis?.date_columns.map(col => col.column_name) || [],
-          categoricalColumns: (result.columns_used || []).filter(col => 
-            !filteredVariables.includes(col) // Non-numeric columns are the ones filtered out
-          ),
-          isProcessed: true
-        }
+          dateColumns:
+            result.date_analysis?.date_columns.map((col) => col.column_name) ||
+            data.fileData?.dateColumns || [],
+          categoricalColumns:
+            data.fileData?.categoricalColumns ||
+            (result.columns_used || []).filter(
+              (col) => !filteredVariables.includes(col), // Non-numeric columns are the ones filtered out
+            ),
+          columnValues: data.fileData?.columnValues || {},
+          isProcessed: true,
+        },
       });
 
     } catch (error) {
@@ -734,7 +740,7 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
   const handleCorrelationMethodChange = (method: string) => {
     handleSettingsChange('correlationMethod', method);
     
-    // If we have file data, settings will be applied when user clicks "Recalculate"
+    // If we have file data, settings will be applied when user clicks "Render"
     onDataChange({
       settings: {
         ...(data.settings || {}),
@@ -1146,7 +1152,7 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
                 Processing...
               </>
             ) : (
-              'Recalculate'
+              'Render'
             )}
           </Button>
           <Button 

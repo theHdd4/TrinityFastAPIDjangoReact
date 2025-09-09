@@ -394,15 +394,19 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
         selectedVar1: null,
         selectedVar2: null,
         fileData: {
+          ...(data.fileData || {}),
           fileName: data.selectedFile,
           rawData: result.preview_data || [],
           numericColumns: filteredVariables,
           dateColumns:
             result.date_analysis?.date_columns.map((c: any) => c.column_name) ||
-            [],
-          categoricalColumns: (result.columns_used || []).filter(
-            (col: string) => !filteredVariables.includes(col),
-          ),
+            data.fileData?.dateColumns || [],
+          categoricalColumns:
+            data.fileData?.categoricalColumns ||
+            (result.columns_used || []).filter(
+              (col: string) => !filteredVariables.includes(col),
+            ),
+          columnValues: data.fileData?.columnValues || {},
           isProcessed: true,
         },
       });
