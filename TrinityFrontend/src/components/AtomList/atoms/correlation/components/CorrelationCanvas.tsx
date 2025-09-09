@@ -1375,19 +1375,24 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
             </div>
           </Card>
 
-          {/* Show All Columns Toggle */}
+          {/* Settings hint and Show All Columns Toggle */}
           <div
-            className="flex items-center space-x-2 justify-end w-full pr-4 mb-2"
+            className="flex items-center justify-between w-full pr-4 mb-2"
             style={{ width: canvasWidth }}
           >
-            <span className="text-xs text-gray-500">Show all columns</span>
-            <Switch
-              checked={data.showAllColumns || false}
-              onCheckedChange={(checked) =>
-                onDataChange({ showAllColumns: checked })
-              }
-              className="data-[state=checked]:bg-[#458EE2]"
-            />
+            <span className="text-xs text-gray-500">
+              Right click on matrix to open settings
+            </span>
+            <div className="flex items-center space-x-2">
+              <span className="text-xs text-gray-500">Show all columns</span>
+              <Switch
+                checked={data.showAllColumns || false}
+                onCheckedChange={(checked) =>
+                  onDataChange({ showAllColumns: checked })
+                }
+                className="data-[state=checked]:bg-[#458EE2]"
+              />
+            </div>
           </div>
 
           {/* Correlation Heatmap - Full Width */}
@@ -1399,14 +1404,14 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
                     ? "p-4 flex justify-center"
                     : "p-6 flex justify-center"
                 }
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  setSettingsPosition({ x: e.clientX, y: e.clientY });
+                  setSettingsOpen(true);
+                }}
               >
                 <svg
                   ref={heatmapRef}
-                  onContextMenu={(e) => {
-                    e.preventDefault();
-                    setSettingsPosition({ x: e.clientX, y: e.clientY });
-                    setSettingsOpen(true);
-                  }}
                   height={isCompactMode ? "260" : "650"}
                   className="block"
                 ></svg>
