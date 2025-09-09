@@ -317,33 +317,47 @@ async def filter_and_correlate(request: FilterAndCorrelateRequest):
         
         # Apply date range filter if requested
         date_filtered_rows = None
-          if request.date_range_filter and request.date_column:
-              from .service import apply_date_range_filter
-              try:
-                  df = apply_date_range_filter(df, request.date_column, request.date_range_filter)
-                  date_filtered_rows = len(df)
-                  filtered_rows = date_filtered_rows  # Update filtered rows count
-                  print(f"🗓️ Date filter applied: {date_filtered_rows} rows remaining")
-              except Exception as e:
-                  print(f"⚠️ Date filtering failed: {e}")
+        if request.date_range_filter and request.date_column:
+            from .service import apply_date_range_filter
+            try:
+                df = apply_date_range_filter(
+                    df, request.date_column, request.date_range_filter
+                )
+                date_filtered_rows = len(df)
+                filtered_rows = date_filtered_rows  # Update filtered rows count
+                print(
+                    f"🗓️ Date filter applied: {date_filtered_rows} rows remaining"
+                )
+            except Exception as e:
+                print(f"⚠️ Date filtering failed: {e}")
 
-          # Apply time aggregation if requested
-          if request.aggregation_level and request.aggregation_level.lower() != "none" and request.date_column:
-              from .service import apply_time_aggregation
-              try:
-                  df = apply_time_aggregation(df, request.date_column, request.aggregation_level)
-                  filtered_rows = len(df)
-                  print(f"⏱️ Time aggregation applied: {filtered_rows} rows")
-              except Exception as e:
-                  print(f"⚠️ Time aggregation failed: {e}")
+        # Apply time aggregation if requested
+        if (
+            request.aggregation_level
+            and request.aggregation_level.lower() != "none"
+            and request.date_column
+        ):
+            from .service import apply_time_aggregation
 
-          # Perform date analysis if requested
-          date_analysis = None
-          if request.include_date_analysis:
-              from .service import analyze_date_columns
-              try:
+            try:
+                df = apply_time_aggregation(
+                    df, request.date_column, request.aggregation_level
+                )
+                filtered_rows = len(df)
+                print(f"⏱️ Time aggregation applied: {filtered_rows} rows")
+            except Exception as e:
+                print(f"⚠️ Time aggregation failed: {e}")
+
+        # Perform date analysis if requested
+        date_analysis = None
+        if request.include_date_analysis:
+            from .service import analyze_date_columns
+
+            try:
                 date_analysis = analyze_date_columns(df)
-                print(f"📅 Date analysis completed: {date_analysis['has_date_data']}")
+                print(
+                    f"📅 Date analysis completed: {date_analysis['has_date_data']}"
+                )
             except Exception as e:
                 print(f"⚠️ Date analysis failed: {e}")
         
