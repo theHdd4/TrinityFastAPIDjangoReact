@@ -493,11 +493,8 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
 
     // Determine container width for responsive layout
     const containerWidth = canvasWidth || 800;
-    const margin = { top: 80, right: 80, bottom: 180, left: 80 };
+    const margin = { top: 80, right: 80, bottom: 180, left: 100 };
     const width = containerWidth - margin.left - margin.right;
-
-    // Ensure svg spans the full card width and adequate height for legend/labels
-    svg.attr("width", containerWidth);
 
     const g = svg.append("g").attr("transform", `translate(${margin.left},${margin.top})`);
 
@@ -509,13 +506,14 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
 
     // Maintain previous matrix height while stretching width to fit container
     const baseHeight = isCompactMode ? 220 : 400;
-    const cellWidth = width / variables.length;
-    const cellHeight = baseHeight / variables.length;
-    const actualWidth = cellWidth * variables.length; // equals available width
-    const actualHeight = cellHeight * variables.length; // fixed previous height
+    const cellWidth = Math.max(width / variables.length, 45);
+    const cellHeight = Math.max(baseHeight / variables.length, 45);
+    const actualWidth = cellWidth * variables.length;
+    const actualHeight = cellHeight * variables.length;
 
-    // Clamp svg height so overall canvas doesn't expand excessively
-    svg.attr("height", margin.top + actualHeight + margin.bottom);
+    svg
+      .attr("width", actualWidth + margin.left + margin.right)
+      .attr("height", margin.top + actualHeight + margin.bottom);
 
     // Scales
     const xScale = d3
@@ -588,8 +586,8 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
       .data(cellData)
       .enter().append("rect")
       .attr("class", "correlation-cell")
-      .attr("x", d => d.x * cellWidth + 3)
-      .attr("y", d => d.y * cellHeight + 3)
+      .attr("x", d => d.x * cellWidth + 1)
+      .attr("y", d => d.y * cellHeight + 1)
       .attr("width", 0)
       .attr("height", 0)
       .attr("fill", d => colorScale(d.correlation))
@@ -678,8 +676,8 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
       .duration(800)
       .delay((_, i) => i * 30)
       .ease(d3.easeBounceOut)
-      .attr("width", cellWidth - 6)
-      .attr("height", cellHeight - 6);
+      .attr("width", cellWidth - 2)
+      .attr("height", cellHeight - 2);
 
     // Correlation values
     if (matrixSettings.showDataLabels) {
@@ -691,7 +689,7 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
         .attr("y", d => d.y * cellHeight + cellHeight / 2)
         .attr("text-anchor", "middle")
         .attr("dominant-baseline", "middle")
-        .attr("font-size", `${Math.max(10, Math.min(Math.min(cellWidth, cellHeight) / 4, 14))}px`)
+        .attr("font-size", `${Math.max(9, Math.min(Math.min(cellWidth, cellHeight) / 4, 12))}px`)
         .attr("font-weight", "700")
         .attr("fill", "#ffffff")
         .attr("stroke", "#000000")
@@ -718,6 +716,7 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
         .attr("font-weight", "600")
         .attr("fill", "hsl(var(--foreground))")
         .attr("transform", (_, i) => `rotate(-45, ${i * cellWidth + cellWidth / 2}, ${actualHeight + 30})`)
+        .style("font-style", "italic")
         .style("opacity", 0)
         .text(d => d)
         .transition().duration(600).delay(1200).style("opacity", 1);
@@ -726,13 +725,14 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({ data, onDataChang
         .data(variables)
         .enter().append("text")
         .attr("class", "y-label")
-        .attr("x", -15)
+        .attr("x", -20)
         .attr("y", (_, i) => i * cellHeight + cellHeight / 2)
         .attr("text-anchor", "end")
         .attr("dominant-baseline", "middle")
         .attr("font-size", "14px")
         .attr("font-weight", "600")
         .attr("fill", "hsl(var(--foreground))")
+        .style("font-style", "italic")
         .style("opacity", 0)
         .text(d => d)
         .transition().duration(600).delay(1400).style("opacity", 1);
