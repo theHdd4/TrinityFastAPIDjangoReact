@@ -1393,10 +1393,7 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
         </div>
       </Card>
 
-      <div
-        className="flex justify-between w-full pr-4 mb-2"
-        style={{ width: canvasWidth }}
-      >
+      <div className="flex items-center justify-between w-full px-4 mb-2">
         <p className="text-xs text-gray-500">Double-click to open settings</p>
         <div className="flex items-center space-x-2">
           <span className="text-xs text-gray-500">Show all columns</span>
