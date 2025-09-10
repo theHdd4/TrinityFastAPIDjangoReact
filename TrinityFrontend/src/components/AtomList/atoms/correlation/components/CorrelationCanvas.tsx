@@ -1412,154 +1412,161 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
         </div>
       </div>
 
+      <p className="text-xs text-gray-500 text-center mb-2">
+        Click a matrix cell to view analysis below
+      </p>
+
       {/* Correlation Heatmap - Full Width */}
       <div className={isCompactMode ? "mb-4" : "mb-6"}>
         <Card
           className="overflow-hidden"
-              onDoubleClick={handleMatrixDoubleClick}
-            >
+          onDoubleClick={handleMatrixDoubleClick}
+        >
+          <div
+            className={
+              isCompactMode ? "p-4 flex justify-center" : "p-6 flex justify-center"
+            }
+          >
+            <svg
+              ref={heatmapRef}
+              height={isCompactMode ? "260" : "650"}
+              className="block"
+            ></svg>
+          </div>
+        </Card>
+      </div>
+
+      {/* Time Series + Analysis Output */}
+      {data.selectedVar1 && data.selectedVar2 && (
+        <div
+          className={`grid ${
+            isCompactMode ? "grid-cols-1 gap-4" : "grid-cols-12 gap-6"
+          }`}
+        >
+          {/* Time Series Chart */}
+          <div className={`${isCompactMode ? "" : "col-span-8"} h-full`}>
+            <Card className="overflow-hidden h-full flex flex-col">
               <div
-                className={
-                  isCompactMode
-                    ? "p-4 flex justify-center"
-                    : "p-6 flex justify-center"
-                }
+                className={`${isCompactMode ? "p-3" : "p-4"} border-b bg-muted/30`}
               >
+                <h3
+                  className={`font-semibold text-foreground flex items-center gap-2 ${
+                    isCompactMode ? "text-sm" : ""
+                  }`}
+                >
+                  <TrendingUp
+                    className={`${isCompactMode ? "w-3 h-3" : "w-4 h-4"} text-primary`}
+                  />
+                  Time Series Comparison
+                </h3>
+                {!isCompactMode && (
+                  <p className="text-sm text-muted-foreground mt-1">
+                    {`Visualize how ${data.selectedVar1} and ${data.selectedVar2} change over time`}
+                  </p>
+                )}
+              </div>
+              <div className={`${isCompactMode ? "p-4" : "p-6"} flex-1`}>
                 <svg
-                  ref={heatmapRef}
-                  height={isCompactMode ? "260" : "650"}
-                  className="block"
+                  ref={timeSeriesRef}
+                  width="100%"
+                  height={isCompactMode ? "150" : "300"}
+                  className="w-full"
                 ></svg>
               </div>
             </Card>
           </div>
 
-          {/* Time Series + Analysis Setup */}
-          <div
-            className={`grid ${isCompactMode ? "grid-cols-1 gap-4" : "grid-cols-12 gap-6"}`}
-          >
-            {/* Time Series Chart */}
-            <div className={`${isCompactMode ? "" : "col-span-8"} h-full`}>
-              <Card className="overflow-hidden h-full flex flex-col">
-                <div
-                  className={`${isCompactMode ? "p-3" : "p-4"} border-b bg-muted/30`}
+          {/* Analysis Output */}
+          <div className={`${isCompactMode ? "" : "col-span-4"} h-full`}>
+            <Card className="overflow-hidden h-full flex flex-col">
+              <div
+                className={`${isCompactMode ? "p-2" : "p-4"} border-b bg-muted/30`}
+              >
+                <h3
+                  className={`font-semibold text-foreground flex items-center gap-2 ${
+                    isCompactMode ? "text-sm" : ""
+                  }`}
                 >
-                  <h3
-                    className={`font-semibold text-foreground flex items-center gap-2 ${isCompactMode ? "text-sm" : ""}`}
-                  >
-                    <TrendingUp
-                      className={`${isCompactMode ? "w-3 h-3" : "w-4 h-4"} text-primary`}
-                    />
-                    Time Series Comparison
-                  </h3>
-                  {!isCompactMode && (
-                    <p className="text-sm text-muted-foreground mt-1">
-                      {data.selectedVar1 && data.selectedVar2
-                        ? `Visualize how ${data.selectedVar1} and ${data.selectedVar2} change over time`
-                        : "Click on a heatmap cell to compare variables over time"}
-                    </p>
-                  )}
-                </div>
-                <div className={`${isCompactMode ? "p-4" : "p-6"} flex-1`}>
-                  <svg
-                    ref={timeSeriesRef}
-                    width="100%"
-                    height={isCompactMode ? "150" : "300"}
-                    className="w-full"
-                  ></svg>
-                </div>
-              </Card>
-            </div>
-
-            {/* Analysis Setup */}
-            <div className={`${isCompactMode ? "" : "col-span-4"} h-full`}>
-              <Card className="overflow-hidden h-full flex flex-col">
+                  <BarChart3
+                    className={`${isCompactMode ? "w-3 h-3" : "w-4 h-4"} text-primary`}
+                  />
+                  Analysis Output
+                </h3>
+              </div>
+              <div
+                className={`${isCompactMode ? "p-3 space-y-2" : "p-4 space-y-4"} flex-1`}
+              >
+                {/* Correlation Result */}
                 <div
-                  className={`${isCompactMode ? "p-2" : "p-4"} border-b bg-muted/30`}
+                  className={`bg-muted/50 rounded-lg ${
+                    isCompactMode ? "p-3" : "p-4"
+                  } border`}
                 >
-                  <h3
-                    className={`font-semibold text-foreground flex items-center gap-2 ${isCompactMode ? "text-sm" : ""}`}
-                  >
-                    <BarChart3
-                      className={`${isCompactMode ? "w-3 h-3" : "w-4 h-4"} text-primary`}
-                    />
-                    Analysis Setup
-                  </h3>
-                </div>
-                <div
-                  className={`${isCompactMode ? "p-3 space-y-2" : "p-4 space-y-4"} flex-1`}
-                >
-                  {/* Correlation Result */}
-                  <div
-                    className={`bg-muted/50 rounded-lg ${isCompactMode ? "p-3" : "p-4"} border`}
-                  >
-                    <div className="text-center">
-                      <div
-                        className={`font-bold text-foreground mb-1 ${isCompactMode ? "text-lg" : "text-2xl"}`}
-                      >
-                        {getCorrelationValue() !== null
-                          ? getCorrelationValue().toFixed(3)
-                          : "---"}
-                      </div>
-                      <div
-                        className={`text-muted-foreground ${isCompactMode ? "text-xs" : "text-sm"}`}
-                      >
-                        Correlation Coefficient
-                      </div>
-                      {getCorrelationValue() !== null ? (
-                        <Badge
-                          variant={
-                            Math.abs(getCorrelationValue()) > 0.7
-                              ? "destructive"
-                              : Math.abs(getCorrelationValue()) > 0.3
-                                ? "default"
-                                : "secondary"
-                          }
-                          className="mt-2"
-                        >
-                          {Math.abs(getCorrelationValue()) > 0.7
-                            ? "Strong"
-                            : Math.abs(getCorrelationValue()) > 0.3
-                              ? "Moderate"
-                              : "Weak"}{" "}
-                          Correlation
-                        </Badge>
-                      ) : (
-                        <Badge variant="outline" className="mt-2">
-                          No Variables Selected
-                        </Badge>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Current Analysis */}
-                  <div className="space-y-2">
+                  <div className="text-center">
                     <div
-                      className={`text-muted-foreground ${isCompactMode ? "text-xs" : "text-sm"}`}
+                      className={`font-bold text-foreground mb-1 ${
+                        isCompactMode ? "text-lg" : "text-2xl"
+                      }`}
                     >
-                      Current Analysis:
+                      {getCorrelationValue() !== null
+                        ? getCorrelationValue().toFixed(3)
+                        : "---"}
                     </div>
-                    {data.selectedVar1 && data.selectedVar2 ? (
-                      <div
-                        className={`text-foreground ${isCompactMode ? "text-sm" : ""}`}
+                    <div
+                      className={`text-muted-foreground ${
+                        isCompactMode ? "text-xs" : "text-sm"
+                      }`}
+                    >
+                      Correlation Coefficient
+                    </div>
+                    {getCorrelationValue() !== null ? (
+                      <Badge
+                        variant={
+                          Math.abs(getCorrelationValue()) > 0.7
+                            ? "destructive"
+                            : Math.abs(getCorrelationValue()) > 0.3
+                              ? "default"
+                              : "secondary"
+                        }
+                        className="mt-2"
                       >
-                        <span className="font-medium">{data.selectedVar1}</span>
-                        <span className="text-muted-foreground mx-2">vs</span>
-                        <span className="font-medium">{data.selectedVar2}</span>
-                      </div>
+                        {Math.abs(getCorrelationValue()) > 0.7
+                          ? "Strong"
+                          : Math.abs(getCorrelationValue()) > 0.3
+                            ? "Moderate"
+                            : "Weak"}{" "}
+                        Correlation
+                      </Badge>
                     ) : (
-                      <div
-                        className={`text-muted-foreground italic ${isCompactMode ? "text-sm" : ""}`}
-                      >
-                        No variables selected. Click a heatmap cell to analyze
-                        correlation.
-                      </div>
+                      <Badge variant="outline" className="mt-2">
+                        No Data
+                      </Badge>
                     )}
                   </div>
                 </div>
-              </Card>
-            </div>
+
+                {/* Current Analysis */}
+                <div className="space-y-2">
+                  <div
+                    className={`text-muted-foreground ${
+                      isCompactMode ? "text-xs" : "text-sm"
+                    }`}
+                  >
+                    Current Analysis:
+                  </div>
+                  <div
+                    className={`text-foreground ${isCompactMode ? "text-sm" : ""}`}
+                  >
+                    <span className="font-medium">{data.selectedVar1}</span>
+                    <span className="text-muted-foreground mx-2">vs</span>
+                    <span className="font-medium">{data.selectedVar2}</span>
+                  </div>
+                </div>
+              </div>
+            </Card>
           </div>
+        </div>
+      )}
         </>
       )}
       <MatrixSettingsTray
