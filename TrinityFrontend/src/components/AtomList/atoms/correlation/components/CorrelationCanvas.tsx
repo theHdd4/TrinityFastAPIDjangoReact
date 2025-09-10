@@ -1327,31 +1327,12 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
       ) : (
         <>
           {/* Show All Columns toggle */}
-          <div
-            className="flex justify-end w-full pr-4 mb-2"
-            style={{ width: canvasWidth }}
-          >
-            <div className="flex items-center space-x-2">
-              <span className="text-xs text-gray-500">Show all columns</span>
-              <Switch
-                checked={data.showAllColumns || false}
-                onCheckedChange={(checked) =>
-                  onDataChange({ showAllColumns: checked })
-                }
-                className="data-[state=checked]:bg-[#458EE2]"
-              />
-            </div>
-          </div>
-
-          {/* Filter Dimensions - Dynamic from actual data */}
-          <Card className="p-4 mb-4" onDoubleClick={handleMatrixDoubleClick}>
-            <h3 className="text-sm font-semibold text-foreground mb-1 flex items-center gap-2">
-              <Target className="w-4 h-4 text-primary" />
-              Filter Dimensions
-            </h3>
-            <p className="text-xs text-gray-500 mb-3">
-              Double-click to open settings
-            </p>
+        {/* Filter Dimensions - Dynamic from actual data */}
+        <Card className="p-4 mb-4" onDoubleClick={handleMatrixDoubleClick}>
+          <h3 className="text-sm font-semibold text-foreground mb-3 flex items-center gap-2">
+            <Target className="w-4 h-4 text-primary" />
+            Filter Dimensions
+          </h3>
 
             {/* Show active filter dimensions */}
             {Object.keys(data.settings?.filterDimensions || {}).length > 0 ? (
@@ -1398,24 +1379,41 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
               >
                 Filter
               </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={handleResetFilters}
-                disabled={
-                  Object.keys(data.settings?.filterDimensions || {}).length ===
-                  0
-                }
-              >
-                Reset
-              </Button>
-            </div>
-          </Card>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={handleResetFilters}
+            disabled={
+              Object.keys(data.settings?.filterDimensions || {}).length ===
+              0
+            }
+          >
+            Reset
+          </Button>
+        </div>
+      </Card>
 
-          {/* Correlation Heatmap - Full Width */}
-          <div className={isCompactMode ? "mb-4" : "mb-6"}>
-            <Card
-              className="overflow-hidden"
+      <div
+        className="flex justify-between w-full pr-4 mb-2"
+        style={{ width: canvasWidth }}
+      >
+        <p className="text-xs text-gray-500">Double-click to open settings</p>
+        <div className="flex items-center space-x-2">
+          <span className="text-xs text-gray-500">Show all columns</span>
+          <Switch
+            checked={data.showAllColumns || false}
+            onCheckedChange={(checked) =>
+              onDataChange({ showAllColumns: checked })
+            }
+            className="data-[state=checked]:bg-[#458EE2]"
+          />
+        </div>
+      </div>
+
+      {/* Correlation Heatmap - Full Width */}
+      <div className={isCompactMode ? "mb-4" : "mb-6"}>
+        <Card
+          className="overflow-hidden"
               onDoubleClick={handleMatrixDoubleClick}
             >
               <div
