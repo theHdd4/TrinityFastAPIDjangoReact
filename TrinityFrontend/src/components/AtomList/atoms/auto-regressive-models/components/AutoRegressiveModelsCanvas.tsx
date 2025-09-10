@@ -87,7 +87,9 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
   // State for combination save status (like Mahek select 1 sept)
   const [combinationSaveStatus, setCombinationSaveStatus] = useState<any>(null);
   const [isLoadingCombinationSaveStatus, setIsLoadingCombinationSaveStatus] = useState(false);
+  const [isFetchingCombinationStatus, setIsFetchingCombinationStatus] = useState(false);
   const [combinationSaveStatusMinimized, setCombinationSaveStatusMinimized] = useState(false);
+  const [hasFreshCombinationSaveStatus, setHasFreshCombinationSaveStatus] = useState(false);
 
   // Interactive Legend State - single selection model
   // null = default state (all visible), otherwise one active legend
@@ -100,6 +102,11 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
   const [selectedGrowthPeriod, setSelectedGrowthPeriod] = useState<'quarterly' | 'halfyearly' | 'yearly'>('quarterly');
   const [growthRatesData, setGrowthRatesData] = useState<any>(null);
   const [isLoadingGrowthRates, setIsLoadingGrowthRates] = useState(false);
+  
+  // Growth Rates Legend State - for bar chart legend filtering
+  const [selectedGrowthLegend, setSelectedGrowthLegend] = useState<{
+    [combinationId: string]: string | null;
+  }>({});
   const [selectedModels, setSelectedModels] = useState<string[]>([]);
   const [selectedGrowthModels, setSelectedGrowthModels] = useState<string[]>([]);
   const [combinationGrowthModels, setCombinationGrowthModels] = useState<{[combination: string]: string[]}>({});
@@ -159,6 +166,44 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
         [combinationIndex]: dataKey
       };
     });
+  };
+
+  // Growth Rates Legend Click Handler
+  const handleGrowthLegendClick = (entry: any, combinationId: string) => {
+    const { dataKey } = entry;
+    console.log('🔧 Growth Legend clicked:', dataKey, 'for combination:', combinationId);
+    
+    setSelectedGrowthLegend(prev => {
+      const currentSelected = prev[combinationId];
+      
+      // If clicking the same legend item, deselect it (show all bars)
+      if (currentSelected === dataKey) {
+        console.log('🔧 Deselecting growth legend:', dataKey, '- showing all bars');
+        const newState = { ...prev };
+        delete newState[combinationId];
+        return newState;
+      }
+      
+      // Otherwise, select this legend item (hide all other bars)
+      console.log('🔧 Selecting growth legend:', dataKey, '- hiding other bars');
+      return {
+        ...prev,
+        [combinationId]: dataKey
+      };
+    });
+  };
+
+  // Check if a bar is visible for growth rates
+  const isGrowthBarVisible = (dataKey: string, combinationId: string) => {
+    const selected = selectedGrowthLegend[combinationId];
+    
+    // If no legend is selected (null), show all bars
+    if (selected === null || selected === undefined) {
+      return true;
+    }
+    
+    // If a legend is selected, only show that specific bar
+    return selected === dataKey;
   };
 
   const isLineVisible = (dataKey: string, combinationIndex: number) => {
@@ -629,6 +674,79 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
     }
   }, [storeData, localModelResults]);
 
+  // Restore complete state from store data when component loads
+  useEffect(() => {
+    if (storeData) {
+      console.log('🔧 AutoRegressiveModelsCanvas: Restoring complete state from store data');
+      
+      // Restore model results
+      if ((storeData as any).modelResults) {
+        setLocalModelResults((storeData as any).modelResults);
+      }
+      
+      // Restore combination save status only if we don't have fresh data
+      // This prevents overwriting freshly fetched combination save status
+      if ((storeData as any).combinationSaveStatus && !hasFreshCombinationSaveStatus) {
+        setCombinationSaveStatus((storeData as any).combinationSaveStatus);
+      }
+      
+      // Restore UI state
+      if ((storeData as any).minimizedCombinations) {
+        setMinimizedCombinations(new Set((storeData as any).minimizedCombinations));
+      }
+      
+      if ((storeData as any).selectedGrowthPeriod) {
+        setSelectedGrowthPeriod((storeData as any).selectedGrowthPeriod);
+      }
+      
+      if ((storeData as any).growthRatesData) {
+        setGrowthRatesData((storeData as any).growthRatesData);
+      }
+      
+      if ((storeData as any).selectedModels) {
+        setSelectedModels((storeData as any).selectedModels);
+      }
+      
+      if ((storeData as any).selectedGrowthModels) {
+        setSelectedGrowthModels((storeData as any).selectedGrowthModels);
+      }
+      
+      if ((storeData as any).combinationGrowthModels) {
+        setCombinationGrowthModels((storeData as any).combinationGrowthModels);
+      }
+      
+      if ((storeData as any).selectedLegend) {
+        setSelectedLegend((storeData as any).selectedLegend);
+      }
+      
+      if ((storeData as any).trainingProgress) {
+        setTrainingProgress((storeData as any).trainingProgress);
+      }
+      
+      if ((storeData as any).trainingProgressPercentage) {
+        setTrainingProgressPercentage((storeData as any).trainingProgressPercentage);
+      }
+      
+      if ((storeData as any).trainingProgressDetails) {
+        setTrainingProgressDetails((storeData as any).trainingProgressDetails);
+      }
+      
+      if ((storeData as any).currentRunId) {
+        setCurrentRunId((storeData as any).currentRunId);
+      }
+      
+      if ((storeData as any).combinationSaveStatusMinimized !== undefined) {
+        setCombinationSaveStatusMinimized((storeData as any).combinationSaveStatusMinimized);
+      }
+      
+      if ((storeData as any).hasFreshCombinationSaveStatus !== undefined) {
+        setHasFreshCombinationSaveStatus((storeData as any).hasFreshCombinationSaveStatus);
+      }
+      
+      console.log('🔧 AutoRegressiveModelsCanvas: Complete state restored from store data');
+    }
+  }, [storeData]);
+
   // Debug logging for localModelResults and auto-expand functionality
   useEffect(() => {
     console.log('🔧 AutoRegressiveModelsCanvas: localModelResults changed:', localModelResults);
@@ -691,12 +809,21 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
   // Don't auto-populate combinationGrowthModels - let users select models manually
   // This ensures growth rates are only calculated when users explicitly select models
 
-  // Fetch combination save status when scope is selected or results are available
+  // Fetch combination save status when results are available (like select models feature)
   useEffect(() => {
-    if (finalData?.selectedScope && atomId) {
-      fetchCombinationSaveStatus();
+    console.log('🔧 DEBUG: useEffect triggered for fetchCombinationSaveStatus with:', {
+      hasLocalModelResults: !!localModelResults,
+      atomId: atomId,
+      isFetchingCombinationStatus: isFetchingCombinationStatus,
+      hasCombinationSaveStatus: !!combinationSaveStatus
+    });
+    if (localModelResults && atomId && !isFetchingCombinationStatus) {
+      // Only fetch if we don't already have combination save status
+      if (!combinationSaveStatus) {
+        fetchCombinationSaveStatus();
+      }
     }
-  }, [finalData?.selectedScope, atomId, localModelResults]);
+  }, [localModelResults, atomId]);
 
   // Function to save a single combination
   const handleSaveSingleCombination = async (result: any) => {
@@ -729,8 +856,16 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
         result: result.result,
         status: result.status,
         tags: [`auto-regressive-models-${atomId}`, 'saved-autoregressive-model'],
-        description: `Auto-regressive model saved from Auto-Regressive Models atom - ${result.combination_id}`
+        description: `Auto-regressive model saved from Auto-Regressive Models atom - ${result.combination_id}`,
+        client_name: envParams.CLIENT_NAME || '',
+        app_name: envParams.APP_NAME || '',
+        project_name: envParams.PROJECT_NAME || '',
+        client_id: envParams.CLIENT_ID || '',
+        app_id: envParams.APP_ID || '',
+        project_id: envParams.PROJECT_ID || ''
       };
+
+      console.log('🔧 DEBUG: Saving combination with request:', saveRequest);
 
       const response = await fetch(baseUrl, {
         method: 'POST',
@@ -746,6 +881,7 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
       }
 
       const saveResult = await response.json();
+      console.log('🔧 DEBUG: Save result:', saveResult);
       
       // Show success message
       toast({
@@ -755,7 +891,14 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
       });
       
       // Refresh combination status after saving
+      console.log('🔧 DEBUG: About to call fetchCombinationSaveStatus after saving');
       await fetchCombinationSaveStatus();
+      console.log('🔧 DEBUG: fetchCombinationSaveStatus completed after saving');
+      
+      // Save complete state after saving a combination
+      setTimeout(() => {
+        saveCompleteAtomState();
+      }, 100);
       
     } catch (error) {
       console.error('Error saving combination:', error);
@@ -771,12 +914,45 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
   };
 
 
-  // Function to fetch combination save status (like Mahek select 1 sept)
+
+  // Function to fetch combination save status (works like select models feature)
   const fetchCombinationSaveStatus = async () => {
-    if (!finalData?.selectedScope || !atomId) {
+    console.log('🔧 DEBUG: fetchCombinationSaveStatus function called');
+    
+    // Prevent multiple simultaneous calls
+    if (isFetchingCombinationStatus) {
+      console.log('🔧 DEBUG: Already fetching combination status, skipping');
       return;
     }
 
+    // Get the file_key from the results (like the original implementation)
+    const resultsArray = getResultsArray();
+    console.log('🔧 DEBUG: resultsArray:', resultsArray);
+    
+    if (!resultsArray || resultsArray.length === 0) {
+      console.log('🔧 DEBUG: No results available, returning early');
+      return;
+    }
+
+    const fileKey = resultsArray[0]?.file_key;
+    console.log('🔧 DEBUG: fileKey from results:', fileKey);
+    
+    if (!fileKey) {
+      console.log('🔧 DEBUG: No file_key found in results, returning early');
+      return;
+    }
+
+    console.log('🔧 DEBUG: fetchCombinationSaveStatus called with:', {
+      fileKey: fileKey,
+      atomId: atomId
+    });
+    
+    if (!atomId) {
+      console.log('🔧 DEBUG: Missing atomId, returning early');
+      return;
+    }
+
+    setIsFetchingCombinationStatus(true);
     setIsLoadingCombinationSaveStatus(true);
     
     try {
@@ -793,7 +969,7 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
 
       const baseUrl = `${AUTO_REGRESSIVE_API}/models/saved-combinations-status`;
       const params = new URLSearchParams({
-        scope: finalData.selectedScope,
+        scope: '1', // Auto regressive always uses scope 1
         atom_id: atomId,
         client_id: envParams.CLIENT_ID || '',
         app_id: envParams.APP_ID || '',
@@ -811,12 +987,22 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
       }
 
       const result = await response.json();
+      console.log('🔧 DEBUG: Combination save status result:', result);
+      console.log('🔧 DEBUG: Setting combinationSaveStatus state with:', result);
       setCombinationSaveStatus(result);
+      setHasFreshCombinationSaveStatus(true); // Mark that we have fresh data
+      console.log('🔧 DEBUG: combinationSaveStatus state set');
+      
+      // Save complete state after fetching combination save status
+      setTimeout(() => {
+        saveCompleteAtomState();
+      }, 100);
       
     } catch (error) {
       console.error('Error fetching combination save status:', error);
       setCombinationSaveStatus(null);
     } finally {
+      setIsFetchingCombinationStatus(false);
       setIsLoadingCombinationSaveStatus(false);
     }
   };
@@ -1254,6 +1440,51 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
     }
   };
 
+  // Function to save complete atom state including all API responses
+  const saveCompleteAtomState = () => {
+    console.log('🔧 saveCompleteAtomState: Saving complete atom state');
+    
+    const completeState = {
+      // Basic configuration data
+      ...finalData,
+      
+      // Model training results and status
+      modelResults: localModelResults,
+      trainingStatus: isTraining ? 'training' : (localModelResults ? 'completed' : 'idle'),
+      trainingProgress,
+      trainingProgressPercentage,
+      trainingProgressDetails,
+      currentRunId,
+      
+      // Combination save status
+      combinationSaveStatus,
+      combinationSaveStatusMinimized,
+      hasFreshCombinationSaveStatus,
+      
+      // UI state
+      minimizedCombinations: Array.from(minimizedCombinations),
+      selectedLegend,
+      selectedGrowthPeriod,
+      growthRatesData,
+      selectedModels,
+      selectedGrowthModels,
+      combinationGrowthModels,
+      
+      // Timestamps
+      lastRunTimestamp: localModelResults?.timestamp || new Date().toISOString(),
+      lastError: localModelResults?.error || null
+    };
+    
+    console.log('🔧 saveCompleteAtomState: Complete state to save:', completeState);
+    
+    if (onDataChange) {
+      onDataChange(completeState);
+      console.log('🔧 saveCompleteAtomState: State saved successfully');
+    } else {
+      console.log('🔧 saveCompleteAtomState: Cannot save - missing onDataChange function');
+    }
+  };
+
 
   // Handle combination deselection from canvas
   const removeCombination = (combinationToRemove: string) => {
@@ -1462,6 +1693,11 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
         // Minimize all combinations by default when new results are loaded
         const allCombinationIndices = Array.from({ length: allResults.length }, (_, i) => i);
         setMinimizedCombinations(new Set(allCombinationIndices));
+        
+        // Save complete state after training completes
+        setTimeout(() => {
+          saveCompleteAtomState();
+        }, 100);
           
           // Update training progress details
           setTrainingProgressDetails({
@@ -2358,7 +2594,7 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <div className="p-2 bg-blue-100 rounded-lg">
-                  <BarChart3 className="w-6 h-6 text-blue-600" />
+                  <BarChart3 className="w-5 h-5 text-blue-600" />
                 </div>
                 <div>
                   <h3 className="font-bold text-lg text-gray-800">Model Training Results</h3>
@@ -2422,19 +2658,29 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
                   });
                   
                   return (
-                    <div key={index} className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm hover:shadow-md transition-shadow duration-200">
+                    <div key={index} className="bg-white border border-gray-200 rounded-lg p-5 shadow-sm hover:shadow-md transition-shadow duration-200">
                       <div className="flex items-center justify-between mb-4">
-                        <div className="flex items-center gap-3">
-                          <div className="p-2 bg-green-100 rounded-lg">
-                            <Target className="w-5 h-5 text-green-600" />
+                        <div className="flex items-center gap-2">
+                          <div className="p-1.5 bg-green-100 rounded-lg">
+                            <Target className="w-4 h-4 text-green-600" />
                           </div>
-                          <h4 className="font-semibold text-base text-gray-800">
-                            Result for Combination {index + 1}: <span className="text-green-600 font-bold">
+                          <h4 className="font-medium text-sm text-gray-800">
+                            Combination: <span className="text-green-600 font-semibold">
                               {formatCombinationName(combinationName)}
                             </span>
                           </h4>
                         </div>
                         <div className="flex items-center gap-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleSaveSingleCombination(result)}
+                            disabled={result.status !== 'success' && result.status !== 'completed'}
+                            className="text-sm bg-orange-50 border-orange-200 text-orange-700 hover:bg-orange-100 disabled:opacity-50 disabled:cursor-not-allowed h-8 px-3"
+                          >
+                            <Save className="w-4 h-4 mr-1.5" />
+                            Save Result
+                          </Button>
                           <Button
                             variant="ghost"
                             size="sm"
@@ -2446,16 +2692,6 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
                             ) : (
                               <Minimize2 className="w-4 h-4 text-gray-600" />
                             )}
-                          </Button>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => handleSaveSingleCombination(result)}
-                            disabled={result.status !== 'success' && result.status !== 'completed'}
-                            className="text-xs bg-orange-50 border-orange-200 text-orange-700 hover:bg-orange-100 disabled:opacity-50 disabled:cursor-not-allowed"
-                          >
-                            <Save className="w-3 h-3 mr-1" />
-                            Save Result
                           </Button>
                         </div>
                       </div>
@@ -2561,7 +2797,7 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
                                 }
                                 
                                 return (
-                                  <ResponsiveContainer width="100%" height="100%" data-chart-area="true" onContextMenu={handleContextMenu} onMouseDown={(e) => { if (e.button === 2) { e.preventDefault(); e.stopPropagation(); handleContextMenu(e as any); } }}>
+                                  <ResponsiveContainer width="100%" height="100%" >
                                     <LineChart data={chartData} margin={{ top: 20, right: 30, left: 20, bottom: 20 }}>
                                       <defs>
                                         <linearGradient id={`lineGradient-actual-${index}`} x1="0" y1="0" x2="0" y2="1">
@@ -3091,7 +3327,7 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
                                       </div>
                                     </div>
                                   ) : growthRatesData && growthRatesData[result.combination_id] ? (
-                                    <div className="w-full h-full" data-chart-area="true" onContextMenu={handleContextMenu} onMouseDown={(e) => { if (e.button === 2) { e.preventDefault(); e.stopPropagation(); handleContextMenu(e as any); } }}>
+                                    <div className="w-full h-full" >
                                       {(() => {
                                         // Get the current models for this combination
                                         const currentModels = combinationGrowthModels[result.combination_id] || [];
@@ -3472,7 +3708,7 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
                                         try {
                                           console.log('🔧 Attempting to render chart with data:', chartData);
                                           return (
-                                            <ResponsiveContainer width="100%" height="100%" data-chart-area="true" onContextMenu={handleContextMenu} onMouseDown={(e) => { if (e.button === 2) { e.preventDefault(); e.stopPropagation(); handleContextMenu(e as any); } }}>
+                                            <ResponsiveContainer width="100%" height="100%">
                                               <BarChart 
                                                 data={chartData}
                                                 margin={{ top: 20, right: 30, left: 20, bottom: 20 }}
@@ -3531,8 +3767,8 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
                                                   cursor={{ fill: 'rgba(0, 0, 0, 0.04)' }}
                                                   formatter={(value: any, name: string) => {
                                                     try {
-                                                      // Convert decimal back to percentage for display
-                                                      const percentageValue = (value * 100).toFixed(2);
+                                                      // Display value as percentage (value is already in percentage format)
+                                                      const percentageValue = value.toFixed(2);
                                                         return [
                                                         `${percentageValue}%`,
                                                           name
@@ -3540,7 +3776,7 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
                                                     } catch (error) {
                                                       console.error('🔧 Error in tooltip formatter:', error);
                                                       return [
-                                                        `${(value * 100).toFixed(2)}%`,
+                                                        `${value.toFixed(2)}%`,
                                                         name
                                                       ];
                                                     }
@@ -3556,6 +3792,10 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
                                                       opacity: 0.8
                                                     }}
                                                     iconType="rect"
+                                                    onClick={(entry: any) => {
+                                                      console.log('🔧 Growth Legend clicked via Recharts:', entry);
+                                                      handleGrowthLegendClick(entry, result.combination_id);
+                                                    }}
                                                   />
                                                 )}
                                                                                                 {/* Render bars for each fiscal year as legend */}
@@ -3630,6 +3870,15 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
                                                     }
                                                     
                                                     console.log(`🔧 Rendering bar for fiscal year ${fiscalYear} with dataKey: ${dataKey}`);
+                                                    
+                                                    // Check if this bar should be visible based on legend selection
+                                                    const isVisible = isGrowthBarVisible(dataKey, result.combination_id);
+                                                    console.log(`🔧 Bar visibility for ${dataKey}:`, isVisible);
+                                                    
+                                                    if (!isVisible) {
+                                                      return null; // Don't render this bar
+                                                    }
+                                                    
                                                     return (
                                                       <Bar 
                                                         key={fiscalYear}
@@ -3646,7 +3895,7 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
                                                         position="top"
                                                         formatter={(value) => {
                                                           if (value && value !== 0) {
-                                                            return `${(value * 100).toFixed(2)}%`;
+                                                            return `${value.toFixed(2)}%`;
                                                           }
                                                           return '';
                                                         }}
@@ -3919,6 +4168,7 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
                     </span>
                   </div>
                 )}
+                {(() => { console.log('🔧 DEBUG: UI rendering combinationSaveStatus:', combinationSaveStatus); return null; })()}
                 {combinationSaveStatus && combinationSaveStatusMinimized && (
                   <div className="flex items-center gap-1.5 text-xs">
                     <Badge variant="secondary" className="bg-green-200 text-green-800 text-xs px-1.5 py-0.5">
@@ -4057,7 +4307,7 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
         }
       }}>
         <DialogContent 
-          className="max-w-6xl h-[80vh] p-6"
+          className="max-w-6xl h-[80vh] p-6 [&>button]:hidden"
           onClick={(e) => e.stopPropagation()}
           onMouseDown={(e) => e.stopPropagation()}
         >
@@ -4150,7 +4400,7 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
                 
                 return (
                   <div className="h-full" data-chart-area="true">
-                    <ResponsiveContainer width="100%" height="100%" data-chart-area="true" onContextMenu={handleContextMenu} onMouseDown={(e) => { if (e.button === 2) { e.preventDefault(); e.stopPropagation(); handleContextMenu(e as any); } }}>
+                    <ResponsiveContainer width="100%" height="100%" >
                       <LineChart data={chartData} margin={{ top: 20, right: 30, left: 20, bottom: 20 }}>
                         <defs>
                           <linearGradient id="lineGradient-actual-fullscreen" x1="0" y1="0" x2="0" y2="1">
@@ -4492,7 +4742,7 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
                     // Store decimal growth rate (percentage divided by 100) for bar height
                     const dataKey = `${fiscalYearId.replace(/\s+/g, '_').replace(/[^a-zA-Z0-9_]/g, '')}_growth_rate`;
                     
-                    groupedData[model][dataKey] = growthRate; // Data is already in decimal format
+                    groupedData[model][dataKey] = growthRate / 100; // Convert to decimal
                   });
                   
                   // Calculate ensemble (weighted average) for the fullscreen chart
@@ -4541,7 +4791,7 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
 
                 return (
                   <div className="h-full" data-chart-area="true">
-                    <ResponsiveContainer width="100%" height="100%" data-chart-area="true" onContextMenu={handleContextMenu} onMouseDown={(e) => { if (e.button === 2) { e.preventDefault(); e.stopPropagation(); handleContextMenu(e as any); } }}>
+                    <ResponsiveContainer width="100%" height="100%" >
                       <BarChart 
                         data={chartData}
                         margin={{ top: 20, right: 30, left: 20, bottom: 20 }}
@@ -4600,8 +4850,8 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
                           cursor={{ fill: 'rgba(0, 0, 0, 0.04)' }}
                           formatter={(value: any, name: string) => {
                             try {
-                              // Convert decimal back to percentage for display
-                              const percentageValue = (value * 100).toFixed(2);
+                              // Display value as percentage (value is already in percentage format)
+                              const percentageValue = value.toFixed(2);
                               return [
                                 `${percentageValue}%`,
                                 name
@@ -4609,7 +4859,7 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
                             } catch (error) {
                               console.error('🔧 Error in fullscreen tooltip formatter:', error);
                               return [
-                            `${(value * 100).toFixed(2)}%`,
+                            `${value.toFixed(2)}%`,
                             name
                               ];
                             }
@@ -4625,6 +4875,12 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
                               opacity: 0.8
                             }}
                             iconType="rect"
+                            onClick={(entry: any) => {
+                              console.log('🔧 Growth Legend clicked via Recharts:', entry);
+                              if (fullscreenChart?.combinationId) {
+                                handleGrowthLegendClick(entry, fullscreenChart.combinationId);
+                              }
+                            }}
                           />
                         )}
                         {/* Render Ensemble bar first (weighted average) */}
@@ -4642,7 +4898,7 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
                                 position="top"
                                 formatter={(value) => {
                                   if (value && value !== 0) {
-                                    return `${(value * 100).toFixed(2)}%`;
+                                    return `${value.toFixed(2)}%`;
                                   }
                                   return '';
                                 }}
@@ -4696,6 +4952,15 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
                             }
                             
                             console.log(`🔧 Fullscreen chart - Rendering bar for fiscal year ${fiscalYear} with dataKey: ${dataKey}`);
+                            
+                            // Check if this bar should be visible based on legend selection
+                            const isVisible = isGrowthBarVisible(dataKey, fullscreenChart.combinationId);
+                            console.log(`🔧 Fullscreen bar visibility for ${dataKey}:`, isVisible);
+                            
+                            if (!isVisible) {
+                              return null; // Don't render this bar
+                            }
+                            
                             return (
                               <Bar 
                                 key={fiscalYear}
@@ -4712,7 +4977,7 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
                                 position="top"
                                 formatter={(value) => {
                                   if (value && value !== 0) {
-                                    return `${(value * 100).toFixed(2)}%`;
+                                    return `${value.toFixed(2)}%`;
                                   }
                                   return '';
                                 }}

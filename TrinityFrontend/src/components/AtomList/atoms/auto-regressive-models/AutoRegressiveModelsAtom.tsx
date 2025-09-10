@@ -108,14 +108,16 @@ const AutoRegressiveModelsAtom: React.FC<Props> = ({ atomId }) => {
     const completeData = {
       ...defaultData,
       ...settings.data,
-      // Always default to all models selected if no models are explicitly selected
-      selectedModels: settings.data?.selectedModels && settings.data.selectedModels.length > 0 
+      // Only default to all models if selectedModels is undefined (initial load)
+      // If selectedModels is an empty array, respect the user's choice to deselect all
+      selectedModels: settings.data?.selectedModels !== undefined 
         ? settings.data.selectedModels 
         : defaultData.selectedModels
     };
 
-    // Ensure all models are selected by default on first load
-    if (!settings.data?.selectedModels || settings.data.selectedModels.length === 0) {
+    // Only auto-select all models on initial load when selectedModels is undefined
+    // Don't override user's explicit choice to have an empty array
+    if (settings.data?.selectedModels === undefined) {
       completeData.selectedModels = defaultData.selectedModels;
     }
 

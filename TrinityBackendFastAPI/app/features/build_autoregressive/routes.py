@@ -10,6 +10,8 @@ import uuid
 import threading
 import hashlib
 from concurrent.futures import ThreadPoolExecutor
+import pandas as pd
+import numpy as np
 
 # MongoDB and MinIO imports for saving models
 import io
@@ -1382,7 +1384,14 @@ async def calculate_fiscal_growth_endpoint(
 ):
     """Calculate fiscal year growth rates for a specific scope and combination."""
     try:
-        # If run_id is provided, try to get actual training results
+        logger.info(f"🔧 calculate_fiscal_growth_endpoint called with: scope={scope}, combination={combination}, run_id={run_id}")
+        logger.info(f"🔧 DATA SOURCE CHECK: Checking if real training data is available...")
+        
+        # Try to find real training results - first check provided run_id, then search all completed runs
+        real_data_found = False
+        actual_run_id = None
+        
+        # First, try the provided run_id if available
         if run_id and run_id in training_progress:
             progress = training_progress[run_id]
             if progress["status"] == "completed" and progress.get("results"):
@@ -1396,14 +1405,15 @@ async def calculate_fiscal_growth_endpoint(
                             
                             # Convert forecast_df to pandas DataFrame if it's a list
                             if isinstance(forecast_df, list):
-                                import pandas as pd
                                 forecast_df = pd.DataFrame(forecast_df)
                             
                             # Calculate fiscal growth using actual data
                             try:
-                                logger.info(f"🔧 Calculating fiscal growth for combination {combination} using actual forecast data")
-                                logger.info(f"🔧 Forecast dataframe shape: {forecast_df.shape}")
-                                logger.info(f"🔧 Models run: {models_run}")
+                                logger.info(f"🔧 ✅ USING REAL TRAINING DATA for combination {combination} (run_id: {run_id})")
+                                logger.info(f"🔧 📊 REAL DATA: Forecast dataframe shape: {forecast_df.shape}")
+                                logger.info(f"🔧 📊 REAL DATA: Models run: {models_run}")
+                                logger.info(f"🔧 📊 REAL DATA: Forecast_df columns: {forecast_df.columns.tolist()}")
+                                logger.info(f"🔧 📊 REAL DATA: Sample forecast data: {forecast_df.head(3).to_dict()}")
                                 
                                 growth_data = calculate_fiscal_growth(
                                     forecast_df=forecast_df,
@@ -1422,22 +1432,84 @@ async def calculate_fiscal_growth_endpoint(
                                         if pd.isna(value) or (isinstance(value, float) and (value == float('inf') or value == float('-inf'))):
                                             record[key] = None
                                 
-                                logger.info(f"🔧 Successfully calculated fiscal growth for combination {combination}: {len(growth_list)} records")
-                                logger.info(f"🔧 Sample growth data: {growth_list[:2] if growth_list else 'No data'}")
+                                logger.info(f"🔧 ✅ SUCCESS: Calculated fiscal growth using REAL DATA for combination {combination}: {len(growth_list)} records")
+                                logger.info(f"🔧 📊 REAL DATA RESULT: Sample growth data: {growth_list[:2] if growth_list else 'No data'}")
                                 
                                 return {
                                     "status": "success",
                                     "data": {
                                         "fiscal_growth": growth_list
-                                    }
+                                    },
+                                    "data_source": "real_training_data",
+                                    "run_id": run_id,
+                                    "models_used": models_run
                                 }
                             except Exception as calc_error:
-                                logger.error(f"Error calculating fiscal growth with actual data for combination {combination}: {calc_error}")
+                                logger.error(f"🔧 ❌ Error calculating fiscal growth with real data: {calc_error}")
+                                logger.info(f"🔧 🔄 FALLING BACK to sample data generation...")
                                 # Fall back to sample data generation
                                 pass
         
+        # If no run_id provided or no data found, search all completed training runs
+        if not real_data_found:
+            logger.info(f"🔧 🔍 SEARCHING ALL COMPLETED TRAINING RUNS for combination {combination}")
+            for search_run_id, progress in training_progress.items():
+                if progress.get("status") == "completed" and progress.get("results"):
+                    for result in progress["results"]:
+                        if result.get("combination_id") == combination and result.get("status") == "success":
+                            if result.get("result") and result["result"].get("forecast_df"):
+                                forecast_df = result["result"]["forecast_df"]
+                                models_run = result["result"].get("models_run", [])
+                                
+                                # Convert forecast_df to pandas DataFrame if it's a list
+                                if isinstance(forecast_df, list):
+                                    forecast_df = pd.DataFrame(forecast_df)
+                                
+                                # Calculate fiscal growth using actual data
+                                try:
+                                    logger.info(f"🔧 ✅ FOUND REAL TRAINING DATA for combination {combination} (run_id: {search_run_id})")
+                                    logger.info(f"🔧 📊 REAL DATA: Forecast dataframe shape: {forecast_df.shape}")
+                                    logger.info(f"🔧 📊 REAL DATA: Models run: {models_run}")
+                                    logger.info(f"🔧 📊 REAL DATA: Forecast_df columns: {forecast_df.columns.tolist()}")
+                                    logger.info(f"🔧 📊 REAL DATA: Sample forecast data: {forecast_df.head(3).to_dict()}")
+                                    
+                                    growth_data = calculate_fiscal_growth(
+                                        forecast_df=forecast_df,
+                                        forecast_horizon=forecast_horizon,
+                                        fiscal_start_month=fiscal_start_month,
+                                        frequency=frequency,
+                                        start_year=start_year
+                                    )
+                                    
+                                    # Convert to list of dictionaries for JSON response
+                                    growth_list = growth_data.to_dict('records')
+                                    
+                                    # Handle any infinite or NaN values in the records
+                                    for record in growth_list:
+                                        for key, value in record.items():
+                                            if pd.isna(value) or (isinstance(value, float) and (value == float('inf') or value == float('-inf'))):
+                                                record[key] = None
+                                    
+                                    logger.info(f"🔧 ✅ SUCCESS: Calculated fiscal growth using REAL DATA for combination {combination}: {len(growth_list)} records")
+                                    logger.info(f"🔧 📊 REAL DATA RESULT: Sample growth data: {growth_list[:2] if growth_list else 'No data'}")
+                                    
+                                    return {
+                                        "status": "success",
+                                        "data": {
+                                            "fiscal_growth": growth_list
+                                        },
+                                        "data_source": "real_training_data",
+                                        "run_id": search_run_id,
+                                        "models_used": models_run
+                                    }
+                                except Exception as calc_error:
+                                    logger.error(f"🔧 ❌ Error calculating fiscal growth with real data: {calc_error}")
+                                    # Continue searching other runs
+                                    continue
+        
         # Fallback to original logic if no run_id or no actual data found
-        logger.info(f"🔧 No run_id provided or no actual data found for combination {combination}, using fallback logic")
+        logger.info(f"🔧 ⚠️  NO REAL DATA AVAILABLE for combination {combination}")
+        logger.info(f"🔧 🔄 USING FALLBACK LOGIC: Generating sample data for demonstration...")
         
         minio_client = get_minio_client()
         trinity_bucket = "trinity"
@@ -1463,10 +1535,10 @@ async def calculate_fiscal_growth_endpoint(
                 if has_scope and has_combination:
                     matching_objects.append(obj_name)
             
-            logger.info(f"Total matching files found: {len(matching_objects)}")
+            logger.info(f"🔧 📁 Found {len(matching_objects)} matching files for sample data generation")
             
         except Exception as search_error:
-            logger.error(f"Search failed: {search_error}")
+            logger.error(f"🔧 ❌ Search failed: {search_error}")
             raise HTTPException(status_code=500, detail=f"Search failed: {str(search_error)}")
         
         if not matching_objects:
@@ -1474,15 +1546,17 @@ async def calculate_fiscal_growth_endpoint(
         
         # Use the first matching file
         target_file_key = matching_objects[0]
+        logger.info(f"🔧 📁 Using file for sample data: {target_file_key}")
         
         # Read the file
         try:
+            import pandas as pd
             response = minio_client.get_object(trinity_bucket, target_file_key)
             df = pd.read_feather(BytesIO(response.read()))
             response.close()
             response.release_conn()
         except Exception as file_error:
-            logger.error(f"Error reading file {target_file_key}: {file_error}")
+            logger.error(f"🔧 ❌ Error reading file {target_file_key}: {file_error}")
             raise HTTPException(status_code=500, detail="Failed to read file")
         
         # Check if we have the required columns (handle both 'date' and 'Date')
@@ -1495,7 +1569,7 @@ async def calculate_fiscal_growth_endpoint(
         if not date_col:
             raise HTTPException(status_code=400, detail="Date column not found in data")
         
-        logger.info(f"🔧 Using date column: {date_col}")
+        logger.info(f"🔧 📊 SAMPLE DATA: Using date column: {date_col}")
         
         # Ensure we have actual data column
         actual_col = None
@@ -1511,12 +1585,18 @@ async def calculate_fiscal_growth_endpoint(
         forecast_df = df[[date_col, actual_col]].copy()
         forecast_df.columns = ['date', 'Actual']
         
+        logger.info(f"🔧 📊 SAMPLE DATA: Original data shape: {forecast_df.shape}")
+        logger.info(f"🔧 📊 SAMPLE DATA: Date range: {forecast_df['date'].min()} to {forecast_df['date'].max()}")
+        
         # Add some sample forecast data for demonstration
         # IMPORTANT: Generate different sample data for each combination to avoid identical growth rates
         combination_hash = hashlib.md5(combination.encode()).hexdigest()
         np.random.seed(int(combination_hash[:8], 16))  # Use combination hash as seed for reproducible but different data
         
         sample_models = ['SARIMA', 'Holt-Winters']
+        logger.info(f"🔧 🎲 SAMPLE DATA: Generating sample forecast data for models: {sample_models}")
+        logger.info(f"🔧 🎲 SAMPLE DATA: Using combination hash: {combination_hash[:8]} for reproducible variation")
+        
         for model in sample_models:
             # Generate combination-specific variation factors
             combination_factor = (int(combination_hash[:4], 16) % 100) / 1000  # 0-0.1 variation
@@ -1530,8 +1610,12 @@ async def calculate_fiscal_growth_endpoint(
             base_forecast_values = df[actual_col].iloc[-forecast_horizon:].values
             forecast_values = base_forecast_values * (1 + np.random.normal(combination_factor + model_factor, 0.1, forecast_horizon))
             forecast_df.loc[forecast_df.index[-forecast_horizon:], model] = forecast_values
+            
+            logger.info(f"🔧 🎲 SAMPLE DATA: Generated {model} data with factors: combination={combination_factor:.4f}, model={model_factor:.4f}")
         
-        logger.info(f"🔧 Generated combination-specific sample data for {combination}")
+        logger.info(f"🔧 ✅ SAMPLE DATA: Generated combination-specific sample data for {combination}")
+        logger.info(f"🔧 📊 SAMPLE DATA: Final forecast dataframe shape: {forecast_df.shape}")
+        logger.info(f"🔧 📊 SAMPLE DATA: Sample forecast data: {forecast_df.head(3).to_dict()}")
         
         # Calculate fiscal growth
         try:
@@ -1552,23 +1636,28 @@ async def calculate_fiscal_growth_endpoint(
                     if pd.isna(value) or (isinstance(value, float) and (value == float('inf') or value == float('-inf'))):
                         record[key] = None
             
-            logger.info(f"🔧 Successfully calculated fiscal growth for combination {combination} using fallback data: {len(growth_list)} records")
+            logger.info(f"🔧 ✅ SUCCESS: Calculated fiscal growth using SAMPLE DATA for combination {combination}: {len(growth_list)} records")
+            logger.info(f"🔧 📊 SAMPLE DATA RESULT: Sample growth data: {growth_list[:2] if growth_list else 'No data'}")
             
             return {
                 "status": "success",
                 "data": {
                     "fiscal_growth": growth_list
-                }
+                },
+                "data_source": "sample_data",
+                "run_id": None,
+                "models_used": sample_models,
+                "note": "Generated using sample data for demonstration. Run autoregressive models first for real data."
             }
             
         except Exception as calc_error:
-            logger.error(f"Error calculating fiscal growth: {calc_error}")
+            logger.error(f"🔧 ❌ Error calculating fiscal growth: {calc_error}")
             raise HTTPException(status_code=500, detail=f"Failed to calculate growth: {str(calc_error)}")
         
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to calculate fiscal growth: {e}")
+        logger.error(f"🔧 ❌ Failed to calculate fiscal growth: {e}")
         raise HTTPException(status_code=500, detail="Failed to calculate fiscal growth")
 
 @router.post("/calculate-halfyearly-growth")
@@ -1588,7 +1677,10 @@ async def calculate_halfyearly_growth_endpoint(
         logger.info("🔧 Endpoint called but parameter logging failed")
     
     try:
-        # If run_id is provided, try to get actual training results
+        # Try to find real training results - first check provided run_id, then search all completed runs
+        real_data_found = False
+        
+        # First, try the provided run_id if available
         if run_id and run_id in training_progress:
             progress = training_progress[run_id]
             if progress["status"] == "completed" and progress.get("results"):
@@ -1602,11 +1694,16 @@ async def calculate_halfyearly_growth_endpoint(
                             
                             # Convert forecast_df to pandas DataFrame if it's a list
                             if isinstance(forecast_df, list):
-                                import pandas as pd
                                 forecast_df = pd.DataFrame(forecast_df)
                             
                             # Calculate half-yearly growth using actual data
                             try:
+                                logger.info(f"🔧 ✅ USING REAL TRAINING DATA for combination {combination} (run_id: {run_id})")
+                                logger.info(f"🔧 📊 REAL DATA: Forecast dataframe shape: {forecast_df.shape}")
+                                logger.info(f"🔧 📊 REAL DATA: Models run: {models_run}")
+                                logger.info(f"🔧 📊 REAL DATA: Forecast_df columns: {forecast_df.columns.tolist()}")
+                                logger.info(f"🔧 📊 REAL DATA: Sample forecast data: {forecast_df.head(3).to_dict()}")
+                                
                                 logger.info(f"🔧 Calling calculate_halfyearly_yoy_growth...")
                                 growth_data = calculate_halfyearly_yoy_growth(
                                     forecast_df=forecast_df,
@@ -1626,27 +1723,90 @@ async def calculate_halfyearly_growth_endpoint(
                                         if pd.isna(value) or (isinstance(value, float) and (value == float('inf') or value == float('-inf'))):
                                             record[key] = None
                                 
-                                logger.info(f"🔧 Returning success response with {len(growth_list)} growth records")
-                                logger.info(f"🔧 Sample growth data: {growth_list[:2] if growth_list else 'No data'}")
+                                logger.info(f"🔧 ✅ SUCCESS: Calculated half-yearly growth using REAL DATA for combination {combination}: {len(growth_list)} records")
+                                logger.info(f"🔧 📊 REAL DATA RESULT: Sample growth data: {growth_list[:2] if growth_list else 'No data'}")
                                 
                                 return {
                                     "status": "success",
                                     "data": {
                                         "halfyearly_growth": growth_list
-                                    }
+                                    },
+                                    "data_source": "real_training_data",
+                                    "run_id": run_id,
+                                    "models_used": models_run
                                 }
                             except Exception as calc_error:
                                 logger.error(f"Error calculating half-yearly growth with actual data: {calc_error}")
                                 # Fall back to sample data generation
                                 pass
         
+        # If no run_id provided or no data found, search all completed training runs
+        if not real_data_found:
+            logger.info(f"🔧 🔍 SEARCHING ALL COMPLETED TRAINING RUNS for combination {combination}")
+            for search_run_id, progress in training_progress.items():
+                if progress.get("status") == "completed" and progress.get("results"):
+                    for result in progress["results"]:
+                        if result.get("combination_id") == combination and result.get("status") == "success":
+                            if result.get("result") and result["result"].get("forecast_df"):
+                                forecast_df = result["result"]["forecast_df"]
+                                models_run = result["result"].get("models_run", [])
+                                
+                                # Convert forecast_df to pandas DataFrame if it's a list
+                                if isinstance(forecast_df, list):
+                                    forecast_df = pd.DataFrame(forecast_df)
+                                
+                                # Calculate half-yearly growth using actual data
+                                try:
+                                    logger.info(f"🔧 ✅ FOUND REAL TRAINING DATA for combination {combination} (run_id: {search_run_id})")
+                                    logger.info(f"🔧 📊 REAL DATA: Forecast dataframe shape: {forecast_df.shape}")
+                                    logger.info(f"🔧 📊 REAL DATA: Models run: {models_run}")
+                                    logger.info(f"🔧 📊 REAL DATA: Forecast_df columns: {forecast_df.columns.tolist()}")
+                                    logger.info(f"🔧 📊 REAL DATA: Sample forecast data: {forecast_df.head(3).to_dict()}")
+                                    
+                                    logger.info(f"🔧 Calling calculate_halfyearly_yoy_growth...")
+                                    growth_data = calculate_halfyearly_yoy_growth(
+                                        forecast_df=forecast_df,
+                                        forecast_horizon=forecast_horizon,
+                                        fiscal_start_month=fiscal_start_month,
+                                        frequency=frequency
+                                    )
+                                    
+                                    logger.info(f"🔧 Growth calculation successful. Result shape: {growth_data.shape}")
+                                    
+                                    # Convert to list of dictionaries for JSON response
+                                    growth_list = growth_data.to_dict('records')
+                                    
+                                    # Handle any infinite or NaN values in the records
+                                    for record in growth_list:
+                                        for key, value in record.items():
+                                            if pd.isna(value) or (isinstance(value, float) and (value == float('inf') or value == float('-inf'))):
+                                                record[key] = None
+                                    
+                                    logger.info(f"🔧 ✅ SUCCESS: Calculated half-yearly growth using REAL DATA for combination {combination}: {len(growth_list)} records")
+                                    logger.info(f"🔧 📊 REAL DATA RESULT: Sample growth data: {growth_list[:2] if growth_list else 'No data'}")
+                                    
+                                    return {
+                                        "status": "success",
+                                        "data": {
+                                            "halfyearly_growth": growth_list
+                                        },
+                                        "data_source": "real_training_data",
+                                        "run_id": search_run_id,
+                                        "models_used": models_run
+                                    }
+                                except Exception as calc_error:
+                                    logger.error(f"Error calculating half-yearly growth with actual data: {calc_error}")
+                                    # Continue searching other runs
+                                    continue
+        
         # Fallback to original logic if no run_id or no actual data found
-        logger.info(f"🔧 No run_id provided or no actual data found for combination {combination}, using fallback logic")
+        logger.info(f"🔧 ⚠️  NO REAL DATA AVAILABLE for combination {combination}")
+        logger.info(f"🔧 🔄 USING FALLBACK LOGIC: Generating sample data for demonstration...")
         
         minio_client = get_minio_client()
         trinity_bucket = "trinity"
         
-        logger.info(f"🔧 Searching for files in bucket: {trinity_bucket}")
+        logger.info(f"🔧 📁 Searching for files in bucket: {trinity_bucket}")
         
         # Search for the file using the same logic as the working forecast code
         target_file_key = None
@@ -1740,8 +1900,10 @@ async def calculate_halfyearly_growth_endpoint(
             forecast_values = base_forecast_values * (1 + np.random.normal(combination_factor + model_factor, 0.1, forecast_horizon))
             forecast_df.loc[forecast_df.index[-forecast_horizon:], model] = forecast_values
         
-        logger.info(f"🔧 Generated combination-specific sample data for {combination}")
-        logger.info(f"🔧 Added forecast data for models: {sample_models}")
+        logger.info(f"🔧 ✅ SAMPLE DATA: Generated combination-specific sample data for {combination}")
+        logger.info(f"🔧 📊 SAMPLE DATA: Final forecast dataframe shape: {forecast_df.shape}")
+        logger.info(f"🔧 📊 SAMPLE DATA: Sample forecast data: {forecast_df.head(3).to_dict()}")
+        logger.info(f"🔧 🎲 SAMPLE DATA: Added forecast data for models: {sample_models}")
         
         # Calculate half-yearly growth
         try:
@@ -1764,13 +1926,18 @@ async def calculate_halfyearly_growth_endpoint(
                     if pd.isna(value) or (isinstance(value, float) and (value == float('inf') or value == float('-inf'))):
                         record[key] = None
             
-            logger.info(f"🔧 Returning success response with {len(growth_list)} growth records")
-        
+            logger.info(f"🔧 ✅ SUCCESS: Calculated half-yearly growth using SAMPLE DATA for combination {combination}: {len(growth_list)} records")
+            logger.info(f"🔧 📊 SAMPLE DATA RESULT: Sample growth data: {growth_list[:2] if growth_list else 'No data'}")
+            
             return {
                 "status": "success",
                 "data": {
                     "halfyearly_growth": growth_list
-                }
+                },
+                "data_source": "sample_data",
+                "run_id": None,
+                "models_used": sample_models,
+                "note": "Generated using sample data for demonstration. Run autoregressive models first for real data."
             }
             
         except Exception as calc_error:
@@ -1794,7 +1961,10 @@ async def calculate_quarterly_growth_endpoint(
 ):
     """Calculate quarterly growth rates for a specific scope and combination."""
     try:
-        # If run_id is provided, try to get actual training results
+        # Try to find real training results - first check provided run_id, then search all completed runs
+        real_data_found = False
+        
+        # First, try the provided run_id if available
         if run_id and run_id in training_progress:
             progress = training_progress[run_id]
             if progress["status"] == "completed" and progress.get("results"):
@@ -1808,11 +1978,16 @@ async def calculate_quarterly_growth_endpoint(
                             
                             # Convert forecast_df to pandas DataFrame if it's a list
                             if isinstance(forecast_df, list):
-                                import pandas as pd
                                 forecast_df = pd.DataFrame(forecast_df)
                             
                             # Calculate quarterly growth using actual data
                             try:
+                                logger.info(f"🔧 ✅ USING REAL TRAINING DATA for combination {combination} (run_id: {run_id})")
+                                logger.info(f"🔧 📊 REAL DATA: Forecast dataframe shape: {forecast_df.shape}")
+                                logger.info(f"🔧 📊 REAL DATA: Models run: {models_run}")
+                                logger.info(f"🔧 📊 REAL DATA: Forecast_df columns: {forecast_df.columns.tolist()}")
+                                logger.info(f"🔧 📊 REAL DATA: Sample forecast data: {forecast_df.head(3).to_dict()}")
+                                
                                 growth_data = calculate_quarterly_yoy_growth(
                                     forecast_df=forecast_df,
                                     forecast_horizon=forecast_horizon,
@@ -1829,19 +2004,82 @@ async def calculate_quarterly_growth_endpoint(
                                         if pd.isna(value) or (isinstance(value, float) and (value == float('inf') or value == float('-inf'))):
                                             record[key] = None
                                 
+                                logger.info(f"🔧 ✅ SUCCESS: Calculated quarterly growth using REAL DATA for combination {combination}: {len(growth_list)} records")
+                                logger.info(f"🔧 📊 REAL DATA RESULT: Sample growth data: {growth_list[:2] if growth_list else 'No data'}")
+                                
                                 return {
                                     "status": "success",
                                     "data": {
                                         "quarterly_growth": growth_list
-                                    }
+                                    },
+                                    "data_source": "real_training_data",
+                                    "run_id": run_id,
+                                    "models_used": models_run
                                 }
                             except Exception as calc_error:
                                 logger.error(f"Error calculating quarterly growth with actual data: {calc_error}")
                                 # Fall back to sample data generation
                                 pass
         
+        # If no run_id provided or no data found, search all completed training runs
+        if not real_data_found:
+            logger.info(f"🔧 🔍 SEARCHING ALL COMPLETED TRAINING RUNS for combination {combination}")
+            for search_run_id, progress in training_progress.items():
+                if progress.get("status") == "completed" and progress.get("results"):
+                    for result in progress["results"]:
+                        if result.get("combination_id") == combination and result.get("status") == "success":
+                            if result.get("result") and result["result"].get("forecast_df"):
+                                forecast_df = result["result"]["forecast_df"]
+                                models_run = result["result"].get("models_run", [])
+                                
+                                # Convert forecast_df to pandas DataFrame if it's a list
+                                if isinstance(forecast_df, list):
+                                    forecast_df = pd.DataFrame(forecast_df)
+                                
+                                # Calculate quarterly growth using actual data
+                                try:
+                                    logger.info(f"🔧 ✅ FOUND REAL TRAINING DATA for combination {combination} (run_id: {search_run_id})")
+                                    logger.info(f"🔧 📊 REAL DATA: Forecast dataframe shape: {forecast_df.shape}")
+                                    logger.info(f"🔧 📊 REAL DATA: Models run: {models_run}")
+                                    logger.info(f"🔧 📊 REAL DATA: Forecast_df columns: {forecast_df.columns.tolist()}")
+                                    logger.info(f"🔧 📊 REAL DATA: Sample forecast data: {forecast_df.head(3).to_dict()}")
+                                    
+                                    growth_data = calculate_quarterly_yoy_growth(
+                                        forecast_df=forecast_df,
+                                        forecast_horizon=forecast_horizon,
+                                        fiscal_start_month=fiscal_start_month,
+                                        frequency=frequency
+                                    )
+                                    
+                                    # Convert to list of dictionaries for JSON response
+                                    growth_list = growth_data.to_dict('records')
+                                    
+                                    # Handle any infinite or NaN values in the records
+                                    for record in growth_list:
+                                        for key, value in record.items():
+                                            if pd.isna(value) or (isinstance(value, float) and (value == float('inf') or value == float('-inf'))):
+                                                record[key] = None
+                                    
+                                    logger.info(f"🔧 ✅ SUCCESS: Calculated quarterly growth using REAL DATA for combination {combination}: {len(growth_list)} records")
+                                    logger.info(f"🔧 📊 REAL DATA RESULT: Sample growth data: {growth_list[:2] if growth_list else 'No data'}")
+                                    
+                                    return {
+                                        "status": "success",
+                                        "data": {
+                                            "quarterly_growth": growth_list
+                                        },
+                                        "data_source": "real_training_data",
+                                        "run_id": search_run_id,
+                                        "models_used": models_run
+                                    }
+                                except Exception as calc_error:
+                                    logger.error(f"Error calculating quarterly growth with actual data: {calc_error}")
+                                    # Continue searching other runs
+                                    continue
+        
         # Fallback to original logic if no run_id or no actual data found
-        logger.info(f"🔧 No run_id provided or no actual data found for combination {combination}, using fallback logic")
+        logger.info(f"🔧 ⚠️  NO REAL DATA AVAILABLE for combination {combination}")
+        logger.info(f"🔧 🔄 USING FALLBACK LOGIC: Generating sample data for demonstration...")
         
         minio_client = get_minio_client()
         trinity_bucket = "trinity"
@@ -1915,12 +2153,18 @@ async def calculate_quarterly_growth_endpoint(
         forecast_df = df[[date_col, actual_col]].copy()
         forecast_df.columns = ['date', 'Actual']
         
+        logger.info(f"🔧 📊 SAMPLE DATA: Original data shape: {forecast_df.shape}")
+        logger.info(f"🔧 📊 SAMPLE DATA: Date range: {forecast_df['date'].min()} to {forecast_df['date'].max()}")
+        
         # Add some sample forecast data for demonstration
         # IMPORTANT: Generate different sample data for each combination to avoid identical growth rates
         combination_hash = hashlib.md5(combination.encode()).hexdigest()
         np.random.seed(int(combination_hash[:8], 16))  # Use combination hash as seed for reproducible but different data
         
         sample_models = ['SARIMA', 'Holt-Winters']
+        logger.info(f"🔧 🎲 SAMPLE DATA: Generating sample forecast data for models: {sample_models}")
+        logger.info(f"🔧 🎲 SAMPLE DATA: Using combination hash: {combination_hash[:8]} for reproducible variation")
+        
         for model in sample_models:
             # Generate combination-specific variation factors
             combination_factor = (int(combination_hash[:4], 16) % 100) / 1000  # 0-0.1 variation
@@ -1934,8 +2178,12 @@ async def calculate_quarterly_growth_endpoint(
             base_forecast_values = df[actual_col].iloc[-forecast_horizon:].values
             forecast_values = base_forecast_values * (1 + np.random.normal(combination_factor + model_factor, 0.1, forecast_horizon))
             forecast_df.loc[forecast_df.index[-forecast_horizon:], model] = forecast_values
+            
+            logger.info(f"🔧 🎲 SAMPLE DATA: Generated {model} data with factors: combination={combination_factor:.4f}, model={model_factor:.4f}")
         
-        logger.info(f"🔧 Generated combination-specific sample data for {combination}")
+        logger.info(f"🔧 ✅ SAMPLE DATA: Generated combination-specific sample data for {combination}")
+        logger.info(f"🔧 📊 SAMPLE DATA: Final forecast dataframe shape: {forecast_df.shape}")
+        logger.info(f"🔧 📊 SAMPLE DATA: Sample forecast data: {forecast_df.head(3).to_dict()}")
         
         # Calculate quarterly growth
         try:
@@ -1955,11 +2203,18 @@ async def calculate_quarterly_growth_endpoint(
                     if pd.isna(value) or (isinstance(value, float) and (value == float('inf') or value == float('-inf'))):
                         record[key] = None
             
+            logger.info(f"🔧 ✅ SUCCESS: Calculated quarterly growth using SAMPLE DATA for combination {combination}: {len(growth_list)} records")
+            logger.info(f"🔧 📊 SAMPLE DATA RESULT: Sample growth data: {growth_list[:2] if growth_list else 'No data'}")
+            
             return {
                 "status": "success",
                 "data": {
                     "quarterly_growth": growth_list
-                }
+                },
+                "data_source": "sample_data",
+                "run_id": None,
+                "models_used": sample_models,
+                "note": "Generated using sample data for demonstration. Run autoregressive models first for real data."
             }
             
         except Exception as calc_error:
@@ -1974,9 +2229,8 @@ async def calculate_quarterly_growth_endpoint(
 
 # Quick validation endpoint to prevent 504 timeouts
 @router.post("/validate-request", tags=["Autoregressive Model Training"])
-async def validate_autoregressive_request(request: dict):
+async def validate_request(request: dict):
     """
-    Quick validation endpoint that returns immediately.
     Use this before calling the main training endpoint to validate parameters.
     """
     try:
@@ -2211,6 +2465,8 @@ async def save_single_autoregressive_combination(
         tags = request.get("tags", [])
         description = request.get("description", "")
         
+        logger.info(f"🔧 DEBUG: Save request - scope: {scope}, combination_id: {combination_id}, tags: {tags}")
+        
         if not scope or not combination_id or not result_data:
             raise HTTPException(status_code=400, detail="Missing required fields: scope, combination_id, or result")
         
@@ -2255,6 +2511,8 @@ async def save_single_autoregressive_combination(
         # Insert the model
         result = await saved_models_collection.insert_one(document)
         
+        logger.info(f"✅ Successfully saved autoregressive combination {combination_id} to MongoDB with ID: {result.inserted_id}")
+        
         # Update combination save status in dedicated collection
         try:
             # Use client_name/app_name/project_name if available, otherwise fall back to client_id/app_id/project_id
@@ -2262,28 +2520,47 @@ async def save_single_autoregressive_combination(
             final_app_name = request.get("app_name", "") or request.get("app_id", "")
             final_project_name = request.get("project_name", "") or request.get("project_id", "")
             
+            # Extract atom_id from tags
+            atom_id = ""
+            if tags:
+                for tag in tags:
+                    if tag.startswith("auto-regressive-models-"):
+                        atom_id = tag.replace("auto-regressive-models-", "")
+                        break
+            
+            logger.info(f"🔧 DEBUG: Updating combination save status for scope={scope}, atom_id={atom_id}, combination_id={combination_id}")
+            
             # Get current save status
             current_status = await get_combination_save_status_from_mongo(
                 scope=scope,
-                atom_id=tags[0].replace("auto-regressive-models-", "") if tags else "",
+                atom_id=atom_id,
                 client_name=final_client_name,
                 app_name=final_app_name,
                 project_name=final_project_name
             )
             
+            logger.info(f"🔧 DEBUG: Current save status: {current_status}")
+            
             # Update with new saved combination
             saved_combinations = current_status.get("saved_combinations", []) if current_status else []
             pending_combinations = current_status.get("pending_combinations", []) if current_status else []
             
+            logger.info(f"🔧 DEBUG: Before update - saved: {saved_combinations}, pending: {pending_combinations}")
+            
             if combination_id not in saved_combinations:
                 saved_combinations.append(combination_id)
+                logger.info(f"✅ Added {combination_id} to saved combinations")
+            
             if combination_id in pending_combinations:
                 pending_combinations.remove(combination_id)
+                logger.info(f"✅ Removed {combination_id} from pending combinations")
+            
+            logger.info(f"🔧 DEBUG: After update - saved: {saved_combinations}, pending: {pending_combinations}")
             
             # Save updated status
             await update_combination_save_status(
                 scope=scope,
-                atom_id=tags[0].replace("auto-regressive-models-", "") if tags else "",
+                atom_id=atom_id,
                 saved_combinations=saved_combinations,
                 pending_combinations=pending_combinations,
                 client_name=final_client_name,
@@ -2291,8 +2568,12 @@ async def save_single_autoregressive_combination(
                 project_name=final_project_name
             )
             
+            logger.info(f"✅ Successfully updated combination save status: {len(saved_combinations)} saved, {len(pending_combinations)} pending")
+            
         except Exception as e:
-            logger.error(f"Error updating combination save status: {e}")
+            logger.error(f"❌ Error updating combination save status: {e}")
+            import traceback
+            logger.error(f"❌ Traceback: {traceback.format_exc()}")
             # Continue even if save status update fails
         
         # Save forecast data to MinIO if available
@@ -2503,67 +2784,75 @@ async def get_saved_autoregressive_combinations_status(
             if "file_key" in model:
                 source_files.add(str(model["file_key"]))
         
-        # Get a representative source file (use the first one found)
-        source_file_key = list(source_files)[0] if source_files else None
+        # Get all combinations for this scope from the training progress
+        all_combination_ids = set()
+        processed_combination_ids = set()
+        for run_id, progress in training_progress.items():
+            if progress.get("scope_id") == f"scope_{scope}":
+                if "results" in progress:
+                    for result in progress["results"]:
+                        if "combination_id" in result:
+                            combination_id = str(result["combination_id"])
+                            all_combination_ids.add(combination_id)
+                            # If the result has a status of "success", consider it processed
+                            if result.get("status") == "success":
+                                processed_combination_ids.add(combination_id)
         
-        # Use the new get_combination_save_status function
-        if source_file_key:
-            # Use the comprehensive function that reads from source file
-            status_data = await get_combination_save_status(
+        # If no combinations found in training progress, try to get from existing save status
+        if not all_combination_ids:
+            existing_status = await get_combination_save_status_from_mongo(
                 scope=scope,
                 atom_id=atom_id,
-                source_file_key=source_file_key,
                 client_name=final_client_name,
                 app_name=final_app_name,
                 project_name=final_project_name
             )
-        else:
-            # Fallback: use existing logic for when no source file is available
-            # Get all combinations for this scope from the training progress
-            all_combination_ids = set()
-            processed_combination_ids = set()
-            for run_id, progress in training_progress.items():
-                if progress.get("scope_id") == f"scope_{scope}":
-                    if "results" in progress:
-                        for result in progress["results"]:
-                            if "combination_id" in result:
-                                combination_id = str(result["combination_id"])
-                                all_combination_ids.add(combination_id)
-                                # If the result has a status of "success", consider it processed
-                                if result.get("status") == "success":
-                                    processed_combination_ids.add(combination_id)
-            
-            # If still no combinations found, use saved combinations as total
-            if not all_combination_ids:
-                all_combination_ids = saved_combination_ids.copy()
-            
-            # Calculate pending combinations more accurately
-            if processed_combination_ids:
-                # Use processed combinations as the base for pending calculation
-                pending_combination_ids = processed_combination_ids - saved_combination_ids
-                # Total should be the union of saved and pending
-                all_combination_ids = saved_combination_ids | pending_combination_ids
-            else:
-                # Fallback: pending = all - saved
-                pending_combination_ids = all_combination_ids - saved_combination_ids
-            
-            # Create the response data
-            status_data = {
-                "scope": scope,
-                "atom_id": atom_id,
-                "total_combinations": len(all_combination_ids),
-                "saved_combinations": list(saved_combination_ids),
-                "pending_combinations": list(pending_combination_ids),
-                "saved_count": len(saved_combination_ids),
-                "pending_count": len(pending_combination_ids),
-                "completion_percentage": round((len(saved_combination_ids) / len(all_combination_ids)) * 100, 2) if all_combination_ids else 0
-            }
+            if existing_status:
+                all_combination_ids = set(existing_status.get("saved_combinations", []) + existing_status.get("pending_combinations", []))
         
-        return SavedCombinationsStatusResponse(**status_data)
+        # If still no combinations found, use saved combinations as total
+        if not all_combination_ids:
+            all_combination_ids = saved_combination_ids.copy()
+        
+        # Calculate pending combinations more accurately
+        # Pending = processed but not saved
+        # If we have processed combinations, use those; otherwise fall back to all combinations
+        if processed_combination_ids:
+            # Use processed combinations as the base for pending calculation
+            pending_combination_ids = processed_combination_ids - saved_combination_ids
+            # Total should be the union of saved and pending
+            all_combination_ids = saved_combination_ids | pending_combination_ids
+        else:
+            # Fallback: pending = all - saved
+            pending_combination_ids = all_combination_ids - saved_combination_ids
+        
+        # Get a representative source file (use the first one found)
+        source_file_key = list(source_files)[0] if source_files else None
+        
+        # Create the response data first
+        response_data = {
+            "scope": scope,
+            "atom_id": atom_id,
+            "total_combinations": len(all_combination_ids),
+            "saved_combinations": list(saved_combination_ids),
+            "pending_combinations": list(pending_combination_ids),
+            "saved_count": len(saved_combination_ids),
+            "pending_count": len(pending_combination_ids),
+            "completion_percentage": round((len(saved_combination_ids) / len(all_combination_ids)) * 100, 2) if all_combination_ids else 0
+        }
+        
+        # Add source file key if available
+        if source_file_key:
+            response_data["file_key"] = source_file_key
+        
+        logger.info(f"✅ Combination save status for scope {scope}, atom {atom_id}: {len(saved_combination_ids)} saved, {len(pending_combination_ids)} pending")
+        
+        return response_data
         
     except Exception as e:
         logger.error(f"Error getting saved combinations status: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error getting saved combinations status: {str(e)}")
+
 
 @router.get("/training-progress-detailed/{run_id}", tags=["Autoregressive Model Training"])
 async def get_training_progress_detailed(run_id: str):

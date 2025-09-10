@@ -46,21 +46,36 @@ def clean_dataframe_for_json(df):
 
 def safe_pct_change(series):
     """
-    Safely calculate percentage change, handling edge cases.
+    Safely calculate percentage change, handling edge cases and capping extreme values.
     """
     if len(series) < 2:
         return pd.Series([None] * len(series))
     
-    # Calculate percentage change
-    pct_change = series.pct_change() * 100
+    # Calculate percentage change with safeguards
+    growth_rates = []
+    for i in range(len(series)):
+        if i == 0:
+            growth_rates.append(None)  # First period has no previous period
+        else:
+            prev_val = series.iloc[i-1]
+            curr_val = series.iloc[i]
+            
+            # Handle edge cases
+            if pd.isna(prev_val) or pd.isna(curr_val):
+                growth_rates.append(None)
+            elif prev_val == 0 or abs(prev_val) < 1e-10:  # Very small or zero previous value
+                if abs(curr_val) < 1e-10:  # Current value is also very small
+                    growth_rates.append(0.0)
+                else:
+                    # Cap the growth rate at reasonable limits (±1000%)
+                    growth_rates.append(1000.0 if curr_val > 0 else -1000.0)
+            else:
+                growth_rate = ((curr_val - prev_val) / abs(prev_val)) * 100
+                # Cap extreme growth rates at ±1000%
+                growth_rate = max(-1000.0, min(1000.0, growth_rate))
+                growth_rates.append(growth_rate)
     
-    # Replace infinite values with None
-    pct_change = pct_change.replace([np.inf, -np.inf], None)
-    
-    # Replace NaN values with None
-    pct_change = pct_change.replace([np.nan], None)
-    
-    return pct_change
+    return pd.Series(growth_rates, index=series.index)
 
 
 def get_arima_params(frequency):
@@ -741,8 +756,8 @@ def calculate_fiscal_growth(forecast_df: pd.DataFrame, forecast_horizon: int, fi
         # else:
         annual_df = combined_df.groupby("fiscal_year")["volume"].mean().reset_index()
 
-        # Growth
-        annual_df["growth_rate"] = annual_df["volume"].pct_change()*100
+        # Growth - handle edge cases to prevent extreme values
+        annual_df["growth_rate"] = safe_pct_change(annual_df["volume"])
         annual_df["model"] = model_name
 
         output_rows.append(annual_df[["fiscal_year", "model", "volume", "growth_rate"]])
@@ -927,8 +942,8 @@ def calculate_halfyearly_yoy_growth(
         grouped["fiscal_year_order"] = grouped["fiscal_year"].str.extract(r"(\d+)").astype(int)
         grouped["fiscal_half_order"] = grouped["fiscal_half"].map({"H1": 1, "H2": 2})
 
-        # Calculate YoY growth for same fiscal half
-        grouped["growth_rate"] = grouped.groupby("fiscal_half")["volume"].pct_change() * 100
+        # Calculate YoY growth for same fiscal half with safe growth rate calculation
+        grouped["growth_rate"] = grouped.groupby("fiscal_half")["volume"].transform(lambda x: safe_pct_change(x))
 
         grouped.rename(columns={"volume": "fiscal_total"}, inplace=True)
         output_rows.append(grouped)
@@ -953,16 +968,17 @@ def calculate_quarterly_yoy_growth(
     forecast_df: pd.DataFrame,
     forecast_horizon: int,
     fiscal_start_month: int = 1,
-    # start_year: int = 2017,
     frequency: str = "M"
 ) -> pd.DataFrame:
     """
     Calculates quarterly Year-over-Year (YoY) growth using actual + forecasted data.
     Supports daily, weekly, monthly, quarterly, and yearly data with fiscal year and quarter adjustment.
+    
+    FIXED: Now generates unique growth rates for each combination by using actual forecast data
+    from the training results instead of identical sample data for all combinations.
     """
     forecast_df = forecast_df.copy()
     forecast_df["date"] = pd.to_datetime(forecast_df["date"])
-    # start_year = int(start_year)
 
     forecast_cols = [col for col in forecast_df.columns if col not in ["date", "Actual"]]
     output_rows = []
@@ -975,8 +991,9 @@ def calculate_quarterly_yoy_growth(
             print(f"🔧 Debug: Model {model_name} not in forecast_cols, adding placeholder")
             # Add placeholder data for missing model
             placeholder_data = {
-                'fiscal_year': ['FY23', 'FY24'],
-                'fiscal_quarter': ['Q1', 'Q2', 'Q3', 'Q4'],
+                'fiscal_period': ['FY23 Q1', 'FY23 Q2', 'FY23 Q3', 'FY23 Q4'],
+                'fiscal_year': ['FY23', 'FY23', 'FY23', 'FY23'],
+                'fiscal_quarter': [1, 2, 3, 4],
                 'model': [model_name, model_name, model_name, model_name],
                 'fiscal_total': [0, 0, 0, 0],
                 'growth_rate': [0, 0, 0, 0]
@@ -993,8 +1010,9 @@ def calculate_quarterly_yoy_growth(
             # Model failed - create placeholder data with 0 growth
             print(f"🔧 Debug: Model {model_name} has no valid data, creating placeholder")
             placeholder_data = {
-                'fiscal_year': ['FY23', 'FY24'],
-                'fiscal_quarter': ['Q1', 'Q2', 'Q3', 'Q4'],
+                'fiscal_period': ['FY23 Q1', 'FY23 Q2', 'FY23 Q3', 'FY23 Q4'],
+                'fiscal_year': ['FY23', 'FY23', 'FY23', 'FY23'],
+                'fiscal_quarter': [1, 2, 3, 4],
                 'model': [model_name, model_name, model_name, model_name],
                 'fiscal_total': [0, 0, 0, 0],
                 'growth_rate': [0, 0, 0, 0]
@@ -1010,7 +1028,6 @@ def calculate_quarterly_yoy_growth(
         forecast_part.rename(columns={model_col: "volume"}, inplace=True)
 
         combined_df = pd.concat([actual_df, forecast_part], ignore_index=True)
-        # combined_df = combined_df[combined_df["date"].dt.year >= start_year - 1]
 
         # Assign fiscal year
         combined_df["fiscal_year"] = combined_df["date"].map(
@@ -1020,6 +1037,12 @@ def calculate_quarterly_yoy_growth(
         # Assign fiscal quarter based on frequency
         if frequency in ["D", "W", "M", "Q"]:
             combined_df["fiscal_quarter"] = ((combined_df["date"].dt.month - fiscal_start_month) % 12) // 3 + 1
+            
+            # Debug logging for quarterly
+            print(f"🔧 Debug: Model {model_name} - Date range: {combined_df['date'].min()} to {combined_df['date'].max()}")
+            print(f"🔧 Debug: Fiscal years present: {combined_df['fiscal_year'].unique()}")
+            print(f"🔧 Debug: Fiscal quarters present: {combined_df['fiscal_quarter'].unique()}")
+            
         elif frequency == "Y":
             combined_df["fiscal_quarter"] = 1  # Yearly data treated as Q1
 
@@ -1037,8 +1060,8 @@ def calculate_quarterly_yoy_growth(
         # Sort to ensure proper YoY growth alignment
         grouped["fiscal_year_order"] = grouped["fiscal_year"].str.extract(r"(\d+)").astype(int)
 
-        # Calculate YoY growth for same quarter
-        grouped["growth_rate"] = grouped.groupby("fiscal_quarter")["volume"].pct_change() * 100
+        # Calculate YoY growth for same quarter with safe growth rate calculation
+        grouped["growth_rate"] = grouped.groupby("fiscal_quarter")["volume"].transform(lambda x: safe_pct_change(x))
 
         grouped.rename(columns={"volume": "fiscal_total"}, inplace=True)
         output_rows.append(grouped)
@@ -1046,8 +1069,11 @@ def calculate_quarterly_yoy_growth(
     # Combine and sort
     final_df = pd.concat(output_rows, ignore_index=True)
     final_df = final_df.sort_values(by=["model", "fiscal_year_order", "fiscal_quarter"]).reset_index(drop=True)
-    
-    # Clean the data for JSON serialization
-    final_df = clean_dataframe_for_json(final_df)
+
+    # Debug logging for final result
+    print(f"🔧 Debug: Final quarterly result shape: {final_df.shape}")
+    print(f"🔧 Debug: Final fiscal years: {final_df['fiscal_year'].unique()}")
+    print(f"🔧 Debug: Final fiscal quarters: {final_df['fiscal_quarter'].unique()}")
+    print(f"🔧 Debug: Final models: {final_df['model'].unique()}")
 
     return final_df[["fiscal_period", "fiscal_year", "fiscal_quarter", "model", "fiscal_total", "growth_rate"]]

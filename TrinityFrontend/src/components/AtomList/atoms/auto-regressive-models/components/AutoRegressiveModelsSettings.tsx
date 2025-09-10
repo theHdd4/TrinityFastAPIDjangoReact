@@ -50,16 +50,18 @@ const AutoRegressiveModelsSettings: React.FC<AutoRegressiveModelsSettingsProps> 
     console.log('🔧 AutoRegressiveModelsSettings: useEffect triggered, current selectedModels:', data?.selectedModels);
     console.log('🔧 AutoRegressiveModelsSettings: availableModels:', availableModels);
     
-    if (!data?.selectedModels || data.selectedModels.length === 0) {
+    // Only auto-select on initial load when selectedModels is undefined (not when it's an empty array)
+    // This allows users to deselect all models without them being auto-selected again
+    if (data?.selectedModels === undefined) {
       const allModelIds = availableModels.map(model => model.id);
       console.log('🔧 AutoRegressiveModelsSettings: Auto-selecting all models on first load:', allModelIds);
       onDataChange({
         selectedModels: allModelIds
       });
     } else {
-      console.log('🔧 AutoRegressiveModelsSettings: Models already selected, count:', data.selectedModels.length);
+      console.log('🔧 AutoRegressiveModelsSettings: Models already selected or explicitly empty, count:', data.selectedModels?.length || 0);
     }
-  }, [data?.selectedModels, availableModels]); // Add dependencies to ensure it runs when data changes
+  }, []); // Only run once on mount, not when any dependencies change
 
   // Filter files that contain "Scope" and extract unique scope numbers
   const scopeFiles = (data?.availableFiles || []).filter(file => 
@@ -151,6 +153,10 @@ const AutoRegressiveModelsSettings: React.FC<AutoRegressiveModelsSettingsProps> 
   };
 
   const handleSelectAllModels = (checked: boolean) => {
+    console.log('🔧 AutoRegressiveModelsSettings: handleSelectAllModels called with checked:', checked);
+    console.log('🔧 AutoRegressiveModelsSettings: Current selectedModels:', data?.selectedModels);
+    console.log('🔧 AutoRegressiveModelsSettings: allModelsSelected:', allModelsSelected);
+    
     if (checked) {
       // Select all models
       const allModelIds = availableModels.map(model => model.id);

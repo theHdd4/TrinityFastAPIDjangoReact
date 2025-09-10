@@ -266,7 +266,8 @@ async def get_combination_save_status(
     source_file_key: str,
     client_name: str = "",
     app_name: str = "",
-    project_name: str = ""
+    project_name: str = "",
+    force_refresh: bool = False
 ):
     """Get the complete status of saved combinations for a specific scope and atom."""
     try:
@@ -279,10 +280,13 @@ async def get_combination_save_status(
             project_name=project_name
         )
         
-        # If we have existing status and it has a source file, use it
-        if existing_status and existing_status.get("source_file") == source_file_key:
+        # Use cached data only if not forcing refresh and source file matches
+        if not force_refresh and existing_status and existing_status.get("source_file") == source_file_key:
             logger.info(f"✅ Retrieved existing combination save status for scope {scope}, atom {atom_id}")
             return existing_status
+        
+        # Always read fresh data from source file to ensure we have the latest combinations
+        logger.info(f"🔄 Reading fresh combination data from source file for scope {scope}, atom {atom_id}")
         
         # Otherwise, read the source file to get all combinations
         all_combinations = set()
