@@ -1024,7 +1024,6 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
     if (!data.timeSeriesData || !data.selectedVar1 || !data.selectedVar2) {
       return [];
     }
-    const formatDate = d3.timeFormat("%d-%B-%y");
     return data.timeSeriesData
       .filter(
         (d) =>
@@ -1035,10 +1034,11 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
           isFinite(d.var2Value),
       )
       .map((d) => ({
-        date: formatDate(new Date(d.date)),
+        date: new Date(d.date).getTime(),
         [data.selectedVar1!]: d.var1Value,
         [data.selectedVar2!]: d.var2Value,
-      }));
+      }))
+      .sort((a, b) => a.date - b.date);
   }, [data.timeSeriesData, data.selectedVar1, data.selectedVar2]);
 
   return (

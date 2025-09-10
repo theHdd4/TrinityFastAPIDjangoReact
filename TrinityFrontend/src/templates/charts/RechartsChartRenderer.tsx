@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { createPortal } from 'react-dom';
+import * as d3 from 'd3';
 import "./chart.css";
 import {
   BarChart,
@@ -1445,7 +1446,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
                   if (active && payload && payload.length) {
                     return (
                       <div className="explore-chart-tooltip">
-                        <p className="font-semibold text-gray-900 mb-2 text-sm">{label}</p>
+                        <p className="font-semibold text-gray-900 mb-2 text-sm">{isDateAxis ? formatDateTick(new Date(label)) : label}</p>
                         {payload.map((entry: any, index: number) => (
                           <div key={index} className="flex items-center gap-2 mb-1">
                             <div
@@ -1688,32 +1689,44 @@ const RechartsChartRenderer: React.FC<Props> = ({
         } else {
           // ---- Fallback to original single-line rendering ----
           // Original single line chart logic
+          const isDateAxis =
+            xKey &&
+            xKey.toLowerCase().includes('date') &&
+            chartDataForRendering.length > 0 &&
+            typeof chartDataForRendering[0][xKey] === 'number';
+          const formatDateTick = d3.timeFormat('%d-%B-%y');
           return (
             <LineChart data={chartDataForRendering} margin={{ top: 20, right: 20, left: 20, bottom: 40 }} className="explore-chart-line">
               {currentShowGrid && <CartesianGrid strokeDasharray="3 3" />}
-              <XAxis 
+              <XAxis
                 dataKey={xKey}
+                type={isDateAxis ? 'number' : 'category'}
+                domain={isDateAxis ? ['dataMin', 'dataMax'] : undefined}
+                scale={isDateAxis ? 'time' : undefined}
+                tickFormatter={isDateAxis ? (v) => formatDateTick(new Date(v)) : undefined}
                 label={currentShowAxisLabels && xAxisLabel && xAxisLabel.trim() ? { value: capitalizeWords(xAxisLabel), position: 'bottom', style: axisLabelStyle } : undefined}
                 tick={axisTickStyle}
                 tickLine={false}
               />
               {/* Primary Y-Axis (Left) */}
-              <YAxis 
+              <YAxis
                 yAxisId={0}
                 label={currentShowAxisLabels && yAxisLabel && yAxisLabel.trim() ? { value: capitalizeWords(yAxisLabel), angle: -90, position: 'left', style: axisLabelStyle } : undefined}
                 tick={axisTickStyle}
                 tickLine={false}
                 tickFormatter={formatLargeNumber}
+                domain={['dataMin', 'dataMax']}
               />
               {/* Secondary Y-Axis (Right) - only if we have dual Y-axes */}
               {(yKeys.length > 1 || (yFields && yFields.length > 1)) && (
-                <YAxis 
+                <YAxis
                   yAxisId={1}
                   orientation="right"
                   label={currentShowAxisLabels && yAxisLabels && yAxisLabels[1] ? { value: capitalizeWords(yAxisLabels[1]), angle: 90, position: 'right', style: axisLabelStyle } : undefined}
                   tick={axisTickStyle}
                   tickLine={false}
                   tickFormatter={formatLargeNumber}
+                  domain={['dataMin', 'dataMax']}
                 />
               )}
               <Tooltip 
