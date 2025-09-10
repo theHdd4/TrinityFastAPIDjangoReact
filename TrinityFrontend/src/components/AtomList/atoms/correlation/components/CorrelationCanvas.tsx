@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState, useMemo } from "react";
 import * as d3 from "d3";
 import {
   ChevronDown,
@@ -33,6 +33,7 @@ import MatrixSettingsTray, {
   MatrixSettings,
   COLOR_THEMES,
 } from "./MatrixSettingsTray";
+import RechartsChartRenderer from "@/templates/charts/RechartsChartRenderer";
 
 interface CorrelationCanvasProps {
   data: CorrelationSettings;
@@ -227,10 +228,8 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
   onDataChange,
 }) => {
   const heatmapRef = useRef<SVGSVGElement>(null);
-  const timeSeriesRef = useRef<SVGSVGElement>(null);
   const prevMatrixRef = useRef<string>("");
   const [canvasWidth, setCanvasWidth] = useState(0);
-  const [timeSeriesWidth, setTimeSeriesWidth] = useState(0);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [matrixSettings, setMatrixSettings] = useState<MatrixSettings>({
     theme: "default",
@@ -264,22 +263,6 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
     return () => observer.disconnect();
   }, []);
 
-  // Track time series container width for responsive chart
-  useEffect(() => {
-    const container = timeSeriesRef.current?.parentElement;
-    if (!container) return;
-
-    const observer = new ResizeObserver((entries) => {
-      for (const entry of entries) {
-        setTimeSeriesWidth(entry.contentRect.width);
-      }
-    });
-
-    observer.observe(container);
-    setTimeSeriesWidth(container.clientWidth);
-
-    return () => observer.disconnect();
-  }, [data.selectedVar1, data.selectedVar2]);
 
   useEffect(() => {
     (async () => {
@@ -993,301 +976,6 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
     matrixSettings,
   ]);
 
-  // Draw time series chart
-  useEffect(() => {
-    if (!timeSeriesRef.current || !data.timeSeriesData?.length) return;
-
-    const svg = d3.select(timeSeriesRef.current);
-    svg.selectAll("*").remove();
-
-    // Adjust dimensions based on compact mode
-    const margin = isCompactMode
-      ? { top: 10, right: 60, bottom: 25, left: 60 }
-      : { top: 20, right: 120, bottom: 40, left: 80 };
-
-    const containerWidth =
-      timeSeriesWidth || canvasWidth || (isCompactMode ? 350 : 600);
-    const baseHeight = isCompactMode ? 150 : 300;
-
-    svg
-      .attr("width", containerWidth)
-      .attr("height", baseHeight)
-      .style("overflow", "visible");
-
-    const width = containerWidth - margin.left - margin.right;
-    const height = baseHeight - margin.top - margin.bottom;
-
-    const g = svg
-      .append("g")
-      .attr("transform", `translate(${margin.left},${margin.top})`);
-
-    // Validate and clean time series data
-    const validData = data.timeSeriesData.filter(
-      (d) =>
-        (d.date instanceof Date || typeof d.date === "number") &&
-        typeof d.var1Value === "number" &&
-        !isNaN(d.var1Value) &&
-        isFinite(d.var1Value) &&
-        typeof d.var2Value === "number" &&
-        !isNaN(d.var2Value) &&
-        isFinite(d.var2Value),
-    );
-
-    if (validData.length === 0) {
-      // Display message when no valid data
-      g.append("text")
-        .attr("x", width / 2)
-        .attr("y", height / 2)
-        .attr("text-anchor", "middle")
-        .style("font-size", isCompactMode ? "12px" : "14px")
-        .style("fill", "#666")
-        .text("No valid time series data available");
-      return;
-    }
-
-    // Determine if we're using dates or indices
-    const hasDatetime =
-      validData.length > 0 && validData[0].date instanceof Date;
-
-    // Create appropriate scales based on data type
-    let xScale: any;
-
-    if (hasDatetime) {
-      // Use time scale for datetime data
-      const dateExtent = d3.extent(validData, (d) => d.date as Date) as [
-        Date,
-        Date,
-      ];
-      if (!dateExtent[0] || !dateExtent[1]) {
-        // No valid date extent, show empty chart message
-        g.append("text")
-          .attr("x", width / 2)
-          .attr("y", height / 2)
-          .attr("text-anchor", "middle")
-          .style("font-size", isCompactMode ? "12px" : "14px")
-          .style("fill", "#666")
-          .text("Invalid date range in time series data");
-        return;
-      }
-      xScale = d3.scaleTime().domain(dateExtent).range([0, width]);
-    } else {
-      // Use linear scale for index data
-      const indexExtent = d3.extent(validData, (d) => d.date as number) as [
-        number,
-        number,
-      ];
-      if (indexExtent[0] === undefined || indexExtent[1] === undefined) {
-        // No valid index extent, show empty chart message
-        g.append("text")
-          .attr("x", width / 2)
-          .attr("y", height / 2)
-          .attr("text-anchor", "middle")
-          .style("font-size", isCompactMode ? "12px" : "14px")
-          .style("fill", "#666")
-          .text("Invalid index range in time series data");
-        return;
-      }
-      xScale = d3.scaleLinear().domain(indexExtent).range([0, width]);
-    }
-
-    // Get visualization options from data or use defaults
-    const vizOptions = data.visualizationOptions || {
-      heatmapColorScheme: "RdBu",
-      var1Color: "#41C185",
-      var2Color: "#458EE2",
-      normalizeValues: false,
-      selectedVizType: "heatmap",
-    };
-
-    // MinMax normalization based on highest absolute value across both variables
-    const applyMinMaxNormalization = (
-      var1Values: number[],
-      var2Values: number[],
-    ): { var1: number[]; var2: number[] } => {
-      if (!vizOptions.normalizeValues) {
-        return { var1: var1Values, var2: var2Values };
-      }
-
-      // Find the maximum absolute value across both variables
-      const allValues = [...var1Values, ...var2Values];
-      const maxAbsValue = Math.max(...allValues.map((v) => Math.abs(v)));
-
-      // If maxAbsValue is 0, return original values to avoid division by zero
-      if (maxAbsValue === 0) {
-        return { var1: var1Values, var2: var2Values };
-      }
-
-      // Normalize both variables by dividing by the max absolute value
-      const normalizedVar1 = var1Values.map((value) => value / maxAbsValue);
-      const normalizedVar2 = var2Values.map((value) => value / maxAbsValue);
-
-      return { var1: normalizedVar1, var2: normalizedVar2 };
-    };
-
-    // Apply MinMax normalization to both variables
-    const var1RawValues = validData.map((d) => d.var1Value);
-    const var2RawValues = validData.map((d) => d.var2Value);
-    const { var1: normalizedVar1Values, var2: normalizedVar2Values } =
-      applyMinMaxNormalization(var1RawValues, var2RawValues);
-
-    // Create normalized data array
-    const normalizedData = validData.map((d, i) => ({
-      ...d,
-      var1Value: normalizedVar1Values[i],
-      var2Value: normalizedVar2Values[i],
-    }));
-
-    // Let D3 automatically calculate extents (no forced ranges)
-    const var1Extent = d3.extent(normalizedData, (d) => d.var1Value) as [
-      number,
-      number,
-    ];
-    const var2Extent = d3.extent(normalizedData, (d) => d.var2Value) as [
-      number,
-      number,
-    ];
-
-    const yScale1 = d3
-      .scaleLinear()
-      .domain(
-        var1Extent[0] !== undefined &&
-          var1Extent[1] !== undefined &&
-          var1Extent[0] !== var1Extent[1]
-          ? var1Extent
-          : [0, Math.max(...normalizedData.map((d) => d.var1Value)) || 100],
-      )
-      .range([height, 0]);
-
-    const yScale2 = d3
-      .scaleLinear()
-      .domain(
-        var2Extent[0] !== undefined &&
-          var2Extent[1] !== undefined &&
-          var2Extent[0] !== var2Extent[1]
-          ? var2Extent
-          : [0, Math.max(...normalizedData.map((d) => d.var2Value)) || 100],
-      )
-      .range([height, 0]);
-
-    // Create line generators with validation using normalized data
-    const line1 = d3
-      .line<(typeof normalizedData)[0]>()
-      .x((d) => {
-        const x = xScale(d.date);
-        return isNaN(x) ? 0 : x;
-      })
-      .y((d) => {
-        const y = yScale1(d.var1Value);
-        return isNaN(y) ? height : y;
-      })
-      .curve(d3.curveMonotoneX);
-
-    const line2 = d3
-      .line<(typeof normalizedData)[0]>()
-      .x((d) => {
-        const x = xScale(d.date);
-        return isNaN(x) ? 0 : x;
-      })
-      .y((d) => {
-        const y = yScale2(d.var2Value);
-        return isNaN(y) ? height : y;
-      })
-      .curve(d3.curveMonotoneX);
-
-    // Add lines with error handling using normalized data and selected colors
-    try {
-      g.append("path")
-        .datum(normalizedData)
-        .attr("fill", "none")
-        .attr("stroke", vizOptions.var1Color)
-        .attr("stroke-width", 2)
-        .attr("d", line1);
-
-      g.append("path")
-        .datum(normalizedData)
-        .attr("fill", "none")
-        .attr("stroke", vizOptions.var2Color)
-        .attr("stroke-width", 2)
-        .attr("d", line2);
-
-      // Add axes with appropriate formatting
-      const xAxis = hasDatetime
-        ? d3.axisBottom(xScale).tickFormat(d3.timeFormat("%d-%B-%y"))
-        : d3.axisBottom(xScale).tickFormat(d3.format("d"));
-
-      const xAxisG = g
-        .append("g")
-        .attr("transform", `translate(0,${height})`)
-        .call(xAxis);
-
-      xAxisG
-        .selectAll("text")
-        .style("font-style", "normal")
-        .attr("text-anchor", "end")
-        .attr("transform", "rotate(-15)")
-        .attr("dx", "-0.8em")
-        .attr("dy", "0.15em");
-
-      g.append("g").call(d3.axisLeft(yScale1));
-
-      // Add legend
-      const legend = g
-        .append("g")
-        .attr("transform", `translate(${width + 20}, 20)`);
-
-      legend
-        .append("line")
-        .attr("x1", 0)
-        .attr("x2", 20)
-        .attr("y1", 0)
-        .attr("y2", 0)
-        .attr("stroke", vizOptions.var1Color)
-        .attr("stroke-width", 2);
-
-      legend
-        .append("text")
-        .attr("x", 25)
-        .attr("y", 0)
-        .attr("dy", "0.35em")
-        .style("font-size", "12px")
-        .style("fill", "#666")
-        .text(data.selectedVar1);
-
-      legend
-        .append("line")
-        .attr("x1", 0)
-        .attr("x2", 20)
-        .attr("y1", 20)
-        .attr("y2", 20)
-        .attr("stroke", vizOptions.var2Color)
-        .attr("stroke-width", 2);
-
-      legend
-        .append("text")
-        .attr("x", 25)
-        .attr("y", 20)
-        .attr("dy", "0.35em")
-        .style("font-size", "12px")
-        .style("fill", "#666")
-        .text(data.selectedVar2);
-    } catch (error) {
-      g.append("text")
-        .attr("x", width / 2)
-        .attr("y", height / 2)
-        .attr("text-anchor", "middle")
-        .style("font-size", "14px")
-        .style("fill", "hsl(var(--destructive))")
-        .text("Error rendering time series chart");
-    }
-  }, [
-    data.timeSeriesData,
-    data.selectedVar1,
-    data.selectedVar2,
-    data.visualizationOptions,
-    isCompactMode,
-    canvasWidth,
-    timeSeriesWidth,
-  ]);
 
   const getCorrelationValue = () => {
     // Return null when no variables are selected
@@ -1331,6 +1019,27 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
   );
 
   const correlationValue = getCorrelationValue();
+
+  const timeSeriesChartData = useMemo(() => {
+    if (!data.timeSeriesData || !data.selectedVar1 || !data.selectedVar2) {
+      return [];
+    }
+    const formatDate = d3.timeFormat("%d-%B-%y");
+    return data.timeSeriesData
+      .filter(
+        (d) =>
+          (d.date instanceof Date || typeof d.date === "number" || typeof d.date === "string") &&
+          typeof d.var1Value === "number" &&
+          isFinite(d.var1Value) &&
+          typeof d.var2Value === "number" &&
+          isFinite(d.var2Value),
+      )
+      .map((d) => ({
+        date: formatDate(new Date(d.date)),
+        [data.selectedVar1!]: d.var1Value,
+        [data.selectedVar2!]: d.var2Value,
+      }));
+  }, [data.timeSeriesData, data.selectedVar1, data.selectedVar2]);
 
   return (
     <div
@@ -1481,6 +1190,13 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
               {correlationValue !== null ? (
                 <div className="flex items-center gap-2">
                   <span
+                    className={`text-foreground ${
+                      isCompactMode ? "text-xs" : "text-sm"
+                    }`}
+                  >
+                    {`Correlation for ${data.selectedVar1} vs ${data.selectedVar2}:`}
+                  </span>
+                  <span
                     className={`font-bold text-foreground ${
                       isCompactMode ? "text-sm" : "text-lg"
                     }`}
@@ -1516,12 +1232,18 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
               </p>
             )}
             <div className={`${isCompactMode ? "p-4" : "p-6"} flex-1`}>
-              <svg
-                ref={timeSeriesRef}
-                width="100%"
-                height={isCompactMode ? "150" : "300"}
-                className="w-full"
-              ></svg>
+              <RechartsChartRenderer
+                type="line_chart"
+                data={timeSeriesChartData}
+                xField="date"
+                yFields={[data.selectedVar1, data.selectedVar2]}
+                yAxisLabels={[data.selectedVar1, data.selectedVar2]}
+                xAxisLabel="Date"
+                showLegend
+                showAxisLabels
+                showGrid
+                height={isCompactMode ? 150 : 300}
+              />
             </div>
           </Card>
         </div>
