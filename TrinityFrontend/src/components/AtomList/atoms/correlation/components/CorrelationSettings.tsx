@@ -186,15 +186,6 @@ const formatDateForDisplay = (dateStr: string, format: string): string => {
   }
 };
 
-const getAvailableAggregationLevels = (granularity: string): string[] => {
-  switch (granularity) {
-    case 'daily': return ['None', 'Daily', 'Weekly', 'Monthly', 'Quarterly', 'Yearly'];
-    case 'monthly': return ['None', 'Monthly', 'Quarterly', 'Yearly'];
-    case 'yearly': return ['None', 'Yearly'];
-    default: return ['None', 'Monthly', 'Quarterly', 'Yearly'];
-  }
-};
-
 // Helper functions for date parsing and formatting
 const parseDateString = (dateStr: string, formatStr: string): Date | null => {
   try {
@@ -956,12 +947,6 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
           </div>
         </div>
         
-        {/* Show available date columns */}
-        {data.dateAnalysis.date_columns.length > 1 && (
-          <div className="text-xs text-muted-foreground">
-            <strong>Available date columns:</strong> {data.dateAnalysis.date_columns.map(col => col.column_name).join(', ')}
-          </div>
-        )}
       </div>
     );
   };
@@ -1018,26 +1003,6 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
 
         {/* Smart Date Filter Section - Only render if date data exists */}
         {renderDateFilterSection()}
-
-        {/* Date and Time Aggregation - Smart options based on detected granularity */}
-        <div className="space-y-3">
-          <h3 className="text-sm font-medium text-muted-foreground">Date and Time Aggregation</h3>
-          <div className="space-y-2">
-            <div className="flex gap-1 flex-wrap">
-              {getAvailableAggregationLevels(data.dateAnalysis?.recommended_granularity || 'monthly').map((period) => (
-                <Button
-                  key={period}
-                  variant={(data.settings?.aggregationLevel || 'None') === period ? "default" : "outline"}
-                  size="sm"
-                  className="text-xs h-6 px-2"
-                  onClick={() => handleSettingsChange('aggregationLevel', period)}
-                >
-                  {period}
-                </Button>
-              ))}
-            </div>
-          </div>
-        </div>
 
       {/* Select Filter */}
       <div className="space-y-3">

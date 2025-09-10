@@ -589,8 +589,8 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
     svg.selectAll("*").remove();
 
     // Determine container width for responsive layout
-    const containerWidth = canvasWidth || 800;
-    const margin = { top: 80, right: 80, bottom: 180, left: 100 };
+    const containerWidth = canvasWidth || 900;
+    const margin = { top: 80, right: 60, bottom: 180, left: 60 };
     const width = containerWidth - margin.left - margin.right;
 
     const g = svg

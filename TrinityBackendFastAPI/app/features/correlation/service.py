@@ -921,7 +921,7 @@ def get_time_series_axis_data(df: pd.DataFrame, start_date: str = None, end_date
         if date_analysis['has_date_data'] and date_analysis['date_columns']:
             # Use first valid date column
             date_col_info = date_analysis['date_columns'][0]
-            datetime_column = date_col_info['column']
+            datetime_column = date_col_info['column_name']
             
             print(f"🗓️ Using datetime column: {datetime_column}")
             
