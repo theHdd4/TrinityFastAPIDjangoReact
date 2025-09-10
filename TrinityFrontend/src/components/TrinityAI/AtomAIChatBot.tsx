@@ -43,6 +43,12 @@ const PERFORM_ENDPOINTS: Record<string, string> = {
 
 import { cn } from '@/lib/utils';
 
+// Helper function to normalize column names
+const normalizeColumnName = (colName: string) => {
+  if (!colName) return '';
+  return colName.toLowerCase();
+};
+
 const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTitle, className, disabled }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [sessionId, setSessionId] = useState<string>(() => {
@@ -783,7 +789,7 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
             cfg.object_names,
             cfg.file_name,
             cfg.file_key,
-            cfg.data_source,
+            cfg.file_name,
             cfg.source_file
           ].filter(Boolean);
           
@@ -1177,8 +1183,8 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
           let targetFile = '';
           
           // Priority 1: Use AI-provided file name (exact keys from LLM)
-          if (data.file_name || data.data_source) {
-            targetFile = data.file_name || data.data_source;
+          if (data.file_name) {
+            targetFile = data.file_name;
             console.log('🎯 Using AI-provided file name:', targetFile);
           } else {
             console.log('⚠️ No file name found in AI response');
@@ -1669,11 +1675,27 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
             const explorationsList = Array.isArray(data.exploration_config) ? data.exploration_config : [data.exploration_config];
             const processedResults = [];
             
+            console.log(`🎯 Processing ${explorationsList.length} exploration(s) via manual flow`);
+            console.log(`🎯 Exploration list:`, explorationsList.map((exp: any, idx: number) => ({
+              index: idx,
+              title: exp.title,
+              x_axis: exp.x_axis,
+              y_axis: exp.y_axis,
+              chart_type: exp.chart_type
+            })));
+            
             for (let i = 0; i < explorationsList.length; i++) {
               const exploration = explorationsList[i];
-              console.log(`📊 Processing exploration ${i + 1} via manual flow:`, exploration);
+              console.log(`📊 Processing exploration ${i + 1}/${explorationsList.length} via manual flow:`, {
+                title: exploration.title,
+                x_axis: exploration.x_axis,
+                y_axis: exploration.y_axis,
+                chart_type: exploration.chart_type,
+                filters: exploration.filters
+              });
               
-              // 🎯 STEP 1: Create same JSON structures as manual
+              try {
+                // 🎯 STEP 1: Create same JSON structures as manual
               const dimensionColumns = new Set<string>([exploration.x_axis]);
               if (exploration.legend_field && exploration.legend_field !== 'aggregate') {
                 dimensionColumns.add(exploration.legend_field);
@@ -1694,6 +1716,7 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
               console.log('📋 Step 1 - selectedMeasures:', selectedMeasures);
               
               // 🎯 STEP 2: Call /select-dimensions-and-measures (SAME as manual)
+              console.log(`🔄 Step 2 - Creating explore atom for chart ${i + 1}...`);
               const createResponse = await fetch(`${EXPLORE_API}/select-dimensions-and-measures`, {
                 method: 'POST',
                 headers: {
@@ -1701,14 +1724,20 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
                 },
                 body: new URLSearchParams({
                   validator_atom_id: targetFile,
-                  atom_name: 'AI Chart Analysis',
+                  atom_name: `AI Chart Analysis ${i + 1}`,
                   selected_dimensions: JSON.stringify(selectedDimensions),
                   selected_measures: JSON.stringify(selectedMeasures)
                 })
               });
               
               if (!createResponse.ok) {
-                throw new Error(`Failed to create explore atom: ${createResponse.status}`);
+                const errorText = await createResponse.text();
+                console.error(`❌ Failed to create explore atom for chart ${i + 1}:`, {
+                  status: createResponse.status,
+                  statusText: createResponse.statusText,
+                  error: errorText
+                });
+                throw new Error(`Failed to create explore atom for chart ${i + 1}: ${createResponse.status} - ${errorText}`);
               }
               
               const createResult = await createResponse.json();
@@ -1737,6 +1766,7 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
               console.log('📋 Step 3 - operationsPayload:', operationsPayload);
               
               // 🎯 STEP 4: Call /specify-operations (SAME as manual)
+              console.log(`🔄 Step 4 - Specifying operations for chart ${i + 1}...`);
               const operationsResponse = await fetch(`${EXPLORE_API}/specify-operations`, {
                 method: 'POST',
                 headers: {
@@ -1749,27 +1779,74 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
               });
               
               if (!operationsResponse.ok) {
-                throw new Error(`Operations specification failed: ${operationsResponse.status}`);
+                const errorText = await operationsResponse.text();
+                console.error(`❌ Operations specification failed for chart ${i + 1}:`, {
+                  status: operationsResponse.status,
+                  statusText: operationsResponse.statusText,
+                  error: errorText,
+                  operationsPayload
+                });
+                throw new Error(`Operations specification failed for chart ${i + 1}: ${operationsResponse.status} - ${errorText}`);
               }
               console.log('✅ Step 4 - Operations specified');
               
               // 🎯 STEP 5: Call /chart-data-multidim (SAME as manual)
+              console.log(`🔄 Step 5 - Fetching chart data for chart ${i + 1}...`);
               const chartResponse = await fetch(`${EXPLORE_API}/chart-data-multidim/${exploreAtomId}`);
               
               if (!chartResponse.ok) {
-                throw new Error(`Chart data fetch failed: ${chartResponse.status}`);
+                const errorText = await chartResponse.text();
+                console.error(`❌ Chart data fetch failed for chart ${i + 1}:`, {
+                  status: chartResponse.status,
+                  statusText: chartResponse.statusText,
+                  error: errorText,
+                  exploreAtomId
+                });
+                throw new Error(`Chart data fetch failed for chart ${i + 1}: ${chartResponse.status} - ${errorText}`);
               }
               
               const chartResult = await chartResponse.json();
-              console.log('✅ Step 5 - Chart data received:', chartResult);
+              console.log(`✅ Step 5 - Chart data received for chart ${i + 1}:`, chartResult);
               
               // Store result in same format as manual
+              const chartData = chartResult.data || [];
               processedResults.push({
                 ...exploration,
-                chart_data: chartResult.data || [],
+                chart_data: chartData,
                 explore_atom_id: exploreAtomId,
                 ai_note: exploration.description || exploration.title || ''
               });
+              
+              console.log(`✅ Chart ${i + 1} processed successfully:`, {
+                title: exploration.title,
+                hasData: chartData.length > 0,
+                dataLength: chartData.length,
+                exploreAtomId: exploreAtomId,
+                sampleData: chartData.slice(0, 3) // Show first 3 data points
+              });
+              
+              // Additional debugging for chart data structure
+              if (chartData.length > 0) {
+                console.log(`📊 Chart ${i + 1} data structure:`, {
+                  firstItem: chartData[0],
+                  keys: Object.keys(chartData[0] || {}),
+                  dataType: typeof chartData[0]
+                });
+              } else {
+                console.warn(`⚠️ Chart ${i + 1} has no data!`);
+              }
+              
+              } catch (chartError) {
+                console.error(`❌ Failed to process chart ${i + 1}:`, chartError);
+                // Continue with next chart instead of failing completely
+                processedResults.push({
+                  ...exploration,
+                  chart_data: [],
+                  explore_atom_id: null,
+                  ai_note: `Failed to process: ${chartError.message}`,
+                  error: chartError.message
+                });
+              }
             }
             
             console.log('🎉 All explorations processed via SAME manual backend flow:', processedResults);
@@ -1806,6 +1883,29 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
               const result = { explorations: processedResults };
               const firstExploration = result.explorations?.[0];
               const numberOfCharts = result.explorations?.length || 1;
+              
+              console.log('🎯 Final processed results:', {
+                totalCharts: numberOfCharts,
+                charts: result.explorations?.map((exp: any, idx: number) => ({
+                  index: idx,
+                  title: exp.title,
+                  hasData: !!exp.chart_data,
+                  dataLength: exp.chart_data?.length || 0,
+                  exploreAtomId: exp.explore_atom_id,
+                  error: exp.error || null
+                }))
+              });
+              
+              // Check if any charts failed to process
+              const failedCharts = result.explorations?.filter((exp: any, idx: number) => !exp.chart_data || exp.chart_data.length === 0);
+              if (failedCharts && failedCharts.length > 0) {
+                console.error(`❌ ${failedCharts.length} chart(s) failed to process:`, failedCharts.map((exp: any, idx: number) => ({
+                  index: idx,
+                  title: exp.title,
+                  error: exp.error,
+                  hasData: !!exp.chart_data
+                })));
+              }
               
               // 🔧 Convert AI column names to match manual casing (lowercase)
               const normalizeColumnName = (colName: string) => {
@@ -1890,6 +1990,12 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
               });
               
               console.log('🎯 Smart filter values processed:', smartFilterValues);
+              console.log('🎯 Smart filter values details:', Object.entries(smartFilterValues).map(([col, vals]) => ({
+                column: col,
+                values: vals,
+                isEmpty: vals.length === 0,
+                isAllSelected: vals.length === 0
+              })));
               
               // 🎯 Replicate manual filter setup process with smart values
               let updatedColumnClassifierConfig = columnClassifierConfig;
@@ -1925,18 +2031,28 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
               }
               
               // 🔧 Create chartConfigs with normalized column names (same as manual)
-              const chartConfigs = result.explorations?.map((exp: any, idx: number) => ({
-                xAxis: normalizeColumnName(exp.x_axis),
-                yAxes: [normalizeColumnName(exp.y_axis)],
-                xAxisLabel: exp.x_axis_label || normalizeColumnName(exp.x_axis),
-                yAxisLabels: [exp.y_axis_label || normalizeColumnName(exp.y_axis)],
-                chartType: exp.chart_type || 'bar_chart',
-                aggregation: exp.aggregation || 'sum',
-                weightColumn: normalizeColumnName(exp.weight_column) || '',
-                title: exp.title || `Chart ${idx + 1}`,
-                legendField: normalizeColumnName(exp.legend_field) || '',
-                sortOrder: exp.sort_order || null,
-              })) || [];
+              const chartConfigs = result.explorations?.map((exp: any, idx: number) => {
+                const config = {
+                  xAxis: normalizeColumnName(exp.x_axis),
+                  yAxes: [normalizeColumnName(exp.y_axis)],
+                  xAxisLabel: exp.x_axis_label || normalizeColumnName(exp.x_axis),
+                  yAxisLabels: [exp.y_axis_label || normalizeColumnName(exp.y_axis)],
+                  chartType: exp.chart_type || 'bar_chart',
+                  aggregation: exp.aggregation || 'sum',
+                  weightColumn: normalizeColumnName(exp.weight_column) || '',
+                  title: exp.title || `Chart ${idx + 1}`,
+                  legendField: normalizeColumnName(exp.legend_field) || '',
+                  sortOrder: exp.sort_order || null,
+                };
+                console.log(`📊 Chart ${idx + 1} config created:`, {
+                  chartIndex: idx,
+                  title: config.title,
+                  xAxis: config.xAxis,
+                  yAxis: config.yAxes[0],
+                  chartType: config.chartType
+                });
+                return config;
+              }) || [];
               
               console.log('📊 Generated chartConfigs with normalized casing:', chartConfigs);
               console.log('📊 Number of charts generated:', numberOfCharts);
@@ -1986,6 +2102,13 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
                 // 🎯 Store chart data exactly like manual workflow
                 chartDataSets: result.explorations?.reduce((acc: any, exp: any, idx: number) => {
                   acc[idx] = exp.chart_data;
+                  console.log(`📊 Chart ${idx + 1} data stored (UPDATED):`, {
+                    chartIndex: idx,
+                    hasData: !!exp.chart_data,
+                    dataLength: exp.chart_data?.length || 0,
+                    dataSample: exp.chart_data?.slice(0, 2) || 'No data',
+                    title: exp.title
+                  });
                   return acc;
                 }, {}),
                 chartGenerated: result.explorations?.reduce((acc: any, exp: any, idx: number) => {
@@ -1997,41 +2120,23 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
                   return acc;
                 }, {}),
                 
-                // 🎯 Set up smart filter values for EACH chart individually
+                // 🎯 Set up smart filter values for EACH chart individually using pre-calculated smartFilterValues
                 chartFilters: result.explorations?.reduce((acc: any, exp: any, idx: number) => {
-                  // Generate chart-specific filter values
+                  // Use the pre-calculated smartFilterValues instead of recalculating
                   const chartSmartFilters: { [column: string]: string[] } = {};
                   
                   if (exp.filters && typeof exp.filters === 'object') {
                     Object.keys(exp.filters).forEach(filterCol => {
                       const normalizedCol = normalizeColumnName(filterCol);
-                      const aiValues = exp.filters[filterCol];
                       
-                      // Apply smart filter logic for this specific chart
-                      if (!aiValues || aiValues.length === 0) {
-                        chartSmartFilters[normalizedCol] = [];  // "All" selected
-                        console.log(`📊 Chart ${idx + 1} - ${normalizedCol}: No values → "All"`);
+                      // Use the pre-calculated smart filter values
+                      if (smartFilterValues[normalizedCol] !== undefined) {
+                        chartSmartFilters[normalizedCol] = smartFilterValues[normalizedCol];
+                        console.log(`📊 Chart ${idx + 1} - ${normalizedCol}: Using pre-calculated values:`, smartFilterValues[normalizedCol]);
                       } else {
-                        // Verify values exist in dataset
-                        const columnData = columnSummary.find((col: any) => 
-                          col.column?.toLowerCase() === normalizedCol
-                        );
-                        
-                        if (columnData && columnData.unique_values) {
-                          const matchingValues = aiValues.filter((val: any) => 
-                            columnData.unique_values.some((avail: any) => 
-                              String(avail).toLowerCase() === String(val).toLowerCase()
-                            )
-                          );
-                          
-                          if (matchingValues.length === 0) {
-                            chartSmartFilters[normalizedCol] = [];  // "All" if no matches
-                            console.log(`📊 Chart ${idx + 1} - ${normalizedCol}: No matches → "All"`);
-                          } else {
-                            chartSmartFilters[normalizedCol] = matchingValues;  // Use matched values
-                            console.log(`📊 Chart ${idx + 1} - ${normalizedCol}: Using values:`, matchingValues);
-                          }
-                        }
+                        // Fallback to "All" if not found
+                        chartSmartFilters[normalizedCol] = [];
+                        console.log(`📊 Chart ${idx + 1} - ${normalizedCol}: No pre-calculated values → "All"`);
                       }
                     });
                   }
@@ -2059,6 +2164,44 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
               };
               
               console.log('📊 Final exploreData with manual filter setup and REAL backend config:', exploreData);
+              console.log('📊 Chart data sets:', exploreData.chartDataSets);
+              console.log('📊 Chart configs:', exploreData.chartConfigs);
+              console.log('📊 Chart generated flags:', exploreData.chartGenerated);
+              
+              // 🔍 Multi-chart processing debugging
+              console.log('🔍 Multi-chart processing complete:');
+              console.log('📊 Total charts processed:', processedResults.length);
+              console.log('📊 Processed results:', processedResults.map((result, idx) => ({
+                chartIndex: idx,
+                hasData: !!result.chart_data,
+                dataLength: result.chart_data?.length || 0,
+                xAxis: result.x_axis,
+                yAxis: result.y_axis,
+                title: result.title
+              })));
+
+              // 🔧 CRITICAL FIX: Update the result.explorations with processed data
+              if (result.explorations && processedResults.length > 0) {
+                console.log('🔧 Updating result.explorations with processed chart data...');
+                result.explorations = result.explorations.map((exp: any, idx: number) => {
+                  const processedResult = processedResults[idx];
+                  if (processedResult) {
+                    console.log(`🔧 Updating exploration ${idx} with chart data:`, {
+                      original: !!exp.chart_data,
+                      processed: !!processedResult.chart_data,
+                      dataLength: processedResult.chart_data?.length || 0
+                    });
+                    return {
+                      ...exp,
+                      chart_data: processedResult.chart_data,
+                      explore_atom_id: processedResult.explore_atom_id,
+                      ai_note: processedResult.ai_note
+                    };
+                  }
+                  return exp;
+                });
+                console.log('✅ result.explorations updated with processed data');
+              }
               
               // 🔧 CRITICAL FIX: Merge with existing state instead of overwriting
               const currentAtom = useLaboratoryStore.getState().getAtom(atomId);
@@ -2094,6 +2237,12 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
                   ...(exploreData.dimensions || [])
                 ])),
                 
+                // 🔧 CRITICAL FIX: Preserve manual chart filters and merge with AI filters
+                chartFilters: {
+                  ...(currentData.chartFilters || {}),
+                  ...(exploreData.chartFilters || {})
+                },
+                
                 // Only add AI chart data to available slots
                 chartDataSets: {
                   ...(currentData.chartDataSets || {}),
@@ -2110,22 +2259,23 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
                   ...(exploreData.chartNotes || {})
                 },
                 
-                // Preserve manual chartConfigs or use AI if none exist
-                chartConfigs: currentData.chartConfigs && currentData.chartConfigs.length > 0
-                  ? [
-                      // Update first config with AI data if it exists
-                      {
-                        ...currentData.chartConfigs[0],
-                        ...(exploreData.chartConfigs && exploreData.chartConfigs[0] ? {
-                          xAxis: exploreData.chartConfigs[0].xAxis,
-                          yAxes: exploreData.chartConfigs[0].yAxes,
-                          title: exploreData.chartConfigs[0].title,
-                          aggregation: exploreData.chartConfigs[0].aggregation
-                        } : {})
-                      },
-                      ...currentData.chartConfigs.slice(1)
-                    ]
-                  : exploreData.chartConfigs,
+                // 🔧 CRITICAL FIX: Use AI chartConfigs for multi-chart support
+                chartConfigs: (() => {
+                  const aiConfigs = exploreData.chartConfigs && exploreData.chartConfigs.length > 0;
+                  const manualConfigs = currentData.chartConfigs && currentData.chartConfigs.length > 0;
+                  
+                  console.log('🔧 ChartConfigs merging decision:', {
+                    aiConfigs: aiConfigs ? exploreData.chartConfigs.length : 0,
+                    manualConfigs: manualConfigs ? currentData.chartConfigs.length : 0,
+                    usingAI: aiConfigs
+                  });
+                  
+                  return aiConfigs
+                    ? exploreData.chartConfigs  // Use all AI-generated chart configs
+                    : (manualConfigs
+                        ? currentData.chartConfigs  // Fallback to manual configs
+                        : []);
+                })(),
                 
                 // Preserve other manual settings
                 graphLayout: exploreData.graphLayout || currentData.graphLayout,

@@ -707,9 +707,7 @@ class ChartMakerAgent:
                     frontend_response["file_name"] = result["file_name"]
                     logger.info(f"✅ Added file_name to frontend response: {result['file_name']}")
                 
-                if result.get("data_source"):
-                    frontend_response["data_source"] = result["data_source"]
-                    logger.info(f"✅ Added data_source to frontend response: {result['data_source']}")
+                # data_source field removed - frontend now uses file_name only
                 
                 # 🔧 CRITICAL: Add file context for frontend
                 if self.files_with_columns:
@@ -726,10 +724,9 @@ class ChartMakerAgent:
                     logger.info(f"📁 Available files: {available_files[:5]}...")  # Log first 5 files
                     
                     # 🔧 CRITICAL FIX: If we have files but no specific file selected, suggest the first one
-                    if available_files and not (result.get("file_name") or result.get("data_source")):
+                    if available_files and not result.get("file_name"):
                         suggested_file = available_files[0]
                         frontend_response["file_name"] = suggested_file
-                        frontend_response["data_source"] = suggested_file
                         logger.info(f"✅ Auto-suggested file: {suggested_file}")
                 else:
                     logger.warning("⚠️ No files available for file context")

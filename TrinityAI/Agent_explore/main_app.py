@@ -61,7 +61,6 @@ class ExploreResponse(BaseModel):
     session_id: Optional[str] = Field(None, description="Session ID for conversation tracking")
     processing_time: Optional[float] = Field(None, description="Time taken to process the request")
     file_name: Optional[str] = Field(None, description="Name of the file used for exploration")
-    data_source: Optional[str] = Field(None, description="Data source file for the exploration")
     file_context: Optional[Dict[str, Any]] = Field(None, description="Context about available files and current file")
 
 @router.post("/explore", response_model=ExploreResponse)

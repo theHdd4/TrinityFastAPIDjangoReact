@@ -31,7 +31,6 @@ EXAMPLE_SINGLE_EXPLORATION_JSON = {
         }
     ],
     "file_name": "exact_full_path_from_available_files.arrow",
-    "data_source": "exact_full_path_from_available_files.arrow",
     "message": "Exploration configuration completed successfully",
     "reasoning": "The query mentions sales analysis and brand comparison",
     "used_memory": True
@@ -72,7 +71,6 @@ EXAMPLE_MULTIPLE_EXPLORATIONS_JSON = {
         }
     ],
     "file_name": "exact_full_path_from_available_files.arrow",
-    "data_source": "exact_full_path_from_available_files.arrow",
     "message": "Multiple exploration configurations completed successfully",
     "reasoning": "User requested multiple analyses for comprehensive insights",
     "used_memory": True
@@ -110,7 +108,7 @@ TASK: Analyze the user input along with the complete conversation history to pro
 
 - ALWAYS return valid JSON with exploration_config as a LIST (even for single explorations)
 - NEVER return invalid JSON or malformed responses
-- ALWAYS include file_name and data_source from available files
+- ALWAYS include file_name from available files
 - ALWAYS use only columns that exist in the provided file data
 - If you cannot create a valid exploration, return suggestions instead
 
@@ -448,7 +446,6 @@ def extract_json(text: str, available_files_with_columns: dict) -> Optional[Dict
                     }
                 ],
                 "file_name": first_file,
-                "data_source": first_file,
                 "message": "Created basic exploration configuration from available data",
                 "reasoning": "Fallback configuration based on available columns",
                 "used_memory": False

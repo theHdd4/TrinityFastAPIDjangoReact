@@ -721,6 +721,12 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
 
   // Update chartConfigs if layout changes
   useEffect(() => {
+    // Don't auto-add charts if AI has generated charts (check if any chart is AI-generated)
+    const hasAIGeneratedCharts = safeData.chartGenerated && Object.keys(safeData.chartGenerated).length > 0;
+    if (hasAIGeneratedCharts) {
+      return;
+    }
+    
     if (safeData.graphLayout.numberOfGraphsInRow === 2 && chartConfigs.length === 1) {
       // Add a second chart card while preserving the first one
       setChartConfigs(prev => [
