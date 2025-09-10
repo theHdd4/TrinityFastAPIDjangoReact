@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -76,6 +76,9 @@ const ClusteringCanvas: React.FC<ClusteringCanvasProps> = ({
   const [loadingValues, setLoadingValues] = useState<Record<string, boolean>>({});
   const [clusteringError, setClusteringError] = useState<string | null>(null);
   const { toast } = useToast();
+  
+  // Use ref to track which identifiers have been fetched to prevent infinite loops
+  const fetchedIdentifiers = useRef<Set<string>>(new Set());
 
   // Initialize filters when selectedIdentifiers change
   useEffect(() => {
@@ -93,10 +96,6 @@ const ClusteringCanvas: React.FC<ClusteringCanvasProps> = ({
         }
       });
       
-      // Debug log to see what's happening
-      console.log('Canvas - Initializing filters for identifiers:', selectedIdentifiers);
-      console.log('Canvas - Previous filters:', prev);
-      console.log('Canvas - New filters:', newFilters);
       
       return newFilters;
     });
@@ -107,7 +106,8 @@ const ClusteringCanvas: React.FC<ClusteringCanvasProps> = ({
     if (!clusteringData.objectName || selectedIdentifiers.length === 0) return;
 
     selectedIdentifiers.forEach(async (identifier) => {
-      if (uniqueValues[identifier]) return; // Already fetched
+      // Use ref to check if already fetched to prevent infinite loops
+      if (fetchedIdentifiers.current.has(identifier)) return;
       
       setLoadingValues(prev => ({ ...prev, [identifier]: true }));
       
@@ -119,13 +119,17 @@ const ClusteringCanvas: React.FC<ClusteringCanvasProps> = ({
           const values = Array.isArray(data.unique_values) ? data.unique_values : [];
           
           setUniqueValues(prev => ({ ...prev, [identifier]: values }));
+          // Mark as fetched
+          fetchedIdentifiers.current.add(identifier);
         } else {
-          console.error(`Failed to fetch unique values for ${identifier}:`, response.status);
           setUniqueValues(prev => ({ ...prev, [identifier]: [] }));
+          // Mark as fetched even if failed to prevent retries
+          fetchedIdentifiers.current.add(identifier);
         }
       } catch (error) {
-        console.error(`Error fetching unique values for ${identifier}:`, error);
         setUniqueValues(prev => ({ ...prev, [identifier]: [] }));
+        // Mark as fetched even if failed to prevent retries
+        fetchedIdentifiers.current.add(identifier);
       } finally {
         setLoadingValues(prev => ({ ...prev, [identifier]: false }));
       }
@@ -134,7 +138,16 @@ const ClusteringCanvas: React.FC<ClusteringCanvasProps> = ({
 
   // Clean up uniqueValues and loadingValues when identifiers are deselected
   useEffect(() => {
-    console.log('Canvas - Cleaning up state for identifiers:', selectedIdentifiers);
+    
+    // Clean up the fetched identifiers ref
+    const currentIdentifiers = new Set(selectedIdentifiers);
+    const newFetchedIdentifiers = new Set<string>();
+    fetchedIdentifiers.current.forEach(identifier => {
+      if (currentIdentifiers.has(identifier)) {
+        newFetchedIdentifiers.add(identifier);
+      }
+    });
+    fetchedIdentifiers.current = newFetchedIdentifiers;
     
     setUniqueValues(prev => {
       const newUniqueValues: Record<string, string[]> = {};
@@ -143,7 +156,6 @@ const ClusteringCanvas: React.FC<ClusteringCanvasProps> = ({
           newUniqueValues[identifier] = prev[identifier];
         }
       });
-      console.log('Canvas - Cleaned uniqueValues:', newUniqueValues);
       return newUniqueValues;
     });
 
@@ -154,7 +166,6 @@ const ClusteringCanvas: React.FC<ClusteringCanvasProps> = ({
           newLoadingValues[identifier] = prev[identifier];
         }
       });
-      console.log('Canvas - Cleaned loadingValues:', newLoadingValues);
       return newLoadingValues;
     });
   }, [selectedIdentifiers]);
@@ -162,7 +173,6 @@ const ClusteringCanvas: React.FC<ClusteringCanvasProps> = ({
   // Simple API health check
   const checkClusteringAPIHealth = async () => {
     try {
-      console.log('🔍 Checking clustering API health...');
       const response = await fetch(`${CLUSTERING_API}/debug-columns?object_name=test`, {
         method: 'GET',
         headers: {
@@ -171,21 +181,17 @@ const ClusteringCanvas: React.FC<ClusteringCanvasProps> = ({
       });
       
       if (response.ok) {
-        console.log('✅ Clustering API is reachable');
         return true;
       } else {
-        console.warn('⚠️ Clustering API responded but with status:', response.status);
         return false;
       }
     } catch (error) {
-      console.error('❌ Clustering API health check failed:', error);
       return false;
     }
   };
 
   const handleRun = async () => {
     if (!clusteringData.objectName || !clusteringData.selectedDataFile) {
-      console.error('No data file selected for clustering');
       return;
     }
 
@@ -255,25 +261,8 @@ const ClusteringCanvas: React.FC<ClusteringCanvasProps> = ({
         preview_limit: 10
       };
 
-      console.log('Sending clustering request:', clusteringRequest);
-      console.log('🔍 Date Range Details:', {
-        hasDateRange: !!clusteringData.dateRange,
-        dateRange: clusteringData.dateRange,
-        dateRangeColumn: clusteringData.dateRange?.column,
-        fromDate: clusteringData.dateRange?.fromDate,
-        toDate: clusteringData.dateRange?.toDate
-      });
-      console.log('🔍 K-Selection Details:', {
-        method: clusteringData.k_selection || 'elbow',
-        manual: clusteringData.k_selection === 'manual',
-        n_clusters: clusteringData.n_clusters,
-        k_min: clusteringData.k_min,
-        k_max: clusteringData.k_max,
-        gap_b: clusteringData.gap_b
-      });
 
       // Call clustering API
-      console.log('🔍 Attempting to connect to clustering API:', `${CLUSTERING_API}/filter-and-cluster`);
       
       try {
         const response = await fetch(`${CLUSTERING_API}/filter-and-cluster`, {
@@ -286,43 +275,11 @@ const ClusteringCanvas: React.FC<ClusteringCanvasProps> = ({
 
         if (!response.ok) {
           const errorText = await response.text();
-          console.error('❌ Clustering API Error Response:', {
-            status: response.status,
-            statusText: response.statusText,
-            url: response.url,
-            errorText: errorText
-          });
           throw new Error(`Clustering failed: ${response.status} ${response.statusText} - ${errorText}`);
         }
 
                  const result = await response.json();
-         console.log('✅ Clustering API call successful');
-         console.log('Clustering result:', result);
-         console.log('Result structure:', {
-           hasClusterStats: !!result.cluster_stats,
-           clusterStatsType: typeof result.cluster_stats,
-           clusterStatsLength: Array.isArray(result.cluster_stats) ? result.cluster_stats.length : 'not array',
-           hasClusterResults: !!result,
-           resultKeys: Object.keys(result || {}),
-           sampleStat: Array.isArray(result.cluster_stats) && result.cluster_stats.length > 0 ? result.cluster_stats[0] : 'no cluster_stats'
-         });
          
-         // Additional debugging for centroid data structure
-         if (Array.isArray(result.cluster_stats) && result.cluster_stats.length > 0) {
-           console.log('🔍 Detailed cluster stats analysis:');
-           result.cluster_stats.forEach((stat, index) => {
-             console.log(`Cluster ${index}:`, {
-               cluster_id: stat.cluster_id,
-               size: stat.size,
-               centroid: stat.centroid,
-               centroidKeys: stat.centroid ? Object.keys(stat.centroid) : [],
-               allKeys: Object.keys(stat),
-               selectedMeasures: selectedMeasures,
-               hasCentroid: !!stat.centroid,
-               centroidType: typeof stat.centroid
-             });
-           });
-         }
 
         // Update settings with results
         onSettingsChange({
@@ -334,27 +291,11 @@ const ClusteringCanvas: React.FC<ClusteringCanvasProps> = ({
         });
 
       } catch (fetchError) {
-        console.error('❌ Fetch Error Details:', {
-          error: fetchError,
-          message: fetchError.message,
-          name: fetchError.name,
-          stack: fetchError.stack
-        });
-        
-        // Check if it's a network error
-        if (fetchError.name === 'TypeError' && fetchError.message.includes('Failed to fetch')) {
-          console.error('🌐 Network Error: Unable to connect to clustering API. Please check:');
-          console.error('   1. Is the FastAPI backend running?');
-          console.error('   2. Is the clustering API endpoint accessible?');
-          console.error('   3. Are there any CORS issues?');
-          console.error('   4. API URL being used:', `${CLUSTERING_API}/filter-and-cluster`);
-        }
         
         throw fetchError;
       }
 
     } catch (error) {
-      console.error('Error running clustering:', error);
       
       // Set error message for user
       const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred during clustering';
@@ -400,7 +341,6 @@ const ClusteringCanvas: React.FC<ClusteringCanvasProps> = ({
       const endpoint = format === 'csv' ? '/export_csv' : '/export_excel';
       const url = `${CLUSTERING_API}${endpoint}?object_name=${encodeURIComponent(filePath)}`;
       
-      console.log(`Exporting ${format.toUpperCase()} from: ${url}`);
       
       const response = await fetch(url);
       
@@ -419,9 +359,7 @@ const ClusteringCanvas: React.FC<ClusteringCanvasProps> = ({
       document.body.removeChild(a);
       URL.revokeObjectURL(a.href);
       
-      console.log(`${format.toUpperCase()} exported successfully: ${fileName}`);
     } catch (error) {
-      console.error(`Error exporting ${format.toUpperCase()}:`, error);
       alert(`Failed to export ${format.toUpperCase()}: ${error instanceof Error ? error.message : String(error)}`);
     }
   };
@@ -452,17 +390,10 @@ const ClusteringCanvas: React.FC<ClusteringCanvasProps> = ({
 
       if (!response.ok) {
         const errorText = await response.text();
-        console.error('❌ Save API Error Response:', {
-          status: response.status,
-          statusText: response.statusText,
-          url: response.url,
-          errorText: errorText
-        });
         throw new Error(`Failed to save results: ${response.status} ${response.statusText} - ${errorText}`);
       }
 
       const result = await response.json();
-      console.log('✅ Results saved successfully:', result);
       
       // Store the output path in the clustering settings
       if (result.result_file) {
@@ -480,7 +411,6 @@ const ClusteringCanvas: React.FC<ClusteringCanvasProps> = ({
         description: `Saved ${result.shape[0]} rows × ${result.shape[1]} columns`
       });
     } catch (error) {
-      console.error('Error saving clustering results:', error);
       toast({
         title: "Error Saving DataFrame",
         description: error instanceof Error ? error.message : "Failed to save clustering results",
@@ -772,15 +702,6 @@ const ClusteringCanvas: React.FC<ClusteringCanvasProps> = ({
                                      <td key={measure} className="px-4 py-3 text-sm text-black text-center border-gray-300">
                                        <span className="font-mono text-xs">
                                          {(() => {
-                                           // Debug logging to see what we're getting
-                                           console.log(`Debug - Cluster ${stat.cluster_id}, Measure ${measure}:`, {
-                                             stat: stat,
-                                             centroid: stat.centroid,
-                                             measureValue: stat.centroid?.[measure],
-                                             hasCentroid: !!stat.centroid,
-                                             centroidKeys: stat.centroid ? Object.keys(stat.centroid) : [],
-                                             displayMeasures: displayMeasures
-                                           });
                                            
                                            // Since we're using displayMeasures (actual measures from results), 
                                            // we can directly access the centroid value

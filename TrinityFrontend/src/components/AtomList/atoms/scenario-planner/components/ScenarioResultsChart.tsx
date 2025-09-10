@@ -739,8 +739,8 @@ export const ScenarioResultsChart: React.FC<ScenarioResultsChartProps> = ({
             fontSize={8}
             fontWeight={400}
             tickLine={false}
-            axisLine={false}
-            tickMargin={2}
+            axisLine={true}
+            tickMargin={10}
             angle={-45}
             textAnchor="end"
             height={50}
@@ -751,91 +751,36 @@ export const ScenarioResultsChart: React.FC<ScenarioResultsChartProps> = ({
                 return null;
               }
 
-              // For hierarchical display: Group by view identifiers
+              // Get identifier values for vertical display
               const dataItemIdentifiers = dataItem.identifiers || {};
-              
-              // Find the primary view identifier (first one in viewSelectedIdentifiers)
-              const primaryIdentifierKey = Object.keys(viewSelectedIdentifiers)[0];
-              const primaryIdentifierValue = primaryIdentifierKey ? dataItemIdentifiers[primaryIdentifierKey] : '';
-              
-              // Get the combination details (excluding the primary identifier)
-              const combinationDetails = Object.entries(dataItemIdentifiers)
-                .filter(([key, value]) => key !== primaryIdentifierKey)
-                .map(([key, value]) => value)
-                .join(', ');
+              const identifierValues = Object.entries(dataItemIdentifiers)
+                .map(([key, value]) => value);
 
-              // Check if this is the first occurrence of this view identifier in the current group
-              // This will help us show the view identifier label only once per group
-              const isFirstInGroup = index === 0 || 
-                (index > 0 && chartData[index - 1] && 
-                 chartData[index - 1].identifiers && 
-                 chartData[index - 1].identifiers[primaryIdentifierKey] !== primaryIdentifierValue);
-
-              // Calculate the center position for the view identifier label
-              // Find the last bar in the current group to calculate the center
-              let groupEndIndex = index;
-              for (let i = index + 1; i < chartData.length; i++) {
-                if (chartData[i] && chartData[i].identifiers && 
-                    chartData[i].identifiers[primaryIdentifierKey] === primaryIdentifierValue) {
-                  groupEndIndex = i;
-                } else {
-                  break;
-                }
-              }
-
-              // Calculate center position more accurately
-              // Get the actual spacing between bars from the chart
-              const chartWidth = width || 800;
-              const dataLength = chartData.length;
-              const availableWidth = chartWidth - 100; // Account for margins
-              const barSpacing = availableWidth / dataLength;
-              
-              // Calculate center x position between first and last bar in the group
-              const firstBarX = x;
-              const lastBarX = x + (groupEndIndex - index) * barSpacing;
-              const groupCenterX = isFirstInGroup ? (firstBarX + lastBarX) / 2 : x;
-
-                return (
-                  <g>
-                    {/* Show combination labels only in individual mode */}
-                    {viewMode === 'individual' && (
-                      <text
-                        x={x}
-                        y={y}
-                        dx={0}
-                        dy={5}
-                        angle={-45}
-                        textAnchor="middle"
-                        fill="#64748b"
-                        fontSize={7}
-                        fontWeight={400}
-                      >
-                        <tspan x={x} dy={0} textAnchor="middle">
-                          {combinationDetails || 'Unknown Combination'}
-                        </tspan>
-                      </text>
-                    )}
-                    
-                    {/* Group label (view identifier) - show in both modes but adjust position */}
-                    {primaryIdentifierValue && isFirstInGroup && (
-                      <text
-                        x={groupCenterX}
-                        y={viewMode === 'aggregated' ? y + 5 : y + 15}
-                        dx={0}
-                        dy={0}
-                        angle={-45}
-                        textAnchor="middle"
-                        fill="#64748b"
-                        fontSize={9}
-                        fontWeight={600}
-                      >
-                        <tspan x={groupCenterX} textAnchor="middle">
-                          {primaryIdentifierValue}
-                        </tspan>
-                      </text>
-                    )}
-                  </g>
-                );
+              return (
+                <text
+                  x={x}
+                  y={y}
+                  dx={0}
+                  dy={15}
+                  angle={-45}
+                  textAnchor="middle"
+                  fill="#64748b"
+                  fontSize={10}
+                  fontWeight={400}
+                >
+                  {identifierValues.length > 0 ? (
+                    identifierValues.map((value, valueIndex) => (
+                      <tspan key={valueIndex} x={x} dy={valueIndex === 0 ? 0 : 12} textAnchor="middle">
+                        {value}
+                      </tspan>
+                    ))
+                  ) : (
+                    <tspan x={x} dy={0} textAnchor="middle">
+                      Unknown Combination
+                    </tspan>
+                  )}
+                </text>
+              );
             }}
             label={currentShowAxisLabels ? { 
               value: xAxisLabel, 

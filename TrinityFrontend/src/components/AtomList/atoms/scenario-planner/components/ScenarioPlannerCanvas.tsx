@@ -2668,7 +2668,122 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
 
     }
 
-  }, [combinations.length]); // Only depend on combinations length, not the full array
+  }, [combinations.length]);
+
+  // ✅ NEW: Function to initialize select_config defaults (mean and backend date range)
+  const initializeSelectConfigDefaults = async () => {
+    try {
+      console.log('🔄 Initializing select_config defaults...');
+      
+      // Use backend defaults: mean and backend date range
+      const defaultSettings = {
+        referenceMethod: 'mean',
+        referencePeriod: {
+          from: settings.backendDateRange?.start_date || null,
+          to: settings.backendDateRange?.end_date || null
+        }
+      };
+      
+      console.log('📊 Setting select_config defaults:', {
+        referenceMethod: defaultSettings.referenceMethod,
+        referencePeriod: defaultSettings.referencePeriod,
+        backendDateRange: settings.backendDateRange
+      });
+      
+      onSettingsChange(defaultSettings);
+      console.log('✅ Auto-initialized settings with select_config defaults');
+    } catch (error) {
+      console.log('⚠️ Error initializing select_config defaults:', error);
+    }
+  };
+
+  // ✅ NEW: Auto-fetch MongoDB reference values on component mount to update settings
+  useEffect(() => {
+    const initializeMongoReferenceSettings = async () => {
+      try {
+        console.log('🔄 Auto-initializing MongoDB reference settings on component mount...');
+        
+        // Extract client/app/project from localStorage
+        const envStr = localStorage.getItem('env');
+        if (!envStr) {
+          console.log('⚠️ No env found in localStorage, skipping MongoDB initialization');
+          return;
+        }
+        
+        const env = JSON.parse(envStr);
+        const client_name = env.CLIENT_NAME || 'default_client';
+        const app_name = env.APP_NAME || 'default_app';
+        const project_name = env.PROJECT_NAME || 'default_project';
+        
+        // Make GET call to retrieve reference points from MongoDB
+        const response = await fetch(
+          `${SCENARIO_PLANNER_API}/get-reference-points?client_name=${encodeURIComponent(client_name)}&app_name=${encodeURIComponent(app_name)}&project_name=${encodeURIComponent(project_name)}`,
+          {
+            method: 'GET',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+          }
+        );
+        
+        if (response.ok) {
+          const data = await response.json();
+          console.log('✅ MongoDB reference points fetched on initialization:', data);
+          
+          if (data.success && data.data) {
+            const referenceData = data.data;
+            const storedStatistics = referenceData.statistic_used;
+            const storedDateRange = referenceData.date_range;
+            
+            console.log('🔍 Auto-initializing with MongoDB values:', {
+              storedStatistics,
+              storedDateRange,
+              currentReferenceMethod: settings.referenceMethod,
+              currentReferencePeriod: settings.referencePeriod
+            });
+            
+            // Update settings with MongoDB values if they exist
+            let updatedSettings = {};
+            if (storedStatistics) {
+              updatedSettings.referenceMethod = storedStatistics;
+              console.log('📊 Auto-updating reference method to:', storedStatistics);
+            }
+            
+            if (storedDateRange && storedDateRange.start_date && storedDateRange.end_date) {
+              updatedSettings.referencePeriod = {
+                from: storedDateRange.start_date,
+                to: storedDateRange.end_date
+              };
+              console.log('📅 Auto-updating reference period to:', { 
+                from: storedDateRange.start_date, 
+                to: storedDateRange.end_date 
+              });
+            }
+            
+            // Apply updates if we have any
+            if (Object.keys(updatedSettings).length > 0) {
+              onSettingsChange(updatedSettings);
+              console.log('✅ Auto-initialized settings with MongoDB values');
+            }
+          } else {
+            // No MongoDB data found, fall back to select_config defaults
+            console.log('⚠️ No MongoDB reference points found, falling back to select_config defaults');
+            await initializeSelectConfigDefaults();
+          }
+        } else {
+          // MongoDB request failed, fall back to select_config defaults
+          console.log('⚠️ MongoDB request failed, falling back to select_config defaults');
+          await initializeSelectConfigDefaults();
+        }
+      } catch (error) {
+        console.log('⚠️ Error auto-initializing MongoDB reference settings:', error);
+        // Don't throw error, just log it - app should continue with default settings
+      }
+    };
+
+    // Only run on component mount (empty dependency array)
+    initializeMongoReferenceSettings();
+  }, []); // Empty dependency array = run only on mount // Only depend on combinations length, not the full array
 
   
   
@@ -3299,6 +3414,36 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
           // Extract reference values from MongoDB response
           const referenceData = data.data;
           
+          // ✅ NEW: Extract and update reference method and period from MongoDB
+          const storedStatistics = referenceData.statistic_used;
+          const storedDateRange = referenceData.date_range;
+          
+          console.log('🔍 MongoDB stored values:', {
+            storedStatistics,
+            storedDateRange,
+            currentReferenceMethod: settings.referenceMethod,
+            currentReferencePeriod: settings.referencePeriod
+          });
+          
+          // Update reference method and period if they exist in MongoDB
+          let updatedSettings = {};
+          if (storedStatistics) {
+            updatedSettings.referenceMethod = storedStatistics;
+            console.log('📊 Updating reference method to:', storedStatistics);
+          }
+          
+          if (storedDateRange && storedDateRange.start_date && storedDateRange.end_date) {
+            // Use the stored date range object directly
+            updatedSettings.referencePeriod = {
+              from: storedDateRange.start_date,
+              to: storedDateRange.end_date
+            };
+            console.log('📅 Updating reference period to:', { 
+              from: storedDateRange.start_date, 
+              to: storedDateRange.end_date 
+            });
+          }
+          
           combinations.forEach(combination => {
             if (!newInputs[combination.id]) {
               newInputs[combination.id] = {};
@@ -3370,7 +3515,11 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
           updatedScenarios[currentScenario].combinationInputs = newInputs;
           updatedScenarios[currentScenario].originalReferenceValues = newOriginalRefs;
           
-          onSettingsChange({ scenarios: updatedScenarios });
+          // ✅ NEW: Include updated reference method and period in settings change
+          onSettingsChange({ 
+            scenarios: updatedScenarios,
+            ...updatedSettings
+          });
           
           console.log('✅ Reference values from MongoDB processed successfully');
           console.log('🔍 Updated combinationInputs:', newInputs);
