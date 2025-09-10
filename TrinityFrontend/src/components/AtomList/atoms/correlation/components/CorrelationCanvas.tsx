@@ -315,7 +315,7 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
     });
   };
 
-  const handleMatrixDoubleClick = (e: React.MouseEvent) => {
+  const handleMatrixContextMenu = (e: React.MouseEvent) => {
     e.preventDefault();
     const menuWidth = 240;
     const menuHeight = 200;
@@ -327,7 +327,7 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
     if (window.innerHeight - y < menuHeight) {
       y = window.innerHeight - menuHeight;
     }
-    console.log("MatrixSettingsTray opened via double click", { x, y });
+    console.log("MatrixSettingsTray opened via right click", { x, y });
     setSettingsPosition({ x, y });
     setSettingsOpen(true);
   };
@@ -1328,7 +1328,7 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
         <>
           {/* Show All Columns toggle */}
         {/* Filter Dimensions - Dynamic from actual data */}
-        <Card className="p-4 mb-4" onDoubleClick={handleMatrixDoubleClick}>
+        <Card className="p-4 mb-4" onContextMenu={handleMatrixContextMenu}>
           <h3 className="text-sm font-semibold text-foreground mb-3 flex items-center gap-2">
             <Target className="w-4 h-4 text-primary" />
             Filter Dimensions
@@ -1394,7 +1394,7 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
       </Card>
 
       <div className="flex items-center justify-between w-full px-4 mb-2">
-        <p className="text-xs text-gray-500">Double-click to open settings</p>
+        <p className="text-xs text-gray-500">Right-click to open settings</p>
         <div className="flex items-center space-x-2">
           <span className="text-xs text-gray-500">Show all columns</span>
           <Switch
@@ -1411,7 +1411,7 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
       <div className={isCompactMode ? "mb-4" : "mb-6"}>
         <Card
           className="overflow-hidden"
-              onDoubleClick={handleMatrixDoubleClick}
+              onContextMenu={handleMatrixContextMenu}
             >
               <div
                 className={
