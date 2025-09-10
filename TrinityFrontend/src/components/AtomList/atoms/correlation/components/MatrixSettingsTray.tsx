@@ -101,7 +101,7 @@ const MatrixSettingsTray: React.FC<MatrixSettingsTrayProps> = ({
     setLocalSettings(settings);
   }, [settings]);
 
-  // Close when clicking or right-clicking outside
+  // Close when clicking outside the tray
   useEffect(() => {
     const handleOutside = (e: MouseEvent) => {
       const target = e.target as Element;
@@ -115,10 +115,8 @@ const MatrixSettingsTray: React.FC<MatrixSettingsTrayProps> = ({
 
     if (open || showColorSubmenu) {
       document.addEventListener('mousedown', handleOutside, false);
-      document.addEventListener('contextmenu', handleOutside, false);
       return () => {
         document.removeEventListener('mousedown', handleOutside, false);
-        document.removeEventListener('contextmenu', handleOutside, false);
       };
     }
   }, [open, showColorSubmenu, onOpenChange]);
