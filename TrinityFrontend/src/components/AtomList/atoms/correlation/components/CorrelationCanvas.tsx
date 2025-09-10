@@ -234,7 +234,7 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
   const [matrixSettings, setMatrixSettings] = useState<MatrixSettings>({
     theme: "default",
     showAxisLabels: true,
-    showDataLabels: true,
+    showDataLabels: false,
     showLegend: true,
   });
   const [settingsPosition, setSettingsPosition] = useState<{
@@ -602,8 +602,8 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
     const svg = d3.select(heatmapRef.current);
     svg.selectAll("*").remove();
 
-    // Determine container width for responsive layout
-    const containerWidth = canvasWidth || 900;
+    // Determine container width for responsive layout and slightly reduce width
+    const containerWidth = (canvasWidth || 900) * 0.9;
     const margin = { top: 80, right: 60, bottom: 180, left: 60 };
     const width = containerWidth - margin.left - margin.right;
 
@@ -1067,7 +1067,7 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
       .sort((a, b) => a[timeSeriesXField] - b[timeSeriesXField])
       .slice(-MAX_TIME_SERIES_POINTS);
   }, [data.timeSeriesData, data.selectedVar1, data.selectedVar2, isDateAxis, timeSeriesXField]);
-  const timeSeriesChartHeight = isCompactMode ? 150 : 300;
+  const timeSeriesChartHeight = isCompactMode ? 195 : 390;
 
   const timeSeriesRendererProps = useMemo(() => {
     if (!data.selectedVar1 || !data.selectedVar2) return null;
@@ -1232,7 +1232,7 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
             <svg
               ref={heatmapRef}
               height={isCompactMode ? "260" : "650"}
-              className="block"
+              className="block mx-auto"
             ></svg>
           </div>
         </Card>
