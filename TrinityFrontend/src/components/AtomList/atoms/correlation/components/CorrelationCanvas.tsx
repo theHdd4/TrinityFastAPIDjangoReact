@@ -608,9 +608,9 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
     );
 
     // Maintain previous matrix height while stretching width to fit container
-    const baseHeight = isCompactMode ? 220 : 400;
-    const cellWidth = Math.max(width / variables.length, 45);
-    const cellHeight = Math.max(baseHeight / variables.length, 45);
+    const baseHeight = isCompactMode ? 300 : 550;
+    const cellWidth = Math.max(width / variables.length, 60);
+    const cellHeight = Math.max(baseHeight / variables.length, 60);
     const actualWidth = cellWidth * variables.length;
     const actualHeight = cellHeight * variables.length;
 
@@ -755,7 +755,7 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
           .html(
             `
           <div style="font-size: 16px; margin-bottom: 8px; text-shadow: ${textBorder};">📊 ${d.xVar} ↔ ${d.yVar}</div>
-          <div style="font-size: 18px; margin-bottom: 6px;">Correlation: <span style="color: #fbbf24; text-shadow: ${textBorder};">${d.correlation.toFixed(3)}</span></div>
+          <div style="font-size: 18px; margin-bottom: 6px;">Correlation: <span style="color: #fbbf24; text-shadow: none;">${d.correlation.toFixed(3)}</span></div>
           <div style="font-size: 12px; opacity: 0.9; text-shadow: ${textBorder};">${strengthText} ${directionText} relationship</div>
         `,
           )
@@ -827,12 +827,12 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
         .attr("dominant-baseline", "middle")
         .attr(
           "font-size",
-          `${Math.max(8, Math.min(Math.min(cellWidth, cellHeight) / 4.5, 11))}px`,
+          `${Math.max(10, Math.min(Math.min(cellWidth, cellHeight) / 3.5, 16))}px`,
         )
         .attr("font-weight", "700")
         .attr("fill", "#ffffff")
         .attr("stroke", "#000000")
-        .attr("stroke-width", 0.8)
+        .attr("stroke-width", 1.5)
         .style("paint-order", "stroke")
         .style("pointer-events", "none")
         .style("opacity", shouldAnimate ? 0 : 1)
