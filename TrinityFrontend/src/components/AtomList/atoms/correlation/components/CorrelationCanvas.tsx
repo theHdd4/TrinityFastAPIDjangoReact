@@ -1241,6 +1241,7 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
                 xAxisLabel="Date"
                 showLegend
                 showAxisLabels
+                width={canvasWidth}
                 showGrid
                 height={isCompactMode ? 150 : 300}
               />
