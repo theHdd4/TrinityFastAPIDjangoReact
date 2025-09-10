@@ -1309,12 +1309,32 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
         </div>
       ) : (
         <>
+          {/* Show All Columns toggle */}
+          <div
+            className="flex justify-end w-full pr-4 mb-2"
+            style={{ width: canvasWidth }}
+          >
+            <div className="flex items-center space-x-2">
+              <span className="text-xs text-gray-500">Show all columns</span>
+              <Switch
+                checked={data.showAllColumns || false}
+                onCheckedChange={(checked) =>
+                  onDataChange({ showAllColumns: checked })
+                }
+                className="data-[state=checked]:bg-[#458EE2]"
+              />
+            </div>
+          </div>
+
           {/* Filter Dimensions - Dynamic from actual data */}
           <Card className="p-4 mb-4">
-            <h3 className="text-sm font-semibold text-foreground mb-3 flex items-center gap-2">
+            <h3 className="text-sm font-semibold text-foreground mb-1 flex items-center gap-2">
               <Target className="w-4 h-4 text-primary" />
               Filter Dimensions
             </h3>
+            <p className="text-xs text-gray-500 mb-3">
+              Right click on matrix to open settings
+            </p>
 
             {/* Show active filter dimensions */}
             {Object.keys(data.settings?.filterDimensions || {}).length > 0 ? (
@@ -1375,26 +1395,6 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
             </div>
           </Card>
 
-          {/* Settings hint and Show All Columns Toggle */}
-          <div
-            className="flex items-center w-full pr-4 mb-2"
-            style={{ width: canvasWidth }}
-          >
-            <span className="flex-1 text-center text-xs text-gray-500">
-              Right click on matrix to open settings
-            </span>
-            <div className="flex items-center space-x-2">
-              <span className="text-xs text-gray-500">Show all columns</span>
-              <Switch
-                checked={data.showAllColumns || false}
-                onCheckedChange={(checked) =>
-                  onDataChange({ showAllColumns: checked })
-                }
-                className="data-[state=checked]:bg-[#458EE2]"
-              />
-            </div>
-          </div>
-
           {/* Correlation Heatmap - Full Width */}
           <div className={isCompactMode ? "mb-4" : "mb-6"}>
             <Card className="overflow-hidden">
@@ -1404,14 +1404,24 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
                     ? "p-4 flex justify-center"
                     : "p-6 flex justify-center"
                 }
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  const menuWidth = 240;
+                  const menuHeight = 200;
+                  let x = e.clientX;
+                  let y = e.clientY;
+                  if (window.innerWidth - x < menuWidth) {
+                    x = window.innerWidth - menuWidth;
+                  }
+                  if (window.innerHeight - y < menuHeight) {
+                    y = window.innerHeight - menuHeight;
+                  }
+                  setSettingsPosition({ x, y });
+                  setSettingsOpen(true);
+                }}
               >
                 <svg
                   ref={heatmapRef}
-                  onContextMenu={(e) => {
-                    e.preventDefault();
-                    setSettingsPosition({ x: e.clientX, y: e.clientY });
-                    setSettingsOpen(true);
-                  }}
                   height={isCompactMode ? "260" : "650"}
                   className="block"
                 ></svg>
