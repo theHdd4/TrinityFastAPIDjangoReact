@@ -1035,11 +1035,18 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
       return [];
     }
     return data.timeSeriesData
-      .map((d, idx) => ({
-        [timeSeriesXField]: isDateAxis ? d.date : idx,
-        [data.selectedVar1!]: d.var1Value,
-        [data.selectedVar2!]: d.var2Value,
-      }))
+      .map((d, idx) => {
+        const xValue = isDateAxis
+          ? typeof d.date === "number"
+            ? d.date
+            : new Date(d.date).getTime()
+          : idx;
+        return {
+          [timeSeriesXField]: xValue,
+          [data.selectedVar1!]: d.var1Value,
+          [data.selectedVar2!]: d.var2Value,
+        };
+      })
       .filter(
         (d) =>
           typeof d[data.selectedVar1!] === "number" &&
