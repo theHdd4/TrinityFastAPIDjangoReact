@@ -1041,6 +1041,33 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
       .sort((a, b) => a.date - b.date);
   }, [data.timeSeriesData, data.selectedVar1, data.selectedVar2]);
 
+  const timeSeriesRendererProps = useMemo(() => {
+    if (!data.selectedVar1 || !data.selectedVar2) return null;
+    const theme = COLOR_THEMES[matrixSettings.theme] || COLOR_THEMES.default;
+    return {
+      key: `${data.selectedVar1}-${data.selectedVar2}`,
+      type: "line_chart" as const,
+      data: timeSeriesChartData,
+      xField: "date",
+      yFields: [data.selectedVar1, data.selectedVar2],
+      yAxisLabels: [data.selectedVar1, data.selectedVar2],
+      xAxisLabel: "Date",
+      colors: [theme.primary, theme.secondary, theme.tertiary],
+      theme: matrixSettings.theme,
+      showLegend: matrixSettings.showLegend,
+      showAxisLabels: matrixSettings.showAxisLabels,
+      showDataLabels: matrixSettings.showDataLabels,
+      showGrid: true,
+      height: isCompactMode ? 150 : 300,
+    } as const;
+  }, [
+    data.selectedVar1,
+    data.selectedVar2,
+    timeSeriesChartData,
+    matrixSettings,
+    isCompactMode,
+  ]);
+
   return (
     <div
       className={`w-full h-full bg-background ${isCompactMode ? "p-4" : "p-6"} overflow-y-auto`}
@@ -1231,21 +1258,11 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
                 {`Visualize how ${data.selectedVar1} and ${data.selectedVar2} change over time`}
               </p>
             )}
-            <div className={`${isCompactMode ? "p-4" : "p-6"} flex-1`}>
-              <RechartsChartRenderer
-                type="line_chart"
-                data={timeSeriesChartData}
-                xField="date"
-                yFields={[data.selectedVar1, data.selectedVar2]}
-                yAxisLabels={[data.selectedVar1, data.selectedVar2]}
-                xAxisLabel="Date"
-                showLegend
-                showAxisLabels
-                width={canvasWidth}
-                showGrid
-                height={isCompactMode ? 150 : 300}
-              />
-            </div>
+            {timeSeriesRendererProps && (
+              <div className={`${isCompactMode ? "p-4" : "p-6"} flex-1`}>
+                <RechartsChartRenderer {...timeSeriesRendererProps} />
+              </div>
+            )}
           </Card>
         </div>
       )}
