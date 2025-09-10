@@ -1020,6 +1020,7 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
 
   const correlationValue = getCorrelationValue();
 
+  const MAX_TIME_SERIES_POINTS = 1000;
   const timeSeriesChartData = useMemo(() => {
     if (!data.timeSeriesData || !data.selectedVar1 || !data.selectedVar2) {
       return [];
@@ -1038,7 +1039,8 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
         [data.selectedVar1!]: d.var1Value,
         [data.selectedVar2!]: d.var2Value,
       }))
-      .sort((a, b) => a.date - b.date);
+      .sort((a, b) => a.date - b.date)
+      .slice(-MAX_TIME_SERIES_POINTS);
   }, [data.timeSeriesData, data.selectedVar1, data.selectedVar2]);
   const timeSeriesChartHeight = isCompactMode ? 150 : 300;
 
@@ -1069,6 +1071,15 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
     matrixSettings,
     timeSeriesChartHeight,
   ]);
+
+  const timeSeriesChartElement = useMemo(() => {
+    if (!timeSeriesRendererProps) return null;
+    return (
+      <div className="w-full" style={{ height: timeSeriesChartHeight }}>
+        <RechartsChartRenderer {...timeSeriesRendererProps} />
+      </div>
+    );
+  }, [timeSeriesRendererProps, timeSeriesChartHeight]);
 
   return (
     <div
@@ -1260,11 +1271,9 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
                 {`Visualize how ${data.selectedVar1} and ${data.selectedVar2} change over time`}
               </p>
             )}
-            {timeSeriesRendererProps && (
+            {timeSeriesChartElement && (
               <div className={`${isCompactMode ? "p-4" : "p-6"} flex-1`}>
-                <div className="w-full" style={{ height: timeSeriesChartHeight }}>
-                  <RechartsChartRenderer {...timeSeriesRendererProps} />
-                </div>
+                {timeSeriesChartElement}
               </div>
             )}
           </Card>
