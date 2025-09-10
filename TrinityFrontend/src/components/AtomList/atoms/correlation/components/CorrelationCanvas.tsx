@@ -488,14 +488,15 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
         seriesRequest,
       );
 
-      // 4. Transform to chart format
+      // 4. Transform to chart format and ensure the x-axis is sorted
       const chartData = axisData.x_values
         .map((x: any, index: number) => ({
           date: isDate ? new Date(x).getTime() : index,
           var1Value: seriesData.column1_values[index] || 0,
           var2Value: seriesData.column2_values[index] || 0,
         }))
-        .filter((d: any) => isFinite(d.var1Value) && isFinite(d.var2Value));
+        .filter((d: any) => isFinite(d.var1Value) && isFinite(d.var2Value))
+        .sort((a: any, b: any) => a.date - b.date);
 
       return { data: chartData, isDate };
     } catch (error) {
@@ -804,7 +805,9 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
           .attr("opacity", 0)
           .remove();
 
-        handleVariableSelectionChange(d.xVar, d.yVar);
+        // Pass the matrix's y-axis variable first so it maps to the chart's left Y-axis
+        // and the x-axis variable becomes the right Y-axis series.
+        handleVariableSelectionChange(d.yVar, d.xVar);
       });
 
     // Animate cells only when data changes
@@ -1059,6 +1062,8 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
       xField: timeSeriesXField,
       yField: data.selectedVar1,
       yFields: [data.selectedVar1, data.selectedVar2],
+      // Provide explicit axis labels for dual Y-axes
+      yAxisLabel: data.selectedVar1,
       yAxisLabels: [data.selectedVar1, data.selectedVar2],
       xAxisLabel: isDateAxis ? "Date" : "Index",
       colors: [theme.primary, theme.secondary, theme.tertiary],
@@ -1067,6 +1072,7 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
       showAxisLabels: matrixSettings.showAxisLabels,
       showDataLabels: matrixSettings.showDataLabels,
       showGrid: true,
+      sortOrder: "asc" as const,
       height: timeSeriesChartHeight,
     } as const;
   }, [
