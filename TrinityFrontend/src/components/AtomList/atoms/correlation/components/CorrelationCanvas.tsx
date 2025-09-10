@@ -1397,7 +1397,24 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
 
           {/* Correlation Heatmap - Full Width */}
           <div className={isCompactMode ? "mb-4" : "mb-6"}>
-            <Card className="overflow-hidden">
+            <Card
+              className="overflow-hidden"
+              onContextMenu={(e) => {
+                e.preventDefault();
+                const menuWidth = 240;
+                const menuHeight = 200;
+                let x = e.clientX;
+                let y = e.clientY;
+                if (window.innerWidth - x < menuWidth) {
+                  x = window.innerWidth - menuWidth;
+                }
+                if (window.innerHeight - y < menuHeight) {
+                  y = window.innerHeight - menuHeight;
+                }
+                setSettingsPosition({ x, y });
+                setSettingsOpen(true);
+              }}
+            >
               <div
                 className={
                   isCompactMode
@@ -1409,21 +1426,6 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
                   ref={heatmapRef}
                   height={isCompactMode ? "260" : "650"}
                   className="block"
-                  onContextMenu={(e) => {
-                    e.preventDefault();
-                    const menuWidth = 240;
-                    const menuHeight = 200;
-                    let x = e.clientX;
-                    let y = e.clientY;
-                    if (window.innerWidth - x < menuWidth) {
-                      x = window.innerWidth - menuWidth;
-                    }
-                    if (window.innerHeight - y < menuHeight) {
-                      y = window.innerHeight - menuHeight;
-                    }
-                    setSettingsPosition({ x, y });
-                    setSettingsOpen(true);
-                  }}
                 ></svg>
               </div>
             </Card>
