@@ -148,7 +148,7 @@ const MatrixSettingsTray: React.FC<MatrixSettingsTrayProps> = ({
 
   const menu = (
     <div
-      className="fixed z-[9999] bg-white border border-gray-200 rounded-lg shadow-lg py-2 min-w-48 matrix-settings-menu"
+      className="fixed z-[100000] bg-white border border-gray-200 rounded-lg shadow-lg py-2 min-w-48 matrix-settings-menu"
       style={{ left: position.x, top: position.y }}
       onClick={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
@@ -270,7 +270,7 @@ const MatrixSettingsTray: React.FC<MatrixSettingsTrayProps> = ({
   const colorSubmenu = showColorSubmenu
     ? createPortal(
         <div
-          className="fixed z-[10000] bg-white border border-gray-300 rounded-lg shadow-xl p-3 color-submenu"
+          className="fixed z-[100001] bg-white border border-gray-300 rounded-lg shadow-xl p-3 color-submenu"
           style={{
             left: colorSubmenuPos.x,
             top: colorSubmenuPos.y,

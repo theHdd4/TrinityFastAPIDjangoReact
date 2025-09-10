@@ -1404,26 +1404,26 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
                     ? "p-4 flex justify-center"
                     : "p-6 flex justify-center"
                 }
-                onContextMenu={(e) => {
-                  e.preventDefault();
-                  const menuWidth = 240;
-                  const menuHeight = 200;
-                  let x = e.clientX;
-                  let y = e.clientY;
-                  if (window.innerWidth - x < menuWidth) {
-                    x = window.innerWidth - menuWidth;
-                  }
-                  if (window.innerHeight - y < menuHeight) {
-                    y = window.innerHeight - menuHeight;
-                  }
-                  setSettingsPosition({ x, y });
-                  setSettingsOpen(true);
-                }}
               >
                 <svg
                   ref={heatmapRef}
                   height={isCompactMode ? "260" : "650"}
                   className="block"
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    const menuWidth = 240;
+                    const menuHeight = 200;
+                    let x = e.clientX;
+                    let y = e.clientY;
+                    if (window.innerWidth - x < menuWidth) {
+                      x = window.innerWidth - menuWidth;
+                    }
+                    if (window.innerHeight - y < menuHeight) {
+                      y = window.innerHeight - menuHeight;
+                    }
+                    setSettingsPosition({ x, y });
+                    setSettingsOpen(true);
+                  }}
                 ></svg>
               </div>
             </Card>
