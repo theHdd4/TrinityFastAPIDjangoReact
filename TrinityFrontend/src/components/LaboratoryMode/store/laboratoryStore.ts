@@ -165,6 +165,7 @@ export interface CorrelationSettings {
     var1Value: number;
     var2Value: number;
   }>;
+  timeSeriesIsDate?: boolean;
   identifiers: {
     identifier3: string;
     identifier4: string;
@@ -238,6 +239,7 @@ export const DEFAULT_CORRELATION_SETTINGS: CorrelationSettings = {
   selectedVar2: null,
   correlationMatrix: [],
   timeSeriesData: [],
+  timeSeriesIsDate: true,
   identifiers: {
     identifier3: 'All',
     identifier4: 'All',

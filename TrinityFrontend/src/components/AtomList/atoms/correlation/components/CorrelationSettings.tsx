@@ -107,53 +107,53 @@ const fetchTimeSeriesData = async (filePath: string, request: {
 
 // Enhanced time series data fetching with datetime axis and highest correlation
 const fetchEnhancedTimeSeriesData = async (
-  filePath: string, 
-  startDate?: string, 
+  filePath: string,
+  startDate?: string,
   endDate?: string,
   forceColumns?: { column1: string; column2: string }
-): Promise<Array<{date: Date | number; var1Value: number; var2Value: number}>> => {
+): Promise<{ data: Array<{ date: number; var1Value: number; var2Value: number }>; isDate: boolean }> => {
   try {
-    
     // 1. Get axis data (datetime or indices)
     const axisData = await fetchTimeSeriesAxis(filePath, startDate, endDate);
+    const isDate = axisData.has_datetime;
 
-    
     // 2. Get highest correlation pair (unless forced columns provided)
     let pairData;
     if (forceColumns) {
       pairData = {
         column1: forceColumns.column1,
         column2: forceColumns.column2,
-        correlation_value: 0
+        correlation_value: 0,
       };
     } else {
       pairData = await fetchHighestCorrelationPair(filePath);
     }
-    
+
     // 3. Get Y-values for the selected columns
     const seriesRequest = {
       column1: pairData.column1,
       column2: pairData.column2,
       start_date: startDate,
       end_date: endDate,
-      datetime_column: axisData.datetime_column
+      datetime_column: axisData.datetime_column,
     };
-    
+
     const seriesData = await fetchTimeSeriesData(filePath, seriesRequest);
-    
+
     // 4. Transform to chart format
-    const chartData = axisData.x_values.map((x: any, index: number) => ({
-      date: axisData.has_datetime ? new Date(x) : index,
-      var1Value: seriesData.column1_values[index] || 0,
-      var2Value: seriesData.column2_values[index] || 0
-    }));
-    
-    return chartData;
-    
+    const chartData = axisData.x_values
+      .map((x: any, index: number) => ({
+        date: isDate ? new Date(x).getTime() : index,
+        var1Value: seriesData.column1_values[index] || 0,
+        var2Value: seriesData.column2_values[index] || 0,
+      }))
+      .filter((d: any) => isFinite(d.var1Value) && isFinite(d.var2Value));
+
+    return { data: chartData, isDate };
   } catch (error) {
     console.error('💥 Enhanced time series data error:', error);
     // Fallback to empty array
-    return [];
+    return { data: [], isDate: false };
   }
 };
 
@@ -545,6 +545,7 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
       fileData: null,
       correlationMatrix: null,
       timeSeriesData: null,
+      timeSeriesIsDate: true,
       dateAnalysis: null,
       isUsingFileData: true  // Always default to using uploaded data
     });
@@ -696,6 +697,7 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
       onDataChange({
         correlationMatrix: transformedResult.correlationMatrix,
         timeSeriesData: [], // No default time series data
+        timeSeriesIsDate: true,
         variables: transformedResult.variables,
         selectedVar1: null, // No default selection
         selectedVar2: null, // No default selection
@@ -817,18 +819,19 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
       });
       
       // Fetch new time series data with specific columns
-      const enhancedTimeSeriesData = await fetchEnhancedTimeSeriesData(
+      const { data: enhancedTimeSeriesData, isDate } = await fetchEnhancedTimeSeriesData(
         data.selectedFile,
         data.settings?.dateFrom,
         data.settings?.dateTo,
         { column1: var1, column2: var2 } // Force specific columns
       );
-      
+
       // Update time series data
       onDataChange({
         timeSeriesData: enhancedTimeSeriesData,
+        timeSeriesIsDate: isDate,
         selectedVar1: var1,
-        selectedVar2: var2
+        selectedVar2: var2,
       });
       
      
@@ -837,8 +840,9 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
       // Set empty data on error - no fallback
       onDataChange({
         timeSeriesData: [],
+        timeSeriesIsDate: true,
         selectedVar1: var1,
-        selectedVar2: var2
+        selectedVar2: var2,
       });
     }
   };
@@ -854,15 +858,16 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
         ? { column1: data.selectedVar1, column2: data.selectedVar2 }
         : undefined;
       
-      const enhancedTimeSeriesData = await fetchEnhancedTimeSeriesData(
+      const { data: enhancedTimeSeriesData, isDate } = await fetchEnhancedTimeSeriesData(
         data.selectedFile,
         data.settings?.dateFrom,
         data.settings?.dateTo,
         forceColumns
       );
-      
+
       onDataChange({
-        timeSeriesData: enhancedTimeSeriesData
+        timeSeriesData: enhancedTimeSeriesData,
+        timeSeriesIsDate: isDate,
       });
       
      
@@ -870,7 +875,8 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
       console.error('💥 Failed to update time series with date filter:', error);
       // Set empty data on error - no fallback
       onDataChange({
-        timeSeriesData: []
+        timeSeriesData: [],
+        timeSeriesIsDate: true,
       });
     }
   };
@@ -887,6 +893,7 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
     onDataChange({
       correlationMatrix: [],
       timeSeriesData: [],
+      timeSeriesIsDate: true,
       variables: [],
       dateAnalysis: null
     });

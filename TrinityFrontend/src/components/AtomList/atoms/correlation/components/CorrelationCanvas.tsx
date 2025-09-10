@@ -408,6 +408,7 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
       onDataChange({
         correlationMatrix: transformedMatrix,
         timeSeriesData: [],
+        timeSeriesIsDate: true,
         variables: filteredVariables,
         selectedVar1: null,
         selectedVar2: null,
@@ -451,9 +452,7 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
     startDate?: string,
     endDate?: string,
     forceColumns?: { column1: string; column2: string },
-  ): Promise<
-    Array<{ date: Date | number; var1Value: number; var2Value: number }>
-  > => {
+  ): Promise<{ data: Array<{ date: number; var1Value: number; var2Value: number }>; isDate: boolean }> => {
     try {
       // 1. Get axis data (datetime or indices)
       const axisData = await correlationAPI.getTimeSeriesAxis(
@@ -461,6 +460,7 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
         startDate,
         endDate,
       );
+      const isDate = axisData.has_datetime;
 
       // 2. Get highest correlation pair (unless forced columns provided)
       let pairData;
@@ -489,15 +489,17 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
       );
 
       // 4. Transform to chart format
-      const chartData = axisData.x_values.map((x: any, index: number) => ({
-        date: axisData.has_datetime ? new Date(x) : index,
-        var1Value: seriesData.column1_values[index] || 0,
-        var2Value: seriesData.column2_values[index] || 0,
-      }));
+      const chartData = axisData.x_values
+        .map((x: any, index: number) => ({
+          date: isDate ? new Date(x).getTime() : index,
+          var1Value: seriesData.column1_values[index] || 0,
+          var2Value: seriesData.column2_values[index] || 0,
+        }))
+        .filter((d: any) => isFinite(d.var1Value) && isFinite(d.var2Value));
 
-      return chartData;
+      return { data: chartData, isDate };
     } catch (error) {
-      return [];
+      return { data: [], isDate: false };
     }
   };
 
@@ -522,7 +524,7 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
       });
 
       // Fetch new time series data with specific columns
-      const enhancedTimeSeriesData = await fetchEnhancedTimeSeriesData(
+      const { data: enhancedTimeSeriesData, isDate } = await fetchEnhancedTimeSeriesData(
         filePath,
         data.settings?.dateFrom,
         data.settings?.dateTo,
@@ -532,12 +534,14 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
       // Update time series data
       onDataChange({
         timeSeriesData: enhancedTimeSeriesData,
+        timeSeriesIsDate: isDate,
         selectedVar1: var1,
         selectedVar2: var2,
       });
     } catch (error) {
       onDataChange({
         timeSeriesData: [],
+        timeSeriesIsDate: true,
         selectedVar1: var1,
         selectedVar2: var2,
       });
@@ -1021,41 +1025,42 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
   const correlationValue = getCorrelationValue();
 
   const MAX_TIME_SERIES_POINTS = 1000;
+  const isDateAxis = data.timeSeriesIsDate !== false;
+  const timeSeriesXField = isDateAxis ? "date" : "index";
   const timeSeriesChartData = useMemo(() => {
     if (!data.timeSeriesData || !data.selectedVar1 || !data.selectedVar2) {
       return [];
     }
     return data.timeSeriesData
-      .filter(
-        (d) =>
-          (d.date instanceof Date || typeof d.date === "number" || typeof d.date === "string") &&
-          typeof d.var1Value === "number" &&
-          isFinite(d.var1Value) &&
-          typeof d.var2Value === "number" &&
-          isFinite(d.var2Value),
-      )
-      .map((d) => ({
-        date: new Date(d.date).getTime(),
+      .map((d, idx) => ({
+        [timeSeriesXField]: isDateAxis ? d.date : idx,
         [data.selectedVar1!]: d.var1Value,
         [data.selectedVar2!]: d.var2Value,
       }))
-      .sort((a, b) => a.date - b.date)
+      .filter(
+        (d) =>
+          typeof d[data.selectedVar1!] === "number" &&
+          isFinite(d[data.selectedVar1!]) &&
+          typeof d[data.selectedVar2!] === "number" &&
+          isFinite(d[data.selectedVar2!]),
+      )
+      .sort((a, b) => a[timeSeriesXField] - b[timeSeriesXField])
       .slice(-MAX_TIME_SERIES_POINTS);
-  }, [data.timeSeriesData, data.selectedVar1, data.selectedVar2]);
+  }, [data.timeSeriesData, data.selectedVar1, data.selectedVar2, isDateAxis, timeSeriesXField]);
   const timeSeriesChartHeight = isCompactMode ? 150 : 300;
 
   const timeSeriesRendererProps = useMemo(() => {
     if (!data.selectedVar1 || !data.selectedVar2) return null;
     const theme = COLOR_THEMES[matrixSettings.theme] || COLOR_THEMES.default;
     return {
-      key: `${data.selectedVar1}-${data.selectedVar2}`,
+      key: `${data.selectedVar1}-${data.selectedVar2}-${timeSeriesXField}`,
       type: "line_chart" as const,
       data: timeSeriesChartData,
-      xField: "date",
+      xField: timeSeriesXField,
       yField: data.selectedVar1,
       yFields: [data.selectedVar1, data.selectedVar2],
       yAxisLabels: [data.selectedVar1, data.selectedVar2],
-      xAxisLabel: "Date",
+      xAxisLabel: isDateAxis ? "Date" : "Index",
       colors: [theme.primary, theme.secondary, theme.tertiary],
       theme: matrixSettings.theme,
       showLegend: matrixSettings.showLegend,
@@ -1070,6 +1075,8 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
     timeSeriesChartData,
     matrixSettings,
     timeSeriesChartHeight,
+    timeSeriesXField,
+    isDateAxis,
   ]);
 
   const timeSeriesChartElement = useMemo(() => {
