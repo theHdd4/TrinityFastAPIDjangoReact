@@ -40,7 +40,9 @@ const SelectModelsFeatureSettings: React.FC<SelectModelsFeatureSettingsProps> = 
         /* ignore */
       }
     }
-    fetch(`${VALIDATE_API}/list_saved_dataframes${query}`)
+    
+    // Fetch only model results files
+    fetch(`${SELECT_API}/list-model-results-files${query}`)
       .then(r => r.json())
       .then(d => setFrames(Array.isArray(d.files) ? d.files : []))
       .catch(() => setFrames([]));
@@ -53,26 +55,18 @@ const SelectModelsFeatureSettings: React.FC<SelectModelsFeatureSettingsProps> = 
     
     try {
       const envStr = localStorage.getItem('env');
-      let envParams: any = {};
-      
-      if (envStr) {
-        try {
-          envParams = JSON.parse(envStr);
-        } catch {
-          /* ignore */
-        }
-      }
+      const env = envStr ? JSON.parse(envStr) : {};
 
       // Construct URL properly to avoid double question marks
       const baseUrl = `${SELECT_API}/combination-ids`;
       const params = new URLSearchParams({
         file_key: fileKey,
-        client_id: envParams.CLIENT_ID || '',
-        app_id: envParams.APP_ID || '',
-        project_id: envParams.PROJECT_ID || '',
-        client_name: envParams.CLIENT_NAME || '',
-        app_name: envParams.APP_NAME || '',
-        project_name: envParams.PROJECT_NAME || ''
+        client_id: env.CLIENT_ID || '',
+        app_id: env.APP_ID || '',
+        project_id: env.PROJECT_ID || '',
+        client_name: env.CLIENT_NAME || '',
+        app_name: env.APP_NAME || '',
+        project_name: env.PROJECT_NAME || ''
       });
       const url = `${baseUrl}?${params.toString()}`;
       
@@ -96,7 +90,6 @@ const SelectModelsFeatureSettings: React.FC<SelectModelsFeatureSettingsProps> = 
       }
       
     } catch (error) {
-      console.error('Error fetching combination IDs:', error);
       setCombinationError(error instanceof Error ? error.message : 'Failed to fetch combination IDs');
       onDataChange({ 
         availableCombinationIds: [],

@@ -402,25 +402,6 @@ const ExploreInput: React.FC<ExploreInputProps> = ({ data, settings, onDataChang
 
       </Card>
 
-      {/* ---------------- Show Data Summary Toggle with Sub-toggle ---------------- */}
-      {columnSummary.length > 0 && (
-        <Card className="p-4 space-y-3">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-2">
-              <span className="text-sm font-medium text-gray-700">Show Data Summary</span>
-            </div>
-            <Switch
-              checked={data.showDataSummary || false}
-              onCheckedChange={val => {
-                onDataChange({ showDataSummary: val });
-              }}
-              className="data-[state=checked]:bg-[#458EE2]"
-            />
-          </div>
-          
-          {/* Sub-toggle removed - now moved to DataFrame Summary section header */}
-        </Card>
-      )}
     </div>
   )
 }

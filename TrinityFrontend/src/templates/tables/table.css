@@ -31,11 +31,11 @@
 }
 
 .table-base {
-  @apply min-w-[700px] w-full border-collapse text-sm border border-black;
+  @apply min-w-[700px] w-full border-collapse text-sm;
 }
 
 .table-header {
-  @apply sticky top-0 z-10 bg-slate-50 text-slate-600;
+  @apply sticky top-0 z-10 bg-green-50 text-slate-600;
 }
 
 .table-header-row {
@@ -43,7 +43,7 @@
 }
 
 .table-header-cell {
-  @apply px-5 py-3 text-left font-medium;
+  @apply px-5 py-3 text-left font-bold text-gray-800;
 }
 
 .table-row {
@@ -56,4 +56,22 @@
 
 .table-cell-primary {
   @apply px-5 py-3 whitespace-nowrap text-slate-800;
+}
+
+/* Minimizable table styles */
+.table-minimized {
+  @apply max-h-12 overflow-hidden;
+}
+
+.table-minimize-cell {
+  @apply w-12 px-2 py-3 text-center;
+}
+
+.table-minimize-button {
+  @apply w-8 h-8 flex items-center justify-center rounded-md bg-slate-100 hover:bg-slate-200 text-slate-600 hover:text-slate-800 transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-slate-300 focus:ring-offset-1;
+}
+
+/* Custom header styles */
+.table-custom-header {
+  @apply bg-white;
 }

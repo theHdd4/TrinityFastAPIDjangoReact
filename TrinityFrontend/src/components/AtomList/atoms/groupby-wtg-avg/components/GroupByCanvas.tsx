@@ -1,14 +1,28 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 
 import { Card, CardContent } from '@/components/ui/card';
-import { Plus, X, Database, Settings2, BarChart, ChevronUp, ChevronDown } from 'lucide-react';
+import { X, Database, Settings2, BarChart, ChevronUp, ChevronDown } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { GROUPBY_API } from '@/lib/api';
+import Table from '@/templates/tables/table';
+import groupbyWtgAvg from '../index';
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSub, ContextMenuSubContent, ContextMenuSubTrigger, ContextMenuTrigger, ContextMenuSeparator } from '@/components/ui/context-menu';
+import { ArrowUp, ArrowDown, FilterIcon, Plus } from 'lucide-react';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Badge } from '@/components/ui/badge';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import {
+  Pagination,
+  PaginationContent,
+  PaginationItem,
+  PaginationLink,
+  PaginationNext,
+  PaginationPrevious,
+} from '@/components/ui/pagination';
 
 interface GroupByCanvasProps {
   atomId: string;
@@ -19,6 +33,16 @@ const GroupByCanvas: React.FC<GroupByCanvasProps> = ({ atomId }) => {
   const atom = useLaboratoryStore(state => state.getAtom(atomId));
   const updateSettings = useLaboratoryStore(state => state.updateAtomSettings);
   const settings = atom?.settings || {};
+
+  // Get input file name for clickable subtitle
+  const inputFileName = settings.dataSource || '';
+
+  // Handle opening the input file in a new tab
+  const handleViewDataClick = () => {
+    if (inputFileName && atomId) {
+      window.open(`/dataframe?name=${encodeURIComponent(inputFileName)}`, '_blank');
+    }
+  };
 
   const selectedMeasures = settings.selectedMeasures || [];
   const measures = settings.measures || [];
@@ -47,6 +71,15 @@ const GroupByCanvas: React.FC<GroupByCanvasProps> = ({ atomId }) => {
   const [saveSuccess, setSaveSuccess] = useState(false);
   // Collapse state for configuration panel
   const [configCollapsed, setConfigCollapsed] = useState(false);
+  
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize] = useState(20);
+  
+  // Filtering and sorting state for results (reusing cardinality state)
+  const [resultsSortColumn, setResultsSortColumn] = useState<string>('');
+  const [resultsSortDirection, setResultsSortDirection] = useState<'asc' | 'desc'>('asc');
+  const [resultsColumnFilters, setResultsColumnFilters] = useState<{ [key: string]: string[] }>({});
 
   // Helper to convert results to CSV
   const resultsToCSV = (data: Record<string, any>[]): string => {
@@ -152,6 +185,11 @@ const GroupByCanvas: React.FC<GroupByCanvasProps> = ({ atomId }) => {
     )
   ).map((c: any) => c.column);
 
+  // Fetch cardinality data on mount
+  React.useEffect(() => {
+    fetchCardinalityData();
+  }, [settings.dataSource]);
+
   // ------------------------------------------------------------
   // Initialize measures only (no automatic selectedMeasureNames)
   React.useEffect(() => {
@@ -181,6 +219,175 @@ const GroupByCanvas: React.FC<GroupByCanvasProps> = ({ atomId }) => {
   const [resultsHeaders, setResultsHeaders] = useState<string[]>([]);
   const [resultsLoading, setResultsLoading] = useState(false);
   const [resultsError, setResultsError] = useState<string | null>(null);
+
+  // Cardinality View state
+  const [cardinalityData, setCardinalityData] = useState<any[]>([]);
+  const [cardinalityLoading, setCardinalityLoading] = useState(false);
+  const [cardinalityError, setCardinalityError] = useState<string | null>(null);
+  
+  // Sorting and filtering state for Cardinality View
+  const [sortColumn, setSortColumn] = useState<string>('unique_count');
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
+  const [columnFilters, setColumnFilters] = useState<Record<string, string[]>>({});
+
+  // Fetch cardinality data
+  const fetchCardinalityData = async () => {
+    if (!settings.dataSource) return;
+    
+    setCardinalityLoading(true);
+    setCardinalityError(null);
+    
+    try {
+      const formData = new FormData();
+      formData.append('validator_atom_id', settings.validator_atom_id || '');
+      formData.append('file_key', settings.dataSource || '');
+      formData.append('bucket_name', 'trinity');
+      formData.append('object_names', settings.dataSource || '');
+      
+      const res = await fetch(`${GROUPBY_API}/cardinality`, { method: 'POST', body: formData });
+      const data = await res.json();
+      
+      if (data.status === 'SUCCESS' && data.cardinality) {
+        setCardinalityData(data.cardinality);
+      } else {
+        setCardinalityError(data.error || 'Failed to fetch cardinality data');
+      }
+    } catch (e: any) {
+      setCardinalityError(e.message || 'Error fetching cardinality data');
+    } finally {
+      setCardinalityLoading(false);
+    }
+  };
+
+  // Cardinality filtering and sorting logic
+  const displayedCardinality = React.useMemo(() => {
+    let filtered = Array.isArray(cardinalityData) ? cardinalityData : [];
+
+    // Filter out columns with unique_count = 0 (only exclude zero values)
+    filtered = filtered.filter(c => c.unique_count > 0);
+
+    // Apply column filters
+    Object.entries(columnFilters).forEach(([column, filterValues]) => {
+      if (filterValues && filterValues.length > 0) {
+        filtered = filtered.filter(row => {
+          const cellValue = String(row[column.toLowerCase()] || '');
+          return filterValues.includes(cellValue);
+        });
+      }
+    });
+
+    // Apply sorting
+    if (sortColumn) {
+      filtered = [...filtered].sort((a, b) => {
+        const aVal = a[sortColumn.toLowerCase()];
+        const bVal = b[sortColumn.toLowerCase()];
+        if (aVal === bVal) return 0;
+        let comparison = 0;
+        if (typeof aVal === 'number' && typeof bVal === 'number') {
+          comparison = aVal - bVal;
+        } else {
+          comparison = String(aVal).localeCompare(String(bVal));
+        }
+        return sortDirection === 'desc' ? -comparison : comparison;
+      });
+    }
+
+    return filtered;
+  }, [cardinalityData, columnFilters, sortColumn, sortDirection]);
+
+  const getUniqueColumnValues = (column: string): string[] => {
+    if (!Array.isArray(cardinalityData) || cardinalityData.length === 0) return [];
+    
+    // Get the currently filtered data (before applying the current column's filter)
+    let filteredData = Array.isArray(cardinalityData) ? cardinalityData : [];
+
+    // Filter out columns with unique_count = 0 (only exclude zero values)
+    filteredData = filteredData.filter(c => c.unique_count > 0);
+
+    // Apply all other column filters except the current one
+    Object.entries(columnFilters).forEach(([col, filterValues]) => {
+      if (col !== column && filterValues && filterValues.length > 0) {
+        filteredData = filteredData.filter(row => {
+          const cellValue = String(row[col.toLowerCase()] || '');
+          return filterValues.includes(cellValue);
+        });
+      }
+    });
+
+    // Get unique values from the filtered data
+    const values = filteredData.map(row => String(row[column.toLowerCase()] || '')).filter(Boolean);
+    return Array.from(new Set(values)).sort();
+  };
+
+  const handleSort = (column: string, direction?: 'asc' | 'desc') => {
+    if (sortColumn === column) {
+      if (sortDirection === 'asc') {
+        setSortDirection('desc');
+      } else if (sortDirection === 'desc') {
+        setSortColumn('');
+        setSortDirection('asc');
+      }
+    } else {
+      setSortColumn(column);
+      setSortDirection(direction || 'asc');
+    }
+  };
+
+  const handleColumnFilter = (column: string, values: string[]) => {
+    setColumnFilters(prev => ({
+      ...prev,
+      [column]: values
+    }));
+  };
+
+  const clearColumnFilter = (column: string) => {
+    setColumnFilters(prev => {
+      const cpy = { ...prev };
+      delete cpy[column];
+      return cpy;
+    });
+  };
+
+  const FilterMenu = ({ column }: { column: string }) => {
+    const uniqueValues = getUniqueColumnValues(column);
+    const current = columnFilters[column] || [];
+    const [temp, setTemp] = useState<string[]>(current);
+
+    const toggleVal = (val: string) => {
+      setTemp(prev => (prev.includes(val) ? prev.filter(v => v !== val) : [...prev, val]));
+    };
+
+    const selectAll = () => {
+      setTemp(temp.length === uniqueValues.length ? [] : uniqueValues);
+    };
+
+    const apply = () => handleColumnFilter(column, temp);
+
+    return (
+      <div className="w-64 max-h-80 overflow-y-auto">
+        <div className="p-2 border-b">
+          <div className="flex items-center space-x-2 mb-2">
+            <Checkbox checked={temp.length === uniqueValues.length} onCheckedChange={selectAll} />
+            <span className="text-sm font-medium">Select All</span>
+          </div>
+        </div>
+        <div className="p-2 space-y-1">
+          {uniqueValues.map((v, i) => (
+            <div key={i} className="flex items-center space-x-2">
+              <Checkbox checked={temp.includes(v)} onCheckedChange={() => toggleVal(v)} />
+              <span className="text-sm">{v}</span>
+            </div>
+          ))}
+        </div>
+        <div className="p-2 border-t flex space-x-2">
+          <Button size="sm" onClick={apply}>Apply</Button>
+          <Button size="sm" variant="outline" onClick={() => setTemp(current)}>
+            Cancel
+          </Button>
+        </div>
+      </div>
+    );
+  };
 
   // Handler for Perform button
   const handlePerform = async () => {
@@ -270,7 +477,8 @@ const GroupByCanvas: React.FC<GroupByCanvasProps> = ({ atomId }) => {
           const allRows = data.results;
           setTotalRows(allRows.length);
           setAllResults(allRows);
-          setResults(allRows.slice(0, 20));
+          setResults(allRows);
+          setCurrentPage(1); // Reset to first page when new data is loaded
           
           // Determine identifiers that have >1 unique value
           const idWithVariety = selectedIdentifiers.filter((id: string) => {
@@ -326,7 +534,8 @@ const GroupByCanvas: React.FC<GroupByCanvasProps> = ({ atomId }) => {
                 
                 setTotalRows(rows.length);
                 setAllResults(rows);
-                setResults(rows.slice(0, 20));
+                setResults(rows);
+                setCurrentPage(1); // Reset to first page when new data is loaded
                 setResultsHeaders(headers);
                 
                 updateSettings(atomId, {
@@ -393,8 +602,358 @@ const GroupByCanvas: React.FC<GroupByCanvasProps> = ({ atomId }) => {
     }
   };
 
+  // Filtering and pagination functions for results
+  const allFilteredData = useMemo(() => {
+    if (!allResults.length) return [];
+    
+    let filtered = [...allResults];
+    
+    // Apply column filters
+    Object.entries(resultsColumnFilters).forEach(([column, filterValues]) => {
+      if (filterValues && filterValues.length > 0) {
+        filtered = filtered.filter(row => 
+          filterValues.includes(String(row[column] || ''))
+        );
+      }
+    });
+    
+    // Apply sorting
+    if (resultsSortColumn) {
+      filtered = [...filtered].sort((a, b) => {
+        const aVal = a[resultsSortColumn];
+        const bVal = b[resultsSortColumn];
+        
+        // Handle null/undefined values
+        if (aVal == null && bVal == null) return 0;
+        if (aVal == null) return resultsSortDirection === 'asc' ? 1 : -1;
+        if (bVal == null) return resultsSortDirection === 'asc' ? -1 : 1;
+        
+        // Handle numeric values
+        if (typeof aVal === 'number' && typeof bVal === 'number') {
+          return resultsSortDirection === 'asc' ? aVal - bVal : bVal - aVal;
+        }
+        
+        // Handle string values
+        const aStr = String(aVal).toLowerCase();
+        const bStr = String(bVal).toLowerCase();
+        return resultsSortDirection === 'asc' 
+          ? aStr.localeCompare(bStr)
+          : bStr.localeCompare(aStr);
+      });
+    }
+    
+    return filtered;
+  }, [allResults, resultsColumnFilters, resultsSortColumn, resultsSortDirection]);
+
+  // Get current page data from filtered results
+  const displayedData = useMemo(() => {
+    const startIndex = (currentPage - 1) * pageSize;
+    const endIndex = startIndex + pageSize;
+    return allFilteredData.slice(startIndex, endIndex);
+  }, [allFilteredData, currentPage, pageSize]);
+
+  const totalPages = Math.ceil(allFilteredData.length / pageSize);
+
+  const handlePageChange = (page: number) => {
+    setCurrentPage(page);
+  };
+
+  const handleResultsSort = (column: string, direction?: 'asc' | 'desc') => {
+    if (resultsSortColumn === column) {
+      if (resultsSortDirection === 'asc') {
+        setResultsSortDirection('desc');
+      } else if (resultsSortDirection === 'desc') {
+        setResultsSortColumn('');
+        setResultsSortDirection('asc');
+      }
+    } else {
+      setResultsSortColumn(column);
+      setResultsSortDirection(direction || 'asc');
+    }
+  };
+
+  const handleResultsColumnFilter = (column: string, values: string[]) => {
+    setResultsColumnFilters(prev => ({
+      ...prev,
+      [column]: values
+    }));
+  };
+
+  const clearResultsColumnFilter = (column: string) => {
+    setResultsColumnFilters(prev => {
+      const cpy = { ...prev };
+      delete cpy[column];
+      return cpy;
+    });
+  };
+
+  const getResultsUniqueColumnValues = (column: string): string[] => {
+    if (!allResults.length) return [];
+
+    // Apply other active filters to get hierarchical filtering
+    const otherFilters = Object.entries(resultsColumnFilters).filter(([key]) => key !== column);
+    let dataToUse = allResults;
+
+    if (otherFilters.length > 0) {
+      dataToUse = allResults.filter(item => {
+        return otherFilters.every(([filterColumn, filterValues]) => {
+          if (!Array.isArray(filterValues) || filterValues.length === 0) return true;
+          const cellValue = String(item[filterColumn] || '');
+          return filterValues.includes(cellValue);
+        });
+      });
+    }
+
+    const values = dataToUse.map(item => String(item[column] || ''));
+    const uniqueValues = Array.from(new Set(values));
+    return uniqueValues.sort() as string[];
+  };
+
+  const ResultsFilterMenu = ({ column }: { column: string }) => {
+    const uniqueValues = getResultsUniqueColumnValues(column);
+    const current = resultsColumnFilters[column] || [];
+    const [temp, setTemp] = useState<string[]>(current);
+
+    const toggleVal = (val: string) => {
+      setTemp(prev => (prev.includes(val) ? prev.filter(v => v !== val) : [...prev, val]));
+    };
+
+    const selectAll = () => {
+      setTemp(temp.length === uniqueValues.length ? [] : uniqueValues);
+    };
+
+    const apply = () => {
+      handleResultsColumnFilter(column, temp);
+      setCurrentPage(1); // Reset to first page when filtering
+    };
+
+    return (
+      <div className="w-64 max-h-80 overflow-y-auto">
+        <div className="p-2 border-b">
+          <div className="flex items-center space-x-2 mb-2">
+            <Checkbox checked={temp.length === uniqueValues.length} onCheckedChange={selectAll} />
+            <span className="text-sm font-medium">Select All</span>
+          </div>
+        </div>
+        <div className="p-2 space-y-1">
+          {uniqueValues.map((v, i) => (
+            <div key={i} className="flex items-center space-x-2">
+              <Checkbox checked={temp.includes(v)} onCheckedChange={() => toggleVal(v)} />
+              <span className="text-sm">{v}</span>
+            </div>
+          ))}
+        </div>
+        <div className="p-2 border-t flex space-x-2">
+          <Button size="sm" onClick={apply}>Apply</Button>
+          <Button size="sm" variant="outline" onClick={() => setTemp(current)}>
+            Cancel
+          </Button>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="p-6 space-y-6 h-full overflow-auto bg-gradient-to-br from-slate-50 to-slate-100">
+      {/* Cardinality View */}
+      {cardinalityLoading ? (
+        <div className="p-4 text-blue-600">Loading cardinality data...</div>
+      ) : cardinalityError ? (
+        <div className="p-4 text-red-600">{cardinalityError}</div>
+      ) : cardinalityData && cardinalityData.length > 0 ? (
+        <div className="mx-auto max-w-screen-2xl">
+          <Table
+            headers={[
+              <ContextMenu key="Column">
+                <ContextMenuTrigger asChild>
+                  <div className="flex items-center gap-1 cursor-pointer">
+                    Column
+                    {sortColumn === 'column' && (
+                      sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />
+                    )}
+                  </div>
+                </ContextMenuTrigger>
+                <ContextMenuContent className="w-48 bg-white border border-gray-200 shadow-lg rounded-md">
+                  <ContextMenuSub>
+                    <ContextMenuSubTrigger className="flex items-center">
+                      <ArrowUp className="w-4 h-4 mr-2" /> Sort
+                    </ContextMenuSubTrigger>
+                    <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md">
+                      <ContextMenuItem onClick={() => handleSort('column', 'asc')}>
+                        <ArrowUp className="w-4 h-4 mr-2" /> Ascending
+                      </ContextMenuItem>
+                      <ContextMenuItem onClick={() => handleSort('column', 'desc')}>
+                        <ArrowDown className="w-4 h-4 mr-2" /> Descending
+                      </ContextMenuItem>
+                    </ContextMenuSubContent>
+                  </ContextMenuSub>
+                  <ContextMenuSeparator />
+                  <ContextMenuSub>
+                    <ContextMenuSubTrigger className="flex items-center">
+                      <FilterIcon className="w-4 h-4 mr-2" /> Filter
+                    </ContextMenuSubTrigger>
+                    <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md p-0">
+                      <FilterMenu column="column" />
+                    </ContextMenuSubContent>
+                  </ContextMenuSub>
+                  {columnFilters['column']?.length > 0 && (
+                    <>
+                      <ContextMenuSeparator />
+                      <ContextMenuItem onClick={() => clearColumnFilter('column')}>
+                        Clear Filter
+                      </ContextMenuItem>
+                    </>
+                  )}
+                </ContextMenuContent>
+              </ContextMenu>,
+              <ContextMenu key="Data type">
+                <ContextMenuTrigger asChild>
+                  <div className="flex items-center gap-1 cursor-pointer">
+                    Data type
+                    {sortColumn === 'data_type' && (
+                      sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />
+                    )}
+                  </div>
+                </ContextMenuTrigger>
+                <ContextMenuContent className="w-48 bg-white border border-gray-200 shadow-lg rounded-md">
+                  <ContextMenuSub>
+                    <ContextMenuSubTrigger className="flex items-center">
+                      <ArrowUp className="w-4 h-4 mr-2" /> Sort
+                    </ContextMenuSubTrigger>
+                    <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md">
+                      <ContextMenuItem onClick={() => handleSort('data_type', 'asc')}>
+                        <ArrowUp className="w-4 h-4 mr-2" /> Ascending
+                      </ContextMenuItem>
+                      <ContextMenuItem onClick={() => handleSort('data_type', 'desc')}>
+                        <ArrowDown className="w-4 h-4 mr-2" /> Descending
+                      </ContextMenuItem>
+                    </ContextMenuSubContent>
+                  </ContextMenuSub>
+                  <ContextMenuSeparator />
+                  <ContextMenuSub>
+                    <ContextMenuSubTrigger className="flex items-center">
+                      <FilterIcon className="w-4 h-4 mr-2" /> Filter
+                    </ContextMenuSubTrigger>
+                    <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md p-0">
+                      <FilterMenu column="data_type" />
+                    </ContextMenuSubContent>
+                  </ContextMenuSub>
+                  {columnFilters['data_type']?.length > 0 && (
+                    <>
+                      <ContextMenuSeparator />
+                      <ContextMenuItem onClick={() => clearColumnFilter('data_type')}>
+                        Clear Filter
+                      </ContextMenuItem>
+                    </>
+                  )}
+                </ContextMenuContent>
+              </ContextMenu>,
+              <ContextMenu key="Unique count">
+                <ContextMenuTrigger asChild>
+                  <div className="flex items-center gap-1 cursor-pointer">
+                    Unique count
+                    {sortColumn === 'unique_count' && (
+                      sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />
+                    )}
+                  </div>
+                </ContextMenuTrigger>
+                <ContextMenuContent className="w-48 bg-white border border-gray-200 shadow-lg rounded-md">
+                  <ContextMenuSub>
+                    <ContextMenuSubTrigger className="flex items-center">
+                      <ArrowUp className="w-4 h-4 mr-2" /> Sort
+                    </ContextMenuSubTrigger>
+                    <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md">
+                      <ContextMenuItem onClick={() => handleSort('unique_count', 'asc')}>
+                        <ArrowUp className="w-4 h-4 mr-2" /> Ascending
+                      </ContextMenuItem>
+                      <ContextMenuItem onClick={() => handleSort('unique_count', 'desc')}>
+                        <ArrowDown className="w-4 h-4 mr-2" /> Descending
+                      </ContextMenuItem>
+                    </ContextMenuSubContent>
+                  </ContextMenuSub>
+                  <ContextMenuSeparator />
+                  <ContextMenuSub>
+                    <ContextMenuSubTrigger className="flex items-center">
+                      <FilterIcon className="w-4 h-4 mr-2" /> Filter
+                    </ContextMenuSubTrigger>
+                    <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md p-0">
+                      <FilterMenu column="unique_count" />
+                    </ContextMenuSubContent>
+                  </ContextMenuSub>
+                  {columnFilters['unique_count']?.length > 0 && (
+                    <>
+                      <ContextMenuSeparator />
+                      <ContextMenuItem onClick={() => clearColumnFilter('unique_count')}>
+                        Clear Filter
+                      </ContextMenuItem>
+                    </>
+                  )}
+                </ContextMenuContent>
+              </ContextMenu>,
+              "Sample values"
+            ]}
+            colClasses={["w-[30%]", "w-[20%]", "w-[15%]", "w-[35%]"]}
+            bodyClassName="max-h-[484px] overflow-y-auto"
+            defaultMinimized={true}
+            borderColor={`border-${groupbyWtgAvg.color.replace('bg-', '')}`}
+            customHeader={{
+              title: "Cardinality View",
+              subtitle: "Click Here to View Data",
+              subtitleClickable: !!inputFileName && !!atomId,
+              onSubtitleClick: handleViewDataClick
+            }}
+          >
+            {displayedCardinality.map((col, index) => (
+              <tr key={index} className="table-row">
+                <td className="table-cell">{col.column || col.Column || ''}</td>
+                <td className="table-cell">{col.data_type || col['Data type'] || ''}</td>
+                <td className="table-cell">{col.unique_count || col['Unique count'] || 0}</td>
+                <td className="table-cell">
+                  {col.unique_values ? (
+                    <div className="flex flex-wrap items-center gap-1">
+                      {Array.isArray(col.unique_values) ? (
+                        <>
+                          {col.unique_values.slice(0, 2).map((val: any, i: number) => (
+                            <Badge
+                              key={i}
+                              className="p-0 px-1 text-xs bg-gray-50 text-slate-700 hover:bg-gray-50"
+                            >
+                              {String(val)}
+                            </Badge>
+                          ))}
+                          {col.unique_values.length > 2 && (
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <span className="flex items-center gap-0.5 text-xs text-slate-600 font-medium cursor-pointer">
+                                  <Plus className="w-3 h-3" />
+                                  {col.unique_values.length - 2}
+                                </span>
+                              </TooltipTrigger>
+                              <TooltipContent className="text-xs max-w-xs whitespace-pre-wrap">
+                                {col.unique_values
+                                  .slice(2)
+                                  .map(val => String(val))
+                                  .join(', ')}
+                              </TooltipContent>
+                            </Tooltip>
+                          )}
+                        </>
+                      ) : (
+                        <Badge className="p-0 px-1 text-xs bg-gray-50 text-slate-700 hover:bg-gray-50">
+                          {String(col.unique_values)}
+                        </Badge>
+                      )}
+                    </div>
+                  ) : (
+                    <span className="text-gray-500 italic">No samples</span>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </Table>
+        </div>
+      ) : null}
+      
       {/* Group By Section */}
       <Card className="shadow-lg border-0 bg-white/80 backdrop-blur-sm">
         <div className="flex items-center justify-between px-4 pt-4 pb-2">
@@ -548,81 +1107,152 @@ const GroupByCanvas: React.FC<GroupByCanvasProps> = ({ atomId }) => {
         </CardContent>
         )}
       </Card>
+      
       {/* Group By Results */}
-      <Card className="mt-8 shadow-lg border-0 bg-white/80 backdrop-blur-sm overflow-hidden">
-        {resultsLoading ? (
-          <div className="p-4 text-blue-600">Loading results...</div>
-        ) : resultsError ? (
-          <div className="p-4 text-red-600">{resultsError}</div>
-        ) : results && results.length > 0 ? (
-          <div className="bg-gradient-to-r from-green-500 to-green-600 p-1">
-            <div className="bg-white rounded-sm">
-              <div className="p-4">
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center">
-                    <div className="w-1 h-8 bg-gradient-to-b from-green-500 to-green-600 rounded-full mr-4"></div>
-                    <h3 className="text-xl font-bold text-gray-900 flex items-center gap-2">
-                      <Database className="h-5 w-5" /> Results
-                    </h3>
-                    <span className="ml-3 inline-block bg-green-50 border border-green-200 text-green-700 text-sm font-semibold px-3 py-1 rounded">
-                      {(totalRows || results.length).toLocaleString()} rows • {resultsHeaders.length} columns
-                    </span>
+      {resultsLoading ? (
+        <div className="p-4 text-blue-600">Loading results...</div>
+      ) : resultsError ? (
+        <div className="p-4 text-red-600">{resultsError}</div>
+      ) : results && results.length > 0 ? (
+        <div className="mt-8 mx-auto max-w-screen-2xl">
+          <Table
+            headers={resultsHeaders.map((header, index) => (
+              <ContextMenu key={header}>
+                <ContextMenuTrigger asChild>
+                  <div className="flex items-center gap-1 cursor-pointer">
+                    {header}
+                    {resultsSortColumn === header && (
+                      resultsSortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />
+                    )}
                   </div>
-                  <div className="flex items-center">
-                    <Button
-                      onClick={handleSaveDataFrame}
-                      disabled={saveLoading}
-                      className="bg-blue-600 hover:bg-blue-700 text-white"
-                    >
-                      {saveLoading ? 'Saving...' : 'Save DataFrame'}
-                    </Button>
-                    {saveError && <span className="text-red-600 text-sm ml-2">{saveError}</span>}
-                    {saveSuccess && <span className="text-green-600 text-sm ml-2">Saved!</span>}
+                </ContextMenuTrigger>
+                <ContextMenuContent className="w-48 bg-white border border-gray-200 shadow-lg rounded-md">
+                  <ContextMenuSub>
+                    <ContextMenuSubTrigger className="flex items-center">
+                      <ArrowUp className="w-4 h-4 mr-2" /> Sort
+                    </ContextMenuSubTrigger>
+                    <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md">
+                      <ContextMenuItem onClick={() => handleResultsSort(header, 'asc')}>
+                        <ArrowUp className="w-4 h-4 mr-2" /> Ascending
+                      </ContextMenuItem>
+                      <ContextMenuItem onClick={() => handleResultsSort(header, 'desc')}>
+                        <ArrowDown className="w-4 h-4 mr-2" /> Descending
+                      </ContextMenuItem>
+                    </ContextMenuSubContent>
+                  </ContextMenuSub>
+                  <ContextMenuSeparator />
+                  <ContextMenuSub>
+                    <ContextMenuSubTrigger className="flex items-center">
+                      <FilterIcon className="w-4 h-4 mr-2" /> Filter
+                    </ContextMenuSubTrigger>
+                    <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md p-0">
+                      <ResultsFilterMenu column={header} />
+                    </ContextMenuSubContent>
+                  </ContextMenuSub>
+                  {resultsColumnFilters[header]?.length > 0 && (
+                    <>
+                      <ContextMenuSeparator />
+                      <ContextMenuItem onClick={() => clearResultsColumnFilter(header)}>
+                        Clear Filter
+                      </ContextMenuItem>
+                    </>
+                  )}
+                </ContextMenuContent>
+              </ContextMenu>
+            ))}
+            colClasses={resultsHeaders.map(() => "w-auto")}
+            bodyClassName="max-h-[400px] overflow-y-auto"
+            borderColor={`border-${groupbyWtgAvg.color.replace('bg-', '')}`}
+            customHeader={{
+              title: "Results",
+              controls: (
+                <div className="flex items-center gap-3">
+                  <span className="inline-block bg-green-50 border border-green-200 text-green-700 text-sm font-semibold px-3 py-1 rounded">
+                    {allFilteredData.length.toLocaleString()} rows • {resultsHeaders.length} columns
+                  </span>
+                  <Button
+                    onClick={handleSaveDataFrame}
+                    disabled={saveLoading}
+                    className="bg-blue-600 hover:bg-blue-700 text-white"
+                  >
+                    {saveLoading ? 'Saving...' : 'Save DataFrame'}
+                  </Button>
+                  {saveError && <span className="text-red-600 text-sm">{saveError}</span>}
+                  {saveSuccess && <span className="text-green-600 text-sm">Saved!</span>}
+                </div>
+              )
+            }}
+          >
+            {displayedData.map((row, rowIndex) => (
+              <tr key={rowIndex} className="table-row">
+                {resultsHeaders.map((header, colIndex) => (
+                  <td key={colIndex} className="table-cell text-center font-medium text-gray-700">
+                    {row[header] !== null && row[header] !== undefined && row[header] !== '' ? (
+                      typeof row[header] === 'number' ? row[header] : String(row[header])
+                    ) : (
+                      <span className="italic text-gray-500">null</span>
+                    )}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </Table>
+          
+          {/* Pagination */}
+          {totalPages > 1 && (
+            <Card className="mt-4">
+              <CardContent className="p-4">
+                <div className="flex items-center justify-between">
+                  <div className="text-sm text-gray-600">
+                    Page {currentPage} of {totalPages}
                   </div>
+                  <Pagination>
+                    <PaginationContent>
+                      <PaginationItem>
+                        <PaginationPrevious
+                          onClick={() => handlePageChange(Math.max(1, currentPage - 1))}
+                          className={currentPage === 1 ? 'pointer-events-none opacity-50' : 'cursor-pointer'}
+                        />
+                      </PaginationItem>
+                      {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                        let pageNum;
+                        if (totalPages <= 5) {
+                          pageNum = i + 1;
+                        } else if (currentPage <= 3) {
+                          pageNum = i + 1;
+                        } else if (currentPage >= totalPages - 2) {
+                          pageNum = totalPages - 4 + i;
+                        } else {
+                          pageNum = currentPage - 2 + i;
+                        }
+                        return (
+                          <PaginationItem key={pageNum}>
+                            <PaginationLink
+                              onClick={() => handlePageChange(pageNum)}
+                              isActive={currentPage === pageNum}
+                              className="cursor-pointer"
+                            >
+                              {pageNum}
+                            </PaginationLink>
+                          </PaginationItem>
+                        );
+                      })}
+                      <PaginationItem>
+                        <PaginationNext
+                          onClick={() => handlePageChange(Math.min(totalPages, currentPage + 1))}
+                          className={currentPage === totalPages ? 'pointer-events-none opacity-50' : 'cursor-pointer'}
+                        />
+                      </PaginationItem>
+                    </PaginationContent>
+                  </Pagination>
                 </div>
-
-                <div className="rounded-md border border-green-100">
-                  <Table className="min-w-full" maxHeight="max-h-96">
-                    <TableHeader>
-                      <TableRow>
-                        {resultsHeaders.map((header, index) => (
-                          <TableHead
-                            key={index}
-                            className="sticky top-0 z-30 bg-green-50 border-b border-green-200 font-bold text-gray-800 text-center py-4"
-                          >
-                            {header}
-                          </TableHead>
-                        ))}
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {results.map((row, rowIndex) => (
-                        <TableRow
-                          key={rowIndex}
-                          className="bg-white hover:bg-gray-50 transition-all duration-200 border-b border-gray-100"
-                        >
-                          {resultsHeaders.map((header, colIndex) => (
-                            <TableCell key={colIndex} className="py-4 text-center font-medium text-gray-700">
-                              {row[header] !== null && row[header] !== undefined && row[header] !== '' ? (
-                                typeof row[header] === 'number' ? row[header] : String(row[header])
-                              ) : (
-                                <span className="italic text-gray-500">null</span>
-                              )}
-                            </TableCell>
-                          ))}
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                  <div className="text-sm text-gray-500 mt-2">Showing first 20 rows of {(totalRows || results.length).toLocaleString()} total rows</div>
-                </div>
-              </div>
-            </div>
-          </div>
-        ) : (
-          <div className="p-4 text-gray-500">No results to display. Please Configure GroupBy options.</div>
-        )}
-      </Card>
+              </CardContent>
+            </Card>
+          )}
+        </div>
+      ) : (
+        <div className="p-4 text-gray-500">No results to display. Please Configure GroupBy options.</div>
+      )}
     </div>
   );
 };

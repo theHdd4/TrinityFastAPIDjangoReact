@@ -7,8 +7,6 @@ interface Props {
 }
 
 const MergeAtom: React.FC<Props> = ({ atomId }) => {
-  console.log('🔧 MergeAtom: Component rendered with atomId:', atomId);
-  
   try {
     const atom = useLaboratoryStore(state => state.getAtom(atomId));
     const settings = (atom?.settings as any) || {
@@ -19,22 +17,6 @@ const MergeAtom: React.FC<Props> = ({ atomId }) => {
       availableColumns: [] as string[],
       mergeResults: null,
     };
-
-    // Add useEffect to track settings changes
-    useEffect(() => {
-      console.log('🔧 MergeAtom: Settings changed for atomId', atomId, ':', settings);
-      console.log('🔧 MergeAtom: mergeResults?.result_file:', settings.mergeResults?.result_file);
-    }, [settings, atomId]);
-
-    // Force re-render when atom changes
-    useEffect(() => {
-      console.log('🔧 MergeAtom: Atom object changed:', atom);
-    }, [atom]);
-
-    console.log('🔧 MergeAtom: Settings for atomId', atomId, ':', settings);
-    console.log('🔧 MergeAtom: mergeResults:', settings.mergeResults);
-    console.log('🔧 MergeAtom: mergeResults?.result_file:', settings.mergeResults?.result_file);
-    console.log('🔧 MergeAtom: atom object:', atom);
 
     // Force re-render when settings change
     const settingsKey = JSON.stringify(settings);
