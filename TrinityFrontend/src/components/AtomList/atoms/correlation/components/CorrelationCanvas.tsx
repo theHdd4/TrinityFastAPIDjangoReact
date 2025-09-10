@@ -315,7 +315,7 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
     });
   };
 
-  const handleMatrixContextMenu = (e: React.MouseEvent) => {
+  const handleMatrixDoubleClick = (e: React.MouseEvent) => {
     e.preventDefault();
     const menuWidth = 240;
     const menuHeight = 200;
@@ -327,7 +327,7 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
     if (window.innerHeight - y < menuHeight) {
       y = window.innerHeight - menuHeight;
     }
-    console.log("MatrixSettingsTray opened via right click", { x, y });
+    console.log("MatrixSettingsTray opened via double click", { x, y });
     setSettingsPosition({ x, y });
     setSettingsOpen(true);
   };
@@ -433,10 +433,15 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
   };
 
   const handleResetFilters = async () => {
+    const currentFilters = data.settings?.filterDimensions || {};
+    const resetFilters: Record<string, string[]> = Object.keys(currentFilters).reduce(
+      (acc, column) => ({ ...acc, [column]: [] }),
+      {}
+    );
     onDataChange({
-      settings: { ...data.settings, filterDimensions: {} },
+      settings: { ...data.settings, filterDimensions: resetFilters },
     });
-    await handleApplyFilters({});
+    await handleApplyFilters(resetFilters);
   };
 
   // Enhanced time series data fetching function
@@ -1328,7 +1333,7 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
         <>
           {/* Show All Columns toggle */}
         {/* Filter Dimensions - Dynamic from actual data */}
-        <Card className="p-4 mb-4" onContextMenu={handleMatrixContextMenu}>
+        <Card className="p-4 mb-4" onDoubleClick={handleMatrixDoubleClick}>
           <h3 className="text-sm font-semibold text-foreground mb-3 flex items-center gap-2">
             <Target className="w-4 h-4 text-primary" />
             Filter Dimensions
@@ -1394,7 +1399,7 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
       </Card>
 
       <div className="flex items-center justify-between w-full px-4 mb-2">
-        <p className="text-xs text-gray-500">Right-click to open settings</p>
+        <p className="text-xs text-gray-500">Double-click to open settings</p>
         <div className="flex items-center space-x-2">
           <span className="text-xs text-gray-500">Show all columns</span>
           <Switch
@@ -1411,7 +1416,7 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
       <div className={isCompactMode ? "mb-4" : "mb-6"}>
         <Card
           className="overflow-hidden"
-              onContextMenu={handleMatrixContextMenu}
+              onDoubleClick={handleMatrixDoubleClick}
             >
               <div
                 className={
