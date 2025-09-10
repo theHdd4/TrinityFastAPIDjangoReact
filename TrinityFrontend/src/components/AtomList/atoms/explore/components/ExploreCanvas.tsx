@@ -11,7 +11,7 @@ import { Switch } from '@/components/ui/switch';
 import { BarChart3, Settings, Filter, Eye, EyeOff, Edit3, Palette, ChevronDown, ChevronUp, X, Plus, RotateCcw, Database, Maximize2, ArrowUp, ArrowDown, FilterIcon } from 'lucide-react';
 import { ExploreData } from '../ExploreAtom';
 import RechartsChartRenderer from '@/templates/charts/RechartsChartRenderer';
-import { EXPLORE_API, TEXT_API } from '@/lib/api';
+import { EXPLORE_API, TEXT_API, INSIGHT_API } from '@/lib/api';
 import { toast } from '@/components/ui/use-toast';
 import './ExploreCanvas.css';
 import ChatBubble from '../../chart-maker/components/ChatBubble';
@@ -187,6 +187,76 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
       saveChartNote(index);
     }
   };
+
+  // 🤖 AI Insight Generation using dedicated insight service
+  const generateAIInsights = async (chartIndex: number) => {
+    if (!chartDataSets[chartIndex] || !chartConfigs[chartIndex]) {
+      console.log(`⚠️ No chart data available for insights generation (chart ${chartIndex})`);
+      return;
+    }
+
+    const chartData = chartDataSets[chartIndex];
+    const config = chartConfigs[chartIndex];
+    
+    try {
+      console.log(`🤖 Generating AI insights for chart ${chartIndex} using dedicated insight service...`);
+      
+      const insightResponse = await fetch(`${INSIGHT_API}/generate`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          chart_data: chartData,
+          chart_config: {
+            chart_type: config.chartType,
+            x_axis: config.xAxis,
+            y_axis: config.yAxes?.[0] || '',
+            title: config.title || '',
+            aggregation: config.aggregation || 'sum'
+          },
+          chart_metadata: {
+            dataframe: safeData.dataframe,
+            filters_applied: !!appliedFilters[chartIndex]
+          },
+          session_id: `chart_insights_${Date.now()}`
+        })
+      });
+      
+      if (insightResponse.ok) {
+        const insightData = await insightResponse.json();
+        
+        if (insightData.success && insightData.insight) {
+          console.log(`✅ Generated AI insight for chart ${chartIndex}:`, insightData.insight);
+          
+          // Auto-populate the note box with AI insights
+          setChartNotes(prev => ({ ...prev, [chartIndex]: insightData.insight }));
+          
+          // Auto-save the AI insight
+          setTimeout(() => saveChartNote(chartIndex), 500);
+          
+          toast({
+            description: `🤖 AI insight generated for chart ${chartIndex + 1}`,
+            variant: 'default'
+          });
+        } else {
+          console.error('AI insight generation failed:', insightData.insight || 'Unknown error');
+        }
+      } else {
+        console.error('Failed to call insight API:', insightResponse.status);
+        toast({
+          description: 'Failed to generate AI insights',
+          variant: 'destructive'
+        });
+      }
+    } catch (error) {
+      console.error('Error generating AI insights:', error);
+      toast({
+        description: 'AI insight generation error',
+        variant: 'destructive'
+      });
+    }
+  };
   
   // State for dropdown positioning
   const [dropdownPosition, setDropdownPosition] = useState<{ top: number; left: number } | null>(null);
@@ -276,6 +346,88 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
     if (safeData.chartGenerated) setChartGenerated(safeData.chartGenerated);
     if (safeData.chartNotes) setChartNotes(safeData.chartNotes);
   }, []);
+
+  // Update chartConfigs when AI-generated data arrives
+  useEffect(() => {
+    if (safeData.applied && safeData.xAxis && safeData.yAxis && chartConfigs.length > 0) {
+      const shouldUpdate = chartConfigs[0].xAxis === '' || chartConfigs[0].yAxes[0] === '';
+      
+      if (shouldUpdate) {
+        console.log('🔄 Updating chart config with AI-generated values:', {
+          xAxis: safeData.xAxis,
+          yAxis: safeData.yAxis,
+          chartType: safeData.chartType
+        });
+        
+        setChartConfigs(prev => [
+          {
+            ...prev[0],
+            xAxis: safeData.xAxis,
+            yAxes: [safeData.yAxis],
+            chartType: safeData.chartType || 'bar_chart',
+            aggregation: safeData.aggregation || 'sum'
+          },
+          ...prev.slice(1)
+        ]);
+      }
+    }
+  }, [safeData.applied, safeData.xAxis, safeData.yAxis, safeData.chartType]);
+
+  // 🎯 Simple AI integration: AI populates once, then manual takes over completely
+  useEffect(() => {
+    // Only run AI integration once when AI operation completes
+    if (safeData.applied && safeData.operationCompleted && safeData.aiConfig && !safeData.aiIntegrated) {
+      console.log('📊 AI integration - one-time setup, then full manual control');
+      
+      // 🔧 One-time AI data integration
+      if (safeData.chartConfigs && Array.isArray(safeData.chartConfigs)) {
+        console.log('✅ Integrating AI chartConfigs once:', safeData.chartConfigs);
+        console.log(`📊 Setting ${safeData.chartConfigs.length} chart configurations:`);
+        
+        safeData.chartConfigs.forEach((config, idx) => {
+          console.log(`📊 Chart ${idx + 1} will be set to:`, {
+            xAxis: config.xAxis,
+            yAxes: config.yAxes,
+            title: config.title,
+            chartType: config.chartType
+          });
+        });
+        
+        setChartConfigs(safeData.chartConfigs);
+        
+        // Verify after setting
+        setTimeout(() => {
+          console.log(`🔍 Verification - chartConfigs after setting:`, chartConfigs);
+        }, 100);
+      }
+      
+      if (safeData.chartDataSets) {
+        console.log('✅ Integrating AI chart data once:', Object.keys(safeData.chartDataSets));
+        setChartDataSets(safeData.chartDataSets);
+        setChartGenerated(safeData.chartGenerated || {});
+        
+        // 🔧 Also set chartFilters for multiple charts
+        if (safeData.chartFilters) {
+          console.log('✅ Integrating AI chart filters:', safeData.chartFilters);
+          setChartFilters(safeData.chartFilters);
+        }
+        
+        // 🔧 Set appliedFilters if filters exist
+        if (safeData.appliedFilters) {
+          console.log('✅ Integrating AI applied filters:', safeData.appliedFilters);
+          setAppliedFilters(safeData.appliedFilters);
+        }
+        
+        if (safeData.chartNotes) setChartNotes(safeData.chartNotes);
+        if (safeData.chartOptions) setChartOptions(safeData.chartOptions);
+      }
+      
+      // Mark as integrated so this only runs once
+      onDataChange({ aiIntegrated: true });
+      
+      console.log('✅ AI integration complete - switching to full manual control mode');
+    }
+  }, [safeData.applied, safeData.operationCompleted, safeData.aiConfig, safeData.aiIntegrated]);
 
   // Fetch cardinality data when dataframe is selected
   useEffect(() => {

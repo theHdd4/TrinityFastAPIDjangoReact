@@ -5,7 +5,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Sparkles, Bot, User, X, MessageSquare, Send, Plus, RotateCcw } from 'lucide-react';
-import { TRINITY_AI_API, CONCAT_API, MERGE_API, CREATECOLUMN_API, GROUPBY_API, FEATURE_OVERVIEW_API, VALIDATE_API, CHART_MAKER_API } from '@/lib/api';
+import { TRINITY_AI_API, CONCAT_API, MERGE_API, CREATECOLUMN_API, GROUPBY_API, FEATURE_OVERVIEW_API, VALIDATE_API, CHART_MAKER_API, EXPLORE_API } from '@/lib/api';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 
 interface Message {
@@ -29,6 +29,7 @@ const ENDPOINTS: Record<string, string> = {
   'chart-maker': `${TRINITY_AI_API}/chart-maker`,
   'create-column': `${TRINITY_AI_API}/create-transform`,
   'groupby-wtg-avg': `${TRINITY_AI_API}/groupby`,
+  'explore': `${TRINITY_AI_API}/explore`,
 };
 
 const PERFORM_ENDPOINTS: Record<string, string> = {
@@ -37,6 +38,7 @@ const PERFORM_ENDPOINTS: Record<string, string> = {
   'create-column': `${CREATECOLUMN_API}/perform`,
   'groupby-wtg-avg': `${GROUPBY_API}/run`,
   'chart-maker': `${CHART_MAKER_API}/charts`,
+  'explore': `${EXPLORE_API}/perform`,
 };
 
 import { cn } from '@/lib/utils';
@@ -1601,6 +1603,621 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
           };
           setMessages(prev => [...prev, aiMsg]);
           
+        } else if (atomType === 'explore' && data.exploration_config) {
+          // 🔍 EXPLORE ATOM: Handle AI-generated exploration configuration
+          console.log('🔍 ===== EXPLORE AI RESPONSE =====');
+          console.log('📝 User Prompt:', userMsg.content);
+          console.log('🔧 Exploration Config:', data.exploration_config);
+          
+          // Parse exploration configurations (always expect a list)
+          const explorationsList = Array.isArray(data.exploration_config) ? data.exploration_config : [data.exploration_config];
+          const numberOfExplorations = explorationsList.length;
+          
+          console.log('📊 Explorations in config:', numberOfExplorations);
+          
+          // Get target file from AI response (use only file_name, ignore data_source)
+          let targetFile = '';
+          if (data.file_name) {
+            targetFile = data.file_name;
+            console.log('🎯 Using AI-provided file_name:', targetFile);
+          } else {
+            console.log('⚠️ No file_name found in AI response');
+          }
+          
+          if (!targetFile) {
+            // No file found - show error and don't proceed
+            const errorMsg: Message = {
+              id: (Date.now() + 1).toString(),
+              content: `❌ Cannot proceed: No valid file found for exploration\n\nAI provided: ${data.file_name || 'N/A'}\n\n💡 Please ensure you have selected a data file before using AI Explore.`,
+              sender: 'ai',
+              timestamp: new Date(),
+            };
+            setMessages(prev => [...prev, errorMsg]);
+            return;
+          }
+          
+          // For explore, we need to preserve the full file path for MinIO access
+          const getFilePathForExplore = (filePath: string) => {
+            if (!filePath) return "";
+            // Keep the full path for explore operations - MinIO needs the complete path
+            return filePath;
+          };
+          
+          // Update atom settings with AI configuration
+          updateAtomSettings(atomId, { 
+            dataframe: targetFile,
+            applied: true,
+            aiConfig: data,
+            aiMessage: data.message,
+            exploration_config: data.exploration_config
+          });
+          
+          // Add AI success message
+          const aiSuccessMsg: Message = {
+            id: (Date.now() + 1).toString(),
+            content: `✅ ${data.message || 'Exploration configuration completed successfully'}\n\nFile: ${targetFile}\nExplorations: ${numberOfExplorations}\n\n🔄 Generating exploration results...`,
+            sender: 'ai',
+            timestamp: new Date(),
+          };
+          setMessages(prev => [...prev, aiSuccessMsg]);
+          
+          // 🎯 Use SAME 3-step backend flow as manual (instead of perform endpoint)
+          try {
+            console.log('🎯 Using SAME backend endpoints as manual workflow');
+            
+            // Process each exploration using manual's 3-step flow
+            const explorationsList = Array.isArray(data.exploration_config) ? data.exploration_config : [data.exploration_config];
+            const processedResults = [];
+            
+            for (let i = 0; i < explorationsList.length; i++) {
+              const exploration = explorationsList[i];
+              console.log(`📊 Processing exploration ${i + 1} via manual flow:`, exploration);
+              
+              // 🎯 STEP 1: Create same JSON structures as manual
+              const dimensionColumns = new Set<string>([exploration.x_axis]);
+              if (exploration.legend_field && exploration.legend_field !== 'aggregate') {
+                dimensionColumns.add(exploration.legend_field);
+              }
+              
+              const selectedDimensions = {
+                [targetFile]: Array.from(dimensionColumns).reduce(
+                  (acc, col) => ({ ...acc, [col]: [col] }),
+                  {} as { [key: string]: string[] }
+                )
+              };
+              
+              const selectedMeasures = {
+                [targetFile]: [exploration.y_axis]
+              };
+              
+              console.log('📋 Step 1 - selectedDimensions:', selectedDimensions);
+              console.log('📋 Step 1 - selectedMeasures:', selectedMeasures);
+              
+              // 🎯 STEP 2: Call /select-dimensions-and-measures (SAME as manual)
+              const createResponse = await fetch(`${EXPLORE_API}/select-dimensions-and-measures`, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/x-www-form-urlencoded',
+                },
+                body: new URLSearchParams({
+                  validator_atom_id: targetFile,
+                  atom_name: 'AI Chart Analysis',
+                  selected_dimensions: JSON.stringify(selectedDimensions),
+                  selected_measures: JSON.stringify(selectedMeasures)
+                })
+              });
+              
+              if (!createResponse.ok) {
+                throw new Error(`Failed to create explore atom: ${createResponse.status}`);
+              }
+              
+              const createResult = await createResponse.json();
+              const exploreAtomId = createResult.explore_atom_id;
+              console.log('✅ Step 2 - Explore atom created:', exploreAtomId);
+              
+              // 🎯 STEP 3: Create operationsPayload JSON (SAME as manual)
+              const measuresConfig: { [key: string]: string } = {};
+              if (exploration.y_axis) {
+                measuresConfig[exploration.y_axis] = exploration.aggregation || 'sum';
+              }
+              
+              const operationsPayload = {
+                file_key: targetFile,
+                filters: exploration.filters || [],
+                group_by: exploration.legend_field && exploration.legend_field !== 'aggregate'
+                  ? [exploration.legend_field, exploration.x_axis]
+                  : [exploration.x_axis],
+                measures_config: measuresConfig,
+                chart_type: exploration.chart_type,
+                x_axis: exploration.x_axis,
+                weight_column: exploration.weight_column || null,
+                sort_order: exploration.sort_order || null
+              };
+              
+              console.log('📋 Step 3 - operationsPayload:', operationsPayload);
+              
+              // 🎯 STEP 4: Call /specify-operations (SAME as manual)
+              const operationsResponse = await fetch(`${EXPLORE_API}/specify-operations`, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/x-www-form-urlencoded',
+                },
+                body: new URLSearchParams({
+                  explore_atom_id: exploreAtomId,
+                  operations: JSON.stringify(operationsPayload)
+                })
+              });
+              
+              if (!operationsResponse.ok) {
+                throw new Error(`Operations specification failed: ${operationsResponse.status}`);
+              }
+              console.log('✅ Step 4 - Operations specified');
+              
+              // 🎯 STEP 5: Call /chart-data-multidim (SAME as manual)
+              const chartResponse = await fetch(`${EXPLORE_API}/chart-data-multidim/${exploreAtomId}`);
+              
+              if (!chartResponse.ok) {
+                throw new Error(`Chart data fetch failed: ${chartResponse.status}`);
+              }
+              
+              const chartResult = await chartResponse.json();
+              console.log('✅ Step 5 - Chart data received:', chartResult);
+              
+              // Store result in same format as manual
+              processedResults.push({
+                ...exploration,
+                chart_data: chartResult.data || [],
+                explore_atom_id: exploreAtomId,
+                ai_note: exploration.description || exploration.title || ''
+              });
+            }
+            
+            console.log('🎉 All explorations processed via SAME manual backend flow:', processedResults);
+            
+            // 🎯 Now fetch REAL column classifier config like manual workflow does
+            try {
+              console.log('📋 Fetching REAL column classifier config like manual workflow...');
+              
+              // Extract path components for API call (same as manual)
+              const pathParts = targetFile.split('/');
+              const fileName = pathParts.pop();
+              const projectPath = pathParts.join('/');
+              
+              const classifierResponse = await fetch(
+                `${EXPLORE_API}/column-classifier/config/${encodeURIComponent(projectPath)}?file=${encodeURIComponent(fileName || '')}`
+              );
+              
+              let columnClassifierConfig = null;
+              if (classifierResponse.ok) {
+                columnClassifierConfig = await classifierResponse.json();
+                console.log('✅ Got REAL column classifier config:', columnClassifierConfig);
+              }
+              
+              // Also fetch column summary for complete manual experience
+              const summaryResponse = await fetch(`${EXPLORE_API}/column_summary?object_name=${encodeURIComponent(targetFile)}`);
+              let columnSummary = [];
+              if (summaryResponse.ok) {
+                const summary = await summaryResponse.json();
+                columnSummary = Array.isArray(summary.summary) ? summary.summary.filter(Boolean) : [];
+                console.log('✅ Got REAL column summary:', columnSummary.length, 'columns');
+              }
+              
+              // 🎯 Create exploreData using REAL backend data (same as manual)
+              const result = { explorations: processedResults };
+              const firstExploration = result.explorations?.[0];
+              const numberOfCharts = result.explorations?.length || 1;
+              
+              // 🔧 Convert AI column names to match manual casing (lowercase)
+              const normalizeColumnName = (colName: string) => {
+                if (!colName) return '';
+                return colName.toLowerCase();
+              };
+              
+              // 🎯 STRICT: Extract ONLY explicit filters from AI JSON (no automatic detection)
+              const allFilterColumns = new Set<string>();
+              
+              console.log('🔍 Using ONLY explicit AI JSON filters - no automatic detection');
+              console.log('🔍 Original AI exploration_config:', data.exploration_config);
+              
+              result.explorations?.forEach((exp: any, idx: number) => {
+                console.log(`🔍 Exploration ${idx + 1} - ONLY explicit filters from AI JSON:`, exp.filters);
+                
+                // STRICT: ONLY add explicit filter columns from AI JSON filters section
+                if (exp.filters && typeof exp.filters === 'object') {
+                  Object.keys(exp.filters).forEach(filterCol => {
+                    const normalized = normalizeColumnName(filterCol);
+                    allFilterColumns.add(normalized);
+                    console.log(`✅ STRICT: Using explicit AI filter: ${filterCol} → ${normalized}`);
+                  });
+                }
+                // NO other automatic additions - stick strictly to AI JSON
+              });
+              
+              console.log('🎯 STRICT: Only AI JSON filters will be used:', Array.from(allFilterColumns));
+              
+              // 🎯 Smart Filter Value Processing based on AI data
+              const smartFilterValues: { [column: string]: string[] } = {};
+              
+              result.explorations?.forEach((exp: any) => {
+                if (exp.filters && typeof exp.filters === 'object') {
+                  Object.keys(exp.filters).forEach(filterCol => {
+                    const normalizedCol = normalizeColumnName(filterCol);
+                    const aiValues = exp.filters[filterCol];
+                    
+                    console.log(`🔍 Processing filter for ${filterCol}:`, aiValues);
+                    
+                    // Find the column in dataset to get available values
+                    const columnData = columnSummary.find((col: any) => 
+                      col.column?.toLowerCase() === normalizedCol
+                    );
+                    
+                    if (columnData && columnData.unique_values) {
+                      const availableValues = columnData.unique_values;
+                      console.log(`📋 Available values for ${normalizedCol}:`, availableValues);
+                      
+                      // 🎯 Apply user's logic for filter value selection
+                      if (!aiValues || aiValues.length === 0) {
+                        // Case 1: Only column specified, no values → Select "All" (empty array)
+                        smartFilterValues[normalizedCol] = [];
+                        console.log(`✅ ${normalizedCol}: No values specified → Selecting "All"`);
+                        allFilterColumns.add(normalizedCol);
+                      } else {
+                        // Check if AI values match actual dataset values
+                        const matchingValues = aiValues.filter((val: any) => 
+                          availableValues.some((avail: any) => 
+                            String(avail).toLowerCase() === String(val).toLowerCase()
+                          )
+                        );
+                        
+                        if (matchingValues.length === 0) {
+                          // Case 2: Values don't match dataset → Select "All"
+                          smartFilterValues[normalizedCol] = [];
+                          console.log(`✅ ${normalizedCol}: Values don't match dataset → Selecting "All"`);
+                          console.log(`   AI provided: ${aiValues}, Available: ${availableValues.slice(0, 5)}...`);
+                          allFilterColumns.add(normalizedCol);
+                        } else {
+                          // Case 3: Values match dataset → Use specific values
+                          smartFilterValues[normalizedCol] = matchingValues;
+                          console.log(`✅ ${normalizedCol}: Using matched values:`, matchingValues);
+                          allFilterColumns.add(normalizedCol);
+                        }
+                      }
+                    } else {
+                      console.log(`⚠️ Column ${normalizedCol} not found in dataset or no unique values`);
+                    }
+                  });
+                }
+              });
+              
+              console.log('🎯 Smart filter values processed:', smartFilterValues);
+              
+              // 🎯 Replicate manual filter setup process with smart values
+              let updatedColumnClassifierConfig = columnClassifierConfig;
+              let selectedIdentifiers: { [key: string]: string[] } = {};
+              let dimensions: string[] = [];
+              
+              if (allFilterColumns.size > 0 && columnClassifierConfig) {
+                // Step 1: Update columnClassifierConfig.dimensions like manual does
+                const newDimensions = { ...columnClassifierConfig.dimensions };
+                allFilterColumns.forEach(col => {
+                  newDimensions[col] = [col];  // Same format as manual handleAddFilters()
+                });
+                
+                updatedColumnClassifierConfig = {
+                  ...columnClassifierConfig,
+                  dimensions: newDimensions
+                };
+                
+                // Step 2: Create selectedIdentifiers like manual does
+                allFilterColumns.forEach(col => {
+                  selectedIdentifiers[col] = [col];
+                });
+                
+                // Step 3: Create dimensions array like manual does
+                dimensions = Array.from(allFilterColumns);
+                
+                console.log('🔧 Manual filter setup replicated with smart values:', {
+                  filterColumns: Array.from(allFilterColumns),
+                  smartFilterValues: smartFilterValues,
+                  updatedDimensions: newDimensions,
+                  selectedIdentifiers: selectedIdentifiers
+                });
+              }
+              
+              // 🔧 Create chartConfigs with normalized column names (same as manual)
+              const chartConfigs = result.explorations?.map((exp: any, idx: number) => ({
+                xAxis: normalizeColumnName(exp.x_axis),
+                yAxes: [normalizeColumnName(exp.y_axis)],
+                xAxisLabel: exp.x_axis_label || normalizeColumnName(exp.x_axis),
+                yAxisLabels: [exp.y_axis_label || normalizeColumnName(exp.y_axis)],
+                chartType: exp.chart_type || 'bar_chart',
+                aggregation: exp.aggregation || 'sum',
+                weightColumn: normalizeColumnName(exp.weight_column) || '',
+                title: exp.title || `Chart ${idx + 1}`,
+                legendField: normalizeColumnName(exp.legend_field) || '',
+                sortOrder: exp.sort_order || null,
+              })) || [];
+              
+              console.log('📊 Generated chartConfigs with normalized casing:', chartConfigs);
+              console.log('📊 Number of charts generated:', numberOfCharts);
+              
+              // 🔧 DEBUG: Log each chart config to verify both are created
+              chartConfigs.forEach((config, idx) => {
+                console.log(`📊 Chart ${idx + 1} config:`, {
+                  xAxis: config.xAxis,
+                  yAxis: config.yAxes[0],
+                  title: config.title,
+                  chartType: config.chartType
+                });
+              });
+              
+              const exploreData = {
+                dataframe: targetFile,
+                applied: true,  // 🎯 Same as manual Step 3: applied: true makes filters appear
+                
+                // 🎯 Individual properties for backward compatibility (use first chart)
+                chartType: firstExploration?.chart_type || 'bar_chart',
+                xAxis: normalizeColumnName(firstExploration?.x_axis),
+                yAxis: normalizeColumnName(firstExploration?.y_axis),
+                xAxisLabel: firstExploration?.x_axis_label || '',
+                yAxisLabel: firstExploration?.y_axis_label || '',
+                title: firstExploration?.title || 'AI Generated Chart',
+                aggregation: firstExploration?.aggregation || 'sum',
+                legendField: normalizeColumnName(firstExploration?.legend_field),
+                weightColumn: normalizeColumnName(firstExploration?.weight_column),
+                
+                // 🎯 Use REAL backend data (same as manual)
+                columnClassifierConfig: updatedColumnClassifierConfig,  // ✅ With filter columns
+                columnSummary: columnSummary,
+                
+                // 🎯 Replicate manual filter setup data structure
+                selectedIdentifiers: selectedIdentifiers,  // ✅ Same as manual Step 2
+                dimensions: dimensions,                    // ✅ Same as manual Step 3
+                
+                // 🎯 FIX: Proper graph layout for Properties panel (match manual behavior)
+                graphLayout: {
+                  numberOfGraphsInRow: numberOfCharts >= 2 ? 2 : numberOfCharts,
+                  rows: 1
+                },
+                
+                // 🎯 KEY: Add chartConfigs with correct casing
+                chartConfigs: chartConfigs,
+                  
+                // 🎯 Store chart data exactly like manual workflow
+                chartDataSets: result.explorations?.reduce((acc: any, exp: any, idx: number) => {
+                  acc[idx] = exp.chart_data;
+                  return acc;
+                }, {}),
+                chartGenerated: result.explorations?.reduce((acc: any, exp: any, idx: number) => {
+                  acc[idx] = true;
+                  return acc;
+                }, {}),
+                chartNotes: result.explorations?.reduce((acc: any, exp: any, idx: number) => {
+                  acc[idx] = exp.ai_note || '';
+                  return acc;
+                }, {}),
+                
+                // 🎯 Set up smart filter values for EACH chart individually
+                chartFilters: result.explorations?.reduce((acc: any, exp: any, idx: number) => {
+                  // Generate chart-specific filter values
+                  const chartSmartFilters: { [column: string]: string[] } = {};
+                  
+                  if (exp.filters && typeof exp.filters === 'object') {
+                    Object.keys(exp.filters).forEach(filterCol => {
+                      const normalizedCol = normalizeColumnName(filterCol);
+                      const aiValues = exp.filters[filterCol];
+                      
+                      // Apply smart filter logic for this specific chart
+                      if (!aiValues || aiValues.length === 0) {
+                        chartSmartFilters[normalizedCol] = [];  // "All" selected
+                        console.log(`📊 Chart ${idx + 1} - ${normalizedCol}: No values → "All"`);
+                      } else {
+                        // Verify values exist in dataset
+                        const columnData = columnSummary.find((col: any) => 
+                          col.column?.toLowerCase() === normalizedCol
+                        );
+                        
+                        if (columnData && columnData.unique_values) {
+                          const matchingValues = aiValues.filter((val: any) => 
+                            columnData.unique_values.some((avail: any) => 
+                              String(avail).toLowerCase() === String(val).toLowerCase()
+                            )
+                          );
+                          
+                          if (matchingValues.length === 0) {
+                            chartSmartFilters[normalizedCol] = [];  // "All" if no matches
+                            console.log(`📊 Chart ${idx + 1} - ${normalizedCol}: No matches → "All"`);
+                          } else {
+                            chartSmartFilters[normalizedCol] = matchingValues;  // Use matched values
+                            console.log(`📊 Chart ${idx + 1} - ${normalizedCol}: Using values:`, matchingValues);
+                          }
+                        }
+                      }
+                    });
+                  }
+                  
+                  acc[idx] = chartSmartFilters;
+                  return acc;
+                }, {}),
+                
+                chartThemes: {},
+                chartOptions: result.explorations?.reduce((acc: any, exp: any, idx: number) => {
+                  acc[idx] = { grid: true, legend: true, axisLabels: true, dataLabels: true };
+                  return acc;
+                }, {}),
+                appliedFilters: Object.keys(smartFilterValues).length > 0 ? 
+                  result.explorations?.reduce((acc: any, exp: any, idx: number) => {
+                    acc[idx] = true;  // Mark filters as applied if we have smart filters
+                    return acc;
+                  }, {}) : {},
+                
+                // Store original AI config for reference
+                aiConfig: data,
+                aiMessage: data.message,
+                exploration_config: data.exploration_config,
+                operationCompleted: true
+              };
+              
+              console.log('📊 Final exploreData with manual filter setup and REAL backend config:', exploreData);
+              
+              // 🔧 CRITICAL FIX: Merge with existing state instead of overwriting
+              const currentAtom = useLaboratoryStore.getState().getAtom(atomId);
+              const currentData = currentAtom?.settings?.data || {};
+              
+              const mergedData = {
+                ...currentData,  // ✅ Preserve ALL existing manual settings
+                
+                // Only override specific AI-generated properties
+                dataframe: exploreData.dataframe,
+                applied: exploreData.applied,
+                
+                // Merge column configurations carefully
+                columnClassifierConfig: {
+                  ...(currentData.columnClassifierConfig || {}),
+                  ...(exploreData.columnClassifierConfig || {}),
+                  dimensions: {
+                    ...(currentData.columnClassifierConfig?.dimensions || {}),
+                    ...(exploreData.columnClassifierConfig?.dimensions || {})
+                  }
+                },
+                
+                columnSummary: exploreData.columnSummary || currentData.columnSummary,
+                
+                // Merge filter setup without overwriting manual filters
+                selectedIdentifiers: {
+                  ...(currentData.selectedIdentifiers || {}),
+                  ...(exploreData.selectedIdentifiers || {})
+                },
+                
+                dimensions: Array.from(new Set([
+                  ...(currentData.dimensions || []),
+                  ...(exploreData.dimensions || [])
+                ])),
+                
+                // Only add AI chart data to available slots
+                chartDataSets: {
+                  ...(currentData.chartDataSets || {}),
+                  ...(exploreData.chartDataSets || {})
+                },
+                
+                chartGenerated: {
+                  ...(currentData.chartGenerated || {}),
+                  ...(exploreData.chartGenerated || {})
+                },
+                
+                chartNotes: {
+                  ...(currentData.chartNotes || {}),
+                  ...(exploreData.chartNotes || {})
+                },
+                
+                // Preserve manual chartConfigs or use AI if none exist
+                chartConfigs: currentData.chartConfigs && currentData.chartConfigs.length > 0
+                  ? [
+                      // Update first config with AI data if it exists
+                      {
+                        ...currentData.chartConfigs[0],
+                        ...(exploreData.chartConfigs && exploreData.chartConfigs[0] ? {
+                          xAxis: exploreData.chartConfigs[0].xAxis,
+                          yAxes: exploreData.chartConfigs[0].yAxes,
+                          title: exploreData.chartConfigs[0].title,
+                          aggregation: exploreData.chartConfigs[0].aggregation
+                        } : {})
+                      },
+                      ...currentData.chartConfigs.slice(1)
+                    ]
+                  : exploreData.chartConfigs,
+                
+                // Preserve other manual settings
+                graphLayout: exploreData.graphLayout || currentData.graphLayout,
+                
+                // Store AI config without overriding manual data
+                aiConfig: exploreData.aiConfig,
+                operationCompleted: exploreData.operationCompleted
+              };
+              
+              console.log('🔧 Merging AI data with existing manual state (preserving manual functionality):', {
+                currentKeys: Object.keys(currentData),
+                aiKeys: Object.keys(exploreData),
+                mergedKeys: Object.keys(mergedData),
+                preservedManualChartConfigs: !!currentData.chartConfigs?.length
+              });
+              
+              updateAtomSettings(atomId, {
+                data: mergedData  // ✅ Merged data instead of overwriting
+              });
+              
+              // Add completion message with filter info
+              const completionMsg: Message = {
+                id: (Date.now() + 2).toString(),
+                content: `🎉 Charts generated using STRICT AI JSON filters!\n\nFile: ${targetFile}\nCharts: ${processedResults.length}\n📊 Chart 1: ${processedResults[0]?.title || 'Sales Analysis'}\n📊 Chart 2: ${processedResults[1]?.title || 'Volume Analysis'}\n📋 Filters: Only using AI JSON filters (${Array.from(allFilterColumns).join(', ') || 'none'})\n\n✅ Full manual control now available.`,
+                sender: 'ai',
+                timestamp: new Date(),
+              };
+              setMessages(prev => [...prev, completionMsg]);
+              
+            } catch (configError: any) {
+              console.error('❌ Failed to fetch column config:', configError);
+              
+              // Fallback: Use basic exploreData without column config
+              const result = { explorations: processedResults };
+              const firstExploration = result.explorations?.[0];
+              
+              const exploreData = {
+                dataframe: targetFile,
+                applied: true,
+                chartType: firstExploration?.chart_type || 'bar_chart',
+                xAxis: normalizeColumnName(firstExploration?.x_axis),
+                yAxis: normalizeColumnName(firstExploration?.y_axis),
+                title: firstExploration?.title || 'AI Generated Chart',
+                aggregation: firstExploration?.aggregation || 'sum',
+                
+                chartDataSets: result.explorations?.reduce((acc: any, exp: any, idx: number) => {
+                  acc[idx] = exp.chart_data;
+                  return acc;
+                }, {}),
+                chartGenerated: result.explorations?.reduce((acc: any, exp: any, idx: number) => {
+                  acc[idx] = true;
+                  return acc;
+                }, {}),
+                
+                aiConfig: data,
+                operationCompleted: true
+              };
+              
+              updateAtomSettings(atomId, {
+                data: exploreData
+              });
+              
+              // Add basic completion message for fallback
+              const basicCompletionMsg: Message = {
+                id: (Date.now() + 2).toString(),
+                content: `🎉 Charts generated (fallback mode)!\n\nFile: ${targetFile}\nCharts: ${processedResults.length}\n\n✅ Manual control available.`,
+                sender: 'ai',
+                timestamp: new Date(),
+              };
+              setMessages(prev => [...prev, basicCompletionMsg]);
+            }
+                
+          } catch (error: any) {
+            console.error('❌ AI exploration via manual flow failed:', error);
+            
+            const errorMsg: Message = {
+              id: (Date.now() + 2).toString(),
+              content: `❌ Failed to process exploration via manual backend flow: ${error.message}\n\nFile: ${targetFile}\nExplorations: ${numberOfExplorations}`,
+              sender: 'ai',
+              timestamp: new Date(),
+            };
+            setMessages(prev => [...prev, errorMsg]);
+            
+            updateAtomSettings(atomId, {
+              dataframe: targetFile,
+              applied: false,
+              aiConfig: data,
+              aiMessage: data.message,
+              exploration_config: data.exploration_config,
+              operationCompleted: false
+            });
+          }
         }
       } else {
         // Handle AI suggestions when complete info is not available
