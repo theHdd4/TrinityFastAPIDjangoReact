@@ -142,12 +142,17 @@ const fetchEnhancedTimeSeriesData = async (
 
     // 4. Transform to chart format
     const chartData = axisData.x_values
-      .map((x: any, index: number) => ({
-        date: isDate ? new Date(x).getTime() : index,
-        var1Value: seriesData.column1_values[index] || 0,
-        var2Value: seriesData.column2_values[index] || 0,
-      }))
-      .filter((d: any) => isFinite(d.var1Value) && isFinite(d.var2Value));
+      .map((x: any, index: number) => {
+        const v1 = parseFloat(seriesData.column1_values[index]);
+        const v2 = parseFloat(seriesData.column2_values[index]);
+        return {
+          date: isDate ? new Date(x).getTime() : index,
+          var1Value: isNaN(v1) ? 0 : v1,
+          var2Value: isNaN(v2) ? 0 : v2,
+        };
+      })
+      .filter((d: any) => isFinite(d.var1Value) && isFinite(d.var2Value))
+      .sort((a: any, b: any) => a.date - b.date);
 
     return { data: chartData, isDate };
   } catch (error) {

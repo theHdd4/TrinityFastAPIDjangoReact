@@ -490,11 +490,15 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
 
       // 4. Transform to chart format and ensure the x-axis is sorted
       const chartData = axisData.x_values
-        .map((x: any, index: number) => ({
-          date: isDate ? new Date(x).getTime() : index,
-          var1Value: seriesData.column1_values[index] || 0,
-          var2Value: seriesData.column2_values[index] || 0,
-        }))
+        .map((x: any, index: number) => {
+          const v1 = parseFloat(seriesData.column1_values[index]);
+          const v2 = parseFloat(seriesData.column2_values[index]);
+          return {
+            date: isDate ? new Date(x).getTime() : index,
+            var1Value: isNaN(v1) ? 0 : v1,
+            var2Value: isNaN(v2) ? 0 : v2,
+          };
+        })
         .filter((d: any) => isFinite(d.var1Value) && isFinite(d.var2Value))
         .sort((a: any, b: any) => a.date - b.date);
 
@@ -1041,10 +1045,12 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
             ? d.date
             : new Date(d.date).getTime()
           : idx;
+        const v1 = typeof d.var1Value === "number" ? d.var1Value : parseFloat(d.var1Value);
+        const v2 = typeof d.var2Value === "number" ? d.var2Value : parseFloat(d.var2Value);
         return {
           [timeSeriesXField]: xValue,
-          [data.selectedVar1!]: d.var1Value,
-          [data.selectedVar2!]: d.var2Value,
+          [data.selectedVar1!]: v1,
+          [data.selectedVar2!]: v2,
         };
       })
       .filter(
