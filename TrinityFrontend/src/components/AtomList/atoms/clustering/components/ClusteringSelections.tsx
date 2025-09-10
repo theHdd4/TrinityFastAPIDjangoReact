@@ -314,22 +314,7 @@ const ClusteringSelections: React.FC<Props> = ({ atomId }) => {
     });
   };
 
-  const getAlgorithmDescription = (algorithm: string) => {
-    switch (algorithm) {
-      case 'kmeans':
-        return 'K-Means clustering is a centroid-based algorithm that partitions the data into K clusters, where K is a user-defined number of clusters. It aims to minimize the sum of squared distances from each point to its assigned cluster center.';
-      case 'dbscan':
-        return 'DBSCAN (Density-Based Spatial Clustering of Applications with Noise) is a density-based clustering algorithm that automatically determines the number of clusters based on data density. It groups together points that are close to each other based on a distance metric (epsilon) and minimum samples threshold, and identifies outliers as noise. No K-selection is needed.';
-      case 'hac':
-        return 'Hierarchical Agglomerative Clustering (HAC) is a bottom-up approach that builds a hierarchy of clusters. It starts with each data point as a single cluster and merges clusters based on a distance metric until all points are in one cluster.';
-      case 'birch':
-        return 'BIRCH (Balanced Iterative Reducing and Clustering using Hierarchies) is a clustering algorithm that builds a tree structure to represent the clustering hierarchy. It is efficient for large datasets and can handle high-dimensional data.';
-      case 'gmm':
-        return 'Gaussian Mixture Model (GMM) is a probabilistic model that assumes all the data points are generated from a mixture of several Gaussian distributions. It can discover complex patterns in the data by fitting multiple Gaussian distributions.';
-      default:
-        return 'No description available for this algorithm.';
-    }
-  };
+
 
   const getAlgorithmParameters = (algorithm: string): AlgorithmParameter[] => {
     // Get current K-selection method

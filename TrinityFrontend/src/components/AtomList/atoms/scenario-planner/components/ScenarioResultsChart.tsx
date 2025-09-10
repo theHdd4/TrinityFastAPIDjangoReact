@@ -685,7 +685,7 @@ export const ScenarioResultsChart: React.FC<ScenarioResultsChartProps> = ({
       {/* Header with title and right-click hint */}
       <div className="mb-3 flex justify-between items-center">
         <h3 className="text-lg font-semibold text-gray-800">
-          {viewMode === 'individual' ? 'Individual Results' : 'Aggregated Results'} - {dataLabelType === 'uplift' ? 'Uplift %' : 'Y-Values'}
+          {viewMode === 'individual' ? 'Individual Results' : 'Aggregated Results'} - {dataLabelType === 'uplift' ? 'Uplift %' : (yVariable || 'Value')}
         </h3>
         
         {/* Right-click hint */}
@@ -870,7 +870,7 @@ export const ScenarioResultsChart: React.FC<ScenarioResultsChartProps> = ({
               }
             }}
             label={currentShowAxisLabels ? { 
-              value: dataLabelType === 'uplift' ? 'Uplift %' : yVariable, 
+              value: dataLabelType === 'uplift' ? 'Uplift %' : (yVariable || 'Value'), 
               angle: -90, 
               position: 'left', 
               style: { fontSize: '12px', fontWeight: 'bold', fill: '#374151' }

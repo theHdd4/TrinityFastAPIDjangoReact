@@ -29,29 +29,30 @@ const ClusteringInputFiles: React.FC<Props> = ({ atomId }) => {
   
   const clusteringData = settings.clusteringData || {};
   const [availableFiles, setAvailableFiles] = useState<SavedDataFrame[]>([]);
-  const [selectedFile, setSelectedFile] = useState<string>('');
+  const [selectedFile, setSelectedFile] = useState<string>(clusteringData.selectedDataFile || '');
   const [loading, setLoading] = useState(false);
+
+  // Sync selectedFile state with stored settings when component mounts or settings change
+  useEffect(() => {
+    if (clusteringData.selectedDataFile && clusteringData.selectedDataFile !== selectedFile) {
+      setSelectedFile(clusteringData.selectedDataFile);
+    }
+  }, [clusteringData.selectedDataFile, selectedFile]);
 
   // Fetch available files when component mounts - only once
   useEffect(() => {
     const fetchFiles = async () => {
       setLoading(true);
       try {
-        console.log('Fetching files from:', `${VALIDATE_API}/list_saved_dataframes`);
         const response = await fetch(`${VALIDATE_API}/list_saved_dataframes`);
-        console.log('Response status:', response.status, response.statusText);
         
         if (response.ok) {
           const data = await response.json();
-          console.log('Files response data:', data);
           const files = Array.isArray(data.files) ? data.files : [];
-          console.log('Processed files:', files);
           setAvailableFiles(files);
-        } else {
-          console.error('Failed to fetch files:', response.status, response.statusText);
         }
       } catch (error) {
-        console.error('Error fetching files:', error);
+        // Error handling without console logs
       } finally {
         setLoading(false);
       }
@@ -62,7 +63,6 @@ const ClusteringInputFiles: React.FC<Props> = ({ atomId }) => {
 
   // Manual fetch columns when file is selected - no useEffect loop
   const handleFileSelect = async (fileName: string) => {
-    console.log('File selected:', fileName);
     setSelectedFile(fileName);
     
     if (!fileName) return;
@@ -104,11 +104,9 @@ const ClusteringInputFiles: React.FC<Props> = ({ atomId }) => {
             selectedMeasures: []     // Start with empty selection
           }
         });
-      } else {
-        console.error('Failed to fetch columns:', response.status, response.statusText);
       }
     } catch (error) {
-      console.error('Error fetching columns:', error);
+      // Error handling without console logs
     } finally {
       setLoading(false);
     }
@@ -234,13 +232,11 @@ const ClusteringInputFiles: React.FC<Props> = ({ atomId }) => {
                       return;
                     }
                     
-                    // Debug: Log what we're sending
                     const requestData = {
                       old_path: clusteringData.outputPath,
                       new_filename: clusteringData.outputFilename
                     };
 
-                    
                     try {
                       const response = await fetch(`${process.env.NEXT_PUBLIC_CLUSTERING_API || '/api/clustering'}/rename`, {
                         method: 'POST',
@@ -268,7 +264,6 @@ const ClusteringInputFiles: React.FC<Props> = ({ atomId }) => {
                         });
                       } else {
                         const errorText = await response.text();
-                        console.error('❌ Rename failed:', errorText);
                         toast({
                           title: 'Failed to rename file',
                           description: `Failed to rename file: ${errorText}`,
@@ -276,7 +271,6 @@ const ClusteringInputFiles: React.FC<Props> = ({ atomId }) => {
                         });
                       }
                     } catch (error) {
-                      console.error('❌ Error renaming file:', error);
                       toast({
                         title: 'Error renaming file',
                         description: 'Error renaming file. Please try again.',

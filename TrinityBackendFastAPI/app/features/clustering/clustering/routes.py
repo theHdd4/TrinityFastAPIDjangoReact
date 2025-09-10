@@ -112,7 +112,7 @@ async def get_available_dates(object_name: str = Query(..., description="Name of
     try:
         df = await load_csv_from_minio(object_name)
         lower_cols = {col.lower(): col for col in df.columns}
-        possible_names = ["date"]
+        possible_names = ["date", "Date"]
 
         found_date_col = next((lower_cols[name] for name in possible_names if name in lower_cols), None)
 
@@ -124,7 +124,7 @@ async def get_available_dates(object_name: str = Query(..., description="Name of
                 "max_date": None
             }
 
-        df[found_date_col] = pd.to_datetime(df[found_date_col], errors="coerce")
+        df[found_date_col] = pd.to_datetime(df[found_date_col], format='%d-%m-%Y', errors="coerce")
         unique_dates = df[found_date_col].dropna().dt.date.unique()
         unique_dates = sorted(unique_dates)
 
@@ -306,8 +306,20 @@ async def filter_and_cluster(request: FilterAndClusterRequest):
                     error_msg = f"Date column '{request.date_range.column}' not found in data. Available columns: {list(df.columns)}"
                     raise HTTPException(400, error_msg)
                 
-                # Convert the column to datetime for comparison
-                df[request.date_range.column] = pd.to_datetime(df[request.date_range.column], errors='coerce')
+                # Convert the column to datetime for comparison using standard format
+                print(f"🔍 Converting date column '{request.date_range.column}' to datetime with standard format...")
+                df[request.date_range.column] = pd.to_datetime(df[request.date_range.column], format='%d-%m-%Y', errors='coerce')
+                
+                # Check for any NaT values after conversion
+                nat_count = df[request.date_range.column].isna().sum()
+                if nat_count > 0:
+                    print(f"⚠️ Warning: {nat_count} rows could not be converted to datetime in column '{request.date_range.column}'")
+                
+                # Show date range in the data
+                valid_dates = df[request.date_range.column].dropna()
+                if len(valid_dates) > 0:
+                    print(f"🔍 Data date range: {valid_dates.min()} to {valid_dates.max()}")
+                    print(f"🔍 Filter date range: {from_date} to {to_date}")
                 
                 # Apply the date range filter
                 df = df[(df[request.date_range.column] >= from_date) & (df[request.date_range.column] <= to_date)]
