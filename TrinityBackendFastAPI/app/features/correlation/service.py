@@ -925,9 +925,13 @@ def get_time_series_axis_data(df: pd.DataFrame, start_date: str = None, end_date
             
             print(f"🗓️ Using datetime column: {datetime_column}")
             
-            # Convert to datetime
-            date_col = pd.to_datetime(df[datetime_column], errors='coerce')
-            valid_dates = date_col.dropna()
+            # Convert to datetime and ensure unique, sorted dates
+            date_col = pd.to_datetime(df[datetime_column], errors="coerce")
+            valid_dates = (
+                date_col.dropna()
+                .sort_values()
+                .drop_duplicates()
+            )
             
             # Apply date filtering if provided
             if start_date and end_date:
@@ -940,7 +944,7 @@ def get_time_series_axis_data(df: pd.DataFrame, start_date: str = None, end_date
                     print(f"⚠️ Date filtering failed: {e}")
             
             # Convert to ISO strings for JSON serialization
-            x_values = [dt.isoformat() for dt in valid_dates.sort_values()]
+            x_values = [dt.isoformat() for dt in valid_dates]
             
             return {
                 "x_values": x_values,
@@ -1115,14 +1119,20 @@ def get_filtered_time_series_values(
             except Exception as e:
                 print(f"⚠️ Date averaging failed: {e}")
         
-        # Extract values for the specified columns
-        col1_values = working_df[column1].fillna(0).tolist()
-        col2_values = working_df[column2].fillna(0).tolist()
-        
-        # Ensure both lists have same length
-        min_length = min(len(col1_values), len(col2_values))
-        col1_values = col1_values[:min_length]
-        col2_values = col2_values[:min_length]
+        # Extract numeric values for the specified columns while preserving index alignment
+        col1_series = pd.to_numeric(working_df[column1], errors="coerce")
+        col2_series = pd.to_numeric(working_df[column2], errors="coerce")
+
+        # Ensure both lists have same length and replace NaN with None for JSON serialization
+        min_length = min(len(col1_series), len(col2_series))
+        col1_values = [
+            (v if pd.notna(v) else None)
+            for v in col1_series.iloc[:min_length].tolist()
+        ]
+        col2_values = [
+            (v if pd.notna(v) else None)
+            for v in col2_series.iloc[:min_length].tolist()
+        ]
         
         print(f"✅ Extracted {len(col1_values)} value pairs")
         

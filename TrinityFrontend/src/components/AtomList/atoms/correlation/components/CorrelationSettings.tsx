@@ -143,15 +143,19 @@ const fetchEnhancedTimeSeriesData = async (
     // 4. Transform to chart format
     const chartData = axisData.x_values
       .map((x: any, index: number) => {
-        const v1 = parseFloat(seriesData.column1_values[index]);
-        const v2 = parseFloat(seriesData.column2_values[index]);
+        const v1Raw = seriesData.column1_values[index];
+        const v2Raw = seriesData.column2_values[index];
+        if (v1Raw === undefined || v2Raw === undefined) return null;
+        const v1 = parseFloat(v1Raw);
+        const v2 = parseFloat(v2Raw);
+        if (!isFinite(v1) || !isFinite(v2)) return null;
         return {
           date: isDate ? new Date(x).getTime() : index,
-          var1Value: isNaN(v1) ? 0 : v1,
-          var2Value: isNaN(v2) ? 0 : v2,
+          var1Value: v1,
+          var2Value: v2,
         };
       })
-      .filter((d: any) => isFinite(d.var1Value) && isFinite(d.var2Value))
+      .filter(Boolean)
       .sort((a: any, b: any) => a.date - b.date);
 
     return { data: chartData, isDate };
