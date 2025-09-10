@@ -328,7 +328,6 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
     if (window.innerHeight - y < menuHeight) {
       y = window.innerHeight - menuHeight;
     }
-    console.log("MatrixSettingsTray opened via double click", { x, y });
     setSettingsPosition({ x, y });
     setSettingsOpen(true);
   };
@@ -430,7 +429,7 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
         },
       });
     } catch (error) {
-      console.error("Error applying filters:", error);
+      // silently fail if filters cannot be applied
     }
   };
 

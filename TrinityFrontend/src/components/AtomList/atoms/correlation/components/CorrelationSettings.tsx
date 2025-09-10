@@ -26,8 +26,7 @@ interface CorrelationSettingsProps {
 // Transform dictionary correlation matrix to 2D array, filtering out non-numeric columns
 const transformCorrelationMatrix = (correlationDict: any, variables: string[]): { matrix: number[][], filteredVariables: string[] } => {
   if (!correlationDict || typeof correlationDict !== 'object') {
-    console.warn('Invalid correlation matrix data:', correlationDict);
-    return { 
+    return {
       matrix: variables.map((_, i) => variables.map((_, j) => i === j ? 1.0 : 0.0)),
       filteredVariables: variables
     };
@@ -46,9 +45,8 @@ const transformCorrelationMatrix = (correlationDict: any, variables: string[]): 
 
 
   if (validVariables.length === 0) {
-    console.warn('No valid numeric variables found in correlation matrix');
-    return { 
-      matrix: [[1.0]], 
+    return {
+      matrix: [[1.0]],
       filteredVariables: variables.length > 0 ? [variables[0]] : ['Unknown']
     };
   }
@@ -68,7 +66,6 @@ const transformCorrelationMatrix = (correlationDict: any, variables: string[]): 
         if (typeof value === 'number' && !isNaN(value) && isFinite(value)) {
           return value;
         } else {
-          console.warn(`Invalid correlation value for ${rowVar} vs ${colVar}:`, value);
           return 0.0; // Off-diagonal invalid values become 0.0
         }
       });
@@ -77,8 +74,7 @@ const transformCorrelationMatrix = (correlationDict: any, variables: string[]): 
    
     return { matrix, filteredVariables: validVariables };
   } catch (error) {
-    console.error('Error transforming correlation matrix:', error);
-    return { 
+    return {
       matrix: validVariables.map((_, i) => validVariables.map((_, j) => i === j ? 1.0 : 0.0)),
       filteredVariables: validVariables
     };
@@ -160,7 +156,6 @@ const fetchEnhancedTimeSeriesData = async (
 
     return { data: chartData, isDate };
   } catch (error) {
-    console.error('💥 Enhanced time series data error:', error);
     // Fallback to empty array
     return { data: [], isDate: false };
   }
@@ -220,7 +215,6 @@ const parseDateString = (dateStr: string, formatStr: string): Date | null => {
     const parsed = parse(dateStr, parseFormat, new Date());
     return isValid(parsed) ? parsed : null;
   } catch (error) {
-    console.error('Date parsing error:', error);
     return null;
   }
 };
@@ -229,7 +223,6 @@ const formatDateForCalendar = (date: Date): string => {
   try {
     return format(date, 'yyyy-MM-dd');
   } catch (error) {
-    console.error('Date formatting error:', error);
     return '';
   }
 };
@@ -474,10 +467,9 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
               columnValues = await correlationAPI.fetchAllColumnValues(data.selectedFile, dataframeInfo.categoricalColumns);
               onDataChange({ columnValuesLoading: false });
             } catch (columnValuesError) {
-              console.error('❌ Failed to fetch column values:', columnValuesError);
-              onDataChange({ 
-                columnValuesLoading: false, 
-                columnValuesError: 'Failed to load column filter values' 
+              onDataChange({
+                columnValuesLoading: false,
+                columnValuesError: 'Failed to load column filter values'
               });
             }
           }
@@ -496,11 +488,10 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
           });
           
         } catch (fileError) {
-          console.warn('⚠️ Could not load categorical columns from file in validator path:', fileError);
+          // could not load categorical columns from validator path
         }
       }
     } catch (error) {
-      console.error('Failed to load columns:', error);
       setProcessingError(handleAPIError(error));
     }
   };
@@ -531,7 +522,6 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
         });
       }
     } catch (error) {
-      console.error('Date analysis failed:', error);
       onDataChange({
         dateAnalysis: {
           has_date_data: false,
@@ -575,7 +565,6 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
         await runCorrelationAnalysis(objectName);
       }
     } catch (error) {
-      console.warn('⚠️ Could not get validator ID, using direct dataframe loading');
       // Fallback to direct dataframe loading
       try {
         const dataframeInfo = await correlationAPI.loadDataframe(objectName);
@@ -591,10 +580,9 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
            
             onDataChange({ columnValuesLoading: false });
           } catch (columnValuesError) {
-            console.error('Failed to fetch column values:', columnValuesError);
-            onDataChange({ 
-              columnValuesLoading: false, 
-              columnValuesError: 'Failed to load column filter values' 
+            onDataChange({
+              columnValuesLoading: false,
+              columnValuesError: 'Failed to load column filter values'
             });
           }
         }
@@ -783,7 +771,6 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
           [columnName]: []
         });
       } catch (error) {
-        console.error('Error adding filter:', error);
       } finally {
         setLoadingColumnValues(null);
       }
@@ -807,7 +794,6 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
         // Re-run correlation analysis with current settings
         await runCorrelationAnalysis(data.selectedFile);
       } catch (error) {
-        console.error('Error applying settings:', error);
         setProcessingError('Failed to apply settings');
       } finally {
         setIsProcessing(false);
@@ -845,7 +831,6 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
       
      
     } catch (error) {
-      console.error('💥 Failed to update time series for variable selection:', error);
       // Set empty data on error - no fallback
       onDataChange({
         timeSeriesData: [],
@@ -881,7 +866,6 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
       
      
     } catch (error) {
-      console.error('💥 Failed to update time series with date filter:', error);
       // Set empty data on error - no fallback
       onDataChange({
         timeSeriesData: [],

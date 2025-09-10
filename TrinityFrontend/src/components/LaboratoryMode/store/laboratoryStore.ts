@@ -1014,10 +1014,6 @@ export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
   },
 
   updateAtomSettings: (atomId: string, settings: any) => {
-    console.log('=== Store: updateAtomSettings called ===');
-    console.log('Store: atomId:', atomId);
-    console.log('Store: settings to update:', settings);
-    
     set((state) => {
       const updatedCards = state.cards.map((card) => ({
         ...card,
