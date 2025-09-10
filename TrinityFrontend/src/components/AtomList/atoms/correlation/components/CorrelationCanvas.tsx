@@ -315,6 +315,22 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
     });
   };
 
+  const handleMatrixContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const menuWidth = 240;
+    const menuHeight = 200;
+    let x = e.clientX;
+    let y = e.clientY;
+    if (window.innerWidth - x < menuWidth) {
+      x = window.innerWidth - menuWidth;
+    }
+    if (window.innerHeight - y < menuHeight) {
+      y = window.innerHeight - menuHeight;
+    }
+    setSettingsPosition({ x, y });
+    setSettingsOpen(true);
+  };
+
   // Apply filters to fetch new correlation data
   const handleApplyFilters = async (
     filtersOverride?: Record<string, string[]>,
@@ -1327,13 +1343,13 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
           </div>
 
           {/* Filter Dimensions - Dynamic from actual data */}
-          <Card className="p-4 mb-4">
+          <Card className="p-4 mb-4" onContextMenu={handleMatrixContextMenu}>
             <h3 className="text-sm font-semibold text-foreground mb-1 flex items-center gap-2">
               <Target className="w-4 h-4 text-primary" />
               Filter Dimensions
             </h3>
             <p className="text-xs text-gray-500 mb-3">
-              Right click on matrix to open settings
+              Right click to open settings
             </p>
 
             {/* Show active filter dimensions */}
@@ -1399,21 +1415,7 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
           <div className={isCompactMode ? "mb-4" : "mb-6"}>
             <Card
               className="overflow-hidden"
-              onContextMenu={(e) => {
-                e.preventDefault();
-                const menuWidth = 240;
-                const menuHeight = 200;
-                let x = e.clientX;
-                let y = e.clientY;
-                if (window.innerWidth - x < menuWidth) {
-                  x = window.innerWidth - menuWidth;
-                }
-                if (window.innerHeight - y < menuHeight) {
-                  y = window.innerHeight - menuHeight;
-                }
-                setSettingsPosition({ x, y });
-                setSettingsOpen(true);
-              }}
+              onContextMenu={handleMatrixContextMenu}
             >
               <div
                 className={
