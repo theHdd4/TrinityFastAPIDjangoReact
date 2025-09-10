@@ -1002,14 +1002,17 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
 
     // Adjust dimensions based on compact mode
     const margin = isCompactMode
-      ? { top: 10, right: 60, bottom: 25, left: 35 }
-      : { top: 20, right: 120, bottom: 40, left: 60 };
+      ? { top: 10, right: 60, bottom: 25, left: 60 }
+      : { top: 20, right: 120, bottom: 40, left: 80 };
 
     const containerWidth =
       timeSeriesWidth || canvasWidth || (isCompactMode ? 350 : 600);
     const baseHeight = isCompactMode ? 150 : 300;
 
-    svg.attr("width", containerWidth).attr("height", baseHeight);
+    svg
+      .attr("width", containerWidth)
+      .attr("height", baseHeight)
+      .style("overflow", "visible");
 
     const width = containerWidth - margin.left - margin.right;
     const height = baseHeight - margin.top - margin.bottom;
@@ -1209,7 +1212,7 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
 
       // Add axes with appropriate formatting
       const xAxis = hasDatetime
-        ? d3.axisBottom(xScale).tickFormat(d3.timeFormat("%b %d"))
+        ? d3.axisBottom(xScale).tickFormat(d3.timeFormat("%d-%B-%y"))
         : d3.axisBottom(xScale).tickFormat(d3.format("d"));
 
       const xAxisG = g
