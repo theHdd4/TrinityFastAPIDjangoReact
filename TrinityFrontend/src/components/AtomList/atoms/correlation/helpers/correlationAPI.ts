@@ -322,7 +322,7 @@ export class CorrelationAPI {
     return {
       theme: 'default',
       showAxisLabels: true,
-      showDataLabels: true,
+      showDataLabels: false,
       showLegend: true,
       ...saved,
     };
