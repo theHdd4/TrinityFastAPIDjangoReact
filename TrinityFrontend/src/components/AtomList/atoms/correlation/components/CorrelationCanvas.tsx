@@ -315,7 +315,7 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
     });
   };
 
-  const handleMatrixContextMenu = (e: React.MouseEvent) => {
+  const handleMatrixDoubleClick = (e: React.MouseEvent) => {
     e.preventDefault();
     const menuWidth = 240;
     const menuHeight = 200;
@@ -327,6 +327,7 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
     if (window.innerHeight - y < menuHeight) {
       y = window.innerHeight - menuHeight;
     }
+    console.log("MatrixSettingsTray opened via double click", { x, y });
     setSettingsPosition({ x, y });
     setSettingsOpen(true);
   };
@@ -1343,13 +1344,13 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
           </div>
 
           {/* Filter Dimensions - Dynamic from actual data */}
-          <Card className="p-4 mb-4" onContextMenu={handleMatrixContextMenu}>
+          <Card className="p-4 mb-4" onDoubleClick={handleMatrixDoubleClick}>
             <h3 className="text-sm font-semibold text-foreground mb-1 flex items-center gap-2">
               <Target className="w-4 h-4 text-primary" />
               Filter Dimensions
             </h3>
             <p className="text-xs text-gray-500 mb-3">
-              Right click to open settings
+              Double-click to open settings
             </p>
 
             {/* Show active filter dimensions */}
@@ -1415,7 +1416,7 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
           <div className={isCompactMode ? "mb-4" : "mb-6"}>
             <Card
               className="overflow-hidden"
-              onContextMenu={handleMatrixContextMenu}
+              onDoubleClick={handleMatrixDoubleClick}
             >
               <div
                 className={
