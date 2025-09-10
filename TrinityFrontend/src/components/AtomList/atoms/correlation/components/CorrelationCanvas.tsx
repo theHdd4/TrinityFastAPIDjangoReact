@@ -230,6 +230,7 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
   const timeSeriesRef = useRef<SVGSVGElement>(null);
   const prevMatrixRef = useRef<string>("");
   const [canvasWidth, setCanvasWidth] = useState(0);
+  const [timeSeriesWidth, setTimeSeriesWidth] = useState(0);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [matrixSettings, setMatrixSettings] = useState<MatrixSettings>({
     theme: "default",
@@ -262,6 +263,23 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
 
     return () => observer.disconnect();
   }, []);
+
+  // Track time series container width for responsive chart
+  useEffect(() => {
+    const container = timeSeriesRef.current?.parentElement;
+    if (!container) return;
+
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        setTimeSeriesWidth(entry.contentRect.width);
+      }
+    });
+
+    observer.observe(container);
+    setTimeSeriesWidth(container.clientWidth);
+
+    return () => observer.disconnect();
+  }, [data.selectedVar1, data.selectedVar2]);
 
   useEffect(() => {
     (async () => {
@@ -987,9 +1005,8 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
       ? { top: 10, right: 60, bottom: 25, left: 35 }
       : { top: 20, right: 120, bottom: 40, left: 60 };
 
-    const container = timeSeriesRef.current.parentElement;
     const containerWidth =
-      container?.clientWidth || canvasWidth || (isCompactMode ? 350 : 600);
+      timeSeriesWidth || canvasWidth || (isCompactMode ? 350 : 600);
     const baseHeight = isCompactMode ? 150 : 300;
 
     svg.attr("width", containerWidth).attr("height", baseHeight);
@@ -1266,6 +1283,7 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
     data.visualizationOptions,
     isCompactMode,
     canvasWidth,
+    timeSeriesWidth,
   ]);
 
   const getCorrelationValue = () => {
@@ -1308,6 +1326,8 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
     allCurrentVariables,
     data.correlationMatrix,
   );
+
+  const correlationValue = getCorrelationValue();
 
   return (
     <div
@@ -1436,135 +1456,71 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
         </Card>
       </div>
 
-      {/* Time Series + Analysis Output */}
+      {/* Time Series Comparison */}
       {data.selectedVar1 && data.selectedVar2 && (
-        <div
-          className={`grid ${
-            isCompactMode ? "grid-cols-1 gap-4" : "grid-cols-12 gap-6"
-          }`}
-        >
-          {/* Time Series Chart */}
-          <div className={`${isCompactMode ? "" : "col-span-8"} h-full`}>
-            <Card className="overflow-hidden h-full flex flex-col">
-              <div
-                className={`${isCompactMode ? "p-3" : "p-4"} border-b bg-muted/30`}
+        <div className={isCompactMode ? "mb-4" : "mb-6"}>
+          <Card className="overflow-hidden h-full flex flex-col">
+            <div
+              className={`${
+                isCompactMode ? "p-3" : "p-4"
+              } border-b bg-muted/30 flex items-center justify-between`}
+            >
+              <h3
+                className={`font-semibold text-foreground flex items-center gap-2 ${
+                  isCompactMode ? "text-sm" : ""
+                }`}
               >
-                <h3
-                  className={`font-semibold text-foreground flex items-center gap-2 ${
-                    isCompactMode ? "text-sm" : ""
-                  }`}
-                >
-                  <TrendingUp
-                    className={`${isCompactMode ? "w-3 h-3" : "w-4 h-4"} text-primary`}
-                  />
-                  Time Series Comparison
-                </h3>
-                {!isCompactMode && (
-                  <p className="text-sm text-muted-foreground mt-1">
-                    {`Visualize how ${data.selectedVar1} and ${data.selectedVar2} change over time`}
-                  </p>
-                )}
-              </div>
-              <div className={`${isCompactMode ? "p-4" : "p-6"} flex-1`}>
-                <svg
-                  ref={timeSeriesRef}
-                  width="100%"
-                  height={isCompactMode ? "150" : "300"}
-                  className="w-full"
-                ></svg>
-              </div>
-            </Card>
-          </div>
-
-          {/* Analysis Output */}
-          <div className={`${isCompactMode ? "" : "col-span-4"} h-full`}>
-            <Card className="overflow-hidden h-full flex flex-col">
-              <div
-                className={`${isCompactMode ? "p-2" : "p-4"} border-b bg-muted/30`}
-              >
-                <h3
-                  className={`font-semibold text-foreground flex items-center gap-2 ${
-                    isCompactMode ? "text-sm" : ""
-                  }`}
-                >
-                  <BarChart3
-                    className={`${isCompactMode ? "w-3 h-3" : "w-4 h-4"} text-primary`}
-                  />
-                  Analysis Output
-                </h3>
-              </div>
-              <div
-                className={`${isCompactMode ? "p-3 space-y-2" : "p-4 space-y-4"} flex-1`}
-              >
-                {/* Correlation Result */}
-                <div
-                  className={`bg-muted/50 rounded-lg ${
-                    isCompactMode ? "p-3" : "p-4"
-                  } border`}
-                >
-                  <div className="text-center">
-                    <div
-                      className={`font-bold text-foreground mb-1 ${
-                        isCompactMode ? "text-lg" : "text-2xl"
-                      }`}
-                    >
-                      {getCorrelationValue() !== null
-                        ? getCorrelationValue().toFixed(3)
-                        : "---"}
-                    </div>
-                    <div
-                      className={`text-muted-foreground ${
-                        isCompactMode ? "text-xs" : "text-sm"
-                      }`}
-                    >
-                      Correlation Coefficient
-                    </div>
-                    {getCorrelationValue() !== null ? (
-                      <Badge
-                        variant={
-                          Math.abs(getCorrelationValue()) > 0.7
-                            ? "destructive"
-                            : Math.abs(getCorrelationValue()) > 0.3
-                              ? "default"
-                              : "secondary"
-                        }
-                        className="mt-2"
-                      >
-                        {Math.abs(getCorrelationValue()) > 0.7
-                          ? "Strong"
-                          : Math.abs(getCorrelationValue()) > 0.3
-                            ? "Moderate"
-                            : "Weak"}{" "}
-                        Correlation
-                      </Badge>
-                    ) : (
-                      <Badge variant="outline" className="mt-2">
-                        No Data
-                      </Badge>
-                    )}
-                  </div>
-                </div>
-
-                {/* Current Analysis */}
-                <div className="space-y-2">
-                  <div
-                    className={`text-muted-foreground ${
-                      isCompactMode ? "text-xs" : "text-sm"
+                <TrendingUp
+                  className={`${isCompactMode ? "w-3 h-3" : "w-4 h-4"} text-primary`}
+                />
+                Time Series Comparison
+              </h3>
+              {correlationValue !== null ? (
+                <div className="flex items-center gap-2">
+                  <span
+                    className={`font-bold text-foreground ${
+                      isCompactMode ? "text-sm" : "text-lg"
                     }`}
                   >
-                    Current Analysis:
-                  </div>
-                  <div
-                    className={`text-foreground ${isCompactMode ? "text-sm" : ""}`}
+                    {correlationValue.toFixed(3)}
+                  </span>
+                  <Badge
+                    variant={
+                      Math.abs(correlationValue) > 0.7
+                        ? "destructive"
+                        : Math.abs(correlationValue) > 0.3
+                          ? "default"
+                          : "secondary"
+                    }
+                    className={isCompactMode ? "text-xs" : "text-sm"}
                   >
-                    <span className="font-medium">{data.selectedVar1}</span>
-                    <span className="text-muted-foreground mx-2">vs</span>
-                    <span className="font-medium">{data.selectedVar2}</span>
-                  </div>
+                    {Math.abs(correlationValue) > 0.7
+                      ? "Strong"
+                      : Math.abs(correlationValue) > 0.3
+                        ? "Moderate"
+                        : "Weak"}
+                  </Badge>
                 </div>
-              </div>
-            </Card>
-          </div>
+              ) : (
+                <Badge variant="outline" className={isCompactMode ? "text-xs" : "text-sm"}>
+                  No Data
+                </Badge>
+              )}
+            </div>
+            {!isCompactMode && (
+              <p className="text-sm text-muted-foreground px-4 pt-2">
+                {`Visualize how ${data.selectedVar1} and ${data.selectedVar2} change over time`}
+              </p>
+            )}
+            <div className={`${isCompactMode ? "p-4" : "p-6"} flex-1`}>
+              <svg
+                ref={timeSeriesRef}
+                width="100%"
+                height={isCompactMode ? "150" : "300"}
+                className="w-full"
+              ></svg>
+            </div>
+          </Card>
         </div>
       )}
         </>
