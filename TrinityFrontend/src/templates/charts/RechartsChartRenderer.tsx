@@ -324,8 +324,8 @@ const RechartsChartRenderer: React.FC<Props> = ({
   data, 
   xField, 
   yField, 
-  yFields, 
-  width = 400, 
+  yFields,
+  width = 0,
   height = 300,
   title,
   xAxisLabel,
@@ -2309,7 +2309,10 @@ const RechartsChartRenderer: React.FC<Props> = ({
         </div>
       )}
 
-      <div className="w-full h-full relative flex-1 min-w-0">
+      <div
+        className="w-full h-full relative flex-1 min-w-0"
+        style={{ height: height ? `${height}px` : '100%', width: width ? `${width}px` : '100%' }}
+      >
         <div 
           className={`w-full h-full transition-all duration-500 ease-in-out ${enableScroll ? 'overflow-x-auto overflow-y-hidden chart-scroll-container' : 'overflow-hidden'}`}
           style={{ 
