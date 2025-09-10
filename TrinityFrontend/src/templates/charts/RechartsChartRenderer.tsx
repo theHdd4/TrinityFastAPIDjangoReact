@@ -50,6 +50,7 @@ interface Props {
   showLegend?: boolean; // External control for legend visibility
   showAxisLabels?: boolean; // External control for axis labels visibility
   showDataLabels?: boolean; // External control for data labels visibility
+  initialShowDataLabels?: boolean; // Default state for data labels
   showGrid?: boolean; // External control for grid visibility
   chartsPerRow?: number; // For multi pie chart layouts
 }
@@ -346,6 +347,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
   showLegend: propShowLegend, // External control for legend visibility
   showAxisLabels: propShowAxisLabels, // External control for axis labels visibility
   showDataLabels: propShowDataLabels, // External control for data labels visibility
+  initialShowDataLabels,
   showGrid: propShowGrid, // External control for grid visibility
   chartsPerRow
 }) => {
@@ -384,7 +386,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
   const [showGrid, setShowGrid] = useState(true);
   const [showLegend, setShowLegend] = useState(true);
   const [showAxisLabels, setShowAxisLabels] = useState(true);
-  const [showDataLabels, setShowDataLabels] = useState(true);
+  const [showDataLabels, setShowDataLabels] = useState(initialShowDataLabels ?? true);
 
   // Sync internal states with external props for persistence
   useEffect(() => {

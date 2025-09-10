@@ -234,7 +234,7 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
   const [matrixSettings, setMatrixSettings] = useState<MatrixSettings>({
     theme: "default",
     showAxisLabels: true,
-    showDataLabels: false,
+    showDataLabels: true,
     showLegend: true,
   });
   const [settingsPosition, setSettingsPosition] = useState<{
@@ -1086,7 +1086,7 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
       theme: matrixSettings.theme,
       showLegend: matrixSettings.showLegend,
       showAxisLabels: matrixSettings.showAxisLabels,
-      showDataLabels: matrixSettings.showDataLabels,
+      initialShowDataLabels: false,
       showGrid: true,
       sortOrder: "asc" as const,
       height: timeSeriesChartHeight,

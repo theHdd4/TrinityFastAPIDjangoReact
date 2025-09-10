@@ -6,7 +6,7 @@ router = APIRouter()
 class MatrixSettings(BaseModel):
     theme: str = "default"
     show_axis_labels: bool = True
-    show_data_labels: bool = False
+    show_data_labels: bool = True
     show_legend: bool = True
 
 _saved_settings = MatrixSettings()
