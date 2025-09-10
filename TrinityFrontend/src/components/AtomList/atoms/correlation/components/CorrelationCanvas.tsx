@@ -1050,6 +1050,7 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
       type: "line_chart" as const,
       data: timeSeriesChartData,
       xField: "date",
+      yField: data.selectedVar1,
       yFields: [data.selectedVar1, data.selectedVar2],
       yAxisLabels: [data.selectedVar1, data.selectedVar2],
       xAxisLabel: "Date",
@@ -1261,7 +1262,7 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
             )}
             {timeSeriesRendererProps && (
               <div className={`${isCompactMode ? "p-4" : "p-6"} flex-1`}>
-                <div className="w-full" style={{ minHeight: timeSeriesChartHeight }}>
+                <div className="w-full" style={{ height: timeSeriesChartHeight }}>
                   <RechartsChartRenderer {...timeSeriesRendererProps} />
                 </div>
               </div>
