@@ -20,10 +20,7 @@ const ConcatProperties: React.FC<Props> = ({ atomId }) => {
   const settings: SettingsType = (atom?.settings as SettingsType) || { ...DEFAULT_CONCAT_SETTINGS };
 
   const handleChange = (newSettings: Partial<SettingsType>) => {
-    console.log('🔧 ConcatProperties: Updating settings:', newSettings);
-    console.log('🔧 ConcatProperties: Current settings before update:', settings);
     updateSettings(atomId, newSettings);
-    console.log('🔧 ConcatProperties: Settings updated');
   };
 
   // Helper function to check if all required options are selected
@@ -32,7 +29,6 @@ const ConcatProperties: React.FC<Props> = ({ atomId }) => {
   };
 
   const handlePerformConcat = async () => {
-    console.log('[ConcatProperties] handlePerformConcat settings:', settings);
     if (!isConcatReady()) {
       toast({
         title: "Error",
@@ -47,7 +43,6 @@ const ConcatProperties: React.FC<Props> = ({ atomId }) => {
         file2: settings.file2,
         concat_direction: settings.direction,
       };
-      console.log('[ConcatProperties] Sending request body:', requestBody);
       const response = await fetch(`${CONCAT_API}/perform`, {
         method: 'POST',
         headers: {
@@ -55,28 +50,17 @@ const ConcatProperties: React.FC<Props> = ({ atomId }) => {
         },
         body: JSON.stringify(requestBody),
       });
-      console.log('[ConcatProperties] Response status:', response.status);
-      console.log('[ConcatProperties] Response ok:', response.ok);
       if (!response.ok) {
         const errorText = await response.text();
-        console.log('[ConcatProperties] Error response:', errorText);
         throw new Error(`Concat failed: ${response.statusText} - ${errorText}`);
       }
       const result = await response.json();
-      console.log('[ConcatProperties] Success result:', result);
       updateSettings(atomId, { 
         ...settings, // preserve previous selections
         concatResults: {
           ...result,
         },
         concatId: result.concat_id 
-      });
-      console.log('[ConcatProperties] After updateSettings, settings.concatResults:', {
-        ...settings,
-        concatResults: {
-          ...result,
-        },
-        concatId: result.concat_id
       });
       toast({
         title: "Success",

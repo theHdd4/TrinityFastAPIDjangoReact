@@ -13,8 +13,10 @@ from .llm_chartmaker import ChartMakerAgent
 logger = logging.getLogger("smart.chart")
 router = APIRouter()
 
+# Standalone configuration functions (no circular imports)
 def get_llm_config():
-    ollama_ip = os.getenv("OLLAMA_IP", os.getenv("HOST_IP", "127.0.0.1"))
+    """Return LLM configuration from environment variables."""
+    ollama_ip = os.getenv("OLLAMA_IP", os.getenv("HOST_IP", "172.22.64.1"))
     llm_port = os.getenv("OLLAMA_PORT", "11434")
     api_url = os.getenv("LLM_API_URL", f"http://{ollama_ip}:{llm_port}/api/chat")
     return {
@@ -23,7 +25,12 @@ def get_llm_config():
         "bearer_token": os.getenv("LLM_BEARER_TOKEN", "aakash_api_key"),
     }
 
+# Initialize agent
 cfg = get_llm_config()
+
+logger.info(f"CHART MAKER AGENT INITIALIZATION:")
+logger.info(f"LLM Config: {cfg}")
+
 agent = ChartMakerAgent(
     cfg["api_url"], 
     cfg["model_name"], 
@@ -60,6 +67,8 @@ class ChartResponse(BaseModel):
     file_name: Optional[str] = Field(None, description="Name of the file used for chart generation")
     data_source: Optional[str] = Field(None, description="Data source file for the chart")
     file_context: Optional[Dict[str, Any]] = Field(None, description="Context about available files and current file")
+    # 🔧 SMART RESPONSE: Add smart_response field for user-friendly messages
+    smart_response: Optional[str] = Field(None, description="Smart, user-friendly response explaining what was created and next steps")
 
 @router.post("/chart", response_model=ChartResponse)
 def chart_make(request: ChartRequest):
@@ -92,6 +101,25 @@ def chart_make(request: ChartRequest):
         if "message" not in result:
             result["message"] = "Chart generation completed" if result.get("success") else "Chart generation failed"
         
+        # 🔧 SMART RESPONSE FALLBACK: Ensure smart_response is always present
+        if "smart_response" not in result or not result["smart_response"]:
+            if result.get("success") and result.get("chart_json"):
+                # Chart generation success - create smart response
+                charts_list = result["chart_json"] if isinstance(result["chart_json"], list) else [result["chart_json"]]
+                if len(charts_list) > 1:
+                    result["smart_response"] = f"I've created {len(charts_list)} complementary charts for you. These charts provide different perspectives on your data - use the 2-chart layout option to view them simultaneously for better analysis."
+                else:
+                    chart = charts_list[0]
+                    chart_type = chart.get("chart_type", "chart")
+                    title = chart.get("title", "your data")
+                    result["smart_response"] = f"I've created a {chart_type} chart showing {title}. You can now view this chart in the interface or modify the settings as needed."
+            else:
+                # Suggestions or error - create smart response
+                if result.get("suggestions"):
+                    result["smart_response"] = "I can help you create charts from your data. Based on your request, I have some suggestions to get you started. Please let me know what you'd like to visualize or ask me to suggest chart types for your data."
+                else:
+                    result["smart_response"] = "I'm here to help you create charts and analyze your data. Please describe what you'd like to visualize or ask me for suggestions."
+        
         # Clean logging
         logger.info(f"Chart request completed: {result.get('success')} ({result.get('processing_time')}s)")
         
@@ -112,6 +140,13 @@ def chart_make(request: ChartRequest):
 def chart_make_alias(request: ChartRequest):
     """
     Alias endpoint for /chart to support frontend compatibility.
+    """
+    return chart_make(request)
+
+@router.post("/generate", response_model=ChartResponse)
+def chart_generate(request: ChartRequest):
+    """
+    Generate endpoint for frontend compatibility.
     """
     return chart_make(request)
 

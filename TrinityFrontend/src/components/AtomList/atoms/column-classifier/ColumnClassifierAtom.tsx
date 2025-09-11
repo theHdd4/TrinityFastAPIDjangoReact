@@ -265,6 +265,7 @@ const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
               showColumnView={settings.enableColumnView ?? true}
               filterUnique={settings.filterColumnViewUnique || false}
               onFilterToggle={handleFilterToggle}
+              atomId={atomId}
             />
           </div>
         </div>

@@ -26,8 +26,7 @@ interface CorrelationSettingsProps {
 // Transform dictionary correlation matrix to 2D array, filtering out non-numeric columns
 const transformCorrelationMatrix = (correlationDict: any, variables: string[]): { matrix: number[][], filteredVariables: string[] } => {
   if (!correlationDict || typeof correlationDict !== 'object') {
-    console.warn('Invalid correlation matrix data:', correlationDict);
-    return { 
+    return {
       matrix: variables.map((_, i) => variables.map((_, j) => i === j ? 1.0 : 0.0)),
       filteredVariables: variables
     };
@@ -46,9 +45,8 @@ const transformCorrelationMatrix = (correlationDict: any, variables: string[]): 
 
 
   if (validVariables.length === 0) {
-    console.warn('No valid numeric variables found in correlation matrix');
-    return { 
-      matrix: [[1.0]], 
+    return {
+      matrix: [[1.0]],
       filteredVariables: variables.length > 0 ? [variables[0]] : ['Unknown']
     };
   }
@@ -68,7 +66,6 @@ const transformCorrelationMatrix = (correlationDict: any, variables: string[]): 
         if (typeof value === 'number' && !isNaN(value) && isFinite(value)) {
           return value;
         } else {
-          console.warn(`Invalid correlation value for ${rowVar} vs ${colVar}:`, value);
           return 0.0; // Off-diagonal invalid values become 0.0
         }
       });
@@ -77,8 +74,7 @@ const transformCorrelationMatrix = (correlationDict: any, variables: string[]): 
    
     return { matrix, filteredVariables: validVariables };
   } catch (error) {
-    console.error('Error transforming correlation matrix:', error);
-    return { 
+    return {
       matrix: validVariables.map((_, i) => validVariables.map((_, j) => i === j ? 1.0 : 0.0)),
       filteredVariables: validVariables
     };
@@ -107,53 +103,61 @@ const fetchTimeSeriesData = async (filePath: string, request: {
 
 // Enhanced time series data fetching with datetime axis and highest correlation
 const fetchEnhancedTimeSeriesData = async (
-  filePath: string, 
-  startDate?: string, 
+  filePath: string,
+  startDate?: string,
   endDate?: string,
   forceColumns?: { column1: string; column2: string }
-): Promise<Array<{date: Date | number; var1Value: number; var2Value: number}>> => {
+): Promise<{ data: Array<{ date: number; var1Value: number; var2Value: number }>; isDate: boolean }> => {
   try {
-    
     // 1. Get axis data (datetime or indices)
     const axisData = await fetchTimeSeriesAxis(filePath, startDate, endDate);
+    const isDate = axisData.has_datetime;
 
-    
     // 2. Get highest correlation pair (unless forced columns provided)
     let pairData;
     if (forceColumns) {
       pairData = {
         column1: forceColumns.column1,
         column2: forceColumns.column2,
-        correlation_value: 0
+        correlation_value: 0,
       };
     } else {
       pairData = await fetchHighestCorrelationPair(filePath);
     }
-    
+
     // 3. Get Y-values for the selected columns
     const seriesRequest = {
       column1: pairData.column1,
       column2: pairData.column2,
       start_date: startDate,
       end_date: endDate,
-      datetime_column: axisData.datetime_column
+      datetime_column: axisData.datetime_column,
     };
-    
+
     const seriesData = await fetchTimeSeriesData(filePath, seriesRequest);
-    
+
     // 4. Transform to chart format
-    const chartData = axisData.x_values.map((x: any, index: number) => ({
-      date: axisData.has_datetime ? new Date(x) : index,
-      var1Value: seriesData.column1_values[index] || 0,
-      var2Value: seriesData.column2_values[index] || 0
-    }));
-    
-    return chartData;
-    
+    const chartData = axisData.x_values
+      .map((x: any, index: number) => {
+        const v1Raw = seriesData.column1_values[index];
+        const v2Raw = seriesData.column2_values[index];
+        if (v1Raw === undefined || v2Raw === undefined) return null;
+        const v1 = parseFloat(v1Raw);
+        const v2 = parseFloat(v2Raw);
+        if (!isFinite(v1) || !isFinite(v2)) return null;
+        return {
+          date: isDate ? new Date(x).getTime() : index,
+          var1Value: v1,
+          var2Value: v2,
+        };
+      })
+      .filter(Boolean)
+      .sort((a: any, b: any) => a.date - b.date);
+
+    return { data: chartData, isDate };
   } catch (error) {
-    console.error('💥 Enhanced time series data error:', error);
     // Fallback to empty array
-    return [];
+    return { data: [], isDate: false };
   }
 };
 
@@ -186,15 +190,6 @@ const formatDateForDisplay = (dateStr: string, format: string): string => {
   }
 };
 
-const getAvailableAggregationLevels = (granularity: string): string[] => {
-  switch (granularity) {
-    case 'daily': return ['None', 'Daily', 'Weekly', 'Monthly', 'Quarterly', 'Yearly'];
-    case 'monthly': return ['None', 'Monthly', 'Quarterly', 'Yearly'];
-    case 'yearly': return ['None', 'Yearly'];
-    default: return ['None', 'Monthly', 'Quarterly', 'Yearly'];
-  }
-};
-
 // Helper functions for date parsing and formatting
 const parseDateString = (dateStr: string, formatStr: string): Date | null => {
   try {
@@ -220,7 +215,6 @@ const parseDateString = (dateStr: string, formatStr: string): Date | null => {
     const parsed = parse(dateStr, parseFormat, new Date());
     return isValid(parsed) ? parsed : null;
   } catch (error) {
-    console.error('Date parsing error:', error);
     return null;
   }
 };
@@ -229,7 +223,6 @@ const formatDateForCalendar = (date: Date): string => {
   try {
     return format(date, 'yyyy-MM-dd');
   } catch (error) {
-    console.error('Date formatting error:', error);
     return '';
   }
 };
@@ -474,10 +467,9 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
               columnValues = await correlationAPI.fetchAllColumnValues(data.selectedFile, dataframeInfo.categoricalColumns);
               onDataChange({ columnValuesLoading: false });
             } catch (columnValuesError) {
-              console.error('❌ Failed to fetch column values:', columnValuesError);
-              onDataChange({ 
-                columnValuesLoading: false, 
-                columnValuesError: 'Failed to load column filter values' 
+              onDataChange({
+                columnValuesLoading: false,
+                columnValuesError: 'Failed to load column filter values'
               });
             }
           }
@@ -496,11 +488,10 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
           });
           
         } catch (fileError) {
-          console.warn('⚠️ Could not load categorical columns from file in validator path:', fileError);
+          // could not load categorical columns from validator path
         }
       }
     } catch (error) {
-      console.error('Failed to load columns:', error);
       setProcessingError(handleAPIError(error));
     }
   };
@@ -531,7 +522,6 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
         });
       }
     } catch (error) {
-      console.error('Date analysis failed:', error);
       onDataChange({
         dateAnalysis: {
           has_date_data: false,
@@ -554,6 +544,7 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
       fileData: null,
       correlationMatrix: null,
       timeSeriesData: null,
+      timeSeriesIsDate: true,
       dateAnalysis: null,
       isUsingFileData: true  // Always default to using uploaded data
     });
@@ -574,7 +565,6 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
         await runCorrelationAnalysis(objectName);
       }
     } catch (error) {
-      console.warn('⚠️ Could not get validator ID, using direct dataframe loading');
       // Fallback to direct dataframe loading
       try {
         const dataframeInfo = await correlationAPI.loadDataframe(objectName);
@@ -590,10 +580,9 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
            
             onDataChange({ columnValuesLoading: false });
           } catch (columnValuesError) {
-            console.error('Failed to fetch column values:', columnValuesError);
-            onDataChange({ 
-              columnValuesLoading: false, 
-              columnValuesError: 'Failed to load column filter values' 
+            onDataChange({
+              columnValuesLoading: false,
+              columnValuesError: 'Failed to load column filter values'
             });
           }
         }
@@ -659,19 +648,22 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
         }
       }
 
-      // Add date filtering if we have date analysis and settings
-      if (data.dateAnalysis?.has_date_data && data.settings?.dateFrom && data.settings?.dateTo) {
-        const primaryDateColumn = data.dateAnalysis.date_columns[0]?.column_name;
+        // Add date filtering and time aggregation if available
+        const primaryDateColumn = data.dateAnalysis?.date_columns[0]?.column_name;
         if (primaryDateColumn) {
           request.date_column = primaryDateColumn;
+        }
+        if (data.dateAnalysis?.has_date_data && data.settings?.dateFrom && data.settings?.dateTo && primaryDateColumn) {
           request.date_range_filter = {
             start: data.settings.dateFrom,
             end: data.settings.dateTo
           };
         }
-      }
+        if (data.settings?.aggregationLevel && data.settings.aggregationLevel !== 'None' && primaryDateColumn) {
+          request.aggregation_level = data.settings.aggregationLevel.toLowerCase();
+        }
 
-      const result = await correlationAPI.filterAndCorrelate(request);
+        const result = await correlationAPI.filterAndCorrelate(request);
       
       // Update date analysis if included in response
       if (result.date_analysis) {
@@ -702,19 +694,26 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
       onDataChange({
         correlationMatrix: transformedResult.correlationMatrix,
         timeSeriesData: [], // No default time series data
+        timeSeriesIsDate: true,
         variables: transformedResult.variables,
         selectedVar1: null, // No default selection
         selectedVar2: null, // No default selection
         fileData: {
+          ...(data.fileData || {}),
           fileName: filePath,
           rawData: result.preview_data || [],
           numericColumns: filteredVariables, // Use filtered variables for numeric columns
-          dateColumns: result.date_analysis?.date_columns.map(col => col.column_name) || [],
-          categoricalColumns: (result.columns_used || []).filter(col => 
-            !filteredVariables.includes(col) // Non-numeric columns are the ones filtered out
-          ),
-          isProcessed: true
-        }
+          dateColumns:
+            result.date_analysis?.date_columns.map((col) => col.column_name) ||
+            data.fileData?.dateColumns || [],
+          categoricalColumns:
+            data.fileData?.categoricalColumns ||
+            (result.columns_used || []).filter(
+              (col) => !filteredVariables.includes(col), // Non-numeric columns are the ones filtered out
+            ),
+          columnValues: data.fileData?.columnValues || {},
+          isProcessed: true,
+        },
       });
 
     } catch (error) {
@@ -734,7 +733,7 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
   const handleCorrelationMethodChange = (method: string) => {
     handleSettingsChange('correlationMethod', method);
     
-    // If we have file data, settings will be applied when user clicks "Recalculate"
+    // If we have file data, settings will be applied when user clicks "Render"
     onDataChange({
       settings: {
         ...(data.settings || {}),
@@ -772,7 +771,6 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
           [columnName]: []
         });
       } catch (error) {
-        console.error('Error adding filter:', error);
       } finally {
         setLoadingColumnValues(null);
       }
@@ -796,7 +794,6 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
         // Re-run correlation analysis with current settings
         await runCorrelationAnalysis(data.selectedFile);
       } catch (error) {
-        console.error('Error applying settings:', error);
         setProcessingError('Failed to apply settings');
       } finally {
         setIsProcessing(false);
@@ -817,28 +814,29 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
       });
       
       // Fetch new time series data with specific columns
-      const enhancedTimeSeriesData = await fetchEnhancedTimeSeriesData(
+      const { data: enhancedTimeSeriesData, isDate } = await fetchEnhancedTimeSeriesData(
         data.selectedFile,
         data.settings?.dateFrom,
         data.settings?.dateTo,
         { column1: var1, column2: var2 } // Force specific columns
       );
-      
+
       // Update time series data
       onDataChange({
         timeSeriesData: enhancedTimeSeriesData,
+        timeSeriesIsDate: isDate,
         selectedVar1: var1,
-        selectedVar2: var2
+        selectedVar2: var2,
       });
       
      
     } catch (error) {
-      console.error('💥 Failed to update time series for variable selection:', error);
       // Set empty data on error - no fallback
       onDataChange({
         timeSeriesData: [],
+        timeSeriesIsDate: true,
         selectedVar1: var1,
-        selectedVar2: var2
+        selectedVar2: var2,
       });
     }
   };
@@ -854,23 +852,24 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
         ? { column1: data.selectedVar1, column2: data.selectedVar2 }
         : undefined;
       
-      const enhancedTimeSeriesData = await fetchEnhancedTimeSeriesData(
+      const { data: enhancedTimeSeriesData, isDate } = await fetchEnhancedTimeSeriesData(
         data.selectedFile,
         data.settings?.dateFrom,
         data.settings?.dateTo,
         forceColumns
       );
-      
+
       onDataChange({
-        timeSeriesData: enhancedTimeSeriesData
+        timeSeriesData: enhancedTimeSeriesData,
+        timeSeriesIsDate: isDate,
       });
       
      
     } catch (error) {
-      console.error('💥 Failed to update time series with date filter:', error);
       // Set empty data on error - no fallback
       onDataChange({
-        timeSeriesData: []
+        timeSeriesData: [],
+        timeSeriesIsDate: true,
       });
     }
   };
@@ -887,6 +886,7 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
     onDataChange({
       correlationMatrix: [],
       timeSeriesData: [],
+      timeSeriesIsDate: true,
       variables: [],
       dateAnalysis: null
     });
@@ -947,12 +947,6 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
           </div>
         </div>
         
-        {/* Show available date columns */}
-        {data.dateAnalysis.date_columns.length > 1 && (
-          <div className="text-xs text-muted-foreground">
-            <strong>Available date columns:</strong> {data.dateAnalysis.date_columns.map(col => col.column_name).join(', ')}
-          </div>
-        )}
       </div>
     );
   };
@@ -1009,26 +1003,6 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
 
         {/* Smart Date Filter Section - Only render if date data exists */}
         {renderDateFilterSection()}
-
-        {/* Date and Time Aggregation - Smart options based on detected granularity */}
-        <div className="space-y-3">
-          <h3 className="text-sm font-medium text-muted-foreground">Date and Time Aggregation</h3>
-          <div className="space-y-2">
-            <div className="flex gap-1 flex-wrap">
-              {getAvailableAggregationLevels(data.dateAnalysis?.recommended_granularity || 'monthly').map((period) => (
-                <Button
-                  key={period}
-                  variant={(data.settings?.aggregationLevel || 'None') === period ? "default" : "outline"}
-                  size="sm"
-                  className="text-xs h-6 px-2"
-                  onClick={() => handleSettingsChange('aggregationLevel', period)}
-                >
-                  {period}
-                </Button>
-              ))}
-            </div>
-          </div>
-        </div>
 
       {/* Select Filter */}
       <div className="space-y-3">
@@ -1146,7 +1120,7 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
                 Processing...
               </>
             ) : (
-              'Recalculate'
+              'Render'
             )}
           </Button>
           <Button 

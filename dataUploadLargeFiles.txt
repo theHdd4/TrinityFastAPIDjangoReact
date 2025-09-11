@@ -1,0 +1,36 @@
+Large file uploads (>300MB) fail with a 500 Internal Server Error.
+The browser reports a CORS issue because the response lacks the
+`Access-Control-Allow-Origin` header, but the root cause is the server
+exception during processing.
+
+Smaller files from the same origin upload correctly, confirming CORS is
+not the issue. The upload route currently reads each CSV entirely into
+memory with Polars before writing Arrow bytes for MinIO, which can exceed
+available RAM for very large datasets and cause the failure.
+
+Reverting the permissive CORS changes restores the previous origin
+configuration. To handle very large files, consider streaming parses with
+`pl.scan_csv` or increasing server resources so the temporary DataFrame
+and Arrow serialization fit in memory.
+
+Fastexcel is now included to enable Polars to read Excel files efficiently for large uploads.
+The MinIO 'trinity' bucket now enforces a 10GB quota via the admin API so
+uploads well over 500MB are accepted without hitting bucket-size limits.
+
+Large CSV uploads now stream through Polars in 1M-row batches, keeping memory use low while
+writing Arrow bytes. A Redis key tracks progress for each file (`uploading` → `parsing` →
+`saved`) so the frontend can display status updates. Files exceeding 512 MB are rejected with
+HTTP 413 before parsing begins.
+
+To avoid `TypeError: expected str, bytes or os.PathLike object, not BytesIO` when processing
+very large uploads, the chunked reader now points Polars at the on-disk temporary file path
+for each CSV. Smaller in-memory uploads fall back to `pl.read_csv`, ensuring both paths are
+handled correctly without exhausting memory.
+
+CSV parsing now scans the first 10k rows when inferring column types. This prevents
+`ComputeError: could not parse '...' as dtype i64` failures when later rows contain
+floating-point values in columns that initially appear integer-only.
+
+Chunked CSV uploads now convert each batch to Arrow via PyArrow, avoiding
+`ArrowTypeError: Extracting byte ranges not supported for type string_view`
+when writing large string columns.

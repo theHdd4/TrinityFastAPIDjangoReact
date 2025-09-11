@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { useToast } from '@/hooks/use-toast';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -6,16 +6,31 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Plus, Settings, Calendar, X, Loader2, Target, Check, BarChart3 } from 'lucide-react';
-import { SCOPE_SELECTOR_API, CLASSIFIER_API } from '@/lib/api';
+import { Plus, Settings, Calendar, X, Loader2, Target, Check, BarChart3, ArrowUp, ArrowDown, Filter as FilterIcon } from 'lucide-react';
+import { SCOPE_SELECTOR_API, CLASSIFIER_API, FEATURE_OVERVIEW_API } from '@/lib/api';
 import { ScopeSelectorData, ScopeData } from '../ScopeSelectorAtom';
+import Table from '@/templates/tables/table';
+import scopeSelector from '../index';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuSub,
+  ContextMenuSubContent,
+  ContextMenuSubTrigger,
+  ContextMenuTrigger,
+} from '@/components/ui/context-menu';
+import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 
 interface ScopeSelectorCanvasProps {
   data: ScopeSelectorData;
   onDataChange: (newData: Partial<ScopeSelectorData>) => void;
+  atomId?: string;
 }
 
-const ScopeSelectorCanvas: React.FC<ScopeSelectorCanvasProps> = ({ data, onDataChange }) => {
+const ScopeSelectorCanvas: React.FC<ScopeSelectorCanvasProps> = ({ data, onDataChange, atomId }) => {
   // Debug log to track data updates
   useEffect(() => {
     console.log('ScopeSelectorCanvas data updated:', {
@@ -34,98 +49,38 @@ const ScopeSelectorCanvas: React.FC<ScopeSelectorCanvasProps> = ({ data, onDataC
   // Preview row counts per scope after save
   type PreviewRow = { scopeId: string; values: Record<string, string>; count: number; pctPass?: boolean };
   const [previewRows, setPreviewRows] = useState<PreviewRow[]>([]);
+  
+  // Get atom settings to access the input file name
+  const atom = useLaboratoryStore(state => atomId ? state.getAtom(atomId) : undefined);
+  const atomSettings = (atom?.settings as any) || {};
+  const inputFileName = atomSettings.dataSource || data.dataSource || '';
+
+  // Handle opening the input file in a new tab
+  const handleViewDataClick = () => {
+    if (inputFileName && atomId) {
+      window.open(`/dataframe?name=${encodeURIComponent(inputFileName)}`, '_blank');
+    }
+  };
+  
   // Date range fetched from backend
   const [dateRange, setDateRange] = useState<{min: string|null; max: string|null; available: boolean}>({ min: null, max: null, available: false });
+  
+  // Data preview sorting and filtering state
+  const [previewSortColumn, setPreviewSortColumn] = useState<string>('');
+  const [previewSortDirection, setPreviewSortDirection] = useState<'asc' | 'desc'>('asc');
+  const [previewColumnFilters, setPreviewColumnFilters] = useState<{ [key: string]: string[] }>({});
+  
+  // Cardinality view state
+  const [cardinalityData, setCardinalityData] = useState<any[]>([]);
+  const [cardinalityLoading, setCardinalityLoading] = useState(false);
+  const [cardinalityError, setCardinalityError] = useState<string | null>(null);
+  const [sortColumn, setSortColumn] = useState<string>('unique_count');
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
+  const [columnFilters, setColumnFilters] = useState<{ [key: string]: string[] }>({});
   
   // Drag and drop state
   const [draggedIdentifier, setDraggedIdentifier] = useState<string | null>(null);
   const [dragOverIdentifier, setDragOverIdentifier] = useState<string | null>(null);
-
-  // Fetch column classifier configuration on mount
-  useEffect(() => {
-    const fetchConfig = async () => {
-      try {
-        const envStr = localStorage.getItem('env');
-        const env = envStr ? JSON.parse(envStr) : {};
-        const client = env.CLIENT_NAME || '';
-        const app = env.APP_NAME || '';
-        const project = env.PROJECT_NAME || '';
-        if (!client || !project) return;
-        const res = await fetch(
-          `${CLASSIFIER_API}/get_config?client_name=${encodeURIComponent(client)}&app_name=${encodeURIComponent(app)}&project_name=${encodeURIComponent(project)}`
-        );
-        if (res.ok) {
-          const json = await res.json();
-          const cfg = json.data || {};
-          const dimensions = cfg.dimensions || {};
-          const dimensionIdentifiers = Array.from(
-            new Set(
-              Object.entries(dimensions)
-                .filter(([k]) =>
-                  k.toLowerCase() !== 'unattributed' &&
-                  k.toLowerCase() !== 'unattributed_dimensions'
-                )
-                .flatMap(([, vals]) => (Array.isArray(vals) ? vals : []))
-                .filter((v): v is string => typeof v === 'string')
-            )
-          );
-          const measures = Array.isArray(cfg.measures) ? cfg.measures : [];
-          if (dimensionIdentifiers.length > 0) {
-            const update: Partial<ScopeSelectorData> = {
-              selectedIdentifiers: dimensionIdentifiers,
-              measures,
-            };
-            if (!data.scopes || data.scopes.length === 0) {
-              const newScope: ScopeData = {
-                id: Date.now().toString(),
-                name: 'Scope 1',
-                identifiers: Object.fromEntries(
-                  dimensionIdentifiers.map((id: string) => [id, ''])
-                ),
-                timeframe: {
-                  from: dateRange.available
-                    ? (dateRange.min ?? new Date().toISOString().split('T')[0])
-                    : new Date().toISOString().split('T')[0],
-                  to: dateRange.available
-                    ? (
-                        dateRange.max ??
-                        new Date(
-                          new Date().setFullYear(
-                            new Date().getFullYear() + 1
-                          )
-                        )
-                          .toISOString()
-                          .split('T')[0]
-                      )
-                    : new Date(
-                        new Date().setFullYear(
-                          new Date().getFullYear() + 1
-                        )
-                      )
-                        .toISOString()
-                        .split('T')[0],
-                },
-              };
-              update.scopes = [newScope];
-            }
-            onDataChange(update);
-            toast({ title: 'Column classifier configuration loaded' });
-          } else {
-            toast({ title: 'Column classifier configuration not found', variant: 'destructive' });
-          }
-        } else {
-          toast({ title: 'Column classifier configuration not found', variant: 'destructive' });
-        }
-      } catch (err) {
-        console.warn('column classifier config fetch failed', err);
-        toast({ title: 'Failed to fetch column classifier configuration', variant: 'destructive' });
-      }
-    };
-    if (!data.selectedIdentifiers?.length) {
-      fetchConfig();
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
   
   // Debug log
   useEffect(() => {
@@ -431,6 +386,13 @@ const ScopeSelectorCanvas: React.FC<ScopeSelectorCanvasProps> = ({ data, onDataC
     fetchRange();
     return () => controller.abort();
   // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data.dataSource]);
+
+  // Fetch cardinality data when data source changes
+  useEffect(() => {
+    if (data.dataSource) {
+      fetchCardinalityData();
+    }
   }, [data.dataSource]);
 
   // Combined effect to handle data source and identifier changes
@@ -747,6 +709,348 @@ const ScopeSelectorCanvas: React.FC<ScopeSelectorCanvasProps> = ({ data, onDataC
     return [];
   };
 
+  // Cardinality functions
+  const fetchCardinalityData = async () => {
+    if (!data.dataSource) return;
+    
+    setCardinalityLoading(true);
+    setCardinalityError(null);
+    
+    try {
+      const res = await fetch(
+        `${FEATURE_OVERVIEW_API}/column_summary?object_name=${encodeURIComponent(data.dataSource)}`
+      );
+      
+      if (!res.ok) {
+        setCardinalityError('Failed to fetch cardinality data');
+        return;
+      }
+      
+      const result = await res.json();
+      const summary = Array.isArray(result.summary) ? result.summary.filter(Boolean) : [];
+      
+      // Transform the data to match the expected format
+      const cardinalityData = summary.map((col: any) => ({
+        column: col.column,
+        data_type: col.data_type,
+        unique_count: col.unique_count,
+        unique_values: col.unique_values || []
+      }));
+      
+      setCardinalityData(cardinalityData);
+    } catch (e: any) {
+      setCardinalityError(e.message || 'Error fetching cardinality data');
+    } finally {
+      setCardinalityLoading(false);
+    }
+  };
+
+  const displayedCardinality = useMemo(() => {
+    let filtered = cardinalityData.filter(c => c.unique_count > 0);
+    
+    // Apply column filters
+    Object.entries(columnFilters).forEach(([column, filterValues]) => {
+      if (Array.isArray(filterValues) && filterValues.length > 0) {
+        filtered = filtered.filter(row => {
+          const cellValue = String(row[column] || '');
+          return filterValues.includes(cellValue);
+        });
+      }
+    });
+    
+    // Apply sorting
+    if (sortColumn) {
+      filtered = [...filtered].sort((a, b) => {
+        const aVal = a[sortColumn];
+        const bVal = b[sortColumn];
+        if (aVal === bVal) return 0;
+        let comparison = 0;
+        if (typeof aVal === 'number' && typeof bVal === 'number') {
+          comparison = aVal - bVal;
+        } else {
+          comparison = String(aVal).localeCompare(String(bVal));
+        }
+        return sortDirection === 'desc' ? -comparison : comparison;
+      });
+    }
+    
+    return filtered;
+  }, [cardinalityData, columnFilters, sortColumn, sortDirection]);
+
+  const getUniqueColumnValues = (column: string): string[] => {
+    if (!cardinalityData.length) return [];
+    
+    // Apply other active filters to get hierarchical filtering
+    const otherFilters = Object.entries(columnFilters).filter(([key]) => key !== column);
+    let dataToUse = cardinalityData;
+    
+    if (otherFilters.length > 0) {
+      dataToUse = cardinalityData.filter(item => {
+        return otherFilters.every(([filterColumn, filterValues]) => {
+          if (!Array.isArray(filterValues) || filterValues.length === 0) return true;
+          const cellValue = String(item[filterColumn] || '');
+          return filterValues.includes(cellValue);
+        });
+      });
+    }
+    
+    const values = dataToUse.map(item => String(item[column] || ''));
+    const uniqueValues = Array.from(new Set(values));
+    return uniqueValues.sort();
+  };
+
+  const handleSort = (column: string, direction?: 'asc' | 'desc') => {
+    if (sortColumn === column) {
+      if (sortDirection === 'asc') {
+        setSortDirection('desc');
+      } else if (sortDirection === 'desc') {
+        setSortColumn('');
+        setSortDirection('asc');
+      }
+    } else {
+      setSortColumn(column);
+      setSortDirection(direction || 'asc');
+    }
+  };
+
+  const handleColumnFilter = (column: string, values: string[]) => {
+    setColumnFilters(prev => ({
+      ...prev,
+      [column]: values
+    }));
+  };
+
+  const clearColumnFilter = (column: string) => {
+    setColumnFilters(prev => {
+      const cpy = { ...prev };
+      delete cpy[column];
+      return cpy;
+    });
+  };
+
+  const FilterMenu = ({ column }: { column: string }) => {
+    const uniqueValues = getUniqueColumnValues(column);
+    const current = columnFilters[column] || [];
+    const [temp, setTemp] = useState<string[]>(current);
+
+    const toggleVal = (val: string) => {
+      setTemp(prev => (prev.includes(val) ? prev.filter(v => v !== val) : [...prev, val]));
+    };
+
+    const selectAll = () => {
+      setTemp(temp.length === uniqueValues.length ? [] : uniqueValues);
+    };
+
+    const apply = () => handleColumnFilter(column, temp);
+
+    return (
+      <div className="w-64 max-h-80 overflow-y-auto">
+        <div className="p-2 border-b">
+          <div className="flex items-center space-x-2 mb-2">
+            <Checkbox checked={temp.length === uniqueValues.length} onCheckedChange={selectAll} />
+            <span className="text-sm font-medium">Select All</span>
+          </div>
+        </div>
+        <div className="p-2 space-y-1">
+          {uniqueValues.map((v, i) => (
+            <div key={i} className="flex items-center space-x-2">
+              <Checkbox checked={temp.includes(v)} onCheckedChange={() => toggleVal(v)} />
+              <span className="text-sm">{v}</span>
+            </div>
+          ))}
+        </div>
+        <div className="p-2 border-t flex space-x-2">
+          <Button size="sm" onClick={apply}>Apply</Button>
+          <Button size="sm" variant="outline" onClick={() => setTemp(current)}>
+            Cancel
+          </Button>
+        </div>
+      </div>
+    );
+  };
+
+  // Preview sorting and filtering functions
+  const displayedPreviewRows = useMemo(() => {
+    let filtered = [...previewRows];
+    
+    // Apply column filters
+    Object.entries(previewColumnFilters).forEach(([column, filterValues]) => {
+      if (Array.isArray(filterValues) && filterValues.length > 0) {
+        filtered = filtered.filter(row => {
+          let cellValue = '';
+          if (column === 'Scope') {
+            cellValue = `Scope ${data.scopes.findIndex(s => s.id === row.scopeId) + 1}`;
+          } else if (column === 'Row Count') {
+            cellValue = String(row.count);
+          } else if (data.selectedIdentifiers.includes(column)) {
+            cellValue = String(row.values[column] || '—');
+          } else if (column === 'Min Pts' && data.criteria?.minDatapointsEnabled) {
+            cellValue = row.count >= (data.criteria?.minDatapoints || 0) ? 'Pass' : 'Fail';
+          } else if (column === 'Pct Check' && data.criteria?.pct90Enabled) {
+            cellValue = row.pctPass ? 'Pass' : 'Fail';
+          }
+          return filterValues.includes(cellValue);
+        });
+      }
+    });
+    
+    // Apply sorting
+    if (previewSortColumn) {
+      filtered = [...filtered].sort((a, b) => {
+        let aVal: any = '';
+        let bVal: any = '';
+        
+        if (previewSortColumn === 'Scope') {
+          aVal = data.scopes.findIndex(s => s.id === a.scopeId);
+          bVal = data.scopes.findIndex(s => s.id === b.scopeId);
+        } else if (previewSortColumn === 'Row Count') {
+          aVal = a.count;
+          bVal = b.count;
+        } else if (data.selectedIdentifiers.includes(previewSortColumn)) {
+          aVal = a.values[previewSortColumn] || '—';
+          bVal = b.values[previewSortColumn] || '—';
+        } else if (previewSortColumn === 'Min Pts' && data.criteria?.minDatapointsEnabled) {
+          aVal = a.count >= (data.criteria?.minDatapoints || 0) ? 'Pass' : 'Fail';
+          bVal = b.count >= (data.criteria?.minDatapoints || 0) ? 'Pass' : 'Fail';
+        } else if (previewSortColumn === 'Pct Check' && data.criteria?.pct90Enabled) {
+          aVal = a.pctPass ? 'Pass' : 'Fail';
+          bVal = b.pctPass ? 'Pass' : 'Fail';
+        }
+        
+        if (aVal === bVal) return 0;
+        let comparison = 0;
+        if (typeof aVal === 'number' && typeof bVal === 'number') {
+          comparison = aVal - bVal;
+        } else {
+          comparison = String(aVal).localeCompare(String(bVal));
+        }
+        return previewSortDirection === 'desc' ? -comparison : comparison;
+      });
+    }
+    
+    return filtered;
+  }, [previewRows, previewColumnFilters, previewSortColumn, previewSortDirection, data.scopes, data.selectedIdentifiers, data.criteria]);
+
+  const getPreviewUniqueColumnValues = (column: string): string[] => {
+    if (!previewRows.length) return [];
+    
+    // Apply other active filters to get hierarchical filtering
+    const otherFilters = Object.entries(previewColumnFilters).filter(([key]) => key !== column);
+    let dataToUse = previewRows;
+    
+    if (otherFilters.length > 0) {
+      dataToUse = previewRows.filter(row => {
+        return otherFilters.every(([filterColumn, filterValues]) => {
+          if (!Array.isArray(filterValues) || filterValues.length === 0) return true;
+          let cellValue = '';
+          if (filterColumn === 'Scope') {
+            cellValue = `Scope ${data.scopes.findIndex(s => s.id === row.scopeId) + 1}`;
+          } else if (filterColumn === 'Row Count') {
+            cellValue = String(row.count);
+          } else if (data.selectedIdentifiers.includes(filterColumn)) {
+            cellValue = String(row.values[filterColumn] || '—');
+          } else if (filterColumn === 'Min Pts' && data.criteria?.minDatapointsEnabled) {
+            cellValue = row.count >= (data.criteria?.minDatapoints || 0) ? 'Pass' : 'Fail';
+          } else if (filterColumn === 'Pct Check' && data.criteria?.pct90Enabled) {
+            cellValue = row.pctPass ? 'Pass' : 'Fail';
+          }
+          return filterValues.includes(cellValue);
+        });
+      });
+    }
+    
+    const values: string[] = [];
+    dataToUse.forEach(row => {
+      let cellValue = '';
+      if (column === 'Scope') {
+        cellValue = `Scope ${data.scopes.findIndex(s => s.id === row.scopeId) + 1}`;
+      } else if (column === 'Row Count') {
+        cellValue = String(row.count);
+      } else if (data.selectedIdentifiers.includes(column)) {
+        cellValue = String(row.values[column] || '—');
+      } else if (column === 'Min Pts' && data.criteria?.minDatapointsEnabled) {
+        cellValue = row.count >= (data.criteria?.minDatapoints || 0) ? 'Pass' : 'Fail';
+      } else if (column === 'Pct Check' && data.criteria?.pct90Enabled) {
+        cellValue = row.pctPass ? 'Pass' : 'Fail';
+      }
+      if (cellValue && !values.includes(cellValue)) {
+        values.push(cellValue);
+      }
+    });
+    
+    return values.sort();
+  };
+
+  const handlePreviewSort = (column: string, direction?: 'asc' | 'desc') => {
+    if (previewSortColumn === column) {
+      if (previewSortDirection === 'asc') {
+        setPreviewSortDirection('desc');
+      } else if (previewSortDirection === 'desc') {
+        setPreviewSortColumn('');
+        setPreviewSortDirection('asc');
+      }
+    } else {
+      setPreviewSortColumn(column);
+      setPreviewSortDirection(direction || 'asc');
+    }
+  };
+
+  const handlePreviewColumnFilter = (column: string, values: string[]) => {
+    setPreviewColumnFilters(prev => ({
+      ...prev,
+      [column]: values
+    }));
+  };
+
+  const clearPreviewColumnFilter = (column: string) => {
+    setPreviewColumnFilters(prev => {
+      const cpy = { ...prev };
+      delete cpy[column];
+      return cpy;
+    });
+  };
+
+  const PreviewFilterMenu = ({ column }: { column: string }) => {
+    const uniqueValues = getPreviewUniqueColumnValues(column);
+    const current = previewColumnFilters[column] || [];
+    const [temp, setTemp] = useState<string[]>(current);
+
+    const toggleVal = (val: string) => {
+      setTemp(prev => (prev.includes(val) ? prev.filter(v => v !== val) : [...prev, val]));
+    };
+
+    const selectAll = () => {
+      setTemp(temp.length === uniqueValues.length ? [] : uniqueValues);
+    };
+
+    const apply = () => handlePreviewColumnFilter(column, temp);
+
+    return (
+      <div className="w-64 max-h-80 overflow-y-auto">
+        <div className="p-2 border-b">
+          <div className="flex items-center space-x-2 mb-2">
+            <Checkbox checked={temp.length === uniqueValues.length} onCheckedChange={selectAll} />
+            <span className="text-sm font-medium">Select All</span>
+          </div>
+        </div>
+        <div className="p-2 space-y-1">
+          {uniqueValues.map((v, i) => (
+            <div key={i} className="flex items-center space-x-2">
+              <Checkbox checked={temp.includes(v)} onCheckedChange={() => toggleVal(v)} />
+              <span className="text-sm">{v}</span>
+            </div>
+          ))}
+        </div>
+        <div className="p-2 border-t flex space-x-2">
+          <Button size="sm" onClick={apply}>Apply</Button>
+          <Button size="sm" variant="outline" onClick={() => setTemp(current)}>
+            Cancel
+          </Button>
+        </div>
+      </div>
+    );
+  };
+
   // Check if we have the required data - add debug logging
   const hasRequiredData = Boolean(data.dataSource && data.selectedIdentifiers?.length > 0);
   console.log('hasRequiredData check:', {
@@ -821,6 +1125,218 @@ const ScopeSelectorCanvas: React.FC<ScopeSelectorCanvasProps> = ({ data, onDataC
       )}
 
       <div className="p-4 space-y-6">
+        {/* Cardinality View */}
+        {data.dataSource && (
+          <div className="space-y-4">
+            {cardinalityLoading && (
+              <div className="flex items-center justify-center p-8">
+                <div className="text-center">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-green-500 mx-auto mb-2"></div>
+                  <span className="text-green-600">Loading cardinality data...</span>
+                </div>
+              </div>
+            )}
+            
+            {cardinalityError && (
+              <div className="p-4 bg-red-50 border border-red-200 rounded-md">
+                <p className="text-red-600 text-sm">Error loading cardinality data: {cardinalityError}</p>
+              </div>
+            )}
+            
+            {!cardinalityLoading && !cardinalityError && displayedCardinality.length > 0 && (
+              <Table
+                headers={[
+                  <ContextMenu key="Column">
+                    <ContextMenuTrigger asChild>
+                      <div className="flex items-center gap-1 cursor-pointer">
+                        Column
+                        {sortColumn === 'column' && (
+                          sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />
+                        )}
+                      </div>
+                    </ContextMenuTrigger>
+                    <ContextMenuContent className="w-48 bg-white border border-gray-200 shadow-lg rounded-md">
+                      <ContextMenuSub>
+                        <ContextMenuSubTrigger className="flex items-center">
+                          <ArrowUp className="w-4 h-4 mr-2" /> Sort
+                        </ContextMenuSubTrigger>
+                        <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md">
+                          <ContextMenuItem onClick={() => handleSort('column', 'asc')}>
+                            <ArrowUp className="w-4 h-4 mr-2" /> Ascending
+                          </ContextMenuItem>
+                          <ContextMenuItem onClick={() => handleSort('column', 'desc')}>
+                            <ArrowDown className="w-4 h-4 mr-2" /> Descending
+                          </ContextMenuItem>
+                        </ContextMenuSubContent>
+                      </ContextMenuSub>
+                      <ContextMenuSeparator />
+                      <ContextMenuSub>
+                        <ContextMenuSubTrigger className="flex items-center">
+                          <FilterIcon className="w-4 h-4 mr-2" /> Filter
+                        </ContextMenuSubTrigger>
+                        <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md p-0">
+                          <FilterMenu column="column" />
+                        </ContextMenuSubContent>
+                      </ContextMenuSub>
+                      {columnFilters['column']?.length > 0 && (
+                        <>
+                          <ContextMenuSeparator />
+                          <ContextMenuItem onClick={() => clearColumnFilter('column')}>
+                            Clear Filter
+                          </ContextMenuItem>
+                        </>
+                      )}
+                    </ContextMenuContent>
+                  </ContextMenu>,
+                  <ContextMenu key="Data type">
+                    <ContextMenuTrigger asChild>
+                      <div className="flex items-center gap-1 cursor-pointer">
+                        Data type
+                        {sortColumn === 'data_type' && (
+                          sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />
+                        )}
+                      </div>
+                    </ContextMenuTrigger>
+                    <ContextMenuContent className="w-48 bg-white border border-gray-200 shadow-lg rounded-md">
+                      <ContextMenuSub>
+                        <ContextMenuSubTrigger className="flex items-center">
+                          <ArrowUp className="w-4 h-4 mr-2" /> Sort
+                        </ContextMenuSubTrigger>
+                        <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md">
+                          <ContextMenuItem onClick={() => handleSort('data_type', 'asc')}>
+                            <ArrowUp className="w-4 h-4 mr-2" /> Ascending
+                          </ContextMenuItem>
+                          <ContextMenuItem onClick={() => handleSort('data_type', 'desc')}>
+                            <ArrowDown className="w-4 h-4 mr-2" /> Descending
+                          </ContextMenuItem>
+                        </ContextMenuSubContent>
+                      </ContextMenuSub>
+                      <ContextMenuSeparator />
+                      <ContextMenuSub>
+                        <ContextMenuSubTrigger className="flex items-center">
+                          <FilterIcon className="w-4 h-4 mr-2" /> Filter
+                        </ContextMenuSubTrigger>
+                        <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md p-0">
+                          <FilterMenu column="data_type" />
+                        </ContextMenuSubContent>
+                      </ContextMenuSub>
+                      {columnFilters['data_type']?.length > 0 && (
+                        <>
+                          <ContextMenuSeparator />
+                          <ContextMenuItem onClick={() => clearColumnFilter('data_type')}>
+                            Clear Filter
+                          </ContextMenuItem>
+                        </>
+                      )}
+                    </ContextMenuContent>
+                  </ContextMenu>,
+                  <ContextMenu key="Unique count">
+                    <ContextMenuTrigger asChild>
+                      <div className="flex items-center gap-1 cursor-pointer">
+                        Unique count
+                        {sortColumn === 'unique_count' && (
+                          sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />
+                        )}
+                      </div>
+                    </ContextMenuTrigger>
+                    <ContextMenuContent className="w-48 bg-white border border-gray-200 shadow-lg rounded-md">
+                      <ContextMenuSub>
+                        <ContextMenuSubTrigger className="flex items-center">
+                          <ArrowUp className="w-4 h-4 mr-2" /> Sort
+                        </ContextMenuSubTrigger>
+                        <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md">
+                          <ContextMenuItem onClick={() => handleSort('unique_count', 'asc')}>
+                            <ArrowUp className="w-4 h-4 mr-2" /> Ascending
+                          </ContextMenuItem>
+                          <ContextMenuItem onClick={() => handleSort('unique_count', 'desc')}>
+                            <ArrowDown className="w-4 h-4 mr-2" /> Descending
+                          </ContextMenuItem>
+                        </ContextMenuSubContent>
+                      </ContextMenuSub>
+                      <ContextMenuSeparator />
+                      <ContextMenuSub>
+                        <ContextMenuSubTrigger className="flex items-center">
+                          <FilterIcon className="w-4 h-4 mr-2" /> Filter
+                        </ContextMenuSubTrigger>
+                        <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md p-0">
+                          <FilterMenu column="unique_count" />
+                        </ContextMenuSubContent>
+                      </ContextMenuSub>
+                      {columnFilters['unique_count']?.length > 0 && (
+                        <>
+                          <ContextMenuSeparator />
+                          <ContextMenuItem onClick={() => clearColumnFilter('unique_count')}>
+                            Clear Filter
+                          </ContextMenuItem>
+                        </>
+                      )}
+                    </ContextMenuContent>
+                  </ContextMenu>,
+                  "Sample values"
+                ]}
+                colClasses={["w-[30%]", "w-[20%]", "w-[15%]", "w-[35%]"]}
+                bodyClassName="max-h-[484px] overflow-y-auto"
+                defaultMinimized={true}
+                borderColor={`border-${scopeSelector.color.replace('bg-', '')}`}
+                customHeader={{
+                  title: "Cardinality View",
+                  subtitle: "Click Here to View Data",
+                  subtitleClickable: !!inputFileName && !!atomId,
+                  onSubtitleClick: handleViewDataClick
+                }}
+              >
+                {displayedCardinality.map((col, index) => (
+                  <tr key={index} className="table-row">
+                    <td className="table-cell">{col.column || col.Column || ''}</td>
+                    <td className="table-cell">{col.data_type || col['Data type'] || ''}</td>
+                    <td className="table-cell">{col.unique_count || col['Unique count'] || 0}</td>
+                    <td className="table-cell">
+                      {col.unique_values ? (
+                        <div className="flex flex-wrap items-center gap-1">
+                          {Array.isArray(col.unique_values) ? (
+                            <>
+                              {col.unique_values.slice(0, 2).map((val: any, i: number) => (
+                                <span
+                                  key={i}
+                                  className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-gray-50 text-slate-700 border border-gray-200"
+                                >
+                                  {String(val)}
+                                </span>
+                              ))}
+                              {col.unique_values.length > 2 && (
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <span className="flex items-center gap-0.5 text-xs text-slate-600 font-medium cursor-pointer">
+                                      <Plus className="w-3 h-3" />
+                                      {col.unique_values.length - 2}
+                                    </span>
+                                  </TooltipTrigger>
+                                  <TooltipContent className="text-xs max-w-xs whitespace-pre-wrap">
+                                    {col.unique_values
+                                      .slice(2)
+                                      .map(val => String(val))
+                                      .join(', ')}
+                                  </TooltipContent>
+                                </Tooltip>
+                              )}
+                            </>
+                          ) : (
+                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-gray-50 text-slate-700 border border-gray-200">
+                              {String(col.unique_values)}
+                            </span>
+                          )}
+                        </div>
+                      ) : (
+                        <span className="text-gray-500 italic">No samples</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </Table>
+            )}
+          </div>
+        )}
+
         {data.scopes.map((scope, index) => (
           <Card key={scope.id} className="group relative bg-gradient-to-br from-white to-blue-50/50 border-2 border-blue-200/50 shadow-lg hover:shadow-2xl hover:border-blue-300 transition-all duration-300 transform hover:-translate-y-1">
 
@@ -1024,152 +1540,314 @@ const ScopeSelectorCanvas: React.FC<ScopeSelectorCanvasProps> = ({ data, onDataC
         </div>
 
         {/* Preview Section */}
-        
         {previewRows.length > 0 && (
-          <div className="mt-8 bg-gradient-to-br from-white via-blue-50/30 to-indigo-50/30 rounded-xl shadow-lg border border-blue-200/50 overflow-hidden">
-            <div className="bg-gradient-to-r from-blue-600 to-indigo-600 px-6 py-4">
-              <div className="flex items-center gap-3">
-                {/* <div className="w-8 h-8 bg-white/20 rounded-lg flex items-center justify-center">
-                  <BarChart3 className="w-4 h-4 text-white" />
-                </div> */}
-                <div>
-                  <h3 className="text-lg font-bold text-white">Data Preview</h3>
-                  {/* <p className="text-blue-100 text-sm">Preview of generated scope combinations and their row counts</p> */}
-                </div>
-              </div>
-            </div>
-            
-            <div className="p-6">
-              <div className="max-h-80 overflow-auto rounded-xl border border-blue-200/50 shadow-inner bg-white/50 backdrop-blur-sm">
-                <table className="min-w-full divide-y divide-blue-200/50 text-sm">
-                  <thead className="bg-gradient-to-r from-blue-50 via-indigo-50 to-purple-50 sticky top-0 z-20">
-                    <tr>
-                                             <th className="sticky left-0 top-0 z-30 px-6 py-4 text-left text-xs font-bold text-blue-700 uppercase tracking-wider bg-gradient-to-r from-blue-50 to-indigo-50 border-r border-blue-200/50">
-                        <div className="flex items-center gap-2">
-                          Scope
-                        </div>
-                      </th>
-                      {data.selectedIdentifiers.map(id => (
-                        <th key={id} className="sticky top-0 z-25 px-6 py-4 text-left text-xs font-bold text-blue-700 uppercase tracking-wider bg-gradient-to-r from-blue-50 to-indigo-50">
-                          <div className="flex items-center gap-2">
-                            {id}
-                          </div>
-                        </th>
-                      ))}
-                      {data.criteria?.minDatapointsEnabled && (
-                        <th className="sticky top-0 z-25 px-6 py-4 text-center text-xs font-bold text-blue-700 uppercase tracking-wider bg-gradient-to-r from-blue-50 to-indigo-50">
-                          <div className="flex items-center justify-center gap-2">
-                            {/* <div className="w-2 h-2 bg-amber-500 rounded-full"></div> */}
-                            Min Pts
-                          </div>
-                        </th>
+                      <div className="mt-8">
+              <Table
+                headers={[
+                  <ContextMenu key="Scope">
+                    <ContextMenuTrigger asChild>
+                      <div className="flex items-center gap-1 cursor-pointer">
+                        Scope
+                        {previewSortColumn === 'Scope' && (
+                          previewSortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />
+                        )}
+                      </div>
+                    </ContextMenuTrigger>
+                    <ContextMenuContent className="w-48 bg-white border border-gray-200 shadow-lg rounded-md">
+                      <ContextMenuSub>
+                        <ContextMenuSubTrigger className="flex items-center">
+                          <ArrowUp className="w-4 h-4 mr-2" /> Sort
+                        </ContextMenuSubTrigger>
+                        <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md">
+                          <ContextMenuItem onClick={() => handlePreviewSort('Scope', 'asc')}>
+                            <ArrowUp className="w-4 h-4 mr-2" /> Ascending
+                          </ContextMenuItem>
+                          <ContextMenuItem onClick={() => handlePreviewSort('Scope', 'desc')}>
+                            <ArrowDown className="w-4 h-4 mr-2" /> Descending
+                          </ContextMenuItem>
+                        </ContextMenuSubContent>
+                      </ContextMenuSub>
+                      <ContextMenuSeparator />
+                      <ContextMenuSub>
+                        <ContextMenuSubTrigger className="flex items-center">
+                          <FilterIcon className="w-4 h-4 mr-2" /> Filter
+                        </ContextMenuSubTrigger>
+                        <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md p-0">
+                          <PreviewFilterMenu column="Scope" />
+                        </ContextMenuSubContent>
+                      </ContextMenuSub>
+                      {previewColumnFilters['Scope']?.length > 0 && (
+                        <>
+                          <ContextMenuSeparator />
+                          <ContextMenuItem onClick={() => clearPreviewColumnFilter('Scope')}>
+                            Clear Filter
+                          </ContextMenuItem>
+                        </>
                       )}
-                      {data.criteria?.pct90Enabled && (
-                        <th className="sticky top-0 z-25 px-6 py-4 text-center text-xs font-bold text-blue-700 uppercase tracking-wider bg-gradient-to-r from-blue-50 to-indigo-50">
-                          <div className="flex items-center justify-center gap-2">
-                            Pct Check
-                          </div>
-                        </th>
-                      )}
-                      <th className="sticky top-0 z-25 px-6 py-4 text-right text-xs font-bold text-blue-700 uppercase tracking-wider bg-gradient-to-r from-blue-50 to-indigo-50">
-                        <div className="flex items-center justify-end gap-2">
-                          {/* <div className="w-2 h-2 bg-emerald-500 rounded-full"></div> */}
-                          Row Count
+                    </ContextMenuContent>
+                  </ContextMenu>,
+                  ...data.selectedIdentifiers.map(id => (
+                    <ContextMenu key={id}>
+                      <ContextMenuTrigger asChild>
+                        <div className="flex items-center gap-1 cursor-pointer">
+                          {id}
+                          {previewSortColumn === id && (
+                            previewSortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />
+                          )}
                         </div>
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody className="bg-white/70 divide-y divide-blue-100/50">
-                    {previewRows.map((row, index) => (
-                      <tr 
-                        key={index} 
-                        className={
-                          row.count === 0
-                            ? 'bg-gradient-to-r from-red-50 to-red-100/50 hover:from-red-100 hover:to-red-200/50'
-                            : (data.criteria?.minDatapointsEnabled && row.count < (data.criteria?.minDatapoints || 0))
-                              ? 'bg-gradient-to-r from-amber-50 to-yellow-100/50 hover:from-amber-100 hover:to-yellow-200/50'
-                              : (data.criteria?.pct90Enabled && !row.pctPass)
-                                ? 'bg-gradient-to-r from-red-50 to-red-100/50 hover:from-red-100 hover:to-red-200/50'
-                                : 'bg-gradient-to-r from-white to-blue-50/30 hover:from-blue-50 hover:to-indigo-50/30'
-                        }
-                      >
-                        <td className="sticky left-0 z-10 px-6 py-4 whitespace-nowrap text-sm font-bold text-gray-900 bg-gradient-to-r from-blue-50 to-indigo-50 border-r border-blue-200/50">
-                          <div className="flex items-center gap-3">
-                            <div className={`w-3 h-3 rounded-full ${
-                              row.count === 0
-                                ? 'bg-red-500'
-                                : (data.criteria?.minDatapointsEnabled && row.count < (data.criteria?.minDatapoints || 0))
-                                  ? 'bg-red-500'
-                                  : (data.criteria?.pct90Enabled && row.pctPass === false)
-                                    ? 'bg-red-500'
-                                    : 'bg-blue-500'
-                            }`}></div>
-                            <span className="bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">
-                              {`Scope ${data.scopes.findIndex(s=>s.id===row.scopeId)+1}`}
-                            </span>
-                          </div>
-                        </td>
-                        {data.selectedIdentifiers.map(id => (
-                          <td key={`${row.scopeId}-${id}`} className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
-                            <span className="inline-flex items-center px-3 py-1.5 bg-gradient-to-r from-blue-100 to-indigo-100 text-blue-800 rounded-full text-xs font-medium shadow-sm border border-blue-200/50">
-                              {row.values[id as string] || '—'}
-                            </span>
-                          </td>
-                        ))}
+                      </ContextMenuTrigger>
+                      <ContextMenuContent className="w-48 bg-white border border-gray-200 shadow-lg rounded-md">
+                        <ContextMenuSub>
+                          <ContextMenuSubTrigger className="flex items-center">
+                            <ArrowUp className="w-4 h-4 mr-2" /> Sort
+                          </ContextMenuSubTrigger>
+                          <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md">
+                            <ContextMenuItem onClick={() => handlePreviewSort(id, 'asc')}>
+                              <ArrowUp className="w-4 h-4 mr-2" /> Ascending
+                            </ContextMenuItem>
+                            <ContextMenuItem onClick={() => handlePreviewSort(id, 'desc')}>
+                              <ArrowDown className="w-4 h-4 mr-2" /> Descending
+                            </ContextMenuItem>
+                          </ContextMenuSubContent>
+                        </ContextMenuSub>
+                        <ContextMenuSeparator />
+                        <ContextMenuSub>
+                          <ContextMenuSubTrigger className="flex items-center">
+                            <FilterIcon className="w-4 h-4 mr-2" /> Filter
+                          </ContextMenuSubTrigger>
+                          <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md p-0">
+                            <PreviewFilterMenu column={id} />
+                          </ContextMenuSubContent>
+                        </ContextMenuSub>
+                        {previewColumnFilters[id]?.length > 0 && (
+                          <>
+                            <ContextMenuSeparator />
+                            <ContextMenuItem onClick={() => clearPreviewColumnFilter(id)}>
+                              Clear Filter
+                            </ContextMenuItem>
+                          </>
+                        )}
+                      </ContextMenuContent>
+                    </ContextMenu>
+                  )),
+                  ...(data.criteria?.minDatapointsEnabled ? [
+                    <ContextMenu key="Min Pts">
+                      <ContextMenuTrigger asChild>
+                        <div className="flex items-center gap-1 cursor-pointer">
+                          Min Pts
+                          {previewSortColumn === 'Min Pts' && (
+                            previewSortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />
+                          )}
+                        </div>
+                      </ContextMenuTrigger>
+                      <ContextMenuContent className="w-48 bg-white border border-gray-200 shadow-lg rounded-md">
+                        <ContextMenuSub>
+                          <ContextMenuSubTrigger className="flex items-center">
+                            <ArrowUp className="w-4 h-4 mr-2" /> Sort
+                          </ContextMenuSubTrigger>
+                          <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md">
+                            <ContextMenuItem onClick={() => handlePreviewSort('Min Pts', 'asc')}>
+                              <ArrowUp className="w-4 h-4 mr-2" /> Ascending
+                            </ContextMenuItem>
+                            <ContextMenuItem onClick={() => handlePreviewSort('Min Pts', 'desc')}>
+                              <ArrowDown className="w-4 h-4 mr-2" /> Descending
+                            </ContextMenuItem>
+                          </ContextMenuSubContent>
+                        </ContextMenuSub>
+                        <ContextMenuSeparator />
+                        <ContextMenuSub>
+                          <ContextMenuSubTrigger className="flex items-center">
+                            <FilterIcon className="w-4 h-4 mr-2" /> Filter
+                          </ContextMenuSubTrigger>
+                          <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md p-0">
+                            <PreviewFilterMenu column="Min Pts" />
+                          </ContextMenuSubContent>
+                        </ContextMenuSub>
+                        {previewColumnFilters['Min Pts']?.length > 0 && (
+                          <>
+                            <ContextMenuSeparator />
+                            <ContextMenuItem onClick={() => clearPreviewColumnFilter('Min Pts')}>
+                              Clear Filter
+                            </ContextMenuItem>
+                          </>
+                        )}
+                      </ContextMenuContent>
+                    </ContextMenu>
+                  ] : []),
+                  ...(data.criteria?.pct90Enabled ? [
+                    <ContextMenu key="Pct Check">
+                      <ContextMenuTrigger asChild>
+                        <div className="flex items-center gap-1 cursor-pointer">
+                          Pct Check
+                          {previewSortColumn === 'Pct Check' && (
+                            previewSortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />
+                          )}
+                        </div>
+                      </ContextMenuTrigger>
+                      <ContextMenuContent className="w-48 bg-white border border-gray-200 shadow-lg rounded-md">
+                        <ContextMenuSub>
+                          <ContextMenuSubTrigger className="flex items-center">
+                            <ArrowUp className="w-4 h-4 mr-2" /> Sort
+                          </ContextMenuSubTrigger>
+                          <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md">
+                            <ContextMenuItem onClick={() => handlePreviewSort('Pct Check', 'asc')}>
+                              <ArrowUp className="w-4 h-4 mr-2" /> Ascending
+                            </ContextMenuItem>
+                            <ContextMenuItem onClick={() => handlePreviewSort('Pct Check', 'desc')}>
+                              <ArrowDown className="w-4 h-4 mr-2" /> Descending
+                            </ContextMenuItem>
+                          </ContextMenuSubContent>
+                        </ContextMenuSub>
+                        <ContextMenuSeparator />
+                        <ContextMenuSub>
+                          <ContextMenuSubTrigger className="flex items-center">
+                            <FilterIcon className="w-4 h-4 mr-2" /> Filter
+                          </ContextMenuSubTrigger>
+                          <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md p-0">
+                            <PreviewFilterMenu column="Pct Check" />
+                          </ContextMenuSubContent>
+                        </ContextMenuSub>
+                        {previewColumnFilters['Pct Check']?.length > 0 && (
+                          <>
+                            <ContextMenuSeparator />
+                            <ContextMenuItem onClick={() => clearPreviewColumnFilter('Pct Check')}>
+                              Clear Filter
+                            </ContextMenuItem>
+                          </>
+                        )}
+                      </ContextMenuContent>
+                    </ContextMenu>
+                  ] : []),
+                  <ContextMenu key="Row Count">
+                    <ContextMenuTrigger asChild>
+                      <div className="flex items-center gap-1 cursor-pointer">
+                        Row Count
+                        {previewSortColumn === 'Row Count' && (
+                          previewSortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />
+                        )}
+                      </div>
+                    </ContextMenuTrigger>
+                    <ContextMenuContent className="w-48 bg-white border border-gray-200 shadow-lg rounded-md">
+                      <ContextMenuSub>
+                        <ContextMenuSubTrigger className="flex items-center">
+                          <ArrowUp className="w-4 h-4 mr-2" /> Sort
+                        </ContextMenuSubTrigger>
+                        <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md">
+                          <ContextMenuItem onClick={() => handlePreviewSort('Row Count', 'asc')}>
+                            <ArrowUp className="w-4 h-4 mr-2" /> Ascending
+                          </ContextMenuItem>
+                          <ContextMenuItem onClick={() => handlePreviewSort('Row Count', 'desc')}>
+                            <ArrowDown className="w-4 h-4 mr-2" /> Descending
+                          </ContextMenuItem>
+                        </ContextMenuSubContent>
+                      </ContextMenuSub>
+                      <ContextMenuSeparator />
+                      <ContextMenuSub>
+                        <ContextMenuSubTrigger className="flex items-center">
+                          <FilterIcon className="w-4 h-4 mr-2" /> Filter
+                        </ContextMenuSubTrigger>
+                        <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md p-0">
+                          <PreviewFilterMenu column="Row Count" />
+                        </ContextMenuSubContent>
+                      </ContextMenuSub>
+                      {previewColumnFilters['Row Count']?.length > 0 && (
+                        <>
+                          <ContextMenuSeparator />
+                          <ContextMenuItem onClick={() => clearPreviewColumnFilter('Row Count')}>
+                            Clear Filter
+                          </ContextMenuItem>
+                        </>
+                      )}
+                    </ContextMenuContent>
+                  </ContextMenu>
+                ]}
+                colClasses={[
+                  "w-[15%]",
+                  ...data.selectedIdentifiers.map(() => "w-[12%]"),
+                  ...(data.criteria?.minDatapointsEnabled ? ["w-[10%]"] : []),
+                  ...(data.criteria?.pct90Enabled ? ["w-[10%]"] : []),
+                  "w-[15%]"
+                ]}
+                bodyClassName="max-h-80 overflow-y-auto"
+                borderColor={`border-${scopeSelector.color.replace('bg-', '')}`}
+                customHeader={{
+                  title: "Data Preview"
+                }}
+              >
+                {displayedPreviewRows.map((row, index) => (
+                <tr key={index}>
+                  <td className="table-cell">
+                    <div className="flex items-center gap-3">
+                      <div className={`w-3 h-3 rounded-full ${
+                        row.count === 0
+                          ? 'bg-red-500'
+                          : (data.criteria?.minDatapointsEnabled && row.count < (data.criteria?.minDatapoints || 0))
+                            ? 'bg-red-500'
+                            : (data.criteria?.pct90Enabled && row.pctPass === false)
+                              ? 'bg-red-500'
+                              : 'bg-blue-500'
+                      }`}></div>
+                      <span className="bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent font-bold">
+                        {`Scope ${data.scopes.findIndex(s=>s.id===row.scopeId)+1}`}
+                      </span>
+                    </div>
+                  </td>
+                  {data.selectedIdentifiers.map(id => (
+                    <td key={`${row.scopeId}-${id}`} className="table-cell">
+                      {row.values[id as string] || '—'}
+                    </td>
+                  ))}
 
-                        {data.criteria?.minDatapointsEnabled && (
-                          <td className="px-6 py-4 whitespace-nowrap text-center text-sm">
-                            {row.count >= (data.criteria?.minDatapoints || 0) ? (
-                              <div className="inline-flex items-center justify-center w-8 h-8 bg-gradient-to-r from-green-100 to-emerald-100 rounded-full border border-green-200">
-                                <Check className="w-4 h-4 text-green-600" />
-                              </div>
-                            ) : (
-                              <div className="inline-flex items-center justify-center w-8 h-8 bg-gradient-to-r from-red-100 to-pink-100 rounded-full border border-red-200">
-                                <X className="w-4 h-4 text-red-600" />
-                              </div>
-                            )}
-                          </td>
-                        )}
-                        {data.criteria?.pct90Enabled && (
-                          <td className="px-6 py-4 whitespace-nowrap text-center text-sm">
-                            {row.pctPass ? (
-                              <div className="inline-flex items-center justify-center w-8 h-8 bg-gradient-to-r from-green-100 to-emerald-100 rounded-full border border-green-200">
-                                <Check className="w-4 h-4 text-green-600" />
-                              </div>
-                            ) : (
-                              <div className="inline-flex items-center justify-center w-8 h-8 bg-gradient-to-r from-red-100 to-pink-100 rounded-full border border-red-200">
-                                <X className="w-4 h-4 text-red-600" />
-                              </div>
-                            )}
-                          </td>
-                        )}
-                        <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-bold text-gray-900">
-                          <span className={`inline-flex items-center px-3 py-1.5 rounded-full text-xs font-bold shadow-sm border ${
-                            row.count === 0 
-                              ? 'bg-gradient-to-r from-red-100 to-pink-100 text-red-800 border-red-200' 
-                              : (() => {
-                                  // Check if all criteria are met
-                                  const minDatapointsMet = !data.criteria?.minDatapointsEnabled || row.count >= (data.criteria?.minDatapoints || 0);
-                                  const pctCheckMet = !data.criteria?.pct90Enabled || row.pctPass;
-                                  
-                                  if (minDatapointsMet && pctCheckMet) {
-                                    return 'bg-gradient-to-r from-green-100 to-emerald-100 text-green-800 border-green-200';
-                                  } else if (row.count < 100) {
-                                    return 'bg-gradient-to-r from-amber-100 to-yellow-100 text-amber-800 border-amber-200';
-                                  } else {
-                                    return 'bg-gradient-to-r from-blue-100 to-indigo-100 text-blue-800 border-blue-200';
-                                  }
-                                })()
-                          }`}>
-                            {row.count.toLocaleString()}
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
+                  {data.criteria?.minDatapointsEnabled && (
+                    <td className="table-cell text-center">
+                      {row.count >= (data.criteria?.minDatapoints || 0) ? (
+                        <div className="inline-flex items-center justify-center w-8 h-8 bg-gradient-to-r from-green-100 to-emerald-100 rounded-full border border-green-200">
+                          <Check className="w-4 h-4 text-green-600" />
+                        </div>
+                      ) : (
+                        <div className="inline-flex items-center justify-center w-8 h-8 bg-gradient-to-r from-red-100 to-pink-100 rounded-full border border-red-200">
+                          <X className="w-4 h-4 text-red-600" />
+                        </div>
+                      )}
+                    </td>
+                  )}
+                  {data.criteria?.pct90Enabled && (
+                    <td className="table-cell text-center">
+                      {row.pctPass ? (
+                        <div className="inline-flex items-center justify-center w-8 h-8 bg-gradient-to-r from-green-100 to-emerald-100 rounded-full border border-green-200">
+                          <Check className="w-4 h-4 text-green-600" />
+                        </div>
+                      ) : (
+                        <div className="inline-flex items-center justify-center w-8 h-8 bg-gradient-to-r from-red-100 to-pink-100 rounded-full border border-red-200">
+                          <X className="w-4 h-4 text-red-600" />
+                        </div>
+                      )}
+                    </td>
+                  )}
+                  <td className="table-cell text-right">
+                    <span className={`inline-flex items-center px-3 py-1.5 rounded-full text-xs font-bold shadow-sm border ${
+                      row.count === 0 
+                        ? 'bg-gradient-to-r from-red-100 to-pink-100 text-red-800 border-red-200' 
+                        : (() => {
+                            // Check if all criteria are met
+                            const minDatapointsMet = !data.criteria?.minDatapointsEnabled || row.count >= (data.criteria?.minDatapoints || 0);
+                            const pctCheckMet = !data.criteria?.pct90Enabled || row.pctPass;
+                            
+                            if (minDatapointsMet && pctCheckMet) {
+                              return 'bg-gradient-to-r from-green-100 to-emerald-100 text-green-800 border-green-200';
+                            } else if (row.count < 100) {
+                              return 'bg-gradient-to-r from-amber-100 to-yellow-100 text-amber-800 border-amber-200';
+                            } else {
+                              return 'bg-gradient-to-r from-blue-100 to-indigo-100 text-blue-800 border-blue-200';
+                            }
+                          })()
+                    }`}>
+                      {row.count.toLocaleString()}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </Table>
           </div>
         )}
 

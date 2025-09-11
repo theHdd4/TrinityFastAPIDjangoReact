@@ -1,17 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Card, CardContent } from '@/components/ui/card';
 import DataFrameOperationsCanvas from './components/DataFrameOperationsCanvas';
-import DataFrameOperationsSettings from './components/DataFrameOperationsSettings';
-import DataFrameOperationsVisualisation from './components/DataFrameOperationsVisualisation';
-import DataFrameOperationsExhibition from './components/DataFrameOperationsExhibition';
-import {
-  useLaboratoryStore,
-  DEFAULT_FEATURE_OVERVIEW_SETTINGS,
-} from '@/components/LaboratoryMode/store/laboratoryStore';
-import { Button } from '@/components/ui/button';
+import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 import ErrorBoundary from '@/components/ErrorBoundary';
 import { loadDataframeByKey } from './services/dataframeOperationsApi';
+import { Table } from 'lucide-react';
 
 export interface DataFrameRow {
   [key: string]: string | number | null;
@@ -196,12 +188,31 @@ const DataFrameOperationsAtom: React.FC<Props> = ({ atomId }) => {
               )}
             </div>
           ) : (
-            <div className="p-4 w-full h-full flex items-center justify-center">
-              <Card>
-                <CardContent className="p-4">
-                  <p className="text-gray-500">No DataFrame available. Upload a CSV or Excel file to see results here.</p>
-                </CardContent>
-              </Card>
+            <div className="w-full h-full p-6 bg-gradient-to-br from-slate-50 via-green-50/30 to-green-50/50 overflow-y-auto relative">
+              <div className="absolute inset-0 opacity-20">
+                <svg width="80" height="80" viewBox="0 0 80 80" className="absolute inset-0 w-full h-full">
+                  <defs>
+                    <pattern id="emptyGrid" width="80" height="80" patternUnits="userSpaceOnUse">
+                      <path d="M 80 0 L 0 0 0 80" fill="none" stroke="rgb(148 163 184 / 0.15)" strokeWidth="1"/>
+                    </pattern>
+                  </defs>
+                  <rect width="100%" height="100%" fill="url(#emptyGrid)" />
+                </svg>
+              </div>
+
+              <div className="relative z-10 flex items-center justify-center h-full">
+                <div className="text-center max-w-md">
+                  <div className="w-24 h-24 mx-auto mb-8 rounded-2xl bg-gradient-to-br from-green-500 to-green-600 flex items-center justify-center shadow-2xl transform rotate-3 hover:rotate-0 transition-transform duration-300">
+                    <Table className="w-12 h-12 text-white drop-shadow-lg" />
+                  </div>
+                  <h3 className="text-3xl font-bold text-gray-900 mb-3 bg-gradient-to-r from-green-500 to-green-600 bg-clip-text text-transparent">
+                    DataFrame Operations
+                  </h3>
+                  <p className="text-gray-600 mb-6 text-lg font-medium leading-relaxed">
+                    Select a dataframe from the properties panel to get started
+                  </p>
+                </div>
+              </div>
             </div>
           )}
         </div>

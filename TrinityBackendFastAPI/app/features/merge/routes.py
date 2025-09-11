@@ -386,4 +386,66 @@ async def get_merged_data(
 
     except Exception as e:
         raise HTTPException(status_code=404, detail=f"Unable to fetch merged data: {str(e)}")
+
+
+@router.post("/cardinality")
+async def get_merge_cardinality_data(
+    validator_atom_id: str = Form(...),
+    file_key: str = Form(...),
+    bucket_name: str = Form(...),
+    object_names: str = Form(...),
+    source_type: str = Form(...)  # "primary" or "secondary"
+):
+    """Return cardinality data for columns in the primary or secondary dataset."""
+    try:
+        # Get the current object prefix
+        prefix = await get_object_prefix()
+        
+        # Construct the full object path
+        full_object_path = f"{prefix}{object_names}" if not object_names.startswith(prefix) else object_names
+        
+        print(f"🔍 Merge Cardinality file path resolution:")
+        print(f"  Original object_names: {object_names}")
+        print(f"  Current prefix: {prefix}")
+        print(f"  Full object path: {full_object_path}")
+        print(f"  Source type: {source_type}")
+        
+        # Load the dataframe
+        df = get_minio_df(bucket=bucket_name, file_key=full_object_path)
+        df.columns = df.columns.str.strip().str.lower()
+        
+        print(f"✅ Successfully loaded {source_type} dataframe for cardinality with shape: {df.shape}")
+        
+        # Generate cardinality data
+        cardinality_data = []
+        for col in df.columns:
+            column_series = df[col].dropna()
+            try:
+                vals = column_series.unique()
+            except TypeError:
+                vals = column_series.astype(str).unique()
+
+            def _serialize(v):
+                if isinstance(v, (pd.Timestamp, datetime.datetime, datetime.date)):
+                    return pd.to_datetime(v).isoformat()
+                return str(v)
+
+            safe_vals = [_serialize(v) for v in vals]
+            
+            cardinality_data.append({
+                "column": col,
+                "data_type": str(df[col].dtype),
+                "unique_count": int(len(vals)),
+                "unique_values": safe_vals,  # All unique values, not just samples
+            })
+        
+        return {
+            "status": "SUCCESS",
+            "source_type": source_type,
+            "cardinality": cardinality_data
+        }
+        
+    except Exception as e:
+        print(f"❌ Error in Merge cardinality endpoint: {e}")
+        raise HTTPException(status_code=400, detail=f"Failed to get cardinality data: {str(e)}")
  
