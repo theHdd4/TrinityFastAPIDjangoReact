@@ -939,6 +939,181 @@ export const DEFAULT_EXPLORE_SETTINGS: ExploreSettings = {
   enableExport: false,
   autoRefresh: false,
 };
+
+// Auto-regressive Models Atom Settings
+export interface AutoRegressiveModelConfig {
+  id: string;
+  name: string;
+  parameters: Record<string, any>;
+}
+
+export interface TimeSeriesTransformation {
+  id: string;
+  component1: string;
+  component2: string;
+  transformationType: string;
+}
+
+export interface AutoRegressiveModelsData {
+  uploadedFile: File | null;
+  selectedDataset: string;
+  selectedScope: string;
+  selectedCombinations: string[];
+  selectedModels: string[];
+  modelConfigs: AutoRegressiveModelConfig[];
+  targetVariable: string;
+  timeVariable: string;
+  exogenousVariables: (string | string[])[];
+  transformations: TimeSeriesTransformation[];
+  availableFiles?: string[];
+  availableColumns: string[];
+  scopes: string[];
+  outputFileName: string;
+  timeSeriesLength?: number;
+  forecastHorizon?: number;
+  validationSplit?: number;
+  frequency?: string;
+  availableDateColumns?: string[];
+  modelResults?: any;
+  lastRunTimestamp?: string;
+  trainingStatus?: 'idle' | 'training' | 'completed' | 'error';
+  lastError?: string;
+}
+
+export interface AutoRegressiveModelsSettings {
+  dataType: string;
+  aggregationLevel: string;
+  dateFrom: string;
+  dateTo: string;
+}
+
+export const DEFAULT_AUTO_REGRESSIVE_MODELS_DATA: AutoRegressiveModelsData = {
+  uploadedFile: null,
+  selectedDataset: '',
+  selectedScope: '',
+  selectedCombinations: [],
+  selectedModels: ['ARIMA', 'SARIMA', 'Holt-Winters', 'ETS', 'Prophet'],
+  modelConfigs: [
+    { id: 'ARIMA', name: 'ARIMA', parameters: { 'AR Order': '1', 'Differencing': '1', 'MA Order': '1' } },
+    { id: 'SARIMA', name: 'SARIMA', parameters: { 'AR Order': '1', 'Differencing': '1', 'MA Order': '1', 'Seasonal Period': '12' } },
+    { id: 'Holt-Winters', name: 'Holt-Winters', parameters: { 'Trend': 'additive', 'Seasonal': 'additive', 'Seasonal Periods': '12' } },
+    { id: 'ETS', name: 'ETS', parameters: { 'Error': 'additive', 'Trend': 'additive', 'Seasonal': 'additive' } },
+    { id: 'Prophet', name: 'Prophet', parameters: { 'Growth': 'linear', 'Seasonality': 'additive', 'Holidays': 'auto' } }
+  ],
+  targetVariable: '',
+  timeVariable: '',
+  exogenousVariables: [],
+  transformations: [],
+  availableFiles: [],
+  availableColumns: ['Time', 'Target', 'Feature 1', 'Feature 2', 'Feature 3', 'Feature 4', 'Feature 5'],
+  scopes: ['Scope 1', 'Scope 2', 'Scope 3', 'Scope 4', 'Scope 5'],
+  outputFileName: '',
+  timeSeriesLength: 100,
+  forecastHorizon: 12,
+  validationSplit: 0.2,
+  frequency: 'D',
+  availableDateColumns: ['Date'],
+  trainingStatus: 'idle',
+  lastRunTimestamp: undefined,
+  lastError: undefined
+};
+
+export const DEFAULT_AUTO_REGRESSIVE_MODELS_SETTINGS: AutoRegressiveModelsSettings = {
+  dataType: '',
+  aggregationLevel: '',
+  dateFrom: '',
+  dateTo: ''
+};
+
+// Select Models Auto-regressive Atom Settings
+export interface SelectModelsAutoRegressiveData {
+  selectedScope: string;
+  availableScopes: string[];
+  selectedVariable: string;
+  modelResults: any[];
+  modelFilters: {
+    mape: number;
+    pValue: number;
+    rSquared: number;
+    aic: number;
+    filters: string[];
+  };
+  selectedModel: string;
+  performanceData: any[];
+  isRunning: boolean;
+  dataType: string;
+  aggregationLevel: string;
+}
+
+export const DEFAULT_SELECT_MODELS_AUTO_REGRESSIVE_DATA: SelectModelsAutoRegressiveData = {
+  selectedScope: 'SCOPE 12',
+  availableScopes: ['SCOPE 12', 'SCOPE 13', 'SCOPE 14', 'SCOPE 15'],
+  selectedVariable: 'Select Variable to View Model Results',
+  modelResults: [
+    { name: 'Jan', value: 45 },
+    { name: 'Feb', value: 62 },
+    { name: 'Mar', value: 38 },
+    { name: 'Apr', value: 75 },
+    { name: 'May', value: 55 },
+    { name: 'Jun', value: 88 },
+    { name: 'Jul', value: 42 },
+    { name: 'Aug', value: 68 },
+    { name: 'Sep', value: 35 },
+    { name: 'Oct', value: 92 },
+    { name: 'Nov', value: 58 },
+    { name: 'Dec', value: 73 }
+  ],
+  modelFilters: {
+    mape: 0.75,
+    pValue: 0.45,
+    rSquared: 0.82,
+    aic: 0.63,
+    filters: []
+  },
+  selectedModel: 'Select Model to View Model Performance',
+  performanceData: [],
+  isRunning: false,
+  dataType: '',
+  aggregationLevel: ''
+};
+
+// Evaluate Models Auto-regressive Atom Settings
+export interface EvaluateModelsAutoRegressiveData {
+  selectedScope: string;
+  availableScopes: string[];
+  selectedVariable: string;
+  modelResults: any[];
+  evaluationMetrics: {
+    mape: number;
+    rmse: number;
+    mae: number;
+    rSquared: number;
+  };
+  selectedModel: string;
+  performanceData: any[];
+  isRunning: boolean;
+  dataType: string;
+  aggregationLevel: string;
+}
+
+export const DEFAULT_EVALUATE_MODELS_AUTO_REGRESSIVE_DATA: EvaluateModelsAutoRegressiveData = {
+  selectedScope: 'SCOPE 12',
+  availableScopes: ['SCOPE 12', 'SCOPE 13', 'SCOPE 14', 'SCOPE 15'],
+  selectedVariable: 'Select Variable to Evaluate',
+  modelResults: [],
+  evaluationMetrics: {
+    mape: 0,
+    rmse: 0,
+    mae: 0,
+    rSquared: 0
+  },
+  selectedModel: 'Select Model to Evaluate',
+  performanceData: [],
+  isRunning: false,
+  dataType: '',
+  aggregationLevel: ''
+};
+
 export const DEFAULT_SELECT_MODELS_FEATURE_SETTINGS: SelectModelsFeatureSettings = {
   uploadedFile: null,
   selectedDataset: '',

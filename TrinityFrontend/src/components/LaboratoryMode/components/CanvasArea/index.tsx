@@ -36,6 +36,9 @@ import ClusteringAtom from '@/components/AtomList/atoms/clustering/ClusteringAto
 import ScenarioPlannerAtom from '@/components/AtomList/atoms/scenario-planner/ScenarioPlannerAtom';
 import ExploreAtom from '@/components/AtomList/atoms/explore/ExploreAtom';
 import EvaluateModelsFeatureAtom from '@/components/AtomList/atoms/evaluate-models-feature/EvaluateModelsFeatureAtom';
+import AutoRegressiveModelsAtom from '@/components/AtomList/atoms/auto-regressive-models/AutoRegressiveModelsAtom';
+import SelectModelsAutoRegressiveAtom from '@/components/AtomList/atoms/select-models-auto-regressive/SelectModelsAutoRegressiveAtom';
+import EvaluateModelsAutoRegressiveAtom from '@/components/AtomList/atoms/evaluate-models-auto-regressive/EvaluateModelsAutoRegressiveAtom';
 import { fetchDimensionMapping } from '@/lib/dimensions';
 
 import {
@@ -49,6 +52,8 @@ import {
   DEFAULT_CHART_MAKER_SETTINGS,
   DEFAULT_SCENARIO_PLANNER_SETTINGS,
   DEFAULT_SELECT_MODELS_FEATURE_SETTINGS,
+  DEFAULT_AUTO_REGRESSIVE_MODELS_SETTINGS,
+  DEFAULT_AUTO_REGRESSIVE_MODELS_DATA,
   DataUploadSettings,
   ColumnClassifierColumn,
   DEFAULT_EXPLORE_SETTINGS,
@@ -607,6 +612,8 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
              ? { ...DEFAULT_SCENARIO_PLANNER_SETTINGS }
              : atom.id === 'select-models-feature'
             ? { ...DEFAULT_SELECT_MODELS_FEATURE_SETTINGS }
+            : atom.id === 'auto-regressive-models'
+            ? { data: { ...DEFAULT_AUTO_REGRESSIVE_MODELS_DATA }, settings: { ...DEFAULT_AUTO_REGRESSIVE_MODELS_SETTINGS } }
             : undefined,
       };
       
@@ -680,6 +687,8 @@ const addNewCardWithAtom = (
         ? { ...DEFAULT_SCENARIO_PLANNER_SETTINGS }
         : atomId === 'select-models-feature'
         ? { ...DEFAULT_SELECT_MODELS_FEATURE_SETTINGS }
+        : atomId === 'auto-regressive-models'
+        ? { data: { ...DEFAULT_AUTO_REGRESSIVE_MODELS_DATA }, settings: { ...DEFAULT_AUTO_REGRESSIVE_MODELS_SETTINGS } }
         : undefined,
   };
   const newCard: LayoutCard = {
@@ -786,6 +795,8 @@ const handleAddDragLeave = (e: React.DragEvent) => {
           ? { ...DEFAULT_CHART_MAKER_SETTINGS }
           : info.id === 'explore'
           ? { data: { ...DEFAULT_EXPLORE_DATA }, settings: { ...DEFAULT_EXPLORE_SETTINGS } }
+          : info.id === 'auto-regressive-models'
+          ? { data: { ...DEFAULT_AUTO_REGRESSIVE_MODELS_DATA }, settings: { ...DEFAULT_AUTO_REGRESSIVE_MODELS_SETTINGS } }
           : undefined,
     };
     setLayoutCards(
@@ -1294,6 +1305,12 @@ const handleAddDragLeave = (e: React.DragEvent) => {
                         <ScopeSelectorAtom atomId={atom.id} />
                       ) : atom.atomId === 'correlation' ? (
                         <CorrelationAtom atomId={atom.id} />
+                      ) : atom.atomId === 'auto-regressive-models' ? (
+                        <AutoRegressiveModelsAtom atomId={atom.id} />
+                      ) : atom.atomId === 'select-models-auto-regressive' ? (
+                        <SelectModelsAutoRegressiveAtom atomId={atom.id} />
+                      ) : atom.atomId === 'evaluate-models-auto-regressive' ? (
+                        <EvaluateModelsAutoRegressiveAtom atomId={atom.id} />
                       ) : (
                         <div>
                           <h4 className="font-semibold text-gray-900 mb-1 text-sm">{atom.title}</h4>
