@@ -20,7 +20,8 @@ POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD", "trinity_pass")
 # Support overriding the connection string or supplying credentials separately
 # so the service can authenticate when MongoDB enforces access control.
 MONGODB_URL = os.getenv("MONGO_URI", settings.mongo_uri)
-MONGO_USER = os.getenv("MONGO_USER")
+# Accept both MONGO_USERNAME and legacy MONGO_USER for credentials
+MONGO_USER = os.getenv("MONGO_USERNAME") or os.getenv("MONGO_USER")
 MONGO_PASSWORD = os.getenv("MONGO_PASSWORD")
 MONGO_AUTH_DB = os.getenv("MONGO_AUTH_DB", "admin")
 

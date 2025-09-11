@@ -10,7 +10,8 @@ import os
 # the connection will be attempted without authentication which is fine for
 # local development.
 MONGODB_URL = os.getenv("MONGO_URI", "mongodb://mongo:27017")
-MONGO_USER = os.getenv("MONGO_USER")
+# Accept both MONGO_USERNAME and legacy MONGO_USER for credentials
+MONGO_USER = os.getenv("MONGO_USERNAME") or os.getenv("MONGO_USER")
 MONGO_PASSWORD = os.getenv("MONGO_PASSWORD")
 MONGO_AUTH_DB = os.getenv("MONGO_AUTH_DB", "admin")
 
