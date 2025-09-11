@@ -601,9 +601,9 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
     const svg = d3.select(heatmapRef.current);
     svg.selectAll("*").remove();
 
-    // Determine container width for responsive layout and slightly reduce width
-    const containerWidth = (canvasWidth || 900) * 0.9;
-    const margin = { top: 80, right: 60, bottom: 180, left: 60 };
+    // Determine container width for responsive layout with extra space on the left
+    const containerWidth = (canvasWidth || 900);
+    const margin = { top: 80, right: 60, bottom: 180, left: 150 };
     const width = containerWidth - margin.left - margin.right;
 
     const g = svg
@@ -890,20 +890,29 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
         .enter()
         .append("text")
         .attr("class", "y-label")
-        .attr("x", -20)
-        .attr("y", (_, i) => i * cellHeight + cellHeight / 2)
+        .attr("x", -10)
         .attr("text-anchor", "end")
         .attr("dominant-baseline", "middle")
         .attr("font-size", "14px")
         .attr("font-weight", "600")
         .attr("fill", "hsl(var(--foreground))")
-        .attr(
-          "transform",
-          (_, i) => `rotate(-45, -20, ${i * cellHeight + cellHeight / 2})`,
-        )
         .style("font-style", "italic")
-        .style("opacity", shouldAnimate ? 0 : 1)
-        .text((d) => d);
+        .style("opacity", shouldAnimate ? 0 : 1);
+      yLabels.each(function (d, i) {
+        const words = String(d).replace(/_/g, " ").split(/\s+/);
+        const lineHeight = 14;
+        const text = d3.select(this);
+        const yPos = i * cellHeight + cellHeight / 2 - ((words.length - 1) * lineHeight) / 2;
+        text.attr("y", yPos);
+        text.text(null);
+        words.forEach((word, idx) => {
+          text
+            .append("tspan")
+            .attr("x", -10)
+            .attr("dy", idx === 0 ? 0 : lineHeight)
+            .text(word);
+        });
+      });
       if (shouldAnimate) {
         yLabels.transition().duration(600).delay(1400).style("opacity", 1);
       }
