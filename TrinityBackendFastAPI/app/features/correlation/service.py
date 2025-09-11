@@ -10,6 +10,8 @@ from minio.error import S3Error
 from fastapi import HTTPException
 from .config import settings  # Use local config instead of global config
 from typing import List, Dict, Any, Literal, Optional, Union
+from datetime import datetime
+from .database import correlation_coll
 
 
 # Initialize MinIO client (only once)
@@ -224,22 +226,18 @@ def calculate_correlations(df: pd.DataFrame, req) -> Dict[str, Any]:
     raise ValueError("Unsupported correlation method")
 
 
-def save_correlation_results_to_minio(df: pd.DataFrame, correlation_results: dict, file_path: str) -> str:
-    """Save correlation results to MinIO"""
-    bucket_name, object_path = parse_minio_path(file_path)
-    
-    # Create output path alongside the original object rather than in a root
-    # level "correlations" directory.  This avoids polluting the bucket with a
-    # top-level folder while still keeping the correlation results near the
-    # source file.
-    base_name = object_path.rsplit('.', 1)[0]
-    out_path = f"{base_name}-correlations.json"
-
-    # Save to MinIO as JSON
-    json_bytes = json.dumps(correlation_results, indent=2).encode()
-    minio_client.put_object(bucket_name, out_path, io.BytesIO(json_bytes), len(json_bytes))
-
-    return f"{bucket_name}/{out_path}"
+async def save_correlation_results_to_db(
+    df: pd.DataFrame, correlation_results: dict, file_path: str
+) -> str:
+    """Persist correlation results in MongoDB"""
+    document = {
+        "source_path": file_path,
+        "rows": len(df),
+        "results": correlation_results,
+        "created_at": datetime.utcnow(),
+    }
+    result = await correlation_coll.insert_one(document)
+    return str(result.inserted_id)
 
 
 # Import schemas for filter functions
