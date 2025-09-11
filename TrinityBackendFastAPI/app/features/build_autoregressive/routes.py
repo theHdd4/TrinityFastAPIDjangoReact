@@ -59,7 +59,6 @@ except ImportError:
         )
 
 # Data processing imports
-import pandas as pd
 import numpy as np
 import io
 from io import StringIO, BytesIO
@@ -805,7 +804,6 @@ async def get_columns_get(
         
         # Read Arrow file to get columns
         import io
-        import pandas as pd
         
         try:
             # Try to read as Arrow first
@@ -1550,7 +1548,6 @@ async def calculate_fiscal_growth_endpoint(
         
         # Read the file
         try:
-            import pandas as pd
             response = minio_client.get_object(trinity_bucket, target_file_key)
             df = pd.read_feather(BytesIO(response.read()))
             response.close()

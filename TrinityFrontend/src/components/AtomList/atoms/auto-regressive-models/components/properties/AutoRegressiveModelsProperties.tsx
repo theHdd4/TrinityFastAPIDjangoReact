@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo, useCallback } from 'react';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
@@ -98,33 +98,55 @@ const AutoRegressiveModelsProperties: React.FC<Props> = (props) => {
       dateTo: ''
     };
 
-    // Ensure complete data structure
-    const completeData = {
-      ...defaultData,
-      ...data,
-      // Ensure selectedModels defaults to all models if none are explicitly set
-      selectedModels: data.selectedModels && data.selectedModels.length > 0 
-        ? data.selectedModels 
-        : defaultData.selectedModels
-    };
+    // Ensure complete data structure using useMemo to prevent unnecessary recreations
+    const completeData = useMemo(() => {
+      const result = {
+        ...defaultData,
+        ...data,
+        // Only default to all models if selectedModels is undefined (initial load)
+        // If selectedModels is an empty array, respect the user's choice to deselect all
+        selectedModels: data.selectedModels !== undefined 
+          ? data.selectedModels 
+          : defaultData.selectedModels
+      };
 
-    const completeSettings = {
+      // Debug logging for data processing
+      console.log('🔧 AutoRegressiveModelsProperties: Processing data:', {
+        originalData: data,
+        selectedModels: data.selectedModels,
+        isUndefined: data.selectedModels === undefined,
+        isArray: Array.isArray(data.selectedModels),
+        length: data.selectedModels?.length,
+        finalSelectedModels: result.selectedModels
+      });
+
+      return result;
+    }, [data, defaultData]);
+
+    const completeSettings = useMemo(() => ({
       ...defaultSettings,
       ...settings
-    };
+    }), [settings, defaultSettings]);
+
+    // Memoize the onDataChange callback to prevent unnecessary re-renders
+    const handleDataChange = useCallback((newData: Partial<AutoRegressiveModelsData>) => {
+      console.log('🔧 AutoRegressiveModelsProperties: onDataChange called with:', newData);
+      console.log('🔧 AutoRegressiveModelsProperties: Current completeData:', completeData);
+      const updatedData = { ...completeData, ...newData };
+      console.log('🔧 AutoRegressiveModelsProperties: Updated data:', updatedData);
+      updateSettings(atomId, { data: updatedData });
+      console.log('🔧 AutoRegressiveModelsProperties: updateSettings called');
+    }, [completeData, updateSettings, atomId]);
 
     return (
       <InternalAutoRegressiveModelsProperties
         data={completeData}
         settings={completeSettings}
-        onDataChange={(newData) => {
-          const updatedData = { ...completeData, ...newData };
-          updateSettings(atomId, { data: updatedData });
-        }}
-        onSettingsChange={(newSettings) => {
+        onDataChange={handleDataChange}
+        onSettingsChange={useCallback((newSettings: Partial<SettingsType>) => {
           const updatedSettings = { ...completeSettings, ...newSettings };
           updateSettings(atomId, { settings: updatedSettings });
-        }}
+        }, [completeSettings, updateSettings, atomId])}
         onDataUpload={(file, fileId) => {
           // Handle file upload if needed
           console.log('File upload:', file, fileId);
@@ -135,13 +157,14 @@ const AutoRegressiveModelsProperties: React.FC<Props> = (props) => {
   }
 
   // Standalone mode - use props directly
+  const standaloneProps = props as StandaloneProps;
   return (
     <InternalAutoRegressiveModelsProperties
-      data={props.data}
-      settings={props.settings}
-      onDataChange={props.onDataChange}
-      onSettingsChange={props.onSettingsChange}
-      onDataUpload={props.onDataUpload}
+      data={standaloneProps.data}
+      settings={standaloneProps.settings}
+      onDataChange={standaloneProps.onDataChange}
+      onSettingsChange={standaloneProps.onSettingsChange}
+      onDataUpload={standaloneProps.onDataUpload}
     />
   );
 };

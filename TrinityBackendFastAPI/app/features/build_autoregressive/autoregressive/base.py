@@ -44,40 +44,6 @@ def clean_dataframe_for_json(df):
     return df_clean
 
 
-def safe_pct_change(series):
-    """
-    Safely calculate percentage change, handling edge cases and capping extreme values.
-    """
-    if len(series) < 2:
-        return pd.Series([None] * len(series))
-    
-    # Calculate percentage change with safeguards
-    growth_rates = []
-    for i in range(len(series)):
-        if i == 0:
-            growth_rates.append(None)  # First period has no previous period
-        else:
-            prev_val = series.iloc[i-1]
-            curr_val = series.iloc[i]
-            
-            # Handle edge cases
-            if pd.isna(prev_val) or pd.isna(curr_val):
-                growth_rates.append(None)
-            elif prev_val == 0 or abs(prev_val) < 1e-10:  # Very small or zero previous value
-                if abs(curr_val) < 1e-10:  # Current value is also very small
-                    growth_rates.append(0.0)
-                else:
-                    # Cap the growth rate at reasonable limits (±1000%)
-                    growth_rates.append(1000.0 if curr_val > 0 else -1000.0)
-            else:
-                growth_rate = ((curr_val - prev_val) / abs(prev_val)) * 100
-                # Cap extreme growth rates at ±1000%
-                growth_rate = max(-1000.0, min(1000.0, growth_rate))
-                growth_rates.append(growth_rate)
-    
-    return pd.Series(growth_rates, index=series.index)
-
-
 def get_arima_params(frequency):
     params = {
         'M': {'order': (1, 1, 1), 'seasonal_order': (1, 1, 1, 12)},
@@ -93,6 +59,10 @@ def process_model_cpu_bound(model_name, y_series_data, forecast_horizon, frequen
     CPU-bound function to process a single model using ProcessPoolExecutor.
     This function runs in a separate process to utilize multiple CPU cores.
     """
+    # Import pandas locally to ensure it's available in all contexts
+    import pandas as pd
+    import numpy as np
+    
     try:
         # Convert y_series_data back to pandas Series
         y_series = pd.Series(y_series_data['values'], index=pd.DatetimeIndex(y_series_data['index']))
@@ -305,6 +275,10 @@ async def forecast_for_combination(df, y_var, forecast_horizon=12, fiscal_start_
     - frequency: Data frequency ('D', 'W', 'M', 'Q', 'Y')
     - combination: Combination dictionary for reference (optional)
     """
+    # Import pandas locally to ensure it's available in all contexts
+    import pandas as pd
+    import numpy as np
+    
     try:
         # Check if data exists
         if df.empty:
@@ -683,12 +657,18 @@ async def forecast_for_combination(df, y_var, forecast_horizon=12, fiscal_start_
 
 #     return growth_df
 
-
 def calculate_fiscal_growth(forecast_df: pd.DataFrame, forecast_horizon: int, fiscal_start_month: int = 1, frequency: str = "M", start_year: int = 2017) -> pd.DataFrame:
     """
     Calculates fiscal year growth using actual + forecasted data for each model.
     Assumes forecast_df has 'date', 'Actual', and model columns like 'ARIMA', 'SARIMA', etc.
+    
+    FIXED: Now generates unique growth rates for each combination by using actual forecast data
+    from the training results instead of identical sample data for all combinations.
     """
+    # Import pandas locally to ensure it's available in multiprocessing context
+    import pandas as pd
+    import numpy as np
+    
     # Ensure start_year is integer
     start_year = int(start_year)
     
@@ -698,6 +678,9 @@ def calculate_fiscal_growth(forecast_df: pd.DataFrame, forecast_horizon: int, fi
     # List of model columns (excluding 'date' and 'Actual')
     forecast_cols = [col for col in forecast_df.columns if col not in ["date", "Actual"]]
     output_rows = []
+
+    if len(forecast_cols) == 0:
+        raise ValueError("No model forecast columns found in forecast_df.")
 
     # Ensure we process ALL models, even if they have None values
     expected_models = ['ARIMA', 'SARIMA', 'Holt-Winters', 'ETS', 'Prophet']
@@ -750,14 +733,11 @@ def calculate_fiscal_growth(forecast_df: pd.DataFrame, forecast_horizon: int, fi
             lambda x: f"FY{(x.year + 1) % 100:02d}" if x.month >= fiscal_start_month else f"FY{x.year % 100:02d}"
         )
 
-        # # Aggregate
-        # if frequency in ["D", "W", "M", "Q"]:
-        #     annual_df = combined_df.groupby("fiscal_year")["volume"].mean().reset_index()
-        # else:
+        # Aggregate
         annual_df = combined_df.groupby("fiscal_year")["volume"].mean().reset_index()
 
-        # Growth - handle edge cases to prevent extreme values
-        annual_df["growth_rate"] = safe_pct_change(annual_df["volume"])
+        # Growth
+        annual_df["growth_rate"] = annual_df["volume"].pct_change()*100
         annual_df["model"] = model_name
 
         output_rows.append(annual_df[["fiscal_year", "model", "volume", "growth_rate"]])
@@ -769,9 +749,6 @@ def calculate_fiscal_growth(forecast_df: pd.DataFrame, forecast_horizon: int, fi
     growth_df = pd.concat(output_rows, ignore_index=True)
     growth_df.rename(columns={"volume": "fiscal_total"}, inplace=True)
     growth_df.sort_values(["model", "fiscal_year"], inplace=True)
-    
-    # Clean the data for JSON serialization
-    growth_df = clean_dataframe_for_json(growth_df)
 
     return growth_df
 
@@ -860,6 +837,10 @@ def calculate_halfyearly_yoy_growth(
     Calculates half-yearly Year-over-Year (YoY) growth using actual + forecasted data.
     Supports monthly, weekly, daily, quarterly, and yearly frequencies.
     """
+    # Import pandas locally to ensure it's available in all contexts
+    import pandas as pd
+    import numpy as np
+    
     forecast_df = forecast_df.copy()
     forecast_df["date"] = pd.to_datetime(forecast_df["date"])
     # start_year = int(start_year)
@@ -942,8 +923,8 @@ def calculate_halfyearly_yoy_growth(
         grouped["fiscal_year_order"] = grouped["fiscal_year"].str.extract(r"(\d+)").astype(int)
         grouped["fiscal_half_order"] = grouped["fiscal_half"].map({"H1": 1, "H2": 2})
 
-        # Calculate YoY growth for same fiscal half with safe growth rate calculation
-        grouped["growth_rate"] = grouped.groupby("fiscal_half")["volume"].transform(lambda x: safe_pct_change(x))
+        # Calculate YoY growth for same fiscal half
+        grouped["growth_rate"] = grouped.groupby("fiscal_half")["volume"].pct_change() * 100
 
         grouped.rename(columns={"volume": "fiscal_total"}, inplace=True)
         output_rows.append(grouped)
@@ -977,6 +958,10 @@ def calculate_quarterly_yoy_growth(
     FIXED: Now generates unique growth rates for each combination by using actual forecast data
     from the training results instead of identical sample data for all combinations.
     """
+    # Import pandas locally to ensure it's available in all contexts
+    import pandas as pd
+    import numpy as np
+    
     forecast_df = forecast_df.copy()
     forecast_df["date"] = pd.to_datetime(forecast_df["date"])
 
@@ -1060,8 +1045,8 @@ def calculate_quarterly_yoy_growth(
         # Sort to ensure proper YoY growth alignment
         grouped["fiscal_year_order"] = grouped["fiscal_year"].str.extract(r"(\d+)").astype(int)
 
-        # Calculate YoY growth for same quarter with safe growth rate calculation
-        grouped["growth_rate"] = grouped.groupby("fiscal_quarter")["volume"].transform(lambda x: safe_pct_change(x))
+        # Calculate YoY growth for same quarter
+        grouped["growth_rate"] = grouped.groupby("fiscal_quarter")["volume"].pct_change() * 100
 
         grouped.rename(columns={"volume": "fiscal_total"}, inplace=True)
         output_rows.append(grouped)

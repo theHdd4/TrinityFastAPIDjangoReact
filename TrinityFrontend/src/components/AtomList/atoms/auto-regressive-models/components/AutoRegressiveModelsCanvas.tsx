@@ -434,12 +434,9 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
       // Check if the right-click is on a chart area
       const target = e.target as Element;
       
-      // Only show context menu on specific chart areas, not everywhere
-      const isChartArea = target.closest('.chart-card') || 
-                         target.closest('[data-chart-area="true"]') ||
-                         target.closest('svg') ||
-                         target.closest('canvas') ||
-                         target.closest('.recharts-wrapper');
+      // Only show context menu on bar chart areas, not line charts
+      // Check if we're specifically in a bar chart container
+      const isBarChartArea = target.closest('[data-chart-type="bar"]');
       
       // Don't show context menu on general page elements
       if (target.closest('button') || 
@@ -452,7 +449,7 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
         return;
       }
       
-      if (isChartArea && e.button === 2) {
+      if (isBarChartArea && e.button === 2) {
         e.preventDefault();
         e.stopPropagation();
         console.log('🔧 Global context menu triggered at:', e.clientX, e.clientY);
@@ -550,13 +547,9 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
         return;
       }
       
-      // Check if click is on chart area (don't close if clicking on chart)
-      if (target.closest('.chart-card') || 
-          target.closest('[data-chart-area="true"]') ||
-          target.closest('svg') ||
-          target.closest('canvas') ||
-          target.closest('.recharts-wrapper')) {
-        console.log('🔧 Click on chart area - not closing');
+      // Check if click is on bar chart area (don't close if clicking on bar chart)
+      if (target.closest('[data-chart-type="bar"]')) {
+        console.log('🔧 Click on bar chart area - not closing');
         return;
       }
       
@@ -592,13 +585,9 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
         return;
       }
       
-      // Check if click is on chart area (don't close if clicking on chart)
-      if (target.closest('.chart-card') || 
-          target.closest('[data-chart-area="true"]') ||
-          target.closest('svg') ||
-          target.closest('canvas') ||
-          target.closest('.recharts-wrapper')) {
-        console.log('🔧 Mousedown on chart area - not closing');
+      // Check if click is on bar chart area (don't close if clicking on bar chart)
+      if (target.closest('[data-chart-type="bar"]')) {
+        console.log('🔧 Mousedown on bar chart area - not closing');
         return;
       }
       
@@ -1810,6 +1799,11 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
   const generateRealForecastData = (result: any, forecastHorizon: number) => {
     console.log('🔧 generateRealForecastData called with:', { result, forecastHorizon });
     
+    // Debug: Log the full result structure
+    console.log('🔧 Full result structure:', JSON.stringify(result, null, 2));
+    console.log('🔧 Result keys:', Object.keys(result || {}));
+    console.log('🔧 Result.result keys:', Object.keys(result?.result || {}));
+    
     if (!result?.result?.forecast_df) {
       console.log('❌ No forecast_df found in result:', result);
         return [];
@@ -1823,6 +1817,7 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
     // Get the actual models that were run from backend
     const modelsRun = result.result.models_run || [];
     console.log('🔧 Models run (backend):', modelsRun);
+    console.log('🔧 Models run type:', typeof modelsRun, 'Array?', Array.isArray(modelsRun));
     
     // For forecast data, we can only show models that were actually run by the backend
     // because the forecast_df only contains data for those models
@@ -1901,12 +1896,18 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
   const generateRealMatrixData = (result: any) => {
     console.log('🔧 generateRealMatrixData called with:', result);
     
+    // Debug: Log the full result structure for matrix
+    console.log('🔧 Full result structure (matrix):', JSON.stringify(result, null, 2));
+    console.log('🔧 Result keys (matrix):', Object.keys(result || {}));
+    console.log('🔧 Result.result keys (matrix):', Object.keys(result?.result || {}));
+    
     // Check for metrics in the result
     const metrics = result?.result?.metrics || {};
     const modelsRun = result?.result?.models_run || [];
     const metricNames = ['MAE', 'MSE', 'RMSE', 'MAPE', 'SMAPE'];
     
     console.log('🔧 Models run:', modelsRun);
+    console.log('🔧 Models run type:', typeof modelsRun, 'Array?', Array.isArray(modelsRun));
     console.log('🔧 Available metrics:', metrics);
     console.log('🔧 Metric names:', metricNames);
     
@@ -2712,7 +2713,7 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
                         {/* Forecast Chart and Matrix Grid */}
                         <div className="grid grid-cols-12 gap-4 mt-4">
                           {/* Forecast Chart - Takes 60% space */}
-                          <div className="col-span-7 p-4 border border-muted/30 rounded-lg bg-gradient-to-br from-white to-muted/5 shadow-sm chart-card" data-chart-area="true">
+                          <div className="col-span-7 p-4 border border-muted/30 rounded-lg bg-gradient-to-br from-white to-muted/5 shadow-sm chart-card">
                             <div className="flex items-center justify-between mb-3">
                               <h6 className="font-bold text-base text-gray-900 flex items-center gap-2">
                                 <div className="p-1.5 bg-blue-100 rounded-lg">
@@ -2741,7 +2742,7 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
                                 <Maximize2 className="w-3 h-3" />
                               </Button>
                             </div>
-                            <div className="w-full h-64" onContextMenu={handleContextMenu}>
+                            <div className="w-full h-64">
                               {(() => {
                                 // Check if this result has a failure status
                                 if (result.result?.status === 'FAILURE') {
@@ -3294,7 +3295,7 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
                           {(combinationGrowthModels[result.combination_id] || []).length > 0 && (
                             <div className="grid grid-cols-12 gap-4">
                               {/* Growth Rates Chart - Takes 60% space (aligned with forecast chart) */}
-                              <div className="col-span-7 p-4 border border-muted/30 rounded-lg bg-gradient-to-br from-white to-muted/5 shadow-sm chart-card" data-chart-area="true">
+                              <div className="col-span-7 p-4 border border-muted/30 rounded-lg bg-gradient-to-br from-white to-muted/5 shadow-sm chart-card" data-chart-area="true" data-chart-type="bar">
                                 <div className="flex items-center justify-between mb-3">
                                   <h6 className="font-medium text-sm text-gray-700">Results :</h6>
                                   <Button
@@ -3767,6 +3768,11 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
                                                   cursor={{ fill: 'rgba(0, 0, 0, 0.04)' }}
                                                   formatter={(value: any, name: string) => {
                                                     try {
+                                                      // Filter out any fiscal year entries with 0 growth rates from tooltip
+                                                      if (name && (value === 0 || value === null || value === undefined)) {
+                                                        return null; // Don't show in tooltip
+                                                      }
+                                                      
                                                       // Display value as percentage (value is already in percentage format)
                                                       const percentageValue = value.toFixed(2);
                                                         return [
@@ -3858,6 +3864,18 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
                                                     const dataKey = `${fiscalYear}_growth_rate`;
                                                     console.log(`🔧 Looking for dataKey: ${dataKey}`);
                                                     console.log(`🔧 Available keys in first chart item:`, chartData[0] ? Object.keys(chartData[0]) : 'No data');
+                                                    
+                                                    // Filter out any fiscal year entries with all 0 growth rates from legend
+                                                    // Check if all models have 0 growth rate for this fiscal year
+                                                    const hasNonZeroLegendValue = chartData.some((item: any) => {
+                                                      const value = item[dataKey];
+                                                      return value !== 0 && value !== null && value !== undefined;
+                                                    });
+                                                    if (!hasNonZeroLegendValue) {
+                                                      console.log(`🔧 Filtering out fiscal year entry with all 0 growth rates: ${fiscalYear}`);
+                                                      return null; // Don't render this legend item
+                                                    }
+                                                    
                                                     // Use theme colors for fiscal years
                                                     const theme = COLOR_THEMES[selectedTheme as keyof typeof COLOR_THEMES] || COLOR_THEMES.default;
                                                     const fiscalColors = [theme.primary, theme.secondary, theme.tertiary, '#dc2626', '#f59e0b', '#2563eb', '#7c3aed', '#059669', '#ea580c', '#be185d', '#0891b2'];
@@ -3876,6 +3894,16 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
                                                     console.log(`🔧 Bar visibility for ${dataKey}:`, isVisible);
                                                     
                                                     if (!isVisible) {
+                                                      return null; // Don't render this bar
+                                                    }
+                                                    
+                                                    // Additional check: Don't render bars for fiscal years with all 0 growth rates
+                                                    const hasNonZeroBarValue = chartData.some((item: any) => {
+                                                      const value = item[dataKey];
+                                                      return value !== 0 && value !== null && value !== undefined;
+                                                    });
+                                                    if (!hasNonZeroBarValue) {
+                                                      console.log(`🔧 Not rendering bar with all 0 growth rates: ${fiscalYear}`);
                                                       return null; // Don't render this bar
                                                     }
                                                     
@@ -4399,7 +4427,7 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
                   }
                 
                 return (
-                  <div className="h-full" data-chart-area="true">
+                  <div className="h-full">
                     <ResponsiveContainer width="100%" height="100%" >
                       <LineChart data={chartData} margin={{ top: 20, right: 30, left: 20, bottom: 20 }}>
                         <defs>
@@ -4790,7 +4818,7 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
                 })();
 
                 return (
-                  <div className="h-full" data-chart-area="true">
+                  <div className="h-full" data-chart-area="true" data-chart-type="bar">
                     <ResponsiveContainer width="100%" height="100%" >
                       <BarChart 
                         data={chartData}
@@ -4850,6 +4878,11 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
                           cursor={{ fill: 'rgba(0, 0, 0, 0.04)' }}
                           formatter={(value: any, name: string) => {
                             try {
+                              // Filter out any fiscal year entries with 0 growth rates from tooltip
+                              if (name && (value === 0 || value === null || value === undefined)) {
+                                return null; // Don't show in tooltip
+                              }
+                              
                               // Display value as percentage (value is already in percentage format)
                               const percentageValue = value.toFixed(2);
                               return [
@@ -4940,6 +4973,18 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
                           
                           return fiscalYears.map((fiscalYear, fiscalIndex) => {
                             const dataKey = `${fiscalYear}_growth_rate`;
+                            
+                            // Filter out any fiscal year entries with all 0 growth rates from legend
+                            // Check if all models have 0 growth rate for this fiscal year
+                            const hasNonZeroFullscreenValue = chartData.some((item: any) => {
+                              const value = item[dataKey];
+                              return value !== 0 && value !== null && value !== undefined;
+                            });
+                            if (!hasNonZeroFullscreenValue) {
+                              console.log(`🔧 Fullscreen chart - Filtering out fiscal year entry with all 0 growth rates: ${fiscalYear}`);
+                              return null; // Don't render this legend item
+                            }
+                            
                             // Use theme colors for fiscal years
                             const theme = COLOR_THEMES[selectedTheme as keyof typeof COLOR_THEMES] || COLOR_THEMES.default;
                             const fiscalColors = [theme.primary, theme.secondary, theme.tertiary, '#dc2626', '#f59e0b', '#2563eb', '#7c3aed', '#059669', '#ea580c', '#be185d', '#0891b2'];
