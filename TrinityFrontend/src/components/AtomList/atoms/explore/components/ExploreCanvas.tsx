@@ -199,7 +199,7 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
     const config = chartConfigs[chartIndex];
     
     try {
-      console.log(`🤖 Generating AI insights for chart ${chartIndex} using dedicated insight service...`);
+      // console.log(`🤖 Generating AI insights for chart ${chartIndex} using dedicated insight service...`);
       
       const insightResponse = await fetch(`${INSIGHT_API}/generate`, {
         method: 'POST',
@@ -227,7 +227,7 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
         const insightData = await insightResponse.json();
         
         if (insightData.success && insightData.insight) {
-          console.log(`✅ Generated AI insight for chart ${chartIndex}:`, insightData.insight);
+          // console.log(`✅ Generated AI insight for chart ${chartIndex}:`, insightData.insight);
           
           // Auto-populate the note box with AI insights
           setChartNotes(prev => ({ ...prev, [chartIndex]: insightData.insight }));
@@ -353,11 +353,11 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
       const shouldUpdate = chartConfigs[0].xAxis === '' || chartConfigs[0].yAxes[0] === '';
       
       if (shouldUpdate) {
-        console.log('🔄 Updating chart config with AI-generated values:', {
-          xAxis: safeData.xAxis,
-          yAxis: safeData.yAxis,
-          chartType: safeData.chartType
-        });
+        // console.log('🔄 Updating chart config with AI-generated values:', {
+        //   xAxis: safeData.xAxis,
+        //   yAxis: safeData.yAxis,
+        //   chartType: safeData.chartType
+        // });
         
         setChartConfigs(prev => [
           {
@@ -377,44 +377,44 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
   useEffect(() => {
     // Only run AI integration once when AI operation completes
     if (safeData.applied && safeData.operationCompleted && safeData.aiConfig && !safeData.aiIntegrated) {
-      console.log('📊 AI integration - one-time setup, then full manual control');
+      // console.log('📊 AI integration - one-time setup, then full manual control');
       
       // 🔧 One-time AI data integration
       if (safeData.chartConfigs && Array.isArray(safeData.chartConfigs)) {
-        console.log('✅ Integrating AI chartConfigs once:', safeData.chartConfigs);
-        console.log(`📊 Setting ${safeData.chartConfigs.length} chart configurations:`);
+        // console.log('✅ Integrating AI chartConfigs once:', safeData.chartConfigs);
+        // console.log(`📊 Setting ${safeData.chartConfigs.length} chart configurations:`);
         
         safeData.chartConfigs.forEach((config, idx) => {
-          console.log(`📊 Chart ${idx + 1} will be set to:`, {
-            xAxis: config.xAxis,
-            yAxes: config.yAxes,
-            title: config.title,
-            chartType: config.chartType
-          });
+          // console.log(`📊 Chart ${idx + 1} will be set to:`, {
+          //   xAxis: config.xAxis,
+          //   yAxes: config.yAxes,
+          //   title: config.title,
+          //   chartType: config.chartType
+          // });
         });
         
         setChartConfigs(safeData.chartConfigs);
         
         // Verify after setting
-        setTimeout(() => {
-          console.log(`🔍 Verification - chartConfigs after setting:`, chartConfigs);
-        }, 100);
+        // setTimeout(() => {
+        //   console.log(`🔍 Verification - chartConfigs after setting:`, chartConfigs);
+        // }, 100);
       }
       
       if (safeData.chartDataSets) {
-        console.log('✅ Integrating AI chart data once:', Object.keys(safeData.chartDataSets));
+        // console.log('✅ Integrating AI chart data once:', Object.keys(safeData.chartDataSets));
         setChartDataSets(safeData.chartDataSets);
         setChartGenerated(safeData.chartGenerated || {});
         
         // 🔧 Also set chartFilters for multiple charts
         if (safeData.chartFilters) {
-          console.log('✅ Integrating AI chart filters:', safeData.chartFilters);
+          // console.log('✅ Integrating AI chart filters:', safeData.chartFilters);
           setChartFilters(safeData.chartFilters);
         }
         
         // 🔧 Set appliedFilters if filters exist
         if (safeData.appliedFilters) {
-          console.log('✅ Integrating AI applied filters:', safeData.appliedFilters);
+          // console.log('✅ Integrating AI applied filters:', safeData.appliedFilters);
           setAppliedFilters(safeData.appliedFilters);
         }
         
@@ -423,9 +423,10 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
       }
       
       // Mark as integrated so this only runs once
-      onDataChange({ aiIntegrated: true });
+      // COMMENTED OUT - causing infinite loop
+      // onDataChange({ aiIntegrated: true });
       
-      console.log('✅ AI integration complete - switching to full manual control mode');
+      // console.log('✅ AI integration complete - switching to full manual control mode');
     }
   }, [safeData.applied, safeData.operationCompleted, safeData.aiConfig, safeData.aiIntegrated]);
 
@@ -586,38 +587,39 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
   const [chatBubbleShouldRender, setChatBubbleShouldRender] = useState(false);
 
   // Persist chart state changes to parent atom settings for saving/loading
-  useEffect(() => {
-    const primaryConfig = chartConfigs[0] || {};
-    onDataChange({
-      chartConfigs,
-      chartFilters,
-      chartThemes,
-      chartOptions,
-      chartDataSets,
-      chartGenerated,
-      appliedFilters,
-      chartNotes,
-      xAxis: primaryConfig.xAxis || '',
-      yAxis: primaryConfig.yAxes?.[0] || '',
-      xAxisLabel: primaryConfig.xAxisLabel || '',
-      yAxisLabel: primaryConfig.yAxisLabels?.[0] || '',
-      chartType: primaryConfig.chartType || 'line_chart',
-      legendField: primaryConfig.legendField || '',
-      aggregation: primaryConfig.aggregation || 'no_aggregation',
-      weightColumn: primaryConfig.weightColumn || '',
-      title: primaryConfig.title || '',
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    chartConfigs,
-    chartFilters,
-    chartThemes,
-    chartOptions,
-    chartDataSets,
-    chartGenerated,
-    appliedFilters,
-    chartNotes,
-  ]);
+  // COMMENTED OUT - causing infinite loop of updateAtomSettings calls
+  // useEffect(() => {
+  //   const primaryConfig = chartConfigs[0] || {};
+  //   onDataChange({
+  //     chartConfigs,
+  //     chartFilters,
+  //     chartThemes,
+  //     chartOptions,
+  //     chartDataSets,
+  //     chartGenerated,
+  //     appliedFilters,
+  //     chartNotes,
+  //     xAxis: primaryConfig.xAxis || '',
+  //     yAxis: primaryConfig.yAxes?.[0] || '',
+  //     xAxisLabel: primaryConfig.xAxisLabel || '',
+  //     yAxisLabel: primaryConfig.yAxisLabels?.[0] || '',
+  //     chartType: primaryConfig.chartType || 'line_chart',
+  //     legendField: primaryConfig.legendField || '',
+  //     aggregation: primaryConfig.aggregation || 'no_aggregation',
+  //     weightColumn: primaryConfig.weightColumn || '',
+  //     title: primaryConfig.title || '',
+  //   });
+  //   // eslint-disable-next-line react-hooks/exhaustive-deps
+  // }, [
+  //   chartConfigs,
+  //   chartFilters,
+  //   chartThemes,
+  //   chartOptions,
+  //   chartDataSets,
+  //   chartGenerated,
+  //   appliedFilters,
+  //   chartNotes,
+  // ]);
 
   // Auto-generate charts on mount if data and configs exist
   useEffect(() => {
@@ -721,12 +723,6 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
 
   // Update chartConfigs if layout changes
   useEffect(() => {
-    // Don't auto-add charts if AI has generated charts (check if any chart is AI-generated)
-    const hasAIGeneratedCharts = safeData.chartGenerated && Object.keys(safeData.chartGenerated).length > 0;
-    if (hasAIGeneratedCharts) {
-      return;
-    }
-    
     if (safeData.graphLayout.numberOfGraphsInRow === 2 && chartConfigs.length === 1) {
       // Add a second chart card while preserving the first one
       setChartConfigs(prev => [
@@ -1452,7 +1448,8 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
   };
 
   const handleChartConfigChange = (field: string, value: any) => {
-    onDataChange({ [field]: value });
+    // COMMENTED OUT - causing infinite loop
+    // onDataChange({ [field]: value });
   };
 
   const handleFilterChange = (dimensionId: string, values: string[]) => {
@@ -1477,7 +1474,8 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
 
     setChartFilters(updatedChartFilters);
 
-    onDataChange({ dateFilters: updatedFilters, chartFilters: updatedChartFilters });
+    // COMMENTED OUT - causing infinite loop
+    // onDataChange({ dateFilters: updatedFilters, chartFilters: updatedChartFilters });
   };
   
   // Multi-selection filter handler
@@ -1977,16 +1975,16 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
     const config = chartConfigs[index] || chartConfigs[0];
     const isSettingsVisible = chartSettingsVisible[index] || false;
     const rendererProps = {
-      key: `chart-${index}-${config.chartType}-${chartThemes[index] || 'default'}-${chartDataSets[index]?.length || 0}-${Object.keys(chartFilters[index] || {}).length}-${appliedFilters[index] ? 'filtered' : 'unfiltered'}-theme-${chartThemes[index] || 'default'}-sort-${config.sortOrder || 'none'}-yaxes-${config.yAxes.join('-')}`,
+      key: `chart-${index}-${config.chartType}-${chartThemes[index] || 'default'}-${chartDataSets[index]?.length || 0}-${Object.keys(chartFilters[index] || {}).length}-${appliedFilters[index] ? 'filtered' : 'unfiltered'}-theme-${chartThemes[index] || 'default'}-sort-${config.sortOrder || 'none'}-yaxes-${(config.yAxes || []).join('-')}`,
       type: config.chartType as 'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart',
       data: chartDataSets[index] || [],
       xField: config.xAxis || undefined,
-      yField: config.yAxes[0] || undefined,
+      yField: (config.yAxes && config.yAxes[0]) || undefined,
       title: config.title,
       xAxisLabel: config.xAxisLabel || config.xAxis || '',
-      yAxisLabel: config.yAxisLabels[0] || config.yAxes[0] || '',
-      yFields: config.yAxes,
-      yAxisLabels: config.yAxes.map((yAxis: string, idx: number) => config.yAxisLabels[idx] || yAxis || ''),
+      yAxisLabel: (config.yAxisLabels && Array.isArray(config.yAxisLabels) && config.yAxisLabels[0]) || (config.yAxes && config.yAxes[0]) || '',
+      yFields: config.yAxes || [],
+      yAxisLabels: (config.yAxes || []).map((yAxis: string, idx: number) => (config.yAxisLabels && Array.isArray(config.yAxisLabels) && config.yAxisLabels[idx]) || yAxis || ''),
       legendField:
         config.legendField && config.legendField !== 'aggregate'
           ? config.legendField
@@ -3030,21 +3028,22 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
   }, [isApplied, sampleDimensions.length, summaryList.length, safeData.dataframe, onDataChange]);
 
   // Fetch date ranges for date columns when column summary is loaded
-  useEffect(() => {
-    if (summaryList.length > 0 && safeData.dataframe) {
-      // Find date columns and fetch their date ranges
-      const dateColumns = summaryList.filter(col => 
-        col.column.toLowerCase().includes('date') || 
-        col.data_type.toLowerCase().includes('date')
-      );
-      
-      dateColumns.forEach(col => {
-        if (!dateRanges[col.column]) {
-          fetchDateRange(col.column);
-        }
-      });
-    }
-  }, [summaryList, safeData.dataframe]); // Removed dateRanges from dependencies to avoid infinite loop
+  // COMMENTED OUT - causing excessive API calls
+  // useEffect(() => {
+  //   if (summaryList.length > 0 && safeData.dataframe) {
+  //     // Find date columns and fetch their date ranges
+  //     const dateColumns = summaryList.filter(col => 
+  //       col.column.toLowerCase().includes('date') || 
+  //       col.data_type.toLowerCase().includes('date')
+  //     );
+  //     
+  //     dateColumns.forEach(col => {
+  //       if (!dateRanges[col.column]) {
+  //         fetchDateRange(col.column);
+  //       }
+  //     });
+  //   }
+  // }, [summaryList, safeData.dataframe]); // Removed dateRanges from dependencies to avoid infinite loop
 
   // Handle theme change for charts
   const handleChartThemeChange = (chartIndex: number, theme: string) => {
@@ -3111,25 +3110,26 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
     const config = chartConfigs[chartIndex];
     if (!config) return;
     const filters = chartFilters[chartIndex] || {};
-    onDataChange({
-      chartConfigs,
-      chartFilters,
-      chartThemes,
-      chartOptions,
-      chartDataSets,
-      chartGenerated,
-      appliedFilters,
-      xAxis: config.xAxis,
-      yAxis: config.yAxes?.[0] || '',
-      xAxisLabel: config.xAxisLabel || '',
-      yAxisLabel: config.yAxisLabels?.[0] || '',
-      chartType: config.chartType,
-      legendField: config.legendField,
-      aggregation: config.aggregation,
-      weightColumn: config.weightColumn,
-      title: config.title,
-      filters,
-    });
+    // COMMENTED OUT - causing infinite loop
+    // onDataChange({
+    //   chartConfigs,
+    //   chartFilters,
+    //   chartThemes,
+    //   chartOptions,
+    //   chartDataSets,
+    //   chartGenerated,
+    //   appliedFilters,
+    //   xAxis: config.xAxis,
+    //   yAxis: config.yAxes?.[0] || '',
+    //   xAxisLabel: config.xAxisLabel || '',
+    //   yAxisLabel: config.yAxisLabels?.[0] || '',
+    //   chartType: config.chartType,
+    //   legendField: config.legendField,
+    //   aggregation: config.aggregation,
+    //   weightColumn: config.weightColumn,
+    //   title: config.title,
+    //   filters,
+    // });
   };
 
   // Helper function to fetch date range for a specific column
@@ -3163,9 +3163,10 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
         allIdentifiers[dimensionId] = safeData.columnClassifierConfig.dimensions[dimensionId] || [];
       });
       
-      onDataChange({
-        selectedIdentifiers: allIdentifiers
-      });
+      // COMMENTED OUT - causing infinite loop
+      // onDataChange({
+      //   selectedIdentifiers: allIdentifiers
+      // });
     }
   }, [safeData.columnClassifierConfig?.dimensions, safeData.selectedIdentifiers]);
 
