@@ -2686,15 +2686,19 @@ async def save_dataframes(
     app_name: str = Form(""),
     project_name: str = Form(""),
     user_name: str = Form(""),
-): 
+):
     """Save validated dataframes as Arrow tables and upload via Flight."""
     try:
-        json.loads(file_keys)
+        keys = json.loads(file_keys)
     except json.JSONDecodeError:
         raise HTTPException(status_code=400, detail="Invalid JSON format for file_keys")
 
     paths = json.loads(file_paths) if file_paths else []
     files_list = files or []
+    if files_list and len(files_list) != len(keys):
+        raise HTTPException(status_code=400, detail="Number of files must match number of keys")
+    if paths and len(paths) != len(keys):
+        raise HTTPException(status_code=400, detail="Number of file paths must match number of keys")
     if not files_list and not paths:
         raise HTTPException(status_code=400, detail="No files or file paths provided")
 
@@ -2717,19 +2721,19 @@ async def save_dataframes(
     print(f"📤 saving to prefix {prefix}")
 
     if files_list:
-        iter_sources = [(f.filename, f.file) for f in files_list]
+        iter_sources = [
+            (k, f.filename, f.file) for k, f in zip(keys, files_list)
+        ]
     else:
         iter_sources = []
-        for p in paths:
+        for k, p in zip(keys, paths):
             data = read_minio_object(p)
-            iter_sources.append((Path(p).name, io.BytesIO(data)))
+            iter_sources.append((k, Path(p).name, io.BytesIO(data)))
 
     MAX_FILE_SIZE = 512 * 1024 * 1024  # 512 MB
     STATUS_TTL = 3600
 
-    for filename, fileobj in iter_sources:
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        key = f"{timestamp}_{filename}"
+    for key, filename, fileobj in iter_sources:
         progress_key = f"upload_status:{validator_atom_id}:{key}"
         redis_client.set(progress_key, "uploading", ex=STATUS_TTL)
 

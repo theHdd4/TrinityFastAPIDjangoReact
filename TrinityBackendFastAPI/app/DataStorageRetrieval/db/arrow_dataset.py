@@ -4,15 +4,21 @@ from .connection import POSTGRES_HOST, POSTGRES_USER, POSTGRES_PASSWORD, POSTGRE
 from .client_project import fetch_client_app_project
 
 
+def _client_to_schema(client: str | None) -> str | None:
+    """Convert a client name to its tenant schema."""
+    if not client:
+        return None
+    # Tenant schemas follow the ``Client_Name_Schema`` convention
+    return f"{client.replace(' ', '_')}_Schema"
+
+
 async def _schema_from_project(project_id: int) -> str | None:
     """Return tenant schema for a project if resolvable."""
     try:
         client, _, _ = await fetch_client_app_project(None, project_id)
-        if client:
-            return client.lower()
+        return _client_to_schema(client)
     except Exception:
-        pass
-    return None
+        return None
 
 
 def _schema_from_object(arrow_object: str) -> str | None:
@@ -20,7 +26,7 @@ def _schema_from_object(arrow_object: str) -> str | None:
     try:
         parts = arrow_object.split("/", 1)
         if len(parts) > 1:
-            return parts[0].lower()
+            return _client_to_schema(parts[0])
     except Exception:
         pass
     return None
@@ -48,14 +54,11 @@ async def record_arrow_dataset(
         return
     try:
         schema = await _schema_from_project(project_id)
-        if schema:
-            try:
-                await conn.execute(f'SET search_path TO "{schema}", public')
-            except Exception:
-                pass
+        if not schema:
+            return
         await conn.execute(
-            """
-            INSERT INTO registry_arrowdataset (
+            f"""
+            INSERT INTO "{schema}".registry_arrowdataset (
                 project_id, atom_id, file_key, arrow_object, flight_path, original_csv, descriptor, created_at
             ) VALUES ($1,$2,$3,$4,$5,$6,$7,NOW())
             ON CONFLICT (original_csv) DO UPDATE
@@ -92,13 +95,10 @@ async def rename_arrow_dataset(old_object: str, new_object: str) -> None:
         return
     try:
         schema = _schema_from_object(old_object)
-        if schema:
-            try:
-                await conn.execute(f'SET search_path TO "{schema}", public')
-            except Exception:
-                pass
+        if not schema:
+            return
         await conn.execute(
-            "UPDATE registry_arrowdataset SET arrow_object=$1 WHERE arrow_object=$2",
+            f'UPDATE "{schema}".registry_arrowdataset SET arrow_object=$1 WHERE arrow_object=$2',
             new_object,
             old_object,
         )
@@ -121,13 +121,10 @@ async def delete_arrow_dataset(arrow_object: str) -> None:
         return
     try:
         schema = _schema_from_object(arrow_object)
-        if schema:
-            try:
-                await conn.execute(f'SET search_path TO "{schema}", public')
-            except Exception:
-                pass
+        if not schema:
+            return
         await conn.execute(
-            "DELETE FROM registry_arrowdataset WHERE arrow_object=$1",
+            f'DELETE FROM "{schema}".registry_arrowdataset WHERE arrow_object=$1',
             arrow_object,
         )
     finally:
@@ -154,16 +151,14 @@ async def arrow_dataset_exists(project_id: int, atom_id: str, filename: str) -> 
             try:
                 schema = await _schema_from_project(project_id)
                 if schema:
-                    try:
-                        await conn.execute(f'SET search_path TO "{schema}", public')
-                    except Exception:
-                        pass
-                row = await conn.fetchrow(
-                    "SELECT arrow_object, flight_path FROM registry_arrowdataset WHERE project_id=$1 AND atom_id=$2 AND original_csv=$3",
-                    project_id,
-                    atom_id,
-                    filename,
-                )
+                    row = await conn.fetchrow(
+                        f"SELECT arrow_object, flight_path FROM \"{schema}\".registry_arrowdataset WHERE project_id=$1 AND atom_id=$2 AND original_csv=$3",
+                        project_id,
+                        atom_id,
+                        filename,
+                    )
+                else:
+                    row = None
                 if row:
                     exists = True
                     arrow_object = row["arrow_object"]
@@ -254,18 +249,15 @@ async def get_dataset_info(arrow_object: str):
         return None
     try:
         schema = _schema_from_object(arrow_object)
-        if schema:
-            try:
-                await conn.execute(f'SET search_path TO "{schema}", public')
-            except Exception:
-                pass
+        if not schema:
+            return None
         row = await conn.fetchrow(
-            "SELECT file_key, flight_path, original_csv FROM registry_arrowdataset WHERE arrow_object=$1",
+            f'SELECT file_key, flight_path, original_csv FROM "{schema}".registry_arrowdataset WHERE arrow_object=$1',
             arrow_object,
         )
         if not row:
             row = await conn.fetchrow(
-                "SELECT file_key, flight_path, original_csv FROM registry_arrowdataset WHERE arrow_object=$1",
+                f'SELECT file_key, flight_path, original_csv FROM "{schema}".registry_arrowdataset WHERE arrow_object=$1',
                 Path(arrow_object).name,
             )
         if row:

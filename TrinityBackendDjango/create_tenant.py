@@ -203,6 +203,12 @@ def main():
     )
     print("   ✅ Tenant-schema migrations complete.\n")
 
+    print(f"→ 3b) Applying registry migrations for '{tenant_schema}'…")
+    call_command(
+        "migrate_schemas", "registry", "--schema", tenant_schema, interactive=False, verbosity=1
+    )
+    print("   ✅ Registry migrations complete.\n")
+
     # Load atom catalogue from FastAPI features
     try:
         call_command("sync_features")
