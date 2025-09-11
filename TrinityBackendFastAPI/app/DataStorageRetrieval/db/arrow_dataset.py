@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 from .connection import POSTGRES_HOST, POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB
 from .client_project import fetch_client_app_project
 
@@ -17,9 +18,12 @@ async def _schema_from_project(project_id: int) -> str | None:
 def _schema_from_object(arrow_object: str) -> str | None:
     """Infer tenant schema from an Arrow object's prefix."""
     try:
-        return arrow_object.split("/", 1)[0].lower()
+        parts = arrow_object.split("/", 1)
+        if len(parts) > 1:
+            return parts[0].lower()
     except Exception:
-        return None
+        pass
+    return None
 
 async def record_arrow_dataset(
     project_id: int,
@@ -259,6 +263,11 @@ async def get_dataset_info(arrow_object: str):
             "SELECT file_key, flight_path, original_csv FROM registry_arrowdataset WHERE arrow_object=$1",
             arrow_object,
         )
+        if not row:
+            row = await conn.fetchrow(
+                "SELECT file_key, flight_path, original_csv FROM registry_arrowdataset WHERE arrow_object=$1",
+                Path(arrow_object).name,
+            )
         if row:
             return row["file_key"], row["flight_path"], row["original_csv"]
     finally:
