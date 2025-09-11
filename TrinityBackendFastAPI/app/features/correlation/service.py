@@ -228,14 +228,17 @@ def save_correlation_results_to_minio(df: pd.DataFrame, correlation_results: dic
     """Save correlation results to MinIO"""
     bucket_name, object_path = parse_minio_path(file_path)
     
-    # Create output path
+    # Create output path alongside the original object rather than in a root
+    # level "correlations" directory.  This avoids polluting the bucket with a
+    # top-level folder while still keeping the correlation results near the
+    # source file.
     base_name = object_path.rsplit('.', 1)[0]
-    out_path = f"correlations/{base_name}-correlations.json"
-    
+    out_path = f"{base_name}-correlations.json"
+
     # Save to MinIO as JSON
     json_bytes = json.dumps(correlation_results, indent=2).encode()
     minio_client.put_object(bucket_name, out_path, io.BytesIO(json_bytes), len(json_bytes))
-    
+
     return f"{bucket_name}/{out_path}"
 
 
