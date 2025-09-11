@@ -279,6 +279,11 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
       return settings.fileKeyMap?.[assigned] || assigned;
     });
     form.append('file_keys', JSON.stringify(keys));
+    console.log('Validating files', {
+      validator_atom_id: settings.validatorId,
+      file_paths: paths,
+      file_keys: keys,
+    });
     const res = await fetch(`${VALIDATE_API}/validate`, { method: 'POST', body: form });
     if (res.ok) {
       const data = await res.json();
@@ -369,6 +374,8 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
       setValidationDetails(details);
       logSessionState(user?.id);
     } else {
+      const err = await res.text();
+      console.error('Validation failed', res.status, err);
       logSessionState(user?.id);
     }
   };
@@ -478,6 +485,12 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
     });
     form.append('file_keys', JSON.stringify(keys));
     form.append('overwrite', 'false');
+    console.log('Saving dataframes', {
+      validator_atom_id: vidSave,
+      file_paths: paths,
+      file_keys: keys,
+      overwrite: false,
+    });
     const savePromise = fetch(`${VALIDATE_API}/save_dataframes`, {
       method: 'POST',
       body: form,
@@ -529,6 +542,8 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
       });
       logSessionState(user?.id);
     } else {
+      const err = await res.text();
+      console.error('Save dataframes failed', res.status, err);
       toast({ title: 'Unable to Save Dataframes', variant: 'destructive' });
       logSessionState(user?.id);
     }

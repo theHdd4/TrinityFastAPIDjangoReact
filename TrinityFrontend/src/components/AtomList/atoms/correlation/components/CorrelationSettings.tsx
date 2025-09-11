@@ -681,11 +681,16 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
       // Get variables (column names) from the result
       const resultVariables = result.columns_used || [];
       
-      // Transform backend correlation matrix dictionary to 2D array and filter out non-numeric columns
-      const { matrix: transformedMatrix, filteredVariables } = transformCorrelationMatrix(
-        result.correlation_results.correlation_matrix, 
-        resultVariables
-      );
+      // Transform backend correlation matrix dictionary to 2D array and
+      // filter out non-numeric columns. The API might return the matrix
+      // directly or nested inside a `results` field when loaded from MongoDB.
+      const correlationDict =
+        result.correlation_results?.correlation_matrix ??
+        result.correlation_results?.results?.correlation_matrix ??
+        {};
+
+      const { matrix: transformedMatrix, filteredVariables } =
+        transformCorrelationMatrix(correlationDict, resultVariables);
       
       // Start with no columns selected and no time series data
       // User must explicitly select variables to see correlations

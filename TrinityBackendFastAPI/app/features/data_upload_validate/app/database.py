@@ -6,7 +6,15 @@ import logging
 import os
 
 # MongoDB Configuration
-MONGODB_URL = os.getenv("MONGO_URI", "mongodb://mongo:27017/trinity")
+# Allow explicit credentials or a full URI.  If no credentials are supplied
+# the connection will be attempted without authentication which is fine for
+# local development.
+MONGODB_URL = os.getenv("MONGO_URI", "mongodb://mongo:27017")
+# Accept both MONGO_USERNAME and legacy MONGO_USER for credentials
+MONGO_USER = os.getenv("MONGO_USERNAME") or os.getenv("MONGO_USER")
+MONGO_PASSWORD = os.getenv("MONGO_PASSWORD")
+MONGO_AUTH_DB = os.getenv("MONGO_AUTH_DB", "admin")
+
 DATABASE_NAME = "validator_atoms_db"
 # operation logs live in a separate database so they can be shared across
 # services.  The rest of the validator atom data remains in
@@ -25,7 +33,13 @@ COLLECTIONS = {
 
 # Initialize MongoDB client with timeout
 try:
-    mongo_client = MongoClient(MONGODB_URL, serverSelectionTimeoutMS=5000)
+    mongo_client = MongoClient(
+        MONGODB_URL,
+        username=MONGO_USER,
+        password=MONGO_PASSWORD,
+        authSource=MONGO_AUTH_DB,
+        serverSelectionTimeoutMS=5000,
+    )
     db = mongo_client[DATABASE_NAME]
     trinity_db = mongo_client[TRINITY_DB_NAME]
     
@@ -41,7 +55,11 @@ except Exception as e:
 
 def check_mongodb_connection():
     """Check if MongoDB is available"""
-    return mongo_client is not None and db is not None
+    return (
+        mongo_client is not None
+        and db is not None
+        and trinity_db is not None
+    )
 
 
 def save_validator_atom_to_mongo(validator_atom_id: str, validator_data: dict):

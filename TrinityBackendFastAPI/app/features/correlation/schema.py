@@ -81,7 +81,7 @@ class FilterAndCorrelateResponse(BaseModel):
     # Correlation results
     correlation_method: str
     correlation_results: dict  # Results vary by method
-    correlation_id: str
+    correlation_id: Optional[str] = None
     
     # Preview (optional)
     preview_data: Optional[List[dict]] = None
