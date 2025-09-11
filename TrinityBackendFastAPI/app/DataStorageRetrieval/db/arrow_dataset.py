@@ -1,5 +1,25 @@
 import os
 from .connection import POSTGRES_HOST, POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB
+from .client_project import fetch_client_app_project
+
+
+async def _schema_from_project(project_id: int) -> str | None:
+    """Return tenant schema for a project if resolvable."""
+    try:
+        client, _, _ = await fetch_client_app_project(None, project_id)
+        if client:
+            return client.lower()
+    except Exception:
+        pass
+    return None
+
+
+def _schema_from_object(arrow_object: str) -> str | None:
+    """Infer tenant schema from an Arrow object's prefix."""
+    try:
+        return arrow_object.split("/", 1)[0].lower()
+    except Exception:
+        return None
 
 async def record_arrow_dataset(
     project_id: int,
@@ -23,6 +43,12 @@ async def record_arrow_dataset(
     except Exception:
         return
     try:
+        schema = await _schema_from_project(project_id)
+        if schema:
+            try:
+                await conn.execute(f'SET search_path TO "{schema}", public')
+            except Exception:
+                pass
         await conn.execute(
             """
             INSERT INTO registry_arrowdataset (
@@ -61,6 +87,12 @@ async def rename_arrow_dataset(old_object: str, new_object: str) -> None:
     except Exception:
         return
     try:
+        schema = _schema_from_object(old_object)
+        if schema:
+            try:
+                await conn.execute(f'SET search_path TO "{schema}", public')
+            except Exception:
+                pass
         await conn.execute(
             "UPDATE registry_arrowdataset SET arrow_object=$1 WHERE arrow_object=$2",
             new_object,
@@ -84,6 +116,12 @@ async def delete_arrow_dataset(arrow_object: str) -> None:
     except Exception:
         return
     try:
+        schema = _schema_from_object(arrow_object)
+        if schema:
+            try:
+                await conn.execute(f'SET search_path TO "{schema}", public')
+            except Exception:
+                pass
         await conn.execute(
             "DELETE FROM registry_arrowdataset WHERE arrow_object=$1",
             arrow_object,
@@ -110,6 +148,12 @@ async def arrow_dataset_exists(project_id: int, atom_id: str, filename: str) -> 
             conn = None
         if conn is not None:
             try:
+                schema = await _schema_from_project(project_id)
+                if schema:
+                    try:
+                        await conn.execute(f'SET search_path TO "{schema}", public')
+                    except Exception:
+                        pass
                 row = await conn.fetchrow(
                     "SELECT arrow_object, flight_path FROM registry_arrowdataset WHERE project_id=$1 AND atom_id=$2 AND original_csv=$3",
                     project_id,
@@ -205,6 +249,12 @@ async def get_dataset_info(arrow_object: str):
     except Exception:
         return None
     try:
+        schema = _schema_from_object(arrow_object)
+        if schema:
+            try:
+                await conn.execute(f'SET search_path TO "{schema}", public')
+            except Exception:
+                pass
         row = await conn.fetchrow(
             "SELECT file_key, flight_path, original_csv FROM registry_arrowdataset WHERE arrow_object=$1",
             arrow_object,
