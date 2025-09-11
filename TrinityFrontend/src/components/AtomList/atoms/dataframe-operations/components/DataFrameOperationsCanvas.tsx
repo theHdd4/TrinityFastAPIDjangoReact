@@ -972,7 +972,6 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
     const el = containerRef.current;
     if (el) {
       // Reset any phantom scroll area after heavy table mount
-      el.style.height = 'auto';
       el.scrollTop = 0;
     }
   }, [data]);
@@ -987,70 +986,67 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
         className="hidden"
       />
 
-      <div ref={containerRef} className="flex flex-col h-full">
+      <div ref={containerRef} className="w-full h-full p-6 bg-gradient-to-br from-slate-50 to-blue-50 overflow-y-auto" style={{position: 'relative'}}>
         {data?.fileName && (
-          <div className="border-b border-blue-200 bg-blue-50">
-            <div className="flex items-center px-6 py-4">
-              <div className="relative">
-                <div className="flex items-center space-x-2 px-5 py-3 rounded-t-xl text-sm font-medium border-t border-l border-r border-slate-200 bg-white -mb-px shadow-lg">
-                  <FileText className="w-4 h-4" />
-                  <span>{data.fileName.split('/').pop()}</span>
-                </div>
+          <div className="mb-4">
+            <div className="flex items-center px-6 py-4 bg-blue-50 border border-blue-200 rounded-lg">
+              <div className="flex items-center space-x-2 px-5 py-3 rounded-t-xl text-sm font-medium border-t border-l border-r border-slate-200 bg-white -mb-px shadow-lg">
+                <FileText className="w-4 h-4" />
+                <span>{data.fileName.split('/').pop()}</span>
               </div>
             </div>
           </div>
         )}
-        <div className="flex-1 p-4 overflow-hidden">
-          <div className="mx-auto max-w-screen-2xl rounded-2xl border border-slate-200 bg-white shadow-sm flex flex-col h-full">
-        {/* Controls section */}
-        <div className="flex-shrink-0 flex items-center justify-between border-b border-slate-200 px-5 py-3">
-            <div className="flex items-center space-x-4">
-              <div className="relative">
-                <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
-                <Input
-                  type="text"
-                  placeholder="Search..."
-                  value={settings.searchTerm || ''}
-                  onChange={(e) => onSettingsChange({ searchTerm: e.target.value })}
-                  className="pl-9 w-64"
-                />
-              </div>
-              <Button variant="outline" size="sm" onClick={onClearAll}>
-                <RotateCcw className="w-4 h-4 mr-1" />
-                Reset
-              </Button>
-            </div>
-            <div className="relative flex flex-col items-center" style={{ minWidth: 180 }}>
-              <Button
-                onClick={handleSaveDataFrame}
-                disabled={saveLoading}
-                className="bg-blue-600 hover:bg-blue-700 text-white"
-              >
-                {saveLoading ? 'Saving...' : 'Save DataFrame'}
-              </Button>
-            </div>
-          </div>
-
-          {/* Table section - Excel-like appearance */}
-          <div className="flex-1 overflow-auto">
-            {/* Placeholder for when no data is loaded */}
-            {!data || !Array.isArray(data.headers) || data.headers.length === 0 ? (
-              <div className="flex flex-1 items-center justify-center bg-gray-50">
-                <div className="border border-gray-200 bg-white rounded-lg p-4 text-center max-w-md w-full mx-auto">
-                  <p className="p-4 text-center text-gray-500">No results to display. Upload a CSV or Excel file to see results here.</p>
+        <div className="mx-auto max-w-screen-2xl rounded-2xl border border-slate-200 bg-white shadow-sm">
+            {/* Controls section */}
+            <div className="flex-shrink-0 flex items-center justify-between border-b border-slate-200 px-5 py-3">
+              <div className="flex items-center space-x-4">
+                <div className="relative">
+                  <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    type="text"
+                    placeholder="Search..."
+                    value={settings.searchTerm || ''}
+                    onChange={(e) => onSettingsChange({ searchTerm: e.target.value })}
+                    className="pl-9 w-64"
+                  />
                 </div>
+                <Button variant="outline" size="sm" onClick={onClearAll}>
+                  <RotateCcw className="w-4 h-4 mr-1" />
+                  Reset
+                </Button>
               </div>
-            ) : (
-              <div className="table-wrapper">
-                <div className="table-edge-left" />
-                <div className="table-edge-right" />
-                <div className="table-overflow relative">
-                  {operationLoading && (
-                    <div className="absolute inset-0 bg-white/70 flex items-center justify-center z-10 text-sm text-slate-700">
-                      Operation Loading...
-                    </div>
-                  )}
-                  <Table className="table-base">
+              <div className="relative flex flex-col items-center" style={{ minWidth: 180 }}>
+                <Button
+                  onClick={handleSaveDataFrame}
+                  disabled={saveLoading}
+                  className="bg-blue-600 hover:bg-blue-700 text-white"
+                >
+                  {saveLoading ? 'Saving...' : 'Save DataFrame'}
+                </Button>
+              </div>
+            </div>
+
+            {/* Table section - Excel-like appearance */}
+            <div className="overflow-auto">
+              {/* Placeholder for when no data is loaded */}
+              {!data || !Array.isArray(data.headers) || data.headers.length === 0 ? (
+                <div className="flex items-center justify-center bg-gray-50 p-8">
+                  <div className="border border-gray-200 bg-white rounded-lg p-4 text-center max-w-md w-full mx-auto">
+                    <p className="p-4 text-center text-gray-500">No results to display. Upload a CSV or Excel file to see results here.</p>
+                  </div>
+                </div>
+              ) : (
+                <div className="table-wrapper">
+                  <div className="table-edge-left" />
+                  <div className="table-edge-right" />
+                  <div className="table-overflow relative">
+                    {operationLoading && (
+                      <div className="absolute inset-0 bg-white/70 flex items-center justify-center z-10 text-sm text-slate-700">
+                        Operation Loading...
+                      </div>
+                    )}
+                    <Table className="table-base">
               <TableHeader className="table-header">
                 <TableRow className="table-header-row">
                   {settings.showRowNumbers && (
@@ -1195,70 +1191,69 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                       );
                     })}
                     <TableCell className="table-cell w-8">
+                      <div
+                        className="absolute bottom-0 left-0 w-full h-1 cursor-row-resize"
+                        onMouseDown={e => startRowResize(startIndex + rowIndex, e)}
+                      />
                     </TableCell>
-                    <div
-                      className="absolute bottom-0 left-0 w-full h-1 cursor-row-resize"
-                      onMouseDown={e => startRowResize(startIndex + rowIndex, e)}
-                    />
                   </TableRow>
                 ))}
               </TableBody>
-            </Table>
-          </div>
-        </div>
-          )}
-          {totalPages > 1 && (
-            <div className="flex flex-col items-center py-4">
-              <div className="text-sm text-muted-foreground mb-2">
-                {`Showing ${startIndex + 1} to ${Math.min(startIndex + (settings.rowsPerPage || 15), processedData.totalRows)} of ${processedData.totalRows} entries`}
-              </div>
-              <Pagination>
-                <PaginationContent>
-                  <PaginationItem>
-                    <PaginationPrevious
-                      onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
-                      className={currentPage === 1 ? 'pointer-events-none opacity-50' : 'cursor-pointer'}
-                    />
-                  </PaginationItem>
-                  {Array.from({ length: totalPages }).map((_, i) => {
-                    const pageNum = i + 1;
-                    if (
-                      pageNum === 1 ||
-                      pageNum === totalPages ||
-                      Math.abs(pageNum - currentPage) <= 2
-                    ) {
-                      return (
-                        <PaginationItem key={pageNum}>
-                          <PaginationLink
-                            onClick={() => setCurrentPage(pageNum)}
-                            isActive={currentPage === pageNum}
-                            className="cursor-pointer"
-                          >
-                            {pageNum}
-                          </PaginationLink>
-                        </PaginationItem>
-                      );
-                    }
-                    if (
-                      (pageNum === currentPage - 3 && pageNum > 1) ||
-                      (pageNum === currentPage + 3 && pageNum < totalPages)
-                    ) {
-                      return <PaginationEllipsis key={pageNum} />;
-                    }
-                    return null;
-                  })}
-                  <PaginationItem>
-                    <PaginationNext
-                      onClick={() => setCurrentPage(Math.min(totalPages, currentPage + 1))}
-                      className={currentPage === totalPages ? 'pointer-events-none opacity-50' : 'cursor-pointer'}
-                    />
-                  </PaginationItem>
-                </PaginationContent>
-              </Pagination>
+                    </Table>
+                  </div>
+                </div>
+              )}
+              {totalPages > 1 && (
+                <div className="flex flex-col items-center py-4">
+                  <div className="text-sm text-muted-foreground mb-2">
+                    {`Showing ${startIndex + 1} to ${Math.min(startIndex + (settings.rowsPerPage || 15), processedData.totalRows)} of ${processedData.totalRows} entries`}
+                  </div>
+                  <Pagination>
+                    <PaginationContent>
+                      <PaginationItem>
+                        <PaginationPrevious
+                          onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
+                          className={currentPage === 1 ? 'pointer-events-none opacity-50' : 'cursor-pointer'}
+                        />
+                      </PaginationItem>
+                      {Array.from({ length: totalPages }).map((_, i) => {
+                        const pageNum = i + 1;
+                        if (
+                          pageNum === 1 ||
+                          pageNum === totalPages ||
+                          Math.abs(pageNum - currentPage) <= 2
+                        ) {
+                          return (
+                            <PaginationItem key={pageNum}>
+                              <PaginationLink
+                                onClick={() => setCurrentPage(pageNum)}
+                                isActive={currentPage === pageNum}
+                                className="cursor-pointer"
+                              >
+                                {pageNum}
+                              </PaginationLink>
+                            </PaginationItem>
+                          );
+                        }
+                        if (
+                          (pageNum === currentPage - 3 && pageNum > 1) ||
+                          (pageNum === currentPage + 3 && pageNum < totalPages)
+                        ) {
+                          return <PaginationEllipsis key={pageNum} />;
+                        }
+                        return null;
+                      })}
+                      <PaginationItem>
+                        <PaginationNext
+                          onClick={() => setCurrentPage(Math.min(totalPages, currentPage + 1))}
+                          className={currentPage === totalPages ? 'pointer-events-none opacity-50' : 'cursor-pointer'}
+                        />
+                      </PaginationItem>
+                    </PaginationContent>
+                  </Pagination>
+                </div>
+              )}
             </div>
-          )}
-        </div>
-        </div>
         </div>
         {contextMenu && data && typeof contextMenu.col === 'string' && (
         <div
