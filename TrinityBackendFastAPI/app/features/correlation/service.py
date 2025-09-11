@@ -12,6 +12,7 @@ from .config import settings  # Use local config instead of global config
 from typing import List, Dict, Any, Literal, Optional, Union
 from datetime import datetime
 from .database import correlation_coll
+from pymongo.errors import PyMongoError
 
 
 # Initialize MinIO client (only once)
@@ -236,16 +237,27 @@ def calculate_correlations(df: pd.DataFrame, req) -> Dict[str, Any]:
 
 async def save_correlation_results_to_db(
     df: pd.DataFrame, correlation_results: dict, file_path: str
-) -> str:
-    """Persist correlation results in MongoDB"""
+) -> Optional[str]:
+    """Persist correlation results in MongoDB.
+
+    If MongoDB is not reachable or authentication fails, the error is
+    logged and ``None`` is returned so that correlation analysis can
+    continue without interruption.
+    """
     document = {
         "source_path": file_path,
         "rows": len(df),
         "results": correlation_results,
         "created_at": datetime.utcnow(),
     }
-    result = await correlation_coll.insert_one(document)
-    return str(result.inserted_id)
+
+    try:
+        result = await correlation_coll.insert_one(document)
+        return str(result.inserted_id)
+    except PyMongoError as e:
+        # Log the error but don't fail the entire operation
+        print(f"⚠️ correlation MongoDB insert failed: {e}")
+        return None
 
 
 # Import schemas for filter functions
