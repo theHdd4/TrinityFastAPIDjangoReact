@@ -1531,8 +1531,10 @@ async def validate(
                     df_pl = pl.read_csv(io.BytesIO(content), **CSV_READ_KWARGS)
                 elif file.filename.lower().endswith((".xls", ".xlsx")):
                     df_pl = pl.from_pandas(pd.read_excel(io.BytesIO(content)))
+                elif file.filename.lower().endswith(".arrow"):
+                    df_pl = pl.read_ipc(io.BytesIO(content))
                 else:
-                    raise HTTPException(status_code=400, detail="Only CSV and XLSX files supported")
+                    raise HTTPException(status_code=400, detail="Only CSV, XLSX and Arrow files supported")
                 df = df_pl.to_pandas()
 
                 df.columns = [preprocess_column_name(col) for col in df.columns]
@@ -1550,8 +1552,10 @@ async def validate(
                     df_pl = pl.read_csv(io.BytesIO(data), **CSV_READ_KWARGS)
                 elif filename.lower().endswith((".xls", ".xlsx")):
                     df_pl = pl.from_pandas(pd.read_excel(io.BytesIO(data)))
+                elif filename.lower().endswith(".arrow"):
+                    df_pl = pl.read_ipc(io.BytesIO(data))
                 else:
-                    raise HTTPException(status_code=400, detail="Only CSV and XLSX files supported")
+                    raise HTTPException(status_code=400, detail="Only CSV, XLSX and Arrow files supported")
                 df = df_pl.to_pandas()
 
                 df.columns = [preprocess_column_name(col) for col in df.columns]
@@ -2857,6 +2861,9 @@ async def save_dataframes(
             arrow_buf = io.BytesIO()
             df_pl.write_ipc(arrow_buf)
             arrow_bytes = arrow_buf.getvalue()
+        elif filename.lower().endswith(".arrow"):
+            arrow_bytes = fileobj.read()
+            df_pl = pl.read_ipc(io.BytesIO(arrow_bytes))
         else:
             raise HTTPException(status_code=400, detail="Unsupported file type")
 
