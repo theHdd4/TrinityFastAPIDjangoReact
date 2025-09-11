@@ -31,7 +31,7 @@ from .service import (
     check_bucket_and_file,
     load_csv_from_minio, 
     calculate_correlations,
-    save_correlation_results_to_minio,
+    save_correlation_results_to_db,
     parse_minio_path,
     apply_identifier_filters,
     apply_measure_filters,
@@ -397,7 +397,9 @@ async def filter_and_correlate(request: FilterAndCorrelateRequest):
         print(f"🔍 correlation_matrix sample: {sample if correlation_matrix is not None else 'no matrix'}")
                 
         # Save correlation results
-        correlation_file_path = save_correlation_results_to_minio(df, correlation_results, request.file_path)
+        correlation_id = await save_correlation_results_to_db(
+            df, correlation_results, request.file_path
+        )
         
         # Prepare preview if requested
         preview_data = None
@@ -412,7 +414,7 @@ async def filter_and_correlate(request: FilterAndCorrelateRequest):
         metadata = {
             "input_path": request.file_path,
             "filtered_file_path": filtered_file_path,
-            "correlation_file_path": correlation_file_path,
+            "correlation_id": correlation_id,
             "original_rows": original_rows,
             "filtered_rows": filtered_rows,
             "filters_applied": filters_applied,
@@ -441,7 +443,7 @@ async def filter_and_correlate(request: FilterAndCorrelateRequest):
             filtered_file_path=filtered_file_path,
             correlation_method=request.method,
             correlation_results=correlation_results,
-            correlation_file_path=correlation_file_path,
+            correlation_id=correlation_id,
             preview_data=preview_data,
             date_analysis=date_analysis,
             date_filtered_rows=date_filtered_rows,

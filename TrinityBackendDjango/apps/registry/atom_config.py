@@ -48,14 +48,14 @@ def save_atom_list_configuration(
     client_id, app_id, project_id = _get_env_ids(project)
     try:
         mc = MongoClient(
-            getattr(settings, "MONGO_URI", "mongodb://mongo:27017/trinity_prod")
+            getattr(settings, "MONGO_URI", "mongodb://mongo:27017/trinity_db")
         )
-        db = mc["trinity_prod"]
+        db = mc["trinity_db"]
         coll = db["atom_list_configuration"]
 
-        # Drop legacy collection from previous `trinity_db` database if it exists
+        # Drop legacy collection from previous `trinity_prod` database if it exists
         try:
-            legacy_db = mc["trinity_db"]
+            legacy_db = mc["trinity_prod"]
             legacy_db.drop_collection("atom_list_configuration")
         except Exception:  # pragma: no cover - best effort cleanup
             pass
@@ -126,9 +126,9 @@ def load_atom_list_configuration(
     client_id, app_id, project_id = _get_env_ids(project)
     try:
         mc = MongoClient(
-            getattr(settings, "MONGO_URI", "mongodb://mongo:27017/trinity_prod")
+            getattr(settings, "MONGO_URI", "mongodb://mongo:27017/trinity_db")
         )
-        coll = mc["trinity_prod"]["atom_list_configuration"]
+        coll = mc["trinity_db"]["atom_list_configuration"]
         cursor = coll.find(
             {
                 "client_id": client_id,
