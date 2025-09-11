@@ -15,6 +15,7 @@ import fastexcel
 
 # Add this line with your other imports
 from datetime import datetime
+import logging
 
 
 from app.features.data_upload_validate.app.validators.mmm import validate_mmm
@@ -78,6 +79,8 @@ from app.features.data_upload_validate.app.database import save_validator_atom_t
 
 # Initialize router
 router = APIRouter()
+
+logger = logging.getLogger(__name__)
 
 
 
@@ -2688,22 +2691,35 @@ async def save_dataframes(
     user_name: str = Form(""),
 ):
     """Save validated dataframes as Arrow tables and upload via Flight."""
+    logger.info(
+        "save_dataframes invoked", extra={
+            "validator_atom_id": validator_atom_id,
+            "overwrite": overwrite,
+        }
+    )
+    logger.debug("raw file_keys=%s", file_keys)
+    logger.debug("raw file_paths=%s", file_paths)
+
     # --- Parse and validate inputs -------------------------------------------------
     try:
         key_inputs = json.loads(file_keys) if file_keys else []
     except json.JSONDecodeError:
+        logger.exception("Invalid JSON for file_keys")
         raise HTTPException(status_code=400, detail="Invalid JSON format for file_keys")
     if not isinstance(key_inputs, list):
+        logger.error("file_keys not list: %s", type(key_inputs))
         raise HTTPException(status_code=400, detail="file_keys must be a JSON array")
 
     try:
         paths = json.loads(file_paths) if file_paths else []
     except json.JSONDecodeError:
+        logger.exception("Invalid JSON for file_paths")
         raise HTTPException(status_code=400, detail="Invalid JSON format for file_paths")
     if paths and (
         not isinstance(paths, list)
         or any(not isinstance(p, str) or not p for p in paths)
     ):
+        logger.error("file_paths malformed: %s", paths)
         raise HTTPException(
             status_code=400, detail="file_paths must be a JSON array of non-empty strings"
         )
@@ -2711,6 +2727,7 @@ async def save_dataframes(
     files_list = files or []
     source_count = len(files_list) if files_list else len(paths)
     if source_count == 0:
+        logger.error("No files or file paths provided")
         raise HTTPException(status_code=400, detail="No files or file paths provided")
 
     # Fallback to filenames when keys are missing or empty
@@ -2723,6 +2740,11 @@ async def save_dataframes(
         keys = fallback_names
     else:
         if len(key_inputs) != source_count:
+            logger.error(
+                "Mismatched file key count: %s keys for %s sources",
+                len(key_inputs),
+                source_count,
+            )
             raise HTTPException(
                 status_code=400,
                 detail="Number of file keys must match number of files or paths",
@@ -2734,6 +2756,7 @@ async def save_dataframes(
             keys.append(k)
 
     if len(set(keys)) != len(keys):
+        logger.error("Duplicate file keys: %s", keys)
         raise HTTPException(status_code=400, detail="Duplicate file keys are not allowed")
 
     uploads = []
@@ -2768,6 +2791,7 @@ async def save_dataframes(
     STATUS_TTL = 3600
 
     for key, filename, fileobj in iter_sources:
+        logger.info("Processing file %s with key %s", filename, key)
         progress_key = f"upload_status:{validator_atom_id}:{key}"
         redis_client.set(progress_key, "uploading", ex=STATUS_TTL)
 
@@ -2839,6 +2863,7 @@ async def save_dataframes(
         result = upload_to_minio(arrow_bytes, arrow_name, prefix)
         saved_name = Path(result.get("object_name", "")).name or arrow_name
         flight_path = f"{validator_atom_id}/{saved_name}"
+        logger.info("Uploaded %s as %s", filename, result.get("object_name", ""))
 
         # If df_pl is None (chunked csv), upload via polars scan
         if filename.lower().endswith(".csv"):
@@ -2882,6 +2907,7 @@ async def save_dataframes(
         "APP_NAME": os.getenv("APP_NAME"),
         "PROJECT_NAME": os.getenv("PROJECT_NAME"),
     }
+    logger.info("save_dataframes completed: %s files", len(uploads))
     log_operation_to_mongo(
         user_id=user_id,
         client_id=client_id,

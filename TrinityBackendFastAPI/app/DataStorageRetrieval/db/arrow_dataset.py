@@ -2,6 +2,9 @@ import os
 from pathlib import Path
 from .connection import POSTGRES_HOST, POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB
 from .client_project import fetch_client_app_project
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def _client_to_schema(client: str | None) -> str | None:
@@ -51,11 +54,20 @@ async def record_arrow_dataset(
             database=POSTGRES_DB,
         )
     except Exception:
+        logger.exception("Unable to connect to Postgres for record_arrow_dataset")
         return
     try:
         schema = await _schema_from_project(project_id)
         if not schema:
+            logger.warning("No schema resolved for project %s", project_id)
             return
+        logger.debug(
+            "Inserting ArrowDataset: project=%s atom=%s key=%s object=%s",
+            project_id,
+            atom_id,
+            file_key,
+            arrow_object,
+        )
         await conn.execute(
             f"""
             INSERT INTO "{schema}".registry_arrowdataset (
@@ -75,6 +87,8 @@ async def record_arrow_dataset(
             original_csv,
             descriptor or "",
         )
+    except Exception:
+        logger.exception("Error recording ArrowDataset")
     finally:
         await conn.close()
 
@@ -92,16 +106,21 @@ async def rename_arrow_dataset(old_object: str, new_object: str) -> None:
             database=POSTGRES_DB,
         )
     except Exception:
+        logger.exception("Unable to connect to Postgres for rename_arrow_dataset")
         return
     try:
         schema = _schema_from_object(old_object)
         if not schema:
+            logger.warning("No schema resolved for object %s", old_object)
             return
+        logger.debug("Renaming arrow object %s -> %s", old_object, new_object)
         await conn.execute(
             f'UPDATE "{schema}".registry_arrowdataset SET arrow_object=$1 WHERE arrow_object=$2',
             new_object,
             old_object,
         )
+    except Exception:
+        logger.exception("Error renaming ArrowDataset")
     finally:
         await conn.close()
 
@@ -118,21 +137,32 @@ async def delete_arrow_dataset(arrow_object: str) -> None:
             database=POSTGRES_DB,
         )
     except Exception:
+        logger.exception("Unable to connect to Postgres for delete_arrow_dataset")
         return
     try:
         schema = _schema_from_object(arrow_object)
         if not schema:
+            logger.warning("No schema resolved for object %s", arrow_object)
             return
+        logger.debug("Deleting arrow object %s", arrow_object)
         await conn.execute(
             f'DELETE FROM "{schema}".registry_arrowdataset WHERE arrow_object=$1',
             arrow_object,
         )
+    except Exception:
+        logger.exception("Error deleting ArrowDataset")
     finally:
         await conn.close()
 
 
 async def arrow_dataset_exists(project_id: int, atom_id: str, filename: str) -> bool:
     """Return True if a dataset entry already exists and is present in MinIO and Flight."""
+    logger.debug(
+        "Checking dataset existence: project=%s atom=%s file=%s",
+        project_id,
+        atom_id,
+        filename,
+    )
     exists = False
     arrow_object: str | None = None
     flight_path: str | None = None
@@ -163,6 +193,11 @@ async def arrow_dataset_exists(project_id: int, atom_id: str, filename: str) -> 
                     exists = True
                     arrow_object = row["arrow_object"]
                     flight_path = row["flight_path"]
+                    logger.debug(
+                        "Postgres record found: arrow_object=%s flight_path=%s",
+                        arrow_object,
+                        flight_path,
+                    )
             finally:
                 await conn.close()
 
@@ -175,6 +210,11 @@ async def arrow_dataset_exists(project_id: int, atom_id: str, filename: str) -> 
                 exists = True
                 flight_path = path
                 arrow_object = arrow_name
+                logger.debug(
+                    "Flight ticket found: arrow_object=%s flight_path=%s",
+                    arrow_object,
+                    flight_path,
+                )
         except Exception:
             pass
 
@@ -198,6 +238,7 @@ async def arrow_dataset_exists(project_id: int, atom_id: str, filename: str) -> 
         except S3Error as exc:
             if getattr(exc, "code", "") in {"NoSuchKey", "NoSuchBucket"}:
                 exists = False
+                logger.warning("MinIO object missing for %s: %s", arrow_object, exc)
                 try:
                     await __import__("DataStorageRetrieval.db", fromlist=["db"]).delete_arrow_dataset(arrow_object)
                 finally:
@@ -231,6 +272,7 @@ async def arrow_dataset_exists(project_id: int, atom_id: str, filename: str) -> 
         except Exception:  # pragma: no cover - any other error
             exists = False
 
+    logger.debug("arrow_dataset_exists for %s -> %s", filename, exists)
     return exists
 
 
