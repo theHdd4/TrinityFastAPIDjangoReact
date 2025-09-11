@@ -1,5 +1,5 @@
 # app/routes.py - API Routes
-from fastapi import APIRouter, HTTPException, File, Form, UploadFile, Query, Request
+from fastapi import APIRouter, HTTPException, File, Form, UploadFile, Query, Request, Response
 from typing import List, Dict, Any
 import json
 import pandas as pd
@@ -2678,7 +2678,16 @@ load_existing_configs()
 
 
 # --- New endpoints for saving and listing validated dataframes ---
+# Accept both trailing and non-trailing slash variants and explicitly
+# handle CORS preflight OPTIONS requests so browsers or proxies never
+# receive a 405/500 before the actual POST is issued.
+@router.options("/save_dataframes")
+@router.options("/save_dataframes/")
+async def save_dataframes_options() -> Response:
+    return Response(status_code=204)
+
 @router.post("/save_dataframes")
+@router.post("/save_dataframes/")
 async def save_dataframes(
     validator_atom_id: str = Form(...),
     files: List[UploadFile] | None = File(None),
