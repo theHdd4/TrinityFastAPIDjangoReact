@@ -236,6 +236,7 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
     showAxisLabels: true,
     showDataLabels: true,
     showLegend: true,
+    showGrid: true,
   });
   const [settingsPosition, setSettingsPosition] = useState<{
     x: number;
@@ -1095,10 +1096,16 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
       theme: matrixSettings.theme,
       showLegend: matrixSettings.showLegend,
       showAxisLabels: matrixSettings.showAxisLabels,
+      showGrid: matrixSettings.showGrid,
       initialShowDataLabels: false,
-      showGrid: true,
       sortOrder: "asc" as const,
       height: timeSeriesChartHeight,
+      onGridToggle: (enabled: boolean) =>
+        setMatrixSettings((prev) => ({ ...prev, showGrid: enabled })),
+      onLegendToggle: (enabled: boolean) =>
+        setMatrixSettings((prev) => ({ ...prev, showLegend: enabled })),
+      onAxisLabelsToggle: (enabled: boolean) =>
+        setMatrixSettings((prev) => ({ ...prev, showAxisLabels: enabled })),
     } as const;
   }, [
     data.selectedVar1,
