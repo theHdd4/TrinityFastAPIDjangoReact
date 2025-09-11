@@ -22,6 +22,9 @@ def main():
     admin_username = "neo"
     admin_email = f"{admin_username}@{primary_domain}"
 
+    print("→ 0) Making sure migrations are generated…")
+    call_command("makemigrations", "registry", interactive=False, verbosity=1)
+
     print("\n→ 1) Applying SHARED (public) migrations…")
     # Run only shared apps into the public schema
     # Ensure the connection points to the public schema before migrating
