@@ -1217,6 +1217,9 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
 
       <div className="flex items-center justify-between w-full px-4 mb-2">
         <p className="text-xs text-gray-500">Right-click to open settings</p>
+        <p className="text-xs text-gray-500 text-center flex-1">
+          Click a matrix cell to view analysis below
+        </p>
         <div className="flex items-center space-x-2">
           <span className="text-xs text-gray-500">Show all columns</span>
           <Switch
@@ -1228,10 +1231,6 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
           />
         </div>
       </div>
-
-      <p className="text-xs text-gray-500 text-center mb-2">
-        Click a matrix cell to view analysis below
-      </p>
 
       {/* Correlation Heatmap - Full Width */}
       <div className={isCompactMode ? "mb-4" : "mb-6"}>
