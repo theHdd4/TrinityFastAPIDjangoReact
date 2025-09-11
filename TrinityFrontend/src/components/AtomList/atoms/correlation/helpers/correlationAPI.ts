@@ -324,6 +324,7 @@ export class CorrelationAPI {
       showAxisLabels: true,
       showDataLabels: true,
       showLegend: true,
+      showGrid: true,
       ...saved,
     };
   }
