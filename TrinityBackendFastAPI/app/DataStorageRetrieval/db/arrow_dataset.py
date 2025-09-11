@@ -28,10 +28,10 @@ async def record_arrow_dataset(
             INSERT INTO registry_arrowdataset (
                 project_id, atom_id, file_key, arrow_object, flight_path, original_csv, descriptor, created_at
             ) VALUES ($1,$2,$3,$4,$5,$6,$7,NOW())
-            ON CONFLICT (project_id, atom_id, file_key) DO UPDATE
-              SET arrow_object = EXCLUDED.arrow_object,
+            ON CONFLICT (original_csv) DO UPDATE
+              SET file_key    = EXCLUDED.file_key,
+                  arrow_object = EXCLUDED.arrow_object,
                   flight_path  = EXCLUDED.flight_path,
-                  original_csv = EXCLUDED.original_csv,
                   descriptor   = EXCLUDED.descriptor
             """,
             project_id,
@@ -92,7 +92,7 @@ async def delete_arrow_dataset(arrow_object: str) -> None:
         await conn.close()
 
 
-async def arrow_dataset_exists(project_id: int, atom_id: str, file_key: str) -> bool:
+async def arrow_dataset_exists(project_id: int, atom_id: str, filename: str) -> bool:
     """Return True if a dataset entry already exists and is present in MinIO and Flight."""
     exists = False
     arrow_object: str | None = None
@@ -111,10 +111,10 @@ async def arrow_dataset_exists(project_id: int, atom_id: str, file_key: str) -> 
         if conn is not None:
             try:
                 row = await conn.fetchrow(
-                    "SELECT arrow_object, flight_path FROM registry_arrowdataset WHERE project_id=$1 AND atom_id=$2 AND file_key=$3",
+                    "SELECT arrow_object, flight_path FROM registry_arrowdataset WHERE project_id=$1 AND atom_id=$2 AND original_csv=$3",
                     project_id,
                     atom_id,
-                    file_key,
+                    filename,
                 )
                 if row:
                     exists = True
@@ -125,9 +125,9 @@ async def arrow_dataset_exists(project_id: int, atom_id: str, file_key: str) -> 
 
     if not exists:
         try:
-            from DataStorageRetrieval.flight_registry import get_ticket_by_key
+            from DataStorageRetrieval.flight_registry import get_latest_ticket_for_basename
 
-            path, arrow_name = get_ticket_by_key(file_key)
+            path, arrow_name = get_latest_ticket_for_basename(filename)
             if path:
                 exists = True
                 flight_path = path

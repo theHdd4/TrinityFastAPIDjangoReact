@@ -440,7 +440,20 @@ async def upload_file(
     prefix = await get_object_prefix()
     ensure_minio_bucket()
     content = await file.read()
-    result = upload_to_minio(content, file.filename, prefix)
+    try:
+        if file.filename.lower().endswith(".csv"):
+            df_pl = pl.read_csv(io.BytesIO(content), **CSV_READ_KWARGS)
+        elif file.filename.lower().endswith((".xls", ".xlsx")):
+            df_pl = pl.from_pandas(pd.read_excel(io.BytesIO(content)))
+        else:
+            raise HTTPException(status_code=400, detail="Only CSV and XLSX files supported")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Error parsing file {file.filename}: {str(e)}")
+
+    arrow_buf = io.BytesIO()
+    df_pl.write_ipc(arrow_buf)
+    arrow_name = Path(file.filename).stem + ".arrow"
+    result = upload_to_minio(arrow_buf.getvalue(), arrow_name, prefix)
     if result.get("status") != "success":
         raise HTTPException(status_code=500, detail=result.get("error_message", "Upload failed"))
     return {"file_path": result["object_name"]}
@@ -2673,19 +2686,15 @@ async def save_dataframes(
     app_name: str = Form(""),
     project_name: str = Form(""),
     user_name: str = Form(""),
-):
+): 
     """Save validated dataframes as Arrow tables and upload via Flight."""
     try:
-        keys = json.loads(file_keys)
+        json.loads(file_keys)
     except json.JSONDecodeError:
         raise HTTPException(status_code=400, detail="Invalid JSON format for file_keys")
 
     paths = json.loads(file_paths) if file_paths else []
     files_list = files or []
-    if files_list and len(files_list) != len(keys):
-        raise HTTPException(status_code=400, detail="Number of files must match number of keys")
-    if paths and len(paths) != len(keys):
-        raise HTTPException(status_code=400, detail="Number of file paths must match number of keys")
     if not files_list and not paths:
         raise HTTPException(status_code=400, detail="No files or file paths provided")
 
@@ -2718,12 +2727,14 @@ async def save_dataframes(
     MAX_FILE_SIZE = 512 * 1024 * 1024  # 512 MB
     STATUS_TTL = 3600
 
-    for (filename, fileobj), key in zip(iter_sources, keys):
+    for filename, fileobj in iter_sources:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        key = f"{timestamp}_{filename}"
         progress_key = f"upload_status:{validator_atom_id}:{key}"
         redis_client.set(progress_key, "uploading", ex=STATUS_TTL)
 
         arrow_name = Path(filename).stem + ".arrow"
-        exists = await arrow_dataset_exists(numeric_pid, validator_atom_id, key)
+        exists = await arrow_dataset_exists(numeric_pid, validator_atom_id, filename)
         if exists and not overwrite:
             uploads.append({"file_key": key, "already_saved": True})
             flights.append({"file_key": key})
