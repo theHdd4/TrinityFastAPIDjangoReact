@@ -458,6 +458,9 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
     if (envStr) {
       try {
         const env = JSON.parse(envStr);
+        form.append('client_id', env.CLIENT_ID || '');
+        form.append('app_id', env.APP_ID || '');
+        form.append('project_id', env.PROJECT_ID || '');
         form.append('client_name', env.CLIENT_NAME || '');
         form.append('app_name', env.APP_NAME || '');
         form.append('project_name', env.PROJECT_NAME || '');
@@ -465,6 +468,8 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
         /* ignore */
       }
     }
+    if (user?.id) form.append('user_id', String(user.id));
+    if (user?.username) form.append('user_name', user.username);
     const paths = uploadedFiles.map(f => f.path);
     form.append('file_paths', JSON.stringify(paths));
     const keys = uploadedFiles.map(f => {

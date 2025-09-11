@@ -2672,6 +2672,7 @@ async def save_dataframes(
     client_name: str = Form(""),
     app_name: str = Form(""),
     project_name: str = Form(""),
+    user_name: str = Form(""),
 ):
     """Save validated dataframes as Arrow tables and upload via Flight."""
     try:
@@ -2838,6 +2839,12 @@ async def save_dataframes(
         validator_atom_id=validator_atom_id,
         operation="save_dataframes",
         details={"files_saved": uploads, "prefix": prefix},
+        user_name=user_name,
+        client_name=client_name,
+        app_id=app_id,
+        app_name=app_name,
+        project_id=project_id,
+        project_name=project_name,
     )
     return {
         "minio_uploads": uploads,
@@ -2968,13 +2975,20 @@ async def delete_dataframe(object_name: str):
     prefix = await get_object_prefix()
     if not object_name.startswith(prefix):
         raise HTTPException(status_code=400, detail="Invalid object name")
+    csv_name = object_name.rsplit('.', 1)[0] + '.csv'
     try:
         try:
             minio_client.remove_object(MINIO_BUCKET, object_name)
         except S3Error as e:
             if getattr(e, "code", "") not in {"NoSuchKey", "NoSuchBucket"}:
                 raise
+        try:
+            minio_client.remove_object(MINIO_BUCKET, csv_name)
+        except S3Error as e:
+            if getattr(e, "code", "") not in {"NoSuchKey", "NoSuchBucket"}:
+                raise
         redis_client.delete(object_name)
+        redis_client.delete(csv_name)
         remove_arrow_object(object_name)
         await delete_arrow_dataset(object_name)
         mark_operation_log_deleted(object_name)
@@ -2991,18 +3005,20 @@ async def delete_all_dataframes():
     prefix = await get_object_prefix()
     deleted = []
     try:
-        objects = minio_client.list_objects(MINIO_BUCKET, prefix=prefix, recursive=True)
+        objects = list(minio_client.list_objects(MINIO_BUCKET, prefix=prefix, recursive=True))
         for obj in objects:
+            obj_name = obj.object_name
             try:
-                minio_client.remove_object(MINIO_BUCKET, obj.object_name)
+                minio_client.remove_object(MINIO_BUCKET, obj_name)
             except S3Error as e:
                 if getattr(e, "code", "") not in {"NoSuchKey", "NoSuchBucket"}:
                     raise
-            redis_client.delete(obj.object_name)
-            remove_arrow_object(obj.object_name)
-            await delete_arrow_dataset(obj.object_name)
-            mark_operation_log_deleted(obj.object_name)
-            deleted.append(obj.object_name)
+            redis_client.delete(obj_name)
+            if obj_name.endswith('.arrow'):
+                remove_arrow_object(obj_name)
+                await delete_arrow_dataset(obj_name)
+                mark_operation_log_deleted(obj_name)
+            deleted.append(obj_name)
         return {"deleted": deleted}
     except S3Error as e:
         if getattr(e, "code", "") == "NoSuchBucket":
