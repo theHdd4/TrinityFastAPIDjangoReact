@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { VALIDATE_API, SESSION_API } from '@/lib/api';
 import { useAuth } from '@/contexts/AuthContext';
+import ConfirmationDialog from '@/templates/DialogueBox/ConfirmationDialog';
 
 interface Props {
   isOpen: boolean;
@@ -24,6 +25,9 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle }) => {
   const [openDirs, setOpenDirs] = useState<Record<string, boolean>>({});
   const [renameTarget, setRenameTarget] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
+  const [confirmDelete, setConfirmDelete] = useState<
+    { type: 'one'; target: string } | { type: 'all' } | null
+  >(null);
 
   const { user } = useAuth();
 
@@ -151,25 +155,25 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle }) => {
     window.open(`/dataframe?name=${encodeURIComponent(obj)}`, '_blank');
   };
 
-  const deleteAll = async () => {
-    const ok = window.confirm(
-      'Delete all saved dataframes? This may impact existing projects.'
-    );
-    if (!ok) return;
-    await fetch(`${VALIDATE_API}/delete_all_dataframes`, { method: 'DELETE' });
-    setFiles([]);
-  };
+  const promptDeleteAll = () => setConfirmDelete({ type: 'all' });
 
-  const deleteOne = async (obj: string) => {
-    const ok = window.confirm(
-      'Are you sure you want to delete this dataframe? This may impact existing projects.'
-    );
-    if (!ok) return;
-    await fetch(
-      `${VALIDATE_API}/delete_dataframe?object_name=${encodeURIComponent(obj)}`,
-      { method: 'DELETE' }
-    );
-    setFiles(prev => prev.filter(f => f.object_name !== obj));
+  const promptDeleteOne = (obj: string) =>
+    setConfirmDelete({ type: 'one', target: obj });
+
+  const performDelete = async () => {
+    if (!confirmDelete) return;
+    if (confirmDelete.type === 'all') {
+      await fetch(`${VALIDATE_API}/delete_all_dataframes`, { method: 'DELETE' });
+      setFiles([]);
+    } else {
+      const obj = confirmDelete.target;
+      await fetch(
+        `${VALIDATE_API}/delete_dataframe?object_name=${encodeURIComponent(obj)}`,
+        { method: 'DELETE' }
+      );
+      setFiles(prev => prev.filter(f => f.object_name !== obj));
+    }
+    setConfirmDelete(null);
   };
 
   const startRename = (obj: string, currentName: string) => {
@@ -278,7 +282,7 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle }) => {
             />
             <Trash2
               className="w-4 h-4 text-gray-400 cursor-pointer"
-              onClick={() => deleteOne(f.object_name)}
+              onClick={() => promptDeleteOne(f.object_name)}
             />
           </div>
         </div>
@@ -319,7 +323,13 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle }) => {
           <span>Saved DataFrames</span>
         </h3>
         <div className="flex items-center space-x-2">
-          <Button variant="ghost" size="sm" onClick={deleteAll} className="p-1 h-8 w-8" title="Delete all">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={promptDeleteAll}
+            className="p-1 h-8 w-8"
+            title="Delete all"
+          >
             <Trash2 className="w-4 h-4" />
           </Button>
           <Button variant="ghost" size="sm" onClick={onToggle} className="p-1 h-8 w-8">
@@ -331,6 +341,26 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle }) => {
         {tree.length === 0 && <p className="text-sm text-gray-600">No saved dataframes</p>}
         {tree.map(node => renderNode(node))}
       </div>
+      <ConfirmationDialog
+        open={!!confirmDelete}
+        onOpenChange={open => {
+          if (!open) setConfirmDelete(null);
+        }}
+        onConfirm={performDelete}
+        onCancel={() => setConfirmDelete(null)}
+        title={
+          confirmDelete?.type === 'all' ? 'Delete All DataFrames' : 'Delete DataFrame'
+        }
+        description={
+          confirmDelete?.type === 'all'
+            ? 'Delete all saved dataframes? This may impact existing projects.'
+            : 'Are you sure you want to delete this dataframe? This may impact existing projects.'
+        }
+        icon={<Trash2 className="w-5 h-5 text-white" />}
+        confirmLabel="Yes, Delete"
+        iconBgClass="bg-red-500"
+        confirmButtonClass="bg-red-500 hover:bg-red-600"
+      />
     </div>
   );
 };
