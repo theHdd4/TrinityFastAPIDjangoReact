@@ -69,6 +69,7 @@ from app.features.data_upload_validate.app.database import (
     get_validator_atom_from_mongo,  # Fallback function
     save_validation_log_to_mongo,
     log_operation_to_mongo,
+    mark_operation_log_deleted,
 )
 
 # Add this import
@@ -2976,6 +2977,7 @@ async def delete_dataframe(object_name: str):
         redis_client.delete(object_name)
         remove_arrow_object(object_name)
         await delete_arrow_dataset(object_name)
+        mark_operation_log_deleted(object_name)
         return {"deleted": object_name}
     except S3Error as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -2999,6 +3001,7 @@ async def delete_all_dataframes():
             redis_client.delete(obj.object_name)
             remove_arrow_object(obj.object_name)
             await delete_arrow_dataset(obj.object_name)
+            mark_operation_log_deleted(obj.object_name)
             deleted.append(obj.object_name)
         return {"deleted": deleted}
     except S3Error as e:

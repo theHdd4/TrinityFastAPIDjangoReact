@@ -152,12 +152,23 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle }) => {
   };
 
   const deleteAll = async () => {
+    const ok = window.confirm(
+      'Delete all saved dataframes? This may impact existing projects.'
+    );
+    if (!ok) return;
     await fetch(`${VALIDATE_API}/delete_all_dataframes`, { method: 'DELETE' });
     setFiles([]);
   };
 
   const deleteOne = async (obj: string) => {
-    await fetch(`${VALIDATE_API}/delete_dataframe?object_name=${encodeURIComponent(obj)}`, { method: 'DELETE' });
+    const ok = window.confirm(
+      'Are you sure you want to delete this dataframe? This may impact existing projects.'
+    );
+    if (!ok) return;
+    await fetch(
+      `${VALIDATE_API}/delete_dataframe?object_name=${encodeURIComponent(obj)}`,
+      { method: 'DELETE' }
+    );
     setFiles(prev => prev.filter(f => f.object_name !== obj));
   };
 
