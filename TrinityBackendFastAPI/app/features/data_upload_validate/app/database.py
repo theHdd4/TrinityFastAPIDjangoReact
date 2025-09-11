@@ -8,6 +8,10 @@ import os
 # MongoDB Configuration
 MONGODB_URL = os.getenv("MONGO_URI", "mongodb://mongo:27017/trinity")
 DATABASE_NAME = "validator_atoms_db"
+# operation logs live in a separate database so they can be shared across
+# services.  The rest of the validator atom data remains in
+# ``validator_atoms_db``.
+TRINITY_DB_NAME = "trinity_db"
 
 # Collection Names
 COLLECTIONS = {
@@ -23,6 +27,7 @@ COLLECTIONS = {
 try:
     mongo_client = MongoClient(MONGODB_URL, serverSelectionTimeoutMS=5000)
     db = mongo_client[DATABASE_NAME]
+    trinity_db = mongo_client[TRINITY_DB_NAME]
     
     # Test connection
     mongo_client.admin.command('ping')
@@ -32,6 +37,7 @@ except Exception as e:
     print(f"❌ MongoDB connection failed: {e}")
     mongo_client = None
     db = None
+    trinity_db = None
 
 def check_mongodb_connection():
     """Check if MongoDB is available"""
@@ -391,7 +397,19 @@ def get_validation_units_from_mongo(validator_atom_id: str, file_key: str):
         return None
 
 
-def log_operation_to_mongo(user_id: str, client_id: str, validator_atom_id: str, operation: str, details: dict):
+def log_operation_to_mongo(
+    user_id: str,
+    client_id: str,
+    validator_atom_id: str,
+    operation: str,
+    details: dict,
+    user_name: str = "",
+    client_name: str = "",
+    app_id: str = "",
+    app_name: str = "",
+    project_id: str = "",
+    project_name: str = "",
+):
     """Record a high level operation performed by a user."""
     if not check_mongodb_connection():
         return {"status": "error", "error": "MongoDB not connected"}
@@ -399,14 +417,20 @@ def log_operation_to_mongo(user_id: str, client_id: str, validator_atom_id: str,
     try:
         document = {
             "user_id": user_id,
+            "user_name": user_name,
             "client_id": client_id,
+            "client_name": client_name,
+            "app_id": app_id,
+            "app_name": app_name,
+            "project_id": project_id,
+            "project_name": project_name,
             "validator_atom_id": validator_atom_id,
             "operation": operation,
             "timestamp": datetime.utcnow(),
             "details": details,
         }
 
-        result = db[COLLECTIONS["OPERATION_LOGS"]].insert_one(document)
+        result = trinity_db[COLLECTIONS["OPERATION_LOGS"]].insert_one(document)
         print(f"📦 Stored in {COLLECTIONS['OPERATION_LOGS']}: {document}")
 
         return {
@@ -426,7 +450,7 @@ def mark_operation_log_deleted(object_name: str):
         return {"status": "error", "error": "MongoDB not connected"}
 
     try:
-        result = db[COLLECTIONS["OPERATION_LOGS"]].update_many(
+        result = trinity_db[COLLECTIONS["OPERATION_LOGS"]].update_many(
             {
                 "details.files_saved": {
                     "$elemMatch": {"minio_upload.object_name": object_name}
