@@ -2688,19 +2688,53 @@ async def save_dataframes(
     user_name: str = Form(""),
 ):
     """Save validated dataframes as Arrow tables and upload via Flight."""
+    # --- Parse and validate inputs -------------------------------------------------
     try:
-        keys = json.loads(file_keys)
+        key_inputs = json.loads(file_keys) if file_keys else []
     except json.JSONDecodeError:
         raise HTTPException(status_code=400, detail="Invalid JSON format for file_keys")
+    if not isinstance(key_inputs, list):
+        raise HTTPException(status_code=400, detail="file_keys must be a JSON array")
 
-    paths = json.loads(file_paths) if file_paths else []
+    try:
+        paths = json.loads(file_paths) if file_paths else []
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid JSON format for file_paths")
+    if paths and (
+        not isinstance(paths, list)
+        or any(not isinstance(p, str) or not p for p in paths)
+    ):
+        raise HTTPException(
+            status_code=400, detail="file_paths must be a JSON array of non-empty strings"
+        )
+
     files_list = files or []
-    if files_list and len(files_list) != len(keys):
-        raise HTTPException(status_code=400, detail="Number of files must match number of keys")
-    if paths and len(paths) != len(keys):
-        raise HTTPException(status_code=400, detail="Number of file paths must match number of keys")
-    if not files_list and not paths:
+    source_count = len(files_list) if files_list else len(paths)
+    if source_count == 0:
         raise HTTPException(status_code=400, detail="No files or file paths provided")
+
+    # Fallback to filenames when keys are missing or empty
+    fallback_names = (
+        [f.filename for f in files_list]
+        if files_list
+        else [Path(p).name for p in paths]
+    )
+    if len(key_inputs) == 0:
+        keys = fallback_names
+    else:
+        if len(key_inputs) != source_count:
+            raise HTTPException(
+                status_code=400,
+                detail="Number of file keys must match number of files or paths",
+            )
+        keys = []
+        for i, k in enumerate(key_inputs):
+            if not isinstance(k, str) or not k.strip():
+                k = fallback_names[i]
+            keys.append(k)
+
+    if len(set(keys)) != len(keys):
+        raise HTTPException(status_code=400, detail="Duplicate file keys are not allowed")
 
     uploads = []
     flights = []
