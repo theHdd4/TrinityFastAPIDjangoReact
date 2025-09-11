@@ -399,11 +399,16 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
       }
 
       const resultVariables = result.columns_used || [];
+      // correlation results may come directly from the response or be nested
+      // inside a `results` field when fetched from MongoDB. Support both
+      // structures to ensure the heatmap renders correctly.
+      const correlationDict =
+        result.correlation_results?.correlation_matrix ??
+        result.correlation_results?.results?.correlation_matrix ??
+        {};
+
       const { matrix: transformedMatrix, filteredVariables } =
-        transformCorrelationMatrix(
-          result.correlation_results.correlation_matrix,
-          resultVariables,
-        );
+        transformCorrelationMatrix(correlationDict, resultVariables);
 
       onDataChange({
         correlationMatrix: transformedMatrix,
