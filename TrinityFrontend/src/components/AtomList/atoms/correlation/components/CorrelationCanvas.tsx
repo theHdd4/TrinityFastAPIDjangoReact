@@ -236,6 +236,7 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
     showAxisLabels: true,
     showDataLabels: true,
     showLegend: true,
+    showGrid: true,
   });
   const [settingsPosition, setSettingsPosition] = useState<{
     x: number;
@@ -316,7 +317,7 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
     });
   };
 
-  const handleMatrixDoubleClick = (e: React.MouseEvent) => {
+  const handleMatrixContextMenu = (e: React.MouseEvent) => {
     e.preventDefault();
     const menuWidth = 240;
     const menuHeight = 200;
@@ -601,9 +602,9 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
     const svg = d3.select(heatmapRef.current);
     svg.selectAll("*").remove();
 
-    // Determine container width for responsive layout and slightly reduce width
-    const containerWidth = (canvasWidth || 900) * 0.9;
-    const margin = { top: 80, right: 60, bottom: 180, left: 60 };
+    // Determine container width for responsive layout with extra space on the left
+    const containerWidth = (canvasWidth || 900);
+    const margin = { top: 80, right: 60, bottom: 180, left: 150 };
     const width = containerWidth - margin.left - margin.right;
 
     const g = svg
@@ -890,20 +891,29 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
         .enter()
         .append("text")
         .attr("class", "y-label")
-        .attr("x", -20)
-        .attr("y", (_, i) => i * cellHeight + cellHeight / 2)
+        .attr("x", -10)
         .attr("text-anchor", "end")
         .attr("dominant-baseline", "middle")
         .attr("font-size", "14px")
         .attr("font-weight", "600")
         .attr("fill", "hsl(var(--foreground))")
-        .attr(
-          "transform",
-          (_, i) => `rotate(-45, -20, ${i * cellHeight + cellHeight / 2})`,
-        )
         .style("font-style", "italic")
-        .style("opacity", shouldAnimate ? 0 : 1)
-        .text((d) => d);
+        .style("opacity", shouldAnimate ? 0 : 1);
+      yLabels.each(function (d, i) {
+        const words = String(d).replace(/_/g, " ").split(/\s+/);
+        const lineHeight = 14;
+        const text = d3.select(this);
+        const yPos = i * cellHeight + cellHeight / 2 - ((words.length - 1) * lineHeight) / 2;
+        text.attr("y", yPos);
+        text.text(null);
+        words.forEach((word, idx) => {
+          text
+            .append("tspan")
+            .attr("x", -10)
+            .attr("dy", idx === 0 ? 0 : lineHeight)
+            .text(word);
+        });
+      });
       if (shouldAnimate) {
         yLabels.transition().duration(600).delay(1400).style("opacity", 1);
       }
@@ -1086,10 +1096,16 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
       theme: matrixSettings.theme,
       showLegend: matrixSettings.showLegend,
       showAxisLabels: matrixSettings.showAxisLabels,
+      showGrid: matrixSettings.showGrid,
       initialShowDataLabels: false,
-      showGrid: true,
       sortOrder: "asc" as const,
       height: timeSeriesChartHeight,
+      onGridToggle: (enabled: boolean) =>
+        setMatrixSettings((prev) => ({ ...prev, showGrid: enabled })),
+      onLegendToggle: (enabled: boolean) =>
+        setMatrixSettings((prev) => ({ ...prev, showLegend: enabled })),
+      onAxisLabelsToggle: (enabled: boolean) =>
+        setMatrixSettings((prev) => ({ ...prev, showAxisLabels: enabled })),
     } as const;
   }, [
     data.selectedVar1,
@@ -1134,7 +1150,7 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
         <>
           {/* Show All Columns toggle */}
         {/* Filter Dimensions - Dynamic from actual data */}
-        <Card className="p-4 mb-4" onDoubleClick={handleMatrixDoubleClick}>
+        <Card className="p-4 mb-4" onContextMenu={handleMatrixContextMenu}>
           <h3 className="text-sm font-semibold text-foreground mb-3 flex items-center gap-2">
             <Target className="w-4 h-4 text-primary" />
             Filter Dimensions
@@ -1200,7 +1216,10 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
       </Card>
 
       <div className="flex items-center justify-between w-full px-4 mb-2">
-        <p className="text-xs text-gray-500">Double-click to open settings</p>
+        <p className="text-xs text-gray-500">Right-click to open settings</p>
+        <p className="text-xs text-gray-500 text-center flex-1">
+          Click a matrix cell to view analysis below
+        </p>
         <div className="flex items-center space-x-2">
           <span className="text-xs text-gray-500">Show all columns</span>
           <Switch
@@ -1213,15 +1232,11 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
         </div>
       </div>
 
-      <p className="text-xs text-gray-500 text-center mb-2">
-        Click a matrix cell to view analysis below
-      </p>
-
       {/* Correlation Heatmap - Full Width */}
       <div className={isCompactMode ? "mb-4" : "mb-6"}>
         <Card
           className="overflow-hidden"
-          onDoubleClick={handleMatrixDoubleClick}
+          onContextMenu={handleMatrixContextMenu}
         >
           <div
             className={

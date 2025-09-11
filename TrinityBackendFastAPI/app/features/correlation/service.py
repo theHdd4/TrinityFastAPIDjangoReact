@@ -24,17 +24,25 @@ minio_client = Minio(
 
 
 def parse_minio_path(file_path: str) -> tuple[str, str]:
-    """Parse MinIO path into bucket and object path
-    For correlation service, the bucket is always 'trinity' and 
-    the entire file_path is the object path within that bucket
+    """Parse MinIO path into bucket and object path.
+
+    The correlation feature expects paths relative to the ``trinity`` bucket
+    but some callers may include the bucket name as a prefix (e.g.
+    ``trinity/client/app/file.arrow``).  MinIO treats object paths literally,
+    so we strip any leading bucket segment to avoid creating a nested
+    ``trinity`` directory in the bucket root.
     """
-    # The bucket is always 'trinity' for correlation service
+
     bucket_name = "trinity"
-    object_path = file_path.strip('/')
-    
+    object_path = file_path.strip("/")
+
+    # Remove leading bucket name if the caller included it
+    if object_path.startswith(f"{bucket_name}/"):
+        object_path = object_path[len(bucket_name) + 1 :]
+
     if not object_path:
         raise ValueError("Invalid MinIO path. Object path cannot be empty")
-    
+
     return bucket_name, object_path
 
 

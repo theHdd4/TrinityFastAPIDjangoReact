@@ -8,6 +8,7 @@ class MatrixSettings(BaseModel):
     show_axis_labels: bool = True
     show_data_labels: bool = True
     show_legend: bool = True
+    show_grid: bool = True
 
 _saved_settings = MatrixSettings()
 
