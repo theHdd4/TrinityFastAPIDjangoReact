@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { VALIDATE_API } from '@/lib/api';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { CONCAT_API } from '@/lib/api';
@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import {
-  Table,
+  Table as UITable,
   TableBody,
   TableCell,
   TableHead,
@@ -21,8 +21,22 @@ import {
   PaginationNext,
   PaginationPrevious,
 } from '@/components/ui/pagination';
-import { Loader2 } from 'lucide-react';
-import { Database, ArrowDown, ArrowRight } from 'lucide-react';
+import { Loader2, Database, ArrowDown, ArrowRight, ArrowUp, FilterIcon, Plus } from 'lucide-react';
+import Table from "@/templates/tables/table";
+import concat from "../index";
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuSub,
+  ContextMenuSubContent,
+  ContextMenuSubTrigger,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 interface ConcatCanvasProps {
   atomId: string;
@@ -64,6 +78,348 @@ const ConcatCanvas: React.FC<ConcatCanvasProps> = ({ atomId, concatId, resultFil
   const [saveLoading, setSaveLoading] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  
+  // Sorting and filtering state
+  const [sortColumn, setSortColumn] = useState<string | null>(null);
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
+  const [columnFilters, setColumnFilters] = useState<Record<string, string[]>>({});
+
+  // Cardinality view state
+  const [cardinalityData, setCardinalityData] = useState<{
+    primary: any[];
+    secondary: any[];
+  }>({ primary: [], secondary: [] });
+  const [cardinalityLoading, setCardinalityLoading] = useState<{
+    primary: boolean;
+    secondary: boolean;
+  }>({ primary: false, secondary: false });
+  const [cardinalityError, setCardinalityError] = useState<{
+    primary: string | null;
+    secondary: string | null;
+  }>({ primary: null, secondary: null });
+  const [activeCardinalityTab, setActiveCardinalityTab] = useState<'primary' | 'secondary'>('primary');
+  
+  // Get input file name based on active tab for clickable subtitle
+  const inputFileName = activeCardinalityTab === 'primary' ? (file1 || '') : (file2 || '');
+
+  // Handle opening the input file in a new tab
+  const handleViewDataClick = () => {
+    if (inputFileName && atomId) {
+      window.open(`/dataframe?name=${encodeURIComponent(inputFileName)}`, '_blank');
+    }
+  };
+  
+  // Sorting and filtering state for cardinality view
+  const [cardinalitySortColumn, setCardinalitySortColumn] = useState<string>('unique_count');
+  const [cardinalitySortDirection, setCardinalitySortDirection] = useState<'asc' | 'desc'>('desc');
+  const [cardinalityColumnFilters, setCardinalityColumnFilters] = useState<Record<string, string[]>>({});
+
+  // Sorting and filtering functions
+  const handleSort = (column: string, direction: 'asc' | 'desc') => {
+    setSortColumn(column);
+    setSortDirection(direction);
+  };
+
+  const handleColumnFilter = (column: string, values: string[]) => {
+    setColumnFilters(prev => ({
+      ...prev,
+      [column]: values
+    }));
+  };
+
+  const clearColumnFilter = (column: string) => {
+    setColumnFilters(prev => {
+      const newFilters = { ...prev };
+      delete newFilters[column];
+      return newFilters;
+    });
+  };
+
+  // Cardinality sorting and filtering functions
+  const handleCardinalitySort = (column: string, direction?: 'asc' | 'desc') => {
+    if (cardinalitySortColumn === column) {
+      if (cardinalitySortDirection === 'asc') {
+        setCardinalitySortDirection('desc');
+      } else if (cardinalitySortDirection === 'desc') {
+        setCardinalitySortColumn('');
+        setCardinalitySortDirection('asc');
+      }
+    } else {
+      setCardinalitySortColumn(column);
+      setCardinalitySortDirection(direction || 'asc');
+    }
+  };
+
+  const handleCardinalityColumnFilter = (column: string, values: string[]) => {
+    setCardinalityColumnFilters(prev => ({
+      ...prev,
+      [column]: values
+    }));
+  };
+
+  const clearCardinalityColumnFilter = (column: string) => {
+    setCardinalityColumnFilters(prev => {
+      const cpy = { ...prev };
+      delete cpy[column];
+      return cpy;
+    });
+  };
+
+  const getCardinalityUniqueColumnValues = (column: string, sourceType: 'primary' | 'secondary'): string[] => {
+    const data = cardinalityData[sourceType];
+    if (!Array.isArray(data) || data.length === 0) return [];
+
+    // Apply other active filters to get hierarchical filtering
+    const otherFilters = Object.entries(cardinalityColumnFilters).filter(([key]) => key !== column);
+    let dataToUse = data;
+
+    if (otherFilters.length > 0) {
+      dataToUse = data.filter(item => {
+        return otherFilters.every(([filterColumn, filterValues]) => {
+          if (!Array.isArray(filterValues) || filterValues.length === 0) return true;
+          const cellValue = String(item[filterColumn] || '');
+          return filterValues.includes(cellValue);
+        });
+      });
+    }
+
+    const values = dataToUse.map(item => String(item[column] || ''));
+    const uniqueValues = Array.from(new Set(values));
+    return uniqueValues.sort() as string[];
+  };
+
+  const CardinalityFilterMenu = ({ column, sourceType }: { column: string; sourceType: 'primary' | 'secondary' }) => {
+    const uniqueValues = getCardinalityUniqueColumnValues(column, sourceType);
+    const current = cardinalityColumnFilters[column] || [];
+    const [temp, setTemp] = useState<string[]>(current);
+
+    const toggleVal = (val: string) => {
+      setTemp(prev => (prev.includes(val) ? prev.filter(v => v !== val) : [...prev, val]));
+    };
+
+    const selectAll = () => {
+      setTemp(temp.length === uniqueValues.length ? [] : uniqueValues);
+    };
+
+    const apply = () => {
+      handleCardinalityColumnFilter(column, temp);
+    };
+
+    return (
+      <div className="w-64 max-h-80 overflow-y-auto">
+        <div className="p-2 border-b">
+          <div className="flex items-center space-x-2 mb-2">
+            <Checkbox checked={temp.length === uniqueValues.length} onCheckedChange={selectAll} />
+            <span className="text-sm font-medium">Select All</span>
+          </div>
+        </div>
+        <div className="p-2 space-y-1">
+          {uniqueValues.map((v, i) => (
+            <div key={i} className="flex items-center space-x-2">
+              <Checkbox checked={temp.includes(v)} onCheckedChange={() => toggleVal(v)} />
+              <span className="text-sm">{v}</span>
+            </div>
+          ))}
+        </div>
+        <div className="p-2 border-t flex space-x-2">
+          <Button size="sm" onClick={apply}>Apply</Button>
+          <Button size="sm" variant="outline" onClick={() => setTemp(current)}>
+            Cancel
+          </Button>
+        </div>
+      </div>
+    );
+  };
+
+  // Displayed cardinality data with filtering and sorting
+  const displayedCardinality = useMemo(() => {
+    const sourceType = activeCardinalityTab;
+    const data = cardinalityData[sourceType];
+    if (!Array.isArray(data) || data.length === 0) {
+      return [];
+    }
+
+    let filtered = data.filter(c => c.unique_count > 0);
+
+    // Apply column filters
+    Object.entries(cardinalityColumnFilters).forEach(([column, filterValues]) => {
+      if (Array.isArray(filterValues) && filterValues.length > 0) {
+        filtered = filtered.filter(row => 
+          filterValues.includes(String(row[column] || ''))
+        );
+      }
+    });
+
+    // Apply sorting
+    if (cardinalitySortColumn) {
+      filtered = [...filtered].sort((a, b) => {
+        const aVal = a[cardinalitySortColumn];
+        const bVal = b[cardinalitySortColumn];
+        
+        // Handle null/undefined values
+        if (aVal == null && bVal == null) return 0;
+        if (aVal == null) return cardinalitySortDirection === 'asc' ? 1 : -1;
+        if (bVal == null) return cardinalitySortDirection === 'asc' ? -1 : 1;
+        
+        // Handle numeric values
+        if (typeof aVal === 'number' && typeof bVal === 'number') {
+          return cardinalitySortDirection === 'asc' ? aVal - bVal : bVal - aVal;
+        }
+        
+        // Handle string values
+        const aStr = String(aVal).toLowerCase();
+        const bStr = String(bVal).toLowerCase();
+        return cardinalitySortDirection === 'asc' 
+          ? aStr.localeCompare(bStr)
+          : bStr.localeCompare(aStr);
+      });
+    }
+
+    return filtered;
+  }, [cardinalityData, activeCardinalityTab, cardinalityColumnFilters, cardinalitySortColumn, cardinalitySortDirection]);
+
+  const getUniqueColumnValues = (column: string): string[] => {
+    if (!rawCSV) return [];
+    
+    const lines = rawCSV.split(/\r?\n/).filter(line => line.trim());
+    if (lines.length <= 1) return [];
+    
+    const csvHeaders = lines[0].split(',').map(h => h.trim().replace(/"/g, ''));
+    const numeric = /^-?\d+(?:\.\d+)?$/;
+    
+    // Parse all data
+    let allData = lines.slice(1).map(line => {
+      const values = line.split(',').map(v => v.trim().replace(/"/g, ''));
+      const row: Record<string, any> = {};
+      csvHeaders.forEach((h, i) => {
+        const value = values[i] ?? '';
+        row[h] = numeric.test(value) ? parseFloat(value) : value;
+      });
+      return row;
+    });
+    
+    // Apply all other column filters except the current one (hierarchical filtering)
+    Object.entries(columnFilters).forEach(([col, filterValues]) => {
+      if (col !== column && filterValues && Array.isArray(filterValues) && filterValues.length > 0) {
+        allData = allData.filter(row => 
+          filterValues.includes(String(row[col] || ''))
+        );
+      }
+    });
+    
+    // Get unique values from the filtered data
+    const values = allData.map(row => String(row[column] || '')).filter(Boolean);
+    return Array.from(new Set(values)).sort() as string[];
+  };
+
+  const FilterMenu = ({ column }: { column: string }) => {
+    const uniqueValues = getUniqueColumnValues(column);
+    const current = columnFilters[column] || [];
+    const [temp, setTemp] = useState<string[]>(current);
+
+    const toggleVal = (val: string) => {
+      setTemp(prev => (prev.includes(val) ? prev.filter(v => v !== val) : [...prev, val]));
+    };
+
+    const selectAll = () => {
+      setTemp(temp.length === uniqueValues.length ? [] : uniqueValues);
+    };
+
+    const apply = () => handleColumnFilter(column, temp);
+
+    return (
+      <div className="w-64 max-h-80 overflow-y-auto">
+        <div className="p-2 border-b">
+          <div className="flex items-center space-x-2 mb-2">
+            <Checkbox checked={temp.length === uniqueValues.length} onCheckedChange={selectAll} />
+            <span className="text-sm font-medium">Select All</span>
+          </div>
+        </div>
+        <div className="p-2 space-y-1">
+          {uniqueValues.map((v, i) => (
+            <div key={i} className="flex items-center space-x-2">
+              <Checkbox checked={temp.includes(v)} onCheckedChange={() => toggleVal(v)} />
+              <span className="text-sm">{v}</span>
+            </div>
+          ))}
+        </div>
+        <div className="p-2 border-t flex space-x-2">
+          <Button size="sm" onClick={apply}>Apply</Button>
+          <Button size="sm" variant="outline" onClick={() => setTemp(current)}>
+            Cancel
+          </Button>
+        </div>
+      </div>
+    );
+  };
+
+  // Filtered and sorted data from entire dataset
+  const allFilteredData = React.useMemo(() => {
+    if (!rawCSV) return [];
+    
+    const lines = rawCSV.split(/\r?\n/).filter(line => line.trim());
+    if (lines.length <= 1) return [];
+    
+    const csvHeaders = lines[0].split(',').map(h => h.trim().replace(/"/g, ''));
+    const numeric = /^-?\d+(?:\.\d+)?$/;
+    
+    // Parse all data
+    let allData = lines.slice(1).map(line => {
+      const values = line.split(',').map(v => v.trim().replace(/"/g, ''));
+      const row: Record<string, any> = {};
+      csvHeaders.forEach((h, i) => {
+        const value = values[i] ?? '';
+        row[h] = numeric.test(value) ? parseFloat(value) : value;
+      });
+      return row;
+    });
+    
+    // Apply column filters to entire dataset
+    Object.entries(columnFilters).forEach(([column, values]) => {
+      if (values && Array.isArray(values) && values.length > 0) {
+        allData = allData.filter(row => 
+          values.includes(String(row[column] || ''))
+        );
+      }
+    });
+    
+    // Apply sorting to entire dataset
+    if (sortColumn) {
+      allData = [...allData].sort((a, b) => {
+        const aVal = a[sortColumn];
+        const bVal = b[sortColumn];
+        
+        // Handle null/undefined values
+        if (aVal == null && bVal == null) return 0;
+        if (aVal == null) return sortDirection === 'asc' ? 1 : -1;
+        if (bVal == null) return sortDirection === 'asc' ? -1 : 1;
+        
+        // Handle numeric values
+        if (typeof aVal === 'number' && typeof bVal === 'number') {
+          return sortDirection === 'asc' ? aVal - bVal : bVal - aVal;
+        }
+        
+        // Handle string values
+        const aStr = String(aVal).toLowerCase();
+        const bStr = String(bVal).toLowerCase();
+        return sortDirection === 'asc' 
+          ? aStr.localeCompare(bStr)
+          : bStr.localeCompare(aStr);
+      });
+    }
+    
+    return allData;
+  }, [rawCSV, columnFilters, sortColumn, sortDirection]);
+
+  // Get current page data from filtered results
+  const displayedData = React.useMemo(() => {
+    if (!pagination) return allFilteredData;
+    
+    const startIndex = (pagination.current_page - 1) * pagination.page_size;
+    const endIndex = startIndex + pagination.page_size;
+    
+    return allFilteredData.slice(startIndex, endIndex);
+  }, [allFilteredData, pagination]);
 
   // Fetch available saved dataframes once
   useEffect(() => {
@@ -122,35 +478,120 @@ const ConcatCanvas: React.FC<ConcatCanvasProps> = ({ atomId, concatId, resultFil
     return { headers, rows };
   };
 
+  // Cardinality data fetching functions
+  const fetchCardinalityData = async (sourceType: 'primary' | 'secondary') => {
+    const currentAtom = useLaboratoryStore.getState().getAtom(atomId);
+    if (!currentAtom?.settings?.file1 || !currentAtom?.settings?.file2) {
+      return;
+    }
+
+    setCardinalityLoading(prev => ({ ...prev, [sourceType]: true }));
+    setCardinalityError(prev => ({ ...prev, [sourceType]: null }));
+
+    try {
+      const filePath = sourceType === 'primary' 
+        ? currentAtom.settings.file1 
+        : currentAtom.settings.file2;
+
+      const formData = new FormData();
+      formData.append('validator_atom_id', currentAtom.id);
+      formData.append('file_key', filePath);
+      formData.append('bucket_name', 'trinity');
+      formData.append('object_names', filePath);
+      formData.append('source_type', sourceType);
+
+      const response = await fetch(`${CONCAT_API}/cardinality`, {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Failed to fetch cardinality data: ${response.statusText} - ${errorText}`);
+      }
+
+      const result = await response.json();
+      
+      if (result.status === 'SUCCESS') {
+        setCardinalityData(prev => ({
+          ...prev,
+          [sourceType]: result.cardinality
+        }));
+      } else {
+        throw new Error(result.message || 'Failed to fetch cardinality data');
+      }
+    } catch (error) {
+      setCardinalityError(prev => ({
+        ...prev,
+        [sourceType]: error instanceof Error ? error.message : 'Failed to fetch cardinality data'
+      }));
+    } finally {
+      setCardinalityLoading(prev => ({ ...prev, [sourceType]: false }));
+    }
+  };
+
   const fetchData = async (page: number = 1) => {
-    if (!resultFilePath) return;
-    
     setLoading(true);
     setError(null);
     
     try {
-      // console.log(`[ConcatCanvas] Fetching: ${CONCAT_API}/cached_dataframe?object_name=${encodeURIComponent(resultFilePath)}&page=${page}&page_size=25`);
-      const response = await fetch(
-        `${CONCAT_API}/cached_dataframe?object_name=${encodeURIComponent(resultFilePath)}&page=${page}&page_size=20`
-      );
+      let csvData = '';
       
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+      if (fullCsv) {
+        // Use full CSV data (complete dataset)
+        csvData = fullCsv;
+        const { headers, rows } = parseCSV(csvData);
+        
+        // Client-side pagination
+        const pageSize = 20;
+        const totalRows = rows.length;
+        const totalPages = Math.ceil(totalRows / pageSize);
+        const startRow = (page - 1) * pageSize;
+        const endRow = Math.min(startRow + pageSize, totalRows);
+        
+        // Get current page data
+        const currentPageData = rows.slice(startRow, endRow);
+        
+        // Set pagination info
+        setPagination({
+          current_page: page,
+          page_size: pageSize,
+          total_rows: totalRows,
+          total_pages: totalPages,
+          start_row: startRow + 1,
+          end_row: endRow
+        });
+        setCurrentPage(page);
+        
+        setData(currentPageData);
+        setHeaders(headers);
+        setRawCSV(csvData);
+        
+      } else if (resultFilePath) {
+        // Fetch from saved file
+        const response = await fetch(
+          `${CONCAT_API}/cached_dataframe?object_name=${encodeURIComponent(resultFilePath)}&page=${page}&page_size=20`
+        );
+        
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        
+        const result: DataResponse = await response.json();
+        csvData = result.data;
+        setPagination(result.pagination);
+        setCurrentPage(page);
+        setIsSaved(true);
+        
+        const { headers, rows } = parseCSV(csvData);
+        setData(rows);
+        setHeaders(headers);
+        setRawCSV(csvData);
+        
+      } else {
+        throw new Error('No data available');
       }
       
-      const result: DataResponse = await response.json();
-      console.log('[ConcatCanvas] Data fetch result:', result);
-      setRawCSV(result.data);
-      const { headers, rows } = parseCSV(result.data);
-      console.log('[ConcatCanvas] Parsed headers:', headers);
-      console.log('[ConcatCanvas] Parsed rows count:', rows.length);
-      console.log('[ConcatCanvas] First few rows:', rows.slice(0, 3));
-      
-      setData(rows);
-      setHeaders(headers);
-      setPagination(result.pagination);
-      setCurrentPage(page);
-      setIsSaved(true);
     } catch (err) {
       console.error('Error fetching data:', err);
       setError(err instanceof Error ? err.message : 'Failed to fetch data');
@@ -166,13 +607,25 @@ const ConcatCanvas: React.FC<ConcatCanvasProps> = ({ atomId, concatId, resultFil
   }, [fullCsv]);
 
   useEffect(() => {
-    console.log('[ConcatCanvas] resultFilePath:', resultFilePath);
     if (resultFilePath) {
       fetchData(1);
     } else {
       setIsSaved(false);
     }
   }, [resultFilePath]);
+
+  // Fetch cardinality data when data sources change
+  useEffect(() => {
+    const currentAtom = useLaboratoryStore.getState().getAtom(atomId);
+    if (currentAtom?.settings?.file1 && currentAtom?.settings?.file2) {
+      fetchCardinalityData('primary');
+      fetchCardinalityData('secondary');
+    } else {
+      setCardinalityData({ primary: [], secondary: [] });
+      setCardinalityLoading({ primary: false, secondary: false });
+      setCardinalityError({ primary: null, secondary: null });
+    }
+  }, [file1, file2, atomId]);
 
   const handlePageChange = (page: number) => {
     fetchData(page);
@@ -230,21 +683,235 @@ const ConcatCanvas: React.FC<ConcatCanvasProps> = ({ atomId, concatId, resultFil
     );
   }
 
-  if (!resultFilePath) {
+  // Always show the canvas if we have file selections, even without results
+  const hasFileSelections = !!(file1 && file2);
+  
+  if (!hasFileSelections && !resultFilePath && !fullCsv) {
     return (
       <div className="p-4">
         <Card>
           <CardContent className="p-4">
-            <p className="text-gray-500">Please Configure concatinate options</p>
+            <p className="text-gray-500">Please select both files in the settings tab to begin</p>
           </CardContent>
         </Card>
       </div>
     );
   }
 
-  // Always render the configuration section
   return (
-    <div className="w-full h-full p-6 bg-gradient-to-br from-slate-50 to-blue-50 overflow-y-auto">
+    <div className="w-full h-full p-6 bg-gradient-to-br from-slate-50 to-blue-50 overflow-y-auto" style={{position: 'relative'}}>
+      {/* Cardinality View */}
+      {(() => {
+        const currentAtom = useLaboratoryStore.getState().getAtom(atomId);
+        const shouldShow = !!(currentAtom?.settings?.file1 && currentAtom?.settings?.file2);
+        return shouldShow;
+      })() && (
+        <div className="mb-6">
+          <Table
+            headers={[
+              <ContextMenu key="Column">
+                <ContextMenuTrigger asChild>
+                  <div className="flex items-center gap-1 cursor-pointer">
+                    Column
+                    {cardinalitySortColumn === 'column' && (
+                      cardinalitySortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />
+                    )}
+                  </div>
+                </ContextMenuTrigger>
+                <ContextMenuContent className="w-48 bg-white border border-gray-200 shadow-lg rounded-md">
+                  <ContextMenuSub>
+                    <ContextMenuSubTrigger className="flex items-center">
+                      <ArrowUp className="w-4 h-4 mr-2" /> Sort
+                    </ContextMenuSubTrigger>
+                    <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md">
+                      <ContextMenuItem onClick={() => handleCardinalitySort('column', 'asc')}>
+                        <ArrowUp className="w-4 h-4 mr-2" /> Ascending
+                      </ContextMenuItem>
+                      <ContextMenuItem onClick={() => handleCardinalitySort('column', 'desc')}>
+                        <ArrowDown className="w-4 h-4 mr-2" /> Descending
+                      </ContextMenuItem>
+                    </ContextMenuSubContent>
+                  </ContextMenuSub>
+                  <ContextMenuSeparator />
+                  <ContextMenuSub>
+                    <ContextMenuSubTrigger className="flex items-center">
+                      <FilterIcon className="w-4 h-4 mr-2" /> Filter
+                    </ContextMenuSubTrigger>
+                    <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md p-0">
+                      <CardinalityFilterMenu column="column" sourceType={activeCardinalityTab} />
+                    </ContextMenuSubContent>
+                  </ContextMenuSub>
+                  {cardinalityColumnFilters['column']?.length > 0 && (
+                    <>
+                      <ContextMenuSeparator />
+                      <ContextMenuItem onClick={() => clearCardinalityColumnFilter('column')}>
+                        Clear Filter
+                      </ContextMenuItem>
+                    </>
+                  )}
+                </ContextMenuContent>
+              </ContextMenu>,
+              <ContextMenu key="Data type">
+                <ContextMenuTrigger asChild>
+                  <div className="flex items-center gap-1 cursor-pointer">
+                    Data type
+                    {cardinalitySortColumn === 'data_type' && (
+                      cardinalitySortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />
+                    )}
+                  </div>
+                </ContextMenuTrigger>
+                <ContextMenuContent className="w-48 bg-white border border-gray-200 shadow-lg rounded-md">
+                  <ContextMenuSub>
+                    <ContextMenuSubTrigger className="flex items-center">
+                      <ArrowUp className="w-4 h-4 mr-2" /> Sort
+                    </ContextMenuSubTrigger>
+                    <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md">
+                      <ContextMenuItem onClick={() => handleCardinalitySort('data_type', 'asc')}>
+                        <ArrowUp className="w-4 h-4 mr-2" /> Ascending
+                      </ContextMenuItem>
+                      <ContextMenuItem onClick={() => handleCardinalitySort('data_type', 'desc')}>
+                        <ArrowDown className="w-4 h-4 mr-2" /> Descending
+                      </ContextMenuItem>
+                    </ContextMenuSubContent>
+                  </ContextMenuSub>
+                  <ContextMenuSeparator />
+                  <ContextMenuSub>
+                    <ContextMenuSubTrigger className="flex items-center">
+                      <FilterIcon className="w-4 h-4 mr-2" /> Filter
+                    </ContextMenuSubTrigger>
+                    <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md p-0">
+                      <CardinalityFilterMenu column="data_type" sourceType={activeCardinalityTab} />
+                    </ContextMenuSubContent>
+                  </ContextMenuSub>
+                  {cardinalityColumnFilters['data_type']?.length > 0 && (
+                    <>
+                      <ContextMenuSeparator />
+                      <ContextMenuItem onClick={() => clearCardinalityColumnFilter('data_type')}>
+                        Clear Filter
+                      </ContextMenuItem>
+                    </>
+                  )}
+                </ContextMenuContent>
+              </ContextMenu>,
+              <ContextMenu key="Unique count">
+                <ContextMenuTrigger asChild>
+                  <div className="flex items-center gap-1 cursor-pointer">
+                    Unique count
+                    {cardinalitySortColumn === 'unique_count' && (
+                      cardinalitySortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />
+                    )}
+                  </div>
+                </ContextMenuTrigger>
+                <ContextMenuContent className="w-48 bg-white border border-gray-200 shadow-lg rounded-md">
+                  <ContextMenuSub>
+                    <ContextMenuSubTrigger className="flex items-center">
+                      <ArrowUp className="w-4 h-4 mr-2" /> Sort
+                    </ContextMenuSubTrigger>
+                    <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md">
+                      <ContextMenuItem onClick={() => handleCardinalitySort('unique_count', 'asc')}>
+                        <ArrowUp className="w-4 h-4 mr-2" /> Ascending
+                      </ContextMenuItem>
+                      <ContextMenuItem onClick={() => handleCardinalitySort('unique_count', 'desc')}>
+                        <ArrowDown className="w-4 h-4 mr-2" /> Descending
+                      </ContextMenuItem>
+                    </ContextMenuSubContent>
+                  </ContextMenuSub>
+                  <ContextMenuSeparator />
+                  <ContextMenuSub>
+                    <ContextMenuSubTrigger className="flex items-center">
+                      <FilterIcon className="w-4 h-4 mr-2" /> Filter
+                    </ContextMenuSubTrigger>
+                    <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md p-0">
+                      <CardinalityFilterMenu column="unique_count" sourceType={activeCardinalityTab} />
+                    </ContextMenuSubContent>
+                  </ContextMenuSub>
+                  {cardinalityColumnFilters['unique_count']?.length > 0 && (
+                    <>
+                      <ContextMenuSeparator />
+                      <ContextMenuItem onClick={() => clearCardinalityColumnFilter('unique_count')}>
+                        Clear Filter
+                      </ContextMenuItem>
+                    </>
+                  )}
+                </ContextMenuContent>
+              </ContextMenu>,
+              "Sample values"
+            ]}
+            colClasses={["w-[25%]", "w-[20%]", "w-[20%]", "w-[35%]"]}
+            bodyClassName="max-h-80 overflow-y-auto"
+            borderColor={`border-${concat.color.replace('bg-', '')}`}
+            customHeader={{
+              title: "Cardinality View",
+              subtitle: "Click Here to View Data",
+              subtitleClickable: !!inputFileName && !!atomId,
+              onSubtitleClick: handleViewDataClick,
+              controls: (
+                <Tabs value={activeCardinalityTab} onValueChange={(value) => setActiveCardinalityTab(value as 'primary' | 'secondary')}>
+                  <TabsList className="grid w-full grid-cols-2">
+                    <TabsTrigger value="primary">Primary Source</TabsTrigger>
+                    <TabsTrigger value="secondary">Secondary Source</TabsTrigger>
+                  </TabsList>
+                </Tabs>
+              )
+            }}
+            defaultMinimized={true}
+          >
+            {(() => {
+              if (cardinalityLoading[activeCardinalityTab]) {
+                return <tr><td colSpan={4} className="text-center py-8 text-gray-500">Loading cardinality data...</td></tr>;
+              } else if (cardinalityError[activeCardinalityTab]) {
+                return <tr><td colSpan={4} className="text-center py-8 text-red-500">Error loading cardinality data: {cardinalityError[activeCardinalityTab]}</td></tr>;
+              } else if (displayedCardinality.length === 0) {
+                return <tr><td colSpan={4} className="text-center py-8 text-gray-500">No cardinality data available</td></tr>;
+              } else {
+                return (
+                  displayedCardinality.map((row, index) => (
+                    <tr key={index} className="table-row">
+                      <td className="table-cell-primary">{row.column}</td>
+                      <td className="table-cell">{row.data_type}</td>
+                      <td className="table-cell">{row.unique_count.toLocaleString()}</td>
+                      <td className="table-cell">
+                        <div className="flex flex-wrap items-center gap-1">
+                          {Array.isArray(row.unique_values) && row.unique_values.length > 0 ? (
+                            <>
+                              {row.unique_values.slice(0, 2).map((val: any, i: number) => (
+                                <span
+                                  key={i}
+                                  className="inline-block bg-gray-100 text-gray-800 px-2 py-1 rounded text-xs mr-1 mb-1"
+                                >
+                                  {String(val)}
+                                </span>
+                              ))}
+                              {row.unique_values.length > 2 && (
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <span className="flex items-center gap-0.5 text-xs text-slate-600 font-medium cursor-pointer">
+                                      <Plus className="w-3 h-3" />
+                                      {row.unique_values.length - 2} more
+                                    </span>
+                                  </TooltipTrigger>
+                                  <TooltipContent className="text-xs max-w-xs whitespace-pre-wrap">
+                                    {row.unique_values
+                                      .slice(2)
+                                      .map((val: any) => String(val))
+                                      .join(', ')}
+                                  </TooltipContent>
+                                </Tooltip>
+                              )}
+                            </>
+                          ) : (
+                            <span className="text-gray-400">—</span>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))
+                );
+              }
+            })()}
+          </Table>
+        </div>
+      )}
       {/* Current Selection (Configuration) */}
       <Card className="border-0 shadow-xl bg-white/80 backdrop-blur-sm mb-6 overflow-hidden">
         <div className="bg-gradient-to-r from-blue-500 to-blue-600 p-1">
@@ -329,71 +996,98 @@ const ConcatCanvas: React.FC<ConcatCanvasProps> = ({ atomId, concatId, resultFil
       </Card>
 
       {/* Concat Results */}
-      <Card className="border-0 shadow-xl bg-white/80 backdrop-blur-sm overflow-hidden">
-        <div className="bg-gradient-to-r from-green-500 to-green-600 p-1">
-          <div className="bg-white rounded-sm">
-            <div className="p-4">
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center">
-                  <div className="w-1 h-8 bg-gradient-to-b from-green-500 to-green-600 rounded-full mr-4"></div>
-                  <h3 className="text-xl font-bold text-gray-900">Concat Results</h3>
-                  {headers.length > 0 && data.length > 0 && (
-                    <Badge variant="outline" className="bg-green-50 border-green-200 text-green-700 ml-3">
-                      {data.length.toLocaleString()} rows • {headers.length} columns
-                    </Badge>
-                  )}
-                </div>
-                {headers.length > 0 && data.length > 0 && (
-                  <div className="flex items-center">
-                    <Button
-                      onClick={handleSaveDataFrame}
-                      disabled={saveLoading}
-                      className="bg-blue-600 hover:bg-blue-700 text-white"
-                    >
-                      {saveLoading ? 'Saving...' : 'Save DataFrame'}
-                    </Button>
-                    {saveError && <span className="text-red-600 text-sm ml-2">{saveError}</span>}
-                    {saveSuccess && <span className="text-green-600 text-sm ml-2">Saved!</span>}
-                  </div>
-                )}
-              </div>
-              <div className="overflow-auto">
-                {headers.length === 0 || data.length === 0 ? (
-                  <div className="p-4 text-center text-gray-500">No results to display.</div>
-                ) : (
-                  <Table>
-                    <TableHeader>
-                      <TableRow className="bg-gradient-to-r from-gray-50 to-green-50 border-b-2 border-green-100">
-                        {headers.map((header, index) => (
-                          <TableHead key={index} className="font-bold text-gray-800 text-center py-4">{header}</TableHead>
-                        ))}
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {data.map((row, rowIndex) => (
-                        <TableRow
-                          key={rowIndex}
-                          className="bg-white hover:bg-gray-50 transition-all duration-200 border-b border-gray-100"
-                        >
-                          {headers.map((header, colIndex) => (
-                            <TableCell key={colIndex} className="py-4 text-center font-medium text-gray-700">
-                              {row[header] !== null && row[header] !== undefined && row[header] !== '' ? (
-                                typeof row[header] === 'number' ? row[header] : String(row[header])
-                              ) : (
-                                <Badge variant="outline" className="text-gray-500">null</Badge>
-                              )}
-                            </TableCell>
-                          ))}
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                )}
-              </div>
-            </div>
-          </div>
+      {!resultFilePath && !fullCsv ? (
+        <div className="p-4 text-center text-gray-500">
+          <p>Files selected! Click the "Perform Concat" button in the settings tab to see results.</p>
         </div>
-      </Card>
+      ) : headers.length === 0 || data.length === 0 ? (
+        <div className="p-4 text-center text-gray-500">No results to display.</div>
+      ) : (
+        <div className="mx-auto max-w-screen-2xl">
+          <Table
+            headers={headers.map((header, index) => (
+              <ContextMenu key={header}>
+                <ContextMenuTrigger asChild>
+                  <div className="flex items-center gap-1 cursor-pointer">
+                    {header}
+                    {sortColumn === header && (
+                      sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />
+                    )}
+                  </div>
+                </ContextMenuTrigger>
+                <ContextMenuContent className="w-48 bg-white border border-gray-200 shadow-lg rounded-md">
+                  <ContextMenuSub>
+                    <ContextMenuSubTrigger className="flex items-center">
+                      <ArrowUp className="w-4 h-4 mr-2" /> Sort
+                    </ContextMenuSubTrigger>
+                    <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md">
+                      <ContextMenuItem onClick={() => handleSort(header, 'asc')}>
+                        <ArrowUp className="w-4 h-4 mr-2" /> Ascending
+                      </ContextMenuItem>
+                      <ContextMenuItem onClick={() => handleSort(header, 'desc')}>
+                        <ArrowDown className="w-4 h-4 mr-2" /> Descending
+                      </ContextMenuItem>
+                    </ContextMenuSubContent>
+                  </ContextMenuSub>
+                  <ContextMenuSeparator />
+                  <ContextMenuSub>
+                    <ContextMenuSubTrigger className="flex items-center">
+                      <FilterIcon className="w-4 h-4 mr-2" /> Filter
+                    </ContextMenuSubTrigger>
+                    <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md p-0">
+                      <FilterMenu column={header} />
+                    </ContextMenuSubContent>
+                  </ContextMenuSub>
+                  {columnFilters[header]?.length > 0 && (
+                    <>
+                      <ContextMenuSeparator />
+                      <ContextMenuItem onClick={() => clearColumnFilter(header)}>
+                        Clear Filter
+                      </ContextMenuItem>
+                    </>
+                  )}
+                </ContextMenuContent>
+              </ContextMenu>
+            ))}
+            colClasses={headers.map(() => "w-auto")}
+            bodyClassName="max-h-[400px] overflow-y-auto"
+            borderColor={`border-${concat.color.replace('bg-', '')}`}
+            customHeader={{
+              title: "Results",
+              controls: (
+                <div className="flex items-center gap-3">
+                  <span className="inline-block bg-green-50 border border-green-200 text-green-700 text-sm font-semibold px-3 py-1 rounded">
+                    {allFilteredData.length.toLocaleString()} rows • {headers.length} columns
+                  </span>
+                  <Button
+                    onClick={handleSaveDataFrame}
+                    disabled={saveLoading}
+                    className="bg-blue-600 hover:bg-blue-700 text-white"
+                  >
+                    {saveLoading ? 'Saving...' : 'Save DataFrame'}
+                  </Button>
+                  {saveError && <span className="text-red-600 text-sm">{saveError}</span>}
+                  {saveSuccess && <span className="text-green-600 text-sm">Saved!</span>}
+                </div>
+              )
+            }}
+          >
+            {displayedData.map((row, rowIndex) => (
+              <tr key={rowIndex} className="table-row">
+                {headers.map((header, colIndex) => (
+                  <td key={colIndex} className="table-cell text-center font-medium text-gray-700">
+                    {row[header] !== null && row[header] !== undefined && row[header] !== '' ? (
+                      typeof row[header] === 'number' ? row[header] : String(row[header])
+                    ) : (
+                      <span className="px-2 py-0.5 text-xs font-medium text-gray-500 border border-gray-300 rounded-full">null</span>
+                    )}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </Table>
+        </div>
+      )}
 
       {/* Pagination */}
       {pagination && pagination.total_pages > 1 && (

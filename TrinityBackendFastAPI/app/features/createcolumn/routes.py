@@ -5,12 +5,13 @@ from fastapi.responses import Response
 
 import json
 from datetime import datetime
+import numpy as np
 # from .create.base import calculate_residuals, compute_rpi, apply_stl_outlier
 from .create.base import calculate_residuals, compute_rpi, apply_stl_outlier
 
 from .deps import get_minio_df,fetch_measures_list,fetch_identifiers_and_measures,get_column_classifications_collection,get_create_settings_collection,minio_client, MINIO_BUCKET, redis_client
 from app.features.data_upload_validate.app.routes import get_object_prefix
-from .mongodb_saver import save_create_data,save_create_data_settings,save_createandtransform_configs
+from .mongodb_saver import save_create_data,save_create_data_settings,save_createandtransform_configs,get_createandtransform_config_from_mongo
 import io
 from sklearn.preprocessing import StandardScaler
 from sklearn.preprocessing import MinMaxScaler
@@ -472,7 +473,9 @@ async def perform_create(
 
         # Save result file using object_names only
         create_key = f"{object_names}_create.csv"
-        csv_bytes = df.to_csv(index=False).encode("utf-8")
+        # Clean DataFrame before saving to CSV to handle NaN, infinity values
+        clean_df_for_csv = df.replace({np.nan: None, np.inf: None, -np.inf: None})
+        csv_bytes = clean_df_for_csv.to_csv(index=False).encode("utf-8")
         minio_client.put_object(
             bucket_name=bucket_name,
             object_name=create_key,
@@ -482,7 +485,9 @@ async def perform_create(
         )
         # 🔧 CRITICAL FIX: Return actual data like GroupBy does
         # Convert DataFrame to list of dictionaries for JSON serialization
-        results_data = df.to_dict('records')
+        # Clean DataFrame to handle NaN, infinity, and other non-JSON-serializable values
+        clean_df = df.replace({np.nan: None, np.inf: None, -np.inf: None})
+        results_data = clean_df.to_dict('records')
         
         return {
             "status": "SUCCESS", 
@@ -889,3 +894,61 @@ async def get_createcolumn_configuration(
     except Exception as e:
         print(f"Error retrieving createcolumn configuration: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to retrieve createcolumn configuration: {str(e)}")
+
+@router.post("/cardinality")
+async def get_cardinality_data(
+    validator_atom_id: str = Form(...),
+    file_key: str = Form(...),
+    bucket_name: str = Form(...),
+    object_names: str = Form(...),
+):
+    """Return cardinality data for columns in the dataset."""
+    try:
+        # Get the current object prefix
+        prefix = await get_object_prefix()
+        
+        # Construct the full object path
+        full_object_path = f"{prefix}{object_names}" if not object_names.startswith(prefix) else object_names
+        
+        print(f"🔍 CreateColumn Cardinality file path resolution:")
+        print(f"  Original object_names: {object_names}")
+        print(f"  Current prefix: {prefix}")
+        print(f"  Full object path: {full_object_path}")
+        
+        # Load the dataframe
+        df = get_minio_df(bucket=bucket_name, file_key=full_object_path)
+        df.columns = df.columns.str.strip().str.lower()
+        
+        print(f"✅ Successfully loaded dataframe for cardinality with shape: {df.shape}")
+        
+        # Generate cardinality data
+        cardinality_data = []
+        for col in df.columns:
+            column_series = df[col].dropna()
+            try:
+                vals = column_series.unique()
+            except TypeError:
+                vals = column_series.astype(str).unique()
+
+            def _serialize(v):
+                if isinstance(v, (pd.Timestamp, datetime.datetime, datetime.date)):
+                    return pd.to_datetime(v).isoformat()
+                return str(v)
+
+            safe_vals = [_serialize(v) for v in vals]
+            
+            cardinality_data.append({
+                "column": col,
+                "data_type": str(df[col].dtype),
+                "unique_count": int(len(vals)),
+                "unique_values": safe_vals,  # All unique values, not just samples
+            })
+        
+        return {
+            "status": "SUCCESS",
+            "cardinality": cardinality_data
+        }
+        
+    except Exception as e:
+        print(f"❌ Error in CreateColumn cardinality endpoint: {e}")
+        raise HTTPException(status_code=400, detail=f"Failed to get cardinality data: {str(e)}")

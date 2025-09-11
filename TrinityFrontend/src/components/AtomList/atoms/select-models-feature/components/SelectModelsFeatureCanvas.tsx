@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { X, Play, Save, Filter, ChevronDown } from 'lucide-react';
+import { X, Play, Save, Filter, ChevronDown, ArrowUp, ArrowDown, FilterIcon, Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -9,8 +9,11 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Checkbox } from '@/components/ui/checkbox';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, ScatterChart, Scatter, Legend } from 'recharts';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
-import { SELECT_API } from '@/lib/api';
+import { SELECT_API, EXPLORE_API, FEATURE_OVERVIEW_API } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSub, ContextMenuSubContent, ContextMenuSubTrigger, ContextMenuTrigger, ContextMenuSeparator } from '@/components/ui/context-menu';
+import { Tooltip as UITooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import Table from '@/templates/tables/table';
 
 interface SelectModelsFeatureCanvasProps {
   atomId: string;
@@ -64,6 +67,16 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
   // Flag to prevent auto-update when updating with filtered data
   const isUpdatingWithFilters = useRef(false);
 
+  // Cardinality View state
+  const [cardinalityData, setCardinalityData] = useState<any[]>([]);
+  const [cardinalityLoading, setCardinalityLoading] = useState(false);
+  const [cardinalityError, setCardinalityError] = useState<string | null>(null);
+  
+  // Sorting and filtering state for Cardinality View
+  const [sortColumn, setSortColumn] = useState<string>('');
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
+  const [columnFilters, setColumnFilters] = useState<Record<string, string[]>>({});
+
   const updateSettings = useLaboratoryStore(state => state.updateAtomSettings);
 
   const handleDataChange = (newData: Partial<any>) => {
@@ -91,32 +104,31 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
     }
   }, [data.elasticityData, data.selectedDataset, data.selectedCombinationId, data.ensembleMethod]);
 
+  // Fetch cardinality data when dataset is selected
+  useEffect(() => {
+    if (data.selectedDataset) {
+      fetchCardinalityData();
+    }
+  }, [data.selectedDataset]);
+
   // Function to fetch variables when combination ID changes
   const fetchVariablesForCombination = async (combinationId: string, fileKey: string) => {
     if (combinationId === 'all' || !fileKey) return;
     
     try {
       const envStr = localStorage.getItem('env');
-      let envParams: any = {};
-      
-      if (envStr) {
-        try {
-          envParams = JSON.parse(envStr);
-        } catch {
-          /* ignore */
-        }
-      }
+      const env = envStr ? JSON.parse(envStr) : {};
 
       const baseUrl = `${SELECT_API}/models/variables`;
       const params = new URLSearchParams({
         file_key: fileKey,
         mode: 'base', // Get base predictor names without beta suffixes
-        client_id: envParams.CLIENT_ID || '',
-        app_id: envParams.APP_ID || '',
-        project_id: envParams.PROJECT_ID || '',
-        client_name: envParams.CLIENT_NAME || '',
-        app_name: envParams.APP_NAME || '',
-        project_name: envParams.PROJECT_NAME || ''
+        client_id: env.CLIENT_ID || '',
+        app_id: env.APP_ID || '',
+        project_id: env.PROJECT_ID || '',
+        client_name: env.CLIENT_NAME || '',
+        app_name: env.APP_NAME || '',
+        project_name: env.PROJECT_NAME || ''
       });
       const url = `${baseUrl}?${params.toString()}`;
       
@@ -140,7 +152,6 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
       }
       
     } catch (error) {
-      console.error('Error fetching variables:', error);
       // Don't show error to user, just log it
     }
   };
@@ -193,27 +204,19 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
     
     try {
       const envStr = localStorage.getItem('env');
-      let envParams: any = {};
-      
-      if (envStr) {
-        try {
-          envParams = JSON.parse(envStr);
-        } catch {
-          /* ignore */
-        }
-      }
+      const env = envStr ? JSON.parse(envStr) : {};
 
       const baseUrl = `${SELECT_API}/models/filters`;
       const params = new URLSearchParams({
         file_key: fileKey,
         combination_id: combinationId,
         variable: variable,
-        client_id: envParams.CLIENT_ID || '',
-        app_id: envParams.APP_ID || '',
-        project_id: envParams.PROJECT_ID || '',
-        client_name: envParams.CLIENT_NAME || '',
-        app_name: envParams.APP_NAME || '',
-        project_name: envParams.PROJECT_NAME || ''
+        client_id: env.CLIENT_ID || '',
+        app_id: env.APP_ID || '',
+        project_id: env.PROJECT_ID || '',
+        client_name: env.CLIENT_NAME || '',
+        app_name: env.APP_NAME || '',
+        project_name: env.PROJECT_NAME || ''
       });
       const url = `${baseUrl}?${params.toString()}`;
       
@@ -244,7 +247,6 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
       }
       
     } catch (error) {
-      console.error('Error fetching available filters:', error);
     }
   };
 
@@ -254,26 +256,18 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
     
     try {
       const envStr = localStorage.getItem('env');
-      let envParams: any = {};
-      
-      if (envStr) {
-        try {
-          envParams = JSON.parse(envStr);
-        } catch {
-          /* ignore */
-        }
-      }
+      const env = envStr ? JSON.parse(envStr) : {};
 
       const baseUrl = `${SELECT_API}/models/filter`;
       const params = new URLSearchParams({
         file_key: fileKey,
         variable: variable,
-        client_id: envParams.CLIENT_ID || '',
-        app_id: envParams.APP_ID || '',
-        project_id: envParams.PROJECT_ID || '',
-        client_name: envParams.CLIENT_NAME || '',
-        app_name: envParams.APP_NAME || '',
-        project_name: envParams.PROJECT_NAME || ''
+        client_id: env.CLIENT_ID || '',
+        app_id: env.APP_ID || '',
+        project_id: env.PROJECT_ID || '',
+        client_name: env.CLIENT_NAME || '',
+        app_name: env.APP_NAME || '',
+        project_name: env.PROJECT_NAME || ''
       });
       const url = `${baseUrl}?${params.toString()}`;
       
@@ -332,7 +326,6 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
       }
       
     } catch (error) {
-      console.error('Error fetching elasticity data:', error);
     }
   };
 
@@ -381,7 +374,6 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
       });
       
     } catch (error) {
-      console.error('Error fetching graph data:', error);
     }
   }, [data.selectedVariable, data.selectedMethod, data.selectedCombinationId, data.selectedDataset]);
 
@@ -433,27 +425,19 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
       const firstVariable = data.selectedVariable[0];
       
       const envStr = localStorage.getItem('env');
-      let envParams: any = {};
-      
-      if (envStr) {
-        try {
-          envParams = JSON.parse(envStr);
-        } catch {
-          /* ignore */
-        }
-      }
+      const env = envStr ? JSON.parse(envStr) : {};
 
       const baseUrl = `${SELECT_API}/models/filters`;
       const params = new URLSearchParams({
         file_key: fileKey,
         combination_id: combinationId,
         variable: firstVariable, // Use single variable parameter as API expects
-        client_id: envParams.CLIENT_ID || '',
-        app_id: envParams.APP_ID || '',
-        project_id: envParams.PROJECT_ID || '',
-        client_name: envParams.CLIENT_NAME || '',
-        app_name: envParams.APP_NAME || '',
-        project_name: envParams.PROJECT_NAME || ''
+        client_id: env.CLIENT_ID || '',
+        app_id: env.APP_ID || '',
+        project_id: env.PROJECT_ID || '',
+        client_name: env.CLIENT_NAME || '',
+        app_name: env.APP_NAME || '',
+        project_name: env.PROJECT_NAME || ''
       });
       const url = `${baseUrl}?${params.toString()}`;
       
@@ -484,15 +468,7 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
         if (data.selectedMethod && Array.isArray(data.selectedVariable) && data.selectedVariable.length > 0) {
           try {
             const envStr = localStorage.getItem('env');
-            let envParams: any = {};
-            
-            if (envStr) {
-              try {
-                envParams = JSON.parse(envStr);
-              } catch {
-                /* ignore */
-              }
-            }
+            const env = envStr ? JSON.parse(envStr) : {};
 
             const baseUrl = `${SELECT_API}/models/variable-ranges`;
             const params = new URLSearchParams({
@@ -500,12 +476,12 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
               combination_id: combinationId,
               variables: data.selectedVariable.join(','),
               method: data.selectedMethod,
-              client_id: envParams.CLIENT_ID || '',
-              app_id: envParams.APP_ID || '',
-              project_id: envParams.PROJECT_ID || '',
-              client_name: envParams.CLIENT_NAME || '',
-              app_name: envParams.APP_NAME || '',
-              project_name: envParams.PROJECT_NAME || ''
+              client_id: env.CLIENT_ID || '',
+              app_id: env.APP_ID || '',
+              project_id: env.PROJECT_ID || '',
+              client_name: env.CLIENT_NAME || '',
+              app_name: env.APP_NAME || '',
+              project_name: env.PROJECT_NAME || ''
             });
             const url = `${baseUrl}?${params.toString()}`;
             
@@ -528,7 +504,6 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
               }
             }
           } catch (error) {
-            console.error('Error fetching variable ranges:', error);
           }
         }
         
@@ -536,7 +511,6 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
       }
       
     } catch (error) {
-      console.error('Error fetching overall filters:', error);
     }
   };
 
@@ -546,26 +520,18 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
     
     try {
       const envStr = localStorage.getItem('env');
-      let envParams: any = {};
-      
-      if (envStr) {
-        try {
-          envParams = JSON.parse(envStr);
-        } catch {
-          /* ignore */
-        }
-      }
+      const env = envStr ? JSON.parse(envStr) : {};
 
               const baseUrl = `${SELECT_API}/models/filter`;
       const params = new URLSearchParams({
         file_key: fileKey,
         variable: variable,
-        client_id: envParams.CLIENT_ID || '',
-        app_id: envParams.APP_ID || '',
-        project_id: envParams.PROJECT_ID || '',
-        client_name: envParams.CLIENT_NAME || '',
-        app_name: envParams.APP_NAME || '',
-        project_name: envParams.PROJECT_NAME || ''
+        client_id: env.CLIENT_ID || '',
+        app_id: env.APP_ID || '',
+        project_id: env.PROJECT_ID || '',
+        client_name: env.CLIENT_NAME || '',
+        app_name: env.APP_NAME || '',
+        project_name: env.PROJECT_NAME || ''
       });
       const url = `${baseUrl}?${params.toString()}`;
       
@@ -631,7 +597,6 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
       }
       
     } catch (error) {
-      console.error('Error fetching elasticity data:', error);
       return [];
     }
   };
@@ -798,7 +763,6 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
       });
       
     } catch (error) {
-      console.error('Error updating graph with filters:', error);
     } finally {
       // Reset flag after update is complete
       isUpdatingWithFilters.current = false;
@@ -843,7 +807,6 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
       });
       
     } catch (error) {
-      console.error('Error updating graph with variable filters:', error);
     } finally {
       // Reset flag after update is complete
       isUpdatingWithFilters.current = false;
@@ -856,26 +819,18 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
     
     try {
       const envStr = localStorage.getItem('env');
-      let envParams: any = {};
-      
-      if (envStr) {
-        try {
-          envParams = JSON.parse(envStr);
-        } catch {
-          /* ignore */
-        }
-      }
+      const env = envStr ? JSON.parse(envStr) : {};
 
       const baseUrl = `${SELECT_API}/models/filter-filtered`;
       const params = new URLSearchParams({
         file_key: fileKey,
         variable: variable,
-        client_id: envParams.CLIENT_ID || '',
-        app_id: envParams.APP_ID || '',
-        project_id: envParams.PROJECT_ID || '',
-        client_name: envParams.CLIENT_NAME || '',
-        app_name: envParams.APP_NAME || '',
-        project_name: envParams.PROJECT_NAME || ''
+        client_id: env.CLIENT_ID || '',
+        app_id: env.APP_ID || '',
+        project_id: env.PROJECT_ID || '',
+        client_name: env.CLIENT_NAME || '',
+        app_name: env.APP_NAME || '',
+        project_name: env.PROJECT_NAME || ''
       });
       const url = `${baseUrl}?${params.toString()}`;
       
@@ -943,7 +898,6 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
       }
       
     } catch (error) {
-      console.error('Error fetching filtered elasticity data:', error);
       return [];
     }
   };
@@ -954,26 +908,18 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
     
     try {
       const envStr = localStorage.getItem('env');
-      let envParams: any = {};
-      
-      if (envStr) {
-        try {
-          envParams = JSON.parse(envStr);
-        } catch {
-          /* ignore */
-        }
-      }
+      const env = envStr ? JSON.parse(envStr) : {};
 
       const baseUrl = `${SELECT_API}/models/filter-filtered`;
       const params = new URLSearchParams({
         file_key: fileKey,
         variable: variable,
-        client_id: envParams.CLIENT_ID || '',
-        app_id: envParams.APP_ID || '',
-        project_id: envParams.PROJECT_ID || '',
-        client_name: envParams.CLIENT_NAME || '',
-        app_name: envParams.APP_NAME || '',
-        project_name: envParams.PROJECT_NAME || ''
+        client_id: env.CLIENT_ID || '',
+        app_id: env.APP_ID || '',
+        project_id: env.PROJECT_ID || '',
+        client_name: env.CLIENT_NAME || '',
+        app_name: env.APP_NAME || '',
+        project_name: env.PROJECT_NAME || ''
       });
       const url = `${baseUrl}?${params.toString()}`;
       
@@ -1059,7 +1005,6 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
       }
       
     } catch (error) {
-      console.error('Error fetching variable filtered elasticity data:', error);
       return [];
     }
   };
@@ -1074,26 +1019,18 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
     
     try {
       const envStr = localStorage.getItem('env');
-      let envParams: any = {};
-      
-      if (envStr) {
-        try {
-          envParams = JSON.parse(envStr);
-        } catch {
-          /* ignore */
-        }
-      }
+      const env = envStr ? JSON.parse(envStr) : {};
 
       const baseUrl = `${SELECT_API}/models/saved-combinations-status`;
       const params = new URLSearchParams({
         file_key: data.selectedDataset,
         atom_id: atomId,
-        client_id: envParams.CLIENT_ID || '',
-        app_id: envParams.APP_ID || '',
-        project_id: envParams.PROJECT_ID || '',
-        client_name: envParams.CLIENT_NAME || '',
-        app_name: envParams.APP_NAME || '',
-        project_name: envParams.PROJECT_NAME || ''
+        client_id: env.CLIENT_ID || '',
+        app_id: env.APP_ID || '',
+        project_id: env.PROJECT_ID || '',
+        client_name: env.CLIENT_NAME || '',
+        app_name: env.APP_NAME || '',
+        project_name: env.PROJECT_NAME || ''
       });
       const url = `${baseUrl}?${params.toString()}`;
       
@@ -1107,7 +1044,6 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
       setCombinationStatus(result);
       
     } catch (error) {
-      console.error('Error fetching combination status:', error);
       setCombinationStatus(null);
     } finally {
       setIsLoadingCombinationStatus(false);
@@ -1126,15 +1062,7 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
     
     try {
       const envStr = localStorage.getItem('env');
-      let envParams: any = {};
-      
-      if (envStr) {
-        try {
-          envParams = JSON.parse(envStr);
-        } catch {
-          /* ignore */
-        }
-      }
+      const env = envStr ? JSON.parse(envStr) : {};
 
       const baseUrl = `${SELECT_API}/models/select-save-generic`;
       
@@ -1146,7 +1074,10 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
         },
         model_name: data.selectedModel,
         tags: [`select-models-feature-${atomId}`, 'saved-model'],
-        description: `Model saved from Select Models Feature atom - ${data.selectedModel} (${data.selectedCombinationId})`
+        description: `Model saved from Select Models Feature atom - ${data.selectedModel} (${data.selectedCombinationId})`,
+        client_name: env.CLIENT_NAME || '',
+        app_name: env.APP_NAME || '',
+        project_name: env.PROJECT_NAME || ''
       };
 
       const response = await fetch(baseUrl, {
@@ -1175,7 +1106,6 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
       await fetchCombinationStatus();
       
     } catch (error) {
-      console.error('Error saving model:', error);
       // Show error message
       toast({
         title: "Error Saving Model",
@@ -1195,27 +1125,19 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
     
     try {
       const envStr = localStorage.getItem('env');
-      let envParams: any = {};
-      
-      if (envStr) {
-        try {
-          envParams = JSON.parse(envStr);
-        } catch {
-          /* ignore */
-        }
-      }
+      const env = envStr ? JSON.parse(envStr) : {};
 
       const baseUrl = `${SELECT_API}/models/contribution`;
       const params = new URLSearchParams({
         file_key: fileKey,
         combination_id: combinationId,
         model_name: modelName,
-        client_id: envParams.CLIENT_ID || '',
-        app_id: envParams.APP_ID || '',
-        project_id: envParams.PROJECT_ID || '',
-        client_name: envParams.CLIENT_NAME || '',
-        app_name: envParams.APP_NAME || '',
-        project_name: envParams.PROJECT_NAME || ''
+        client_id: env.CLIENT_ID || '',
+        app_id: env.APP_ID || '',
+        project_id: env.PROJECT_ID || '',
+        client_name: env.CLIENT_NAME || '',
+        app_name: env.APP_NAME || '',
+        project_name: env.PROJECT_NAME || ''
       });
       const url = `${baseUrl}?${params.toString()}`;
       
@@ -1235,7 +1157,6 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
       }
       
     } catch (error) {
-      console.error('Error fetching model contribution:', error);
     }
   };
 
@@ -1247,27 +1168,19 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
     
     try {
       const envStr = localStorage.getItem('env');
-      let envParams: any = {};
-      
-      if (envStr) {
-        try {
-          envParams = JSON.parse(envStr);
-        } catch {
-          /* ignore */
-        }
-      }
+      const env = envStr ? JSON.parse(envStr) : {};
 
       const baseUrl = `${SELECT_API}/models/performance`;
       const params = new URLSearchParams({
         file_key: fileKey,
         combination_id: combinationId,
         model_name: modelName,
-        client_id: envParams.CLIENT_ID || '',
-        app_id: envParams.APP_ID || '',
-        project_id: envParams.PROJECT_ID || '',
-        client_name: envParams.CLIENT_NAME || '',
-        app_name: envParams.APP_NAME || '',
-        project_name: envParams.PROJECT_NAME || ''
+        client_id: env.CLIENT_ID || '',
+        app_id: env.APP_ID || '',
+        project_id: env.PROJECT_ID || '',
+        client_name: env.CLIENT_NAME || '',
+        app_name: env.APP_NAME || '',
+        project_name: env.PROJECT_NAME || ''
       });
       const url = `${baseUrl}?${params.toString()}`;
       
@@ -1298,7 +1211,6 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
       }
       
     } catch (error) {
-      console.error('Error fetching model performance:', error);
     }
   };
 
@@ -1310,21 +1222,13 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
     
     try {
       const envStr = localStorage.getItem('env');
-      let envParams: any = {};
-      
-      if (envStr) {
-        try {
-          envParams = JSON.parse(envStr);
-        } catch {
-          /* ignore */
-        }
-      }
+      const env = envStr ? JSON.parse(envStr) : {};
 
       const baseUrl = `${SELECT_API}/actual-vs-predicted`;
       const params = new URLSearchParams({
-        client_name: envParams.CLIENT_NAME || 'default_client',
-        app_name: envParams.APP_NAME || 'default_app',
-        project_name: envParams.PROJECT_NAME || 'default_project',
+        client_name: env.CLIENT_NAME || '',
+        app_name: env.APP_NAME || '',
+        project_name: env.PROJECT_NAME || '',
         combination_name: combinationId,
         model_name: modelName
       });
@@ -1342,10 +1246,6 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
       const result = await response.json();
       
       if (result && result.success && result.actual_values && result.predicted_values) {
-        // Debug logging
-        console.log('🔍 DEBUG: Backend response:', result);
-        console.log('🔍 DEBUG: Actual values sample:', result.actual_values.slice(0, 5));
-        console.log('🔍 DEBUG: Predicted values sample:', result.predicted_values.slice(0, 5));
         
         // Check for extreme values
         const maxActual = Math.max(...result.actual_values);
@@ -1353,48 +1253,26 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
         const maxPredicted = Math.max(...result.predicted_values);
         const minPredicted = Math.min(...result.predicted_values);
         
-        console.log('🔍 DEBUG: Value ranges - Actual:', {min: minActual, max: maxActual});
-        console.log('🔍 DEBUG: Value ranges - Predicted:', {min: minPredicted, max: maxPredicted});
         
         // Find extreme outliers that might be causing axis scaling issues
         const sortedPredicted = [...result.predicted_values].sort((a, b) => b - a);
         const sortedActual = [...result.actual_values].sort((a, b) => b - a);
         
-        console.log('🔍 DEBUG: Top 10 largest predicted values:', sortedPredicted.slice(0, 10));
-        console.log('🔍 DEBUG: Top 10 largest actual values:', sortedActual.slice(0, 10));
         
         // Check for any values that are extremely large (beyond reasonable range)
         const extremePredicted = result.predicted_values.filter(val => Math.abs(val) > 10000);
         const extremeActual = result.actual_values.filter(val => Math.abs(val) > 10000);
         
-        if (extremePredicted.length > 0) {
-            console.warn('⚠️ WARNING: Found extreme predicted values:', extremePredicted);
-        }
-        if (extremeActual.length > 0) {
-            console.warn('⚠️ WARNING: Found extreme actual values:', extremeActual);
-        }
         
         // Check for NaN, Infinity, or other problematic values
         const nanPredicted = result.predicted_values.filter(val => isNaN(val) || !isFinite(val));
         const nanActual = result.actual_values.filter(val => isNaN(val) || !isFinite(val));
         
-        if (nanPredicted.length > 0) {
-            console.error('❌ ERROR: Found NaN/Infinity in predicted values:', nanPredicted);
-        }
-        if (nanActual.length > 0) {
-            console.error('❌ ERROR: Found NaN/Infinity in actual values:', nanActual);
-        }
         
         // Check for any values that are suspiciously large (even if not extreme)
         const suspiciousPredicted = result.predicted_values.filter(val => Math.abs(val) > 1000);
         const suspiciousActual = result.actual_values.filter(val => Math.abs(val) > 1000);
         
-        console.log('🔍 DEBUG: Values > 1000 - Predicted count:', suspiciousPredicted.length);
-        console.log('🔍 DEBUG: Values > 1000 - Actual count:', suspiciousActual.length);
-        
-        if (suspiciousPredicted.length > 0) {
-            console.log('🔍 DEBUG: Suspicious predicted values:', suspiciousPredicted.slice(0, 5));
-        }
         
         // Convert arrays to scatter chart format
         const actualVsPredictedData = result.actual_values.map((actual: number, index: number) => ({
@@ -1402,7 +1280,6 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
           predicted: result.predicted_values[index] || 0
         })).sort((a, b) => a.actual - b.actual); // Sort by actual values (low to high)
         
-        console.log('🔍 DEBUG: Scatter chart data sample:', actualVsPredictedData.slice(0, 3));
         
         // Use all data points without filtering extreme outliers
         const chartData = actualVsPredictedData;
@@ -1425,7 +1302,6 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
         const xDomain = [Math.max(0, actualMin - actualPadding), actualMax + actualPadding];
         const yDomain = [Math.max(0, predictedMin - predictedPadding), predictedMax + predictedPadding];
         
-        console.log('🔍 DEBUG: Dynamic axis domains - X:', xDomain, 'Y:', yDomain);
         
         // Update domains in state
         handleDataChange({
@@ -1434,7 +1310,6 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
       }
       
     } catch (error) {
-      console.error('Error fetching actual vs predicted data:', error);
     }
   };
 
@@ -1446,21 +1321,13 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
     
     try {
       const envStr = localStorage.getItem('env');
-      let envParams: any = {};
-      
-      if (envStr) {
-        try {
-          envParams = JSON.parse(envStr);
-        } catch {
-          /* ignore */
-        }
-      }
+      const env = envStr ? JSON.parse(envStr) : {};
 
       const baseUrl = `${SELECT_API}/yoy-calculation`;
       const params = new URLSearchParams({
-        client_name: envParams.CLIENT_NAME || 'default_client',
-        app_name: envParams.APP_NAME || 'default_app',
-        project_name: envParams.PROJECT_NAME || 'default_project',
+        client_name: env.CLIENT_NAME || '',
+        app_name: env.APP_NAME || '',
+        project_name: env.PROJECT_NAME || '',
         combination_name: combinationId,
         model_name: modelName
       });
@@ -1478,7 +1345,6 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
       const result = await response.json();
       
       if (result && result.success && result.waterfall && result.waterfall.labels && result.waterfall.values) {
-        console.log('🔍 DEBUG: YoY Backend response:', result);
         
         // Transform waterfall data for the bar chart
         const chartData = result.waterfall.labels.map((label: string, index: number) => ({
@@ -1492,7 +1358,6 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
       }
       
     } catch (error) {
-      console.error('Error fetching YoY data:', error);
       handleDataChange({ yoyData: [] });
     }
   };
@@ -1506,27 +1371,19 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
     try {
       const ensemble = data.weightedEnsembleData[0];
       const envStr = localStorage.getItem('env');
-      let envParams: any = {};
-      
-      if (envStr) {
-        try {
-          envParams = JSON.parse(envStr);
-        } catch {
-          /* ignore */
-        }
-      }
+      const env = envStr ? JSON.parse(envStr) : {};
 
       // Use the ensemble-specific endpoint
       const baseUrl = `${SELECT_API}/models/actual-vs-predicted-ensemble`;
       const params = new URLSearchParams({
         file_key: data.selectedDataset,
         combination_id: combinationId,
-        client_id: envParams.CLIENT_ID || '',
-        app_id: envParams.APP_ID || '',
-        project_id: envParams.PROJECT_ID || '',
-        client_name: envParams.CLIENT_NAME || '',
-        app_name: envParams.APP_NAME || '',
-        project_name: envParams.PROJECT_NAME || ''
+        client_id: env.CLIENT_ID || '',
+        app_id: env.APP_ID || '',
+        project_id: env.PROJECT_ID || '',
+        client_name: env.CLIENT_NAME || '',
+        app_name: env.APP_NAME || '',
+        project_name: env.PROJECT_NAME || ''
       });
       const url = `${baseUrl}?${params.toString()}`;
       
@@ -1546,7 +1403,6 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
           predicted: result.predicted_values[index] || 0
         })).sort((a, b) => a.actual - b.actual); // Sort by actual values (low to high)
         
-        console.log('🔍 DEBUG: Ensemble Scatter chart data sample:', actualVsPredictedData.slice(0, 3));
         
         handleDataChange({
           actualVsPredictedData: actualVsPredictedData,
@@ -1566,7 +1422,6 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
         const xDomain = [Math.max(0, actualMin - actualPadding), actualMax + actualPadding];
         const yDomain = [Math.max(0, predictedMin - predictedPadding), predictedMax + predictedPadding];
         
-        console.log('🔍 DEBUG: Ensemble Dynamic axis domains - X:', xDomain, 'Y:', yDomain);
         
         // Update domains in state
         handleDataChange({
@@ -1575,7 +1430,6 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
       }
       
     } catch (error) {
-      console.error('Error fetching ensemble actual vs predicted data:', error);
       handleDataChange({ actualVsPredictedData: [] });
     }
   };
@@ -1588,27 +1442,19 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
     
     try {
       const envStr = localStorage.getItem('env');
-      let envParams: any = {};
-      
-      if (envStr) {
-        try {
-          envParams = JSON.parse(envStr);
-        } catch {
-          /* ignore */
-        }
-      }
+      const env = envStr ? JSON.parse(envStr) : {};
 
       // Use the ensemble-specific endpoint
       const baseUrl = `${SELECT_API}/models/contribution-ensemble`;
       const params = new URLSearchParams({
         file_key: fileKey,
         combination_id: combinationId,
-        client_id: envParams.CLIENT_ID || '',
-        app_id: envParams.APP_ID || '',
-        project_id: envParams.PROJECT_ID || '',
-        client_name: envParams.CLIENT_NAME || '',
-        app_name: envParams.APP_NAME || '',
-        project_name: envParams.PROJECT_NAME || ''
+        client_id: env.CLIENT_ID || '',
+        app_id: env.APP_ID || '',
+        project_id: env.PROJECT_ID || '',
+        client_name: env.CLIENT_NAME || '',
+        app_name: env.APP_NAME || '',
+        project_name: env.PROJECT_NAME || ''
       });
       const url = `${baseUrl}?${params.toString()}`;
       
@@ -1628,15 +1474,12 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
           value: item.value
         }));
         
-        console.log('🔍 DEBUG: Ensemble Contribution data:', transformedData);
         handleDataChange({ contributionData: transformedData });
       } else {
-        console.log('🔍 DEBUG: No ensemble contribution data found');
         handleDataChange({ contributionData: [] });
       }
       
     } catch (error) {
-      console.error('Error fetching ensemble contribution data:', error);
       handleDataChange({ contributionData: [] });
     }
   };
@@ -1650,27 +1493,19 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
     try {
       const ensemble = data.weightedEnsembleData[0];
       const envStr = localStorage.getItem('env');
-      let envParams: any = {};
-      
-      if (envStr) {
-        try {
-          envParams = JSON.parse(envStr);
-        } catch {
-          /* ignore */
-        }
-      }
+      const env = envStr ? JSON.parse(envStr) : {};
 
       // Use the ensemble-specific endpoint
       const baseUrl = `${SELECT_API}/models/yoy-calculation-ensemble`;
       const params = new URLSearchParams({
         file_key: data.selectedDataset,
         combination_id: combinationId,
-        client_id: envParams.CLIENT_ID || '',
-        app_id: envParams.APP_ID || '',
-        project_id: envParams.PROJECT_ID || '',
-        client_name: envParams.CLIENT_NAME || '',
-        app_name: envParams.APP_NAME || '',
-        project_name: envParams.PROJECT_NAME || ''
+        client_id: env.CLIENT_ID || '',
+        app_id: env.APP_ID || '',
+        project_id: env.PROJECT_ID || '',
+        client_name: env.CLIENT_NAME || '',
+        app_name: env.APP_NAME || '',
+        project_name: env.PROJECT_NAME || ''
       });
       const url = `${baseUrl}?${params.toString()}`;
       
@@ -1685,7 +1520,6 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
       
       // Transform the data to match the expected format
       if (result && result.success && result.waterfall && result.waterfall.labels && result.waterfall.values) {
-        console.log('🔍 DEBUG: Ensemble YoY Backend response:', result);
         
         // Transform waterfall data for the bar chart
         const chartData = result.waterfall.labels.map((label: string, index: number) => ({
@@ -1699,7 +1533,6 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
       }
       
     } catch (error) {
-      console.error('Error fetching ensemble YoY data:', error);
       handleDataChange({ yoyData: [] });
     }
   };
@@ -1712,15 +1545,7 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
     
     try {
       const envStr = localStorage.getItem('env');
-      let envParams: any = {};
-      
-      if (envStr) {
-        try {
-          envParams = JSON.parse(envStr);
-        } catch {
-          /* ignore */
-        }
-      }
+      const env = envStr ? JSON.parse(envStr) : {};
 
       const baseUrl = `${SELECT_API}/models/weighted-ensemble`;
       const url = `${baseUrl}`;
@@ -1753,7 +1578,6 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
       const result = await response.json();
       
       if (result && result.results && result.results.length > 0) {
-        console.log('🔍 DEBUG: Weighted Ensemble Backend response:', result);
         
         // Transform the results for display
         const ensembleData = result.results.map((item: any) => ({
@@ -1773,9 +1597,180 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
       }
       
     } catch (error) {
-      console.error('Error fetching weighted ensemble data:', error);
       handleDataChange({ weightedEnsembleData: [] });
     }
+  };
+
+  // Fetch cardinality data function
+  const fetchCardinalityData = async () => {
+    if (!data.selectedDataset) {
+      return;
+    }
+    
+    setCardinalityLoading(true);
+    setCardinalityError(null);
+    
+    try {
+      // Add .arrow extension if not present, like other atoms do
+      const objectName = data.selectedDataset.endsWith('.arrow') ? data.selectedDataset : `${data.selectedDataset}.arrow`;
+      const response = await fetch(`${FEATURE_OVERVIEW_API}/column_summary?object_name=${encodeURIComponent(objectName)}`);
+      if (response.ok) {
+        const summary = await response.json();
+        const summaryData = Array.isArray(summary.summary) ? summary.summary.filter(Boolean) : [];
+        
+        // Transform the data to match the cardinality format expected by the table
+        const cardinalityFormatted = summaryData.map((col: any) => ({
+          column: col.column,
+          data_type: col.data_type,
+          unique_count: col.unique_count,
+          unique_values: col.unique_values || []
+        }));
+        
+        setCardinalityData(cardinalityFormatted);
+      } else {
+        setCardinalityError('Failed to fetch cardinality data');
+      }
+    } catch (e: any) {
+      setCardinalityError(e.message || 'Error fetching cardinality data');
+    } finally {
+      setCardinalityLoading(false);
+    }
+  };
+
+  // Cardinality filtering and sorting logic
+  const displayedCardinality = React.useMemo(() => {
+    let filtered = Array.isArray(cardinalityData) ? cardinalityData : [];
+
+    // Don't filter out columns with unique_count = 0, show all columns
+    // filtered = filtered.filter(c => c.unique_count > 0);
+
+    // Apply column filters
+    Object.entries(columnFilters).forEach(([column, filterValues]) => {
+      if (filterValues && Array.isArray(filterValues) && filterValues.length > 0) {
+        filtered = filtered.filter(row => {
+          const cellValue = String(row[column as keyof typeof row] || '');
+          return filterValues.includes(cellValue);
+        });
+      }
+    });
+
+    // Apply sorting
+    if (sortColumn) {
+      filtered.sort((a, b) => {
+        const aVal = a[sortColumn as keyof typeof a];
+        const bVal = b[sortColumn as keyof typeof b];
+        
+        if (typeof aVal === 'number' && typeof bVal === 'number') {
+          return sortDirection === 'asc' ? aVal - bVal : bVal - aVal;
+        }
+        
+        const aStr = String(aVal || '');
+        const bStr = String(bVal || '');
+        return sortDirection === 'asc' ? aStr.localeCompare(bStr) : bStr.localeCompare(aStr);
+      });
+    }
+
+    console.log('🔍 SelectModelsFeature: displayedCardinality after filtering:', filtered);
+    return filtered;
+  }, [cardinalityData, columnFilters, sortColumn, sortDirection]);
+
+  // Cardinality sorting and filtering functions
+  const handleSort = (column: string, direction?: 'asc' | 'desc') => {
+    if (sortColumn === column) {
+      if (sortDirection === 'asc') {
+        setSortDirection('desc');
+      } else if (sortDirection === 'desc') {
+        setSortColumn('');
+        setSortDirection('asc');
+      }
+    } else {
+      setSortColumn(column);
+      setSortDirection(direction || 'asc');
+    }
+  };
+
+  const handleColumnFilter = (column: string, values: string[]) => {
+    setColumnFilters(prev => ({
+      ...prev,
+      [column]: values
+    }));
+  };
+
+  const clearColumnFilter = (column: string) => {
+    setColumnFilters(prev => {
+      const cpy = { ...prev };
+      delete cpy[column];
+      return cpy;
+    });
+  };
+
+  const getUniqueColumnValues = (column: string) => {
+    const allColumns = Array.isArray(cardinalityData) ? cardinalityData : [];
+    let filteredData = allColumns; // Show all columns, don't filter by unique_count
+
+    // Apply all other column filters except the current one
+    Object.entries(columnFilters).forEach(([col, filterValues]) => {
+      if (col !== column && filterValues && Array.isArray(filterValues) && filterValues.length > 0) {
+        filteredData = filteredData.filter(row => {
+          const cellValue = String(row[col as keyof typeof row] || '');
+          return filterValues.includes(cellValue);
+        });
+      }
+    });
+
+    // Get unique values from the filtered data
+    const values = filteredData.map(row => String(row[column as keyof typeof row] || '')).filter(Boolean);
+    return Array.from(new Set(values)).sort();
+  };
+
+  // FilterMenu component for cardinality view
+  const FilterMenu = ({ 
+    column, 
+    uniqueValues, 
+    current, 
+    onColumnFilter 
+  }: { 
+    column: string;
+    uniqueValues: string[];
+    current: string[];
+    onColumnFilter: (column: string, values: string[]) => void;
+  }) => {
+    const [temp, setTemp] = useState<string[]>(current);
+
+    const toggleVal = (val: string) => {
+      setTemp(prev => (prev.includes(val) ? prev.filter(v => v !== val) : [...prev, val]));
+    };
+
+    const selectAll = () => {
+      setTemp(temp.length === uniqueValues.length ? [] : uniqueValues);
+    };
+
+    const apply = () => onColumnFilter(column, temp);
+
+    return (
+      <div className="w-64 max-h-80 overflow-y-auto">
+        <div className="p-2 border-b">
+          <div className="flex items-center space-x-2 mb-2">
+            <Checkbox checked={temp.length === uniqueValues.length} onCheckedChange={selectAll} />
+            <span className="text-sm font-medium">Select All</span>
+          </div>
+        </div>
+        <div className="p-2 space-y-1">
+          {uniqueValues.map((v, i) => (
+            <div key={i} className="flex items-center space-x-2">
+              <Checkbox checked={temp.includes(v)} onCheckedChange={() => toggleVal(v)} />
+              <span className="text-sm">{v}</span>
+            </div>
+          ))}
+        </div>
+        <div className="p-2 border-t flex space-x-2">
+          <Button size="sm" onClick={apply}>Apply</Button>
+          <Button size="sm" variant="outline" onClick={() => setTemp(current)}>
+            Cancel
+          </Button>
+        </div>
+      </div>
+    );
   };
 
   // Function to fetch elasticity data with filters
@@ -1786,26 +1781,18 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
     
     try {
       const envStr = localStorage.getItem('env');
-      let envParams: any = {};
-      
-      if (envStr) {
-        try {
-          envParams = JSON.parse(envStr);
-        } catch {
-          /* ignore */
-        }
-      }
+      const env = envStr ? JSON.parse(envStr) : {};
 
       const baseUrl = `${SELECT_API}/models/filter`;
       const params = new URLSearchParams({
         file_key: fileKey,
         variable: variable,
-        client_id: envParams.CLIENT_ID || '',
-        app_id: envParams.APP_ID || '',
-        project_id: envParams.PROJECT_ID || '',
-        client_name: envParams.CLIENT_NAME || '',
-        app_name: envParams.APP_NAME || '',
-        project_name: envParams.PROJECT_NAME || ''
+        client_id: env.CLIENT_ID || '',
+        app_id: env.APP_ID || '',
+        project_id: env.PROJECT_ID || '',
+        client_name: env.CLIENT_NAME || '',
+        app_name: env.APP_NAME || '',
+        project_name: env.PROJECT_NAME || ''
       });
       const url = `${baseUrl}?${params.toString()}`;
       
@@ -1890,6 +1877,265 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
   return (
     <div className="w-full h-full bg-gradient-to-br from-orange-50/30 via-background to-blue-50/20">
       <div className="p-6 overflow-y-auto">
+        {/* Cardinality View */}
+        {data.selectedDataset && (
+          <div className="w-full mb-6">
+            {cardinalityLoading ? (
+              <div className="p-4 text-blue-600">Loading cardinality data...</div>
+            ) : cardinalityError ? (
+              <div className="p-4 text-red-600">{cardinalityError}</div>
+            ) : cardinalityData && cardinalityData.length > 0 ? (
+              <div className="w-full">
+                <Table
+                  headers={[
+                    <ContextMenu key="Column">
+                      <ContextMenuTrigger asChild>
+                        <div className="flex items-center gap-1 cursor-pointer">
+                          Column
+                          {sortColumn === 'column' && (
+                            sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />
+                          )}
+                        </div>
+                      </ContextMenuTrigger>
+                      <ContextMenuContent className="w-48 bg-white border border-gray-200 shadow-lg rounded-md">
+                        <ContextMenuSub>
+                          <ContextMenuSubTrigger className="flex items-center">
+                            <ArrowUp className="w-4 h-4 mr-2" /> Sort
+                          </ContextMenuSubTrigger>
+                          <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md">
+                            <ContextMenuItem onClick={() => handleSort('column', 'asc')}>
+                              <ArrowUp className="w-4 h-4 mr-2" /> Ascending
+                            </ContextMenuItem>
+                            <ContextMenuItem onClick={() => handleSort('column', 'desc')}>
+                              <ArrowDown className="w-4 h-4 mr-2" /> Descending
+                            </ContextMenuItem>
+                          </ContextMenuSubContent>
+                        </ContextMenuSub>
+                        <ContextMenuSeparator />
+                        <ContextMenuSub>
+                          <ContextMenuSubTrigger className="flex items-center">
+                            <FilterIcon className="w-4 h-4 mr-2" /> Filter
+                          </ContextMenuSubTrigger>
+                          <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md p-0">
+                            <FilterMenu 
+                              column="column" 
+                              uniqueValues={getUniqueColumnValues('column')} 
+                              current={columnFilters['column'] || []} 
+                              onColumnFilter={handleColumnFilter} 
+                            />
+                          </ContextMenuSubContent>
+                        </ContextMenuSub>
+                        {columnFilters['column']?.length > 0 && (
+                          <>
+                            <ContextMenuSeparator />
+                            <ContextMenuItem onClick={() => clearColumnFilter('column')}>
+                              <X className="w-4 h-4 mr-2" /> Clear Filter
+                            </ContextMenuItem>
+                          </>
+                        )}
+                      </ContextMenuContent>
+                    </ContextMenu>,
+                    <ContextMenu key="Data Type">
+                      <ContextMenuTrigger asChild>
+                        <div className="flex items-center gap-1 cursor-pointer">
+                          Data Type
+                          {sortColumn === 'data_type' && (
+                            sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />
+                          )}
+                        </div>
+                      </ContextMenuTrigger>
+                      <ContextMenuContent className="w-48 bg-white border border-gray-200 shadow-lg rounded-md">
+                        <ContextMenuSub>
+                          <ContextMenuSubTrigger className="flex items-center">
+                            <ArrowUp className="w-4 h-4 mr-2" /> Sort
+                          </ContextMenuSubTrigger>
+                          <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md">
+                            <ContextMenuItem onClick={() => handleSort('data_type', 'asc')}>
+                              <ArrowUp className="w-4 h-4 mr-2" /> Ascending
+                            </ContextMenuItem>
+                            <ContextMenuItem onClick={() => handleSort('data_type', 'desc')}>
+                              <ArrowDown className="w-4 h-4 mr-2" /> Descending
+                            </ContextMenuItem>
+                          </ContextMenuSubContent>
+                        </ContextMenuSub>
+                        <ContextMenuSeparator />
+                        <ContextMenuSub>
+                          <ContextMenuSubTrigger className="flex items-center">
+                            <FilterIcon className="w-4 h-4 mr-2" /> Filter
+                          </ContextMenuSubTrigger>
+                          <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md p-0">
+                            <FilterMenu 
+                              column="data_type" 
+                              uniqueValues={getUniqueColumnValues('data_type')} 
+                              current={columnFilters['data_type'] || []} 
+                              onColumnFilter={handleColumnFilter} 
+                            />
+                          </ContextMenuSubContent>
+                        </ContextMenuSub>
+                        {columnFilters['data_type']?.length > 0 && (
+                          <>
+                            <ContextMenuSeparator />
+                            <ContextMenuItem onClick={() => clearColumnFilter('data_type')}>
+                              <X className="w-4 h-4 mr-2" /> Clear Filter
+                            </ContextMenuItem>
+                          </>
+                        )}
+                      </ContextMenuContent>
+                    </ContextMenu>,
+                    <ContextMenu key="Unique Count">
+                      <ContextMenuTrigger asChild>
+                        <div className="flex items-center gap-1 cursor-pointer">
+                          Unique Count
+                          {sortColumn === 'unique_count' && (
+                            sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />
+                          )}
+                        </div>
+                      </ContextMenuTrigger>
+                      <ContextMenuContent className="w-48 bg-white border border-gray-200 shadow-lg rounded-md">
+                        <ContextMenuSub>
+                          <ContextMenuSubTrigger className="flex items-center">
+                            <ArrowUp className="w-4 h-4 mr-2" /> Sort
+                          </ContextMenuSubTrigger>
+                          <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md">
+                            <ContextMenuItem onClick={() => handleSort('unique_count', 'asc')}>
+                              <ArrowUp className="w-4 h-4 mr-2" /> Ascending
+                            </ContextMenuItem>
+                            <ContextMenuItem onClick={() => handleSort('unique_count', 'desc')}>
+                              <ArrowDown className="w-4 h-4 mr-2" /> Descending
+                            </ContextMenuItem>
+                          </ContextMenuSubContent>
+                        </ContextMenuSub>
+                        <ContextMenuSeparator />
+                        <ContextMenuSub>
+                          <ContextMenuSubTrigger className="flex items-center">
+                            <FilterIcon className="w-4 h-4 mr-2" /> Filter
+                          </ContextMenuSubTrigger>
+                          <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md p-0">
+                            <FilterMenu 
+                              column="unique_count" 
+                              uniqueValues={getUniqueColumnValues('unique_count')} 
+                              current={columnFilters['unique_count'] || []} 
+                              onColumnFilter={handleColumnFilter} 
+                            />
+                          </ContextMenuSubContent>
+                        </ContextMenuSub>
+                        {columnFilters['unique_count']?.length > 0 && (
+                          <>
+                            <ContextMenuSeparator />
+                            <ContextMenuItem onClick={() => clearColumnFilter('unique_count')}>
+                              <X className="w-4 h-4 mr-2" /> Clear Filter
+                            </ContextMenuItem>
+                          </>
+                        )}
+                      </ContextMenuContent>
+                    </ContextMenu>,
+                    <ContextMenu key="Unique Values">
+                      <ContextMenuTrigger asChild>
+                        <div className="flex items-center gap-1 cursor-pointer">
+                          Unique Values
+                          {sortColumn === 'unique_values' && (
+                            sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />
+                          )}
+                        </div>
+                      </ContextMenuTrigger>
+                      <ContextMenuContent className="w-48 bg-white border border-gray-200 shadow-lg rounded-md">
+                        <ContextMenuSub>
+                          <ContextMenuSubTrigger className="flex items-center">
+                            <ArrowUp className="w-4 h-4 mr-2" /> Sort
+                          </ContextMenuSubTrigger>
+                          <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md">
+                            <ContextMenuItem onClick={() => handleSort('unique_values', 'asc')}>
+                              <ArrowUp className="w-4 h-4 mr-2" /> Ascending
+                            </ContextMenuItem>
+                            <ContextMenuItem onClick={() => handleSort('unique_values', 'desc')}>
+                              <ArrowDown className="w-4 h-4 mr-2" /> Descending
+                            </ContextMenuItem>
+                          </ContextMenuSubContent>
+                        </ContextMenuSub>
+                        <ContextMenuSeparator />
+                        <ContextMenuSub>
+                          <ContextMenuSubTrigger className="flex items-center">
+                            <FilterIcon className="w-4 h-4 mr-2" /> Filter
+                          </ContextMenuSubTrigger>
+                          <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md p-0">
+                            <FilterMenu 
+                              column="unique_values" 
+                              uniqueValues={getUniqueColumnValues('unique_values')} 
+                              current={columnFilters['unique_values'] || []} 
+                              onColumnFilter={handleColumnFilter} 
+                            />
+                          </ContextMenuSubContent>
+                        </ContextMenuSub>
+                        {columnFilters['unique_values']?.length > 0 && (
+                          <>
+                            <ContextMenuSeparator />
+                            <ContextMenuItem onClick={() => clearColumnFilter('unique_values')}>
+                              <X className="w-4 h-4 mr-2" /> Clear Filter
+                            </ContextMenuItem>
+                          </>
+                        )}
+                      </ContextMenuContent>
+                    </ContextMenu>
+                  ]}
+                  colClasses={["w-[30%]", "w-[20%]", "w-[15%]", "w-[35%]"]}
+                  bodyClassName="max-h-[484px] overflow-y-auto"
+                  defaultMinimized={true}
+                  borderColor="border-orange-500"
+                  customHeader={{
+                    title: "Cardinality View",
+                    subtitle: "Click Here to View Data",
+                    subtitleClickable: !!data.selectedDataset,
+                    onSubtitleClick: () => {
+                      if (data.selectedDataset) {
+                        const objectName = data.selectedDataset.endsWith('.arrow') ? data.selectedDataset : `${data.selectedDataset}.arrow`;
+                        window.open(`/dataframe?name=${encodeURIComponent(objectName)}`, '_blank');
+                      }
+                    }
+                  }}
+                >
+                  {displayedCardinality.map((col, index) => (
+                    <tr key={index} className="table-row">
+                      <td className="table-cell">{col.column || ''}</td>
+                      <td className="table-cell">{col.data_type || ''}</td>
+                      <td className="table-cell">{col.unique_count || 0}</td>
+                      <td className="table-cell">
+                        <div className="flex flex-wrap items-center gap-1">
+                          {Array.isArray(col.unique_values) && col.unique_values.slice(0, 2).map((val, i) => (
+                            <Badge
+                              key={i}
+                              className="p-0 px-1 text-xs bg-gray-50 text-slate-700 hover:bg-gray-50"
+                            >
+                              {String(val)}
+                            </Badge>
+                          ))}
+                          {Array.isArray(col.unique_values) && col.unique_values.length > 2 && (
+                            <UITooltip>
+                              <TooltipTrigger asChild>
+                                <span className="flex items-center gap-0.5 text-xs text-slate-600 font-medium cursor-pointer">
+                                  <Plus className="w-3 h-3" />
+                                  {col.unique_values.length - 2}
+                                </span>
+                              </TooltipTrigger>
+                              <TooltipContent className="text-xs max-w-xs whitespace-pre-wrap">
+                                {col.unique_values
+                                  .slice(2)
+                                  .map(val => String(val))
+                                  .join(', ')}
+                              </TooltipContent>
+                              </UITooltip>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </Table>
+              </div>
+            ) : (
+              <div className="p-4 text-gray-500">No cardinality data available</div>
+            )}
+          </div>
+        )}
+
         {/* Top Section: Results and Filters */}
         <div className="flex gap-6 mb-8">
           {/* Results Section */}
@@ -3330,6 +3576,7 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
             </div>
           )}
         </div>
+
       </div>
     </div>
   );

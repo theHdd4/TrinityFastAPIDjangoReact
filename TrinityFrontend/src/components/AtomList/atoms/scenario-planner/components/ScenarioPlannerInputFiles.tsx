@@ -2,11 +2,13 @@ import React, { useEffect, useState } from 'react';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Label } from '@/components/ui/label';
+import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { VALIDATE_API, FEATURE_OVERVIEW_API, SCENARIO_PLANNER_API } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
 import { generateModelId } from '../utils/scenarioPlannerUtils';
+import { RefreshCw } from 'lucide-react';
 
 interface Props {
   atomId: string;
@@ -31,6 +33,7 @@ const ScenarioPlannerInputFiles: React.FC<Props> = ({ atomId, onCacheInitialized
   const [selectedFile, setSelectedFile] = useState<string>('');
   const [loading, setLoading] = useState(false);
   const [initializingCache, setInitializingCache] = useState(false);
+  const [refreshingCache, setRefreshingCache] = useState(false);
 
   // Fetch available files and restore selected file when component mounts
   useEffect(() => {
@@ -156,6 +159,69 @@ const ScenarioPlannerInputFiles: React.FC<Props> = ({ atomId, onCacheInitialized
     } catch (error) {
       console.error('Error fetching combinations:', error);
       throw error;
+    }
+  };
+
+  // ✅ NEW: Extract d0_key from full file path
+  const extractD0Key = (fullPath: string): string => {
+    // Extract just the filename from the full path
+    // Example: "Quant_Matrix_AI_Schema/forecasting/New%20Forecasting%20Analysis%20Project%201/20250908_13349_20250908_133647_D0%203.arrow"
+    // Should return: "20250908_13349_20250908_133647_D0%203.arrow"
+    const parts = fullPath.split('/');
+    return parts[parts.length - 1]; // Get the last part (filename)
+  };
+
+  // ✅ NEW: Refresh cache for selected dataset
+  const refreshCache = async (fileName: string) => {
+    try {
+      setRefreshingCache(true);
+      
+      // Extract d0_key from full file path
+      const d0Key = extractD0Key(fileName);
+      console.log('🔄 Refreshing cache:', { fullPath: fileName, d0Key });
+      
+      // Clear cache for the specific dataset using d0_key
+      const response = await fetch(`${SCENARIO_PLANNER_API}/cache/${encodeURIComponent(d0Key)}`, {
+        method: 'DELETE'
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        console.log('Cache cleared:', data);
+        
+        // ✅ FIXED: Only clear the file selection, preserve all user settings
+        updateSettings(atomId, {
+          scenarioData: {
+            ...scenarioData,
+            selectedDataFile: '',
+            objectName: ''
+          }
+        });
+        
+        // Reset local state
+        setSelectedFile('');
+        
+        toast({
+          title: "🔄 Cache Refreshed",
+          description: `Cache cleared for ${d0Key}. File selection reset, but your settings are preserved.`,
+          variant: "default",
+        });
+        
+        return data;
+      } else {
+        const errorData = await response.json();
+        throw new Error(errorData.detail || `Failed to refresh cache: ${response.statusText}`);
+      }
+    } catch (error) {
+      console.error('Error refreshing cache:', error);
+      toast({
+        title: "Cache Refresh Error",
+        description: error instanceof Error ? error.message : "Failed to refresh cache",
+        variant: "destructive",
+      });
+      throw error;
+    } finally {
+      setRefreshingCache(false);
     }
   };
 
@@ -295,17 +361,28 @@ const ScenarioPlannerInputFiles: React.FC<Props> = ({ atomId, onCacheInitialized
       {/* File Selection */}
       <Card className="p-6">
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-semibold">🚀 Auto-Initialize Scenario Planner</h3>
-          {availableFiles.length > 0 && (
-            <Badge variant="outline" className="text-sm">
-              {availableFiles.length} file{availableFiles.length !== 1 ? 's' : ''} available
-            </Badge>
-          )}
+          <div></div>
+          <div className="flex items-center space-x-2">
+            {availableFiles.length > 0 && (
+              <Badge variant="outline" className="text-sm">
+                {availableFiles.length} file{availableFiles.length !== 1 ? 's' : ''} available
+              </Badge>
+            )}
+            
+            {/* ✅ NEW: Refresh Cache Button */}
+            {selectedFile && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => refreshCache(selectedFile)}
+                disabled={refreshingCache}
+                className="flex items-center space-x-2"
+              >
+                <RefreshCw className={`h-4 w-4 ${refreshingCache ? 'animate-spin' : ''}`} />
+              </Button>
+            )}
+          </div>
         </div>
-        
-        <p className="text-sm text-gray-600 mb-4">
-          Simply select a file and the scenario planner will automatically initialize with all identifiers and features ready to use.
-        </p>
         
         {loading ? (
           <div className="text-center py-8">
@@ -348,36 +425,6 @@ const ScenarioPlannerInputFiles: React.FC<Props> = ({ atomId, onCacheInitialized
         )}
       </Card>
 
-      {/* Selected File Info */}
-      {selectedFile && (
-        <Card className="p-4 bg-blue-50 border border-blue-200">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-2">
-              <span className="text-sm font-medium text-blue-800">
-                📁 Selected: {selectedFile}
-              </span>
-              {scenarioData.selectedDataFile === selectedFile && (
-                <Badge variant="secondary" className="text-xs">
-                  🔄 Restored from previous session
-                </Badge>
-              )}
-            </div>
-                  <div className="flex-1">
-                    <h4 className="font-medium text-blue-900">Selected File</h4>
-                    <p className="text-sm text-blue-700">{selectedFile}</p>
-                    <p className="text-xs text-blue-600 mt-1">
-                      {initializingCache 
-                        ? "🔄 Auto-initializing scenario planner..." 
-                        : "✅ File ready! Identifiers and features loaded automatically."
-                      }
-                    </p>
-                  </div>
-                  <Badge className={`${initializingCache ? 'bg-yellow-100 text-yellow-800' : 'bg-green-100 text-green-800'}`}>
-                    {initializingCache ? '🔄 Auto-Initializing...' : '🚀 Ready to Plan!'}
-                  </Badge>
-                </div>
-              </Card>
-            )}
     </div>
   );
 };

@@ -113,7 +113,7 @@ curl -X POST "http://localhost:8000/trinityai/chart-maker/chart" \
 ```bash
 # LLM Configuration
 LLM_API_URL=http://localhost:11434/api/chat
-LLM_MODEL_NAME=deepseek-r1:32b
+LLM_MODEL_NAME=qwen3:30b
 LLM_BEARER_TOKEN=your_token
 
 # MinIO Configuration

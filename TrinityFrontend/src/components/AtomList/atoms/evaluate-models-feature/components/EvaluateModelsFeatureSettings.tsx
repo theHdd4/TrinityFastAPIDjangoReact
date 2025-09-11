@@ -8,7 +8,7 @@ import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
 // Removed Badge and icon imports to avoid type issues
 import { EvaluateModelsFeatureData, type EvaluateModelsFeatureSettings } from '../EvaluateModelsFeatureAtom';
-import { VALIDATE_API, EVALUATE_API } from '@/lib/api';
+import { VALIDATE_API, EVALUATE_API, SELECT_API } from '@/lib/api';
 
 interface EvaluateModelsFeatureSettingsProps {
   data: EvaluateModelsFeatureData;
@@ -34,7 +34,28 @@ const EvaluateModelsFeatureSettings: React.FC<EvaluateModelsFeatureSettingsProps
   }, [data.graphs]);
 
   useEffect(() => {
-    fetch(`${VALIDATE_API}/list_saved_dataframes`)
+    let query = '';
+    const envStr = localStorage.getItem('env');
+    if (envStr) {
+      try {
+        const env = JSON.parse(envStr);
+        query =
+          '?' +
+          new URLSearchParams({
+            client_id: env.CLIENT_ID || '',
+            app_id: env.APP_ID || '',
+            project_id: env.PROJECT_ID || '',
+            client_name: env.CLIENT_NAME || '',
+            app_name: env.APP_NAME || '',
+            project_name: env.PROJECT_NAME || ''
+          }).toString();
+      } catch {
+        /* ignore */
+      }
+    }
+    
+    // Fetch only model results files
+    fetch(`${SELECT_API}/list-model-results-files${query}`)
       .then(r => r.json())
       .then(d => setFrames(Array.isArray(d.files) ? d.files : []))
       .catch(() => setFrames([]));
@@ -191,7 +212,7 @@ const EvaluateModelsFeatureSettings: React.FC<EvaluateModelsFeatureSettingsProps
               <SelectContent>
                 {frames.map((f, idx) => (
                   <SelectItem key={`${f.object_name}-${idx}`} value={f.object_name}>
-                    {f.csv_name || f.object_name.split('/').pop() || f.object_name}
+                    {f.csv_name.split('/').pop()}
                   </SelectItem>
                 ))}
               </SelectContent>

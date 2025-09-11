@@ -4,13 +4,26 @@ import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import Table from "@/templates/tables/table";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { FEATURE_OVERVIEW_API } from "@/lib/api";
 import { fetchDimensionMapping } from "@/lib/dimensions";
-import { BarChart3, TrendingUp, Maximize2 } from "lucide-react";
+import { BarChart3, TrendingUp, Maximize2, ArrowUp, ArrowDown, Filter as FilterIcon, Plus } from "lucide-react";
 import { Dialog, DialogContent, DialogTrigger } from "@/components/ui/dialog";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuSub,
+  ContextMenuSubContent,
+  ContextMenuSubTrigger,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu";
 import D3LineChart from "./D3LineChart";
 import { useAuth } from "@/contexts/AuthContext";
 import { logSessionState, addNavigationItem } from "@/lib/session";
+import { useLaboratoryStore } from "@/components/LaboratoryMode/store/laboratoryStore";
 
 interface ColumnInfo {
   column: string;
@@ -22,6 +35,7 @@ interface ColumnInfo {
 interface FeatureOverviewCanvasProps {
   settings: any;
   onUpdateSettings: (s: any) => void;
+  atomId?: string;
 }
 
 const filterUnattributed = (mapping: Record<string, string[]>) =>
@@ -34,6 +48,7 @@ const filterUnattributed = (mapping: Record<string, string[]>) =>
 const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
   settings,
   onUpdateSettings,
+  atomId,
 }) => {
   const { user } = useAuth();
   const [dimensionMap, setDimensionMap] = useState<Record<string, string[]>>(
@@ -61,6 +76,28 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
     settings.activeMetric || settings.yAxes?.[0] || "",
   );
   const [error, setError] = useState<string | null>(null);
+  
+  // Sorting and filtering state for Cardinality View
+  const [sortColumn, setSortColumn] = useState<string>('unique_count');
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
+  const [columnFilters, setColumnFilters] = useState<Record<string, string[]>>({});
+
+  // Get atom settings to access the input file name
+  const atom = useLaboratoryStore(state => atomId ? state.getAtom(atomId) : undefined);
+  const atomSettings = (atom?.settings as any) || {};
+  const inputFileName = atomSettings.dataSource || '';
+
+  // Handle opening the input file in a new tab
+  const handleViewDataClick = () => {
+    if (inputFileName && atomId) {
+      window.open(`/dataframe?name=${encodeURIComponent(inputFileName)}`, '_blank');
+    }
+  };
+  
+  // Sorting and filtering state for SKU Table
+  const [skuSortColumn, setSkuSortColumn] = useState<string>('');
+  const [skuSortDirection, setSkuSortDirection] = useState<'asc' | 'desc'>('asc');
+  const [skuColumnFilters, setSkuColumnFilters] = useState<Record<string, string[]>>({});
 
   useEffect(() => {
     if (settings.yAxes && settings.yAxes.length > 0) {
@@ -126,10 +163,134 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
     ? settings.columnSummary.filter(Boolean)
     : [];
 
-  const filterUnique = settings.filterUnique ?? true;
-  const displayedSummary = filterUnique
-    ? summaryList.filter((c) => c.unique_count > 1)
-    : summaryList;
+  const filterUnique = settings.filterUnique ?? false;
+  
+  const displayedSummary = React.useMemo(() => {
+    let filtered = filterUnique
+      ? summaryList.filter((c) => c.unique_count > 0)
+      : summaryList;
+
+    // Apply column filters
+    Object.entries(columnFilters).forEach(([column, filterValues]) => {
+      if (filterValues && filterValues.length > 0) {
+        filtered = filtered.filter(row => {
+          const cellValue = String(row[column as keyof ColumnInfo] || '');
+          return filterValues.includes(cellValue);
+        });
+      }
+    });
+
+    // Apply sorting
+    if (sortColumn) {
+      filtered = [...filtered].sort((a, b) => {
+        const aVal = a[sortColumn as keyof ColumnInfo];
+        const bVal = b[sortColumn as keyof ColumnInfo];
+        if (aVal === bVal) return 0;
+        let comparison = 0;
+        if (typeof aVal === 'number' && typeof bVal === 'number') {
+          comparison = aVal - bVal;
+        } else {
+          comparison = String(aVal).localeCompare(String(bVal));
+        }
+        return sortDirection === 'desc' ? -comparison : comparison;
+      });
+    }
+
+    return filtered;
+  }, [summaryList, filterUnique, columnFilters, sortColumn, sortDirection]);
+
+  const getUniqueColumnValues = (column: string): string[] => {
+    if (!summaryList.length) return [];
+    
+    // Get the currently filtered data (before applying the current column's filter)
+    let filteredData = filterUnique
+      ? summaryList.filter((c) => c.unique_count > 0)
+      : summaryList;
+
+    // Apply all other column filters except the current one
+    Object.entries(columnFilters).forEach(([col, filterValues]) => {
+      if (col !== column && filterValues && filterValues.length > 0) {
+        filteredData = filteredData.filter(row => {
+          const cellValue = String(row[col as keyof ColumnInfo] || '');
+          return filterValues.includes(cellValue);
+        });
+      }
+    });
+
+    // Get unique values from the filtered data
+    const values = filteredData.map(row => String(row[column as keyof ColumnInfo] || '')).filter(Boolean);
+    return Array.from(new Set(values)).sort();
+  };
+
+  const handleSort = (column: string, direction?: 'asc' | 'desc') => {
+    if (sortColumn === column) {
+      if (sortDirection === 'asc') {
+        setSortDirection('desc');
+      } else if (sortDirection === 'desc') {
+        setSortColumn('');
+        setSortDirection('asc');
+      }
+    } else {
+      setSortColumn(column);
+      setSortDirection(direction || 'asc');
+    }
+  };
+
+  const handleColumnFilter = (column: string, values: string[]) => {
+    setColumnFilters(prev => ({
+      ...prev,
+      [column]: values
+    }));
+  };
+
+  const clearColumnFilter = (column: string) => {
+    setColumnFilters(prev => {
+      const cpy = { ...prev };
+      delete cpy[column];
+      return cpy;
+    });
+  };
+
+  const FilterMenu = ({ column }: { column: string }) => {
+    const uniqueValues = getUniqueColumnValues(column);
+    const current = columnFilters[column] || [];
+    const [temp, setTemp] = useState<string[]>(current);
+
+    const toggleVal = (val: string) => {
+      setTemp(prev => (prev.includes(val) ? prev.filter(v => v !== val) : [...prev, val]));
+    };
+
+    const selectAll = () => {
+      setTemp(temp.length === uniqueValues.length ? [] : uniqueValues);
+    };
+
+    const apply = () => handleColumnFilter(column, temp);
+
+    return (
+      <div className="w-64 max-h-80 overflow-y-auto">
+        <div className="p-2 border-b">
+          <div className="flex items-center space-x-2 mb-2">
+            <Checkbox checked={temp.length === uniqueValues.length} onCheckedChange={selectAll} />
+            <span className="text-sm font-medium">Select All</span>
+          </div>
+        </div>
+        <div className="p-2 space-y-1">
+          {uniqueValues.map((v, i) => (
+            <div key={i} className="flex items-center space-x-2">
+              <Checkbox checked={temp.includes(v)} onCheckedChange={() => toggleVal(v)} />
+              <span className="text-sm">{v}</span>
+            </div>
+          ))}
+        </div>
+        <div className="p-2 border-t flex space-x-2">
+          <Button size="sm" onClick={apply}>Apply</Button>
+          <Button size="sm" variant="outline" onClick={() => setTemp(current)}>
+            Cancel
+          </Button>
+        </div>
+      </div>
+    );
+  };
 
   const handleFilterToggle = (val: boolean) => {
     onUpdateSettings({ filterUnique: val });
@@ -137,6 +298,130 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
 
   const dimensionCols = Object.values(dimensionMap).flat();
   const colSpan = dimensionCols.length + 2; // SR NO. + View Stat
+
+  // SKU Table filtering and sorting logic
+  const displayedSkuRows = React.useMemo(() => {
+    let filtered = Array.isArray(skuRows) ? skuRows : [];
+
+    // Apply column filters
+    Object.entries(skuColumnFilters).forEach(([column, filterValues]) => {
+      if (filterValues && filterValues.length > 0) {
+        filtered = filtered.filter(row => {
+          const cellValue = String(row[column.toLowerCase()] || '');
+          return filterValues.includes(cellValue);
+        });
+      }
+    });
+
+    // Apply sorting
+    if (skuSortColumn) {
+      filtered = [...filtered].sort((a, b) => {
+        const aVal = a[skuSortColumn.toLowerCase()];
+        const bVal = b[skuSortColumn.toLowerCase()];
+        if (aVal === bVal) return 0;
+        let comparison = 0;
+        if (typeof aVal === 'number' && typeof bVal === 'number') {
+          comparison = aVal - bVal;
+        } else {
+          comparison = String(aVal).localeCompare(String(bVal));
+        }
+        return skuSortDirection === 'desc' ? -comparison : comparison;
+      });
+    }
+
+    return filtered;
+  }, [skuRows, skuColumnFilters, skuSortColumn, skuSortDirection]);
+
+  const getSkuUniqueColumnValues = (column: string): string[] => {
+    if (!Array.isArray(skuRows) || skuRows.length === 0) return [];
+    
+    // Get the currently filtered data (before applying the current column's filter)
+    let filteredData = Array.isArray(skuRows) ? skuRows : [];
+
+    // Apply all other column filters except the current one
+    Object.entries(skuColumnFilters).forEach(([col, filterValues]) => {
+      if (col !== column && filterValues && filterValues.length > 0) {
+        filteredData = filteredData.filter(row => {
+          const cellValue = String(row[col.toLowerCase()] || '');
+          return filterValues.includes(cellValue);
+        });
+      }
+    });
+
+    // Get unique values from the filtered data
+    const values = filteredData.map(row => String(row[column.toLowerCase()] || '')).filter(Boolean);
+    return Array.from(new Set(values)).sort();
+  };
+
+  const handleSkuSort = (column: string, direction?: 'asc' | 'desc') => {
+    if (skuSortColumn === column) {
+      if (skuSortDirection === 'asc') {
+        setSkuSortDirection('desc');
+      } else if (skuSortDirection === 'desc') {
+        setSkuSortColumn('');
+        setSkuSortDirection('asc');
+      }
+    } else {
+      setSkuSortColumn(column);
+      setSkuSortDirection(direction || 'asc');
+    }
+  };
+
+  const handleSkuColumnFilter = (column: string, values: string[]) => {
+    setSkuColumnFilters(prev => ({
+      ...prev,
+      [column]: values
+    }));
+  };
+
+  const clearSkuColumnFilter = (column: string) => {
+    setSkuColumnFilters(prev => {
+      const cpy = { ...prev };
+      delete cpy[column];
+      return cpy;
+    });
+  };
+
+  const SkuFilterMenu = ({ column }: { column: string }) => {
+    const uniqueValues = getSkuUniqueColumnValues(column);
+    const current = skuColumnFilters[column] || [];
+    const [temp, setTemp] = useState<string[]>(current);
+
+    const toggleVal = (val: string) => {
+      setTemp(prev => (prev.includes(val) ? prev.filter(v => v !== val) : [...prev, val]));
+    };
+
+    const selectAll = () => {
+      setTemp(temp.length === uniqueValues.length ? [] : uniqueValues);
+    };
+
+    const apply = () => handleSkuColumnFilter(column, temp);
+
+    return (
+      <div className="w-64 max-h-80 overflow-y-auto">
+        <div className="p-2 border-b">
+          <div className="flex items-center space-x-2 mb-2">
+            <Checkbox checked={temp.length === uniqueValues.length} onCheckedChange={selectAll} />
+            <span className="text-sm font-medium">Select All</span>
+          </div>
+        </div>
+        <div className="p-2 space-y-1">
+          {uniqueValues.map((v, i) => (
+            <div key={i} className="flex items-center space-x-2">
+              <Checkbox checked={temp.includes(v)} onCheckedChange={() => toggleVal(v)} />
+              <span className="text-sm">{v}</span>
+            </div>
+          ))}
+        </div>
+        <div className="p-2 border-t flex space-x-2">
+          <Button size="sm" onClick={apply}>Apply</Button>
+          <Button size="sm" variant="outline" onClick={() => setTemp(current)}>
+            Cancel
+          </Button>
+        </div>
+      </div>
+    );
+  };
 
   if (summaryList.length === 0) {
     return (
@@ -293,23 +578,146 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
       {summaryList.length > 0 && (
         <div className="mb-8">
           <div className="mx-auto max-w-screen-2xl rounded-2xl border border-slate-200 bg-white shadow-sm">
-            <div className="flex items-center justify-between border-b border-slate-200 px-5 py-3">
-              <h3 className="text-base font-semibold text-slate-800">Cardinality View</h3>
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-slate-500">
-                  Select Columns with more than one unique values
-                </span>
-                <Switch
-                  checked={filterUnique}
-                  onCheckedChange={handleFilterToggle}
-                  className="data-[state=checked]:bg-[#458EE2]"
-                />
-              </div>
-            </div>
             <Table
-              headers={["Columns", "Data Type", "Unique Counts", "Unique Values"]}
+              headers={[
+                <ContextMenu key="Columns">
+                  <ContextMenuTrigger asChild>
+                    <div className="flex items-center gap-1 cursor-pointer">
+                      Columns
+                      {sortColumn === 'column' && (
+                        sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />
+                      )}
+                    </div>
+                  </ContextMenuTrigger>
+                  <ContextMenuContent className="w-48 bg-white border border-gray-200 shadow-lg rounded-md">
+                    <ContextMenuSub>
+                      <ContextMenuSubTrigger className="flex items-center">
+                        <ArrowUp className="w-4 h-4 mr-2" /> Sort
+                      </ContextMenuSubTrigger>
+                      <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md">
+                        <ContextMenuItem onClick={() => handleSort('column', 'asc')}>
+                          <ArrowUp className="w-4 h-4 mr-2" /> Ascending
+                        </ContextMenuItem>
+                        <ContextMenuItem onClick={() => handleSort('column', 'desc')}>
+                          <ArrowDown className="w-4 h-4 mr-2" /> Descending
+                        </ContextMenuItem>
+                      </ContextMenuSubContent>
+                    </ContextMenuSub>
+                    <ContextMenuSeparator />
+                    <ContextMenuSub>
+                      <ContextMenuSubTrigger className="flex items-center">
+                        <FilterIcon className="w-4 h-4 mr-2" /> Filter
+                      </ContextMenuSubTrigger>
+                      <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md p-0">
+                        <FilterMenu column="column" />
+                      </ContextMenuSubContent>
+                    </ContextMenuSub>
+                    {columnFilters['column']?.length > 0 && (
+                      <>
+                        <ContextMenuSeparator />
+                        <ContextMenuItem onClick={() => clearColumnFilter('column')}>
+                          Clear Filter
+                        </ContextMenuItem>
+                      </>
+                    )}
+                  </ContextMenuContent>
+                </ContextMenu>,
+                <ContextMenu key="Data Type">
+                  <ContextMenuTrigger asChild>
+                    <div className="flex items-center gap-1 cursor-pointer">
+                      Data Type
+                      {sortColumn === 'data_type' && (
+                        sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />
+                      )}
+                    </div>
+                  </ContextMenuTrigger>
+                  <ContextMenuContent className="w-48 bg-white border border-gray-200 shadow-lg rounded-md">
+                    <ContextMenuSub>
+                      <ContextMenuSubTrigger className="flex items-center">
+                        <ArrowUp className="w-4 h-4 mr-2" /> Sort
+                      </ContextMenuSubTrigger>
+                      <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md">
+                        <ContextMenuItem onClick={() => handleSort('data_type', 'asc')}>
+                          <ArrowUp className="w-4 h-4 mr-2" /> Ascending
+                        </ContextMenuItem>
+                        <ContextMenuItem onClick={() => handleSort('data_type', 'desc')}>
+                          <ArrowDown className="w-4 h-4 mr-2" /> Descending
+                        </ContextMenuItem>
+                      </ContextMenuSubContent>
+                    </ContextMenuSub>
+                    <ContextMenuSeparator />
+                    <ContextMenuSub>
+                      <ContextMenuSubTrigger className="flex items-center">
+                        <FilterIcon className="w-4 h-4 mr-2" /> Filter
+                      </ContextMenuSubTrigger>
+                      <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md p-0">
+                        <FilterMenu column="data_type" />
+                      </ContextMenuSubContent>
+                    </ContextMenuSub>
+                    {columnFilters['data_type']?.length > 0 && (
+                      <>
+                        <ContextMenuSeparator />
+                        <ContextMenuItem onClick={() => clearColumnFilter('data_type')}>
+                          Clear Filter
+                        </ContextMenuItem>
+                      </>
+                    )}
+                  </ContextMenuContent>
+                </ContextMenu>,
+                <ContextMenu key="Unique Counts">
+                  <ContextMenuTrigger asChild>
+                    <div className="flex items-center gap-1 cursor-pointer">
+                      Unique Counts
+                      {sortColumn === 'unique_count' && (
+                        sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />
+                      )}
+                    </div>
+                  </ContextMenuTrigger>
+                  <ContextMenuContent className="w-48 bg-white border border-gray-200 shadow-lg rounded-md">
+                    <ContextMenuSub>
+                      <ContextMenuSubTrigger className="flex items-center">
+                        <ArrowUp className="w-4 h-4 mr-2" /> Sort
+                      </ContextMenuSubTrigger>
+                      <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md">
+                        <ContextMenuItem onClick={() => handleSort('unique_count', 'asc')}>
+                          <ArrowUp className="w-4 h-4 mr-2" /> Ascending
+                        </ContextMenuItem>
+                        <ContextMenuItem onClick={() => handleSort('unique_count', 'desc')}>
+                          <ArrowDown className="w-4 h-4 mr-2" /> Descending
+                        </ContextMenuItem>
+                      </ContextMenuSubContent>
+                    </ContextMenuSub>
+                    <ContextMenuSeparator />
+                    <ContextMenuSub>
+                      <ContextMenuSubTrigger className="flex items-center">
+                        <FilterIcon className="w-4 h-4 mr-2" /> Filter
+                      </ContextMenuSubTrigger>
+                      <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md p-0">
+                        <FilterMenu column="unique_count" />
+                      </ContextMenuSubContent>
+                    </ContextMenuSub>
+                    {columnFilters['unique_count']?.length > 0 && (
+                      <>
+                        <ContextMenuSeparator />
+                        <ContextMenuItem onClick={() => clearColumnFilter('unique_count')}>
+                          Clear Filter
+                        </ContextMenuItem>
+                      </>
+                    )}
+                  </ContextMenuContent>
+                </ContextMenu>,
+                "Unique Values"
+              ]}
               colClasses={["w-[30%]", "w-[20%]", "w-[15%]", "w-[35%]"]}
               bodyClassName="max-h-[484px] overflow-y-auto"
+              defaultMinimized={true}
+              borderColor="border-green-500"
+              customHeader={{
+                title: "Cardinality View",
+                subtitle: "Click Here to View Data",
+                subtitleClickable: !!inputFileName && !!atomId,
+                onSubtitleClick: handleViewDataClick
+              }}
             >
               {Array.isArray(displayedSummary) &&
                 displayedSummary.map((c: ColumnInfo) => (
@@ -325,34 +733,37 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
                     </td>
                     <td className="table-cell">{c.unique_count}</td>
                     <td className="table-cell">
-                      <div className="flex flex-wrap gap-1">
-                        {(Array.isArray(c.unique_values)
-                          ? c.unique_values.slice(0, 3)
-                          : []
-                        ).map((v, i) => (
-                          <Badge
-                            key={i}
-                            variant="outline"
-                            className="p-0 px-1 text-xs bg-gray-50 text-slate-700 hover:bg-gray-50"
-                          >
-                            {v}
-                          </Badge>
-                        ))}
-                        {Array.isArray(c.unique_values) &&
-                          c.unique_values.length > 3 && (
-                            <Badge
-                              variant="outline"
-                              className="p-0 px-1 text-xs bg-orange-50 text-orange-700 border-orange-200"
-                            >
-                              +{c.unique_values.length - 3}
-                            </Badge>
-                          )}
-                        {Array.isArray(c.unique_values) &&
-                          c.unique_values.length === 0 && (
-                            <span className="text-xs text-gray-500 italic font-medium">
-                              Multiple values
-                            </span>
-                          )}
+                      <div className="flex flex-wrap items-center gap-1">
+                        {Array.isArray(c.unique_values) ? (
+                          <>
+                            {c.unique_values.slice(0, 2).map((v, i) => (
+                              <Badge
+                                key={i}
+                                className="p-0 px-1 text-xs bg-gray-50 text-slate-700 hover:bg-gray-50"
+                              >
+                                {String(v)}
+                              </Badge>
+                            ))}
+                            {c.unique_values.length > 2 && (
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <span className="flex items-center gap-0.5 text-xs text-slate-600 font-medium cursor-pointer">
+                                    <Plus className="w-3 h-3" />
+                                    {c.unique_values.length - 2}
+                                  </span>
+                                </TooltipTrigger>
+                                <TooltipContent className="text-xs max-w-xs whitespace-pre-wrap">
+                                  {c.unique_values
+                                    .slice(2)
+                                    .map(val => String(val))
+                                    .join(', ')}
+                                </TooltipContent>
+                              </Tooltip>
+                            )}
+                          </>
+                        ) : (
+                          <span className="text-gray-500 italic">No samples</span>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -400,14 +811,86 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
 
           {skuRows.length > 0 && (
             <div className="mt-8 mx-auto max-w-screen-2xl rounded-2xl border border-slate-200 bg-white shadow-sm">
-              <div className="flex items-center justify-between border-b border-slate-200 px-5 py-3">
-                <h3 className="text-base font-semibold text-slate-800">SKU Table</h3>
-              </div>
               <Table
-                headers={["SR NO.", ...dimensionCols, "View Stat"]}
+                headers={[
+                  <ContextMenu key="SR NO.">
+                    <ContextMenuTrigger asChild>
+                      <div className="flex items-center gap-1 cursor-pointer">
+                        SR NO.
+                        {skuSortColumn === 'id' && (
+                          skuSortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />
+                        )}
+                      </div>
+                    </ContextMenuTrigger>
+                    <ContextMenuContent className="w-48 bg-white border border-gray-200 shadow-lg rounded-md">
+                      <ContextMenuSub>
+                        <ContextMenuSubTrigger className="flex items-center">
+                          <ArrowUp className="w-4 h-4 mr-2" /> Sort
+                        </ContextMenuSubTrigger>
+                        <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md">
+                          <ContextMenuItem onClick={() => handleSkuSort('id', 'asc')}>
+                            <ArrowUp className="w-4 h-4 mr-2" /> Ascending
+                          </ContextMenuItem>
+                          <ContextMenuItem onClick={() => handleSkuSort('id', 'desc')}>
+                            <ArrowDown className="w-4 h-4 mr-2" /> Descending
+                          </ContextMenuItem>
+                        </ContextMenuSubContent>
+                      </ContextMenuSub>
+                    </ContextMenuContent>
+                  </ContextMenu>,
+                  ...dimensionCols.map(col => (
+                    <ContextMenu key={col}>
+                      <ContextMenuTrigger asChild>
+                        <div className="flex items-center gap-1 cursor-pointer">
+                          {col}
+                          {skuSortColumn === col && (
+                            skuSortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />
+                          )}
+                        </div>
+                      </ContextMenuTrigger>
+                      <ContextMenuContent className="w-48 bg-white border border-gray-200 shadow-lg rounded-md">
+                        <ContextMenuSub>
+                          <ContextMenuSubTrigger className="flex items-center">
+                            <ArrowUp className="w-4 h-4 mr-2" /> Sort
+                          </ContextMenuSubTrigger>
+                          <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md">
+                            <ContextMenuItem onClick={() => handleSkuSort(col, 'asc')}>
+                              <ArrowUp className="w-4 h-4 mr-2" /> Ascending
+                            </ContextMenuItem>
+                            <ContextMenuItem onClick={() => handleSkuSort(col, 'desc')}>
+                              <ArrowDown className="w-4 h-4 mr-2" /> Descending
+                            </ContextMenuItem>
+                          </ContextMenuSubContent>
+                        </ContextMenuSub>
+                        <ContextMenuSeparator />
+                        <ContextMenuSub>
+                          <ContextMenuSubTrigger className="flex items-center">
+                            <FilterIcon className="w-4 h-4 mr-2" /> Filter
+                          </ContextMenuSubTrigger>
+                          <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md p-0">
+                            <SkuFilterMenu column={col} />
+                          </ContextMenuSubContent>
+                        </ContextMenuSub>
+                        {skuColumnFilters[col]?.length > 0 && (
+                          <>
+                            <ContextMenuSeparator />
+                            <ContextMenuItem onClick={() => clearSkuColumnFilter(col)}>
+                              Clear Filter
+                            </ContextMenuItem>
+                          </>
+                        )}
+                      </ContextMenuContent>
+                    </ContextMenu>
+                  )),
+                  "View Stat"
+                ]}
                 bodyClassName="max-h-[440px] overflow-y-auto"
+                borderColor="border-green-500"
+                customHeader={{
+                  title: "SKU Table"
+                }}
               >
-                {(Array.isArray(skuRows) ? skuRows : []).map((row) => (
+                {displayedSkuRows.map((row) => (
                   <React.Fragment key={row.id}>
                     <tr className="table-row">
                       <td className="table-cell">{row.id}</td>

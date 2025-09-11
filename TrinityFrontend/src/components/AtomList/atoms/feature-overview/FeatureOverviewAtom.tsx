@@ -16,6 +16,7 @@ const FeatureOverviewAtom: React.FC<Props> = ({ atomId }) => {
       <FeatureOverviewCanvas
         settings={settings}
         onUpdateSettings={s => updateSettings(atomId, s)}
+        atomId={atomId}
       />
     </div>
   );

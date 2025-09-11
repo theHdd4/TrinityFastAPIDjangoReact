@@ -31,9 +31,6 @@ export interface EvaluateModelsFeatureSettings {
   showLegend: boolean;
   chartHeight: number;
   autoRefresh: boolean;
-  clientName?: string;
-  appName?: string;
-  projectName?: string;
 }
 
 interface EvaluateModelsFeatureAtomProps {
@@ -79,10 +76,7 @@ const EvaluateModelsFeatureAtom: React.FC<EvaluateModelsFeatureAtomProps> = ({
   const defaultSettings = {
     showLegend: true,
     chartHeight: 300,
-    autoRefresh: false,
-    clientName: 'default_client',
-    appName: 'default_app',
-    projectName: 'default_project'
+    autoRefresh: false
   };
 
   const settings = (atom?.settings as any) || {
@@ -160,6 +154,7 @@ const EvaluateModelsFeatureAtom: React.FC<EvaluateModelsFeatureAtomProps> = ({
 
   return (
     <EvaluateModelsFeatureCanvas
+      atomId={atomId}
       data={data}
       settings={completeSettings}
       onDataChange={handleDataChange}

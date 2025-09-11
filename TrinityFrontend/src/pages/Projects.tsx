@@ -218,31 +218,43 @@ const Projects = () => {
     clearProjectState();
     saveCurrentProject(project);
 
+    // Construct an initial environment using any existing client identifiers
+    // and the currently selected app/project. This ensures env-dependent
+    // components (session state, MinIO prefixing, etc.) immediately reflect
+    // the user's context even before the backend responds with its
+    // canonical environment payload.
+    let env: Record<string, string> = {
+      APP_NAME: selectedApp || '',
+      APP_ID: appId?.toString() || '',
+      PROJECT_NAME: project.name,
+      PROJECT_ID: project.id?.toString() || '',
+    };
     try {
       const envStr = localStorage.getItem('env');
       const baseEnv = envStr ? JSON.parse(envStr) : {};
-      const { CLIENT_NAME, APP_NAME } = baseEnv;
-      localStorage.setItem(
-        'env',
-        JSON.stringify({ CLIENT_NAME, APP_NAME, PROJECT_NAME: project.name })
-      );
+      if (baseEnv.CLIENT_NAME) env.CLIENT_NAME = baseEnv.CLIENT_NAME;
+      if (baseEnv.CLIENT_ID) env.CLIENT_ID = baseEnv.CLIENT_ID;
     } catch {
-      localStorage.setItem(
-        'env',
-        JSON.stringify({ PROJECT_NAME: project.name })
-      );
+      /* ignore parse errors */
     }
+    localStorage.setItem('env', JSON.stringify(env));
 
     try {
       const res = await fetch(`${REGISTRY_API}/projects/${project.id}/`, { credentials: 'include' });
       if (res.ok) {
         const data = await res.json();
         if (data.environment) {
-          const { CLIENT_NAME, APP_NAME, PROJECT_NAME } = data.environment;
-          localStorage.setItem(
-            'env',
-            JSON.stringify({ CLIENT_NAME, APP_NAME, PROJECT_NAME })
-          );
+          // Persist the full environment returned by the backend, but ensure
+          // current app/project identifiers remain accurate.
+          env = {
+            ...env,
+            ...data.environment,
+            APP_NAME: selectedApp || env.APP_NAME,
+            APP_ID: appId?.toString() || env.APP_ID,
+            PROJECT_NAME: project.name,
+            PROJECT_ID: project.id?.toString() || env.PROJECT_ID,
+          };
+          localStorage.setItem('env', JSON.stringify(env));
         }
       }
     } catch (err) {
