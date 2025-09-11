@@ -418,3 +418,31 @@ def log_operation_to_mongo(user_id: str, client_id: str, validator_atom_id: str,
     except Exception as e:
         logging.error(f"MongoDB save error for operation log: {e}")
         return {"status": "error", "error": str(e)}
+
+
+def mark_operation_log_deleted(object_name: str):
+    """Mark operation log entries associated with a dataframe as deleted."""
+    if not check_mongodb_connection():
+        return {"status": "error", "error": "MongoDB not connected"}
+
+    try:
+        result = db[COLLECTIONS["OPERATION_LOGS"]].update_many(
+            {
+                "details.files_saved": {
+                    "$elemMatch": {"minio_upload.object_name": object_name}
+                }
+            },
+            {
+                "$set": {"deleted": True, "deleted_at": datetime.utcnow()}
+            },
+        )
+        return {
+            "status": "success",
+            "matched": result.matched_count,
+            "modified": result.modified_count,
+        }
+    except Exception as e:
+        logging.error(
+            f"MongoDB mark delete error for operation log ({object_name}): {e}"
+        )
+        return {"status": "error", "error": str(e)}
