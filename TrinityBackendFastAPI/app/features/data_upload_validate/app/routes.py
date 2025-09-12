@@ -1,5 +1,5 @@
 # app/routes.py - API Routes
-from fastapi import APIRouter, HTTPException, File, Form, UploadFile, Query, Request
+from fastapi import APIRouter, HTTPException, File, Form, UploadFile, Query, Request, Response
 from typing import List, Dict, Any
 import json
 import pandas as pd
@@ -442,6 +442,10 @@ async def upload_file(
         os.environ["PROJECT_NAME"] = project_name
     prefix = await get_object_prefix()
     ensure_minio_bucket()
+    # Upload initial file to a temporary subfolder so it isn't exposed as a
+    # saved dataframe until explicitly persisted via the save_dataframes
+    # endpoint.
+    tmp_prefix = prefix + "tmp/"
     content = await file.read()
     try:
         if file.filename.lower().endswith(".csv"):
@@ -456,7 +460,8 @@ async def upload_file(
     arrow_buf = io.BytesIO()
     df_pl.write_ipc(arrow_buf)
     arrow_name = Path(file.filename).stem + ".arrow"
-    result = upload_to_minio(arrow_buf.getvalue(), arrow_name, prefix)
+    # Store under temporary prefix to hide from list_saved_dataframes
+    result = upload_to_minio(arrow_buf.getvalue(), arrow_name, tmp_prefix)
     if result.get("status") != "success":
         raise HTTPException(status_code=500, detail=result.get("error_message", "Upload failed"))
     return {"file_path": result["object_name"]}
@@ -2678,7 +2683,16 @@ load_existing_configs()
 
 
 # --- New endpoints for saving and listing validated dataframes ---
+# Accept both trailing and non-trailing slash variants and explicitly
+# handle CORS preflight OPTIONS requests so browsers or proxies never
+# receive a 405/500 before the actual POST is issued.
+@router.options("/save_dataframes")
+@router.options("/save_dataframes/")
+async def save_dataframes_options() -> Response:
+    return Response(status_code=204)
+
 @router.post("/save_dataframes")
+@router.post("/save_dataframes/")
 async def save_dataframes(
     validator_atom_id: str = Form(...),
     files: List[UploadFile] | None = File(None),
@@ -2781,20 +2795,21 @@ async def save_dataframes(
     numeric_pid = _parse_numeric_id(project_id or os.getenv("PROJECT_ID", "0"))
     print(f"📤 saving to prefix {prefix}")
 
+    tmp_prefix = prefix + "tmp/"
     if files_list:
         iter_sources = [
-            (k, f.filename, f.file) for k, f in zip(keys, files_list)
+            (k, f.filename, f.file, None) for k, f in zip(keys, files_list)
         ]
     else:
         iter_sources = []
         for k, p in zip(keys, paths):
             data = read_minio_object(p)
-            iter_sources.append((k, Path(p).name, io.BytesIO(data)))
+            iter_sources.append((k, Path(p).name, io.BytesIO(data), p))
 
     MAX_FILE_SIZE = 512 * 1024 * 1024  # 512 MB
     STATUS_TTL = 3600
 
-    for key, filename, fileobj in iter_sources:
+    for key, filename, fileobj, orig_path in iter_sources:
         logger.info("Processing file %s with key %s", filename, key)
         progress_key = f"upload_status:{validator_atom_id}:{key}"
         redis_client.set(progress_key, "uploading", ex=STATUS_TTL)
@@ -2900,6 +2915,12 @@ async def save_dataframes(
         )
 
         redis_client.set(progress_key, "saved", ex=STATUS_TTL)
+        # Remove temporary upload if it exists
+        if orig_path and orig_path.startswith(tmp_prefix):
+            try:
+                minio_client.remove_object(MINIO_BUCKET, orig_path)
+            except Exception:
+                logger.warning("Failed to remove temp object %s", orig_path)
 
         uploads.append({
             "file_key": key,
@@ -2977,6 +2998,7 @@ async def list_saved_dataframes(
                 MINIO_BUCKET, prefix=prefix, recursive=True
             )
         )
+        tmp_prefix = prefix + "tmp/"
         files = [
             {
                 "object_name": obj.object_name,
@@ -2985,6 +3007,7 @@ async def list_saved_dataframes(
             }
             for obj in sorted(objects, key=lambda o: o.object_name)
             if obj.object_name.endswith(".arrow")
+            and not obj.object_name.startswith(tmp_prefix)
         ]
         return {
             "bucket": MINIO_BUCKET,
