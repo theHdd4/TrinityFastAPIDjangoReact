@@ -100,6 +100,7 @@ def main():
                 last_name=last,
                 email=username if "@" in username else "",
                 is_staff=True,
+                is_superuser=True,
             )
             print(f"→ 1c) Created user '{username}' with password '{password}'")
         else:
@@ -107,6 +108,9 @@ def main():
             update_needed = False
             if not user.is_staff:
                 user.is_staff = True
+                update_needed = True
+            if not user.is_superuser:
+                user.is_superuser = True
                 update_needed = True
             if first and user.first_name != first:
                 user.first_name = first

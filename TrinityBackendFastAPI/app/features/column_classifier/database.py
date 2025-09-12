@@ -90,6 +90,8 @@ def ensure_mongo_connection() -> bool:
         db = mongo_client[DATABASE_NAME]
         config_db = mongo_client[settings.classifier_configs_database]
         mongo_client.admin.command("ping")
+        if COLLECTIONS["CLASSIFIER_CONFIGS"] not in config_db.list_collection_names():
+            config_db.create_collection(COLLECTIONS["CLASSIFIER_CONFIGS"])
         return True
     except Exception as exc:  # pragma: no cover - best effort
         logging.error(f"MongoDB reconnection failed: {exc}")
