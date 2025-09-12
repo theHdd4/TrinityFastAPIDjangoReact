@@ -1,7 +1,6 @@
 # app/routes.py
 
 from fastapi import APIRouter, HTTPException, Query, Path, Form, BackgroundTasks, Body, Request
-import logging
 import asyncio
 import multiprocessing
 from datetime import datetime, timezone
@@ -75,7 +74,6 @@ PERFORMANCE_CONFIG = {
     "process_pool": True               # Use ProcessPoolExecutor for CPU-bound tasks
 }
 
-logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -141,12 +139,9 @@ async def process_combination_async(
             #             app_name="",
             #             project_name=""
             #         )
-            #         logger.info(f"✅ Initialized combination save status for scope {scope_number} with {len(all_combinations)} combinations")
             #     except Exception as e:
-            #         logger.error(f"Error initializing combination save status: {e}")
             #         # Continue even if initialization fails
         
-        logger.info(f"Processing combination {combination_index + 1}/{total_combinations}: {combination}")
         
         minio_client = get_minio_client()
         
@@ -171,10 +166,8 @@ async def process_combination_async(
                 if has_scope and has_combination:
                     matching_objects.append(obj_name)
             
-            logger.info(f"Total matching files found for {combination}: {len(matching_objects)}")
                     
         except Exception as search_error:
-            logger.error(f"Search failed: {search_error}")
             return {
                 "combination_id": combination,
                 "file_key": None,
@@ -183,7 +176,6 @@ async def process_combination_async(
             }
                 
         if not matching_objects:
-            logger.warning(f"No matching file found for combination: {combination}")
             return {
                 "combination_id": combination,
                 "file_key": None,
@@ -221,7 +213,6 @@ async def process_combination_async(
                     reader = ipc.RecordBatchFileReader(pa.BufferReader(file_data))
                     df = reader.read_all().to_pandas()
                 except Exception as arrow_error:
-                    logger.error(f"Error reading Arrow file: {arrow_error}")
                     return {
                         "combination_id": combination,
                         "file_key": target_file_key,
@@ -233,7 +224,6 @@ async def process_combination_async(
             elif target_file_key.endswith('.xlsx'):
                 df = pd.read_excel(io.BytesIO(file_data))
             else:
-                logger.warning(f"Unsupported file format: {target_file_key}")
                 return {
                     "combination_id": combination,
                     "file_key": target_file_key,
@@ -244,7 +234,6 @@ async def process_combination_async(
             # Validate target variable exists
             available_columns = df.columns.tolist()
             if y_variable not in available_columns:
-                logger.warning(f"Target variable '{y_variable}' not found in {target_file_key}. Available: {available_columns}")
                 return {
                     "combination_id": combination,
                     "file_key": target_file_key,
@@ -257,7 +246,6 @@ async def process_combination_async(
             y_var_lower = y_variable.lower().strip()
             
             if y_var_lower not in df.columns:
-                logger.warning(f"Target variable '{y_var_lower}' not found after standardization")
                 return {
                     "combination_id": combination,
                     "file_key": target_file_key,
@@ -266,7 +254,6 @@ async def process_combination_async(
                 }
             
         except Exception as file_error:
-            logger.error(f"Error reading file {target_file_key}: {file_error}")
             return {
                 "combination_id": combination,
                 "file_key": target_file_key,
@@ -298,14 +285,6 @@ async def process_combination_async(
                 training_progress[run_id]["last_updated"] = datetime.now().isoformat()
                 await asyncio.sleep(0.2)  # Small delay to make progress visible
             
-            # Debug: Log the forecast result structure
-            logger.info(f"Forecast result for {combination}:")
-            logger.info(f"  - Status: {forecast_result.get('status', 'N/A')}")
-            logger.info(f"  - Models run: {forecast_result.get('models_run', [])}")
-            logger.info(f"  - Has forecast_df: {bool(forecast_result.get('forecast_df'))}")
-            logger.info(f"  - Forecast_df length: {len(forecast_result.get('forecast_df', []))}")
-            logger.info(f"  - Has metrics: {bool(forecast_result.get('metrics'))}")
-            logger.info(f"  - Metrics keys: {list(forecast_result.get('metrics', {}).keys())}")
             
             return {
                 "combination_id": combination,
@@ -315,7 +294,6 @@ async def process_combination_async(
             }
             
         except Exception as model_error:
-            logger.error(f"Error running autoregressive models for {combination}: {model_error}")
             return {
                             "combination_id": combination,
                             "file_key": target_file_key,
@@ -324,7 +302,6 @@ async def process_combination_async(
             }
             
     except Exception as e:
-        logger.error(f"Failed to process combination {combination}: {e}")
         return {
                         "combination_id": combination,
                         "file_key": None,
@@ -365,7 +342,6 @@ async def run_background_training(
             "last_updated": datetime.now().isoformat()
         }
         
-        logger.info(f"Starting background training for {total_combinations} combinations with run_id: {run_id}")
         
         # Process combinations sequentially for better progress tracking
         for combination_index, combination in enumerate(combinations):
@@ -376,7 +352,6 @@ async def run_background_training(
                 training_progress[run_id]["percentage"] = int((combination_index / total_combinations) * 100)
                 training_progress[run_id]["last_updated"] = datetime.now().isoformat()
                 
-                logger.info(f"Processing combination {combination_index + 1}/{total_combinations}: {combination}")
                 
                 # Update progress - searching for file
                 training_progress[run_id]["current_model"] = "Searching for data file..."
@@ -407,7 +382,6 @@ async def run_background_training(
                 await asyncio.sleep(0.3)
                 
             except Exception as e:
-                logger.error(f"Error processing combination {combination}: {e}")
                 training_progress[run_id]["current_model"] = f"Error: {combination}"
                 training_progress[run_id]["last_updated"] = datetime.now().isoformat()
                 combination_results.append({
@@ -420,12 +394,10 @@ async def run_background_training(
         # Update results in progress
         training_progress[run_id]["results"] = combination_results
         
-        # Debug: Log the results being stored
-        logger.info(f"🔍 DEBUG: Storing {len(combination_results)} results for run_id: {run_id}")
         for i, result in enumerate(combination_results):
-            logger.info(f"🔍 DEBUG: Result {i+1}: {result.get('combination_id', 'N/A')} - {result.get('status', 'N/A')}")
             if result.get('status') == 'success' and result.get('result'):
-                logger.info(f"🔍 DEBUG: Success result has {len(result.get('result', {}).get('models_run', []))} models")
+                # Process successful result
+                pass
         
         # Update final progress
         training_progress[run_id]["status"] = "completed"
@@ -436,11 +408,8 @@ async def run_background_training(
         training_progress[run_id]["current_model"] = "Training completed successfully"
         training_progress[run_id]["last_updated"] = datetime.now().isoformat()
         
-        logger.info(f"Background training completed for run_id: {run_id}")
-        logger.info(f"🔍 DEBUG: Final results count: {len(training_progress[run_id].get('results', []))}")
         
     except Exception as e:
-        logger.error(f"Background training failed for run_id {run_id}: {e}")
         if run_id in training_progress:
             training_progress[run_id]["status"] = "error"
             training_progress[run_id]["error"] = str(e)
@@ -459,7 +428,6 @@ async def train_autoregressive_models_direct(request: dict, background_tasks: Ba
     try:
         # Generate unique run ID or use provided one
         run_id = request.get('run_id') or str(uuid.uuid4())
-        logger.info(f"Starting direct autoregressive model training with run_id: {run_id}")
         
         # Extract parameters from request
         scope_number = request.get('scope_number')  # e.g., "3"
@@ -478,7 +446,6 @@ async def train_autoregressive_models_direct(request: dict, background_tasks: Ba
             )
         
         # Run training synchronously to return results immediately
-        logger.info(f"✅ Starting synchronous training for immediate results. Run ID: {run_id}")
         
         # Run training synchronously
         await run_background_training(
@@ -525,7 +492,6 @@ async def train_autoregressive_models_direct(request: dict, background_tasks: Ba
                         
                         serializable_results.append(serializable_result)
                 
-                logger.info(f"✅ Training completed successfully with {len(successful_results)} successful results")
                 
                 return AutoregressiveTrainingResponse(
                     status="completed",
@@ -565,7 +531,6 @@ async def train_autoregressive_models_direct(request: dict, background_tasks: Ba
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to start autoregressive model training: {e}")
         raise HTTPException(status_code=500, detail="Failed to start autoregressive model training")
 
 @router.get("/training-progress/{run_id}", tags=["Autoregressive Model Training"])
@@ -640,11 +605,6 @@ async def get_training_results(run_id: str):
     # Count successful results
     successful_results = [r for r in progress.get("results", []) if r.get("status") == "success"]
     
-    # Debug: Log what we're retrieving
-    logger.info(f"🔍 DEBUG: Getting results for run_id: {run_id}")
-    logger.info(f"🔍 DEBUG: Progress status: {progress.get('status')}")
-    logger.info(f"🔍 DEBUG: Total results in progress: {len(progress.get('results', []))}")
-    logger.info(f"🔍 DEBUG: Successful results: {len(successful_results)}")
     
     # Return the actual results with forecast data, but ensure they're serializable
     serializable_results = []
@@ -712,7 +672,6 @@ async def get_file_path(scope: str = Query(...), combination: str = Query(...)):
                 if has_scope and has_combination:
                     matching_objects.append(obj_name)
         except Exception as search_error:
-            logger.error(f"Search failed: {search_error}")
             raise HTTPException(status_code=500, detail="Failed to search for file")
         
         if matching_objects:
@@ -722,7 +681,6 @@ async def get_file_path(scope: str = Query(...), combination: str = Query(...)):
                 presigned_url = minio_client.presigned_get_object(bucket_name, file_path, expires=3600)
                 return {"file_path": file_path, "presigned_url": presigned_url}
             except Exception as e:
-                logger.error(f"Failed to generate presigned URL: {e}")
                 return {"file_path": file_path, "presigned_url": None}
         else:
             raise HTTPException(status_code=404, detail="File not found")
@@ -730,7 +688,6 @@ async def get_file_path(scope: str = Query(...), combination: str = Query(...)):
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to get file path: {e}")
         raise HTTPException(status_code=500, detail="Failed to get file path")
 
 # Get columns endpoint (for frontend column selection) - GET version
@@ -762,30 +719,23 @@ async def get_columns_get(
         
         # Log all available files for debugging
         all_files = list(objects)
-        logger.info(f"Found {len(all_files)} files in {trinity_bucket} bucket")
         arrow_files = [obj.object_name for obj in all_files if obj.object_name.endswith('.arrow')]
-        logger.info(f"Found {len(arrow_files)} Arrow files: {arrow_files[:10]}...")  # Show first 10
         
         # Look for files that match the pattern: Scope_{scope}_{combination}_*.arrow
         target_file_key = None
-        logger.info(f"Searching for files with Scope_{scope}_ and combination: {combination}")
         
         for obj in all_files:
             if obj.object_name.endswith('.arrow'):
-                logger.debug(f"Checking file: {obj.object_name}")
                 # Check if this file matches our scope and combination
                 if f"Scope_{scope}_" in obj.object_name and combination in obj.object_name:
                     target_file_key = obj.object_name
-                    logger.info(f"Found exact match: {target_file_key}")
                     break
         
         if not target_file_key:
             # If no exact match, try to find any file with the scope number
-            logger.info(f"No exact match found, looking for any file with Scope_{scope}_")
             for obj in all_files:
                 if obj.object_name.endswith('.arrow') and f"Scope_{scope}_" in obj.object_name:
                     target_file_key = obj.object_name
-                    logger.info(f"Found scope match: {target_file_key}")
                     break
         
         if not target_file_key:
@@ -794,7 +744,6 @@ async def get_columns_get(
                 detail=f"No files found for Scope {scope} with combination {combination}"
             )
         
-        logger.info(f"Found file: {target_file_key}")
         
         # Read the file from MinIO
         response = minio_client.get_object(trinity_bucket, target_file_key)
@@ -815,7 +764,6 @@ async def get_columns_get(
             table = reader.read_all()
             df = table.to_pandas()
         except Exception as arrow_error:
-            logger.warning(f"Failed to read as Arrow, trying CSV: {arrow_error}")
             # Fallback to CSV if Arrow fails
             df = pd.read_csv(io.BytesIO(file_data), nrows=0)
         
@@ -855,7 +803,6 @@ async def get_columns_get(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error in get_columns: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 # Get columns endpoint (for frontend column selection) - POST version
@@ -882,30 +829,23 @@ async def get_columns(
             
             # Log all available files for debugging
             all_files = list(objects)
-            logger.info(f"Found {len(all_files)} files in {trinity_bucket} bucket")
             arrow_files = [obj.object_name for obj in all_files if obj.object_name.endswith('.arrow')]
-            logger.info(f"Found {len(arrow_files)} Arrow files: {arrow_files[:10]}...")  # Show first 10
             
             # Look for files that match the pattern: Scope_{scope}_{combination}_*.arrow
             target_file_key = None
-            logger.info(f"Searching for files with Scope_{scope}_ and combination: {combination}")
             
             for obj in all_files:
                 if obj.object_name.endswith('.arrow'):
-                    logger.debug(f"Checking file: {obj.object_name}")
                     # Check if this file matches our scope and combination
                     if f"Scope_{scope}_" in obj.object_name and combination in obj.object_name:
                         target_file_key = obj.object_name
-                        logger.info(f"Found exact match: {target_file_key}")
                     break
             
             if not target_file_key:
                 # If no exact match, try to find any file with the scope number
-                logger.info(f"No exact match found, looking for any file with Scope_{scope}_")
                 for obj in all_files:
                     if obj.object_name.endswith('.arrow') and f"Scope_{scope}_" in obj.object_name:
                         target_file_key = obj.object_name
-                        logger.info(f"Found scope match: {target_file_key}")
                     break
             
             if not target_file_key:
@@ -914,10 +854,8 @@ async def get_columns(
                     detail=f"No files found for Scope {scope} with combination {combination}"
                 )
             
-            logger.info(f"Found file: {target_file_key}")
             
         except Exception as search_error:
-            logger.error(f"Search failed: {search_error}")
             raise HTTPException(status_code=500, detail="Failed to search for file")
         
         if target_file_key:
@@ -937,7 +875,6 @@ async def get_columns(
                         table = reader.read_all()
                         df = table.to_pandas()
                     except Exception as arrow_error:
-                        logger.warning(f"Failed to read as Arrow, trying CSV: {arrow_error}")
                         # Fallback to CSV if Arrow fails
                         df = pd.read_csv(io.BytesIO(file_data), nrows=0)
                 elif target_file_key.endswith('.csv'):
@@ -981,7 +918,6 @@ async def get_columns(
                 }
                 
             except Exception as file_error:
-                logger.error(f"Error reading file {target_file_key}: {file_error}")
                 raise HTTPException(status_code=500, detail="Failed to read file")
         else:
             raise HTTPException(status_code=404, detail="File not found")
@@ -989,7 +925,6 @@ async def get_columns(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to get columns: {e}")
         raise HTTPException(status_code=500, detail="Failed to get columns")
 
 # Get saved dataframes endpoint (for frontend dataset selection)
@@ -1031,13 +966,11 @@ async def get_saved_dataframes():
             return data_files
             
         except Exception as search_error:
-            logger.error(f"Search failed: {search_error}")
             raise HTTPException(status_code=500, detail="Failed to search for dataframes")
             
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to get saved dataframes: {e}")
         raise HTTPException(status_code=500, detail="Failed to get saved dataframes")
 
 # Get training status endpoint
@@ -1054,7 +987,6 @@ async def get_training_status(run_id: str):
             "message": "Training completed successfully"
         }
     except Exception as e:
-        logger.error(f"Failed to get training status: {e}")
         raise HTTPException(status_code=500, detail="Failed to get training status")
 
 # Detect frequency endpoint for time series analysis
@@ -1082,28 +1014,22 @@ async def detect_frequency(
             
             # Log all available files for debugging
             all_files = list(objects)
-            logger.info(f"Found {len(all_files)} files in {trinity_bucket} bucket")
             
             # Look for files that match the pattern: Scope_{scope}_{combination}_*.arrow
             target_file_key = None
-            logger.info(f"Searching for files with Scope_{scope}_ and combination: {combination}")
             
             for obj in all_files:
                 if obj.object_name.endswith('.arrow'):
-                    logger.debug(f"Checking file: {obj.object_name}")
                     # Check if this file matches our scope and combination
                     if f"Scope_{scope}_" in obj.object_name and combination in obj.object_name:
                         target_file_key = obj.object_name
-                        logger.info(f"Found exact match: {target_file_key}")
                     break
             
             if not target_file_key:
                 # If no exact match, try to find any file with the scope number
-                logger.info(f"No exact match found, looking for any file with Scope_{scope}_")
                 for obj in all_files:
                     if obj.object_name.endswith('.arrow') and f"Scope_{scope}_" in obj.object_name:
                         target_file_key = obj.object_name
-                        logger.info(f"Found scope match: {target_file_key}")
                         break
             
             if not target_file_key:
@@ -1112,10 +1038,8 @@ async def detect_frequency(
                     detail=f"No files found for Scope {scope} with combination {combination}"
                 )
             
-            logger.info(f"Found file: {target_file_key}")
             
         except Exception as search_error:
-            logger.error(f"Search failed: {search_error}")
             raise HTTPException(status_code=500, detail="Failed to search for file")
         
         if target_file_key:
@@ -1135,7 +1059,6 @@ async def detect_frequency(
                         table = reader.read_all()
                         df = table.to_pandas()
                     except Exception as arrow_error:
-                        logger.warning(f"Failed to read as Arrow, trying CSV: {arrow_error}")
                         # Fallback to CSV if Arrow fails
                         df = pd.read_csv(io.BytesIO(file_data), nrows=0)
                 elif target_file_key.endswith('.csv'):
@@ -1157,7 +1080,6 @@ async def detect_frequency(
                 try:
                     df[date_column] = pd.to_datetime(df[date_column], errors='coerce')
                 except Exception as date_error:
-                    logger.error(f"Error converting date column: {date_error}")
                     raise HTTPException(
                         status_code=400, 
                         detail=f"Failed to convert date column '{date_column}' to datetime format"
@@ -1226,7 +1148,6 @@ async def detect_frequency(
             except HTTPException:
                 raise
             except Exception as file_error:
-                logger.error(f"Error reading file {target_file_key}: {file_error}")
                 raise HTTPException(status_code=500, detail="Failed to read file")
         else:
             raise HTTPException(status_code=404, detail="File not found")
@@ -1234,7 +1155,6 @@ async def detect_frequency(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to detect frequency: {e}")
         raise HTTPException(status_code=500, detail="Failed to detect frequency")
 
 # Get date columns endpoint for frequency detection
@@ -1261,28 +1181,22 @@ async def get_date_columns(
             
             # Log all available files for debugging
             all_files = list(objects)
-            logger.info(f"Found {len(all_files)} files in {trinity_bucket} bucket")
             
             # Look for files that match the pattern: Scope_{scope}_{combination}_*.arrow
             target_file_key = None
-            logger.info(f"Searching for files with Scope_{scope}_ and combination: {combination}")
             
             for obj in all_files:
                 if obj.object_name.endswith('.arrow'):
-                    logger.debug(f"Checking file: {obj.object_name}")
                     # Check if this file matches our scope and combination
                     if f"Scope_{scope}_" in obj.object_name and combination in obj.object_name:
                         target_file_key = obj.object_name
-                        logger.info(f"Found exact match: {target_file_key}")
                         break
             
             if not target_file_key:
                 # If no exact match, try to find any file with the scope number
-                logger.info(f"No exact match found, looking for any file with Scope_{scope}_")
                 for obj in all_files:
                     if obj.object_name.endswith('.arrow') and f"Scope_{scope}_" in obj.object_name:
                         target_file_key = obj.object_name
-                        logger.info(f"Found scope match: {target_file_key}")
                         break
             
             if not target_file_key:
@@ -1291,10 +1205,8 @@ async def get_date_columns(
                     detail=f"No files found for Scope {scope} with combination {combination}"
                 )
             
-            logger.info(f"Found file: {target_file_key}")
             
         except Exception as search_error:
-            logger.error(f"Search failed: {search_error}")
             raise HTTPException(status_code=500, detail="Failed to search for file")
         
         if target_file_key:
@@ -1314,7 +1226,6 @@ async def get_date_columns(
                         table = reader.read_all()
                         df = table.to_pandas()
                     except Exception as arrow_error:
-                        logger.warning(f"Failed to read as Arrow, trying CSV: {arrow_error}")
                         # Fallback to CSV if Arrow fails
                         df = pd.read_csv(io.BytesIO(file_data), nrows=0)
                 elif target_file_key.endswith('.csv'):
@@ -1358,7 +1269,6 @@ async def get_date_columns(
             except HTTPException:
                 raise
             except Exception as file_error:
-                logger.error(f"Error reading file {target_file_key}: {file_error}")
                 raise HTTPException(status_code=500, detail="Failed to read file")
         else:
             raise HTTPException(status_code=404, detail="File not found")
@@ -1366,7 +1276,6 @@ async def get_date_columns(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to get date columns: {e}")
         raise HTTPException(status_code=500, detail="Failed to get date columns")
 
 # Growth Rates Endpoints
@@ -1382,8 +1291,6 @@ async def calculate_fiscal_growth_endpoint(
 ):
     """Calculate fiscal year growth rates for a specific scope and combination."""
     try:
-        logger.info(f"🔧 calculate_fiscal_growth_endpoint called with: scope={scope}, combination={combination}, run_id={run_id}")
-        logger.info(f"🔧 DATA SOURCE CHECK: Checking if real training data is available...")
         
         # Try to find real training results - first check provided run_id, then search all completed runs
         real_data_found = False
@@ -1407,11 +1314,6 @@ async def calculate_fiscal_growth_endpoint(
                             
                             # Calculate fiscal growth using actual data
                             try:
-                                logger.info(f"🔧 ✅ USING REAL TRAINING DATA for combination {combination} (run_id: {run_id})")
-                                logger.info(f"🔧 📊 REAL DATA: Forecast dataframe shape: {forecast_df.shape}")
-                                logger.info(f"🔧 📊 REAL DATA: Models run: {models_run}")
-                                logger.info(f"🔧 📊 REAL DATA: Forecast_df columns: {forecast_df.columns.tolist()}")
-                                logger.info(f"🔧 📊 REAL DATA: Sample forecast data: {forecast_df.head(3).to_dict()}")
                                 
                                 growth_data = calculate_fiscal_growth(
                                     forecast_df=forecast_df,
@@ -1430,8 +1332,6 @@ async def calculate_fiscal_growth_endpoint(
                                         if pd.isna(value) or (isinstance(value, float) and (value == float('inf') or value == float('-inf'))):
                                             record[key] = None
                                 
-                                logger.info(f"🔧 ✅ SUCCESS: Calculated fiscal growth using REAL DATA for combination {combination}: {len(growth_list)} records")
-                                logger.info(f"🔧 📊 REAL DATA RESULT: Sample growth data: {growth_list[:2] if growth_list else 'No data'}")
                                 
                                 return {
                                     "status": "success",
@@ -1443,14 +1343,11 @@ async def calculate_fiscal_growth_endpoint(
                                     "models_used": models_run
                                 }
                             except Exception as calc_error:
-                                logger.error(f"🔧 ❌ Error calculating fiscal growth with real data: {calc_error}")
-                                logger.info(f"🔧 🔄 FALLING BACK to sample data generation...")
                                 # Fall back to sample data generation
                                 pass
         
         # If no run_id provided or no data found, search all completed training runs
         if not real_data_found:
-            logger.info(f"🔧 🔍 SEARCHING ALL COMPLETED TRAINING RUNS for combination {combination}")
             for search_run_id, progress in training_progress.items():
                 if progress.get("status") == "completed" and progress.get("results"):
                     for result in progress["results"]:
@@ -1465,11 +1362,6 @@ async def calculate_fiscal_growth_endpoint(
                                 
                                 # Calculate fiscal growth using actual data
                                 try:
-                                    logger.info(f"🔧 ✅ FOUND REAL TRAINING DATA for combination {combination} (run_id: {search_run_id})")
-                                    logger.info(f"🔧 📊 REAL DATA: Forecast dataframe shape: {forecast_df.shape}")
-                                    logger.info(f"🔧 📊 REAL DATA: Models run: {models_run}")
-                                    logger.info(f"🔧 📊 REAL DATA: Forecast_df columns: {forecast_df.columns.tolist()}")
-                                    logger.info(f"🔧 📊 REAL DATA: Sample forecast data: {forecast_df.head(3).to_dict()}")
                                     
                                     growth_data = calculate_fiscal_growth(
                                         forecast_df=forecast_df,
@@ -1488,8 +1380,6 @@ async def calculate_fiscal_growth_endpoint(
                                             if pd.isna(value) or (isinstance(value, float) and (value == float('inf') or value == float('-inf'))):
                                                 record[key] = None
                                     
-                                    logger.info(f"🔧 ✅ SUCCESS: Calculated fiscal growth using REAL DATA for combination {combination}: {len(growth_list)} records")
-                                    logger.info(f"🔧 📊 REAL DATA RESULT: Sample growth data: {growth_list[:2] if growth_list else 'No data'}")
                                     
                                     return {
                                         "status": "success",
@@ -1501,13 +1391,10 @@ async def calculate_fiscal_growth_endpoint(
                                         "models_used": models_run
                                     }
                                 except Exception as calc_error:
-                                    logger.error(f"🔧 ❌ Error calculating fiscal growth with real data: {calc_error}")
                                     # Continue searching other runs
                                     continue
         
         # Fallback to original logic if no run_id or no actual data found
-        logger.info(f"🔧 ⚠️  NO REAL DATA AVAILABLE for combination {combination}")
-        logger.info(f"🔧 🔄 USING FALLBACK LOGIC: Generating sample data for demonstration...")
         
         minio_client = get_minio_client()
         trinity_bucket = "trinity"
@@ -1533,10 +1420,8 @@ async def calculate_fiscal_growth_endpoint(
                 if has_scope and has_combination:
                     matching_objects.append(obj_name)
             
-            logger.info(f"🔧 📁 Found {len(matching_objects)} matching files for sample data generation")
             
         except Exception as search_error:
-            logger.error(f"🔧 ❌ Search failed: {search_error}")
             raise HTTPException(status_code=500, detail=f"Search failed: {str(search_error)}")
         
         if not matching_objects:
@@ -1544,7 +1429,6 @@ async def calculate_fiscal_growth_endpoint(
         
         # Use the first matching file
         target_file_key = matching_objects[0]
-        logger.info(f"🔧 📁 Using file for sample data: {target_file_key}")
         
         # Read the file
         try:
@@ -1553,7 +1437,6 @@ async def calculate_fiscal_growth_endpoint(
             response.close()
             response.release_conn()
         except Exception as file_error:
-            logger.error(f"🔧 ❌ Error reading file {target_file_key}: {file_error}")
             raise HTTPException(status_code=500, detail="Failed to read file")
         
         # Check if we have the required columns (handle both 'date' and 'Date')
@@ -1566,7 +1449,6 @@ async def calculate_fiscal_growth_endpoint(
         if not date_col:
             raise HTTPException(status_code=400, detail="Date column not found in data")
         
-        logger.info(f"🔧 📊 SAMPLE DATA: Using date column: {date_col}")
         
         # Ensure we have actual data column
         actual_col = None
@@ -1582,8 +1464,6 @@ async def calculate_fiscal_growth_endpoint(
         forecast_df = df[[date_col, actual_col]].copy()
         forecast_df.columns = ['date', 'Actual']
         
-        logger.info(f"🔧 📊 SAMPLE DATA: Original data shape: {forecast_df.shape}")
-        logger.info(f"🔧 📊 SAMPLE DATA: Date range: {forecast_df['date'].min()} to {forecast_df['date'].max()}")
         
         # Add some sample forecast data for demonstration
         # IMPORTANT: Generate different sample data for each combination to avoid identical growth rates
@@ -1591,8 +1471,6 @@ async def calculate_fiscal_growth_endpoint(
         np.random.seed(int(combination_hash[:8], 16))  # Use combination hash as seed for reproducible but different data
         
         sample_models = ['SARIMA', 'Holt-Winters']
-        logger.info(f"🔧 🎲 SAMPLE DATA: Generating sample forecast data for models: {sample_models}")
-        logger.info(f"🔧 🎲 SAMPLE DATA: Using combination hash: {combination_hash[:8]} for reproducible variation")
         
         for model in sample_models:
             # Generate combination-specific variation factors
@@ -1608,11 +1486,7 @@ async def calculate_fiscal_growth_endpoint(
             forecast_values = base_forecast_values * (1 + np.random.normal(combination_factor + model_factor, 0.1, forecast_horizon))
             forecast_df.loc[forecast_df.index[-forecast_horizon:], model] = forecast_values
             
-            logger.info(f"🔧 🎲 SAMPLE DATA: Generated {model} data with factors: combination={combination_factor:.4f}, model={model_factor:.4f}")
         
-        logger.info(f"🔧 ✅ SAMPLE DATA: Generated combination-specific sample data for {combination}")
-        logger.info(f"🔧 📊 SAMPLE DATA: Final forecast dataframe shape: {forecast_df.shape}")
-        logger.info(f"🔧 📊 SAMPLE DATA: Sample forecast data: {forecast_df.head(3).to_dict()}")
         
         # Calculate fiscal growth
         try:
@@ -1633,8 +1507,6 @@ async def calculate_fiscal_growth_endpoint(
                     if pd.isna(value) or (isinstance(value, float) and (value == float('inf') or value == float('-inf'))):
                         record[key] = None
             
-            logger.info(f"🔧 ✅ SUCCESS: Calculated fiscal growth using SAMPLE DATA for combination {combination}: {len(growth_list)} records")
-            logger.info(f"🔧 📊 SAMPLE DATA RESULT: Sample growth data: {growth_list[:2] if growth_list else 'No data'}")
             
             return {
                 "status": "success",
@@ -1648,13 +1520,11 @@ async def calculate_fiscal_growth_endpoint(
             }
             
         except Exception as calc_error:
-            logger.error(f"🔧 ❌ Error calculating fiscal growth: {calc_error}")
             raise HTTPException(status_code=500, detail=f"Failed to calculate growth: {str(calc_error)}")
         
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"🔧 ❌ Failed to calculate fiscal growth: {e}")
         raise HTTPException(status_code=500, detail="Failed to calculate fiscal growth")
 
 @router.post("/calculate-halfyearly-growth")
@@ -1668,10 +1538,11 @@ async def calculate_halfyearly_growth_endpoint(
 ):
     """Calculate half-yearly growth rates for a specific scope and combination."""
     try:
-        logger.info(f"🔧 calculate_halfyearly_growth_endpoint called with: scope={scope}, combination={combination}, forecast_horizon={forecast_horizon}, fiscal_start_month={fiscal_start_month}, frequency={frequency}")
+        # Process the request
+        pass
     except Exception as log_error:
-        logger.error(f"🔧 Error logging parameters: {log_error}")
-        logger.info("🔧 Endpoint called but parameter logging failed")
+        logger.error(f"Error in half-yearly growth calculation: {log_error}")
+        return {"error": str(log_error)}
     
     try:
         # Try to find real training results - first check provided run_id, then search all completed runs
@@ -1695,13 +1566,7 @@ async def calculate_halfyearly_growth_endpoint(
                             
                             # Calculate half-yearly growth using actual data
                             try:
-                                logger.info(f"🔧 ✅ USING REAL TRAINING DATA for combination {combination} (run_id: {run_id})")
-                                logger.info(f"🔧 📊 REAL DATA: Forecast dataframe shape: {forecast_df.shape}")
-                                logger.info(f"🔧 📊 REAL DATA: Models run: {models_run}")
-                                logger.info(f"🔧 📊 REAL DATA: Forecast_df columns: {forecast_df.columns.tolist()}")
-                                logger.info(f"🔧 📊 REAL DATA: Sample forecast data: {forecast_df.head(3).to_dict()}")
                                 
-                                logger.info(f"🔧 Calling calculate_halfyearly_yoy_growth...")
                                 growth_data = calculate_halfyearly_yoy_growth(
                                     forecast_df=forecast_df,
                                     forecast_horizon=forecast_horizon,
@@ -1709,7 +1574,6 @@ async def calculate_halfyearly_growth_endpoint(
                                     frequency=frequency
                                 )
                                 
-                                logger.info(f"🔧 Growth calculation successful. Result shape: {growth_data.shape}")
                                 
                                 # Convert to list of dictionaries for JSON response
                                 growth_list = growth_data.to_dict('records')
@@ -1720,8 +1584,6 @@ async def calculate_halfyearly_growth_endpoint(
                                         if pd.isna(value) or (isinstance(value, float) and (value == float('inf') or value == float('-inf'))):
                                             record[key] = None
                                 
-                                logger.info(f"🔧 ✅ SUCCESS: Calculated half-yearly growth using REAL DATA for combination {combination}: {len(growth_list)} records")
-                                logger.info(f"🔧 📊 REAL DATA RESULT: Sample growth data: {growth_list[:2] if growth_list else 'No data'}")
                                 
                                 return {
                                     "status": "success",
@@ -1733,13 +1595,11 @@ async def calculate_halfyearly_growth_endpoint(
                                     "models_used": models_run
                                 }
                             except Exception as calc_error:
-                                logger.error(f"Error calculating half-yearly growth with actual data: {calc_error}")
                                 # Fall back to sample data generation
                                 pass
         
         # If no run_id provided or no data found, search all completed training runs
         if not real_data_found:
-            logger.info(f"🔧 🔍 SEARCHING ALL COMPLETED TRAINING RUNS for combination {combination}")
             for search_run_id, progress in training_progress.items():
                 if progress.get("status") == "completed" and progress.get("results"):
                     for result in progress["results"]:
@@ -1754,13 +1614,7 @@ async def calculate_halfyearly_growth_endpoint(
                                 
                                 # Calculate half-yearly growth using actual data
                                 try:
-                                    logger.info(f"🔧 ✅ FOUND REAL TRAINING DATA for combination {combination} (run_id: {search_run_id})")
-                                    logger.info(f"🔧 📊 REAL DATA: Forecast dataframe shape: {forecast_df.shape}")
-                                    logger.info(f"🔧 📊 REAL DATA: Models run: {models_run}")
-                                    logger.info(f"🔧 📊 REAL DATA: Forecast_df columns: {forecast_df.columns.tolist()}")
-                                    logger.info(f"🔧 📊 REAL DATA: Sample forecast data: {forecast_df.head(3).to_dict()}")
                                     
-                                    logger.info(f"🔧 Calling calculate_halfyearly_yoy_growth...")
                                     growth_data = calculate_halfyearly_yoy_growth(
                                         forecast_df=forecast_df,
                                         forecast_horizon=forecast_horizon,
@@ -1768,7 +1622,6 @@ async def calculate_halfyearly_growth_endpoint(
                                         frequency=frequency
                                     )
                                     
-                                    logger.info(f"🔧 Growth calculation successful. Result shape: {growth_data.shape}")
                                     
                                     # Convert to list of dictionaries for JSON response
                                     growth_list = growth_data.to_dict('records')
@@ -1779,8 +1632,6 @@ async def calculate_halfyearly_growth_endpoint(
                                             if pd.isna(value) or (isinstance(value, float) and (value == float('inf') or value == float('-inf'))):
                                                 record[key] = None
                                     
-                                    logger.info(f"🔧 ✅ SUCCESS: Calculated half-yearly growth using REAL DATA for combination {combination}: {len(growth_list)} records")
-                                    logger.info(f"🔧 📊 REAL DATA RESULT: Sample growth data: {growth_list[:2] if growth_list else 'No data'}")
                                     
                                     return {
                                         "status": "success",
@@ -1792,18 +1643,14 @@ async def calculate_halfyearly_growth_endpoint(
                                         "models_used": models_run
                                     }
                                 except Exception as calc_error:
-                                    logger.error(f"Error calculating half-yearly growth with actual data: {calc_error}")
                                     # Continue searching other runs
                                     continue
         
         # Fallback to original logic if no run_id or no actual data found
-        logger.info(f"🔧 ⚠️  NO REAL DATA AVAILABLE for combination {combination}")
-        logger.info(f"🔧 🔄 USING FALLBACK LOGIC: Generating sample data for demonstration...")
         
         minio_client = get_minio_client()
         trinity_bucket = "trinity"
         
-        logger.info(f"🔧 📁 Searching for files in bucket: {trinity_bucket}")
         
         # Search for the file using the same logic as the working forecast code
         target_file_key = None
@@ -1826,10 +1673,8 @@ async def calculate_halfyearly_growth_endpoint(
                 if has_scope and has_combination:
                     matching_objects.append(obj_name)
             
-            logger.info(f"Total matching files found: {len(matching_objects)}")
             
         except Exception as search_error:
-            logger.error(f"Search failed: {search_error}")
             raise HTTPException(status_code=500, detail=f"Search failed: {str(search_error)}")
         
         if not matching_objects:
@@ -1845,7 +1690,6 @@ async def calculate_halfyearly_growth_endpoint(
             response.close()
             response.release_conn()
         except Exception as file_error:
-            logger.error(f"Error reading file {target_file_key}: {file_error}")
             raise HTTPException(status_code=500, detail="Failed to read file")
         
         # Check if we have the required columns (handle both 'date' and 'Date')
@@ -1858,7 +1702,6 @@ async def calculate_halfyearly_growth_endpoint(
         if not date_col:
             raise HTTPException(status_code=400, detail="Date column not found in data")
         
-        logger.info(f"🔧 Using date column: {date_col}")
         
         # Ensure we have actual data column
         actual_col = None
@@ -1874,8 +1717,6 @@ async def calculate_halfyearly_growth_endpoint(
         forecast_df = df[[date_col, actual_col]].copy()
         forecast_df.columns = ['date', 'Actual']
         
-        logger.info(f"🔧 Forecast dataframe shape: {forecast_df.shape}")
-        logger.info(f"🔧 Sample data: {forecast_df.head().to_dict()}")
         
         # Add some sample forecast data for demonstration
         # IMPORTANT: Generate different sample data for each combination to avoid identical growth rates
@@ -1897,14 +1738,9 @@ async def calculate_halfyearly_growth_endpoint(
             forecast_values = base_forecast_values * (1 + np.random.normal(combination_factor + model_factor, 0.1, forecast_horizon))
             forecast_df.loc[forecast_df.index[-forecast_horizon:], model] = forecast_values
         
-        logger.info(f"🔧 ✅ SAMPLE DATA: Generated combination-specific sample data for {combination}")
-        logger.info(f"🔧 📊 SAMPLE DATA: Final forecast dataframe shape: {forecast_df.shape}")
-        logger.info(f"🔧 📊 SAMPLE DATA: Sample forecast data: {forecast_df.head(3).to_dict()}")
-        logger.info(f"🔧 🎲 SAMPLE DATA: Added forecast data for models: {sample_models}")
         
         # Calculate half-yearly growth
         try:
-            logger.info(f"🔧 Calling calculate_halfyearly_yoy_growth...")
             growth_data = calculate_halfyearly_yoy_growth(
                 forecast_df=forecast_df,
                 forecast_horizon=forecast_horizon,
@@ -1912,7 +1748,6 @@ async def calculate_halfyearly_growth_endpoint(
                 frequency=frequency
             )
             
-            logger.info(f"🔧 Growth calculation successful. Result shape: {growth_data.shape}")
             
             # Convert to list of dictionaries for JSON response
             growth_list = growth_data.to_dict('records')
@@ -1923,8 +1758,6 @@ async def calculate_halfyearly_growth_endpoint(
                     if pd.isna(value) or (isinstance(value, float) and (value == float('inf') or value == float('-inf'))):
                         record[key] = None
             
-            logger.info(f"🔧 ✅ SUCCESS: Calculated half-yearly growth using SAMPLE DATA for combination {combination}: {len(growth_list)} records")
-            logger.info(f"🔧 📊 SAMPLE DATA RESULT: Sample growth data: {growth_list[:2] if growth_list else 'No data'}")
             
             return {
                 "status": "success",
@@ -1938,13 +1771,11 @@ async def calculate_halfyearly_growth_endpoint(
             }
             
         except Exception as calc_error:
-            logger.error(f"Error calculating half-yearly growth: {calc_error}")
             raise HTTPException(status_code=500, detail=f"Failed to calculate growth: {str(calc_error)}")
         
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to calculate half-yearly growth: {e}")
         raise HTTPException(status_code=500, detail="Failed to calculate half-yearly growth")
 
 @router.post("/calculate-quarterly-growth")
@@ -1979,11 +1810,6 @@ async def calculate_quarterly_growth_endpoint(
                             
                             # Calculate quarterly growth using actual data
                             try:
-                                logger.info(f"🔧 ✅ USING REAL TRAINING DATA for combination {combination} (run_id: {run_id})")
-                                logger.info(f"🔧 📊 REAL DATA: Forecast dataframe shape: {forecast_df.shape}")
-                                logger.info(f"🔧 📊 REAL DATA: Models run: {models_run}")
-                                logger.info(f"🔧 📊 REAL DATA: Forecast_df columns: {forecast_df.columns.tolist()}")
-                                logger.info(f"🔧 📊 REAL DATA: Sample forecast data: {forecast_df.head(3).to_dict()}")
                                 
                                 growth_data = calculate_quarterly_yoy_growth(
                                     forecast_df=forecast_df,
@@ -2001,8 +1827,6 @@ async def calculate_quarterly_growth_endpoint(
                                         if pd.isna(value) or (isinstance(value, float) and (value == float('inf') or value == float('-inf'))):
                                             record[key] = None
                                 
-                                logger.info(f"🔧 ✅ SUCCESS: Calculated quarterly growth using REAL DATA for combination {combination}: {len(growth_list)} records")
-                                logger.info(f"🔧 📊 REAL DATA RESULT: Sample growth data: {growth_list[:2] if growth_list else 'No data'}")
                                 
                                 return {
                                     "status": "success",
@@ -2014,13 +1838,11 @@ async def calculate_quarterly_growth_endpoint(
                                     "models_used": models_run
                                 }
                             except Exception as calc_error:
-                                logger.error(f"Error calculating quarterly growth with actual data: {calc_error}")
                                 # Fall back to sample data generation
                                 pass
         
         # If no run_id provided or no data found, search all completed training runs
         if not real_data_found:
-            logger.info(f"🔧 🔍 SEARCHING ALL COMPLETED TRAINING RUNS for combination {combination}")
             for search_run_id, progress in training_progress.items():
                 if progress.get("status") == "completed" and progress.get("results"):
                     for result in progress["results"]:
@@ -2035,11 +1857,6 @@ async def calculate_quarterly_growth_endpoint(
                                 
                                 # Calculate quarterly growth using actual data
                                 try:
-                                    logger.info(f"🔧 ✅ FOUND REAL TRAINING DATA for combination {combination} (run_id: {search_run_id})")
-                                    logger.info(f"🔧 📊 REAL DATA: Forecast dataframe shape: {forecast_df.shape}")
-                                    logger.info(f"🔧 📊 REAL DATA: Models run: {models_run}")
-                                    logger.info(f"🔧 📊 REAL DATA: Forecast_df columns: {forecast_df.columns.tolist()}")
-                                    logger.info(f"🔧 📊 REAL DATA: Sample forecast data: {forecast_df.head(3).to_dict()}")
                                     
                                     growth_data = calculate_quarterly_yoy_growth(
                                         forecast_df=forecast_df,
@@ -2057,8 +1874,6 @@ async def calculate_quarterly_growth_endpoint(
                                             if pd.isna(value) or (isinstance(value, float) and (value == float('inf') or value == float('-inf'))):
                                                 record[key] = None
                                     
-                                    logger.info(f"🔧 ✅ SUCCESS: Calculated quarterly growth using REAL DATA for combination {combination}: {len(growth_list)} records")
-                                    logger.info(f"🔧 📊 REAL DATA RESULT: Sample growth data: {growth_list[:2] if growth_list else 'No data'}")
                                     
                                     return {
                                         "status": "success",
@@ -2070,13 +1885,10 @@ async def calculate_quarterly_growth_endpoint(
                                         "models_used": models_run
                                     }
                                 except Exception as calc_error:
-                                    logger.error(f"Error calculating quarterly growth with actual data: {calc_error}")
                                     # Continue searching other runs
                                     continue
         
         # Fallback to original logic if no run_id or no actual data found
-        logger.info(f"🔧 ⚠️  NO REAL DATA AVAILABLE for combination {combination}")
-        logger.info(f"🔧 🔄 USING FALLBACK LOGIC: Generating sample data for demonstration...")
         
         minio_client = get_minio_client()
         trinity_bucket = "trinity"
@@ -2102,10 +1914,8 @@ async def calculate_quarterly_growth_endpoint(
                 if has_scope and has_combination:
                     matching_objects.append(obj_name)
             
-            logger.info(f"Total matching files found: {len(matching_objects)}")
             
         except Exception as search_error:
-            logger.error(f"Search failed: {search_error}")
             raise HTTPException(status_code=500, detail=f"Search failed: {str(search_error)}")
         
         if not matching_objects:
@@ -2121,7 +1931,6 @@ async def calculate_quarterly_growth_endpoint(
             response.close()
             response.release_conn()
         except Exception as file_error:
-            logger.error(f"Error reading file {target_file_key}: {file_error}")
             raise HTTPException(status_code=500, detail="Failed to read file")
         
         # Check if we have the required columns (handle both 'date' and 'Date')
@@ -2134,7 +1943,6 @@ async def calculate_quarterly_growth_endpoint(
         if not date_col:
             raise HTTPException(status_code=400, detail="Date column not found in data")
         
-        logger.info(f"🔧 Using date column: {date_col}")
         
         # Ensure we have actual data column
         actual_col = None
@@ -2150,8 +1958,6 @@ async def calculate_quarterly_growth_endpoint(
         forecast_df = df[[date_col, actual_col]].copy()
         forecast_df.columns = ['date', 'Actual']
         
-        logger.info(f"🔧 📊 SAMPLE DATA: Original data shape: {forecast_df.shape}")
-        logger.info(f"🔧 📊 SAMPLE DATA: Date range: {forecast_df['date'].min()} to {forecast_df['date'].max()}")
         
         # Add some sample forecast data for demonstration
         # IMPORTANT: Generate different sample data for each combination to avoid identical growth rates
@@ -2159,8 +1965,6 @@ async def calculate_quarterly_growth_endpoint(
         np.random.seed(int(combination_hash[:8], 16))  # Use combination hash as seed for reproducible but different data
         
         sample_models = ['SARIMA', 'Holt-Winters']
-        logger.info(f"🔧 🎲 SAMPLE DATA: Generating sample forecast data for models: {sample_models}")
-        logger.info(f"🔧 🎲 SAMPLE DATA: Using combination hash: {combination_hash[:8]} for reproducible variation")
         
         for model in sample_models:
             # Generate combination-specific variation factors
@@ -2176,11 +1980,7 @@ async def calculate_quarterly_growth_endpoint(
             forecast_values = base_forecast_values * (1 + np.random.normal(combination_factor + model_factor, 0.1, forecast_horizon))
             forecast_df.loc[forecast_df.index[-forecast_horizon:], model] = forecast_values
             
-            logger.info(f"🔧 🎲 SAMPLE DATA: Generated {model} data with factors: combination={combination_factor:.4f}, model={model_factor:.4f}")
         
-        logger.info(f"🔧 ✅ SAMPLE DATA: Generated combination-specific sample data for {combination}")
-        logger.info(f"🔧 📊 SAMPLE DATA: Final forecast dataframe shape: {forecast_df.shape}")
-        logger.info(f"🔧 📊 SAMPLE DATA: Sample forecast data: {forecast_df.head(3).to_dict()}")
         
         # Calculate quarterly growth
         try:
@@ -2200,8 +2000,6 @@ async def calculate_quarterly_growth_endpoint(
                     if pd.isna(value) or (isinstance(value, float) and (value == float('inf') or value == float('-inf'))):
                         record[key] = None
             
-            logger.info(f"🔧 ✅ SUCCESS: Calculated quarterly growth using SAMPLE DATA for combination {combination}: {len(growth_list)} records")
-            logger.info(f"🔧 📊 SAMPLE DATA RESULT: Sample growth data: {growth_list[:2] if growth_list else 'No data'}")
             
             return {
                 "status": "success",
@@ -2215,13 +2013,11 @@ async def calculate_quarterly_growth_endpoint(
             }
             
         except Exception as calc_error:
-            logger.error(f"Error calculating quarterly growth: {calc_error}")
             raise HTTPException(status_code=500, detail=f"Failed to calculate growth: {str(calc_error)}")
         
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to calculate quarterly growth: {e}")
         raise HTTPException(status_code=500, detail="Failed to calculate quarterly growth")
 
 # Quick validation endpoint to prevent 504 timeouts
@@ -2262,7 +2058,6 @@ async def validate_request(request: dict):
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Validation failed: {e}")
         raise HTTPException(status_code=500, detail="Validation failed")
 
 # Legacy endpoints for backward compatibility
@@ -2366,7 +2161,6 @@ async def list_active_runs():
         }
         
     except Exception as e:
-        logger.error(f"Error listing active runs: {e}")
         raise HTTPException(status_code=500, detail="Failed to list active runs")
 
 # Performance monitoring endpoint
@@ -2406,7 +2200,6 @@ async def get_performance_stats():
         }
         
     except Exception as e:
-        logger.error(f"Error getting performance stats: {e}")
         raise HTTPException(status_code=500, detail="Failed to get performance stats")
 
 
@@ -2462,7 +2255,6 @@ async def save_single_autoregressive_combination(
         tags = request.get("tags", [])
         description = request.get("description", "")
         
-        logger.info(f"🔧 DEBUG: Save request - scope: {scope}, combination_id: {combination_id}, tags: {tags}")
         
         if not scope or not combination_id or not result_data:
             raise HTTPException(status_code=400, detail="Missing required fields: scope, combination_id, or result")
@@ -2508,7 +2300,6 @@ async def save_single_autoregressive_combination(
         # Insert the model
         result = await saved_models_collection.insert_one(document)
         
-        logger.info(f"✅ Successfully saved autoregressive combination {combination_id} to MongoDB with ID: {result.inserted_id}")
         
         # Update combination save status in dedicated collection
         try:
@@ -2525,7 +2316,6 @@ async def save_single_autoregressive_combination(
                         atom_id = tag.replace("auto-regressive-models-", "")
                         break
             
-            logger.info(f"🔧 DEBUG: Updating combination save status for scope={scope}, atom_id={atom_id}, combination_id={combination_id}")
             
             # Get current save status
             current_status = await get_combination_save_status_from_mongo(
@@ -2536,23 +2326,18 @@ async def save_single_autoregressive_combination(
                 project_name=final_project_name
             )
             
-            logger.info(f"🔧 DEBUG: Current save status: {current_status}")
             
             # Update with new saved combination
             saved_combinations = current_status.get("saved_combinations", []) if current_status else []
             pending_combinations = current_status.get("pending_combinations", []) if current_status else []
             
-            logger.info(f"🔧 DEBUG: Before update - saved: {saved_combinations}, pending: {pending_combinations}")
             
             if combination_id not in saved_combinations:
                 saved_combinations.append(combination_id)
-                logger.info(f"✅ Added {combination_id} to saved combinations")
             
             if combination_id in pending_combinations:
                 pending_combinations.remove(combination_id)
-                logger.info(f"✅ Removed {combination_id} from pending combinations")
             
-            logger.info(f"🔧 DEBUG: After update - saved: {saved_combinations}, pending: {pending_combinations}")
             
             # Save updated status
             await update_combination_save_status(
@@ -2565,12 +2350,9 @@ async def save_single_autoregressive_combination(
                 project_name=final_project_name
             )
             
-            logger.info(f"✅ Successfully updated combination save status: {len(saved_combinations)} saved, {len(pending_combinations)} pending")
             
         except Exception as e:
-            logger.error(f"❌ Error updating combination save status: {e}")
             import traceback
-            logger.error(f"❌ Traceback: {traceback.format_exc()}")
             # Continue even if save status update fails
         
         # Save forecast data to MinIO if available
@@ -2600,8 +2382,8 @@ async def save_single_autoregressive_combination(
                 )
                 
             except Exception as e:
-                logger.error(f"Error saving forecast to MinIO: {e}")
                 # Continue even if MinIO save fails
+                logger.warning(f"Failed to save forecast to MinIO: {e}")
         
         return SavedModelResponse(
             model_id=str(result.inserted_id),
@@ -2612,7 +2394,6 @@ async def save_single_autoregressive_combination(
         )
         
     except Exception as e:
-        logger.error(f"Error saving auto-regressive combination: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error saving combination: {str(e)}")
 
 @router.post("/models/save-all-combinations", response_model=SavedModelResponse, tags=["Autoregressive Models"])
@@ -2716,11 +2497,10 @@ async def save_all_autoregressive_combinations(
                         )
                         
                     except Exception as e:
-                        logger.error(f"Error saving forecast to MinIO for {combination_id}: {e}")
                         # Continue even if MinIO save fails
+                        logger.warning(f"Failed to save forecast to MinIO: {e}")
                 
             except Exception as e:
-                logger.error(f"Error saving combination {combination_id}: {e}")
                 continue
         
         return SavedModelResponse(
@@ -2732,7 +2512,6 @@ async def save_all_autoregressive_combinations(
         )
         
     except Exception as e:
-        logger.error(f"Error saving all auto-regressive combinations: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error saving combinations: {str(e)}")
 
 @router.get("/models/saved-combinations-status", response_model=SavedCombinationsStatusResponse, tags=["Autoregressive Models"])
@@ -2842,12 +2621,10 @@ async def get_saved_autoregressive_combinations_status(
         if source_file_key:
             response_data["file_key"] = source_file_key
         
-        logger.info(f"✅ Combination save status for scope {scope}, atom {atom_id}: {len(saved_combination_ids)} saved, {len(pending_combination_ids)} pending")
         
         return response_data
         
     except Exception as e:
-        logger.error(f"Error getting saved combinations status: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error getting saved combinations status: {str(e)}")
 
 
@@ -2943,7 +2720,6 @@ async def save_autoregressive_configuration(
             raise HTTPException(status_code=500, detail=f"Failed to save autoregressive configuration: {result['error']}")
             
     except Exception as e:
-        logger.error(f"Error saving autoregressive configuration: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to save autoregressive configuration: {str(e)}")
 
 @router.get("/get-autoregressive-config")
@@ -2971,7 +2747,6 @@ async def get_autoregressive_configuration(
             }
             
     except Exception as e:
-        logger.error(f"Error retrieving autoregressive configuration: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to retrieve autoregressive configuration: {str(e)}")
 
 @router.post("/save")
@@ -2984,17 +2759,10 @@ async def save_autoregressive_data(
     project_id: int = Query(None, description="Project ID")
 ):
     """General save endpoint for autoregressive data - used by SAVE button"""
-    logger.info(f"🔍 DEBUG: /save endpoint called")
-    logger.info(f"🔍 DEBUG: client_name = {client_name}")
-    logger.info(f"🔍 DEBUG: app_name = {app_name}")
-    logger.info(f"🔍 DEBUG: project_name = {project_name}")
-    logger.info(f"🔍 DEBUG: user_id = {user_id}")
-    logger.info(f"🔍 DEBUG: project_id = {project_id}")
     
     try:
         # Get the request body
         body = await request.json()
-        logger.info(f"🔍 DEBUG: request body = {body}")
         
         # Save autoregressive configuration data
         from .mongodb_saver import save_autoregressive_config
@@ -3008,7 +2776,6 @@ async def save_autoregressive_data(
             project_id=project_id
         )
         
-        logger.info(f"🔍 DEBUG: save_autoregressive_config result = {result}")
         
         if result["status"] == "success":
             return {
@@ -3022,7 +2789,6 @@ async def save_autoregressive_data(
             raise HTTPException(status_code=500, detail=f"Failed to save autoregressive data: {result['error']}")
             
     except Exception as e:
-        logger.error(f"Error saving autoregressive data: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to save autoregressive data: {str(e)}")
 
 @router.get("/test-mongo")
@@ -3030,7 +2796,6 @@ async def test_mongo_connection():
     """Test MongoDB connection and list databases"""
     try:
         from .mongodb_saver import get_client
-        logger.info(f"🔍 DEBUG: Testing MongoDB connection")
         
         client = get_client()
         if client is None:
@@ -3041,16 +2806,12 @@ async def test_mongo_connection():
         
         # List all databases
         databases = await client.list_database_names()
-        logger.info(f"🔍 DEBUG: Available databases: {databases}")
         
         # Check if trinity_prod exists
         if "trinity_prod" in databases:
-            logger.info(f"🔍 DEBUG: trinity_prod database exists")
             # List collections in trinity_prod
             collections = await client["trinity_prod"].list_collection_names()
-            logger.info(f"🔍 DEBUG: Collections in trinity_prod: {collections}")
         else:
-            logger.warning(f"🔍 DEBUG: trinity_prod database does not exist")
             collections = []
         
         return {
@@ -3061,7 +2822,6 @@ async def test_mongo_connection():
         }
         
     except Exception as e:
-        logger.error(f"Error testing MongoDB connection: {str(e)}")
         return {
             "success": False,
             "error": str(e)

@@ -1,7 +1,6 @@
 import pandas as pd
 import numpy as np
 import asyncio
-import logging
 from datetime import datetime, timedelta
 from typing import Dict, List, Any, Optional
 from concurrent.futures import ProcessPoolExecutor, as_completed
@@ -20,7 +19,6 @@ from sklearn.metrics import mean_absolute_percentage_error
 
 warnings.filterwarnings("ignore")
 
-logger = logging.getLogger(__name__)
 
 
 def clean_dataframe_for_json(df):
@@ -150,14 +148,11 @@ def process_model_cpu_bound(model_name, y_series_data, forecast_horizon, frequen
                 try:
                     from prophet import Prophet
                     prophet_available = True
-                    print(f"Debug: Prophet library imported successfully in process")
                 except ImportError as e:
                     prophet_available = False
-                    print(f"Debug: Prophet import failed in process: {str(e)}")
                     return {'model_name': 'Prophet', 'error': f'Prophet library not available: {str(e)}'}
                 
                 if prophet_available:
-                    print(f"Debug: Prophet processing started for {len(y_series)} data points")
                     
                     # Prophet requires at least 2 data points and some variation
                     if len(y_series) < 2:
@@ -165,7 +160,6 @@ def process_model_cpu_bound(model_name, y_series_data, forecast_horizon, frequen
                     
                     # Check for sufficient data variation for Prophet
                     if y_series.nunique() < 2:
-                        print(f"Debug: Prophet data has only {y_series.nunique()} unique values, adding small noise")
                         # Add very small random noise to make Prophet work with constant data
                         noise_level = y_series.iloc[0] * 0.001
                         y_series_prophet = y_series + np.random.normal(0, noise_level, len(y_series))
@@ -177,9 +171,6 @@ def process_model_cpu_bound(model_name, y_series_data, forecast_horizon, frequen
                         'ds': y_series.index,
                         'y': y_series_prophet.values
                     })
-                    print(f"Debug: Prophet dataframe shape: {df_prophet.shape}")
-                    print(f"Debug: Prophet dataframe sample: {df_prophet.head()}")
-                    print(f"Debug: Prophet y values range: {df_prophet['y'].min()} to {df_prophet['y'].max()}")
                     
                     # Create and fit Prophet model
                     prophet_model = Prophet(
@@ -188,9 +179,7 @@ def process_model_cpu_bound(model_name, y_series_data, forecast_horizon, frequen
                         daily_seasonality=False,   # Disable daily seasonality for short series
                         seasonality_mode='additive'
                     )
-                    print(f"Debug: Prophet model created, fitting...")
                     prophet_model.fit(df_prophet)
-                    print(f"Debug: Prophet model fitted successfully")
                     
                     # Map frequency to Prophet-compatible format
                     prophet_freq_map = {
@@ -201,29 +190,21 @@ def process_model_cpu_bound(model_name, y_series_data, forecast_horizon, frequen
                         'Y': 'Y'       # Yearly
                     }
                     prophet_freq = prophet_freq_map.get(frequency, 'M')  # Default to monthly
-                    print(f"Debug: Prophet frequency mapped from '{frequency}' to '{prophet_freq}'")
                     
                     # Make future dataframe for forecasting
-                    print(f"Debug: Creating future dataframe with {forecast_horizon} periods")
                     future = prophet_model.make_future_dataframe(periods=forecast_horizon, freq=prophet_freq)
-                    print(f"Debug: Future dataframe shape: {future.shape}")
                     
-                    print(f"Debug: Predicting forecast...")
                     forecast = prophet_model.predict(future)
-                    print(f"Debug: Forecast completed, shape: {forecast.shape}")
                     
                     # Extract fitted values (historical predictions)
                     fitted = forecast["yhat"].values[:len(y_series)]
                     fitted_series = pd.Series(fitted, index=y_series.index)
-                    print(f"Debug: Fitted values extracted, length: {len(fitted)}")
                     
                     # Extract future forecast values
                     future_forecast = forecast["yhat"].values[-forecast_horizon:]
-                    print(f"Debug: Future forecast extracted, length: {len(future_forecast)}")
                     
                     # Validate forecast results
                     if len(future_forecast) != forecast_horizon:
-                        print(f"Debug: Prophet forecast length mismatch: expected {forecast_horizon}, got {len(future_forecast)}")
                         # Pad or truncate to match expected length
                         if len(future_forecast) > forecast_horizon:
                             future_forecast = future_forecast[:forecast_horizon]
@@ -234,7 +215,6 @@ def process_model_cpu_bound(model_name, y_series_data, forecast_horizon, frequen
                     
                     # Check for invalid values (NaN, inf)
                     if np.any(np.isnan(future_forecast)) or np.any(np.isinf(future_forecast)):
-                        print(f"Debug: Prophet forecast contains invalid values, replacing with last valid value")
                         last_valid = fitted[-1] if len(fitted) > 0 and not np.isnan(fitted[-1]) else y_series.iloc[-1]
                         future_forecast = np.where(np.isnan(future_forecast) | np.isinf(future_forecast), last_valid, future_forecast)
                     
@@ -249,12 +229,10 @@ def process_model_cpu_bound(model_name, y_series_data, forecast_horizon, frequen
                             'holidays': 'auto'
                         }
                     }
-                    print(f"Debug: Prophet returning successful result with {len(result['forecast'])} forecast values")
                     return result
                 else:
                     return {'model_name': 'Prophet', 'error': 'Prophet library not available'}
             except Exception as e:
-                print(f"Debug: Prophet error: {str(e)}")
                 return {'model_name': 'Prophet', 'error': f'Prophet training failed: {str(e)}'}
         
         return {'model_name': model_name, 'error': 'Unknown model'}
@@ -306,12 +284,10 @@ async def forecast_for_combination(df, y_var, forecast_horizon=12, fiscal_start_
         df = df.set_index(date_col).sort_index()
 
         # Ensure target column exists (case-insensitive matching)
-        print(f"🔍 Checking for target variable '{y_var}' in columns: {list(df.columns)}")
         
         # Try exact match first
         if y_var in df.columns:
             actual_y_var = y_var
-            print(f"✅ Target variable '{y_var}' found in data (exact match)")
         else:
             # Try case-insensitive match
             actual_y_var = None
@@ -321,32 +297,24 @@ async def forecast_for_combination(df, y_var, forecast_horizon=12, fiscal_start_
                     break
             
             if actual_y_var is None:
-                print(f"❌ Target variable '{y_var}' not found in data (case-insensitive)")
                 return {
                     "status": "FAILURE",
                     "error": f"The target variable '{y_var}' is not in the data. Available columns: {list(df.columns)}"
                 }
-            print(f"✅ Target variable '{y_var}' found as '{actual_y_var}' in data (case-insensitive match)")
         
         # Use the actual column name from the data
         y_var = actual_y_var
 
-        print(f"🔢 Converting target variable '{y_var}' to numeric...")
         y_series = pd.to_numeric(df[y_var], errors='coerce')
-        print(f"📊 Original y_series length: {len(y_series)}")
         
-        print(f"🔄 Resampling with frequency '{frequency}'...")
         y_series = y_series.resample(frequency).mean().ffill().dropna()
-        print(f"📊 After resampling y_series length: {len(y_series)}")
 
         # Final check
         if y_series.empty:
-            print(f"❌ No valid data found for target variable '{y_var}' after cleaning")
             return {
                 "status": "FAILURE",
                 "error": f"No valid data found for target variable '{y_var}' after cleaning"
             }
-        print(f"✅ Valid data found for target variable '{y_var}': {len(y_series)} points")
 
         # Define available models
         available_models = ['ARIMA', 'SARIMA', 'Holt-Winters', 'ETS', 'Prophet']
@@ -446,7 +414,6 @@ async def forecast_for_combination(df, y_var, forecast_horizon=12, fiscal_start_
         import multiprocessing
         
         max_workers = min(multiprocessing.cpu_count(), len(models_to_run))
-        print(f"Debug: Starting parallel processing with {max_workers} workers for models: {models_to_run}")
         
         model_results = []
         
@@ -465,22 +432,17 @@ async def forecast_for_combination(df, y_var, forecast_horizon=12, fiscal_start_
                     ): model_name 
                     for model_name in models_to_run
                 }
-                print(f"Debug: Submitted {len(future_to_model)} model tasks")
                 
                 # Collect results as they complete
                 for future in as_completed(future_to_model):
                     model_name = future_to_model[future]
                     try:
                         result = future.result()
-                        print(f"Debug: {model_name} completed: {result.get('model_name', 'unknown')} - {'error' in result and 'failed' or 'success'}")
                         model_results.append(result)
                     except Exception as e:
-                        print(f"Debug: {model_name} future exception: {str(e)}")
                         model_results.append({'model_name': model_name, 'error': str(e)})
         except Exception as e:
-            print(f"Debug: ProcessPoolExecutor failed: {str(e)}")
             # Fallback to sequential processing if parallel processing fails
-            print(f"Debug: Falling back to sequential processing")
             for model_name in models_to_run:
                 try:
                     result = process_model_cpu_bound(
@@ -491,10 +453,8 @@ async def forecast_for_combination(df, y_var, forecast_horizon=12, fiscal_start_
                         seasonal_periods, 
                         freq_params
                     )
-                    print(f"Debug: {model_name} sequential result: {result.get('model_name', 'unknown')} - {'error' in result and 'failed' or 'success'}")
                     model_results.append(result)
                 except Exception as e:
-                    print(f"Debug: {model_name} sequential exception: {str(e)}")
                     model_results.append({'model_name': model_name, 'error': str(e)})
         
         # Process results and populate df_results
@@ -516,11 +476,9 @@ async def forecast_for_combination(df, y_var, forecast_horizon=12, fiscal_start_
                     fitted_series = pd.Series(fitted_values, index=y_series.index)
                     calculate_metrics(y_series, fitted_series, model_name)
                 else:
-                    print(f"Debug: {model_name} has incorrect data lengths - fitted: {len(fitted_values)}, forecast: {len(forecast_values)}")
                     df_results[model_name] = [None] * len(df_results)
             else:
                 # Model failed
-                print(f"Debug: {model_name} failed: {result.get('error', 'Unknown error')}")
                 df_results[model_name] = [None] * len(df_results)
         
         # Ensure all requested models have columns in df_results
@@ -528,7 +486,6 @@ async def forecast_for_combination(df, y_var, forecast_horizon=12, fiscal_start_
             if model_name not in df_results.columns:
                 df_results[model_name] = [None] * len(df_results)
         
-        print(f"Debug: Successfully processed {len(successful_models)} models: {successful_models}")
         results['models_run'] = successful_models
 
         # Convert DataFrame to serializable format
@@ -539,8 +496,6 @@ async def forecast_for_combination(df, y_var, forecast_horizon=12, fiscal_start_
     except Exception as e:
         import traceback
         error_traceback = traceback.format_exc()
-        print(f"❌ Error in forecast_for_combination: {str(e)}")
-        print(f"❌ Full traceback: {error_traceback}")
         return {
             "status": "FAILURE",
             "error": f"Error in forecast_for_combination: {str(e)}",
@@ -687,7 +642,6 @@ def calculate_fiscal_growth(forecast_df: pd.DataFrame, forecast_horizon: int, fi
     
     for model_name in expected_models:
         if model_name not in forecast_cols:
-            print(f"🔧 Debug: Model {model_name} not in forecast_cols, adding placeholder")
             # Add placeholder data for missing model
             placeholder_data = {
                 'fiscal_year': ['FY23', 'FY24'],
@@ -705,7 +659,6 @@ def calculate_fiscal_growth(forecast_df: pd.DataFrame, forecast_horizon: int, fi
         model_data = forecast_df[model_col]
         if model_data.isna().all() or (model_data == None).all():
             # Model failed - create placeholder data with 0 growth
-            print(f"🔧 Debug: Model {model_name} has no valid data, creating placeholder")
             placeholder_data = {
                 'fiscal_year': ['FY23', 'FY24'],
                 'model': [model_name, model_name],
@@ -853,7 +806,6 @@ def calculate_halfyearly_yoy_growth(
     
     for model_name in expected_models:
         if model_name not in forecast_cols:
-            print(f"🔧 Debug: Model {model_name} not in forecast_cols, adding placeholder")
             # Add placeholder data for missing model
             placeholder_data = {
                 'fiscal_year': ['FY23', 'FY24'],
@@ -872,7 +824,6 @@ def calculate_halfyearly_yoy_growth(
         model_data = forecast_df[model_col]
         if model_data.isna().all() or (model_data == None).all():
             # Model failed - create placeholder data with 0 growth
-            print(f"🔧 Debug: Model {model_name} has no valid data, creating placeholder")
             placeholder_data = {
                 'fiscal_year': ['FY23', 'FY24'],
                 'fiscal_half': ['H1', 'H2'],
@@ -973,7 +924,6 @@ def calculate_quarterly_yoy_growth(
     
     for model_name in expected_models:
         if model_name not in forecast_cols:
-            print(f"🔧 Debug: Model {model_name} not in forecast_cols, adding placeholder")
             # Add placeholder data for missing model
             placeholder_data = {
                 'fiscal_period': ['FY23 Q1', 'FY23 Q2', 'FY23 Q3', 'FY23 Q4'],
@@ -993,7 +943,6 @@ def calculate_quarterly_yoy_growth(
         model_data = forecast_df[model_col]
         if model_data.isna().all() or (model_data == None).all():
             # Model failed - create placeholder data with 0 growth
-            print(f"🔧 Debug: Model {model_name} has no valid data, creating placeholder")
             placeholder_data = {
                 'fiscal_period': ['FY23 Q1', 'FY23 Q2', 'FY23 Q3', 'FY23 Q4'],
                 'fiscal_year': ['FY23', 'FY23', 'FY23', 'FY23'],
@@ -1023,10 +972,6 @@ def calculate_quarterly_yoy_growth(
         if frequency in ["D", "W", "M", "Q"]:
             combined_df["fiscal_quarter"] = ((combined_df["date"].dt.month - fiscal_start_month) % 12) // 3 + 1
             
-            # Debug logging for quarterly
-            print(f"🔧 Debug: Model {model_name} - Date range: {combined_df['date'].min()} to {combined_df['date'].max()}")
-            print(f"🔧 Debug: Fiscal years present: {combined_df['fiscal_year'].unique()}")
-            print(f"🔧 Debug: Fiscal quarters present: {combined_df['fiscal_quarter'].unique()}")
             
         elif frequency == "Y":
             combined_df["fiscal_quarter"] = 1  # Yearly data treated as Q1
@@ -1055,10 +1000,5 @@ def calculate_quarterly_yoy_growth(
     final_df = pd.concat(output_rows, ignore_index=True)
     final_df = final_df.sort_values(by=["model", "fiscal_year_order", "fiscal_quarter"]).reset_index(drop=True)
 
-    # Debug logging for final result
-    print(f"🔧 Debug: Final quarterly result shape: {final_df.shape}")
-    print(f"🔧 Debug: Final fiscal years: {final_df['fiscal_year'].unique()}")
-    print(f"🔧 Debug: Final fiscal quarters: {final_df['fiscal_quarter'].unique()}")
-    print(f"🔧 Debug: Final models: {final_df['model'].unique()}")
 
     return final_df[["fiscal_period", "fiscal_year", "fiscal_quarter", "model", "fiscal_total", "growth_rate"]]

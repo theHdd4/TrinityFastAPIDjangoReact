@@ -7,9 +7,7 @@ from io import BytesIO
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorCollection
 from .config import settings
 from fastapi import HTTPException
-import logging
 
-logger = logging.getLogger(__name__)
 
 # MinIO config
 # Default to the development MinIO service if not explicitly configured
@@ -77,7 +75,6 @@ def get_mongo_client():
             autoregressive_db = client["trinity_prod"]  # Use the database from docker-compose
             validator_db = client["validator_atoms_db"]
         except Exception as e:
-            logger.error(f"❌ MongoDB connection failed: {e}")
             client = None
             autoregressive_db = None
             validator_db = None

@@ -2,7 +2,6 @@ import os
 import pandas as pd
 import numpy as np
 from io import StringIO, BytesIO
-import logging
 from typing import List, Dict, Any, Optional
 import asyncio
 from datetime import datetime, timezone
@@ -23,7 +22,6 @@ from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorCollection
 from .config import settings
 from .deps import redis_client, OBJECT_PREFIX, MINIO_BUCKET
 
-logger = logging.getLogger(__name__)
 
 # MinIO client initialization
 minio_client = Minio(
@@ -61,12 +59,8 @@ def get_mongo_client():
             autoreg_results_collection = autoregressive_db["autoreg_results"]
             autoreg_identifiers_collection = autoregressive_db["autoreg_identifiers"]
             
-            logger.info("✅ MongoDB connected - autoregressive collections ready:")
-            logger.info(f"    • {settings.database_name}.autoreg_results")
-            logger.info(f"    • {settings.database_name}.autoreg_identifiers")
             
         except Exception as e:
-            logger.error(f"❌ MongoDB connection failed: {e}")
             mongo_client = None
             autoregressive_db = None
             autoreg_results_collection = None
@@ -89,7 +83,6 @@ def get_combination_save_status_collection():
                 combination_save_status_db = mongo_client[settings.combination_save_status_database]
                 combination_save_status_collection = combination_save_status_db[settings.combination_save_status_collection]
         except Exception as e:
-            logger.error(f"❌ Failed to initialize combination save status collection: {e}")
             combination_save_status_db = None
             combination_save_status_collection = None
     
@@ -128,7 +121,6 @@ async def save_combination_save_status_to_mongo(
             upsert=True
         )
         
-        logger.info(f"✅ Saved combination save status for scope {scope}, atom {atom_id}")
         return {
             "status": "success",
             "mongo_id": document_id,
@@ -137,7 +129,6 @@ async def save_combination_save_status_to_mongo(
         }
         
     except Exception as e:
-        logger.error(f"❌ Failed to save combination save status: {e}")
         return {"status": "error", "error": str(e)}
 
 async def get_combination_save_status_from_mongo(
@@ -157,14 +148,11 @@ async def get_combination_save_status_from_mongo(
         document = await collection.find_one({"_id": document_id})
         
         if document:
-            logger.info(f"✅ Retrieved combination save status for scope {scope}, atom {atom_id}")
             return document.get("save_status", {})
         else:
-            logger.info(f"ℹ️ No combination save status found for scope {scope}, atom {atom_id}")
             return None
             
     except Exception as e:
-        logger.error(f"❌ Failed to retrieve combination save status: {e}")
         return None
 
 async def update_combination_save_status(
@@ -209,10 +197,8 @@ async def update_combination_save_status(
                 elif "combo_id" in df.columns:
                     all_combinations = set(df["combo_id"].astype(str).unique())
                 
-                logger.info(f"✅ Read {len(all_combinations)} combinations from source file: {source_file_key}")
                 
             except Exception as e:
-                logger.warning(f"⚠️ Could not read source file {source_file_key}: {e}")
                 # Fall back to using provided combinations
                 all_combinations = set(saved_combinations + pending_combinations)
         else:
@@ -230,7 +216,8 @@ async def update_combination_save_status(
             pending_combinations = list(current_pending)
         else:
             # Fallback: use provided combinations
-            logger.warning(f"⚠️ No combinations found in source file, using provided data")
+            saved_combinations = []
+            pending_combinations = all_combinations if all_combinations else []
         
         save_status_data = {
             "total_combinations": len(all_combinations) if all_combinations else (len(saved_combinations) + len(pending_combinations)),
@@ -252,12 +239,10 @@ async def update_combination_save_status(
             project_name=project_name
         )
         
-        logger.info(f"✅ Updated combination save status: {len(saved_combinations)} saved, {len(pending_combinations)} pending")
         
         return result
         
     except Exception as e:
-        logger.error(f"❌ Failed to update combination save status: {e}")
         return {"status": "error", "error": str(e)}
 
 async def get_combination_save_status(
@@ -282,11 +267,9 @@ async def get_combination_save_status(
         
         # Use cached data only if not forcing refresh and source file matches
         if not force_refresh and existing_status and existing_status.get("source_file") == source_file_key:
-            logger.info(f"✅ Retrieved existing combination save status for scope {scope}, atom {atom_id}")
             return existing_status
         
         # Always read fresh data from source file to ensure we have the latest combinations
-        logger.info(f"🔄 Reading fresh combination data from source file for scope {scope}, atom {atom_id}")
         
         # Otherwise, read the source file to get all combinations
         all_combinations = set()
@@ -318,10 +301,8 @@ async def get_combination_save_status(
                 elif "combo_id" in df.columns:
                     all_combinations = set(df["combo_id"].astype(str).unique())
                 
-                logger.info(f"✅ Read {len(all_combinations)} combinations from source file: {source_file_key}")
                 
             except Exception as e:
-                logger.error(f"❌ Error reading source file {source_file_key}: {e}")
                 return {
                     "status": "error",
                     "error": f"Could not read source file: {str(e)}",
@@ -368,11 +349,9 @@ async def get_combination_save_status(
             source_file_key=source_file_key
         )
         
-        logger.info(f"✅ Generated combination save status: {len(saved_set)} saved, {len(pending_combinations)} pending")
         return status_data
         
     except Exception as e:
-        logger.error(f"❌ Failed to get combination save status: {e}")
         return {
             "status": "error",
             "error": str(e),
@@ -390,7 +369,6 @@ async def save_autoregressive_results(scope_id: str, set_name: str, combination_
     """Save autoregressive model results to MongoDB."""
     get_mongo_client()  # Initialize connection if needed
     if autoreg_results_collection is None:
-        logger.warning("❌ MongoDB not connected - cannot save results")
         return
         
     try:
@@ -404,17 +382,14 @@ async def save_autoregressive_results(scope_id: str, set_name: str, combination_
         }
         
         await autoreg_results_collection.insert_one(document)
-        logger.info(f"✅ Saved autoregressive results for {combination_id}")
         
     except Exception as e:
-        logger.error(f"Failed to save autoregressive results: {e}")
         raise
 
 async def get_autoregressive_results(scope_id: str, set_name: str) -> List[Dict[str, Any]]:
     """Get autoregressive results for a scope and set."""
     get_mongo_client()  # Initialize connection if needed
     if autoreg_results_collection is None:
-        logger.warning("❌ MongoDB not connected - cannot retrieve results")
         return []
         
     try:
@@ -425,14 +400,12 @@ async def get_autoregressive_results(scope_id: str, set_name: str) -> List[Dict[
         results = await cursor.to_list(length=None)
         return results
     except Exception as e:
-        logger.error(f"Failed to get autoregressive results: {e}")
         return []
 
 async def save_autoregressive_results_by_run_id(run_id: str, results: Dict[str, Any]):
     """Save autoregressive model results to MongoDB using run_id."""
     get_mongo_client()  # Initialize connection if needed
     if autoreg_results_collection is None:
-        logger.warning("❌ MongoDB not connected - cannot save results")
         return
         
     try:
@@ -444,24 +417,20 @@ async def save_autoregressive_results_by_run_id(run_id: str, results: Dict[str, 
         }
         
         await autoreg_results_collection.insert_one(document)
-        logger.info(f"✅ Saved autoregressive results for run_id: {run_id}")
         
     except Exception as e:
-        logger.error(f"Failed to save autoregressive results: {e}")
         raise
 
 async def get_autoregressive_results_by_run_id(run_id: str) -> Optional[Dict[str, Any]]:
     """Get autoregressive results by run_id."""
     get_mongo_client()  # Initialize connection if needed
     if autoreg_results_collection is None:
-        logger.warning("❌ MongoDB not connected - cannot retrieve results")
         return None
         
     try:
         result = await autoreg_results_collection.find_one({"run_id": run_id})
         return result
     except Exception as e:
-        logger.error(f"Failed to get autoregressive results for run_id {run_id}: {e}")
         return None
 
 def save_dataframe_to_minio(df: pd.DataFrame, object_name: str, format: str = "csv"):
@@ -493,10 +462,9 @@ def save_dataframe_to_minio(df: pd.DataFrame, object_name: str, format: str = "c
             try:
                 redis_client.setex(object_name, 3600, content)
             except Exception as e:
+                # Log Redis error but don't fail the operation
                 logger.warning(f"Failed to cache in Redis: {e}")
         
-        logger.info(f"✅ Saved dataframe to MinIO: {object_name}")
         
     except Exception as e:
-        logger.error(f"Failed to save dataframe to MinIO: {e}")
         raise

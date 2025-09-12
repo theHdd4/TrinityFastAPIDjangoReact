@@ -47,19 +47,15 @@ const AutoRegressiveModelsSettings: React.FC<AutoRegressiveModelsSettingsProps> 
 
   // Ensure all models are selected by default on first load
   useEffect(() => {
-    console.log('🔧 AutoRegressiveModelsSettings: useEffect triggered, current selectedModels:', data?.selectedModels);
-    console.log('🔧 AutoRegressiveModelsSettings: availableModels:', availableModels);
     
     // Only auto-select on initial load when selectedModels is undefined (not when it's an empty array)
     // This allows users to deselect all models without them being auto-selected again
     if (data?.selectedModels === undefined) {
       const allModelIds = availableModels.map(model => model.id);
-      console.log('🔧 AutoRegressiveModelsSettings: Auto-selecting all models on first load:', allModelIds);
       onDataChange({
         selectedModels: allModelIds
       });
     } else {
-      console.log('🔧 AutoRegressiveModelsSettings: Models already selected or explicitly empty, count:', data.selectedModels?.length || 0);
     }
   }, []); // Only run once on mount, not when any dependencies change
 
@@ -116,13 +112,6 @@ const AutoRegressiveModelsSettings: React.FC<AutoRegressiveModelsSettingsProps> 
       updatedModels = updatedModels.filter(id => id !== modelId);
     }
 
-    console.log('🔧 AutoRegressiveModelsSettings: Model selection changed:', {
-      modelId,
-      checked,
-      previousModels: data.selectedModels,
-      updatedModels
-    });
-
     onDataChange({
       selectedModels: updatedModels
     });
@@ -153,30 +142,21 @@ const AutoRegressiveModelsSettings: React.FC<AutoRegressiveModelsSettingsProps> 
   };
 
   const handleSelectAllModels = (checked: boolean) => {
-    console.log('🔧 AutoRegressiveModelsSettings: handleSelectAllModels called with checked:', checked);
-    console.log('🔧 AutoRegressiveModelsSettings: Current selectedModels:', data?.selectedModels);
-    console.log('🔧 AutoRegressiveModelsSettings: allModelsSelected:', allModelsSelected);
-    console.log('🔧 AutoRegressiveModelsSettings: onDataChange function:', !!onDataChange);
     
     // Ensure we have a valid boolean value
     const shouldSelectAll = Boolean(checked);
-    console.log('🔧 AutoRegressiveModelsSettings: shouldSelectAll:', shouldSelectAll);
     
     if (shouldSelectAll) {
       // Select all models
       const allModelIds = availableModels.map(model => model.id);
-      console.log('🔧 AutoRegressiveModelsSettings: Select all models:', allModelIds);
       onDataChange({
         selectedModels: allModelIds
       });
-      console.log('🔧 AutoRegressiveModelsSettings: onDataChange called for select all');
     } else {
       // Deselect all models
-      console.log('🔧 AutoRegressiveModelsSettings: Deselect all models');
       onDataChange({
         selectedModels: []
       });
-      console.log('🔧 AutoRegressiveModelsSettings: onDataChange called for deselect all');
     }
   };
 
@@ -190,17 +170,6 @@ const AutoRegressiveModelsSettings: React.FC<AutoRegressiveModelsSettingsProps> 
     data.selectedModels.length > 0 &&
     availableModels.every(model => data.selectedModels.includes(model.id));
   
-  // Debug logging for model selection state
-  console.log('🔧 AutoRegressiveModelsSettings: allModelsSelected calculation:', {
-    availableModelsCount: availableModels.length,
-    selectedModelsCount: data?.selectedModels?.length || 0,
-    selectedModels: data?.selectedModels || [],
-    allModelsSelected: allModelsSelected,
-    availableModelIds: availableModels.map(m => m.id)
-  });
-
-
-
   return (
     <div className="space-y-6">
       {/* Select Data */}
@@ -306,13 +275,9 @@ const AutoRegressiveModelsSettings: React.FC<AutoRegressiveModelsSettingsProps> 
                 id="select-all-models"
                 checked={allModelsSelected}
                 onCheckedChange={(checked) => {
-                  console.log('🔧 AutoRegressiveModelsSettings: Checkbox clicked with checked:', checked, 'type:', typeof checked);
-                  console.log('🔧 AutoRegressiveModelsSettings: Current allModelsSelected:', allModelsSelected);
-                  console.log('🔧 AutoRegressiveModelsSettings: Current selectedModels:', data?.selectedModels);
                   
                   // Ensure checked is a boolean
                   const isChecked = checked === true;
-                  console.log('🔧 AutoRegressiveModelsSettings: Converted to boolean:', isChecked);
                   handleSelectAllModels(isChecked);
                 }}
               />
