@@ -22,6 +22,9 @@ def main():
     admin_username = "neo"
     admin_email = f"{admin_username}@{primary_domain}"
 
+    print("→ 0) Making sure migrations are generated…")
+    call_command("makemigrations", "registry", interactive=False, verbosity=1)
+
     print("\n→ 1) Applying SHARED (public) migrations…")
     # Run only shared apps into the public schema
     # Ensure the connection points to the public schema before migrating
@@ -199,6 +202,12 @@ def main():
         "migrate_schemas", "--schema", tenant_schema, interactive=False, verbosity=1
     )
     print("   ✅ Tenant-schema migrations complete.\n")
+
+    print(f"→ 3b) Applying registry migrations for '{tenant_schema}'…")
+    call_command(
+        "migrate_schemas", "registry", "--schema", tenant_schema, interactive=False, verbosity=1
+    )
+    print("   ✅ Registry migrations complete.\n")
 
     # Load atom catalogue from FastAPI features
     try:

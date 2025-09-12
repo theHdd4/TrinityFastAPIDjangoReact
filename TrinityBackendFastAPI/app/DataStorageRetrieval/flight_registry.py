@@ -117,6 +117,8 @@ def get_ticket_by_key(file_key: str) -> Tuple[str | None, str | None]:
 def get_flight_path_for_csv(csv_name: str) -> str | None:
     """Return the registered flight path for the given CSV."""
     path = CSV_TO_FLIGHT.get(csv_name)
+    if path is None:
+        path = CSV_TO_FLIGHT.get(Path(csv_name).name)
     logger.info("➡️ lookup flight path for %s: %s", csv_name, path)
     return path
 

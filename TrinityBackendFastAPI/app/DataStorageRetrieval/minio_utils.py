@@ -81,7 +81,7 @@ def upload_to_minio(file_content_bytes: bytes, filename: str, object_prefix: str
     """Upload bytes to MinIO using the object prefix."""
     try:
         timestamp = pd.Timestamp.now().strftime("%Y%m%d_%H%M%S")
-        object_name = f"{object_prefix}{timestamp}_{filename}"
+        object_name = f"{object_prefix}{filename}"
         print(f"⬆️ uploading to minio: {object_name}")
         file_content = io.BytesIO(file_content_bytes)
         file_content.seek(0, os.SEEK_END)

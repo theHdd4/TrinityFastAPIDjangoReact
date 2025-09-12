@@ -10,6 +10,9 @@ from minio.error import S3Error
 from fastapi import HTTPException
 from .config import settings  # Use local config instead of global config
 from typing import List, Dict, Any, Literal, Optional, Union
+from datetime import datetime
+from .database import correlation_coll
+from pymongo.errors import PyMongoError
 
 
 # Initialize MinIO client (only once)
@@ -22,17 +25,25 @@ minio_client = Minio(
 
 
 def parse_minio_path(file_path: str) -> tuple[str, str]:
-    """Parse MinIO path into bucket and object path
-    For correlation service, the bucket is always 'trinity' and 
-    the entire file_path is the object path within that bucket
+    """Parse MinIO path into bucket and object path.
+
+    The correlation feature expects paths relative to the ``trinity`` bucket
+    but some callers may include the bucket name as a prefix (e.g.
+    ``trinity/client/app/file.arrow``).  MinIO treats object paths literally,
+    so we strip any leading bucket segment to avoid creating a nested
+    ``trinity`` directory in the bucket root.
     """
-    # The bucket is always 'trinity' for correlation service
+
     bucket_name = "trinity"
-    object_path = file_path.strip('/')
-    
+    object_path = file_path.strip("/")
+
+    # Remove leading bucket name if the caller included it
+    if object_path.startswith(f"{bucket_name}/"):
+        object_path = object_path[len(bucket_name) + 1 :]
+
     if not object_path:
         raise ValueError("Invalid MinIO path. Object path cannot be empty")
-    
+
     return bucket_name, object_path
 
 
@@ -224,19 +235,29 @@ def calculate_correlations(df: pd.DataFrame, req) -> Dict[str, Any]:
     raise ValueError("Unsupported correlation method")
 
 
-def save_correlation_results_to_minio(df: pd.DataFrame, correlation_results: dict, file_path: str) -> str:
-    """Save correlation results to MinIO"""
-    bucket_name, object_path = parse_minio_path(file_path)
-    
-    # Create output path
-    base_name = object_path.rsplit('.', 1)[0]
-    out_path = f"correlations/{base_name}-correlations.json"
-    
-    # Save to MinIO as JSON
-    json_bytes = json.dumps(correlation_results, indent=2).encode()
-    minio_client.put_object(bucket_name, out_path, io.BytesIO(json_bytes), len(json_bytes))
-    
-    return f"{bucket_name}/{out_path}"
+async def save_correlation_results_to_db(
+    df: pd.DataFrame, correlation_results: dict, file_path: str
+) -> Optional[str]:
+    """Persist correlation results in MongoDB.
+
+    If MongoDB is not reachable or authentication fails, the error is
+    logged and ``None`` is returned so that correlation analysis can
+    continue without interruption.
+    """
+    document = {
+        "source_path": file_path,
+        "rows": len(df),
+        "results": correlation_results,
+        "created_at": datetime.utcnow(),
+    }
+
+    try:
+        result = await correlation_coll.insert_one(document)
+        return str(result.inserted_id)
+    except PyMongoError as e:
+        # Log the error but don't fail the entire operation
+        print(f"⚠️ correlation MongoDB insert failed: {e}")
+        return None
 
 
 # Import schemas for filter functions
@@ -290,12 +311,22 @@ async def save_filtered_data_to_minio(df: pd.DataFrame, original_path: str, filt
     
     # Create new path for filtered file
     base_name = object_path.rsplit('.', 1)[0]
-    filtered_path = f"filtered/{base_name}-{filter_name}.csv"
-    
-    # Save to MinIO
-    csv_bytes = df.to_csv(index=False).encode()
-    minio_client.put_object(bucket_name, filtered_path, io.BytesIO(csv_bytes), len(csv_bytes))
-    
+    filtered_path = f"filtered/{base_name}-{filter_name}.arrow"
+
+    # Convert dataframe to Arrow and save to MinIO
+    table = pa.Table.from_pandas(df)
+    sink = io.BytesIO()
+    with ipc.new_file(sink, table.schema) as writer:
+        writer.write_table(table)
+    arrow_bytes = sink.getvalue()
+    minio_client.put_object(
+        bucket_name,
+        filtered_path,
+        io.BytesIO(arrow_bytes),
+        len(arrow_bytes),
+        content_type="application/vnd.apache.arrow.file",
+    )
+
     return f"{bucket_name}/{filtered_path}"
 
 
@@ -873,6 +904,32 @@ def apply_date_range_filter(df: pd.DataFrame, date_column: str, date_range: Dict
         return df
 
 
+def apply_time_aggregation(df: pd.DataFrame, date_column: str, level: str) -> pd.DataFrame:
+    """Aggregate dataframe by time period"""
+    if level.lower() == 'none':
+        return df
+    if date_column not in df.columns:
+        raise ValueError(f"Date column '{date_column}' not found in dataframe")
+
+    freq_map = {
+        'daily': 'D',
+        'weekly': 'W',
+        'monthly': 'M',
+        'quarterly': 'Q',
+        'yearly': 'Y',
+    }
+    freq = freq_map.get(level.lower())
+    if not freq:
+        return df
+
+    df = df.copy()
+    df[date_column] = pd.to_datetime(df[date_column], errors='coerce')
+    df = df.dropna(subset=[date_column])
+    aggregated = df.set_index(date_column).resample(freq).mean(numeric_only=True).reset_index()
+    print(f"⏱️ Aggregated {len(df)} → {len(aggregated)} rows using {level}")
+    return aggregated
+
+
 # ─── Time Series Functions ──────────────────────────────────────────────
 def get_time_series_axis_data(df: pd.DataFrame, start_date: str = None, end_date: str = None) -> Dict[str, Any]:
     """Get X-axis data for time series - datetime values or indices"""
@@ -885,13 +942,17 @@ def get_time_series_axis_data(df: pd.DataFrame, start_date: str = None, end_date
         if date_analysis['has_date_data'] and date_analysis['date_columns']:
             # Use first valid date column
             date_col_info = date_analysis['date_columns'][0]
-            datetime_column = date_col_info['column']
+            datetime_column = date_col_info['column_name']
             
             print(f"🗓️ Using datetime column: {datetime_column}")
             
-            # Convert to datetime
-            date_col = pd.to_datetime(df[datetime_column], errors='coerce')
-            valid_dates = date_col.dropna()
+            # Convert to datetime and ensure unique, sorted dates
+            date_col = pd.to_datetime(df[datetime_column], errors="coerce")
+            valid_dates = (
+                date_col.dropna()
+                .sort_values()
+                .drop_duplicates()
+            )
             
             # Apply date filtering if provided
             if start_date and end_date:
@@ -904,7 +965,7 @@ def get_time_series_axis_data(df: pd.DataFrame, start_date: str = None, end_date
                     print(f"⚠️ Date filtering failed: {e}")
             
             # Convert to ISO strings for JSON serialization
-            x_values = [dt.isoformat() for dt in valid_dates.sort_values()]
+            x_values = [dt.isoformat() for dt in valid_dates]
             
             return {
                 "x_values": x_values,
@@ -1079,14 +1140,20 @@ def get_filtered_time_series_values(
             except Exception as e:
                 print(f"⚠️ Date averaging failed: {e}")
         
-        # Extract values for the specified columns
-        col1_values = working_df[column1].fillna(0).tolist()
-        col2_values = working_df[column2].fillna(0).tolist()
-        
-        # Ensure both lists have same length
-        min_length = min(len(col1_values), len(col2_values))
-        col1_values = col1_values[:min_length]
-        col2_values = col2_values[:min_length]
+        # Extract numeric values for the specified columns while preserving index alignment
+        col1_series = pd.to_numeric(working_df[column1], errors="coerce")
+        col2_series = pd.to_numeric(working_df[column2], errors="coerce")
+
+        # Ensure both lists have same length and replace NaN with None for JSON serialization
+        min_length = min(len(col1_series), len(col2_series))
+        col1_values = [
+            (v if pd.notna(v) else None)
+            for v in col1_series.iloc[:min_length].tolist()
+        ]
+        col2_values = [
+            (v if pd.notna(v) else None)
+            for v in col2_series.iloc[:min_length].tolist()
+        ]
         
         print(f"✅ Extracted {len(col1_values)} value pairs")
         

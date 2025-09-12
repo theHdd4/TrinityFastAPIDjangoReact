@@ -11,6 +11,8 @@ from common.minio_utils import create_prefix, rename_project_folder
 from apps.accounts.models import UserEnvironmentVariable
 from redis_store.env_cache import invalidate_env, set_current_env
 
+TRINITY_DB_NAME = "trinity_db"
+
 
 def _current_tenant_name() -> str:
     """Return the shared client folder for all MinIO prefixes."""
@@ -166,10 +168,10 @@ def update_env_vars_on_rename(sender, instance, **kwargs):
             )
             try:
                 mc = MongoClient(
-                    getattr(settings, "MONGO_URI", "mongodb://mongo:27017/trinity"),
+                    getattr(settings, "MONGO_URI", "mongodb://mongo:27017/trinity_db"),
                     serverSelectionTimeoutMS=5000,
                 )
-                db = mc.get_default_database()
+                db = mc[TRINITY_DB_NAME]
                 result = db.session_state.update_many(
                     {
                         "state.client_name": entry["client_name"],
@@ -246,10 +248,10 @@ def cleanup_on_delete(sender, instance, **kwargs):
         ).delete()
         try:
             mc = MongoClient(
-                getattr(settings, "MONGO_URI", "mongodb://mongo:27017/trinity"),
+                getattr(settings, "MONGO_URI", "mongodb://mongo:27017/trinity_db"),
                 serverSelectionTimeoutMS=5000,
             )
-            db = mc.get_default_database()
+            db = mc[TRINITY_DB_NAME]
             db.session_state.delete_many(
                 {
                     "state.client_name": entry["client_name"],

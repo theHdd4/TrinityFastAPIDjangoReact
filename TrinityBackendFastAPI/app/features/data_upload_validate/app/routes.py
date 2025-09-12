@@ -1,5 +1,5 @@
 # app/routes.py - API Routes
-from fastapi import APIRouter, HTTPException, File, Form, UploadFile, Query, Request
+from fastapi import APIRouter, HTTPException, File, Form, UploadFile, Query, Request, Response
 from typing import List, Dict, Any
 import json
 import pandas as pd
@@ -15,6 +15,7 @@ import fastexcel
 
 # Add this line with your other imports
 from datetime import datetime
+import logging
 
 
 from app.features.data_upload_validate.app.validators.mmm import validate_mmm
@@ -69,6 +70,7 @@ from app.features.data_upload_validate.app.database import (
     get_validator_atom_from_mongo,  # Fallback function
     save_validation_log_to_mongo,
     log_operation_to_mongo,
+    mark_operation_log_deleted,
 )
 
 # Add this import
@@ -77,6 +79,8 @@ from app.features.data_upload_validate.app.database import save_validator_atom_t
 
 # Initialize router
 router = APIRouter()
+
+logger = logging.getLogger(__name__)
 
 
 
@@ -439,7 +443,20 @@ async def upload_file(
     prefix = await get_object_prefix()
     ensure_minio_bucket()
     content = await file.read()
-    result = upload_to_minio(content, file.filename, prefix)
+    try:
+        if file.filename.lower().endswith(".csv"):
+            df_pl = pl.read_csv(io.BytesIO(content), **CSV_READ_KWARGS)
+        elif file.filename.lower().endswith((".xls", ".xlsx")):
+            df_pl = pl.from_pandas(pd.read_excel(io.BytesIO(content)))
+        else:
+            raise HTTPException(status_code=400, detail="Only CSV and XLSX files supported")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Error parsing file {file.filename}: {str(e)}")
+
+    arrow_buf = io.BytesIO()
+    df_pl.write_ipc(arrow_buf)
+    arrow_name = Path(file.filename).stem + ".arrow"
+    result = upload_to_minio(arrow_buf.getvalue(), arrow_name, prefix)
     if result.get("status") != "success":
         raise HTTPException(status_code=500, detail=result.get("error_message", "Upload failed"))
     return {"file_path": result["object_name"]}
@@ -1514,8 +1531,10 @@ async def validate(
                     df_pl = pl.read_csv(io.BytesIO(content), **CSV_READ_KWARGS)
                 elif file.filename.lower().endswith((".xls", ".xlsx")):
                     df_pl = pl.from_pandas(pd.read_excel(io.BytesIO(content)))
+                elif file.filename.lower().endswith(".arrow"):
+                    df_pl = pl.read_ipc(io.BytesIO(content))
                 else:
-                    raise HTTPException(status_code=400, detail="Only CSV and XLSX files supported")
+                    raise HTTPException(status_code=400, detail="Only CSV, XLSX and Arrow files supported")
                 df = df_pl.to_pandas()
 
                 df.columns = [preprocess_column_name(col) for col in df.columns]
@@ -1533,8 +1552,10 @@ async def validate(
                     df_pl = pl.read_csv(io.BytesIO(data), **CSV_READ_KWARGS)
                 elif filename.lower().endswith((".xls", ".xlsx")):
                     df_pl = pl.from_pandas(pd.read_excel(io.BytesIO(data)))
+                elif filename.lower().endswith(".arrow"):
+                    df_pl = pl.read_ipc(io.BytesIO(data))
                 else:
-                    raise HTTPException(status_code=400, detail="Only CSV and XLSX files supported")
+                    raise HTTPException(status_code=400, detail="Only CSV, XLSX and Arrow files supported")
                 df = df_pl.to_pandas()
 
                 df.columns = [preprocess_column_name(col) for col in df.columns]
@@ -2657,7 +2678,16 @@ load_existing_configs()
 
 
 # --- New endpoints for saving and listing validated dataframes ---
+# Accept both trailing and non-trailing slash variants and explicitly
+# handle CORS preflight OPTIONS requests so browsers or proxies never
+# receive a 405/500 before the actual POST is issued.
+@router.options("/save_dataframes")
+@router.options("/save_dataframes/")
+async def save_dataframes_options() -> Response:
+    return Response(status_code=204)
+
 @router.post("/save_dataframes")
+@router.post("/save_dataframes/")
 async def save_dataframes(
     validator_atom_id: str = Form(...),
     files: List[UploadFile] | None = File(None),
@@ -2671,21 +2701,76 @@ async def save_dataframes(
     client_name: str = Form(""),
     app_name: str = Form(""),
     project_name: str = Form(""),
+    user_name: str = Form(""),
 ):
     """Save validated dataframes as Arrow tables and upload via Flight."""
-    try:
-        keys = json.loads(file_keys)
-    except json.JSONDecodeError:
-        raise HTTPException(status_code=400, detail="Invalid JSON format for file_keys")
+    logger.info(
+        "save_dataframes invoked", extra={
+            "validator_atom_id": validator_atom_id,
+            "overwrite": overwrite,
+        }
+    )
+    logger.debug("raw file_keys=%s", file_keys)
+    logger.debug("raw file_paths=%s", file_paths)
 
-    paths = json.loads(file_paths) if file_paths else []
+    # --- Parse and validate inputs -------------------------------------------------
+    try:
+        key_inputs = json.loads(file_keys) if file_keys else []
+    except json.JSONDecodeError:
+        logger.exception("Invalid JSON for file_keys")
+        raise HTTPException(status_code=400, detail="Invalid JSON format for file_keys")
+    if not isinstance(key_inputs, list):
+        logger.error("file_keys not list: %s", type(key_inputs))
+        raise HTTPException(status_code=400, detail="file_keys must be a JSON array")
+
+    try:
+        paths = json.loads(file_paths) if file_paths else []
+    except json.JSONDecodeError:
+        logger.exception("Invalid JSON for file_paths")
+        raise HTTPException(status_code=400, detail="Invalid JSON format for file_paths")
+    if paths and (
+        not isinstance(paths, list)
+        or any(not isinstance(p, str) or not p for p in paths)
+    ):
+        logger.error("file_paths malformed: %s", paths)
+        raise HTTPException(
+            status_code=400, detail="file_paths must be a JSON array of non-empty strings"
+        )
+
     files_list = files or []
-    if files_list and len(files_list) != len(keys):
-        raise HTTPException(status_code=400, detail="Number of files must match number of keys")
-    if paths and len(paths) != len(keys):
-        raise HTTPException(status_code=400, detail="Number of file paths must match number of keys")
-    if not files_list and not paths:
+    source_count = len(files_list) if files_list else len(paths)
+    if source_count == 0:
+        logger.error("No files or file paths provided")
         raise HTTPException(status_code=400, detail="No files or file paths provided")
+
+    # Fallback to filenames when keys are missing or empty
+    fallback_names = (
+        [f.filename for f in files_list]
+        if files_list
+        else [Path(p).name for p in paths]
+    )
+    if len(key_inputs) == 0:
+        keys = fallback_names
+    else:
+        if len(key_inputs) != source_count:
+            logger.error(
+                "Mismatched file key count: %s keys for %s sources",
+                len(key_inputs),
+                source_count,
+            )
+            raise HTTPException(
+                status_code=400,
+                detail="Number of file keys must match number of files or paths",
+            )
+        keys = []
+        for i, k in enumerate(key_inputs):
+            if not isinstance(k, str) or not k.strip():
+                k = fallback_names[i]
+            keys.append(k)
+
+    if len(set(keys)) != len(keys):
+        logger.error("Duplicate file keys: %s", keys)
+        raise HTTPException(status_code=400, detail="Duplicate file keys are not allowed")
 
     uploads = []
     flights = []
@@ -2706,22 +2791,25 @@ async def save_dataframes(
     print(f"📤 saving to prefix {prefix}")
 
     if files_list:
-        iter_sources = [(f.filename, f.file) for f in files_list]
+        iter_sources = [
+            (k, f.filename, f.file) for k, f in zip(keys, files_list)
+        ]
     else:
         iter_sources = []
-        for p in paths:
+        for k, p in zip(keys, paths):
             data = read_minio_object(p)
-            iter_sources.append((Path(p).name, io.BytesIO(data)))
+            iter_sources.append((k, Path(p).name, io.BytesIO(data)))
 
     MAX_FILE_SIZE = 512 * 1024 * 1024  # 512 MB
     STATUS_TTL = 3600
 
-    for (filename, fileobj), key in zip(iter_sources, keys):
+    for key, filename, fileobj in iter_sources:
+        logger.info("Processing file %s with key %s", filename, key)
         progress_key = f"upload_status:{validator_atom_id}:{key}"
         redis_client.set(progress_key, "uploading", ex=STATUS_TTL)
 
         arrow_name = Path(filename).stem + ".arrow"
-        exists = await arrow_dataset_exists(numeric_pid, validator_atom_id, key)
+        exists = await arrow_dataset_exists(numeric_pid, validator_atom_id, filename)
         if exists and not overwrite:
             uploads.append({"file_key": key, "already_saved": True})
             flights.append({"file_key": key})
@@ -2782,12 +2870,16 @@ async def save_dataframes(
             arrow_buf = io.BytesIO()
             df_pl.write_ipc(arrow_buf)
             arrow_bytes = arrow_buf.getvalue()
+        elif filename.lower().endswith(".arrow"):
+            arrow_bytes = fileobj.read()
+            df_pl = pl.read_ipc(io.BytesIO(arrow_bytes))
         else:
             raise HTTPException(status_code=400, detail="Unsupported file type")
 
         result = upload_to_minio(arrow_bytes, arrow_name, prefix)
         saved_name = Path(result.get("object_name", "")).name or arrow_name
         flight_path = f"{validator_atom_id}/{saved_name}"
+        logger.info("Uploaded %s as %s", filename, result.get("object_name", ""))
 
         # If df_pl is None (chunked csv), upload via polars scan
         if filename.lower().endswith(".csv"):
@@ -2831,12 +2923,19 @@ async def save_dataframes(
         "APP_NAME": os.getenv("APP_NAME"),
         "PROJECT_NAME": os.getenv("PROJECT_NAME"),
     }
+    logger.info("save_dataframes completed: %s files", len(uploads))
     log_operation_to_mongo(
         user_id=user_id,
         client_id=client_id,
         validator_atom_id=validator_atom_id,
         operation="save_dataframes",
         details={"files_saved": uploads, "prefix": prefix},
+        user_name=user_name,
+        client_name=client_name,
+        app_id=app_id,
+        app_name=app_name,
+        project_id=project_id,
+        project_name=project_name,
     )
     return {
         "minio_uploads": uploads,
@@ -2890,12 +2989,11 @@ async def list_saved_dataframes(
         files = [
             {
                 "object_name": obj.object_name,
-                "arrow_name": Path(obj.object_name).name
-                if obj.object_name.endswith(".arrow")
-                else None,
+                "arrow_name": Path(obj.object_name).name,
                 "csv_name": Path(obj.object_name).name,
             }
             for obj in sorted(objects, key=lambda o: o.object_name)
+            if obj.object_name.endswith(".arrow")
         ]
         return {
             "bucket": MINIO_BUCKET,
@@ -2968,15 +3066,23 @@ async def delete_dataframe(object_name: str):
     prefix = await get_object_prefix()
     if not object_name.startswith(prefix):
         raise HTTPException(status_code=400, detail="Invalid object name")
+    csv_name = object_name.rsplit('.', 1)[0] + '.csv'
     try:
         try:
             minio_client.remove_object(MINIO_BUCKET, object_name)
         except S3Error as e:
             if getattr(e, "code", "") not in {"NoSuchKey", "NoSuchBucket"}:
                 raise
+        try:
+            minio_client.remove_object(MINIO_BUCKET, csv_name)
+        except S3Error as e:
+            if getattr(e, "code", "") not in {"NoSuchKey", "NoSuchBucket"}:
+                raise
         redis_client.delete(object_name)
+        redis_client.delete(csv_name)
         remove_arrow_object(object_name)
         await delete_arrow_dataset(object_name)
+        mark_operation_log_deleted(object_name)
         return {"deleted": object_name}
     except S3Error as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -2990,17 +3096,20 @@ async def delete_all_dataframes():
     prefix = await get_object_prefix()
     deleted = []
     try:
-        objects = minio_client.list_objects(MINIO_BUCKET, prefix=prefix, recursive=True)
+        objects = list(minio_client.list_objects(MINIO_BUCKET, prefix=prefix, recursive=True))
         for obj in objects:
+            obj_name = obj.object_name
             try:
-                minio_client.remove_object(MINIO_BUCKET, obj.object_name)
+                minio_client.remove_object(MINIO_BUCKET, obj_name)
             except S3Error as e:
                 if getattr(e, "code", "") not in {"NoSuchKey", "NoSuchBucket"}:
                     raise
-            redis_client.delete(obj.object_name)
-            remove_arrow_object(obj.object_name)
-            await delete_arrow_dataset(obj.object_name)
-            deleted.append(obj.object_name)
+            redis_client.delete(obj_name)
+            if obj_name.endswith('.arrow'):
+                remove_arrow_object(obj_name)
+                await delete_arrow_dataset(obj_name)
+                mark_operation_log_deleted(obj_name)
+            deleted.append(obj_name)
         return {"deleted": deleted}
     except S3Error as e:
         if getattr(e, "code", "") == "NoSuchBucket":
