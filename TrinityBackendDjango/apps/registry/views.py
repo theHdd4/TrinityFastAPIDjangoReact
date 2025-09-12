@@ -3,6 +3,7 @@ from rest_framework.response import Response
 from rest_framework.decorators import action
 from django.utils.text import slugify
 import os
+import logging
 from apps.accounts.views import CsrfExemptSessionAuthentication
 from apps.accounts.utils import save_env_var, get_env_dict, load_env_vars
 from .models import (
@@ -25,6 +26,7 @@ from .serializers import (
     ArrowDatasetSerializer,
 )
 
+logger = logging.getLogger(__name__)
 
 class AppViewSet(viewsets.ModelViewSet):
     """
@@ -581,9 +583,25 @@ class ArrowDatasetViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         qs = self.queryset
         atom = self.request.query_params.get("atom_id")
+        project = self.request.query_params.get("project")
+        logger.debug(
+            "ArrowDatasetViewSet.get_queryset user=%s atom=%s project=%s",
+            self.request.user,
+            atom,
+            project,
+        )
         if atom:
             qs = qs.filter(atom_id=atom)
-        project = self.request.query_params.get("project")
         if project:
             qs = qs.filter(project_id=project)
         return qs
+
+    def perform_create(self, serializer):
+        instance = serializer.save()
+        logger.info(
+            "ArrowDataset created id=%s project=%s atom=%s key=%s",
+            instance.id,
+            instance.project_id,
+            instance.atom_id,
+            instance.file_key,
+        )

@@ -10,6 +10,9 @@ from minio.error import S3Error
 from fastapi import HTTPException
 from .config import settings  # Use local config instead of global config
 from typing import List, Dict, Any, Literal, Optional, Union
+from datetime import datetime
+from .database import correlation_coll
+from pymongo.errors import PyMongoError
 
 
 # Initialize MinIO client (only once)
@@ -22,17 +25,25 @@ minio_client = Minio(
 
 
 def parse_minio_path(file_path: str) -> tuple[str, str]:
-    """Parse MinIO path into bucket and object path
-    For correlation service, the bucket is always 'trinity' and 
-    the entire file_path is the object path within that bucket
+    """Parse MinIO path into bucket and object path.
+
+    The correlation feature expects paths relative to the ``trinity`` bucket
+    but some callers may include the bucket name as a prefix (e.g.
+    ``trinity/client/app/file.arrow``).  MinIO treats object paths literally,
+    so we strip any leading bucket segment to avoid creating a nested
+    ``trinity`` directory in the bucket root.
     """
-    # The bucket is always 'trinity' for correlation service
+
     bucket_name = "trinity"
-    object_path = file_path.strip('/')
-    
+    object_path = file_path.strip("/")
+
+    # Remove leading bucket name if the caller included it
+    if object_path.startswith(f"{bucket_name}/"):
+        object_path = object_path[len(bucket_name) + 1 :]
+
     if not object_path:
         raise ValueError("Invalid MinIO path. Object path cannot be empty")
-    
+
     return bucket_name, object_path
 
 
@@ -224,19 +235,29 @@ def calculate_correlations(df: pd.DataFrame, req) -> Dict[str, Any]:
     raise ValueError("Unsupported correlation method")
 
 
-def save_correlation_results_to_minio(df: pd.DataFrame, correlation_results: dict, file_path: str) -> str:
-    """Save correlation results to MinIO"""
-    bucket_name, object_path = parse_minio_path(file_path)
-    
-    # Create output path
-    base_name = object_path.rsplit('.', 1)[0]
-    out_path = f"correlations/{base_name}-correlations.json"
-    
-    # Save to MinIO as JSON
-    json_bytes = json.dumps(correlation_results, indent=2).encode()
-    minio_client.put_object(bucket_name, out_path, io.BytesIO(json_bytes), len(json_bytes))
-    
-    return f"{bucket_name}/{out_path}"
+async def save_correlation_results_to_db(
+    df: pd.DataFrame, correlation_results: dict, file_path: str
+) -> Optional[str]:
+    """Persist correlation results in MongoDB.
+
+    If MongoDB is not reachable or authentication fails, the error is
+    logged and ``None`` is returned so that correlation analysis can
+    continue without interruption.
+    """
+    document = {
+        "source_path": file_path,
+        "rows": len(df),
+        "results": correlation_results,
+        "created_at": datetime.utcnow(),
+    }
+
+    try:
+        result = await correlation_coll.insert_one(document)
+        return str(result.inserted_id)
+    except PyMongoError as e:
+        # Log the error but don't fail the entire operation
+        print(f"⚠️ correlation MongoDB insert failed: {e}")
+        return None
 
 
 # Import schemas for filter functions

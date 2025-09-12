@@ -13,6 +13,12 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { format, parse, isValid, getDaysInMonth, startOfMonth, addMonths, subMonths } from 'date-fns';
 import { VALIDATE_API } from '@/lib/api';
 import type { CorrelationSettings } from '@/components/LaboratoryMode/store/laboratoryStore';
@@ -675,11 +681,16 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
       // Get variables (column names) from the result
       const resultVariables = result.columns_used || [];
       
-      // Transform backend correlation matrix dictionary to 2D array and filter out non-numeric columns
-      const { matrix: transformedMatrix, filteredVariables } = transformCorrelationMatrix(
-        result.correlation_results.correlation_matrix, 
-        resultVariables
-      );
+      // Transform backend correlation matrix dictionary to 2D array and
+      // filter out non-numeric columns. The API might return the matrix
+      // directly or nested inside a `results` field when loaded from MongoDB.
+      const correlationDict =
+        result.correlation_results?.correlation_matrix ??
+        result.correlation_results?.results?.correlation_matrix ??
+        {};
+
+      const { matrix: transformedMatrix, filteredVariables } =
+        transformCorrelationMatrix(correlationDict, resultVariables);
       
       // Start with no columns selected and no time series data
       // User must explicitly select variables to see correlations
@@ -1024,48 +1035,62 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
             </div>
           )}
           
-          <Select 
-            value="" 
-            onValueChange={handleAddFilter}
-            disabled={!data.fileData?.fileName || data.columnValuesLoading}
-          >
-            <SelectTrigger className="w-full bg-background border-border">
-              <SelectValue placeholder={
-                !data.fileData?.fileName ? "Select a file first" : 
-                data.columnValuesLoading ? "Loading column values..." :
-                "Add Filter by Column"
-              } />
-            </SelectTrigger>
-            <SelectContent className="bg-background border-border z-50">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="outline"
+                className="w-full justify-between"
+                disabled={!data.fileData?.fileName || data.columnValuesLoading}
+              >
+                {
+                  !data.fileData?.fileName
+                    ? "Select a file first"
+                    : data.columnValuesLoading
+                      ? "Loading column values..."
+                      : Object.keys(data.settings?.filterDimensions || {}).length
+                        ? `${Object.keys(data.settings?.filterDimensions || {}).length} Filters Selected`
+                        : "Add Filter by Column"
+                }
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent className="bg-background border-border z-50 max-h-60 overflow-y-auto">
               {(data.fileData?.categoricalColumns || [])
                 .filter((column) => {
                   const columnValues = data.fileData?.columnValues?.[column];
                   return columnValues && columnValues.length > 1;
                 })
-                .map((column) => (
-                <SelectItem 
-                  key={column} 
-                  value={column}
-                  disabled={data.settings?.filterDimensions && column in data.settings.filterDimensions}
-                >
-                  {loadingColumnValues === column ? 'Loading...' : column}
-                  {data.fileData?.columnValues?.[column] && (
-                    <span className="text-muted-foreground ml-1">
-                      ({data.fileData.columnValues[column].length} values)
-                    </span>
-                  )}
-                </SelectItem>
-              ))}
+                .map((column) => {
+                  const isChecked = Boolean(
+                    data.settings?.filterDimensions && column in data.settings.filterDimensions,
+                  );
+                  return (
+                    <DropdownMenuCheckboxItem
+                      key={column}
+                      checked={isChecked}
+                      onCheckedChange={(checked) =>
+                        checked ? handleAddFilter(column) : handleRemoveFilter(column)
+                      }
+                      onSelect={(e) => e.preventDefault()}
+                    >
+                      {loadingColumnValues === column ? "Loading..." : column}
+                      {data.fileData?.columnValues?.[column] && (
+                        <span className="text-muted-foreground ml-1">
+                          ({data.fileData.columnValues[column].length} values)
+                        </span>
+                      )}
+                    </DropdownMenuCheckboxItem>
+                  );
+                })}
               {!(data.fileData?.categoricalColumns?.filter((column) => {
                 const columnValues = data.fileData?.columnValues?.[column];
                 return columnValues && columnValues.length > 1;
               }).length) && (
-                <SelectItem value="none" disabled>
+                <DropdownMenuCheckboxItem disabled checked={false} onSelect={(e) => e.preventDefault()}>
                   No categorical columns available for filtering
-                </SelectItem>
+                </DropdownMenuCheckboxItem>
               )}
-            </SelectContent>
-          </Select>
+            </DropdownMenuContent>
+          </DropdownMenu>
           
           {/* Filter Items - Show active filter dimensions */}
           <div className="space-y-2">

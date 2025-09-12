@@ -6,6 +6,7 @@ export interface MatrixSettings {
   showAxisLabels: boolean;
   showDataLabels: boolean;
   showLegend: boolean;
+  showGrid: boolean;
 }
 
 // Reuse color themes from Explore/ChartMaker atoms

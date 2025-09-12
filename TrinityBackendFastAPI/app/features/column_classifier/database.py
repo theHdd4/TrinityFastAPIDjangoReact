@@ -17,7 +17,14 @@ POSTGRES_USER = os.getenv("POSTGRES_USER", "trinity_user")
 POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD", "trinity_pass")
 
 # MongoDB Configuration
-MONGODB_URL = settings.mongo_uri
+# Support overriding the connection string or supplying credentials separately
+# so the service can authenticate when MongoDB enforces access control.
+MONGODB_URL = os.getenv("MONGO_URI", settings.mongo_uri)
+# Accept both MONGO_USERNAME and legacy MONGO_USER for credentials
+MONGO_USER = os.getenv("MONGO_USERNAME") or os.getenv("MONGO_USER")
+MONGO_PASSWORD = os.getenv("MONGO_PASSWORD")
+MONGO_AUTH_DB = os.getenv("MONGO_AUTH_DB", "admin")
+
 DATABASE_NAME = settings.classification_database
 
 # Collection Names - ONLY the ones you specified
@@ -31,7 +38,13 @@ COLLECTIONS = {
 
 # Initialize MongoDB client with timeout
 try:
-    mongo_client = MongoClient(MONGODB_URL, serverSelectionTimeoutMS=5000)
+    mongo_client = MongoClient(
+        MONGODB_URL,
+        username=MONGO_USER,
+        password=MONGO_PASSWORD,
+        authSource=MONGO_AUTH_DB,
+        serverSelectionTimeoutMS=5000,
+    )
     db = mongo_client[DATABASE_NAME]
     config_db = mongo_client[settings.classifier_configs_database]
     
