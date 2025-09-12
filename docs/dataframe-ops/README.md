@@ -53,31 +53,39 @@ UI Updates ← State Management ← Response Processing ← JSON Response ← Da
 1. **User Action**: User selects a saved dataframe from the **Inputs tab** dropdown
 2. **Frontend Element**: `DataFrameOperationsInputs.tsx` - File selection dropdown
 3. **API Call**: `GET ${VALIDATE_API}/list_saved_dataframes` - Fetches available dataframes
-4. **User Action**: User selects a specific dataframe from the dropdown
-5. **Frontend Element**: `DataFrameOperationsInputs.tsx` - `handleFileChange()` function
-6. **API Call**: `POST /load_cached` - Loads existing dataframe from MinIO
-7. **Frontend Element**: `DataFrameOperationsCanvas.tsx` - `loadDataframeByKey()` function
-8. **Backend Process**: Fetches data from MinIO and creates a session
-9. **API Call**: `GET /preview` - Gets dataframe preview for display
-10. **Frontend Element**: `DataFrameOperationsCanvas.tsx` - Data table rendering
-11. **Result**: Data is displayed in the main canvas interface
+4. **Trigger**: `useEffect` hook in `DataFrameOperationsInputs.tsx` (component mount)
+5. **User Action**: User selects a specific dataframe from the dropdown
+6. **Frontend Element**: `DataFrameOperationsInputs.tsx` - File selection dropdown
+7. **Trigger**: `handleFileChange()` function called when dropdown selection changes
+8. **API Call**: `POST /load_cached` - Loads existing dataframe from MinIO
+9. **Trigger**: `loadDataframeByKey()` function called from `handleFileChange()`
+10. **Backend Process**: Fetches data from MinIO and creates a session
+11. **API Call**: `GET /preview` - Gets dataframe preview for display
+12. **Trigger**: Called from `loadDataframeByKey()` function
+13. **Frontend Element**: `DataFrameOperationsCanvas.tsx` - Data table rendering
+14. **Result**: Data is displayed in the main canvas interface
 
 ### 2. Data Editing
 1. **User Action**: User double-clicks on a cell in the data table
 2. **Frontend Element**: `DataFrameOperationsCanvas.tsx` - Cell editing mode activation
-3. **User Action**: User makes changes and commits (Enter key or blur)
-4. **Frontend Element**: `DataFrameOperationsCanvas.tsx` - `handleCellEdit()` function
-5. **API Call**: `POST /edit_cell` - Saves cell value changes
-6. **Backend Process**: Processes the change using Polars
-7. **Frontend Element**: `DataFrameOperationsCanvas.tsx` - Table cell update
-8. **Result**: Updated data is returned and displayed
+3. **Trigger**: Cell double-click event handler
+4. **User Action**: User makes changes and commits (Enter key or blur)
+5. **Frontend Element**: `DataFrameOperationsCanvas.tsx` - Cell input field
+6. **Trigger**: `handleCellEdit()` function called on Enter key or blur event
+7. **API Call**: `POST /edit_cell` - Saves cell value changes
+8. **Trigger**: Called from `handleCellEdit()` function
+9. **Backend Process**: Processes the change using Polars
+10. **Frontend Element**: `DataFrameOperationsCanvas.tsx` - Table cell update
+11. **Result**: Updated data is returned and displayed
 
 ### 3. Data Manipulation
 1. **User Action**: User right-clicks on rows/columns for context menu
 2. **Frontend Element**: `DataFrameOperationsCanvas.tsx` - Context menu system
-3. **User Action**: User selects operation (insert, delete, duplicate, etc.)
-4. **Frontend Element**: `DataFrameOperationsCanvas.tsx` - Context menu handlers
-5. **API Calls**:
+3. **Trigger**: Right-click event handler shows context menu
+4. **User Action**: User selects operation (insert, delete, duplicate, etc.)
+5. **Frontend Element**: `DataFrameOperationsCanvas.tsx` - Context menu options
+6. **Trigger**: Context menu option handlers called when options are selected
+7. **API Calls**:
    - **Row Operations**:
      - `POST /insert_row` - `handleInsertRow()` function
      - `POST /delete_row` - `handleDeleteRow()` function
@@ -89,9 +97,9 @@ UI Updates ← State Management ← Response Processing ← JSON Response ← Da
      - `POST /rename_column` - `handleRenameColumn()` function
      - `POST /move_column` - `handleMoveColumn()` function
      - `POST /retype_column` - `handleRetypeColumn()` function
-6. **Backend Process**: Performs the operation using Polars
-7. **Frontend Element**: `DataFrameOperationsCanvas.tsx` - Table structure update
-8. **Result**: UI updates to reflect changes
+8. **Backend Process**: Performs the operation using Polars
+9. **Frontend Element**: `DataFrameOperationsCanvas.tsx` - Table structure update
+10. **Result**: UI updates to reflect changes
 
 ### 4. Data Operations
 1. **User Action**: User applies filters or sorting

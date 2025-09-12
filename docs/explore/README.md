@@ -60,80 +60,94 @@ UI Updates ← State Management ← Response Processing ← Chart Generation ←
 1. **User Action**: User selects a saved dataframe from the **Input tab** dropdown
 2. **Frontend Element**: `ExploreInput.tsx` - File selection dropdown
 3. **API Call**: `GET ${VALIDATE_API}/list_saved_dataframes` - Fetches available dataframes
-4. **User Action**: User selects a specific dataframe from the dropdown
-5. **Frontend Element**: `ExploreInput.tsx` - `handleFrameChange()` function
-6. **API Call**: `GET /column_summary` - Loads column statistics and data types
-7. **Frontend Element**: `ExploreInput.tsx` - `fetchColumnSummary()` function
-8. **API Call**: `GET /column-classifier/config/{client_name}/{app_name}/{project_name}` - Detects column classifier configuration
-9. **Frontend Element**: `ExploreInput.tsx` - `fetchColumnClassifierConfig()` function
-10. **Backend Process**: Loads dimensions (with identifiers) and measures from the column classifier config
-11. **Result**: Column summary and classifier config are displayed in the Input tab
+4. **Trigger**: `useEffect` hook in `ExploreInput.tsx` (component mount)
+5. **User Action**: User selects a specific dataframe from the dropdown
+6. **Frontend Element**: `ExploreInput.tsx` - `handleFrameChange()` function
+7. **API Call**: `GET /column_summary` - Loads column statistics and data types
+8. **Trigger**: `fetchColumnSummary()` function called from `handleFrameChange()`
+9. **API Call**: `GET /column-classifier/config/{client_name}/{app_name}/{project_name}` - Detects column classifier configuration
+10. **Trigger**: `fetchColumnClassifierConfig()` function called from `handleFrameChange()`
+11. **Backend Process**: Loads dimensions (with identifiers) and measures from the column classifier config
+12. **Result**: Column summary and classifier config are displayed in the Input tab
 
 ### 2. Cardinality View Toggle
 1. **User Action**: User toggles the dataframe summary view (cardinality view) on/off
 2. **Frontend Element**: `ExploreCanvas.tsx` - Cardinality view toggle switch
-3. **Frontend Process**: Shows/hides column statistics, data types, and unique value counts
-4. **Result**: Cardinality view displays column summary data in a sortable table
+3. **API Call**: `GET /column_summary` - Fetches column statistics for cardinality view
+4. **Trigger**: `fetchCardinalityData()` function called when toggle is switched on
+5. **Frontend Process**: Shows/hides column statistics, data types, and unique value counts
+6. **Result**: Cardinality view displays column summary data in a sortable table
 
 ### 3. Chart Layout Configuration
 1. **User Action**: User goes to **Settings tab** and chooses graph layout (1 or 2 charts per row)
 2. **Frontend Element**: `ExploreSettings.tsx` - Chart layout selection controls
 3. **User Action**: User clicks "Explore" button to initialize chart areas
-4. **Frontend Element**: `ExploreSettings.tsx` - `handleApply()` function
-5. **Frontend Process**: Creates the specified number of chart areas
-6. **Result**: Chart areas are initialized in the Exhibition tab
+4. **Frontend Element**: `ExploreSettings.tsx` - "Explore" button
+5. **Trigger**: `handleApply()` function called when "Explore" button is clicked
+6. **Frontend Process**: Creates the specified number of chart areas
+7. **Result**: Chart areas are initialized in the Exhibition tab
 
 ### 4. Chart Configuration
 1. **User Action**: For each chart area, user selects X-axis and Y-axis from available columns
 2. **Frontend Element**: `ExploreCanvas.tsx` - Chart configuration dropdowns
 3. **User Action**: User can add up to 2 Y-axes per chart using the plus (+) button
-4. **Frontend Element**: `ExploreCanvas.tsx` - Y-axis plus button (`addYAxis()` function)
-5. **User Action**: User uses segregate field dropdown for filtering by categorical values
-6. **Frontend Element**: `ExploreCanvas.tsx` - Segregate field dropdown
-7. **Result**: Chart configuration is set up for data visualization
+4. **Frontend Element**: `ExploreCanvas.tsx` - Y-axis plus button
+5. **Trigger**: `addYAxis()` function called when plus (+) button is clicked
+6. **User Action**: User uses segregate field dropdown for filtering by categorical values
+7. **Frontend Element**: `ExploreCanvas.tsx` - Segregate field dropdown
+8. **Result**: Chart configuration is set up for data visualization
 
 ### 5. Chart Type Selection
 1. **User Action**: User long-presses at the top of any chart area to change chart type
-2. **Frontend Element**: `ExploreCanvas.tsx` - Chart header long-press handler (`openChartTypeTray()`)
-3. **Frontend Process**: Opens chart type selection context menu
-4. **User Action**: User selects from 5 chart types: bar, line, pie, area, scatter
-5. **Frontend Element**: `ExploreCanvas.tsx` - `handleChartTypeSelect()` function
-6. **Result**: Chart type changes apply immediately
+2. **Frontend Element**: `ExploreCanvas.tsx` - Chart header long-press handler
+3. **Trigger**: `openChartTypeTray()` function called on long-press
+4. **Frontend Process**: Opens chart type selection context menu
+5. **User Action**: User selects from 5 chart types: bar, line, pie, area, scatter
+6. **Frontend Element**: `ExploreCanvas.tsx` - Chart type selection menu
+7. **Trigger**: `handleChartTypeSelect()` function called when chart type is selected
+8. **Result**: Chart type changes apply immediately
 
 ### 6. Real-time Chart Generation
 1. **User Action**: User completes chart configuration (X/Y axes selection)
-2. **Frontend Element**: `ExploreCanvas.tsx` - `generateChart()` function
-3. **API Call**: `POST /select-dimensions-and-measures` - Creates explore atom configuration
-4. **Frontend Element**: `ExploreCanvas.tsx` - Chart generation logic
-5. **API Call**: `POST /specify-operations` - Saves chart configuration
-6. **Frontend Element**: `ExploreCanvas.tsx` - Operations specification
-7. **API Call**: `GET /chart-data-multidim/{explore_atom_id}` - Generates chart data
-8. **Frontend Element**: `ExploreCanvas.tsx` - Chart data processing and rendering
-9. **Result**: Charts update automatically and display data visualization
+2. **Frontend Element**: `ExploreCanvas.tsx` - Chart configuration dropdowns
+3. **Trigger**: `generateChart()` function called when axes are selected
+4. **API Call**: `POST /select-dimensions-and-measures` - Creates explore atom configuration
+5. **Trigger**: Called from `generateChart()` function
+6. **API Call**: `POST /specify-operations` - Saves chart configuration
+7. **Trigger**: Called from `generateChart()` function
+8. **API Call**: `GET /chart-data-multidim/{explore_atom_id}` - Generates chart data
+9. **Trigger**: Called from `generateChart()` function
+10. **Frontend Element**: `ExploreCanvas.tsx` - Chart data processing and rendering
+11. **Result**: Charts update automatically and display data visualization
 
 ### 7. Multiple Chart Areas
 1. **User Action**: User clicks the plus (+) button below any existing chart
-2. **Frontend Element**: `ExploreCanvas.tsx` - Plus button (`addChart()` function)
-3. **Frontend Process**: Creates new chart configuration in `chartConfigs` array
-4. **User Action**: User configures the new chart area independently
-5. **Frontend Element**: `ExploreCanvas.tsx` - Independent chart configuration system
-6. **Result**: New chart area is added with independent configuration
+2. **Frontend Element**: `ExploreCanvas.tsx` - Plus button
+3. **Trigger**: `addChart()` function called when plus (+) button is clicked
+4. **Frontend Process**: Creates new chart configuration in `chartConfigs` array
+5. **User Action**: User configures the new chart area independently
+6. **Frontend Element**: `ExploreCanvas.tsx` - Independent chart configuration system
+7. **Result**: New chart area is added with independent configuration
 
 ### 8. Context Menu Operations
 1. **User Action**: User right-clicks on chart areas for context menu
 2. **Frontend Element**: `ExploreCanvas.tsx` - Right-click context menu system
-3. **User Action**: User selects chart customization options
-4. **Frontend Element**: `ExploreCanvas.tsx` - Context menu handlers
-5. **Result**: Chart customization options are applied
+3. **Trigger**: Context menu appears on right-click event
+4. **User Action**: User selects chart customization options
+5. **Frontend Element**: `ExploreCanvas.tsx` - Context menu handlers
+6. **Trigger**: Context menu option handlers called when options are selected
+7. **Result**: Chart customization options are applied
 
 ### 9. Filtering and Data Management
 1. **User Action**: User applies filters using segregate field dropdowns
 2. **Frontend Element**: `ExploreCanvas.tsx` - Filter dropdown system
-3. **API Call**: `GET /column_summary` - Fetches unique values for filtering
-4. **Frontend Element**: `ExploreCanvas.tsx` - `fetchUniqueValues()` function
-5. **User Action**: User selects filter values
-6. **Frontend Element**: `ExploreCanvas.tsx` - Filter application logic
-7. **Result**: Charts update with filtered data
+3. **Trigger**: Filter dropdown change handlers called when filter is selected
+4. **API Call**: `GET /column_summary` - Fetches unique values for filtering
+5. **Trigger**: `fetchUniqueValues()` function called from filter change handlers
+6. **User Action**: User selects filter values
+7. **Frontend Element**: `ExploreCanvas.tsx` - Filter application logic
+8. **Trigger**: Filter value selection handlers called when values are selected
+9. **Result**: Charts update with filtered data
 
 ## Key API Endpoints
 

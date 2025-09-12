@@ -63,13 +63,14 @@ UI Updates ← State Management ← Response Processing ← Forecast Generation 
 1. **User Action**: User selects a saved dataframe from the **Settings tab** dropdown
 2. **Frontend Element**: `AutoRegressiveModelsSettings.tsx` - File selection dropdown
 3. **API Call**: `GET ${VALIDATE_API}/list_saved_dataframes` - Fetches available dataframes
-4. **Frontend Element**: `AutoRegressiveModelsSettings.tsx` - `useEffect` hook for file loading
+4. **Trigger**: `useEffect` hook in `AutoRegressiveModelsSettings.tsx` (component mount)
 5. **Frontend Process**: Extracts scope numbers from filenames (e.g., `Scope_1_Combination_Date.arrow`)
 6. **User Action**: User selects a scope from available scope options
 7. **Frontend Element**: `AutoRegressiveModelsSettings.tsx` - Scope selection dropdown
-8. **Frontend Process**: Filters files by selected scope and extracts combinations using regex pattern matching
-9. **API Call**: No additional API call - combinations are derived from filename patterns
-10. **Result**: Available combinations are displayed for selection
+8. **Trigger**: Scope dropdown change handler
+9. **Frontend Process**: Filters files by selected scope and extracts combinations using regex pattern matching
+10. **API Call**: No additional API call - combinations are derived from filename patterns
+11. **Result**: Available combinations are displayed for selection
 
 ### 2. Model Configuration
 1. **User Action**: User selects combinations and models for training
@@ -81,36 +82,38 @@ UI Updates ← State Management ← Response Processing ← Forecast Generation 
 7. **Result**: Model training configuration is prepared
 
 ### 3. Column Detection and Frequency Analysis
-1. **User Action**: User initiates model training process
-2. **Frontend Element**: `AutoRegressiveModelsCanvas.tsx` - `handleTrainModels()` function
-3. **API Call**: `POST /get_columns` - Fetches available columns for selected scope/combination
-4. **Frontend Element**: `AutoRegressiveModelsCanvas.tsx` - Column detection logic
-5. **API Call**: `POST /detect_frequency` - Detects time series frequency
-6. **Frontend Element**: `AutoRegressiveModelsCanvas.tsx` - `detectFrequency()` function
-7. **API Call**: `POST /get_date_columns` - Gets available date columns
-8. **Frontend Element**: `AutoRegressiveModelsCanvas.tsx` - Date column selection
-9. **User Action**: User selects fiscal year month from dropdown (January-December)
-10. **Frontend Element**: `AutoRegressiveModelsCanvas.tsx` - Fiscal year month selection dropdown
+1. **User Action**: User clicks "Run the Models" button
+2. **Frontend Element**: `AutoRegressiveModelsCanvas.tsx` - "Run the Models" button
+3. **Trigger**: `handleTrainModels()` function called when button is clicked
+4. **API Call**: `POST /get_columns` - Fetches available columns for selected scope/combination
+5. **Trigger**: Called from `handleTrainModels()` function
+6. **API Call**: `POST /detect_frequency` - Detects time series frequency
+7. **Trigger**: `detectFrequency()` function called from `handleTrainModels()`
+8. **User Action**: User selects fiscal year month from dropdown (January-December)
+9. **Frontend Element**: `AutoRegressiveModelsCanvas.tsx` - Fiscal year month selection dropdown
+10. **Trigger**: Dropdown change handler
 11. **Frontend Process**: Maps selected month to numeric value (1-12) for backend processing
 12. **Result**: Time series configuration is validated and prepared
 
 ### 4. Model Training
 1. **User Action**: User clicks "Run the Models" button
-2. **Frontend Element**: `AutoRegressiveModelsCanvas.tsx` - Training button handler
-3. **API Call**: `POST /validate-request` - Validates training parameters (prevents 504 timeouts)
-4. **Frontend Element**: `AutoRegressiveModelsCanvas.tsx` - Request validation
-5. **API Call**: `POST /train-autoregressive-models-direct` - Initiates model training (main training endpoint)
-6. **Frontend Element**: `AutoRegressiveModelsCanvas.tsx` - Training initiation with progress tracking
-7. **Backend Process**: Concurrent training of multiple models with progress tracking
-8. **Result**: Training is initiated with run_id for progress tracking
+2. **Frontend Element**: `AutoRegressiveModelsCanvas.tsx` - "Run the Models" button
+3. **Trigger**: `handleTrainModels()` function called when button is clicked
+4. **API Call**: `POST /validate-request` - Validates training parameters (prevents 504 timeouts)
+5. **Trigger**: Called from `handleTrainModels()` function
+6. **API Call**: `POST /train-autoregressive-models-direct` - Initiates model training (main training endpoint)
+7. **Trigger**: Called from `handleTrainModels()` function
+8. **Backend Process**: Concurrent training of multiple models with progress tracking
+9. **Result**: Training is initiated with run_id for progress tracking
 
 ### 5. Progress Tracking
 1. **Frontend Process**: Polls training progress using run_id
 2. **API Call**: `GET /training-progress/{run_id}` - Gets detailed training progress
-3. **Frontend Element**: `AutoRegressiveModelsCanvas.tsx` - `pollProgress()` function
+3. **Trigger**: `pollProgress()` function called repeatedly during training
 4. **API Call**: `GET /training-progress-simple/{run_id}` - Gets minimal progress for fast polling
-5. **Frontend Element**: `AutoRegressiveModelsCanvas.tsx` - Progress display logic
-6. **Result**: Real-time progress updates are displayed to user
+5. **Trigger**: Called from `pollProgress()` function for faster updates
+6. **Frontend Element**: `AutoRegressiveModelsCanvas.tsx` - Progress display logic
+7. **Result**: Real-time progress updates are displayed to user
 
 **Note**: During model training, the Network tab shows these primary API calls:
 - `POST /validate-request` - Parameter validation (prevents timeouts)
@@ -120,29 +123,34 @@ UI Updates ← State Management ← Response Processing ← Forecast Generation 
 ### 6. Results Retrieval and Visualization
 1. **Frontend Process**: Detects training completion
 2. **API Call**: `GET /training-results/{run_id}` - Gets final training results
-3. **Frontend Element**: `AutoRegressiveModelsCanvas.tsx` - Results processing
-4. **Frontend Process**: Renders interactive charts and model comparisons
-5. **Frontend Element**: `AutoRegressiveModelsCanvas.tsx` - Chart rendering with Recharts
-6. **Result**: Model results are displayed with interactive visualizations
+3. **Trigger**: Called when training is complete
+4. **Frontend Element**: `AutoRegressiveModelsCanvas.tsx` - Results processing
+5. **Frontend Process**: Renders interactive charts and model comparisons
+6. **Frontend Element**: `AutoRegressiveModelsCanvas.tsx` - Chart rendering with Recharts
+7. **Result**: Model results are displayed with interactive visualizations
 
 ### 7. Growth Rate Calculations
-1. **User Action**: User selects growth rate calculation (fiscal, quarterly, half-yearly)
-2. **Frontend Element**: `AutoRegressiveModelsCanvas.tsx` - Growth rate selection
-3. **API Calls**:
+1. **User Action**: User clicks growth rate calculation buttons (fiscal, quarterly, half-yearly)
+2. **Frontend Element**: `AutoRegressiveModelsCanvas.tsx` - Growth rate calculation buttons
+3. **Trigger**: Growth rate button click handlers
+4. **API Calls**:
    - `POST /calculate-fiscal-growth` - Fiscal growth calculation
    - `POST /calculate-quarterly-growth` - Quarterly growth calculation
    - `POST /calculate-halfyearly-growth` - Half-yearly growth calculation
-4. **Frontend Element**: `AutoRegressiveModelsCanvas.tsx` - Growth rate calculation functions
-5. **Result**: Growth rates are calculated and displayed
+5. **Trigger**: Called from respective growth rate calculation functions
+6. **Frontend Element**: `AutoRegressiveModelsCanvas.tsx` - Growth rate calculation functions
+7. **Result**: Growth rates are calculated and displayed
 
 ### 8. Model Persistence
 1. **User Action**: User clicks "Save Result" button for specific combinations
-2. **Frontend Element**: `AutoRegressiveModelsCanvas.tsx` - Save button handler
-3. **API Call**: `POST /models/save-single-combination` - Saves individual combination result
-4. **Frontend Element**: `AutoRegressiveModelsCanvas.tsx` - Save confirmation
-5. **API Call**: `GET /models/saved-combinations-status` - Gets updated save status
-6. **Frontend Element**: `AutoRegressiveModelsCanvas.tsx` - Status checking
-7. **Result**: Models are saved to MongoDB and status is tracked
+2. **Frontend Element**: `AutoRegressiveModelsCanvas.tsx` - "Save Result" button
+3. **Trigger**: `handleSaveSingleCombination()` function called when button is clicked
+4. **API Call**: `POST /models/save-single-combination` - Saves individual combination result
+5. **Trigger**: Called from `handleSaveSingleCombination()` function
+6. **API Call**: `GET /models/saved-combinations-status` - Gets updated save status
+7. **Trigger**: Called from `handleSaveSingleCombination()` function
+8. **Frontend Element**: `AutoRegressiveModelsCanvas.tsx` - Status checking
+9. **Result**: Models are saved to MongoDB and status is tracked
 
 **Note**: When clicking "Save Result", the Network tab shows these API calls:
 - `POST /models/save-single-combination` - Saves the specific combination result
