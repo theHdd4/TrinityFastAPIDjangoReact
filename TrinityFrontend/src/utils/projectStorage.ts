@@ -35,18 +35,33 @@ function stripCards(cards: any[]): any[] {
 
       if (atom.atomId === 'data-upload-validate' && atom.settings) {
         const {
-          uploadedFiles,
-          fileMappings,
-          filePathMap,
-          fileSizeMap,
-          fileKeyMap,
+          uploadedFiles = [],
+          fileMappings = {},
+          filePathMap = {},
+          fileSizeMap = {},
+          fileKeyMap = {},
           validations,
           columnConfig,
           ...restSettings
         } = atom.settings;
+        const saved = uploadedFiles.filter(name => {
+          const p = filePathMap[name];
+          return !p || !p.includes('/tmp/');
+        });
+        const filterMap = (map: Record<string, any>) =>
+          Object.fromEntries(
+            Object.entries(map).filter(([n]) => saved.includes(n))
+          );
         return {
           ...atom,
-          settings: restSettings,
+          settings: {
+            ...restSettings,
+            uploadedFiles: saved,
+            fileMappings: filterMap(fileMappings),
+            filePathMap: filterMap(filePathMap),
+            fileSizeMap: filterMap(fileSizeMap),
+            fileKeyMap: filterMap(fileKeyMap),
+          },
           color: atom.color || info?.color || 'bg-gray-400',
         };
       }
