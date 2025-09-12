@@ -467,6 +467,42 @@ async def upload_file(
     return {"file_path": result["object_name"]}
 
 
+@router.delete("/temp-uploads")
+async def clear_temp_uploads(
+    client_name: str = "",
+    app_name: str = "",
+    project_name: str = "",
+):
+    """Remove any temporary uploads for the given environment."""
+    prefix, env, env_source = await get_object_prefix(
+        client_name=client_name,
+        app_name=app_name,
+        project_name=project_name,
+        include_env=True,
+    )
+    tmp_prefix = prefix + "tmp/"
+    try:
+        objects = list(
+            minio_client.list_objects(MINIO_BUCKET, prefix=tmp_prefix, recursive=True)
+        )
+        for obj in objects:
+            minio_client.remove_object(MINIO_BUCKET, obj.object_name)
+        return {
+            "deleted": len(objects),
+            "prefix": tmp_prefix,
+            "environment": env,
+            "env_source": env_source,
+        }
+    except S3Error as e:
+        return {
+            "deleted": 0,
+            "error": str(e),
+            "prefix": tmp_prefix,
+            "environment": env,
+            "env_source": env_source,
+        }
+
+
 # POST: CREATE_NEW - Create validator atom with column preprocessing
 @router.post("/create_new", status_code=202, response_model=CreateValidatorResponse)
 async def create_new(

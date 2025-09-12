@@ -66,6 +66,36 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
     }
   }, [settings.uploadedFiles, settings.filePathMap, settings.fileSizeMap, uploadedFiles.length]);
 
+  useEffect(() => {
+    return () => {
+      const envStr = localStorage.getItem('env');
+      if (envStr) {
+        try {
+          const env = JSON.parse(envStr);
+          const params = new URLSearchParams({
+            client_name: env.CLIENT_NAME || '',
+            app_name: env.APP_NAME || '',
+            project_name: env.PROJECT_NAME || ''
+          });
+          fetch(`${VALIDATE_API}/temp-uploads?${params.toString()}`, {
+            method: 'DELETE',
+            credentials: 'include'
+          }).catch(() => {});
+        } catch {
+          /* ignore */
+        }
+      }
+      updateSettings(atomId, {
+        uploadedFiles: [],
+        fileMappings: {},
+        filePathMap: {},
+        fileSizeMap: {},
+        fileKeyMap: {},
+      });
+      updateSessionState(user?.id, { envvars: null });
+    };
+  }, [atomId, updateSettings, user?.id]);
+
   const handleFileUpload = async (files: File[]) => {
     const uploaded: UploadedFileRef[] = [];
     for (const file of files) {
