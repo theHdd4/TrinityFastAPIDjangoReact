@@ -338,24 +338,35 @@ class DataService:
 
     @classmethod
     def _parse_x_variables(cls, x_variables_str: str) -> List[str]:
-        """Parse x_variables from string format like "['SalesValue' 'VolumeUnits' 'D1' 'Week']"."""
+        """Parse x_variables from string format like "['SalesValue' 'VolumeUnits' 'D1' 'Week']" or "['Year', 'Month', 'Week', 'SalesValue']"."""
         try:
             if not x_variables_str or x_variables_str == "[]":
                 return []
             
-            # Handle the format: "['SalesValue' 'VolumeUnits' 'D1' 'Week']"
-            # Remove brackets and split by spaces, then clean up quotes
+            # Remove brackets
             cleaned = x_variables_str.strip("[]")
             if not cleaned:
                 return []
             
-            # Split by spaces and clean up quotes
             variables = []
-            for var in cleaned.split():
-                var = var.strip("'\"")
-                if var:
-                    variables.append(var)
             
+            # Check if the string contains commas (new format)
+            if ',' in cleaned:
+                # Handle format with commas: "['Year', 'Month', 'Week', 'SalesValue', 'VolumeUnits', 'D1']"
+                # Split by commas and clean up quotes and spaces
+                for var in cleaned.split(','):
+                    var = var.strip().strip("'\"")
+                    if var:
+                        variables.append(var)
+            else:
+                # Handle format without commas: "['SalesValue' 'VolumeUnits' 'D1' 'Week']"
+                # Split by spaces and clean up quotes
+                for var in cleaned.split():
+                    var = var.strip("'\"")
+                    if var:
+                        variables.append(var)
+            
+            logger.info("✅ Parsed x_variables: %s -> %s", x_variables_str, variables)
             return variables
         except Exception as e:
             logger.warning("Failed to parse x_variables '%s': %s", x_variables_str, e)

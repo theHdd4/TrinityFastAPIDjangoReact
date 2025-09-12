@@ -1240,9 +1240,9 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
                       
                       {/* Individual Combination Selection - Exact Build Atom Layout */}
                       <div className="max-h-60 overflow-y-auto overflow-x-auto mt-2 border rounded p-2">
-                        <div className="grid grid-cols-1 gap-2 min-w-max">
+                        <div className="grid grid-cols-1 gap-2 w-full min-w-max">
                           {backendCombinations.combinations.map((combination: any) => (
-                            <div key={combination.combination_id} className="flex items-center space-x-2 p-2 border rounded hover:bg-muted/30">
+                            <div key={combination.combination_id} className="flex items-center space-x-2 p-2 border rounded hover:bg-muted/30 w-full min-w-max">
                               <Checkbox 
                                 id={`combination-${combination.combination_id}`}
                                 checked={data.selectedCombinations?.includes(combination.combination_id) || false}
@@ -1265,14 +1265,14 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
                                     });
                                   }
                                 }}
-                                className="data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600 data-[state=checked]:text-white"
+                                className="data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600 data-[state=checked]:text-white flex-shrink-0"
                                 onClick={(e) => e.stopPropagation()}
                               />
-                              <div className="min-w-0 flex-1">
-                                <label htmlFor={`combination-${combination.combination_id}`} className="text-xs font-medium cursor-pointer whitespace-nowrap">
+                              <div className="min-w-0 flex-1 overflow-hidden">
+                                <label htmlFor={`combination-${combination.combination_id}`} className="text-xs font-medium cursor-pointer block truncate">
                                   {combination.combination_id}
                                 </label>
-                                <div className="text-xs text-gray-500 whitespace-nowrap">
+                                <div className="text-xs text-gray-500 block truncate">
                                   {combination.identifiers ? Object.entries(combination.identifiers).map(([key, value]) => `${key}: ${value}`).join(', ') : 'No identifiers'}
                                 </div>
                               </div>
