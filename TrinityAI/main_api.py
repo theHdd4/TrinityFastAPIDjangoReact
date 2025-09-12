@@ -53,9 +53,10 @@ load_env_from_redis()
 REDIS_HOST = os.getenv("REDIS_HOST", "redis")
 redis_client = redis.Redis(host=REDIS_HOST, port=6379, decode_responses=True)
 
-MONGO_URI = os.getenv(
-    "CLASSIFY_MONGO_URI",
-    "mongodb://admin_dev:pass_dev@10.2.1.65:9005/?authSource=admin",
+MONGO_URI = (
+    os.getenv("CLASSIFY_MONGO_URI")
+    or os.getenv("MONGO_URI")
+    or "mongodb://admin_dev:pass_dev@10.2.1.65:9005/?authSource=admin"
 )
 # Column classifier configurations are stored in the shared "trinity_db"
 # database under the "column_classifier_config" collection.

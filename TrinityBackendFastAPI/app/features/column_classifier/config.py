@@ -2,6 +2,7 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from functools import lru_cache
 from typing import Optional
+import os
 
 class Settings(BaseSettings):
     """Data Classification API Settings - MongoDB Focused"""
@@ -24,7 +25,11 @@ class Settings(BaseSettings):
     # =============================================================================
     # MONGODB SETTINGS
     # =============================================================================
-    mongo_uri: str = "mongodb://admin_dev:pass_dev@10.2.1.65:9005/?authSource=admin"
+    mongo_uri: str = (
+        os.getenv("CLASSIFY_MONGO_URI")
+        or os.getenv("MONGO_URI")
+        or "mongodb://admin_dev:pass_dev@10.2.1.65:9005/?authSource=admin"
+    )
     
     # Main database for classification data
     classification_database: str = "validator_atoms_db"  # ✅ FIXED: Added missing 'd'

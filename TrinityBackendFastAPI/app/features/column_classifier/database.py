@@ -17,15 +17,22 @@ POSTGRES_USER = os.getenv("POSTGRES_USER", "trinity_user")
 POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD", "trinity_pass")
 
 # MongoDB Configuration
-# Support overriding the connection string or supplying credentials separately
-# so the service can authenticate when MongoDB enforces access control.
-MONGODB_URL = os.getenv("MONGO_URI", settings.mongo_uri)
+# Support both dedicated CLASSIFY_MONGO_URI and fallback MONGO_URI so the
+# service connects in dev and prod environments without additional tweaks.
+MONGODB_URL = (
+    os.getenv("CLASSIFY_MONGO_URI")
+    or os.getenv("MONGO_URI")
+    or settings.mongo_uri
+)
 # Accept both MONGO_USERNAME and legacy MONGO_USER for credentials
 MONGO_USER = os.getenv("MONGO_USERNAME") or os.getenv("MONGO_USER")
 MONGO_PASSWORD = os.getenv("MONGO_PASSWORD")
 MONGO_AUTH_DB = os.getenv("MONGO_AUTH_DB", "admin")
 
 DATABASE_NAME = settings.classification_database
+CONFIG_DB_NAME = os.getenv(
+    "CLASSIFIER_CONFIG_DB", settings.classifier_configs_database
+)
 
 # Collection Names - ONLY the ones you specified
 # Use settings for consistency
@@ -46,16 +53,16 @@ try:
         serverSelectionTimeoutMS=5000,
     )
     db = mongo_client[DATABASE_NAME]
-    config_db = mongo_client[settings.classifier_configs_database]
+    config_db = mongo_client[CONFIG_DB_NAME]
 
     # Test connection
     mongo_client.admin.command('ping')
     print(f"✅ Connected to MongoDB: {DATABASE_NAME}")
-    print(f"✅ Config DB: {settings.classifier_configs_database}")
+    print(f"✅ Config DB: {CONFIG_DB_NAME}")
     if COLLECTIONS["CLASSIFIER_CONFIGS"] not in config_db.list_collection_names():
         config_db.create_collection(COLLECTIONS["CLASSIFIER_CONFIGS"])
         print(
-            f"✅ Created collection {COLLECTIONS['CLASSIFIER_CONFIGS']} in {settings.classifier_configs_database}"
+            f"✅ Created collection {COLLECTIONS['CLASSIFIER_CONFIGS']} in {CONFIG_DB_NAME}"
         )
     
 except Exception as e:
@@ -88,7 +95,7 @@ def ensure_mongo_connection() -> bool:
             serverSelectionTimeoutMS=5000,
         )
         db = mongo_client[DATABASE_NAME]
-        config_db = mongo_client[settings.classifier_configs_database]
+        config_db = mongo_client[CONFIG_DB_NAME]
         mongo_client.admin.command("ping")
         if COLLECTIONS["CLASSIFIER_CONFIGS"] not in config_db.list_collection_names():
             config_db.create_collection(COLLECTIONS["CLASSIFIER_CONFIGS"])
