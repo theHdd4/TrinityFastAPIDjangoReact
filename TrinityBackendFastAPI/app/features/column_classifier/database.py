@@ -47,11 +47,16 @@ try:
     )
     db = mongo_client[DATABASE_NAME]
     config_db = mongo_client[settings.classifier_configs_database]
-    
+
     # Test connection
     mongo_client.admin.command('ping')
     print(f"✅ Connected to MongoDB: {DATABASE_NAME}")
     print(f"✅ Config DB: {settings.classifier_configs_database}")
+    if COLLECTIONS["CLASSIFIER_CONFIGS"] not in config_db.list_collection_names():
+        config_db.create_collection(COLLECTIONS["CLASSIFIER_CONFIGS"])
+        print(
+            f"✅ Created collection {COLLECTIONS['CLASSIFIER_CONFIGS']} in {settings.classifier_configs_database}"
+        )
     
 except Exception as e:
     print(f"❌ MongoDB connection failed: {e}")

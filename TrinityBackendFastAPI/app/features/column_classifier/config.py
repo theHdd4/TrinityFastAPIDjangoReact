@@ -35,7 +35,7 @@ class Settings(BaseSettings):
     business_dimensions_collection: str = "business_dimensions_with_assignments"
     classifier_configs_collection: str = "column_classifier_configs"
     # Database used for classifier config documents
-    classifier_configs_database: str = "trinity_prod"
+    classifier_configs_database: str = "trinity_db"
     
     # =============================================================================
     # CLASSIFICATION SETTINGS
