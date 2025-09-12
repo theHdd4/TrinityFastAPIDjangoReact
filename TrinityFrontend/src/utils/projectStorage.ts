@@ -2,6 +2,7 @@ import { safeStringify } from './safeStringify';
 import { useExhibitionStore } from '@/components/ExhibitionMode/store/exhibitionStore';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { atoms as allAtoms } from '@/components/AtomList/data';
+import { VALIDATE_API } from '@/lib/api';
 
 function stripCards(cards: any[]): any[] {
   return cards.map(card => ({
@@ -88,6 +89,24 @@ export function saveCurrentProject(project: any): void {
 
 // Clear all cached project-specific state from localStorage
 export function clearProjectState(): void {
+  const envStr = localStorage.getItem('env');
+  if (envStr) {
+    try {
+      const env = JSON.parse(envStr);
+      const params = new URLSearchParams({
+        client_name: env.CLIENT_NAME || '',
+        app_name: env.APP_NAME || '',
+        project_name: env.PROJECT_NAME || ''
+      });
+      void fetch(`${VALIDATE_API}/temp-uploads?${params.toString()}`, {
+        method: 'DELETE',
+        credentials: 'include'
+      });
+    } catch {
+      /* ignore */
+    }
+  }
+
   [
     'current-project',
     'laboratory-config',
