@@ -237,7 +237,6 @@ def main():
 
     # Seed default App templates if none exist
     from apps.registry.models import App
-    from django_tenants.utils import schema_context
 
     default_apps = [
         ("Marketing Mix Modeling", "marketing-mix", "Preset: Pre-process + Build"),
