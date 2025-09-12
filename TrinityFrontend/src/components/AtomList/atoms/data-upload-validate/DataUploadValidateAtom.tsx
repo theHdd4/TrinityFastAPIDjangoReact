@@ -557,6 +557,20 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
         }
       });
       setSaveStatus(prev => ({ ...prev, ...newStatus }));
+      // Clear temp paths so saved files persist in project state
+      const cleared: Record<string, string> = {};
+      uploadedFiles.forEach(f => {
+        cleared[f.name] = '';
+      });
+      updateSettings(atomId, {
+        uploadedFiles: uploadedFiles.map(f => f.name),
+        filePathMap: { ...(settings.filePathMap || {}), ...cleared },
+        fileSizeMap: {
+          ...(settings.fileSizeMap || {}),
+          ...Object.fromEntries(uploadedFiles.map(f => [f.name, f.size])),
+        },
+        fileMappings: fileAssignments,
+      });
       if (duplicates.length > 0) {
         toast({
           title: `File with the name ${duplicates[0]} already exists`,
