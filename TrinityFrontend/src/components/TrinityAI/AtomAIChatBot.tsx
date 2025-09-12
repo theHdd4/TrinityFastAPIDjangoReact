@@ -72,7 +72,7 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
     const initialSessionId = localStorage.getItem(`trinity_ai_session_${atomId}`) || Math.floor(1000 + Math.random() * 90000).toString();
     return [{
       id: 'init',
-      content: `Hi! I can help configure the "${atomTitle}" atom. Describe what you want to do.\n\n🆔 Session: ${initialSessionId}`,
+      content: `Hi! I can help configure the "${atomTitle}" atom. Describe what you want to do.`,
       sender: 'ai',
       timestamp: new Date(),
     }];
@@ -92,7 +92,7 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
     const clearedMessages = [
       {
         id: 'init',
-        content: `Hi! I can help configure the "${atomTitle}" atom. Describe what you want to do.\n\n🆔 Session: ${sessionId}\n💬 Chat history cleared`,
+        content: `Hi! I can help configure the "${atomTitle}" atom. Describe what you want to do.\n\n💬 Chat history cleared`,
         sender: 'ai',
         timestamp: new Date(),
       },
@@ -113,7 +113,7 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
     const newMessages = [
       {
         id: 'init',
-        content: `Hi! I can help configure the "${atomTitle}" atom. Describe what you want to do.\n\n🆔 Session: ${newSessionId}`,
+        content: `Hi! I can help configure the "${atomTitle}" atom. Describe what you want to do.`,
         sender: 'ai',
         timestamp: new Date(),
       },
@@ -156,46 +156,62 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
       let data;
       if (res.ok) {
         data = await res.json();
-        // Enhanced AI response handling with suggestions as master key
+        // Enhanced AI response handling with smart_response as priority
         let aiText = '';
         if (data.success) {
-          // Success case - show completion message
-          aiText = `✅ ${data.message || 'Operation completed successfully!'}\n\n🔄 You can now configure the operation or proceed with the current settings.`;
+          // Success case - use smart_response if available, otherwise show completion message
+          aiText = data.smart_response || `I've successfully completed the operation for you. ${data.message || 'The configuration is ready and you can now proceed with the current settings or make further adjustments as needed.'}`;
         } else if (Array.isArray(data.suggestions) && data.suggestions.length) {
-          // Suggestions case - show enhanced suggestions
-          aiText = `💡 ${data.message || 'Here\'s what I can help you with:'}\n\n${data.suggestions.join('\n\n')}`;
-          
-          // Add file analysis if available
-          if (data.file_analysis) {
-            aiText += `\n\n📊 File Analysis:\n`;
-            if (data.file_analysis.total_files) {
-              aiText += `• Total files available: ${data.file_analysis.total_files}\n`;
+          // Suggestions case - ALWAYS use smart_response if available, don't add extra content
+          if (data.smart_response) {
+            aiText = data.smart_response;
+          } else {
+            // Only show suggestions if no smart_response
+            aiText = `${data.message || 'Here\'s what I can help you with:'}\n\n${data.suggestions.join('\n\n')}`;
+            
+            // Add file analysis if available
+            if (data.file_analysis) {
+              aiText += `\n\n📊 File Analysis:\n`;
+              if (data.file_analysis.total_files) {
+                aiText += `• Total files available: ${data.file_analysis.total_files}\n`;
+              }
+              if (data.file_analysis.recommended_pairs && data.file_analysis.recommended_pairs.length > 0) {
+                aiText += `• Recommended pairs: ${data.file_analysis.recommended_pairs.join(', ')}\n`;
+              }
+              if (data.file_analysis.common_columns && data.file_analysis.common_columns.length > 0) {
+                aiText += `• Common columns: ${data.file_analysis.common_columns.join(', ')}\n`;
+              }
+              if (data.file_analysis.concat_tips && data.file_analysis.concat_tips.length > 0) {
+                aiText += `• Tips: ${data.file_analysis.concat_tips.join(', ')}\n`;
+              }
+              if (data.file_analysis.merge_tips && data.file_analysis.merge_tips.length > 0) {
+                aiText += `• Tips: ${data.file_analysis.merge_tips.join(', ')}\n`;
+              }
             }
-            if (data.file_analysis.recommended_pairs && data.file_analysis.recommended_pairs.length > 0) {
-              aiText += `• Recommended pairs: ${data.file_analysis.recommended_pairs.join(', ')}\n`;
+            
+            // Add next steps if available
+            if (data.next_steps && data.next_steps.length > 0) {
+              aiText += `\n\n🎯 Next Steps:\n${data.next_steps.map((step, idx) => `${idx + 1}. ${step}`).join('\n')}`;
             }
-            if (data.file_analysis.common_columns && data.file_analysis.common_columns.length > 0) {
-              aiText += `• Common columns: ${data.file_analysis.common_columns.join(', ')}\n`;
-            }
-            if (data.file_analysis.concat_tips && data.file_analysis.concat_tips.length > 0) {
-              aiText += `• Tips: ${data.file_analysis.concat_tips.join(', ')}\n`;
-            }
-            if (data.file_analysis.merge_tips && data.file_analysis.merge_tips.length > 0) {
-              aiText += `• Tips: ${data.file_analysis.merge_tips.join(', ')}\n`;
-            }
-          }
-          
-          // Add next steps if available
-          if (data.next_steps && data.next_steps.length > 0) {
-            aiText += `\n\n🎯 Next Steps:\n${data.next_steps.map((step, idx) => `${idx + 1}. ${step}`).join('\n')}`;
           }
         } else {
-          // Fallback case
-          aiText = data.message || data.response || data.final_response || 'AI response received';
+          // Fallback case - use smart_response if available
+          aiText = data.smart_response || data.message || data.response || data.final_response || 'AI response received';
         }
         
-        const aiMsg: Message = { id: (Date.now() + 1).toString(), content: aiText, sender: 'ai', timestamp: new Date() };
-        setMessages(prev => [...prev, aiMsg]);
+        // Only add general AI message if not handled by specific atom types
+        const hasSpecificHandler = (atomType === 'concat' && data.concat_json) ||
+                                 (atomType === 'merge' && data.merge_json) ||
+                                 (atomType === 'create-column' && data.json) ||
+                                 (atomType === 'groupby-wtg-avg' && data.groupby_json) ||
+                                 (atomType === 'chart-maker' && data.chart_json) ||
+                                 (atomType === 'explore' && data.exploration_config);
+        
+        if (!hasSpecificHandler) {
+          const aiMsg: Message = { id: (Date.now() + 1).toString(), content: aiText, sender: 'ai', timestamp: new Date() };
+          setMessages(prev => [...prev, aiMsg]);
+        }
+        
         if (atomType === 'concat' && data.concat_json) {
           const cfg = data.concat_json;
           const file1 = Array.isArray(cfg.file1) ? cfg.file1[0] : cfg.file1;
@@ -1608,6 +1624,8 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
           console.log('🔍 ===== EXPLORE AI RESPONSE =====');
           console.log('📝 User Prompt:', userMsg.content);
           console.log('🔧 Exploration Config:', data.exploration_config);
+          console.log('🔧 Smart Response:', data.smart_response);
+          console.log('🔧 Message:', data.message);
           
           // 🔧 MINIMAL FIX: Define normalizeColumnName function at the top level
           const normalizeColumnName = (colName: string) => {
@@ -1634,7 +1652,7 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
             // No file found - show error and don't proceed
             const errorMsg: Message = {
               id: (Date.now() + 1).toString(),
-              content: `❌ Cannot proceed: No valid file found for exploration\n\nAI provided: ${data.file_name || 'N/A'}\n\n💡 Please ensure you have selected a data file before using AI Explore.`,
+              content: data.smart_response || `I couldn't find a data file to analyze. Please make sure you have selected or uploaded a data file first, then try your exploration request again. I'll be able to help you create meaningful visualizations once the data is available.`,
               sender: 'ai',
               timestamp: new Date(),
             };
@@ -1658,14 +1676,7 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
             exploration_config: data.exploration_config
           });
           
-          // Add AI success message
-          const aiSuccessMsg: Message = {
-            id: (Date.now() + 1).toString(),
-            content: `✅ ${data.message || 'Exploration configuration completed successfully'}\n\nFile: ${targetFile}\nExplorations: ${numberOfExplorations}\n\n🔄 Generating exploration results...`,
-            sender: 'ai',
-            timestamp: new Date(),
-          };
-          setMessages(prev => [...prev, aiSuccessMsg]);
+          // Note: AI success message will be added after processing is complete
           
           // 🎯 Use SAME 3-step backend flow as manual (instead of perform endpoint)
           try {
@@ -2250,10 +2261,15 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
                 data: mergedData  // ✅ Merged data instead of overwriting
               });
               
-              // Add completion message with filter info
+              // Add completion message - use smart_response if available, otherwise create concise message
+              const smartCompletionResponse = data.smart_response || 
+                (finalExplorations.length > 1 
+                  ? `I've successfully generated ${finalExplorations.length} complementary charts for your analysis. These visualizations will provide different perspectives on your data, allowing you to identify patterns, trends, and relationships. You can use the 2-chart layout to view both visualizations simultaneously for better comparison.`
+                  : `I've successfully generated your chart analysis. The visualization is now ready and will help you understand the patterns and insights in your data. You can click to view the chart and explore the findings.`);
+              
               const completionMsg: Message = {
                 id: (Date.now() + 2).toString(),
-                content: `🎉 Charts generated using STRICT AI JSON filters!\n\nFile: ${targetFile}\nCharts: ${finalExplorations.length}\n📊 Chart 1: ${finalExplorations[0]?.title || 'Chart 1'}\n📊 Chart 2: ${finalExplorations[1]?.title || 'Chart 2'}\n📋 Filters: Only using AI JSON filters (${Array.from(allFilterColumns).join(', ') || 'none'})\n\n✅ Full manual control now available.`,
+                content: smartCompletionResponse,
                 sender: 'ai',
                 timestamp: new Date(),
               };
@@ -2292,14 +2308,7 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
                 data: exploreData
               });
               
-              // Add basic completion message for fallback
-              const basicCompletionMsg: Message = {
-                id: (Date.now() + 2).toString(),
-                content: `🎉 Charts generated (fallback mode)!\n\nFile: ${targetFile}\nCharts: ${processedResults?.length || 0}\n\n✅ Manual control available.`,
-                sender: 'ai',
-                timestamp: new Date(),
-              };
-              setMessages(prev => [...prev, basicCompletionMsg]);
+              // Note: Completion message already added above
             }
                 
           } catch (error: any) {
@@ -2316,13 +2325,16 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
               errorMessage = `❌ Network error: Could not connect to backend services. Please try again.`;
             }
             
-            const errorMsg: Message = {
-              id: (Date.now() + 2).toString(),
-              content: `${errorMessage}\n\nFile: ${targetFile}\nExplorations: ${numberOfExplorations}\n\n💡 Please try again or use manual configuration.`,
-              sender: 'ai',
-              timestamp: new Date(),
-            };
-            setMessages(prev => [...prev, errorMsg]);
+            // Only add error message if no smart_response was already added
+            if (!data.smart_response) {
+              const errorMsg: Message = {
+                id: (Date.now() + 2).toString(),
+                content: `${errorMessage} Please try again or use the manual configuration options to set up your analysis.`,
+                sender: 'ai',
+                timestamp: new Date(),
+              };
+              setMessages(prev => [...prev, errorMsg]);
+            }
             
             updateAtomSettings(atomId, {
               dataframe: targetFile,
@@ -2408,16 +2420,6 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
           <div className="flex items-center space-x-2">
             <MessageSquare className="w-4 h-4 text-purple-600" />
             <span className="text-sm font-semibold text-gray-800">{atomTitle} AI</span>
-            {/* Session ID Display */}
-            {sessionId && (
-              <div className="flex items-center space-x-2 ml-2">
-                <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-                <span className="text-xs text-gray-600 font-mono">
-                  Session: {sessionId}
-                </span>
-                <span className="text-xs text-green-600 font-medium">● Active</span>
-              </div>
-            )}
           </div>
           <div className="flex items-center space-x-2">
             {/* Session Management Buttons - Icon-based like ChatGPT */}

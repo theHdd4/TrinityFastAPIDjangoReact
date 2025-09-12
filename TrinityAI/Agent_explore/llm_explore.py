@@ -52,8 +52,10 @@ class ExploreAgent:
             if not session_id:
                 session_id = f"explore_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
             
+            # Try to load existing session from disk
             if session_id not in self.sessions:
-                self.sessions[session_id] = []
+                if not self._load_session_from_disk(session_id):
+                    self.sessions[session_id] = []
             
             # Add user message to session
             self.sessions[session_id].append({
@@ -83,19 +85,16 @@ class ExploreAgent:
             
             prompt = build_explore_prompt(user_prompt, self.files_with_columns, context)
             logger.info(f"🔍 Explore Process - Generated prompt length: {len(prompt)}")
-            logger.info(f"🔍 Complete Prompt:\n{prompt}")
             
             llm_response = call_explore_llm(self.api_url, self.model_name, self.bearer_token, prompt)
             logger.info(f"🔍 Explore Process - LLM response length: {len(llm_response)}")
-            logger.info(f"🔍 Complete LLM Response:\n{llm_response}")
             
             result = extract_json(llm_response, self.files_with_columns)
             logger.info(f"🔍 Explore Process - Extracted result: {json.dumps(result, indent=2) if result else 'None'}")
             
-            # 🔍 FILTER DEBUGGING: Check if AI generated filters
+            # Apply filters to exploration configs if needed
             if result and result.get("success") and result.get("exploration_config"):
                 configs = result["exploration_config"]
-                logger.info(f"🔍 AI EXPLORE FILTERS - Processing {len(configs)} exploration configs")
                 
                 # Check if any config has filters
                 has_any_filters = any(config.get("filters", {}) for config in configs)
@@ -108,25 +107,10 @@ class ExploreAgent:
                             reference_filters = config.get("filters", {})
                             break
                     
-                    logger.info(f"🔍 AI EXPLORE FILTERS - Reference filters: {reference_filters}")
-                    
                     # Apply the same filters to all configs
                     for i, config in enumerate(configs):
                         if not config.get("filters", {}):
                             config["filters"] = reference_filters
-                            logger.info(f"🔍 AI EXPLORE FILTERS - Applied reference filters to config {i+1}")
-                        else:
-                            logger.info(f"🔍 AI EXPLORE FILTERS - Config {i+1} already has filters: {config.get('filters', {})}")
-                
-                # Log final filter state
-                for i, config in enumerate(configs):
-                    filters = config.get("filters", {})
-                    logger.info(f"🔍 AI EXPLORE FILTERS - Final Config {i+1}: {filters}")
-                    logger.info(f"🔍 AI EXPLORE FILTERS - Type: {type(filters)}, Empty: {not filters or len(filters) == 0}")
-                    if filters:
-                        logger.info(f"🔍 AI EXPLORE FILTERS - Filter columns: {list(filters.keys())}")
-                        for col, vals in filters.items():
-                            logger.info(f"🔍 AI EXPLORE FILTERS - {col}: {vals}")
             
             if not result:
                 logger.error("❌ Failed to extract valid JSON from LLM response")
@@ -148,24 +132,32 @@ class ExploreAgent:
                     "session_id": session_id
                 }
                 
-                # Add error response to session
+                # Add error response to session with complete result
                 self.sessions[session_id].append({
                     "role": "assistant",
-                    "content": error_result["message"],
-                    "timestamp": datetime.now().isoformat()
+                    "content": error_result.get("smart_response", error_result.get("message", "Error occurred")),
+                    "timestamp": datetime.now().isoformat(),
+                    "full_result": error_result  # Store complete result
                 })
+                
+                # Save session to disk for persistence
+                self._save_session_to_disk(session_id)
                 
                 return error_result
             
             # Add session tracking
             result["session_id"] = session_id
             
-            # Add assistant response to session
+            # Add assistant response to session with complete result (including JSON config)
             self.sessions[session_id].append({
                 "role": "assistant",
-                "content": result.get("message", "Exploration configuration generated"),
-                "timestamp": datetime.now().isoformat()
+                "content": result.get("smart_response", result.get("message", "Exploration configuration generated")),
+                "timestamp": datetime.now().isoformat(),
+                "full_result": result  # Store complete result including exploration_config JSON
             })
+            
+            # Save session to disk for persistence
+            self._save_session_to_disk(session_id)
             
             logger.info(f"Successfully generated exploration config for session {session_id}")
             return result
@@ -180,13 +172,17 @@ class ExploreAgent:
                 "used_memory": False
             }
             
-            # Add error response to session
+            # Add error response to session with complete result
             if session_id in self.sessions:
                 self.sessions[session_id].append({
                     "role": "assistant",
-                    "content": error_result["message"],
-                    "timestamp": datetime.now().isoformat()
+                    "content": error_result.get("smart_response", error_result.get("message", "Error occurred")),
+                    "timestamp": datetime.now().isoformat(),
+                    "full_result": error_result  # Store complete result
                 })
+                
+                # Save session to disk for persistence
+                self._save_session_to_disk(session_id)
             
             return error_result
     
@@ -206,7 +202,7 @@ class ExploreAgent:
         }
         
         # Also add to files_with_columns for AI processing
-        self.files_with_columns[file_id] = columns
+        self.files_with_columns[file_id] = {"columns": columns}
         
         logger.info(f"File context set: {file_id} with {len(columns)} columns")
     
@@ -269,7 +265,7 @@ class ExploreAgent:
                         with pa.ipc.open_file(pa.BufferReader(data)) as reader:
                             table = reader.read_all()
                             columns = table.column_names
-                            files_with_columns[obj.object_name] = columns
+                            files_with_columns[obj.object_name] = {"columns": columns}
                             
                         logger.info(f"Loaded file {obj.object_name} with {len(columns)} columns")
                         
@@ -286,24 +282,114 @@ class ExploreAgent:
             self.files_with_columns = {}
     
     def _build_conversation_context(self, session_id: str) -> str:
-        """Build conversation context from session history"""
+        """Build conversation context from session history with ChatGPT-style memory"""
         if session_id not in self.sessions:
             return ""
         
         messages = self.sessions[session_id]
-        context_parts = []
+        if not messages:
+            return ""
         
-        for msg in messages[-10:]:  # Last 10 messages for context
+        context_parts = []
+        context_parts.append("=== CONVERSATION HISTORY ===")
+        
+        # Include more messages for better context (last 20 instead of 10)
+        for msg in messages[-20:]:
             role = msg["role"]
             content = msg["content"]
             timestamp = msg.get("timestamp", "")
             
             if role == "user":
-                context_parts.append(f"User: {content}")
+                context_parts.append(f"👤 User: {content}")
             elif role == "assistant":
-                context_parts.append(f"Assistant: {content}")
+                # Include both the smart_response and the full result (including JSON config)
+                context_parts.append(f"🤖 Assistant: {content}")
+                if "full_result" in msg and msg["full_result"]:
+                    # Include the complete result JSON so LLM knows the previous configuration
+                    context_parts.append(f"📋 Previous Configuration: {json.dumps(msg['full_result'], indent=2)}")
+        
+        context_parts.append("=== END CONVERSATION HISTORY ===")
+        context_parts.append("")
+        
+        # Add intelligent context analysis
+        if len(messages) > 2:
+            context_parts.append("🧠 CONVERSATION INTELLIGENCE:")
+            context_parts.append("- This is an ongoing conversation about data exploration")
+            context_parts.append("- Previous interactions should inform current responses")
+            context_parts.append("- Maintain context and build upon previous discussions")
+            context_parts.append("- Remember user preferences, successful configurations, and patterns")
+            context_parts.append("- Understand contextual responses like 'yes', 'no', 'use that', 'create it'")
+            context_parts.append("")
+            
+            # Extract key information from conversation history
+            user_files = []
+            user_chart_types = []
+            user_preferences = []
+            
+            for msg in messages[-10:]:  # Last 10 messages for pattern analysis
+                if msg["role"] == "user":
+                    content = msg["content"].lower()
+                    # Extract file mentions
+                    if ".arrow" in content:
+                        # Simple file extraction - look for .arrow files
+                        import re
+                        files = re.findall(r'(\w+\.arrow)', content)
+                        user_files.extend(files)
+                    # Extract chart type preferences
+                    if "bar chart" in content:
+                        user_chart_types.append("bar_chart")
+                    elif "line chart" in content:
+                        user_chart_types.append("line_chart")
+                    elif "pie chart" in content:
+                        user_chart_types.append("pie_chart")
+                    # Extract preferences
+                    if "yes" in content:
+                        user_preferences.append("positive_response")
+                    elif "no" in content:
+                        user_preferences.append("negative_response")
+            
+            # Add extracted patterns to context
+            if user_files:
+                context_parts.append(f"📁 USER FILE PREFERENCES: {list(set(user_files))}")
+            if user_chart_types:
+                context_parts.append(f"📊 USER CHART PREFERENCES: {list(set(user_chart_types))}")
+            if user_preferences:
+                context_parts.append(f"💭 USER RESPONSE PATTERNS: {list(set(user_preferences))}")
+            context_parts.append("")
         
         return "\n".join(context_parts)
+    
+    def _save_session_to_disk(self, session_id: str):
+        """Save session to disk for persistence"""
+        try:
+            import os
+            sessions_dir = "sessions"
+            if not os.path.exists(sessions_dir):
+                os.makedirs(sessions_dir)
+            
+            session_file = os.path.join(sessions_dir, f"{session_id}.json")
+            with open(session_file, 'w') as f:
+                json.dump(self.sessions[session_id], f, indent=2)
+            
+            logger.info(f"Session {session_id} saved to disk")
+        except Exception as e:
+            logger.warning(f"Failed to save session {session_id} to disk: {e}")
+    
+    def _load_session_from_disk(self, session_id: str):
+        """Load session from disk if it exists"""
+        try:
+            import os
+            sessions_dir = "sessions"
+            session_file = os.path.join(sessions_dir, f"{session_id}.json")
+            
+            if os.path.exists(session_file):
+                with open(session_file, 'r') as f:
+                    self.sessions[session_id] = json.load(f)
+                logger.info(f"Session {session_id} loaded from disk with {len(self.sessions[session_id])} messages")
+                return True
+        except Exception as e:
+            logger.warning(f"Failed to load session {session_id} from disk: {e}")
+        return False
     
     # Backend integration methods removed - following chart maker pattern
     # The explore agent now only generates configuration, frontend handles execution

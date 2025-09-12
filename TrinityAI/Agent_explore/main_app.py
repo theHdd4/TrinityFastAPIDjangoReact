@@ -51,7 +51,7 @@ class FileContextRequest(BaseModel):
 
 class ExploreResponse(BaseModel):
     success: bool = Field(..., description="Whether the exploration was successful")
-    message: str = Field(..., description="Success message or error description")
+    smart_response: str = Field(..., description="Smart response message for the user")
     exploration_config: Optional[Union[Dict[str, Any], List[Dict[str, Any]]]] = Field(None, description="Exploration configuration(s) - single or multiple")
     reasoning: Optional[str] = Field(None, description="Reasoning about the exploration")
     used_memory: Optional[bool] = Field(None, description="Whether conversation memory was used")
@@ -89,13 +89,13 @@ def explore_data(request: ExploreRequest):
         # Ensure required fields are present with better defaults
         if "success" not in result:
             result["success"] = False
-            result["message"] = "Missing success status in response"
+            result["smart_response"] = "Missing success status in response"
         
-        if "message" not in result:
+        if "smart_response" not in result:
             if result.get("success"):
-                result["message"] = "Exploration configuration completed successfully"
+                result["smart_response"] = "Exploration configuration completed successfully"
             else:
-                result["message"] = "Exploration configuration failed - please try again"
+                result["smart_response"] = "Exploration configuration failed - please try again"
         
         # Add helpful suggestions if not present
         if not result.get("success") and not result.get("suggestions"):
@@ -114,7 +114,7 @@ def explore_data(request: ExploreRequest):
         logger.error(f"Explore request failed: {e}")
         error_response = {
             "success": False,
-            "message": f"Internal server error: {str(e)}",
+            "smart_response": f"Internal server error: {str(e)}",
             "error": str(e),
             "session_id": request.session_id,
             "processing_time": round(time.time() - start, 2)
@@ -210,11 +210,13 @@ def chat_endpoint(request: ChatRequest):
 
         # Return response in format expected by AIChatBot
         if result.get("success") and result.get("exploration_config"):
+            # Use smart_response if available, otherwise fallback to message
+            smart_response = result.get("smart_response", result.get("message", "Exploration configuration ready"))
+            
             # Format for successful exploration configuration
             return {
                 "success": True,
-                "message": result.get("message", "Exploration configuration ready"),
-                "final_response": result.get("message", "Exploration configuration ready"),
+                "smart_response": smart_response,
                 "match_type": "single",
                 "atom_status": True,
                 "atom_name": "explore",
@@ -225,20 +227,12 @@ def chat_endpoint(request: ChatRequest):
                 "processing_time": processing_time
             }
         else:
-            # Format for suggestions and guidance
-            suggestions = result.get("suggestions", [])
-            message = result.get("message", "I can help you explore your data. What would you like to analyze?")
+            # Format for suggestions and guidance - return only smart_response
+            smart_response = result.get("smart_response", result.get("message", "I can help you explore your data. What would you like to analyze?"))
             
             return {
                 "success": False,
-                "message": message,
-                "final_response": message,
-                "match_type": "multi" if suggestions else "none",
-                "atom_status": False,
-                "suggestions": suggestions,
-                "relevant_atoms": [{"name": "explore", "description": "Data exploration and analysis"}] if suggestions else [],
-                "reasoning": result.get("reasoning", ""),
-                "used_memory": result.get("used_memory", False),
+                "smart_response": smart_response,
                 "session_id": request.session_id,
                 "processing_time": processing_time
             }
@@ -247,8 +241,7 @@ def chat_endpoint(request: ChatRequest):
         logger.error(f"EXPLORE CHAT REQUEST FAILED: {e}")
         error_result = {
             "success": False,
-            "message": f"I encountered an issue: {str(e)}",
-            "final_response": "I'm having trouble processing your request. Please try again.",
+            "smart_response": f"I encountered an issue: {str(e)}",
             "match_type": "none",
             "atom_status": False,
             "error": str(e),
