@@ -98,22 +98,64 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
 
   const handleFileUpload = async (files: File[]) => {
     const uploaded: UploadedFileRef[] = [];
+
+    const envStr = localStorage.getItem('env');
+    let env: any = null;
+    if (envStr) {
+      try {
+        env = JSON.parse(envStr);
+      } catch {
+        /* ignore */
+      }
+    }
+
+    let savedNames = new Set<string>();
+    try {
+      if (env && env.CLIENT_NAME && env.APP_NAME && env.PROJECT_NAME) {
+        const query =
+          '?' +
+          new URLSearchParams({
+            client_name: env.CLIENT_NAME,
+            app_name: env.APP_NAME,
+            project_name: env.PROJECT_NAME,
+          }).toString();
+        const check = await fetch(`${VALIDATE_API}/list_saved_dataframes${query}`);
+        if (check.ok) {
+          const data = await check.json();
+          savedNames = new Set(
+            Array.isArray(data.files)
+              ? data.files.map((f: any) => (f.csv_name || '').toLowerCase())
+              : []
+          );
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+
     for (const file of files) {
+      const stem = file.name.replace(/\.[^/.]+$/, '').toLowerCase();
+      if (
+        savedNames.has(stem) ||
+        uploadedFiles.some((f) => f.name === file.name) ||
+        (settings.uploadedFiles || []).includes(file.name)
+      ) {
+        toast({
+          title: 'Same file already present in the project',
+          variant: 'destructive',
+        });
+        continue;
+      }
+
       const form = new FormData();
       form.append('file', file);
-      const envStr = localStorage.getItem('env');
-      if (envStr) {
-        try {
-          const env = JSON.parse(envStr);
-          form.append('client_id', env.CLIENT_ID || '');
-          form.append('app_id', env.APP_ID || '');
-          form.append('project_id', env.PROJECT_ID || '');
-          form.append('client_name', env.CLIENT_NAME || '');
-          form.append('app_name', env.APP_NAME || '');
-          form.append('project_name', env.PROJECT_NAME || '');
-        } catch {
-          /* ignore */
-        }
+      if (env) {
+        form.append('client_id', env.CLIENT_ID || '');
+        form.append('app_id', env.APP_ID || '');
+        form.append('project_id', env.PROJECT_ID || '');
+        form.append('client_name', env.CLIENT_NAME || '');
+        form.append('app_name', env.APP_NAME || '');
+        form.append('project_name', env.PROJECT_NAME || '');
       }
       try {
         const res = await fetch(`${VALIDATE_API}/upload-file`, {
@@ -141,29 +183,29 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
       fileMappings: {
         ...fileAssignments,
         ...Object.fromEntries(
-          uploaded.map(f => [
+          uploaded.map((f) => [
             f.name,
-            settings.bypassMasterUpload ? f.name : settings.requiredFiles?.[0] || ''
+            settings.bypassMasterUpload ? f.name : settings.requiredFiles?.[0] || '',
           ])
-        )
+        ),
       },
       filePathMap: {
         ...(settings.filePathMap || {}),
-        ...Object.fromEntries(uploaded.map(f => [f.name, f.path]))
+        ...Object.fromEntries(uploaded.map((f) => [f.name, f.path])),
       },
       fileSizeMap: {
         ...(settings.fileSizeMap || {}),
-        ...Object.fromEntries(uploaded.map(f => [f.name, f.size]))
-      }
+        ...Object.fromEntries(uploaded.map((f) => [f.name, f.size])),
+      },
     });
-    setFileAssignments(prev => ({
+    setFileAssignments((prev) => ({
       ...prev,
       ...Object.fromEntries(
-        uploaded.map(f => [
+        uploaded.map((f) => [
           f.name,
-          settings.bypassMasterUpload ? f.name : settings.requiredFiles?.[0] || ''
+          settings.bypassMasterUpload ? f.name : settings.requiredFiles?.[0] || '',
         ])
-      )
+      ),
     }));
   };
 
@@ -428,10 +470,13 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
               const data = await res.json();
               const status = data.status as string | null;
               const name = fileNames[idx];
-              if (status && seen[name] !== status) {
-                seen[name] = status;
-                if (status !== 'saved') {
-                  toast({ title: `${name}: ${status}` });
+              if (status) {
+                const normalized = status.toLowerCase();
+                if (seen[name] !== normalized) {
+                  seen[name] = normalized;
+                  if (normalized !== 'saved') {
+                    toast({ title: `${name}: ${status}` });
+                  }
                 }
               }
             }
@@ -484,8 +529,8 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
           );
           if (duplicates.length > 0) {
             toast({
-              title: `File with the name ${duplicates[0].name} already exists`,
-              variant: 'destructive'
+              title: 'Same file already present in the project',
+              variant: 'destructive',
             });
             return;
           }
@@ -579,8 +624,8 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
       });
       if (duplicates.length > 0) {
         toast({
-          title: `File with the name ${duplicates[0]} already exists`,
-          variant: 'destructive'
+          title: 'Same file already present in the project',
+          variant: 'destructive',
         });
       } else {
         toast({ title: 'Dataframes Saved Successfully' });
