@@ -38,7 +38,7 @@ hierarchical_aggregations_collection = db["hierarchical_aggregations"]
 scenario_values_collection = db["scenario_values_promo"]
 
 # Column classifier collection for identifier structure
-column_classifier_configs = db["column_classifier_configs"]
+column_classifier_config = db["column_classifier_config"]
 
 logger.info("Mongo URI: %s", MONGO_URI)
 

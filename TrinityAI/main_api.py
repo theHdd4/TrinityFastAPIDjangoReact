@@ -57,10 +57,12 @@ MONGO_URI = os.getenv(
     "CLASSIFY_MONGO_URI",
     "mongodb://admin_dev:pass_dev@10.2.1.65:9005/?authSource=admin",
 )
-CONFIG_DB = os.getenv("CLASSIFIER_CONFIG_DB", "trinity_prod")
+# Column classifier configurations are stored in the shared "trinity_db"
+# database under the "column_classifier_config" collection.
+CONFIG_DB = os.getenv("CLASSIFIER_CONFIG_DB", "trinity_db")
 CONFIG_COLLECTION = os.getenv(
     "CLASSIFIER_CONFIGS_COLLECTION",
-    "column_classifier_configs",
+    "column_classifier_config",
 )
 
 try:
