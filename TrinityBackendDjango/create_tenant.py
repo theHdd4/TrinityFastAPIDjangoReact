@@ -1,13 +1,25 @@
 #!/usr/bin/env python3
+"""Tenant creation utility.
+
+Ensures Django settings are loaded before any framework modules that expect
+configured settings are imported. This avoids ``ImproperlyConfigured`` errors
+when the script is executed directly.
+"""
+
 import os
-import uuid
+
+# Django modules such as ``django_tenants`` access ``settings`` at import time.
+# Configure Django **before** importing those modules.
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
+
 import django
+
+django.setup()
+
+import uuid
 from django.core.management import call_command
 from django.db import transaction, connection
 from django_tenants.utils import schema_context
-
-os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
-django.setup()
 
 # Adjust this import path if your app label is different:
 from apps.tenants.models import Tenant, Domain

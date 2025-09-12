@@ -10,7 +10,6 @@ import openpyxl
 import pyarrow as pa
 from app.core.utils import get_env_vars
 from pathlib import Path
-import re
 import fastexcel
 
 # Add this line with your other imports
@@ -62,6 +61,11 @@ from app.features.data_upload_validate.app.database import (
 )
 
 from app.redis_cache import cache_master_config
+
+import re
+
+# Allowed characters for file keys (alphanumeric, underscores, hyphens, periods)
+FILE_KEY_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
 
 
 
@@ -1525,8 +1529,14 @@ async def validate(
         keys = json.loads(file_keys)
     except json.JSONDecodeError:
         raise HTTPException(status_code=400, detail="Invalid JSON format for file_keys")
+    if not isinstance(keys, list):
+        raise HTTPException(status_code=400, detail="file_keys must be a JSON array")
 
-    paths = json.loads(file_paths) if file_paths else []
+    try:
+        paths = json.loads(file_paths) if file_paths else []
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid JSON format for file_paths")
+
     files_list = files or []
 
     if files_list and len(files_list) != len(keys):
@@ -1535,6 +1545,12 @@ async def validate(
         raise HTTPException(status_code=400, detail="Number of file paths must match number of keys")
     if not files_list and not paths:
         raise HTTPException(status_code=400, detail="No files or file paths provided")
+
+    if len(set(keys)) != len(keys):
+        raise HTTPException(status_code=400, detail="Duplicate file keys are not allowed")
+    for k in keys:
+        if not isinstance(k, str) or not k.strip() or not FILE_KEY_RE.match(k):
+            raise HTTPException(status_code=400, detail=f"Malformed file key: {k}")
 
     if files_list and len(files_list) > 3:
         raise HTTPException(status_code=400, detail="Maximum 3 files allowed")
@@ -2812,6 +2828,15 @@ async def save_dataframes(
     if len(set(keys)) != len(keys):
         logger.error("Duplicate file keys: %s", keys)
         raise HTTPException(status_code=400, detail="Duplicate file keys are not allowed")
+
+    # Validate file key format
+    for k in keys:
+        if not FILE_KEY_RE.match(k):
+            logger.error("Malformed file key: %s", k)
+            raise HTTPException(
+                status_code=400,
+                detail=f"Malformed file key: {k}",
+            )
 
     uploads = []
     flights = []
