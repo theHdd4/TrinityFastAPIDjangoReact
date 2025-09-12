@@ -33,6 +33,24 @@ function stripCards(cards: any[]): any[] {
         };
       }
 
+      if (atom.atomId === 'data-upload-validate' && atom.settings) {
+        const {
+          uploadedFiles,
+          fileMappings,
+          filePathMap,
+          fileSizeMap,
+          fileKeyMap,
+          validations,
+          columnConfig,
+          ...restSettings
+        } = atom.settings;
+        return {
+          ...atom,
+          settings: restSettings,
+          color: atom.color || info?.color || 'bg-gray-400',
+        };
+      }
+
       return { ...atom, color: atom.color || info?.color || 'bg-gray-400' };
     }),
   }));
