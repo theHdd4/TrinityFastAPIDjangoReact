@@ -77,15 +77,6 @@ PERFORMANCE_CONFIG = {
 
 router = APIRouter()
 
-# Test endpoint to verify router is working
-@router.get("/test")
-async def test_endpoint():
-    return {"message": "Router is working", "status": "success"}
-
-# Simple test endpoint for save functionality
-@router.post("/models/test-save")
-async def test_save_endpoint():
-    return {"message": "Save endpoint is working", "status": "success"}
 
 # Global storage for training progress
 training_progress: Dict[str, Dict[str, Any]] = {}
@@ -571,25 +562,6 @@ async def get_training_progress(run_id: str):
         "results": progress.get("results", [])
     }
 
-@router.get("/training-progress-simple/{run_id}", tags=["Autoregressive Model Training"])
-async def get_training_progress_simple(run_id: str):
-    """Get minimal training progress for fast polling."""
-    if run_id not in training_progress:
-        raise HTTPException(status_code=404, detail="Training run not found")
-    
-    progress = training_progress[run_id]
-    
-    # Return only the most essential info for fast response
-    return {
-        "run_id": run_id,
-        "status": progress["status"],
-        "current": progress["current"],
-        "total": progress["total"],
-        "percentage": progress["percentage"],
-        "current_combination": progress.get("current_combination", ""),
-        "current_model": progress.get("current_model", ""),
-        "last_updated": progress.get("last_updated", "")
-    }
 
 @router.get("/training-results/{run_id}", tags=["Autoregressive Model Training"])
 async def get_training_results(run_id: str):
@@ -642,53 +614,6 @@ async def get_training_results(run_id: str):
             run_id=run_id
         )
 
-# Get file path endpoint (for frontend file opening)
-@router.get("/get_file_path")
-async def get_file_path(scope: str = Query(...), combination: str = Query(...)):
-    """Get the file path for a specific scope and combination."""
-    try:
-        minio_client = get_minio_client()
-        
-        # Dynamically get the bucket and prefix structure
-        try:
-            # Use the same bucket as scope selector (trinity bucket)
-            bucket_name = "trinity"
-            object_prefix = "filtered-data/"
-        except Exception as e:
-            bucket_name = "trinity"
-            object_prefix = "filtered-data/"
-        
-        # Search for the file
-        matching_objects = []
-        try:
-            all_objects = list(minio_client.list_objects(bucket_name, recursive=True))
-            
-            for obj in all_objects:
-                obj_name = obj.object_name
-                scope_pattern = f"Scope_{scope}"
-                has_scope = scope_pattern in obj_name
-                has_combination = combination in obj_name
-                
-                if has_scope and has_combination:
-                    matching_objects.append(obj_name)
-        except Exception as search_error:
-            raise HTTPException(status_code=500, detail="Failed to search for file")
-        
-        if matching_objects:
-            file_path = matching_objects[0]
-            # Generate presigned URL for file access
-            try:
-                presigned_url = minio_client.presigned_get_object(bucket_name, file_path, expires=3600)
-                return {"file_path": file_path, "presigned_url": presigned_url}
-            except Exception as e:
-                return {"file_path": file_path, "presigned_url": None}
-        else:
-            raise HTTPException(status_code=404, detail="File not found")
-            
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail="Failed to get file path")
 
 # Get columns endpoint (for frontend column selection) - GET version
 @router.get("/get_columns")
@@ -805,189 +730,8 @@ async def get_columns_get(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-# Get columns endpoint (for frontend column selection) - POST version
-@router.post("/get_columns")
-async def get_columns(
-    scope: str = Form(...),
-    combination: str = Form(...)
-):
-    """Get available columns for a specific scope and combination."""
-    try:
-        minio_client = get_minio_client()
-        
-        # Use the same bucket as scope selector (trinity bucket)
-        trinity_bucket = "trinity"
-        
-        # Search for the file
-        target_file_key = None
-        try:
-            # List objects in the trinity bucket to find matching files
-            objects = minio_client.list_objects(
-                trinity_bucket,
-                recursive=True
-            )
-            
-            # Log all available files for debugging
-            all_files = list(objects)
-            arrow_files = [obj.object_name for obj in all_files if obj.object_name.endswith('.arrow')]
-            
-            # Look for files that match the pattern: Scope_{scope}_{combination}_*.arrow
-            target_file_key = None
-            
-            for obj in all_files:
-                if obj.object_name.endswith('.arrow'):
-                    # Check if this file matches our scope and combination
-                    if f"Scope_{scope}_" in obj.object_name and combination in obj.object_name:
-                        target_file_key = obj.object_name
-                    break
-            
-            if not target_file_key:
-                # If no exact match, try to find any file with the scope number
-                for obj in all_files:
-                    if obj.object_name.endswith('.arrow') and f"Scope_{scope}_" in obj.object_name:
-                        target_file_key = obj.object_name
-                    break
-            
-            if not target_file_key:
-                raise HTTPException(
-                    status_code=404, 
-                    detail=f"No files found for Scope {scope} with combination {combination}"
-                )
-            
-            
-        except Exception as search_error:
-            raise HTTPException(status_code=500, detail="Failed to search for file")
-        
-        if target_file_key:
-            try:
-                response = minio_client.get_object(trinity_bucket, target_file_key)
-                file_data = response.read()
-                response.close()
-                response.release_conn()
-                
-                # Read file into DataFrame
-                if target_file_key.endswith('.arrow'):
-                    import pyarrow as pa
-                    import pyarrow.ipc as ipc
-                    try:
-                        # Read Arrow file
-                        reader = ipc.RecordBatchFileReader(pa.BufferReader(file_data))
-                        table = reader.read_all()
-                        df = table.to_pandas()
-                    except Exception as arrow_error:
-                        # Fallback to CSV if Arrow fails
-                        df = pd.read_csv(io.BytesIO(file_data), nrows=0)
-                elif target_file_key.endswith('.csv'):
-                    df = pd.read_csv(io.BytesIO(file_data))
-                elif target_file_key.endswith('.xlsx'):
-                    df = pd.read_excel(io.BytesIO(file_data))
-                else:
-                    raise HTTPException(status_code=400, detail="Unsupported file format")
-                
-                # Get data types for each column
-                columns = df.columns.tolist()
-                df_sample = df.head(100) if len(df) > 0 else df
-                column_info = []
-                
-                for col in columns:
-                    col_type = str(df_sample[col].dtype)
-                    is_numerical = (
-                        'int' in col_type or 
-                        'float' in col_type or 
-                        'number' in col_type or
-                        pd.api.types.is_numeric_dtype(df_sample[col])
-                    )
-                    
-                    column_info.append({
-                        "name": col,
-                        "type": col_type,
-                        "is_numerical": is_numerical
-                    })
-                
-                # Filter for numerical columns only
-                numerical_columns = [col["name"] for col in column_info if col["is_numerical"]]
-                
-                # Return the same structure as build_model_feature_based for frontend compatibility
-                return {
-                    "scope": scope,
-                    "combination": combination,
-                    "file_key": target_file_key,
-                    "total_columns": len(columns),
-                    "numerical_columns": numerical_columns,
-                    "all_columns": column_info
-                }
-                
-            except Exception as file_error:
-                raise HTTPException(status_code=500, detail="Failed to read file")
-        else:
-            raise HTTPException(status_code=404, detail="File not found")
-            
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail="Failed to get columns")
 
-# Get saved dataframes endpoint (for frontend dataset selection)
-@router.get("/get_saved_dataframes")
-async def get_saved_dataframes():
-    """Get list of saved dataframes from MinIO for frontend selection."""
-    try:
-        minio_client = get_minio_client()
-        
-        # Dynamically get the bucket and prefix structure
-        try:
-            # Use the same bucket as scope selector (trinity bucket)
-            bucket_name = "trinity"
-            object_prefix = "filtered-data/"
-        except Exception as e:
-            bucket_name = "trinity"
-            object_prefix = "filtered-data/"
-        
-        try:
-            all_objects = list(minio_client.list_objects(bucket_name, recursive=True))
-            
-            # Filter for data files (arrow, csv, xlsx)
-            data_files = []
-            for obj in all_objects:
-                obj_name = obj.object_name
-                if (obj_name.endswith('.arrow') or 
-                    obj_name.endswith('.csv') or 
-                    obj_name.endswith('.xlsx')):
-                    # Extract a readable name from the file path
-                    file_name = obj_name.split('/')[-1]  # Get just the filename
-                    if file_name:
-                        data_files.append({
-                            "id": obj_name,
-                            "name": file_name,
-                            "path": obj_name,
-                            "type": file_name.split('.')[-1].upper()
-                        })
-            
-            return data_files
-            
-        except Exception as search_error:
-            raise HTTPException(status_code=500, detail="Failed to search for dataframes")
-            
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail="Failed to get saved dataframes")
 
-# Get training status endpoint
-@router.get("/get_training_status/{run_id}")
-async def get_training_status(run_id: str):
-    """Get the current status of model training for a specific run ID."""
-    try:
-        # This would typically check a database or cache for training status
-        # For now, return a simple status
-        return {
-            "run_id": run_id,
-            "status": "completed",  # or "running", "failed", etc.
-            "progress": 100,
-            "message": "Training completed successfully"
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail="Failed to get training status")
 
 # Detect frequency endpoint for time series analysis
 @router.post("/detect_frequency")
@@ -2060,147 +1804,9 @@ async def validate_request(request: dict):
     except Exception as e:
         raise HTTPException(status_code=500, detail="Validation failed")
 
-# Legacy endpoints for backward compatibility
-@router.post("/init")
-async def init_autoforecat(
-    object_names: str = Form(...),
-    bucket_name: str = Form(...),
-    validator_atom_id: str = Form(...),
-    file_key: str = Form(...),
-):
-    try:
-        df = get_minio_df(bucket=bucket_name, file_key=object_names)
-      
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Failed to load data: {e}")
-    
-    df.columns = df.columns.str.strip().str.lower()
-
-    # Clean string column values
-    str_cols = df.select_dtypes(include='object').columns
-    df[str_cols] = df[str_cols].apply(lambda x: x.str.strip().str.lower())
-    
-    # Step 3: Get final measures from column_classifications
-    measures_collection = await get_column_classifications_collection()
-    identifiers, measures = await fetch_measures_list(validator_atom_id, file_key, measures_collection)
-
-    # Identify identifiers with more than one unique value and not numeric/datetime
-    multi_value_identifiers = []
-    for col in identifiers:
-        if col in df.columns:
-            if (
-                df[col].nunique(dropna=False) > 1
-                and not pd.api.types.is_numeric_dtype(df[col])
-                and not pd.api.types.is_datetime64_any_dtype(df[col])
-            ):
-                multi_value_identifiers.append(col)
-
-    await save_autoreg_identifiers(
-        collection_name="autoreg_identifiers",
-        data={"validator_atom_id": validator_atom_id, "file_key": file_key, "identifiers": multi_value_identifiers}
-    )
-
-    return {
-        "identifiers": identifiers,
-        "multi_value_identifiers": multi_value_identifiers,
-        "measures": measures,
-        "message": "Dataset loaded and inspected successfully."
-    }
-
-@router.post("/perform")
-async def perform_autoregressive(
-    object_names: str = Form(...),
-    bucket_name: str = Form(...),
-    validator_atom_id: str = Form(...),
-    file_key: str = Form(...),
-    y_var: str = Form(...),
-    forecast_horizon: int = Form(...),
-    fiscal_start_month: str = Form(...),
-    frequency: str = Form(...),
-    combination: str = Form(...)  # JSON string
-):
-    
-    if not fiscal_start_month.isdigit():
-        return {"status": "FAILURE", "error": f"Invalid fiscal_start_month: {fiscal_start_month}"}
-    fiscal_start_month = int(fiscal_start_month)
-    
-    # Your existing autoregressive logic here
-    # This is a placeholder - you should keep your existing implementation
-    return {"status": "SUCCESS", "message": "Autoregressive forecasting completed"}
 
 # List all active training runs (for recovery after 504 timeouts)
-@router.get("/active-runs", tags=["Autoregressive Model Training"])
-async def list_active_runs():
-    """List all active training runs. Use this to recover run_id after 504 timeouts."""
-    try:
-        active_runs = []
-        
-        for run_id, progress in training_progress.items():
-            # Only show runs that are still running or recently completed
-            if progress.get("status") in ["running", "completed"]:
-                active_runs.append({
-                    "run_id": run_id,
-                    "status": progress.get("status"),
-                    "current": progress.get("current", 0),
-                    "total": progress.get("total", 0),
-                    "percentage": progress.get("percentage", 0),
-                    "current_combination": progress.get("current_combination", ""),
-                    "scope_id": progress.get("scope_id", ""),
-                    "start_time": progress.get("start_time"),
-                    "total_execution_time_seconds": progress.get("total_execution_time"),
-                    "last_updated": progress.get("last_updated", "unknown")
-                })
-        
-        # Sort by most recent first
-        active_runs.sort(key=lambda x: x.get("start_time", 0), reverse=True)
-        
-        return {
-            "active_runs": active_runs,
-            "total_active": len(active_runs),
-            "message": "Use the run_id to check progress at /training-progress/{run_id}"
-        }
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail="Failed to list active runs")
 
-# Performance monitoring endpoint
-@router.get("/performance-stats", tags=["Autoregressive Model Training"])
-async def get_performance_stats():
-    """Get performance statistics and optimization metrics."""
-    try:
-        # Calculate average processing times
-        processing_times = []
-        for run_id, progress in training_progress.items():
-            if "total_execution_time" in progress:
-                processing_times.append(progress["total_execution_time"])
-        
-        avg_time = sum(processing_times) / len(processing_times) if processing_times else 0
-        
-        # Count active runs
-        active_runs = sum(1 for p in training_progress.values() if p.get("status") == "running")
-        completed_runs = sum(1 for p in training_progress.values() if p.get("status") == "completed")
-        
-        return {
-            "performance_config": PERFORMANCE_CONFIG,
-            "statistics": {
-                "total_runs": len(training_progress),
-                "active_runs": active_runs,
-                "completed_runs": completed_runs,
-                "average_processing_time_seconds": round(avg_time, 2),
-                "estimated_improvement": "80-90% faster with CPU parallel processing"
-            },
-            "optimization_tips": [
-                "CPU PARALLEL PROCESSING: Using ProcessPoolExecutor",
-                "Process ALL 19 combinations simultaneously",
-                "Models run in separate processes across CPU cores",
-                "Utilizes all available CPU cores for maximum speed",
-                "CPU-bound tasks now truly parallel (not just async)",
-                "No model logic changes - pure performance optimization"
-            ]
-        }
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail="Failed to get performance stats")
 
 
 
@@ -2628,7 +2234,6 @@ async def get_saved_autoregressive_combinations_status(
         raise HTTPException(status_code=500, detail=f"Error getting saved combinations status: {str(e)}")
 
 
-@router.get("/training-progress-detailed/{run_id}", tags=["Autoregressive Model Training"])
 async def get_training_progress_detailed(run_id: str):
     """Get detailed training progress with stage information for enhanced progress bars."""
     if run_id not in training_progress:
@@ -2686,7 +2291,6 @@ async def get_training_progress_detailed(run_id: str):
 # SAVE ENDPOINTS FOR ATOM STATE PERSISTENCE
 # ============================================================================
 
-@router.post("/save-autoregressive-config")
 async def save_autoregressive_configuration(
     client_name: str = Query(..., description="Client name"),
     app_name: str = Query(..., description="App name"),
@@ -2722,7 +2326,6 @@ async def save_autoregressive_configuration(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to save autoregressive configuration: {str(e)}")
 
-@router.get("/get-autoregressive-config")
 async def get_autoregressive_configuration(
     client_name: str = Query(..., description="Client name"),
     app_name: str = Query(..., description="App name"),
