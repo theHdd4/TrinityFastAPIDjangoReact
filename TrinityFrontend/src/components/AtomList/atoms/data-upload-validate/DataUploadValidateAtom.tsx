@@ -430,7 +430,9 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
               const name = fileNames[idx];
               if (status && seen[name] !== status) {
                 seen[name] = status;
-                toast({ title: `${name}: ${status}` });
+                if (status !== 'saved') {
+                  toast({ title: `${name}: ${status}` });
+                }
               }
             }
           } catch {
@@ -455,34 +457,38 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
       if (envStr) {
         try {
           const env = JSON.parse(envStr);
-          query =
-            '?' +
-            new URLSearchParams({
-              client_name: env.CLIENT_NAME || '',
-              app_name: env.APP_NAME || '',
-              project_name: env.PROJECT_NAME || ''
-            }).toString();
+          if (env.CLIENT_NAME && env.APP_NAME && env.PROJECT_NAME) {
+            query =
+              '?' +
+              new URLSearchParams({
+                client_name: env.CLIENT_NAME,
+                app_name: env.APP_NAME,
+                project_name: env.PROJECT_NAME
+              }).toString();
+          }
         } catch {
           /* ignore */
         }
       }
-      const check = await fetch(`${VALIDATE_API}/list_saved_dataframes${query}`);
-      if (check.ok) {
-        const data = await check.json();
-        const existing = new Set(
-          Array.isArray(data.files)
-            ? data.files.map((f: any) => (f.csv_name || '').toLowerCase())
-            : []
-        );
-        const duplicates = uploadedFiles.filter(f =>
-          existing.has(f.name.replace(/\.[^/.]+$/, '').toLowerCase())
-        );
-        if (duplicates.length > 0) {
-          toast({
-            title: `File with the name ${duplicates[0].name} already exists`,
-            variant: 'destructive'
-          });
-          return;
+      if (query) {
+        const check = await fetch(`${VALIDATE_API}/list_saved_dataframes${query}`);
+        if (check.ok) {
+          const data = await check.json();
+          const existing = new Set(
+            Array.isArray(data.files)
+              ? data.files.map((f: any) => (f.csv_name || '').toLowerCase())
+              : []
+          );
+          const duplicates = uploadedFiles.filter(f =>
+            existing.has(f.name.replace(/\.[^/.]+$/, '').toLowerCase())
+          );
+          if (duplicates.length > 0) {
+            toast({
+              title: `File with the name ${duplicates[0].name} already exists`,
+              variant: 'destructive'
+            });
+            return;
+          }
         }
       }
     } catch {

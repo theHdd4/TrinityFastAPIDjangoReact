@@ -4,6 +4,7 @@ import uuid
 import django
 from django.core.management import call_command
 from django.db import transaction, connection
+from django_tenants.utils import schema_context
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
 django.setup()
@@ -207,6 +208,12 @@ def main():
     call_command(
         "migrate_schemas", "registry", "--schema", tenant_schema, interactive=False, verbosity=1
     )
+    with schema_context(tenant_schema):
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS registry_arrowdataset_project_csv_idx "
+                "ON registry_arrowdataset (project_id, original_csv)"
+            )
     print("   ✅ Registry migrations complete.\n")
 
     # Load atom catalogue from FastAPI features
