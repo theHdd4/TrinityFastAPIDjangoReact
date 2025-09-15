@@ -6,7 +6,7 @@ interface LoadingAnimationProps {
 }
 
 const LoadingAnimation: React.FC<LoadingAnimationProps> = ({
-  message = 'Processing data...',
+  message = 'Loading',
   className = ''
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -18,27 +18,32 @@ const LoadingAnimation: React.FC<LoadingAnimationProps> = ({
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    const getVar = (name: string) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-    const primary = `hsl(${getVar('--primary')})`;
-    const primaryGlow = `hsl(${getVar('--primary')})`;
-    const backgroundHsl = getVar('--background');
-
-    // size the canvas to its container rather than the full window
-    let width = (canvas.width = canvas.offsetWidth);
-    let height = (canvas.height = canvas.offsetHeight);
-
-    const fontSize = 16; // px
-    const columns = Math.floor(width / fontSize);
-    const drops: number[] = Array.from({ length: columns }, () => Math.floor(Math.random() * -50));
-
+    const fontSize = 16;
     const chars = '0101010011010010110100100110100101010010';
+    let width = 0;
+    let height = 0;
+    let columns = 0;
+    let drops: number[] = [];
+
+    const resize = () => {
+      const parent = canvas.parentElement;
+      if (!parent) return;
+      const rect = parent.getBoundingClientRect();
+      width = canvas.width = rect.width;
+      height = canvas.height = rect.height;
+      columns = Math.floor(width / fontSize);
+      drops = Array.from({ length: columns }, () => Math.floor(Math.random() * -50));
+    };
+
+    resize();
+    const observer = new ResizeObserver(resize);
+    if (canvas.parentElement) observer.observe(canvas.parentElement);
 
     const draw = () => {
-      // Trail effect background using theme background token
-      ctx.fillStyle = backgroundHsl ? `hsla(${backgroundHsl}, 0.08)` : 'rgba(0,0,0,0.08)';
+      ctx.fillStyle = 'rgba(255,255,255,0.08)';
       ctx.fillRect(0, 0, width, height);
 
-      ctx.fillStyle = primary; // matrix glyph color
+      ctx.fillStyle = '#00a000';
       ctx.textAlign = 'center';
       ctx.font = `${fontSize}px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace`;
 
@@ -46,14 +51,6 @@ const LoadingAnimation: React.FC<LoadingAnimationProps> = ({
         const text = chars[Math.floor(Math.random() * chars.length)];
         const x = i * fontSize + fontSize / 2;
         const y = drops[i] * fontSize;
-
-        // subtle glow for head
-        if (Math.random() < 0.05) {
-          ctx.shadowColor = primaryGlow;
-          ctx.shadowBlur = 12;
-        } else {
-          ctx.shadowBlur = 0;
-        }
 
         ctx.fillText(text, x, y);
 
@@ -69,29 +66,18 @@ const LoadingAnimation: React.FC<LoadingAnimationProps> = ({
 
     rafRef.current = requestAnimationFrame(draw);
 
-    const onResize = () => {
-      width = canvas.width = canvas.offsetWidth;
-      height = canvas.height = canvas.offsetHeight;
-    };
-    window.addEventListener('resize', onResize);
-
     return () => {
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
-      window.removeEventListener('resize', onResize);
+      observer.disconnect();
     };
   }, []);
 
   return (
-    <div
-      className={`relative w-full h-full overflow-hidden flex items-center justify-center bg-background ${className}`}
-    >
-      {/* Matrix rain canvas */}
+    <div className={`absolute inset-0 flex items-center justify-center bg-white ${className}`}>
       <canvas ref={canvasRef} className="absolute inset-0 w-full h-full" />
-
-      {/* Message */}
-      <div className="absolute inset-0 z-10 flex flex-col items-center justify-center text-center px-6 bg-background/80 backdrop-blur-sm">
-        <h3 className="text-2xl font-light text-foreground mb-2">{message}</h3>
-        <div className="flex items-center justify-center space-x-1 text-muted-foreground">
+      <div className="relative z-10 text-center px-6">
+        <h3 className="text-2xl font-light text-green-700 mb-2">{message}</h3>
+        <div className="flex items-center justify-center space-x-1 text-green-600">
           <span>Please wait</span>
           <span className="animate-pulse">.</span>
           <span className="animate-pulse animation-delay-300">.</span>
