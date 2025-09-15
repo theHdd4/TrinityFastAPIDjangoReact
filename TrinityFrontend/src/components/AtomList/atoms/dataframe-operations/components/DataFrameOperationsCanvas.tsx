@@ -793,7 +793,7 @@ const handleFormulaSubmit = () => {
 
   if (input.startsWith('=')) {
     const expr = input.slice(1);
-    const funcMatch = expr.match(/^(SUM|AVG|CORR)\(([^)]+)\)$/i);
+    const funcMatch = expr.match(/^(SUM|AVG|CORR|PROD|DIV|MAX|MIN)\(([^)]+)\)$/i);
     if (funcMatch) {
       const func = funcMatch[1].toUpperCase();
       const cols = funcMatch[2].split(',').map(c => c.trim());
@@ -825,16 +825,40 @@ const handleFormulaSubmit = () => {
         }
       } else {
         for (let r = 0; r < rows.length; r++) {
-          let total = 0;
-          let count = 0;
-          for (const colName of cols) {
-            const val = Number(rows[r][colName]);
-            if (!isNaN(val)) {
-              total += val;
-              count++;
-            }
+          const values = cols
+            .map(c => Number(rows[r][c]))
+            .filter(v => !isNaN(v));
+          let result = 0;
+          switch (func) {
+            case 'SUM':
+              result = values.reduce((a, b) => a + b, 0);
+              break;
+            case 'AVG':
+              result = values.length > 0 ? values.reduce((a, b) => a + b, 0) / values.length : 0;
+              break;
+            case 'PROD':
+              result = values.length > 0 ? values.reduce((a, b) => a * b, 1) : 0;
+              break;
+            case 'DIV':
+              if (values.length > 0) {
+                let divResult = values[0];
+                for (let i = 1; i < values.length; i++) {
+                  const v = values[i];
+                  divResult = v !== 0 ? divResult / v : divResult;
+                }
+                result = divResult;
+              }
+              break;
+            case 'MAX':
+              result = values.length > 0 ? Math.max(...values) : 0;
+              break;
+            case 'MIN':
+              result = values.length > 0 ? Math.min(...values) : 0;
+              break;
+            default:
+              result = 0;
           }
-          rows[r][targetCol] = func === 'SUM' ? total : count > 0 ? total / count : 0;
+          rows[r][targetCol] = result;
         }
       }
     } else {
