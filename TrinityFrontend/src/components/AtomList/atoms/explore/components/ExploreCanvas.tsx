@@ -3684,4 +3684,3 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
   );
 };
 
-export default ExploreCanvas;
