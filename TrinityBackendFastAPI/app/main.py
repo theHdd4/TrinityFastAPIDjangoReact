@@ -51,3 +51,4 @@ async def log_env():
             prefix,
         )
     )
+    print(f"🌐 CORS Origins configured: {allowed_origins}")
