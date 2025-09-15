@@ -129,13 +129,29 @@ def _list_objects(prefix: str):
 
 
 def remove_prefix(prefix: str) -> None:
-    """Remove all objects under the given prefix."""
+    """Remove all objects under the given prefix.
+
+    MinIO/S3 stores "folders" as zero-byte objects.  When removing a project we
+    need to delete both the placeholder object for the prefix itself and any
+    nested objects so the entire folder disappears from the bucket.
+    """
+    if not prefix:
+        return
+
     objects = _list_objects(prefix)
     for obj in objects:
         try:
             _client.remove_object(MINIO_BUCKET, obj.object_name)
         except S3Error as exc:
             print(f"MinIO connection error: {exc}")
+
+    # Ensure the top-level prefix object itself is removed even if no children
+    # were returned (e.g. an empty "folder" placeholder).
+    for candidate in {prefix.rstrip("/"), prefix.rstrip("/") + "/"}:
+        try:
+            _client.remove_object(MINIO_BUCKET, candidate)
+        except S3Error:
+            pass
 
 
 def rename_existing_prefix(old_prefix: str, new_prefix: str) -> bool:

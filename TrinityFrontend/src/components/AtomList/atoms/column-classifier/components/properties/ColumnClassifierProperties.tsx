@@ -21,8 +21,9 @@ const ColumnClassifierProperties: React.FC<Props> = ({ atomId }) => {
   const [tab, setTab] = useState('settings');
   const atom = useLaboratoryStore(state => state.getAtom(atomId));
   const updateSettings = useLaboratoryStore(state => state.updateAtomSettings);
-  const settings: SettingsType = (atom?.settings as SettingsType) || {
-    ...DEFAULT_COLUMN_CLASSIFIER_SETTINGS
+  const settings: SettingsType = {
+    ...DEFAULT_COLUMN_CLASSIFIER_SETTINGS,
+    ...(atom?.settings as SettingsType)
   };
 
   const handleClassification = (file: FileClassification) => {
