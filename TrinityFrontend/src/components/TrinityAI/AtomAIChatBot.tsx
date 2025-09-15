@@ -145,12 +145,35 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
     setIsLoading(true);
 
     try {
+      // Get environment context from localStorage for dynamic path resolution
+      let envContext = {
+        client_name: '',
+        app_name: '',
+        project_name: ''
+      };
+
+      try {
+        const envStr = localStorage.getItem('env');
+        if (envStr) {
+          const env = JSON.parse(envStr);
+          envContext = {
+            client_name: env.CLIENT_NAME || '',
+            app_name: env.APP_NAME || '',
+            project_name: env.PROJECT_NAME || ''
+          };
+          console.log('🔍 Environment context loaded:', envContext);
+        }
+      } catch (error) {
+        console.warn('Failed to load environment context:', error);
+      }
+
       const res = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
           prompt: userMsg.content,
-          session_id: sessionId  // Include session ID for context
+          session_id: sessionId,  // Include session ID for context
+          ...envContext  // Include environment context for dynamic path resolution
         }),
       });
       let data;
@@ -1639,11 +1662,37 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
           
           console.log('📊 Explorations in config:', numberOfExplorations);
           
-          // Get target file from AI response (use only file_name, ignore data_source)
+          // Get target file from AI response and construct full path
           let targetFile = '';
           if (data.file_name) {
-            targetFile = data.file_name;
-            console.log('🎯 Using AI-provided file_name:', targetFile);
+            // 🔧 CRITICAL FIX: Construct full file path with current prefix
+            try {
+              // Get current prefix from environment context
+              const envStr = localStorage.getItem('env');
+              if (envStr) {
+                const env = JSON.parse(envStr);
+                const clientName = env.CLIENT_NAME || '';
+                const appName = env.APP_NAME || '';
+                const projectName = env.PROJECT_NAME || '';
+                
+                if (clientName && appName && projectName) {
+                  // Construct full path: client/app/project/filename
+                  targetFile = `${clientName}/${appName}/${projectName}/${data.file_name}`;
+                  console.log('🎯 Constructed full file path:', targetFile);
+                } else {
+                  // Fallback to just filename if no environment context
+                  targetFile = data.file_name;
+                  console.log('⚠️ No environment context, using filename only:', targetFile);
+                }
+              } else {
+                // Fallback to just filename if no environment context
+                targetFile = data.file_name;
+                console.log('⚠️ No environment context, using filename only:', targetFile);
+              }
+            } catch (error) {
+              console.warn('Failed to construct full file path:', error);
+              targetFile = data.file_name;
+            }
           } else {
             console.log('⚠️ No file_name found in AI response');
           }
@@ -1695,8 +1744,8 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
               try {
                 // 🎯 STEP 1: Create same JSON structures as manual
               const dimensionColumns = new Set<string>([exploration.x_axis]);
-              if (exploration.legend_field && exploration.legend_field !== 'aggregate') {
-                dimensionColumns.add(exploration.legend_field);
+              if (exploration.segregated_field && exploration.segregated_field !== 'aggregate') {
+                dimensionColumns.add(exploration.segregated_field);
               }
               
               const selectedDimensions = {
@@ -1751,8 +1800,8 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
               const operationsPayload = {
                 file_key: targetFile,
                 filters: exploration.filters || [],
-                group_by: exploration.legend_field && exploration.legend_field !== 'aggregate'
-                  ? [exploration.legend_field, exploration.x_axis]
+                group_by: exploration.segregated_field && exploration.segregated_field !== 'aggregate'
+                  ? [exploration.segregated_field, exploration.x_axis]
                   : [exploration.x_axis],
                 measures_config: measuresConfig,
                 chart_type: exploration.chart_type,
@@ -2043,16 +2092,18 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
               // 🔧 Create chartConfigs with normalized column names (same as manual)
               const chartConfigs = finalExplorations.map((exp: any, idx: number) => {
                 const config = {
-                  xAxis: normalizeColumnName(exp.x_axis),
-                  yAxes: [normalizeColumnName(exp.y_axis)],
-                  xAxisLabel: exp.x_axis_label || normalizeColumnName(exp.x_axis),
-                  yAxisLabels: [exp.y_axis_label || normalizeColumnName(exp.y_axis)],
+                  xAxis: exp.x_axis ? normalizeColumnName(exp.x_axis) : '',
+                  yAxes: [exp.y_axis ? normalizeColumnName(exp.y_axis) : ''],
+                  xAxisLabel: exp.x_axis_label || (exp.x_axis ? normalizeColumnName(exp.x_axis) : ''),
+                  yAxisLabels: [exp.y_axis_label || (exp.y_axis ? normalizeColumnName(exp.y_axis) : '')],
                   chartType: exp.chart_type || 'bar_chart',
                   aggregation: exp.aggregation || 'sum',
-                  weightColumn: normalizeColumnName(exp.weight_column) || '',
+                  weightColumn: exp.weight_column ? normalizeColumnName(exp.weight_column) : '',
                   title: exp.title || `Chart ${idx + 1}`,
-                  legendField: normalizeColumnName(exp.legend_field) || '',
+                  legendField: exp.segregated_field ? normalizeColumnName(exp.segregated_field) : '',
                   sortOrder: exp.sort_order || null,
+                  // 🔧 NEW: Add segregated_field support for secondary x-axis grouping
+                  segregatedField: exp.segregated_field ? normalizeColumnName(exp.segregated_field) : null,
                 };
                 console.log(`📊 Chart ${idx + 1} config created:`, {
                   chartIndex: idx,
@@ -2083,14 +2134,16 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
                 
                 // 🎯 Individual properties for backward compatibility (use first chart)
                 chartType: firstExploration?.chart_type || 'bar_chart',
-                xAxis: normalizeColumnName(firstExploration?.x_axis),
-                yAxis: normalizeColumnName(firstExploration?.y_axis),
+                xAxis: firstExploration?.x_axis ? normalizeColumnName(firstExploration.x_axis) : '',
+                yAxis: firstExploration?.y_axis ? normalizeColumnName(firstExploration.y_axis) : '',
                 xAxisLabel: firstExploration?.x_axis_label || '',
                 yAxisLabel: firstExploration?.y_axis_label || '',
                 title: firstExploration?.title || 'AI Generated Chart',
                 aggregation: firstExploration?.aggregation || 'sum',
-                legendField: normalizeColumnName(firstExploration?.legend_field),
-                weightColumn: normalizeColumnName(firstExploration?.weight_column),
+                legendField: firstExploration?.segregated_field ? normalizeColumnName(firstExploration.segregated_field) : '',
+                weightColumn: firstExploration?.weight_column ? normalizeColumnName(firstExploration.weight_column) : '',
+                // 🔧 NEW: Add segregated_field support for secondary x-axis grouping
+                segregatedField: firstExploration?.segregated_field ? normalizeColumnName(firstExploration.segregated_field) : null,
                 
                 // 🎯 Use REAL backend data (same as manual)
                 columnClassifierConfig: updatedColumnClassifierConfig,  // ✅ With filter columns
@@ -2286,10 +2339,13 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
                 dataframe: targetFile,
                 applied: true,
                 chartType: firstExploration?.chart_type || 'bar_chart',
-                xAxis: normalizeColumnName(firstExploration?.x_axis),
-                yAxis: normalizeColumnName(firstExploration?.y_axis),
+                xAxis: firstExploration?.x_axis ? normalizeColumnName(firstExploration.x_axis) : '',
+                yAxis: firstExploration?.y_axis ? normalizeColumnName(firstExploration.y_axis) : '',
                 title: firstExploration?.title || 'AI Generated Chart',
                 aggregation: firstExploration?.aggregation || 'sum',
+                legendField: firstExploration?.segregated_field ? normalizeColumnName(firstExploration.segregated_field) : '',
+                // 🔧 NEW: Add segregated_field support for secondary x-axis grouping
+                segregatedField: firstExploration?.segregated_field ? normalizeColumnName(firstExploration.segregated_field) : null,
                 
                 chartDataSets: result.explorations?.reduce((acc: any, exp: any, idx: number) => {
                   acc[idx] = exp.chart_data || [];

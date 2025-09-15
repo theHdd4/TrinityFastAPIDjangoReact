@@ -49,6 +49,9 @@ agent = SmartMergeAgent(
 class MergeRequest(BaseModel):
     prompt: str
     session_id: Optional[str] = None
+    client_name: Optional[str] = ""
+    app_name: Optional[str] = ""
+    project_name: Optional[str] = ""
 
 @router.post("/merge")
 def merge_files(request: MergeRequest):
@@ -60,8 +63,14 @@ def merge_files(request: MergeRequest):
     logger.info(f"Session ID: {request.session_id}")
     
     try:
-        # Process with complete memory context
-        result = agent.process_request(request.prompt, request.session_id)
+        # Process with complete memory context and dynamic path resolution
+        result = agent.process_request(
+            request.prompt, 
+            request.session_id,
+            request.client_name or "",
+            request.app_name or "",
+            request.project_name or ""
+        )
 
         # Add timing
         processing_time = round(time.time() - start_time, 2)

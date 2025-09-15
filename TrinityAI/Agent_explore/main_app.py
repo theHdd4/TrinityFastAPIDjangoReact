@@ -5,7 +5,7 @@ import time
 import logging
 from typing import Optional, Dict, Any, List, Union
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from .llm_explore import ExploreAgent
@@ -38,11 +38,17 @@ agent = ExploreAgent(
 class ExploreRequest(BaseModel):
     prompt: str = Field(..., description="User prompt describing the data exploration to perform")
     session_id: Optional[str] = Field(None, description="Optional session ID for conversation continuity")
+    client_name: str = Field("", description="Client name for dynamic path resolution")
+    app_name: str = Field("", description="App name for dynamic path resolution")
+    project_name: str = Field("", description="Project name for dynamic path resolution")
 
 # Add chat-compatible request model for frontend integration
 class ChatRequest(BaseModel):
     query: str = Field(..., description="Natural language query from the user")
     session_id: Optional[str] = Field(None, description="Optional session ID for conversation continuity")
+    client_name: str = Field("", description="Client name for dynamic path resolution")
+    app_name: str = Field("", description="App name for dynamic path resolution")
+    project_name: str = Field("", description="Project name for dynamic path resolution")
 
 class FileContextRequest(BaseModel):
     file_id: str = Field(..., description="File ID for exploration")
@@ -77,7 +83,13 @@ def explore_data(request: ExploreRequest):
     logger.info(f"Explore request: {request.prompt[:100]}... (Session: {request.session_id})")
     
     try:
-        result = agent.process(request.prompt, request.session_id)
+        result = agent.process(
+            request.prompt, 
+            request.session_id,
+            request.client_name,
+            request.app_name,
+            request.project_name
+        )
         
         # Add processing time
         result["processing_time"] = round(time.time() - start, 2)
@@ -158,9 +170,9 @@ def get_file_context():
 
 @router.get("/files")
 def list_available_files():
-    """List all available files from MinIO for exploration"""
+    """List all available files from MinIO for exploration using dynamic paths"""
     try:
-        logger.info("Listing available files")
+        logger.info("Listing available files with dynamic paths")
         files_info = agent.list_available_files()
         return files_info
     except Exception as e:
@@ -197,7 +209,13 @@ def chat_endpoint(request: ChatRequest):
     
     try:
         # Process with complete memory context using the same pattern as concat agent
-        result = agent.process_conversation(request.query, request.session_id)
+        result = agent.process_conversation(
+            request.query, 
+            request.session_id,
+            request.client_name,
+            request.app_name,
+            request.project_name
+        )
 
         # Add timing
         processing_time = round(time.time() - start_time, 2)

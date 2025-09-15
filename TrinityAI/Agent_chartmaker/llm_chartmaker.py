@@ -6,15 +6,9 @@ import uuid
 import json
 from datetime import datetime
 from typing import Dict, Optional, Any, List
-from io import BytesIO
-
-import pandas as pd
-import pyarrow as pa
-import pyarrow.feather as pf
-import pyarrow.parquet as pq
-from minio import Minio
 
 from .ai_logic import build_chart_prompt, call_chart_llm, extract_json
+from file_loader import FileLoader
 
 # Import the file analyzer
 import sys
@@ -50,7 +44,15 @@ class ChartMakerAgent:
         self.secret_key = secret_key
         self.bucket = bucket
         self.prefix = prefix
-        self.minio_client = Minio(minio_endpoint, access_key=access_key, secret_key=secret_key, secure=False)
+        
+        # Initialize FileLoader for standardized file handling
+        self.file_loader = FileLoader(
+            minio_endpoint=minio_endpoint,
+            minio_access_key=access_key,
+            minio_secret_key=secret_key,
+            minio_bucket=bucket,
+            object_prefix=prefix
+        )
         
         # Initialize file analyzer for enhanced file context
         self.file_analyzer = FileAnalyzer(
@@ -66,134 +68,72 @@ class ChartMakerAgent:
         self._load_files()
 
     def _maybe_update_prefix(self) -> None:
-        """Dynamically updates the MinIO prefix using the same system as data_upload_validate."""
+        """Dynamically updates the MinIO prefix and reloads files."""
         try:
-            # 🔧 CRITICAL FIX: Try multiple methods to get the current path
-            
-            # Method 1: Try to import and use get_object_prefix from data_upload_validate
-            try:
-                import sys
-                import os
-                # Add the path to TrinityBackendFastAPI
-                backend_path = os.path.join(os.path.dirname(__file__), '..', '..', 'TrinityBackendFastAPI')
-                if backend_path not in sys.path:
-                    sys.path.append(backend_path)
-                
-                from app.features.data_upload_validate.app.routes import get_object_prefix
-                import asyncio
-                
-                # Get the current dynamic path (this is what data_upload_validate uses)
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                try:
-                    current = loop.run_until_complete(get_object_prefix())
-                    logger.info(f"✅ Method 1 (get_object_prefix) successful: {current}")
-                finally:
-                    loop.close()
-                
-                if self.prefix != current:
-                    logger.info("MinIO prefix updated from '%s' to '%s'", self.prefix, current)
-                    self.prefix = current
-                    # Update file analyzer prefix
-                    self.file_analyzer.prefix = current
-                    # Since prefix changed, we must reload the files.
-                    self._load_files()
-                    return
-                    
-            except Exception as e:
-                logger.warning(f"Method 1 (get_object_prefix) failed: {e}")
-            
-            # Method 2: Try to get from environment variables directly
-            client = os.getenv("CLIENT_NAME", "").strip()
-            app = os.getenv("APP_NAME", "").strip()
-            project = os.getenv("PROJECT_NAME", "").strip()
-            
-            logger.info(f"🔍 Environment variables: CLIENT_NAME='{client}', APP_NAME='{app}', PROJECT_NAME='{project}'")
-            
-            if client and app and project and not (client == "default_client" and app == "default_app" and project == "default_project"):
-                current = f"{client}/{app}/{project}/"
-                current = current.lstrip("/")
-                if current and not current.endswith("/"):
-                    current += "/"
-                
-                logger.info(f"✅ Method 2 (env vars) successful: {current}")
-                
-                if self.prefix != current:
-                    logger.info("MinIO prefix updated from '%s' to '%s'", self.prefix, current)
-                    self.prefix = current
-                    # Update file analyzer prefix
-                    self.file_analyzer.prefix = current
-                    # Since prefix changed, we must reload the files.
-                    self._load_files()
-                    return
-            else:
-                logger.warning("⚠️ Environment variables contain default values or are empty")
-            
-            # Method 3: Try to get from Redis cache or database (if accessible)
-            try:
-                # Try to make a simple HTTP request to get the current prefix
-                import requests
-                base_url = "http://localhost:8000"  # Adjust if needed
-                prefix_endpoint = f"{base_url}/data-upload-validate/get_object_prefix"
-                
-                response = requests.get(prefix_endpoint, timeout=5)
-                if response.status_code == 200:
-                    data = response.json()
-                    current = data.get("prefix", "")
-                    if current and current != self.prefix:
-                        logger.info(f"✅ Method 3 (HTTP API) successful: {current}")
-                        logger.info("MinIO prefix updated from '%s' to '%s'", self.prefix, current)
-                        self.prefix = current
-                        # Since prefix changed, we must reload the files.
-                        self._load_files()
-                        return
-                    else:
-                        logger.info(f"✅ Method 3 (HTTP API) returned same prefix: {current}")
-                else:
-                    logger.warning(f"Method 3 (HTTP API) failed with status: {response.status_code}")
-                    
-            except Exception as e:
-                logger.warning(f"Method 3 (HTTP API) failed: {e}")
-            
-            # If all methods failed, log the current state
-            logger.warning(f"⚠️ All path detection methods failed. Using current prefix: {self.prefix}")
-            logger.warning(f"⚠️ Current environment: CLIENT_NAME='{client}', APP_NAME='{app}', PROJECT_NAME='{project}'")
-            
-            # Check if we're using default values
-            if self.prefix == "default_client/default_app/default_project/" or self.prefix == "":
-                logger.error("❌ CRITICAL: Using default path. Chart maker will not find any files!")
-                logger.error("❌ Please check environment variables or system configuration")
-                
+            # Use FileLoader's prefix update method
+            self.file_loader._maybe_update_prefix()
+            if self.file_loader.object_prefix != self.prefix:
+                logger.info("MinIO prefix updated from '%s' to '%s'", self.prefix, self.file_loader.object_prefix)
+                self.prefix = self.file_loader.object_prefix
+                # Update file analyzer prefix
+                self.file_analyzer.prefix = self.prefix
+                # Reload files with new prefix
+                self._load_files()
         except Exception as e:
-            logger.error(f"❌ Critical error in _maybe_update_prefix: {e}", exc_info=True)
-            # Don't change the prefix on critical errors
+            logger.warning(f"Failed to update prefix: {e}")
 
     def _load_files(self) -> None:
         """
-        Load files using FileAnalyzer for comprehensive analysis.
+        Load files using the standardized FileLoader and FileAnalyzer for comprehensive analysis.
         This provides rich file context for better chart recommendations.
         """
         logger.info(f"Loading files from MinIO bucket '{self.bucket}' with prefix '{self.prefix}'...")
         
         try:
-            # Use file analyzer to get comprehensive analysis
+            # First load files using the standardized FileLoader
+            files_with_columns = self.file_loader.load_files()
+            
+            # Convert FileLoader results to the format expected by the chart maker
+            self.files_with_columns = {}
+            for file_path, file_data in files_with_columns.items():
+                if isinstance(file_data, dict):
+                    columns = file_data.get('columns', [])
+                    file_name = file_data.get('file_name', os.path.basename(file_path))
+                else:
+                    columns = file_data
+                    file_name = os.path.basename(file_path)
+                self.files_with_columns[file_name] = columns
+            
+            # Then use file analyzer to get comprehensive analysis
             analysis_results = self.file_analyzer.analyze_files()
             
             if 'error' in analysis_results:
-                logger.error(f"File analysis failed: {analysis_results['error']}")
-                self.files_with_columns = {}
+                logger.warning(f"File analysis failed, using basic file info: {analysis_results['error']}")
+                # Use basic file info from FileLoader
                 self.files_metadata = {}
+                for file_name, columns in self.files_with_columns.items():
+                    self.files_metadata[file_name] = {
+                        'total_rows': 0,
+                        'row_count': 0,
+                        'total_columns': len(columns),
+                        'file_size_bytes': 0,
+                        'file_size': 0,
+                        'file_path': '',
+                        'columns': {},
+                        'data_types': {},
+                        'missing_values': {},
+                        'sample_data': {},
+                        'statistical_summary': {},
+                        'column_types': [],
+                        'numeric_columns': [],
+                        'categorical_columns': []
+                    }
                 return
             
             # Convert file analyzer results to the format expected by the chart maker
-            self.files_with_columns = {}
             self.files_metadata = {}
             
             for filename, analysis in analysis_results.get('files', {}).items():
-                # Extract column names for compatibility
-                columns = list(analysis.get('columns', {}).keys())
-                self.files_with_columns[filename] = columns
-                
                 # Store comprehensive metadata with JSON-serializable values
                 def convert_to_json_serializable(obj):
                     """Convert numpy types to Python types for JSON serialization."""
@@ -243,10 +183,10 @@ class ChartMakerAgent:
                     self.files_metadata[filename]['numeric_columns'] = numeric_columns
                     self.files_metadata[filename]['categorical_columns'] = categorical_columns
             
-            logger.info(f"Successfully analyzed {len(self.files_with_columns)} files using FileAnalyzer")
+            logger.info(f"Successfully loaded {len(self.files_with_columns)} files using FileLoader and FileAnalyzer")
             
         except Exception as e:
-            logger.error(f"Error during file analysis: {e}")
+            logger.error(f"Error during file loading: {e}")
             self.files_with_columns = {}
             self.files_metadata = {}
 
