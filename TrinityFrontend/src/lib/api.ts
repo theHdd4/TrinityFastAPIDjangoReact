@@ -134,6 +134,7 @@ export const CLUSTERING_API =
 export const CORRELATION_API =
   normalizeUrl(import.meta.env.VITE_CORRELATION_API) ||
   `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/correlation`;
+
 export const CHART_MAKER_API =
   normalizeUrl(import.meta.env.VITE_CHART_MAKER_API) ||
   `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/chart-maker`;
@@ -160,6 +161,16 @@ console.log('Clustering API Configuration:', {
     `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/clustering`
 });
 
+// Debug logging for feature-overview API
+console.log('feature-overview API Configuration:', {
+  isDevStack,
+  djangoPort,
+  fastapiPort,
+  backendOrigin,
+  featureoverviewApi: normalizeUrl(import.meta.env.VITE_FEATURE_OVERVIEW_API) ||
+    `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/feature-overview`
+});
+ 
 
 export const SELECT_API =
   normalizeUrl(import.meta.env.VITE_SELECT_API) ||
