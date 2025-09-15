@@ -38,6 +38,22 @@ class ExploreAgent:
         
         logger.info(f"ExploreAgent initialized with model: {model_name}")
     
+    def set_context(self, client_name: str = "", app_name: str = "", project_name: str = "") -> None:
+        """
+        Set environment context for dynamic path resolution.
+        This ensures the API call will fetch the correct path for the current project.
+        """
+        if client_name or app_name or project_name:
+            if client_name:
+                os.environ["CLIENT_NAME"] = client_name
+            if app_name:
+                os.environ["APP_NAME"] = app_name
+            if project_name:
+                os.environ["PROJECT_NAME"] = project_name
+            logger.info(f"🔧 Environment context set for dynamic path resolution: {client_name}/{app_name}/{project_name}")
+        else:
+            logger.info("🔧 Using existing environment context for dynamic path resolution")
+    
     def process(self, user_prompt: str, session_id: Optional[str] = None, 
                 client_name: str = "", app_name: str = "", project_name: str = "") -> Dict[str, Any]:
         """
@@ -51,16 +67,8 @@ class ExploreAgent:
             return {"success": False, "error": "Prompt cannot be empty.", "session_id": session_id}
 
         try:
-            # Set environment context for prefix resolution
-            if client_name or app_name or project_name:
-                import os
-                if client_name:
-                    os.environ["CLIENT_NAME"] = client_name
-                if app_name:
-                    os.environ["APP_NAME"] = app_name
-                if project_name:
-                    os.environ["PROJECT_NAME"] = project_name
-                logger.info(f"Environment context set: {client_name}/{app_name}/{project_name}")
+            # Set environment context for dynamic path resolution (like merge agent)
+            self.set_context(client_name, app_name, project_name)
             
             # Get or create session
             if not session_id:
@@ -264,7 +272,8 @@ class ExploreAgent:
         return self.sessions.get(session_id, [])
     
     def _maybe_update_prefix(self) -> None:
-        """Dynamically updates the MinIO prefix using the data_upload_validate API endpoint."""
+        """Dynamically updates the MinIO prefix using the data_upload_validate API endpoint.
+        Uses the same dynamic path resolution as merge agent for consistency."""
         try:
             # Method 1: Call the data_upload_validate API endpoint to get the current prefix
             try:
@@ -276,37 +285,45 @@ class ExploreAgent:
                 app_name = os.getenv("APP_NAME", "")
                 project_name = os.getenv("PROJECT_NAME", "")
                 
-                # Call the get_object_prefix endpoint
-                validate_api_url = os.getenv("VALIDATE_API_URL", "http://localhost:8000/validate")
+                # Use the correct backend API endpoint for dynamic path resolution (same as merge agent)
+                validate_api_url = os.getenv("VALIDATE_API_URL", "http://fastapi:8004")
                 if not validate_api_url.startswith("http"):
                     validate_api_url = f"http://{validate_api_url}"
                 
-                url = f"{validate_api_url}/get_object_prefix"
+                # Call the correct API endpoint that returns the current dynamic path
+                url = f"{validate_api_url}/api/data-upload-validate/get_object_prefix"
                 params = {
                     "client_name": client_name,
                     "app_name": app_name,
                     "project_name": project_name
                 }
                 
-                response = requests.get(url, params=params, timeout=5)
+                logger.info(f"🔍 Fetching dynamic path from: {url}")
+                logger.info(f"🔍 With params: {params}")
+                
+                response = requests.get(url, params=params, timeout=10)
                 if response.status_code == 200:
                     data = response.json()
                     current = data.get("prefix", "")
                     if current and current != self.object_prefix:
-                        logger.info(f"✅ Method 1 (API endpoint) successful: {current}")
+                        logger.info(f"✅ Dynamic path fetched successfully: {current}")
                         logger.info("MinIO prefix updated from '%s' to '%s'", self.object_prefix, current)
                         self.object_prefix = current
                         # Since prefix changed, we must reload the files.
                         self._load_available_files()
                         return
                     elif current:
-                        logger.info(f"✅ Method 1 (API endpoint) successful: {current} (no change needed)")
+                        logger.info(f"✅ Dynamic path fetched: {current} (no change needed)")
                         return
+                    else:
+                        logger.warning(f"API returned empty prefix: {data}")
+                else:
+                    logger.warning(f"API call failed with status {response.status_code}: {response.text}")
                         
             except Exception as e:
-                logger.warning(f"Method 1 (API endpoint) failed: {e}")
+                logger.warning(f"Failed to fetch dynamic path from API: {e}")
             
-            # Method 2: Fallback to environment variables
+            # Method 2: Fallback to environment variables if API fails
             import os
             client_name = os.getenv("CLIENT_NAME", "default_client")
             app_name = os.getenv("APP_NAME", "default_app")
@@ -318,6 +335,8 @@ class ExploreAgent:
                 self.object_prefix = current
                 # Since prefix changed, we must reload the files.
                 self._load_available_files()
+            else:
+                logger.info(f"Using current prefix: {current}")
                 
         except Exception as e:
             logger.error(f"Failed to update prefix: {e}")
