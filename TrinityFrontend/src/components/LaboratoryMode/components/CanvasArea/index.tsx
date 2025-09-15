@@ -108,11 +108,12 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
     unique_values: string[];
   }
 
-  const fetchColumnSummary = async (csv: string) => {
+  const fetchColumnSummary = async (csv: string, signal?: AbortSignal) => {
     try {
       console.log('🔎 fetching column summary for', csv);
       const res = await fetch(
-        `${FEATURE_OVERVIEW_API}/column_summary?object_name=${encodeURIComponent(csv)}`
+        `${FEATURE_OVERVIEW_API}/column_summary?object_name=${encodeURIComponent(csv)}`,
+        { signal }
       );
       if (!res.ok) {
         console.warn('⚠️ column summary request failed', res.status);
@@ -165,7 +166,7 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
   };
 
 
-  const findLatestDataSource = async () => {
+  const findLatestDataSource = async (signal?: AbortSignal) => {
     console.log('🔎 searching for latest data source');
     if (!Array.isArray(layoutCards)) return null;
     for (let i = layoutCards.length - 1; i >= 0; i--) {
@@ -174,8 +175,8 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
         const a = card.atoms[j];
         if (a.atomId === 'feature-overview' && a.settings?.dataSource) {
           console.log('✔️ found feature overview data source', a.settings.dataSource);
-          await prefetchDataframe(a.settings.dataSource);
-          const cols = await fetchColumnSummary(a.settings.dataSource);
+          await prefetchDataframe(a.settings.dataSource, signal);
+          const cols = await fetchColumnSummary(a.settings.dataSource, signal);
           return {
             csv: a.settings.dataSource,
             display: a.settings.csvDisplay || a.settings.dataSource,
@@ -189,17 +190,17 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
           if (req) {
             try {
               const [ticketRes, confRes] = await Promise.all([
-                fetch(`${VALIDATE_API}/latest_ticket/${encodeURIComponent(req)}`),
+                fetch(`${VALIDATE_API}/latest_ticket/${encodeURIComponent(req)}`, { signal }),
                 validatorId
-                  ? fetch(`${VALIDATE_API}/get_validator_config/${validatorId}`)
+                  ? fetch(`${VALIDATE_API}/get_validator_config/${validatorId}`, { signal })
                   : Promise.resolve(null as any),
               ]);
               if (ticketRes.ok) {
                 const ticket = await ticketRes.json();
                 if (ticket.arrow_name) {
                   console.log('✔️ using validated data source', ticket.arrow_name);
-                  await prefetchDataframe(ticket.arrow_name);
-                  const cols = await fetchColumnSummary(ticket.arrow_name);
+                  await prefetchDataframe(ticket.arrow_name, signal);
+                  const cols = await fetchColumnSummary(ticket.arrow_name, signal);
                   let ids: string[] = [];
                   if (confRes && confRes.ok) {
                     const cfg = await confRes.json();
@@ -242,7 +243,9 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
           /* ignore */
         }
       }
-      const res = await fetch(`${VALIDATE_API}/list_saved_dataframes${query}`);
+      const res = await fetch(`${VALIDATE_API}/list_saved_dataframes${query}`, {
+        signal,
+      });
       if (res.ok) {
         const data = await res.json();
         const files = Array.isArray(data.files) ? data.files : [];
@@ -254,8 +257,8 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
         const file = validFiles[validFiles.length - 1];
         if (file && file.object_name) {
           console.log('✔️ defaulting to latest saved dataframe', file.object_name);
-          await prefetchDataframe(file.object_name);
-          const cols = await fetchColumnSummary(file.object_name);
+          await prefetchDataframe(file.object_name, signal);
+          const cols = await fetchColumnSummary(file.object_name, signal);
           return { csv: file.object_name, display: file.csv_name, ...(cols || {}) };
         }
       }
@@ -267,17 +270,19 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
   };
 
   const prefillFeatureOverview = async (cardId: string, atomId: string) => {
+    const controller = new AbortController();
+    registerPrefillController(atomId, controller);
     updateAtomSettings(atomId, { isLoading: true });
     try {
-      const prev = await findLatestDataSource();
+      const prev = await findLatestDataSource(controller.signal);
       if (!prev || !prev.csv) {
         console.warn('⚠️ no data source found for feature overview');
         updateAtomSettings(atomId, { isLoading: false });
         return;
       }
       console.log('ℹ️ prefill data source details', prev);
-      await prefetchDataframe(prev.csv);
-      const rawMapping = await fetchDimensionMapping();
+      await prefetchDataframe(prev.csv, controller.signal);
+      const rawMapping = await fetchDimensionMapping(controller.signal);
       const mapping = Object.fromEntries(
         Object.entries(rawMapping).filter(
           ([key]) => key.toLowerCase() !== 'unattributed',
@@ -307,8 +312,14 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
         isLoading: false,
       });
     } catch (err) {
-      console.error('⚠️ prefill feature overview error', err);
+      if ((err as any)?.name === 'AbortError') {
+        console.log('ℹ️ prefill feature overview aborted');
+      } else {
+        console.error('⚠️ prefill feature overview error', err);
+      }
       updateAtomSettings(atomId, { isLoading: false });
+    } finally {
+      cancelPrefillController(atomId);
     }
   };
 
@@ -331,7 +342,7 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
     const quoteTimer = setInterval(showQuote, 5000);
 
     try {
-      const prev = await findLatestDataSource();
+      const prev = await findLatestDataSource(controller.signal);
       if (!prev || !prev.csv) {
         console.warn('⚠️ no dataframe found for column classifier');
         updateAtomSettings(atomId, { isLoading: false });

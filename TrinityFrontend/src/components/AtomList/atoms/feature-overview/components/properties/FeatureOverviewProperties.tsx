@@ -54,7 +54,11 @@ const FeatureOverviewProperties: React.FC<Props> = ({ atomId }) => {
 
       <div className="px-4">
         <TabsContent value="settings" className="space-y-4" forceMount>
-          <FeatureOverviewSettings settings={settings} onSettingsChange={handleChange} />
+          <FeatureOverviewSettings
+            atomId={atomId}
+            settings={settings}
+            onSettingsChange={handleChange}
+          />
         </TabsContent>
         <TabsContent value="visual" className="space-y-4" forceMount>
           <FeatureOverviewVisualisation
