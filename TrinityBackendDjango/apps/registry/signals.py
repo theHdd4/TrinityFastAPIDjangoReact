@@ -268,7 +268,12 @@ def cleanup_on_delete(sender, instance, **kwargs):
         except Exception:
             pass
 
-    tenant = _current_tenant_name()
+    tenant_env = os.getenv("CLIENT_NAME", "default_client")
+    tenant_candidates = {
+        tenant_env,
+        tenant_env.replace(" ", "_"),
+    }
     app_slug = instance.app.slug if instance.app else ""
-    remove_prefix(f"{tenant}/{app_slug}/{instance.name}")
-    remove_prefix(f"{tenant}/{app_slug}/{instance.slug}")
+    for client_slug in tenant_candidates:
+        remove_prefix(f"{client_slug}/{app_slug}/{instance.name}")
+        remove_prefix(f"{client_slug}/{app_slug}/{instance.slug}")
