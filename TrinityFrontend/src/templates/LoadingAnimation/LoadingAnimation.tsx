@@ -1,15 +1,11 @@
 import React, { useEffect, useRef } from 'react';
 
 interface LoadingAnimationProps {
-  message?: string;
   status?: string;
   className?: string;
 }
 
-const textBorder = '-1px 0 #000, 0 1px #000, 1px 0 #000, 0 -1px #000';
-
 const LoadingAnimation: React.FC<LoadingAnimationProps> = ({
-  message = 'Loading',
   status = '',
   className = ''
 }) => {
@@ -80,16 +76,8 @@ const LoadingAnimation: React.FC<LoadingAnimationProps> = ({
     <div className={`absolute inset-0 flex items-center justify-center bg-white ${className}`}>
       <canvas ref={canvasRef} className="absolute inset-0 w-full h-full" />
       <div className="relative z-10 text-center px-6">
-        <h3
-          className="text-2xl font-light text-white mb-2"
-          style={{ textShadow: textBorder }}
-        >
-          {message}
-        </h3>
-        <div
-          className="flex items-center justify-center space-x-1 text-white"
-          style={{ textShadow: textBorder }}
-        >
+        <h3 className="text-2xl font-light text-black mb-2">Loading</h3>
+        <div className="flex items-center justify-center space-x-1 text-black">
           <span>{status}</span>
           <span className="animate-pulse">.</span>
           <span className="animate-pulse animation-delay-300">.</span>
