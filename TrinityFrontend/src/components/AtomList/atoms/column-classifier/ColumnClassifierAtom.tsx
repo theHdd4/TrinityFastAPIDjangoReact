@@ -28,10 +28,11 @@ interface Props {
 const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
   const atom = useLaboratoryStore(state => state.getAtom(atomId));
   const updateSettings = useLaboratoryStore(state => state.updateAtomSettings);
-  const settings: SettingsType = (atom?.settings as SettingsType) || {
-    ...DEFAULT_COLUMN_CLASSIFIER_SETTINGS
+  const settings: SettingsType = {
+    ...DEFAULT_COLUMN_CLASSIFIER_SETTINGS,
+    ...(atom?.settings as SettingsType)
   };
-  const classifierData = settings.data;
+  const classifierData = settings.data || DEFAULT_COLUMN_CLASSIFIER_SETTINGS.data;
   const { toast } = useToast();
   const { user } = useAuth();
 
