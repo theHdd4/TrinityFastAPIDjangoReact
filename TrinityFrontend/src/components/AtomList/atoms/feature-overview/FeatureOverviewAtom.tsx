@@ -24,7 +24,7 @@ const FeatureOverviewAtom: React.FC<Props> = ({ atomId }) => {
     let timer: ReturnType<typeof setInterval> | undefined;
     if (settings.isLoading) {
       const quotes = [
-        'Denial is the most predictable of all Analyst responses',
+        'You hit that back button... the story ends, you wake up in your bed and believe whatever you want to believe. You take a closer look at that data - at your curiosity.. you stay in Wonderland.',
         'Some Analysts go their entire lives without hearing news that good',
         'To deny our own impulses is to deny the very thing that makes us human',
       ];
