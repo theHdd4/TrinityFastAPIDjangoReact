@@ -261,20 +261,7 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
   };
 
   const prefillFeatureOverview = async (cardId: string, atomId: string) => {
-    const quotes = [
-      'Denial is the most predictable of all Analyst responses',
-      "Some Analysts go their entire lives without hearing news that good",
-      'To deny our own impulses is to deny the very thing that makes us human',
-    ];
-    let quoteIndex = 0;
-    const showQuote = () => {
-      toast({ title: quotes[quoteIndex % quotes.length] });
-      quoteIndex++;
-    };
     updateAtomSettings(atomId, { isLoading: true });
-    showQuote();
-    const quoteTimer = setInterval(showQuote, 5000);
-
     try {
       const prev = await findLatestDataSource();
       if (!prev || !prev.csv) {
@@ -313,15 +300,9 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
         xAxis: prev.xField || 'date',
         isLoading: false,
       });
-      toast({
-        title:
-          "Success! But there's a difference between knowing the path and walking the path.",
-      });
     } catch (err) {
       console.error('⚠️ prefill feature overview error', err);
       updateAtomSettings(atomId, { isLoading: false });
-    } finally {
-      clearInterval(quoteTimer);
     }
   };
 
