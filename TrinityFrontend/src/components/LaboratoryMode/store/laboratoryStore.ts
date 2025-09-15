@@ -301,6 +301,7 @@ export interface ColumnClassifierSettings {
   enableDimensionMapping?: boolean;
   enableColumnView?: boolean;
   filterColumnViewUnique?: boolean;
+  isLoading?: boolean;
 }
 
 export const DEFAULT_COLUMN_CLASSIFIER_SETTINGS: ColumnClassifierSettings = {
@@ -315,6 +316,7 @@ export const DEFAULT_COLUMN_CLASSIFIER_SETTINGS: ColumnClassifierSettings = {
   enableDimensionMapping: false,
   enableColumnView: true,
   filterColumnViewUnique: false,
+  isLoading: false,
 };
 
 export interface DataFrameOperationsSettings {

@@ -37,6 +37,7 @@ import ScenarioPlannerAtom from '@/components/AtomList/atoms/scenario-planner/Sc
 import ExploreAtom from '@/components/AtomList/atoms/explore/ExploreAtom';
 import EvaluateModelsFeatureAtom from '@/components/AtomList/atoms/evaluate-models-feature/EvaluateModelsFeatureAtom';
 import { fetchDimensionMapping } from '@/lib/dimensions';
+import { useToast } from '@/hooks/use-toast';
 
 import {
   useLaboratoryStore,
@@ -92,8 +93,9 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
   const [addDragTarget, setAddDragTarget] = useState<string | null>(null);
   const prevLayout = React.useRef<LayoutCard[] | null>(null);
   const initialLoad = React.useRef(true);
-  
+
   const { updateCard, setCards } = useExhibitionStore();
+  const { toast } = useToast();
 
   interface ColumnInfo {
     column: string;
@@ -297,14 +299,30 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
   };
 
   const prefillColumnClassifier = async (atomId: string) => {
-    const prev = await findLatestDataSource();
-    if (!prev || !prev.csv) {
-      console.warn('⚠️ no dataframe found for column classifier');
-      return;
-    }
-    console.log('ℹ️ prefill column classifier with', prev.csv);
-    await prefetchDataframe(prev.csv);
+    const quotes = [
+      'Working the Trinity Magic!',
+      'Choice is an illusion created between those with power and those without',
+      'Choice. The problem is choice',
+      'To deny our own impulses is to deny the very thing that makes us human',
+    ];
+    let quoteIndex = 0;
+    const showQuote = () => {
+      toast({ title: quotes[quoteIndex % quotes.length] });
+      quoteIndex++;
+    };
+    updateAtomSettings(atomId, { isLoading: true });
+    showQuote();
+    const quoteTimer = setInterval(showQuote, 5000);
+
     try {
+      const prev = await findLatestDataSource();
+      if (!prev || !prev.csv) {
+        console.warn('⚠️ no dataframe found for column classifier');
+        updateAtomSettings(atomId, { isLoading: false });
+        return;
+      }
+      console.log('ℹ️ prefill column classifier with', prev.csv);
+      await prefetchDataframe(prev.csv);
       const form = new FormData();
       form.append('dataframe', prev.csv);
       const res = await fetch(`${CLASSIFIER_API}/classify_columns`, {
@@ -314,6 +332,7 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
       });
       if (!res.ok) {
         console.warn('⚠️ auto classification failed', res.status);
+        updateAtomSettings(atomId, { isLoading: false });
         return;
       }
       const data = await res.json();
@@ -344,9 +363,14 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
           ],
           activeFileIndex: 0,
         },
+        isLoading: false,
       });
+      toast({ title: 'Success! We are still here!' });
     } catch (err) {
       console.error('⚠️ prefill column classifier error', err);
+      updateAtomSettings(atomId, { isLoading: false });
+    } finally {
+      clearInterval(quoteTimer);
     }
   };
 

@@ -1,5 +1,6 @@
 import React from 'react';
 import { useToast } from '@/hooks/use-toast';
+import { Loader2 } from 'lucide-react';
 
 import ColumnClassifierCanvas from './components/ColumnClassifierCanvas';
 import ColumnClassifierDimensionMapping from './components/ColumnClassifierDimensionMapping';
@@ -258,18 +259,24 @@ const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
     <div className="w-full h-full bg-white flex flex-col">
         <div className="flex flex-1">
           <div className="w-full p-4">
-            <ColumnClassifierCanvas
-              data={classifierData}
-              onColumnMove={handleColumnMove}
-              onActiveFileChange={setActiveFile}
-              showColumnView={settings.enableColumnView ?? true}
-              filterUnique={settings.filterColumnViewUnique || false}
-              onFilterToggle={handleFilterToggle}
-              atomId={atomId}
-            />
+            {settings.isLoading ? (
+              <div className="w-full h-full flex items-center justify-center">
+                <Loader2 className="w-8 h-8 animate-spin text-gray-500" />
+              </div>
+            ) : (
+              <ColumnClassifierCanvas
+                data={classifierData}
+                onColumnMove={handleColumnMove}
+                onActiveFileChange={setActiveFile}
+                showColumnView={settings.enableColumnView ?? true}
+                filterUnique={settings.filterColumnViewUnique || false}
+                onFilterToggle={handleFilterToggle}
+                atomId={atomId}
+              />
+            )}
           </div>
         </div>
-      {settings.enableDimensionMapping && (
+      {!settings.isLoading && settings.enableDimensionMapping && (
         <div className="border-t p-4 overflow-y-auto">
           <ColumnClassifierDimensionMapping
             customDimensions={
