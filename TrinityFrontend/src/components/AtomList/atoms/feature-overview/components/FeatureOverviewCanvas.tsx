@@ -24,6 +24,7 @@ import D3LineChart from "./D3LineChart";
 import { useAuth } from "@/contexts/AuthContext";
 import { logSessionState, addNavigationItem } from "@/lib/session";
 import { useLaboratoryStore } from "@/components/LaboratoryMode/store/laboratoryStore";
+import { useToast } from "@/hooks/use-toast";
 
 interface ColumnInfo {
   column: string;
@@ -51,6 +52,7 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
   atomId,
 }) => {
   const { user } = useAuth();
+  const { toast } = useToast();
   const [dimensionMap, setDimensionMap] = useState<Record<string, string[]>>(
     filterUnattributed(settings.dimensionMap || {}),
   );
@@ -519,7 +521,14 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
       .forEach((d) => {
         combo[d] = row[d.toLowerCase()];
       });
-    if (!settings.yAxes || settings.yAxes.length === 0) return;
+    if (!settings.yAxes || settings.yAxes.length === 0) {
+      toast({
+        title:
+          "Can not display trend - configure Dependant Variables in properties section to view stat.",
+        variant: "destructive",
+      });
+      return;
+    }
     setError(null);
     try {
       const result: Record<
