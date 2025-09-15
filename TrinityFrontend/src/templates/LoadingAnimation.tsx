@@ -76,7 +76,12 @@ const LoadingAnimation: React.FC<LoadingAnimationProps> = ({
     <div className={`absolute inset-0 flex items-center justify-center bg-white ${className}`}>
       <canvas ref={canvasRef} className="absolute inset-0 w-full h-full" />
       <div className="relative z-10 text-center px-6">
-        <h3 className="text-2xl font-light text-green-700 mb-2">{message}</h3>
+        <h3
+          className="text-2xl font-light text-green-700 mb-2"
+          style={{ textShadow: '0 0 6px #ffffff' }}
+        >
+          {message}
+        </h3>
         <div className="flex items-center justify-center space-x-1 text-green-600">
           <span>Please wait</span>
           <span className="animate-pulse">.</span>
