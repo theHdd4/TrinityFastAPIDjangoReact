@@ -86,11 +86,29 @@ const FeatureOverviewSettings: React.FC<FeatureOverviewSettingsProps> = ({ atomI
 
   const handleFrameChange = async (val: string) => {
     cancelPrefillController(atomId);
-    onSettingsChange({ isLoading: true });
+    onSettingsChange({
+      isLoading: true,
+      loadingMessage: 'Loading',
+      loadingStatus: 'Fetching flight table',
+    });
     if (!val.endsWith('.arrow')) {
       val += '.arrow';
     }
     try {
+      const ft = await fetch(
+        `${FEATURE_OVERVIEW_API}/flight_table?object_name=${encodeURIComponent(val)}`
+      );
+      if (ft.ok) {
+        await ft.arrayBuffer();
+      }
+      onSettingsChange({ loadingStatus: 'Prefetching Dataframe' });
+      const cache = await fetch(
+        `${FEATURE_OVERVIEW_API}/cached_dataframe?object_name=${encodeURIComponent(val)}`
+      );
+      if (cache.ok) {
+        await cache.text();
+      }
+      onSettingsChange({ loadingStatus: 'Fetching column summary' });
       const res = await fetch(
         `${FEATURE_OVERVIEW_API}/column_summary?object_name=${encodeURIComponent(val)}`
       );
@@ -131,9 +149,11 @@ const FeatureOverviewSettings: React.FC<FeatureOverviewSettingsProps> = ({ atomI
         filterUnique,
         dimensionMap: mapping,
         isLoading: false,
+        loadingStatus: '',
+        loadingMessage: '',
       });
     } catch {
-      onSettingsChange({ isLoading: false });
+      onSettingsChange({ isLoading: false, loadingStatus: '', loadingMessage: '' });
     }
   };
 

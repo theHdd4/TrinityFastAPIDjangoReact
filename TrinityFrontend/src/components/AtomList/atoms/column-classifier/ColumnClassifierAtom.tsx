@@ -1,6 +1,6 @@
 import React from 'react';
 import { useToast } from '@/hooks/use-toast';
-import LoadingAnimation from '@/templates/LoadingAnimation';
+import LoadingAnimation from '@/templates/LoadingAnimation/LoadingAnimation';
 
 import ColumnClassifierCanvas from './components/ColumnClassifierCanvas';
 import ColumnClassifierDimensionMapping from './components/ColumnClassifierDimensionMapping';
@@ -255,7 +255,10 @@ const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
         <div className="flex flex-1">
           <div className="relative w-full h-full p-4 min-h-[450px]">
             {settings.isLoading ? (
-              <LoadingAnimation />
+              <LoadingAnimation
+                message={settings.loadingMessage}
+                status={settings.loadingStatus}
+              />
             ) : (
               <ColumnClassifierCanvas
                 data={classifierData}
