@@ -39,6 +39,7 @@ import { DATAFRAME_OPERATIONS_API, VALIDATE_API } from '@/lib/api';
 } from '../services/dataframeOperationsApi';
 import { toast } from '@/components/ui/use-toast';
 import '@/templates/tables/table.css';
+import FormularBar from './FormularBar';
 
 interface DataFrameOperationsCanvasProps {
   data: DataFrameData | null;
@@ -115,6 +116,8 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
   // 1. Add state for selected cell and selected column
   const [selectedCell, setSelectedCell] = useState<{ row: number; col: string } | null>(null);
   const [selectedColumn, setSelectedColumn] = useState<string | null>(null);
+  const [formulaInput, setFormulaInput] = useState('');
+  const [isFormulaMode, setIsFormulaMode] = useState(false);
   const [openDropdown, setOpenDropdown] = useState<null | 'insert' | 'delete' | 'sort' | 'filter'>(null);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; col: string; colIdx: number } | null>(null);
   const [insertMenuOpen, setInsertMenuOpen] = useState(false);
@@ -781,6 +784,60 @@ const handleHeaderClick = (header: string) => {
   setSelectedCell(null);
 };
 
+const letterToIndex = (letter: string) => letter.charCodeAt(0) - 65;
+
+const handleFormulaSubmit = () => {
+  if (!data || !selectedCell) return;
+  const headers = data.headers;
+  const rows = data.rows.map(r => ({ ...r }));
+  const targetCol = selectedCell.col;
+  const input = formulaInput.trim();
+
+  if (input.startsWith('=')) {
+    const expr = input.slice(1);
+    const rangeMatch = expr.match(/^(SUM|AVG)\(([A-Z]):([A-Z])\)$/i);
+    if (rangeMatch) {
+      const func = rangeMatch[1].toUpperCase();
+      const start = letterToIndex(rangeMatch[2]);
+      const end = letterToIndex(rangeMatch[3]);
+      for (let r = 0; r < rows.length; r++) {
+        let total = 0;
+        let count = 0;
+        for (let c = start; c <= end; c++) {
+          const colName = headers[c];
+          const val = Number(rows[r][colName]);
+          if (!isNaN(val)) {
+            total += val;
+            count++;
+          }
+        }
+        rows[r][targetCol] = func === 'SUM' ? total : count > 0 ? total / count : 0;
+      }
+    } else {
+      const rowIdx = selectedCell.row;
+      const replaced = expr.replace(/([A-Z])(\d+)/gi, (_, colLetter, rowNumber) => {
+        const colIdx = letterToIndex(colLetter);
+        const colName = headers[colIdx];
+        const r = parseInt(rowNumber, 10) - 1;
+        const val = Number(rows[r]?.[colName]);
+        return isNaN(val) ? '0' : String(val);
+      });
+      try {
+        const result = Function(`return ${replaced}`)();
+        rows[rowIdx][targetCol] = result;
+      } catch {
+        rows[rowIdx][targetCol] = '';
+      }
+    }
+  } else if (input !== '') {
+    rows[selectedCell.row][targetCol] = input;
+  }
+
+  onDataChange({ ...data, rows });
+  setFormulaInput('');
+  setIsFormulaMode(false);
+};
+
 const insertDisabled = !selectedCell && !selectedColumn;
 const deleteDisabled = !selectedCell && !selectedColumn;
 
@@ -1032,25 +1089,38 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
           </div>
 
           {/* Table section - Excel-like appearance */}
-          <div className="flex-1 overflow-auto">
-            {/* Placeholder for when no data is loaded */}
-            {!data || !Array.isArray(data.headers) || data.headers.length === 0 ? (
-              <div className="flex flex-1 items-center justify-center bg-gray-50">
-                <div className="border border-gray-200 bg-white rounded-lg p-4 text-center max-w-md w-full mx-auto">
-                  <p className="p-4 text-center text-gray-500">No results to display. Upload a CSV or Excel file to see results here.</p>
+          <div className="flex-1 flex flex-col overflow-hidden">
+            {data && (
+              <FormularBar
+                data={data}
+                selectedCell={selectedCell}
+                formulaInput={formulaInput}
+                isFormulaMode={isFormulaMode}
+                onSelectedCellChange={setSelectedCell}
+                onFormulaInputChange={setFormulaInput}
+                onFormulaModeChange={setIsFormulaMode}
+                onFormulaSubmit={handleFormulaSubmit}
+              />
+            )}
+            <div className="flex-1 overflow-auto">
+              {/* Placeholder for when no data is loaded */}
+              {!data || !Array.isArray(data.headers) || data.headers.length === 0 ? (
+                <div className="flex flex-1 items-center justify-center bg-gray-50">
+                  <div className="border border-gray-200 bg-white rounded-lg p-4 text-center max-w-md w-full mx-auto">
+                    <p className="p-4 text-center text-gray-500">No results to display. Upload a CSV or Excel file to see results here.</p>
+                  </div>
                 </div>
-              </div>
-            ) : (
-              <div className="table-wrapper">
-                <div className="table-edge-left" />
-                <div className="table-edge-right" />
-                <div className="table-overflow relative">
-                  {operationLoading && (
-                    <div className="absolute inset-0 bg-white/70 flex items-center justify-center z-10 text-sm text-slate-700">
-                      Operation Loading...
-                    </div>
-                  )}
-                  <Table className="table-base">
+              ) : (
+                <div className="table-wrapper">
+                  <div className="table-edge-left" />
+                  <div className="table-edge-right" />
+                  <div className="table-overflow relative">
+                    {operationLoading && (
+                      <div className="absolute inset-0 bg-white/70 flex items-center justify-center z-10 text-sm text-slate-700">
+                        Operation Loading...
+                      </div>
+                    )}
+                    <Table className="table-base">
               <TableHeader className="table-header">
                 <TableRow className="table-header-row">
                   {settings.showRowNumbers && (
@@ -1204,10 +1274,11 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                 ))}
               </TableBody>
             </Table>
-          </div>
-        </div>
-          )}
-          {totalPages > 1 && (
+                </div>
+              </div>
+            )}
+            </div>
+            {totalPages > 1 && (
             <div className="flex flex-col items-center py-4">
               <div className="text-sm text-muted-foreground mb-2">
                 {`Showing ${startIndex + 1} to ${Math.min(startIndex + (settings.rowsPerPage || 15), processedData.totalRows)} of ${processedData.totalRows} entries`}
