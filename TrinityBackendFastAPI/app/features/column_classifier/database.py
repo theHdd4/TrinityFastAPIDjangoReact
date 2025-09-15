@@ -59,10 +59,18 @@ try:
     mongo_client.admin.command('ping')
     print(f"✅ Connected to MongoDB: {DATABASE_NAME}")
     print(f"✅ Config DB: {CONFIG_DB_NAME}")
-    if COLLECTIONS["CLASSIFIER_CONFIGS"] not in config_db.list_collection_names():
-        config_db.create_collection(COLLECTIONS["CLASSIFIER_CONFIGS"])
-        print(
-            f"✅ Created collection {COLLECTIONS['CLASSIFIER_CONFIGS']} in {CONFIG_DB_NAME}"
+    try:  # pragma: no cover - best effort to ensure collection exists
+        if (
+            COLLECTIONS["CLASSIFIER_CONFIGS"]
+            not in config_db.list_collection_names()
+        ):
+            config_db.create_collection(COLLECTIONS["CLASSIFIER_CONFIGS"])
+            print(
+                f"✅ Created collection {COLLECTIONS['CLASSIFIER_CONFIGS']} in {CONFIG_DB_NAME}"
+            )
+    except Exception as exc:
+        logging.warning(
+            f"Could not verify/create {COLLECTIONS['CLASSIFIER_CONFIGS']}: {exc}"
         )
     
 except Exception as e:
@@ -97,8 +105,16 @@ def ensure_mongo_connection() -> bool:
         db = mongo_client[DATABASE_NAME]
         config_db = mongo_client[CONFIG_DB_NAME]
         mongo_client.admin.command("ping")
-        if COLLECTIONS["CLASSIFIER_CONFIGS"] not in config_db.list_collection_names():
-            config_db.create_collection(COLLECTIONS["CLASSIFIER_CONFIGS"])
+        try:  # pragma: no cover - best effort to ensure collection exists
+            if (
+                COLLECTIONS["CLASSIFIER_CONFIGS"]
+                not in config_db.list_collection_names()
+            ):
+                config_db.create_collection(COLLECTIONS["CLASSIFIER_CONFIGS"])
+        except Exception as exc:
+            logging.warning(
+                f"Could not verify/create {COLLECTIONS['CLASSIFIER_CONFIGS']}: {exc}"
+            )
         return True
     except Exception as exc:  # pragma: no cover - best effort
         logging.error(f"MongoDB reconnection failed: {exc}")
@@ -470,9 +486,15 @@ def save_classifier_config_to_mongo(config: dict):
         }
 
         coll_name = COLLECTIONS["CLASSIFIER_CONFIGS"]
-        if coll_name not in config_db.list_collection_names():
-            config_db.create_collection(coll_name)
-        result = config_db[coll_name].replace_one({"_id": document_id}, document, upsert=True)
+        coll = config_db[coll_name]
+        try:  # pragma: no cover - best effort to ensure collection exists
+            if coll_name not in config_db.list_collection_names():
+                config_db.create_collection(coll_name)
+        except Exception as exc:
+            logging.warning(
+                f"Could not verify/create {coll_name}: {exc}"
+            )
+        result = coll.replace_one({"_id": document_id}, document, upsert=True)
         return {
             "status": "success",
             "mongo_id": document_id,
