@@ -7,7 +7,7 @@ from django.conf import settings
 from pymongo import MongoClient
 from redis_store.redis_client import redis_client
 from .models import Project, RegistryEnvironment
-from common.minio_utils import create_prefix, rename_project_folder
+from common.minio_utils import create_prefix, rename_project_folder, remove_prefix
 from apps.accounts.models import UserEnvironmentVariable
 from redis_store.env_cache import invalidate_env, set_current_env
 
@@ -267,3 +267,8 @@ def cleanup_on_delete(sender, instance, **kwargs):
             )
         except Exception:
             pass
+
+    tenant = _current_tenant_name()
+    app_slug = instance.app.slug if instance.app else ""
+    remove_prefix(f"{tenant}/{app_slug}/{instance.name}")
+    remove_prefix(f"{tenant}/{app_slug}/{instance.slug}")
