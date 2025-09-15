@@ -524,7 +524,8 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
     if (!settings.yAxes || settings.yAxes.length === 0) {
       toast({
         title:
-          "can not display trend - configure dependant variable in properties section to view stat.",
+          "Can not display trend - configure Dependant Variables in properties section to view stat.",
+        variant: "destructive",
       });
       return;
     }
