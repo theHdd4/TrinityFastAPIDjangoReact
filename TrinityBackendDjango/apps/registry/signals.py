@@ -7,9 +7,11 @@ from django.conf import settings
 from pymongo import MongoClient
 from redis_store.redis_client import redis_client
 from .models import Project, RegistryEnvironment
-from common.minio_utils import create_prefix, rename_project_folder
+from common.minio_utils import create_prefix, rename_project_folder, remove_prefix
 from apps.accounts.models import UserEnvironmentVariable
 from redis_store.env_cache import invalidate_env, set_current_env
+
+TRINITY_DB_NAME = "trinity_db"
 
 
 def _current_tenant_name() -> str:
@@ -166,10 +168,10 @@ def update_env_vars_on_rename(sender, instance, **kwargs):
             )
             try:
                 mc = MongoClient(
-                    getattr(settings, "MONGO_URI", "mongodb://mongo:27017/trinity"),
+                    getattr(settings, "MONGO_URI", "mongodb://mongo:27017/trinity_db"),
                     serverSelectionTimeoutMS=5000,
                 )
-                db = mc.get_default_database()
+                db = mc[TRINITY_DB_NAME]
                 result = db.session_state.update_many(
                     {
                         "state.client_name": entry["client_name"],
@@ -246,10 +248,10 @@ def cleanup_on_delete(sender, instance, **kwargs):
         ).delete()
         try:
             mc = MongoClient(
-                getattr(settings, "MONGO_URI", "mongodb://mongo:27017/trinity"),
+                getattr(settings, "MONGO_URI", "mongodb://mongo:27017/trinity_db"),
                 serverSelectionTimeoutMS=5000,
             )
-            db = mc.get_default_database()
+            db = mc[TRINITY_DB_NAME]
             db.session_state.delete_many(
                 {
                     "state.client_name": entry["client_name"],
@@ -265,3 +267,13 @@ def cleanup_on_delete(sender, instance, **kwargs):
             )
         except Exception:
             pass
+
+    tenant_env = os.getenv("CLIENT_NAME", "default_client")
+    tenant_candidates = {
+        tenant_env,
+        tenant_env.replace(" ", "_"),
+    }
+    app_slug = instance.app.slug if instance.app else ""
+    for client_slug in tenant_candidates:
+        remove_prefix(f"{client_slug}/{app_slug}/{instance.name}")
+        remove_prefix(f"{client_slug}/{app_slug}/{instance.slug}")

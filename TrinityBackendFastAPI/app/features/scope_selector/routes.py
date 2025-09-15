@@ -77,7 +77,7 @@ async def identifier_options(
 
     1. Attempt to read JSON config from Redis key
        `<client>/<app>/<project>/column_classifier_config`.
-    2. If missing, fetch from Mongo (`column_classifier_configs` collection).
+    2. If missing, fetch from Mongo (`column_classifier_config` collection).
        Cache the document back into Redis.
     3. If still unavailable, return empty list – the frontend will
        fall back to its existing column_summary extraction flow.

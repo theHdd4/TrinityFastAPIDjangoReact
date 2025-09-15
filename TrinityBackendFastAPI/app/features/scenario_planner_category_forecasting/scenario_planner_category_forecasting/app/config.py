@@ -23,8 +23,12 @@ logger.info("Using MONGO_URI: %s", MONGO_URI)
 # Create MongoDB client using the same pattern as clustering atom
 mongo_client = motor.motor_asyncio.AsyncIOMotorClient(MONGO_URI, serverSelectionTimeoutMS=5000)
 
-# Get database
+# Get primary database from URI
 db = mongo_client.get_default_database()
+
+# Collection in shared config database for identifier structure
+CONFIG_DB = os.getenv("CLASSIFIER_CONFIG_DB", "trinity_db")
+column_classifier_config = mongo_client[CONFIG_DB]["column_classifier_config"]
 
 # Primary collections - use select_configs for model selection
 select_models_collection = db["select_configs"]  # Correct collection for selected models
@@ -36,9 +40,6 @@ hierarchical_aggregations_collection = db["hierarchical_aggregations"]
 
 # New collection for scenario values
 scenario_values_collection = db["scenario_values_promo"]
-
-# Column classifier collection for identifier structure
-column_classifier_configs = db["column_classifier_configs"]
 
 logger.info("Mongo URI: %s", MONGO_URI)
 

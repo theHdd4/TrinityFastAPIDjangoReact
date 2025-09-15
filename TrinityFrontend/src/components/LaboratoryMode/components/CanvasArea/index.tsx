@@ -37,6 +37,7 @@ import ScenarioPlannerAtom from '@/components/AtomList/atoms/scenario-planner/Sc
 import ExploreAtom from '@/components/AtomList/atoms/explore/ExploreAtom';
 import EvaluateModelsFeatureAtom from '@/components/AtomList/atoms/evaluate-models-feature/EvaluateModelsFeatureAtom';
 import { fetchDimensionMapping } from '@/lib/dimensions';
+import { useToast } from '@/hooks/use-toast';
 
 import {
   useLaboratoryStore,
@@ -93,8 +94,9 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
   const [expandedCard, setExpandedCard] = useState<string | null>(null);
   const prevLayout = React.useRef<LayoutCard[] | null>(null);
   const initialLoad = React.useRef(true);
-  
+
   const { updateCard, setCards } = useExhibitionStore();
+  const { toast } = useToast();
 
   interface ColumnInfo {
     column: string;
@@ -260,52 +262,76 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
   };
 
   const prefillFeatureOverview = async (cardId: string, atomId: string) => {
-    const prev = await findLatestDataSource();
-    if (!prev || !prev.csv) {
-      console.warn('⚠️ no data source found for feature overview');
-      return;
-    }
-    console.log('ℹ️ prefill data source details', prev);
-    await prefetchDataframe(prev.csv);
-    const rawMapping = await fetchDimensionMapping();
-    const mapping = Object.fromEntries(
-      Object.entries(rawMapping).filter(
-        ([key]) => key.toLowerCase() !== 'unattributed',
-      ),
-    );
-    console.log('✅ pre-filling feature overview with', prev.csv);
-    const summary = Array.isArray(prev.summary) ? prev.summary : [];
-    const identifiers = Array.isArray(prev.identifiers) ? prev.identifiers : [];
-    const filtered =
-      identifiers.length > 0
-        ? summary.filter(s => identifiers.includes(s.column))
-        : summary;
-    const selected =
-      identifiers.length > 0
-        ? identifiers
-        : (Array.isArray(summary) ? summary : []).map(cc => cc.column);
+    updateAtomSettings(atomId, { isLoading: true });
+    try {
+      const prev = await findLatestDataSource();
+      if (!prev || !prev.csv) {
+        console.warn('⚠️ no data source found for feature overview');
+        updateAtomSettings(atomId, { isLoading: false });
+        return;
+      }
+      console.log('ℹ️ prefill data source details', prev);
+      await prefetchDataframe(prev.csv);
+      const rawMapping = await fetchDimensionMapping();
+      const mapping = Object.fromEntries(
+        Object.entries(rawMapping).filter(
+          ([key]) => key.toLowerCase() !== 'unattributed',
+        ),
+      );
+      console.log('✅ pre-filling feature overview with', prev.csv);
+      const summary = Array.isArray(prev.summary) ? prev.summary : [];
+      const identifiers = Array.isArray(prev.identifiers) ? prev.identifiers : [];
+      const filtered =
+        identifiers.length > 0
+          ? summary.filter(s => identifiers.includes(s.column))
+          : summary;
+      const selected =
+        identifiers.length > 0
+          ? identifiers
+          : (Array.isArray(summary) ? summary : []).map(cc => cc.column);
 
-    updateAtomSettings(atomId, {
-      dataSource: prev.csv,
-      csvDisplay: prev.display || prev.csv,
-      allColumns: summary,
-      columnSummary: filtered,
-      selectedColumns: selected,
-      numericColumns: Array.isArray(prev.numeric) ? prev.numeric : [],
-      dimensionMap: mapping,
-      xAxis: prev.xField || 'date',
-    });
+      updateAtomSettings(atomId, {
+        dataSource: prev.csv,
+        csvDisplay: prev.display || prev.csv,
+        allColumns: summary,
+        columnSummary: filtered,
+        selectedColumns: selected,
+        numericColumns: Array.isArray(prev.numeric) ? prev.numeric : [],
+        dimensionMap: mapping,
+        xAxis: prev.xField || 'date',
+        isLoading: false,
+      });
+    } catch (err) {
+      console.error('⚠️ prefill feature overview error', err);
+      updateAtomSettings(atomId, { isLoading: false });
+    }
   };
 
   const prefillColumnClassifier = async (atomId: string) => {
-    const prev = await findLatestDataSource();
-    if (!prev || !prev.csv) {
-      console.warn('⚠️ no dataframe found for column classifier');
-      return;
-    }
-    console.log('ℹ️ prefill column classifier with', prev.csv);
-    await prefetchDataframe(prev.csv);
+    const quotes = [
+      'Working the Trinity Magic!',
+      'Choice is an illusion created between those with power and those without',
+      'Choice. The problem is choice',
+      'To deny our own impulses is to deny the very thing that makes us human',
+    ];
+    let quoteIndex = 0;
+    const showQuote = () => {
+      toast({ title: quotes[quoteIndex % quotes.length] });
+      quoteIndex++;
+    };
+    updateAtomSettings(atomId, { isLoading: true });
+    showQuote();
+    const quoteTimer = setInterval(showQuote, 5000);
+
     try {
+      const prev = await findLatestDataSource();
+      if (!prev || !prev.csv) {
+        console.warn('⚠️ no dataframe found for column classifier');
+        updateAtomSettings(atomId, { isLoading: false });
+        return;
+      }
+      console.log('ℹ️ prefill column classifier with', prev.csv);
+      await prefetchDataframe(prev.csv);
       const form = new FormData();
       form.append('dataframe', prev.csv);
       const res = await fetch(`${CLASSIFIER_API}/classify_columns`, {
@@ -315,6 +341,7 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
       });
       if (!res.ok) {
         console.warn('⚠️ auto classification failed', res.status);
+        updateAtomSettings(atomId, { isLoading: false });
         return;
       }
       const data = await res.json();
@@ -345,9 +372,14 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
           ],
           activeFileIndex: 0,
         },
+        isLoading: false,
       });
+      toast({ title: 'Success! We are still here!' });
     } catch (err) {
       console.error('⚠️ prefill column classifier error', err);
+      updateAtomSettings(atomId, { isLoading: false });
+    } finally {
+      clearInterval(quoteTimer);
     }
   };
 

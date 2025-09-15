@@ -15,6 +15,7 @@ from apps.accounts.utils import get_env_vars
 from app.features.column_classifier.database import get_classifier_config_from_mongo
 
 TTL = 3600 * 2  # 2 hours
+TRINITY_DB_NAME = "trinity_db"
 
 
 def _session_key(client_id: str, user_id: str, app_id: str, project_id: str) -> str:
@@ -22,7 +23,7 @@ def _session_key(client_id: str, user_id: str, app_id: str, project_id: str) -> 
 
 
 def _mongo_client() -> MongoClient:
-    uri = getattr(settings, "MONGO_URI", "mongodb://mongo:27017/trinity")
+    uri = getattr(settings, "MONGO_URI", "mongodb://mongo:27017/trinity_db")
     return MongoClient(uri, serverSelectionTimeoutMS=5000)
 
 
@@ -56,7 +57,7 @@ class SessionInitView(APIView):
             session = {}
             try:
                 mc = _mongo_client()
-                db = mc.get_default_database()
+                db = mc[TRINITY_DB_NAME]
                 record = db.session_state.find_one({"_id": session_id})
                 if record and isinstance(record.get("state"), dict):
                     session = record["state"]
@@ -132,7 +133,7 @@ class SessionStateView(APIView):
             session = {}
             try:
                 mc = _mongo_client()
-                db = mc.get_default_database()
+                db = mc[TRINITY_DB_NAME]
                 record = db.session_state.find_one({"_id": session_id})
                 if record and isinstance(record.get("state"), dict):
                     session = record["state"]
@@ -219,7 +220,7 @@ class SessionUpdateView(APIView):
         redis_client.setex(session_id, TTL, json.dumps(session, default=str))
         try:
             mc = _mongo_client()
-            db = mc.get_default_database()
+            db = mc[TRINITY_DB_NAME]
             db.session_state.update_one(
                 {"_id": session_id},
                 {"$set": {"state": session}},
@@ -242,7 +243,7 @@ class SessionEndView(APIView):
         redis_client.delete(session_id)
         try:
             mc = _mongo_client()
-            db = mc.get_default_database()
+            db = mc[TRINITY_DB_NAME]
             db.session_state.delete_one({"_id": session_id})
         except Exception:
             pass

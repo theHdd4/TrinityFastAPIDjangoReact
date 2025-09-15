@@ -51,7 +51,7 @@ ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS", "*").split(",")
 _frontend_origin = f"http://{HOST_IP}:{FRONTEND_PORT}"
 _default_csrf = os.getenv(
     "CSRF_DEFAULT",
-    f"{_frontend_origin},https://trinity.quantmatrixai.com",
+    f"{_frontend_origin},https://trinity.quantmatrixai.com,https://trinity-dev.quantmatrixai.com",
 )
 _trusted = os.getenv("CSRF_TRUSTED_ORIGINS", _default_csrf)
 CSRF_TRUSTED_ORIGINS = [o.strip() for o in _trusted.split(",") if o.strip()]
@@ -62,7 +62,7 @@ ADDITIONAL_DOMAINS = os.getenv("ADDITIONAL_DOMAINS", HOST_IP)
 # ------------------------------------------------------------------
 _default_cors = os.getenv(
     "CORS_DEFAULT",
-    f"{_frontend_origin},https://trinity.quantmatrixai.com",
+    f"{_frontend_origin},https://trinity.quantmatrixai.com,https://trinity-dev.quantmatrixai.com",
 )
 CORS_ALLOWED_ORIGINS = [
     o.strip()

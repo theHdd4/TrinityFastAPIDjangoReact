@@ -135,6 +135,7 @@ import {
   ResponsiveContainer,
   LabelList
 } from 'recharts';
+import * as d3 from 'd3';
 
 interface Props {
   type: 'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart';
@@ -164,6 +165,7 @@ interface Props {
   showLegend?: boolean; // External control for legend visibility
   showAxisLabels?: boolean; // External control for axis labels visibility
   showDataLabels?: boolean; // External control for data labels visibility
+  initialShowDataLabels?: boolean; // Default state for data labels
   showGrid?: boolean; // External control for grid visibility
   chartsPerRow?: number; // For multi pie chart layouts
 }
@@ -438,8 +440,8 @@ const RechartsChartRenderer: React.FC<Props> = ({
   data, 
   xField, 
   yField, 
-  yFields, 
-  width = 400, 
+  yFields,
+  width = 0,
   height = 300,
   title,
   xAxisLabel,
@@ -461,6 +463,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
   showLegend: propShowLegend, // External control for legend visibility
   showAxisLabels: propShowAxisLabels, // External control for axis labels visibility
   showDataLabels: propShowDataLabels, // External control for data labels visibility
+  initialShowDataLabels,
   showGrid: propShowGrid, // External control for grid visibility
   chartsPerRow
 }) => {
@@ -611,7 +614,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
   const [showGrid, setShowGrid] = useState(true);
   const [showLegend, setShowLegend] = useState(true);
   const [showAxisLabels, setShowAxisLabels] = useState(true);
-  const [showDataLabels, setShowDataLabels] = useState(true);
+  const [showDataLabels, setShowDataLabels] = useState(initialShowDataLabels ?? true);
 
   // Sync internal states with external props for persistence
   useEffect(() => {
@@ -1771,10 +1774,10 @@ const RechartsChartRenderer: React.FC<Props> = ({
     // Final validation for dual Y-axes
     const hasDualYAxes = yKeys.length > 1 || (yFields && yFields.length > 1);
 
-    // CRITICAL FIX: Transform data for bar charts when data has generic keys
+    // CRITICAL FIX: Transform data for bar charts and line charts when data has generic keys
     // Now also supports dual Y-axes by mapping both Y fields when available
     let transformedChartData = chartDataForRendering;
-    if (type === 'bar_chart' && xField && yField && chartDataForRendering.length > 0) {
+    if ((type === 'bar_chart' || type === 'line_chart') && xField && yField && chartDataForRendering.length > 0) {
       const firstItem = chartDataForRendering[0];
       const availableKeys = Object.keys(firstItem);
 
@@ -2077,6 +2080,15 @@ const RechartsChartRenderer: React.FC<Props> = ({
             xField ||
             Object.keys(pivotedLineData[0] || {}).find(k => !legendValues.includes(k)) ||
             Object.keys(pivotedLineData[0] || {})[0];
+          
+          // Check if this is a date axis
+          const isDateAxisMultiLine =
+            xKeyForLine &&
+            xKeyForLine.toLowerCase().includes('date') &&
+            pivotedLineData.length > 0 &&
+            typeof pivotedLineData[0][xKeyForLine] === 'number';
+          const formatDateTickMultiLine = d3.timeFormat('%d-%B-%y');
+          
           return (
             <LineChart data={pivotedLineData} margin={getChartMargins()}>
               {currentShowGrid && <CartesianGrid strokeDasharray="3 3" />}
@@ -2086,7 +2098,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
                 tick={xAxisTickStyle}
                 tickLine={false}
                 allowDuplicatedCategory={false}
-                tickFormatter={xAxisTickFormatter}
+                tickFormatter={isDateAxisMultiLine ? (value) => formatDateTickMultiLine(new Date(value)) : xAxisTickFormatter}
               />
               <YAxis
                 tickFormatter={formatLargeNumber}
@@ -2094,7 +2106,35 @@ const RechartsChartRenderer: React.FC<Props> = ({
                 tick={axisTickStyle}
                 tickLine={false}
               />
-              <Tooltip formatter={(v: number) => formatTooltipNumber(v as number)} />
+              <Tooltip 
+                content={({ active, payload, label }) => {
+                  if (active && payload && payload.length) {
+                    return (
+                      <div className="explore-chart-tooltip">
+                        <p className="font-semibold text-gray-900 mb-2 text-sm">
+                          {isDateAxisMultiLine ? formatDateTickMultiLine(new Date(label)) : label}
+                        </p>
+                        {payload.map((entry: any, index: number) => (
+                          <div key={index} className="flex items-center gap-2 mb-1">
+                            <div 
+                              className="w-3 h-3 rounded-full" 
+                              style={{ backgroundColor: entry.color }}
+                            />
+                            <span className="text-sm font-medium text-gray-700">
+                              {entry.dataKey}: 
+                            </span>
+                            <span className="text-sm font-semibold text-gray-700">
+                              {typeof entry.value === 'number' ? formatTooltipNumber(entry.value) : entry.value}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  }
+                  return null;
+                }}
+                cursor={{ stroke: palette[0], strokeWidth: 1, strokeOpacity: 0.4 }}
+              />
               {currentShowLegend && (
                 <Legend
                   layout="horizontal"
@@ -2129,33 +2169,41 @@ const RechartsChartRenderer: React.FC<Props> = ({
         } else {
           // ---- Fallback to original single-line rendering ----
           // Original single line chart logic
+          const isDateAxis =
+            xKey &&
+            xKey.toLowerCase().includes('date') &&
+            chartDataForRendering.length > 0 &&
+            typeof chartDataForRendering[0][xKey] === 'number';
+          const formatDateTick = d3.timeFormat('%d-%B-%y');
           return (
-            <LineChart data={chartDataForRendering} margin={getChartMargins()} className="explore-chart-line">
+            <LineChart data={transformedChartData} margin={getChartMargins()} className="explore-chart-line">
               {currentShowGrid && <CartesianGrid strokeDasharray="3 3" />}
-              <XAxis 
+              <XAxis
                 dataKey={xKey}
                 label={currentShowAxisLabels && effectiveXAxisLabel && effectiveXAxisLabel.trim() ? { value: capitalizeWords(effectiveXAxisLabel), position: 'bottom', style: effectiveXAxisLabelStyle, offset: 15 } : undefined}
                 tick={xAxisTickStyle}
                 tickLine={false}
-                tickFormatter={xAxisTickFormatter}
+                tickFormatter={isDateAxis ? (value) => formatDateTick(new Date(value)) : xAxisTickFormatter}
               />
               {/* Primary Y-Axis (Left) */}
-              <YAxis 
+              <YAxis
                 yAxisId={0}
                 label={currentShowAxisLabels && effectiveYAxisLabel && effectiveYAxisLabel.trim() ? { value: capitalizeWords(effectiveYAxisLabel), angle: -90, position: 'left', style: effectiveYAxisLabelStyle, offset: 5 } : undefined}
                 tick={axisTickStyle}
                 tickLine={false}
                 tickFormatter={formatLargeNumber}
+                domain={['dataMin', 'dataMax']}
               />
               {/* Secondary Y-Axis (Right) - only if we have dual Y-axes */}
               {(yKeys.length > 1 || (yFields && yFields.length > 1)) && (
-                <YAxis 
+                <YAxis
                   yAxisId={1}
                   orientation="right"
                   label={currentShowAxisLabels && effectiveYAxisLabels && effectiveYAxisLabels[1] ? { value: capitalizeWords(effectiveYAxisLabels[1]), angle: 90, position: 'right', style: effectiveYAxisLabelStyle, offset: 5 } : undefined}
                   tick={axisTickStyle}
                   tickLine={false}
                   tickFormatter={formatLargeNumber}
+                  domain={['dataMin', 'dataMax']}
                 />
               )}
               <Tooltip 
@@ -2283,6 +2331,15 @@ const RechartsChartRenderer: React.FC<Props> = ({
             xField ||
             Object.keys(pivotedLineData[0] || {}).find(k => !legendValues.includes(k)) ||
             Object.keys(pivotedLineData[0] || {})[0];
+          
+          // Check if this is a date axis
+          const isDateAxisArea =
+            xKeyForArea &&
+            xKeyForArea.toLowerCase().includes('date') &&
+            pivotedLineData.length > 0 &&
+            typeof pivotedLineData[0][xKeyForArea] === 'number';
+          const formatDateTickArea = d3.timeFormat('%d-%B-%y');
+          
           return (
             <AreaChart data={pivotedLineData} margin={getChartMargins()}>
               {currentShowGrid && <CartesianGrid strokeDasharray="3 3" />}
@@ -2292,7 +2349,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
                 tick={xAxisTickStyle}
                 tickLine={false}
                 allowDuplicatedCategory={false}
-                tickFormatter={xAxisTickFormatter}
+                tickFormatter={isDateAxisArea ? (value) => formatDateTickArea(new Date(value)) : xAxisTickFormatter}
               />
               <YAxis
                 label={currentShowAxisLabels && effectiveYAxisLabel && effectiveYAxisLabel.trim() ? { value: capitalizeWords(effectiveYAxisLabel), angle: -90, position: 'left', style: effectiveYAxisLabelStyle, offset: 5 } : undefined}
@@ -2300,7 +2357,35 @@ const RechartsChartRenderer: React.FC<Props> = ({
                 tickLine={false}
                 tickFormatter={formatLargeNumber}
               />
-              <Tooltip formatter={(v: number) => formatTooltipNumber(v)} />
+              <Tooltip 
+                content={({ active, payload, label }) => {
+                  if (active && payload && payload.length) {
+                    return (
+                      <div className="explore-chart-tooltip">
+                        <p className="font-semibold text-gray-900 mb-2 text-sm">
+                          {isDateAxisArea ? formatDateTickArea(new Date(label)) : label}
+                        </p>
+                        {payload.map((entry: any, index: number) => (
+                          <div key={index} className="flex items-center gap-2 mb-1">
+                            <div 
+                              className="w-3 h-3 rounded-full" 
+                              style={{ backgroundColor: entry.color }}
+                            />
+                            <span className="text-sm font-medium text-gray-700">
+                              {entry.dataKey}: 
+                            </span>
+                            <span className="text-sm font-semibold text-gray-700">
+                              {typeof entry.value === 'number' ? formatTooltipNumber(entry.value) : entry.value}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  }
+                  return null;
+                }}
+                cursor={{ stroke: palette[0], strokeWidth: 1, strokeOpacity: 0.4 }}
+              />
               {currentShowLegend && (
                 <Legend
                   layout="horizontal"
@@ -2392,6 +2477,16 @@ const RechartsChartRenderer: React.FC<Props> = ({
                 Object.keys(pivotedLineData[0] || {}).find(k => !legendValues.includes(k)) ||
                 Object.keys(pivotedLineData[0] || {})[0]
             : xKey;
+        
+        // Check if this is a date axis
+        const isDateAxisScatter =
+          xKeyForScatter &&
+          xKeyForScatter.toLowerCase().includes('date') &&
+          ((legendField && legendValues.length > 0 && pivotedLineData.length > 0) ? 
+            (pivotedLineData.length > 0 && typeof pivotedLineData[0][xKeyForScatter] === 'number') :
+            (chartDataForRendering.length > 0 && typeof chartDataForRendering[0][xKeyForScatter] === 'number'));
+        const formatDateTickScatter = d3.timeFormat('%d-%B-%y');
+        
         return (
           <ScatterChart margin={getChartMargins()}>
             {currentShowGrid && <CartesianGrid strokeDasharray="3 3" />}
@@ -2401,7 +2496,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
               tick={xAxisTickStyle}
               tickLine={false}
               allowDuplicatedCategory={false}
-              tickFormatter={xAxisTickFormatter}
+              tickFormatter={isDateAxisScatter ? (value) => formatDateTickScatter(new Date(value)) : xAxisTickFormatter}
             />
             <YAxis
               yAxisId={0}
@@ -2420,7 +2515,35 @@ const RechartsChartRenderer: React.FC<Props> = ({
                 tickFormatter={formatLargeNumber}
               />
             )}
-            <Tooltip formatter={(v: number) => formatTooltipNumber(v)} />
+            <Tooltip 
+              content={({ active, payload, label }) => {
+                if (active && payload && payload.length) {
+                  return (
+                    <div className="explore-chart-tooltip">
+                      <p className="font-semibold text-gray-900 mb-2 text-sm">
+                        {isDateAxisScatter ? formatDateTickScatter(new Date(label)) : label}
+                      </p>
+                      {payload.map((entry: any, index: number) => (
+                        <div key={index} className="flex items-center gap-2 mb-1">
+                          <div 
+                            className="w-3 h-3 rounded-full" 
+                            style={{ backgroundColor: entry.color }}
+                          />
+                          <span className="text-sm font-medium text-gray-700">
+                            {entry.dataKey}: 
+                          </span>
+                          <span className="text-sm font-semibold text-gray-700">
+                            {typeof entry.value === 'number' ? formatTooltipNumber(entry.value) : entry.value}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                }
+                return null;
+              }}
+              cursor={{ stroke: palette[0], strokeWidth: 1, strokeOpacity: 0.4 }}
+            />
             {legendField && currentShowLegend && (
               <Legend
                 layout="horizontal"
@@ -2784,7 +2907,10 @@ const RechartsChartRenderer: React.FC<Props> = ({
         </div>
       )}
 
-      <div className="w-full h-full relative flex-1 min-w-0">
+      <div
+        className="w-full h-full relative flex-1 min-w-0"
+        style={{ height: height ? `${height}px` : '100%', width: width ? `${width}px` : '100%' }}
+      >
         <div 
           className={`w-full h-full transition-all duration-500 ease-in-out ${enableScroll ? 'overflow-x-auto overflow-y-hidden chart-scroll-container' : 'overflow-hidden'}`}
           style={{ 

@@ -36,6 +36,7 @@ import {
   DropdownMenuSubContent
 } from '@/components/ui/dropdown-menu';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
+import ConfirmationDialog from '@/templates/DialogueBox/ConfirmationDialog';
 
 interface Project {
   id: string;
@@ -69,6 +70,8 @@ const Projects = () => {
   const [editingName, setEditingName] = useState('');
   const [editingTemplateId, setEditingTemplateId] = useState<string | null>(null);
   const [editingTemplateName, setEditingTemplateName] = useState('');
+  const [projectToDelete, setProjectToDelete] = useState<Project | null>(null);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const navigate = useNavigate();
   const currentApp = JSON.parse(localStorage.getItem('current-app') || '{}');
   const selectedApp = currentApp.slug;
@@ -384,19 +387,31 @@ const Projects = () => {
     setEditingProjectId(null);
   };
 
-  const deleteProject = async (project: Project) => {
-    if (!confirm(`Delete project "${project.name}"?`)) return;
+  const requestDeleteProject = (project: Project) => {
+    setProjectToDelete(project);
+    setDeleteDialogOpen(true);
+  };
+
+  const confirmDeleteProject = async () => {
+    if (!projectToDelete) return;
     try {
-      const res = await fetch(`${REGISTRY_API}/projects/${project.id}/`, {
+      const res = await fetch(`${REGISTRY_API}/projects/${projectToDelete.id}/`, {
         method: 'DELETE',
         credentials: 'include'
       });
       if (res.ok) {
-        setProjects(projects.filter(p => p.id !== project.id));
+        setProjects(projects.filter(p => p.id !== projectToDelete.id));
       }
     } catch (err) {
       console.error('Delete project error', err);
     }
+    setDeleteDialogOpen(false);
+    setProjectToDelete(null);
+  };
+
+  const cancelDelete = () => {
+    setDeleteDialogOpen(false);
+    setProjectToDelete(null);
   };
 
   const startTemplateRename = (template: Template, e?: React.MouseEvent) => {
@@ -501,8 +516,22 @@ const Projects = () => {
   );
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-gray-50">
-      <Header projectCount={projects.length} />
+    <>
+      <ConfirmationDialog
+        open={deleteDialogOpen}
+        onOpenChange={setDeleteDialogOpen}
+        onConfirm={confirmDeleteProject}
+        onCancel={cancelDelete}
+        title="Delete project?"
+        description={`Deleting project "${projectToDelete?.name || ''}" will delete all saved files, workflows, exhibitions and other details.`}
+        icon={<Trash2 className="w-6 h-6 text-white" />}
+        iconBgClass="bg-red-500"
+        confirmLabel="Yes, delete"
+        cancelLabel="Cancel"
+        confirmButtonClass="bg-red-500 hover:bg-red-600"
+      />
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-gray-50">
+        <Header projectCount={projects.length} />
       <div className="max-w-7xl mx-auto px-6 py-8">
         <div className="mb-8">
           <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
@@ -618,7 +647,7 @@ const Projects = () => {
                             className="h-8 w-8 p-0 text-red-600"
                             onClick={(e) => {
                               e.stopPropagation();
-                              deleteProject(project);
+                              requestDeleteProject(project);
                             }}
                             title="Delete"
                           >
@@ -712,7 +741,7 @@ const Projects = () => {
                               <DropdownMenuItem
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  deleteProject(project);
+                                  requestDeleteProject(project);
                                 }}
                               >
                                 <Trash2 className="w-4 h-4 mr-2" />
@@ -1073,6 +1102,7 @@ const Projects = () => {
         </Tabs>
       </div>
     </div>
+    </>
   );
 };
 
