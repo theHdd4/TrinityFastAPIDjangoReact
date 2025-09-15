@@ -149,13 +149,22 @@ class ProjectViewSet(viewsets.ModelViewSet):
         project.save(update_fields=["is_deleted"])
 
         tenant_obj = getattr(request, "tenant", None)
-        client_slug = (
-            getattr(tenant_obj, "name", None)
-            or os.getenv("CLIENT_NAME", "default_client")
-        )
+        client_name_env = os.getenv("CLIENT_NAME", "default_client")
+        tenant_candidates = {
+            client_name_env,
+            client_name_env.replace(" ", "_"),
+        }
+        if tenant_obj:
+            for attr in ("name", "slug"):
+                val = getattr(tenant_obj, attr, None)
+                if val:
+                    tenant_candidates.add(val)
+                    tenant_candidates.add(val.replace(" ", "_"))
+
         app_slug = project.app.slug if project.app else ""
-        remove_prefix(f"{client_slug}/{app_slug}/{project.name}")
-        remove_prefix(f"{client_slug}/{app_slug}/{project.slug}")
+        for client_slug in tenant_candidates:
+            remove_prefix(f"{client_slug}/{app_slug}/{project.name}")
+            remove_prefix(f"{client_slug}/{app_slug}/{project.slug}")
 
         try:
             client_id, app_id, project_id = _get_env_ids(project)
