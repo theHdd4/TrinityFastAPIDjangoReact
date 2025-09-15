@@ -32,6 +32,16 @@ const FormularBar: React.FC<FormularBarProps> = ({
     onFormulaModeChange(false);
   };
 
+  const formulaSuggestions = [
+    { example: 'SUM(colA,colB)', description: 'Sum columns' },
+    { example: 'AVG(colA,colB)', description: 'Average columns' },
+    { example: 'CORR(colA,colB)', description: 'Correlation' },
+    { example: 'PROD(colA,colB)', description: 'Product' },
+    { example: 'DIV(colA,colB)', description: 'Division' },
+    { example: 'MAX(colA,colB)', description: 'Max value' },
+    { example: 'MIN(colA,colB)', description: 'Min value' }
+  ];
+
   return (
     <div className="flex-shrink-0 border-b border-border bg-gradient-to-r from-card via-card/95 to-card">
       <div className="flex items-center h-12 px-4 space-x-3">
@@ -44,11 +54,11 @@ const FormularBar: React.FC<FormularBarProps> = ({
             </span>
           </div>
           <Button
-            variant="outline" 
+            variant="outline"
             size="sm"
             className="h-8 w-8 p-0"
             onClick={() => onFormulaModeChange(!isFormulaMode)}
-            title={isFormulaMode ? "Exit Formula Mode" : "Enter Formula Mode"}
+            title="Show Formulas"
           >
             <Calculator className={`w-4 h-4 ${isFormulaMode ? 'text-primary' : 'text-muted-foreground'}`} />
           </Button>
@@ -63,7 +73,11 @@ const FormularBar: React.FC<FormularBarProps> = ({
             <Input
               value={formulaInput}
               onChange={(e) => onFormulaInputChange(e.target.value)}
-              placeholder={isFormulaMode ? "=SUM(colA,colB), =AVG(colA,colB), =colA+colB..." : "Enter value..."}
+              placeholder={
+                isFormulaMode
+                  ? "=SUM(colA,colB), =AVG(colA,colB), =PROD(colA,colB)..."
+                  : "Enter value..."
+              }
               className={`h-8 ${isFormulaMode ? 'pl-10 font-mono border-primary/50 bg-primary/5' : 'bg-background'} transition-all duration-200`}
               onKeyDown={(e) => {
                 if (e.key === 'Enter') {
@@ -81,7 +95,7 @@ const FormularBar: React.FC<FormularBarProps> = ({
         <div className="flex items-center space-x-1">
           <Button
             variant="outline"
-            size="sm" 
+            size="sm"
             className="h-8 px-3"
             onClick={onFormulaSubmit}
             disabled={!selectedColumn}
@@ -99,23 +113,21 @@ const FormularBar: React.FC<FormularBarProps> = ({
           </Button>
         </div>
       </div>
-      
+
       {/* Formula Helper */}
       {isFormulaMode && (
         <div className="px-4 pb-2">
-          <div className="flex items-center space-x-4 text-xs text-muted-foreground">
-            <span className="flex items-center space-x-1">
-              <Badge variant="secondary" className="text-xs">SUM(colA,colB)</Badge>
-              <span>Sum columns</span>
-            </span>
-            <span className="flex items-center space-x-1">
-              <Badge variant="secondary" className="text-xs">AVG(colA,colB)</Badge>
-              <span>Average columns</span>
-            </span>
-            <span className="flex items-center space-x-1">
-              <Badge variant="secondary" className="text-xs">CORR(colA,colB)</Badge>
-              <span>Correlation</span>
-            </span>
+          <div className="flex items-center flex-wrap gap-4 text-xs text-muted-foreground">
+            {formulaSuggestions.map((f) => (
+              <span
+                key={f.example}
+                className="flex items-center space-x-1 cursor-pointer"
+                onClick={() => onFormulaInputChange(`=${f.example}`)}
+              >
+                <Badge variant="secondary" className="text-xs">{f.example}</Badge>
+                <span>{f.description}</span>
+              </span>
+            ))}
           </div>
         </div>
       )}
@@ -124,3 +136,4 @@ const FormularBar: React.FC<FormularBarProps> = ({
 };
 
 export default FormularBar;
+
