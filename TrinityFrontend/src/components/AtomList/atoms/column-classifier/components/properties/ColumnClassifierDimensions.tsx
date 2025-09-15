@@ -20,8 +20,9 @@ interface Props {
 const ColumnClassifierDimensions: React.FC<Props> = ({ atomId }) => {
   const atom = useLaboratoryStore(state => state.getAtom(atomId));
   const updateSettings = useLaboratoryStore(state => state.updateAtomSettings);
-  const settings: SettingsType = (atom?.settings as SettingsType) || {
-    ...DEFAULT_COLUMN_CLASSIFIER_SETTINGS
+  const settings: SettingsType = {
+    ...DEFAULT_COLUMN_CLASSIFIER_SETTINGS,
+    ...(atom?.settings as SettingsType)
   };
   const { toast } = useToast();
 
@@ -48,7 +49,7 @@ const ColumnClassifierDimensions: React.FC<Props> = ({ atomId }) => {
   // list of identifier columns for potential future assignments
   const identifiers =
     settings.data.files[settings.data.activeFileIndex]?.columns
-      .filter(c => c.category === 'identifiers')
+      ?.filter(c => c.category === 'identifiers')
       .map(c => c.name) || [];
 
   React.useEffect(() => {
