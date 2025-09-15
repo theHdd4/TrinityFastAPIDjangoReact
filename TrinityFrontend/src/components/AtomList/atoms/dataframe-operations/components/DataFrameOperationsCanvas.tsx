@@ -35,6 +35,7 @@ import { DATAFRAME_OPERATIONS_API, VALIDATE_API } from '@/lib/api';
   duplicateColumn as apiDuplicateColumn,
   moveColumn as apiMoveColumn,
   retypeColumn as apiRetypeColumn,
+  applyFormula as apiApplyFormula,
   loadDataframeByKey,
 } from '../services/dataframeOperationsApi';
 import { toast } from '@/components/ui/use-toast';
@@ -784,110 +785,31 @@ const handleHeaderClick = (header: string) => {
   setSelectedCell(null);
 };
 
-const handleFormulaSubmit = () => {
-  if (!data || !selectedColumn) return;
-  const headers = data.headers;
-  const rows = data.rows.map(r => ({ ...r }));
-  const targetCol = selectedColumn;
-  const input = formulaInput.trim();
-
-  if (input.startsWith('=')) {
-    const expr = input.slice(1);
-    const funcMatch = expr.match(/^(SUM|AVG|CORR|PROD|DIV|MAX|MIN)\(([^)]+)\)$/i);
-    if (funcMatch) {
-      const func = funcMatch[1].toUpperCase();
-      const cols = funcMatch[2].split(',').map(c => c.trim());
-      if (func === 'CORR' && cols.length === 2) {
-        const [c1, c2] = cols;
-        const xVals: number[] = [];
-        const yVals: number[] = [];
-        for (let r = 0; r < rows.length; r++) {
-          const xv = Number(rows[r][c1]);
-          const yv = Number(rows[r][c2]);
-          if (!isNaN(xv) && !isNaN(yv)) {
-            xVals.push(xv);
-            yVals.push(yv);
-          }
-        }
-        const n = xVals.length;
-        let sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0, sumY2 = 0;
-        for (let i = 0; i < n; i++) {
-          const x = xVals[i];
-          const y = yVals[i];
-          sumX += x; sumY += y; sumXY += x * y; sumX2 += x * x; sumY2 += y * y;
-        }
-        const corr = n > 0
-          ? (n * sumXY - sumX * sumY) /
-            Math.sqrt((n * sumX2 - sumX ** 2) * (n * sumY2 - sumY ** 2))
-          : 0;
-        for (let r = 0; r < rows.length; r++) {
-          rows[r][targetCol] = corr;
-        }
-      } else {
-        for (let r = 0; r < rows.length; r++) {
-          const values = cols
-            .map(c => Number(rows[r][c]))
-            .filter(v => !isNaN(v));
-          let result = 0;
-          switch (func) {
-            case 'SUM':
-              result = values.reduce((a, b) => a + b, 0);
-              break;
-            case 'AVG':
-              result = values.length > 0 ? values.reduce((a, b) => a + b, 0) / values.length : 0;
-              break;
-            case 'PROD':
-              result = values.length > 0 ? values.reduce((a, b) => a * b, 1) : 0;
-              break;
-            case 'DIV':
-              if (values.length > 0) {
-                let divResult = values[0];
-                for (let i = 1; i < values.length; i++) {
-                  const v = values[i];
-                  divResult = v !== 0 ? divResult / v : divResult;
-                }
-                result = divResult;
-              }
-              break;
-            case 'MAX':
-              result = values.length > 0 ? Math.max(...values) : 0;
-              break;
-            case 'MIN':
-              result = values.length > 0 ? Math.min(...values) : 0;
-              break;
-            default:
-              result = 0;
-          }
-          rows[r][targetCol] = result;
-        }
-      }
-    } else {
-      const headersPattern = headers
-        .map(h => h.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&'))
-        .join('|');
-      const regex = new RegExp(`\\b(${headersPattern})\\b`, 'g');
-      for (let r = 0; r < rows.length; r++) {
-        const replaced = expr.replace(regex, match => {
-          const val = Number(rows[r][match]);
-          return isNaN(val) ? '0' : String(val);
-        });
-        try {
-          const result = Function(`return ${replaced}`)();
-          rows[r][targetCol] = result;
-        } catch {
-          rows[r][targetCol] = '';
-        }
-      }
-    }
-  } else if (input !== '') {
-    for (let r = 0; r < rows.length; r++) {
-      rows[r][targetCol] = input;
-    }
+const handleFormulaSubmit = async () => {
+  resetSaveSuccess();
+  if (!data || !selectedColumn || !fileId) return;
+  try {
+    const resp = await apiApplyFormula(fileId, selectedColumn, formulaInput.trim());
+    const columnTypes: any = {};
+    resp.headers.forEach(h => {
+      const t = resp.types[h];
+      columnTypes[h] = t.includes('float') || t.includes('int') ? 'number' : 'text';
+    });
+    onDataChange({
+      headers: resp.headers,
+      rows: resp.rows,
+      fileName: data.fileName,
+      columnTypes,
+      pinnedColumns: data.pinnedColumns,
+      frozenColumns: data.frozenColumns,
+      cellColors: data.cellColors,
+    });
+  } catch (err) {
+    handleApiError('Apply formula failed', err);
+  } finally {
+    setFormulaInput('');
+    setIsFormulaMode(false);
   }
-
-  onDataChange({ ...data, rows });
-  setFormulaInput('');
-  setIsFormulaMode(false);
 };
 
 const insertDisabled = !selectedCell && !selectedColumn;
