@@ -23,8 +23,9 @@ const LoadingAnimation: React.FC<LoadingAnimationProps> = ({
     const primaryGlow = `hsl(${getVar('--primary')})`;
     const backgroundHsl = getVar('--background');
 
-    let width = (canvas.width = window.innerWidth);
-    let height = (canvas.height = window.innerHeight);
+    // size the canvas to its container rather than the full window
+    let width = (canvas.width = canvas.offsetWidth);
+    let height = (canvas.height = canvas.offsetHeight);
 
     const fontSize = 16; // px
     const columns = Math.floor(width / fontSize);
@@ -69,8 +70,8 @@ const LoadingAnimation: React.FC<LoadingAnimationProps> = ({
     rafRef.current = requestAnimationFrame(draw);
 
     const onResize = () => {
-      width = canvas.width = window.innerWidth;
-      height = canvas.height = window.innerHeight;
+      width = canvas.width = canvas.offsetWidth;
+      height = canvas.height = canvas.offsetHeight;
     };
     window.addEventListener('resize', onResize);
 
@@ -81,12 +82,14 @@ const LoadingAnimation: React.FC<LoadingAnimationProps> = ({
   }, []);
 
   return (
-    <div className={`fixed inset-0 z-50 flex items-center justify-center bg-background/95 backdrop-blur-sm ${className}`}>
+    <div
+      className={`relative w-full h-full overflow-hidden flex items-center justify-center bg-background ${className}`}
+    >
       {/* Matrix rain canvas */}
       <canvas ref={canvasRef} className="absolute inset-0 w-full h-full" />
 
       {/* Message */}
-      <div className="relative z-10 text-center px-6">
+      <div className="absolute inset-0 z-10 flex flex-col items-center justify-center text-center px-6 bg-background/80 backdrop-blur-sm">
         <h3 className="text-2xl font-light text-foreground mb-2">{message}</h3>
         <div className="flex items-center justify-center space-x-1 text-muted-foreground">
           <span>Please wait</span>
