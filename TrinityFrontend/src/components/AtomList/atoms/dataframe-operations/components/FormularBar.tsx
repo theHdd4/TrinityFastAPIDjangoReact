@@ -7,41 +7,27 @@ import { DataFrameData } from '../DataFrameOperationsAtom';
 
 interface FormularBarProps {
   data: DataFrameData | null;
-  selectedCell: {row: number, col: string} | null;
+  selectedColumn: string | null;
   formulaInput: string;
   isFormulaMode: boolean;
-  onSelectedCellChange: (cell: {row: number, col: string} | null) => void;
+  onSelectedColumnChange: (col: string | null) => void;
   onFormulaInputChange: (value: string) => void;
   onFormulaModeChange: (mode: boolean) => void;
   onFormulaSubmit: () => void;
 }
 
-function safeToString(val: any): string {
-  if (val === undefined || val === null) return '';
-  try {
-    return val.toString();
-  } catch {
-    return '';
-  }
-}
-
-const getCellReference = (rowIndex: number, columnIndex: number) => {
-  const columnLetter = String.fromCharCode(65 + columnIndex);
-  return `${columnLetter}${rowIndex + 1}`;
-};
-
 const FormularBar: React.FC<FormularBarProps> = ({
   data,
-  selectedCell,
+  selectedColumn,
   formulaInput,
   isFormulaMode,
-  onSelectedCellChange,
+  onSelectedColumnChange,
   onFormulaInputChange,
   onFormulaModeChange,
   onFormulaSubmit
 }) => {
   const handleCancel = () => {
-    onSelectedCellChange(null);
+    onSelectedColumnChange(null);
     onFormulaInputChange('');
     onFormulaModeChange(false);
   };
@@ -49,15 +35,12 @@ const FormularBar: React.FC<FormularBarProps> = ({
   return (
     <div className="flex-shrink-0 border-b border-border bg-gradient-to-r from-card via-card/95 to-card">
       <div className="flex items-center h-12 px-4 space-x-3">
-        {/* Cell Reference Display */}
+        {/* Column Reference Display */}
         <div className="flex items-center space-x-2">
           <div className="flex items-center space-x-1 bg-primary/10 rounded-md px-3 py-1.5 border border-primary/20">
             <Hash className="w-4 h-4 text-primary" />
             <span className="text-sm font-mono font-semibold text-primary min-w-[60px]">
-              {selectedCell 
-                ? getCellReference(selectedCell.row, data?.headers.indexOf(selectedCell.col) || 0)
-                : 'Select Cell'
-              }
+              {selectedColumn ?? 'Select Column'}
             </span>
           </div>
           <Button
@@ -80,7 +63,7 @@ const FormularBar: React.FC<FormularBarProps> = ({
             <Input
               value={formulaInput}
               onChange={(e) => onFormulaInputChange(e.target.value)}
-              placeholder={isFormulaMode ? "=SUM(A:C), =AVG(A:B), =A1+B1..." : "Enter value..."}
+              placeholder={isFormulaMode ? "=SUM(colA,colB), =AVG(colA,colB), =colA+colB..." : "Enter value..."}
               className={`h-8 ${isFormulaMode ? 'pl-10 font-mono border-primary/50 bg-primary/5' : 'bg-background'} transition-all duration-200`}
               onKeyDown={(e) => {
                 if (e.key === 'Enter') {
@@ -101,7 +84,7 @@ const FormularBar: React.FC<FormularBarProps> = ({
             size="sm" 
             className="h-8 px-3"
             onClick={onFormulaSubmit}
-            disabled={!selectedCell}
+            disabled={!selectedColumn}
           >
             <Check className="w-4 h-4 mr-1" />
             Apply
@@ -122,16 +105,16 @@ const FormularBar: React.FC<FormularBarProps> = ({
         <div className="px-4 pb-2">
           <div className="flex items-center space-x-4 text-xs text-muted-foreground">
             <span className="flex items-center space-x-1">
-              <Badge variant="secondary" className="text-xs">SUM(A:C)</Badge>
-              <span>Sum range</span>
+              <Badge variant="secondary" className="text-xs">SUM(colA,colB)</Badge>
+              <span>Sum columns</span>
             </span>
             <span className="flex items-center space-x-1">
-              <Badge variant="secondary" className="text-xs">AVG(A:B)</Badge>
-              <span>Average range</span>
+              <Badge variant="secondary" className="text-xs">AVG(colA,colB)</Badge>
+              <span>Average columns</span>
             </span>
             <span className="flex items-center space-x-1">
-              <Badge variant="secondary" className="text-xs">A1+B1</Badge>
-              <span>Cell references</span>
+              <Badge variant="secondary" className="text-xs">CORR(colA,colB)</Badge>
+              <span>Correlation</span>
             </span>
           </div>
         </div>

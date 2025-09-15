@@ -784,53 +784,81 @@ const handleHeaderClick = (header: string) => {
   setSelectedCell(null);
 };
 
-const letterToIndex = (letter: string) => letter.charCodeAt(0) - 65;
-
 const handleFormulaSubmit = () => {
-  if (!data || !selectedCell) return;
+  if (!data || !selectedColumn) return;
   const headers = data.headers;
   const rows = data.rows.map(r => ({ ...r }));
-  const targetCol = selectedCell.col;
+  const targetCol = selectedColumn;
   const input = formulaInput.trim();
 
   if (input.startsWith('=')) {
     const expr = input.slice(1);
-    const rangeMatch = expr.match(/^(SUM|AVG)\(([A-Z]):([A-Z])\)$/i);
-    if (rangeMatch) {
-      const func = rangeMatch[1].toUpperCase();
-      const start = letterToIndex(rangeMatch[2]);
-      const end = letterToIndex(rangeMatch[3]);
-      for (let r = 0; r < rows.length; r++) {
-        let total = 0;
-        let count = 0;
-        for (let c = start; c <= end; c++) {
-          const colName = headers[c];
-          const val = Number(rows[r][colName]);
-          if (!isNaN(val)) {
-            total += val;
-            count++;
+    const funcMatch = expr.match(/^(SUM|AVG|CORR)\(([^)]+)\)$/i);
+    if (funcMatch) {
+      const func = funcMatch[1].toUpperCase();
+      const cols = funcMatch[2].split(',').map(c => c.trim());
+      if (func === 'CORR' && cols.length === 2) {
+        const [c1, c2] = cols;
+        const xVals: number[] = [];
+        const yVals: number[] = [];
+        for (let r = 0; r < rows.length; r++) {
+          const xv = Number(rows[r][c1]);
+          const yv = Number(rows[r][c2]);
+          if (!isNaN(xv) && !isNaN(yv)) {
+            xVals.push(xv);
+            yVals.push(yv);
           }
         }
-        rows[r][targetCol] = func === 'SUM' ? total : count > 0 ? total / count : 0;
+        const n = xVals.length;
+        let sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0, sumY2 = 0;
+        for (let i = 0; i < n; i++) {
+          const x = xVals[i];
+          const y = yVals[i];
+          sumX += x; sumY += y; sumXY += x * y; sumX2 += x * x; sumY2 += y * y;
+        }
+        const corr = n > 0
+          ? (n * sumXY - sumX * sumY) /
+            Math.sqrt((n * sumX2 - sumX ** 2) * (n * sumY2 - sumY ** 2))
+          : 0;
+        for (let r = 0; r < rows.length; r++) {
+          rows[r][targetCol] = corr;
+        }
+      } else {
+        for (let r = 0; r < rows.length; r++) {
+          let total = 0;
+          let count = 0;
+          for (const colName of cols) {
+            const val = Number(rows[r][colName]);
+            if (!isNaN(val)) {
+              total += val;
+              count++;
+            }
+          }
+          rows[r][targetCol] = func === 'SUM' ? total : count > 0 ? total / count : 0;
+        }
       }
     } else {
-      const rowIdx = selectedCell.row;
-      const replaced = expr.replace(/([A-Z])(\d+)/gi, (_, colLetter, rowNumber) => {
-        const colIdx = letterToIndex(colLetter);
-        const colName = headers[colIdx];
-        const r = parseInt(rowNumber, 10) - 1;
-        const val = Number(rows[r]?.[colName]);
-        return isNaN(val) ? '0' : String(val);
-      });
-      try {
-        const result = Function(`return ${replaced}`)();
-        rows[rowIdx][targetCol] = result;
-      } catch {
-        rows[rowIdx][targetCol] = '';
+      const headersPattern = headers
+        .map(h => h.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&'))
+        .join('|');
+      const regex = new RegExp(`\\b(${headersPattern})\\b`, 'g');
+      for (let r = 0; r < rows.length; r++) {
+        const replaced = expr.replace(regex, match => {
+          const val = Number(rows[r][match]);
+          return isNaN(val) ? '0' : String(val);
+        });
+        try {
+          const result = Function(`return ${replaced}`)();
+          rows[r][targetCol] = result;
+        } catch {
+          rows[r][targetCol] = '';
+        }
       }
     }
   } else if (input !== '') {
-    rows[selectedCell.row][targetCol] = input;
+    for (let r = 0; r < rows.length; r++) {
+      rows[r][targetCol] = input;
+    }
   }
 
   onDataChange({ ...data, rows });
@@ -1093,10 +1121,10 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
             {data && (
               <FormularBar
                 data={data}
-                selectedCell={selectedCell}
+                selectedColumn={selectedColumn}
                 formulaInput={formulaInput}
                 isFormulaMode={isFormulaMode}
-                onSelectedCellChange={setSelectedCell}
+                onSelectedColumnChange={setSelectedColumn}
                 onFormulaInputChange={setFormulaInput}
                 onFormulaModeChange={setIsFormulaMode}
                 onFormulaSubmit={handleFormulaSubmit}
