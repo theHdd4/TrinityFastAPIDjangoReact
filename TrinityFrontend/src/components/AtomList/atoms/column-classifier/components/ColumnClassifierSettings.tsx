@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { VALIDATE_API, CLASSIFIER_API } from '@/lib/api';
+import { cancelPrefillController } from '../prefillManager';
 import type { FileClassification, ColumnData } from '../ColumnClassifierAtom';
 import {
   useLaboratoryStore,
@@ -68,8 +69,10 @@ const ColumnClassifierSettings: React.FC<ColumnClassifierSettingsProps> = ({ ato
 
   const classify = async () => {
     if (!savedId) return;
+    cancelPrefillController(atomId);
     setLoading(true);
     setError('');
+    updateSettings(atomId, { isLoading: true });
     try {
       const form = new FormData();
       form.append('dataframe', savedId);
@@ -89,9 +92,10 @@ const ColumnClassifierSettings: React.FC<ColumnClassifierSettingsProps> = ({ ato
       ];
       const custom = Object.fromEntries((settings.dimensions || []).map(d => [d, []]));
       onClassification({ fileName: savedId, columns: cols, customDimensions: custom });
-      updateSettings(atomId, { validatorId: savedId, assignments: {} });
+      updateSettings(atomId, { validatorId: savedId, assignments: {}, isLoading: false });
     } catch (e: any) {
       setError(e.message);
+      updateSettings(atomId, { isLoading: false });
     } finally {
       setLoading(false);
     }

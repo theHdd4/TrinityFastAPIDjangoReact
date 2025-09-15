@@ -38,6 +38,10 @@ import ExploreAtom from '@/components/AtomList/atoms/explore/ExploreAtom';
 import EvaluateModelsFeatureAtom from '@/components/AtomList/atoms/evaluate-models-feature/EvaluateModelsFeatureAtom';
 import { fetchDimensionMapping } from '@/lib/dimensions';
 import { useToast } from '@/hooks/use-toast';
+import {
+  registerPrefillController,
+  cancelPrefillController,
+} from '@/components/AtomList/atoms/column-classifier/prefillManager';
 
 import {
   useLaboratoryStore,
@@ -130,13 +134,13 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
     }
   };
 
-  const prefetchDataframe = async (name: string) => {
+  const prefetchDataframe = async (name: string, signal?: AbortSignal) => {
     if (!name || !/\.[^/]+$/.test(name.trim())) return;
     try {
       console.log('✈️ fetching flight table', name);
       const fr = await fetch(
         `${FEATURE_OVERVIEW_API}/flight_table?object_name=${encodeURIComponent(name)}`,
-        { credentials: 'include' }
+        { credentials: 'include', signal }
       );
       if (fr.ok) {
         await fr.arrayBuffer();
@@ -145,7 +149,7 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
       console.log('🔎 prefetching dataframe', name);
       const res = await fetch(
         `${FEATURE_OVERVIEW_API}/cached_dataframe?object_name=${encodeURIComponent(name)}`,
-        { credentials: 'include' }
+        { credentials: 'include', signal }
       );
       if (res.ok) {
         await res.text();
@@ -154,7 +158,9 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
         console.warn('⚠️ prefetch dataframe failed', res.status);
       }
     } catch (err) {
-      console.error('⚠️ prefetch dataframe error', err);
+      if ((err as any)?.name !== 'AbortError') {
+        console.error('⚠️ prefetch dataframe error', err);
+      }
     }
   };
 
@@ -308,16 +314,18 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
 
   const prefillColumnClassifier = async (atomId: string) => {
     const quotes = [
+      'To deny our own impulses is to deny the very thing that makes us human. Select the file in properties if you want to exercise choice.',
       'Working the Trinity Magic!',
       'Choice is an illusion created between those with power and those without',
       'Choice. The problem is choice',
-      'To deny our own impulses is to deny the very thing that makes us human',
     ];
     let quoteIndex = 0;
     const showQuote = () => {
       toast({ title: quotes[quoteIndex % quotes.length] });
       quoteIndex++;
     };
+    const controller = new AbortController();
+    registerPrefillController(atomId, controller);
     updateAtomSettings(atomId, { isLoading: true });
     showQuote();
     const quoteTimer = setInterval(showQuote, 5000);
@@ -330,13 +338,14 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
         return;
       }
       console.log('ℹ️ prefill column classifier with', prev.csv);
-      await prefetchDataframe(prev.csv);
+      await prefetchDataframe(prev.csv, controller.signal);
       const form = new FormData();
       form.append('dataframe', prev.csv);
       const res = await fetch(`${CLASSIFIER_API}/classify_columns`, {
         method: 'POST',
         body: form,
         credentials: 'include',
+        signal: controller.signal,
       });
       if (!res.ok) {
         console.warn('⚠️ auto classification failed', res.status);
@@ -375,10 +384,15 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
       });
       toast({ title: 'Success! We are still here!' });
     } catch (err) {
-      console.error('⚠️ prefill column classifier error', err);
+      if ((err as any)?.name === 'AbortError') {
+        console.log('ℹ️ prefill column classifier aborted');
+      } else {
+        console.error('⚠️ prefill column classifier error', err);
+      }
       updateAtomSettings(atomId, { isLoading: false });
     } finally {
       clearInterval(quoteTimer);
+      cancelPrefillController(atomId);
     }
   };
 
