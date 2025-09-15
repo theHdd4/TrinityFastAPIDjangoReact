@@ -52,12 +52,9 @@ const FeatureOverviewAtom: React.FC<Props> = ({ atomId }) => {
 
   return (
     <div className="w-full h-full bg-white rounded-lg overflow-hidden flex flex-col">
-      <div className="relative flex-grow">
+      <div className="relative flex-grow min-h-[450px]">
         {settings.isLoading ? (
-          <LoadingAnimation
-            message={settings.loadingMessage}
-            status={settings.loadingStatus}
-          />
+          <LoadingAnimation status={settings.loadingStatus} />
         ) : (
           <FeatureOverviewCanvas
             settings={settings}

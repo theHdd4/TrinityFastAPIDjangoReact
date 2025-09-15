@@ -255,10 +255,7 @@ const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
         <div className="flex flex-1">
           <div className="relative w-full h-full p-4 min-h-[450px]">
             {settings.isLoading ? (
-              <LoadingAnimation
-                message={settings.loadingMessage}
-                status={settings.loadingStatus}
-              />
+              <LoadingAnimation status={settings.loadingStatus} />
             ) : (
               <ColumnClassifierCanvas
                 data={classifierData}
