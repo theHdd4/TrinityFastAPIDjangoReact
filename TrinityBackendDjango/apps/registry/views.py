@@ -3,6 +3,7 @@ from rest_framework.response import Response
 from rest_framework.decorators import action
 from django.utils.text import slugify
 import os
+import logging
 from apps.accounts.views import CsrfExemptSessionAuthentication
 from apps.accounts.utils import save_env_var, get_env_dict, load_env_vars
 from .models import (
@@ -14,8 +15,14 @@ from .models import (
     ArrowDataset,
     RegistryEnvironment,
 )
-from .atom_config import save_atom_list_configuration, load_atom_list_configuration
-from common.minio_utils import copy_prefix
+from .atom_config import (
+    save_atom_list_configuration,
+    load_atom_list_configuration,
+    _get_env_ids,
+)
+from common.minio_utils import copy_prefix, remove_prefix
+from pymongo import MongoClient
+from django.conf import settings
 from .serializers import (
     AppSerializer,
     ProjectSerializer,
@@ -25,6 +32,7 @@ from .serializers import (
     ArrowDatasetSerializer,
 )
 
+logger = logging.getLogger(__name__)
 
 class AppViewSet(viewsets.ModelViewSet):
     """
@@ -82,7 +90,7 @@ class ProjectViewSet(viewsets.ModelViewSet):
     CRUD for Projects.
     Admins and owners may create; owners may update/delete their own.
     """
-    queryset = Project.objects.select_related("owner", "app").all()
+    queryset = Project.objects.select_related("owner", "app").filter(is_deleted=False)
     serializer_class = ProjectSerializer
     permission_classes = [permissions.IsAuthenticated]
     authentication_classes = [CsrfExemptSessionAuthentication]
@@ -136,7 +144,28 @@ class ProjectViewSet(viewsets.ModelViewSet):
     def destroy(self, request, *args, **kwargs):
         if not self._can_edit(request.user):
             return Response({"detail": "Permission denied."}, status=status.HTTP_403_FORBIDDEN)
-        return super().destroy(request, *args, **kwargs)
+        project = self.get_object()
+        project.is_deleted = True
+        project.save(update_fields=["is_deleted"])
+
+        client_slug = getattr(request, "tenant", None)
+        client_slug = getattr(client_slug, "name", "") if client_slug else ""
+        app_slug = project.app.slug if project.app else ""
+        remove_prefix(f"{client_slug}/{app_slug}/{project.name}")
+        remove_prefix(f"{client_slug}/{app_slug}/{project.slug}")
+
+        try:
+            client_id, app_id, project_id = _get_env_ids(project)
+            mc = MongoClient(getattr(settings, "MONGO_URI", "mongodb://mongo:27017/trinity_db"))
+            coll = mc["trinity_db"]["atom_list_configuration"]
+            coll.update_many(
+                {"client_id": client_id, "app_id": app_id, "project_id": project_id},
+                {"$set": {"isDeleted": True}},
+            )
+        except Exception as exc:  # pragma: no cover - logging only
+            logger.error("Failed to mark atom configuration deleted: %s", exc)
+
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
     def create(self, request, *args, **kwargs):
         data = request.data.copy()
@@ -577,9 +606,25 @@ class ArrowDatasetViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         qs = self.queryset
         atom = self.request.query_params.get("atom_id")
+        project = self.request.query_params.get("project")
+        logger.debug(
+            "ArrowDatasetViewSet.get_queryset user=%s atom=%s project=%s",
+            self.request.user,
+            atom,
+            project,
+        )
         if atom:
             qs = qs.filter(atom_id=atom)
-        project = self.request.query_params.get("project")
         if project:
             qs = qs.filter(project_id=project)
         return qs
+
+    def perform_create(self, serializer):
+        instance = serializer.save()
+        logger.info(
+            "ArrowDataset created id=%s project=%s atom=%s key=%s",
+            instance.id,
+            instance.project_id,
+            instance.atom_id,
+            instance.file_key,
+        )

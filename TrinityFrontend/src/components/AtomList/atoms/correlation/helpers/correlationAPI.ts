@@ -1,4 +1,5 @@
 import { CORRELATION_API } from '@/lib/api';
+import type { MatrixSettings } from '../components/MatrixSettingsTray';
 
 export interface IdentifierFilter {
   column: string;
@@ -39,6 +40,7 @@ export interface FilterAndCorrelateRequest {
     start: string;
     end: string;
   };
+  aggregation_level?: string;
 }
 
 export interface DateColumnInfo {
@@ -70,7 +72,7 @@ export interface CorrelationResults {
   filtered_file_path?: string;
   correlation_method: string;
   correlation_results: any;
-  correlation_file_path: string;
+  correlation_id?: string;
   preview_data?: any[];
   date_analysis?: DateAnalysisResponse;
   date_filtered_rows?: number;
@@ -307,6 +309,34 @@ export class CorrelationAPI {
     });
     if (!response.ok) {
       throw new Error(`Failed to fetch time series data: ${response.statusText}`);
+    }
+    return response.json();
+  }
+
+  async getMatrixSettings(): Promise<MatrixSettings> {
+    const response = await fetch(`${this.baseUrl}/matrix-settings`);
+    if (!response.ok) {
+      throw new Error(`Failed to fetch matrix settings: ${response.statusText}`);
+    }
+    const saved = await response.json();
+    return {
+      theme: 'default',
+      showAxisLabels: true,
+      showDataLabels: true,
+      showLegend: true,
+      showGrid: true,
+      ...saved,
+    };
+  }
+
+  async saveMatrixSettings(settings: MatrixSettings): Promise<MatrixSettings> {
+    const response = await fetch(`${this.baseUrl}/matrix-settings`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(settings)
+    });
+    if (!response.ok) {
+      throw new Error(`Failed to save matrix settings: ${response.statusText}`);
     }
     return response.json();
   }

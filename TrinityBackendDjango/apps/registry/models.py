@@ -51,6 +51,7 @@ class Project(models.Model):
     )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    is_deleted = models.BooleanField(default=False)
     history = HistoricalRecords()
 
     class Meta:
@@ -157,7 +158,7 @@ class ArrowDataset(models.Model):
 
     class Meta:
         ordering = ["-created_at"]
-        unique_together = ("project", "atom_id", "file_key")
+        unique_together = ("project", "original_csv")
 
     def __str__(self):
         return f"{self.atom_id}:{self.file_key}"

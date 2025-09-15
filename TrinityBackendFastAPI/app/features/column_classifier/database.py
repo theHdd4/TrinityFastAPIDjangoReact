@@ -17,8 +17,22 @@ POSTGRES_USER = os.getenv("POSTGRES_USER", "trinity_user")
 POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD", "trinity_pass")
 
 # MongoDB Configuration
-MONGODB_URL = settings.mongo_uri
+# Support both dedicated CLASSIFY_MONGO_URI and fallback MONGO_URI so the
+# service connects in dev and prod environments without additional tweaks.
+MONGODB_URL = (
+    os.getenv("CLASSIFY_MONGO_URI")
+    or os.getenv("MONGO_URI")
+    or settings.mongo_uri
+)
+# Accept both MONGO_USERNAME and legacy MONGO_USER for credentials
+MONGO_USER = os.getenv("MONGO_USERNAME") or os.getenv("MONGO_USER")
+MONGO_PASSWORD = os.getenv("MONGO_PASSWORD")
+MONGO_AUTH_DB = os.getenv("MONGO_AUTH_DB", "admin")
+
 DATABASE_NAME = settings.classification_database
+CONFIG_DB_NAME = os.getenv(
+    "CLASSIFIER_CONFIG_DB", settings.classifier_configs_database
+)
 
 # Collection Names - ONLY the ones you specified
 # Use settings for consistency
@@ -31,14 +45,25 @@ COLLECTIONS = {
 
 # Initialize MongoDB client with timeout
 try:
-    mongo_client = MongoClient(MONGODB_URL, serverSelectionTimeoutMS=5000)
+    mongo_client = MongoClient(
+        MONGODB_URL,
+        username=MONGO_USER,
+        password=MONGO_PASSWORD,
+        authSource=MONGO_AUTH_DB,
+        serverSelectionTimeoutMS=5000,
+    )
     db = mongo_client[DATABASE_NAME]
-    config_db = mongo_client[settings.classifier_configs_database]
-    
+    config_db = mongo_client[CONFIG_DB_NAME]
+
     # Test connection
     mongo_client.admin.command('ping')
     print(f"✅ Connected to MongoDB: {DATABASE_NAME}")
-    print(f"✅ Config DB: {settings.classifier_configs_database}")
+    print(f"✅ Config DB: {CONFIG_DB_NAME}")
+    if COLLECTIONS["CLASSIFIER_CONFIGS"] not in config_db.list_collection_names():
+        config_db.create_collection(COLLECTIONS["CLASSIFIER_CONFIGS"])
+        print(
+            f"✅ Created collection {COLLECTIONS['CLASSIFIER_CONFIGS']} in {CONFIG_DB_NAME}"
+        )
     
 except Exception as e:
     print(f"❌ MongoDB connection failed: {e}")
@@ -46,9 +71,46 @@ except Exception as e:
     db = None
     config_db = None
 
-def check_mongodb_connection():
-    """Check if MongoDB is available"""
-    return mongo_client is not None and db is not None and config_db is not None
+def ensure_mongo_connection() -> bool:
+    """Ensure a live connection to MongoDB.
+
+    The initial connection attempt happens at import time. However, services
+    like MongoDB might not be ready yet when the module is imported. This
+    helper retries the connection on demand so that later requests (e.g. when
+    the user clicks *Save Configuration*) can still succeed and automatically
+    create the necessary collection.
+    """
+
+    global mongo_client, db, config_db
+
+    if mongo_client is not None and db is not None and config_db is not None:
+        return True
+
+    try:
+        mongo_client = MongoClient(
+            MONGODB_URL,
+            username=MONGO_USER,
+            password=MONGO_PASSWORD,
+            authSource=MONGO_AUTH_DB,
+            serverSelectionTimeoutMS=5000,
+        )
+        db = mongo_client[DATABASE_NAME]
+        config_db = mongo_client[CONFIG_DB_NAME]
+        mongo_client.admin.command("ping")
+        if COLLECTIONS["CLASSIFIER_CONFIGS"] not in config_db.list_collection_names():
+            config_db.create_collection(COLLECTIONS["CLASSIFIER_CONFIGS"])
+        return True
+    except Exception as exc:  # pragma: no cover - best effort
+        logging.error(f"MongoDB reconnection failed: {exc}")
+        mongo_client = None
+        db = None
+        config_db = None
+        return False
+
+
+def check_mongodb_connection() -> bool:
+    """Check if MongoDB is available, attempting reconnection if necessary."""
+    return ensure_mongo_connection()
 
 def get_validator_atom_from_mongo(validator_atom_id: str):
     """Get validator atom data from MongoDB - USED BY classify_columns endpoint"""
@@ -391,6 +453,8 @@ def save_classifier_config_to_mongo(config: dict):
             **config,
             "updated_at": datetime.utcnow(),
         }
+        if COLLECTIONS["CLASSIFIER_CONFIGS"] not in config_db.list_collection_names():
+            config_db.create_collection(COLLECTIONS["CLASSIFIER_CONFIGS"])
         result = config_db[COLLECTIONS["CLASSIFIER_CONFIGS"]].replace_one(
             {"_id": document_id}, document, upsert=True
         )

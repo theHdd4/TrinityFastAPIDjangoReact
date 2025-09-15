@@ -2,6 +2,7 @@ import { safeStringify } from './safeStringify';
 import { useExhibitionStore } from '@/components/ExhibitionMode/store/exhibitionStore';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { atoms as allAtoms } from '@/components/AtomList/data';
+import { VALIDATE_API } from '@/lib/api';
 
 function stripCards(cards: any[]): any[] {
   return cards.map(card => ({
@@ -28,6 +29,39 @@ function stripCards(cards: any[]): any[] {
         return {
           ...atom,
           settings: { ...restSettings, charts: sanitizedCharts },
+          color: atom.color || info?.color || 'bg-gray-400',
+        };
+      }
+
+      if (atom.atomId === 'data-upload-validate' && atom.settings) {
+        const {
+          uploadedFiles = [],
+          fileMappings = {},
+          filePathMap = {},
+          fileSizeMap = {},
+          fileKeyMap = {},
+          validations,
+          columnConfig,
+          ...restSettings
+        } = atom.settings;
+        const saved = uploadedFiles.filter(name => {
+          const p = filePathMap[name];
+          return !p || !p.includes('/tmp/');
+        });
+        const filterMap = (map: Record<string, any>) =>
+          Object.fromEntries(
+            Object.entries(map).filter(([n]) => saved.includes(n))
+          );
+        return {
+          ...atom,
+          settings: {
+            ...restSettings,
+            uploadedFiles: saved,
+            fileMappings: filterMap(fileMappings),
+            filePathMap: filterMap(filePathMap),
+            fileSizeMap: filterMap(fileSizeMap),
+            fileKeyMap: filterMap(fileKeyMap),
+          },
           color: atom.color || info?.color || 'bg-gray-400',
         };
       }
@@ -88,6 +122,24 @@ export function saveCurrentProject(project: any): void {
 
 // Clear all cached project-specific state from localStorage
 export function clearProjectState(): void {
+  const envStr = localStorage.getItem('env');
+  if (envStr) {
+    try {
+      const env = JSON.parse(envStr);
+      const params = new URLSearchParams({
+        client_name: env.CLIENT_NAME || '',
+        app_name: env.APP_NAME || '',
+        project_name: env.PROJECT_NAME || ''
+      });
+      void fetch(`${VALIDATE_API}/temp-uploads?${params.toString()}`, {
+        method: 'DELETE',
+        credentials: 'include'
+      });
+    } catch {
+      /* ignore */
+    }
+  }
+
   [
     'current-project',
     'laboratory-config',

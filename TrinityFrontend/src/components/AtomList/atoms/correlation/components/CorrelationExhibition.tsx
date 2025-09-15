@@ -86,12 +86,13 @@ const CorrelationExhibition: React.FC<CorrelationExhibitionProps> = ({ data }) =
     if (data.correlationMatrix && variables.length > 0) {
       for (let i = 0; i < variables.length; i++) {
         for (let j = i + 1; j < variables.length; j++) {
-          if (data.correlationMatrix[i] && 
+          if (data.correlationMatrix[i] &&
               typeof data.correlationMatrix[i][j] === 'number' &&
               !isNaN(data.correlationMatrix[i][j]) &&
               isFinite(data.correlationMatrix[i][j])) {
-            
-            const correlation = data.correlationMatrix[i][j];
+
+            const rawCorr = data.correlationMatrix[i][j];
+            const correlation = Number(rawCorr.toFixed(2));
             const strength = getStrength(correlation);
             const pValue = Math.random() * 0.05; // Simulated p-value for demonstration
             const confidence = 0.95 - (Math.abs(correlation) * 0.1); // Simulated confidence
