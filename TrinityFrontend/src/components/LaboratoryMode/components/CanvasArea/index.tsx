@@ -135,9 +135,14 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
     }
   };
 
-  const prefetchDataframe = async (name: string, signal?: AbortSignal) => {
+  const prefetchDataframe = async (
+    name: string,
+    signal?: AbortSignal,
+    statusCb?: (s: string) => void,
+  ) => {
     if (!name || !/\.[^/]+$/.test(name.trim())) return;
     try {
+      statusCb?.('Fetching flight table');
       console.log('✈️ fetching flight table', name);
       const fr = await fetch(
         `${FEATURE_OVERVIEW_API}/flight_table?object_name=${encodeURIComponent(name)}`,
@@ -147,6 +152,7 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
         await fr.arrayBuffer();
         console.log('✅ fetched flight table', name);
       }
+      statusCb?.('Prefetching Dataframe');
       console.log('🔎 prefetching dataframe', name);
       const res = await fetch(
         `${FEATURE_OVERVIEW_API}/cached_dataframe?object_name=${encodeURIComponent(name)}`,
@@ -272,16 +278,22 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
   const prefillFeatureOverview = async (cardId: string, atomId: string) => {
     const controller = new AbortController();
     registerPrefillController(atomId, controller);
-    updateAtomSettings(atomId, { isLoading: true });
+    updateAtomSettings(atomId, {
+      isLoading: true,
+      loadingMessage: 'Loading',
+      loadingStatus: 'Fetching flight table',
+    });
     try {
       const prev = await findLatestDataSource(controller.signal);
       if (!prev || !prev.csv) {
         console.warn('⚠️ no data source found for feature overview');
-        updateAtomSettings(atomId, { isLoading: false });
+        updateAtomSettings(atomId, { isLoading: false, loadingStatus: '', loadingMessage: '' });
         return;
       }
       console.log('ℹ️ prefill data source details', prev);
-      await prefetchDataframe(prev.csv, controller.signal);
+      await prefetchDataframe(prev.csv, controller.signal, status =>
+        updateAtomSettings(atomId, { loadingStatus: status }),
+      );
       const rawMapping = await fetchDimensionMapping(controller.signal);
       const mapping = Object.fromEntries(
         Object.entries(rawMapping).filter(
@@ -310,6 +322,8 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
         dimensionMap: mapping,
         xAxis: prev.xField || 'date',
         isLoading: false,
+        loadingStatus: '',
+        loadingMessage: '',
       });
     } catch (err) {
       if ((err as any)?.name === 'AbortError') {
@@ -317,7 +331,7 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
       } else {
         console.error('⚠️ prefill feature overview error', err);
       }
-      updateAtomSettings(atomId, { isLoading: false });
+      updateAtomSettings(atomId, { isLoading: false, loadingStatus: '', loadingMessage: '' });
     } finally {
       cancelPrefillController(atomId);
     }
@@ -330,14 +344,18 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
       'Choice is an illusion created between those with power and those without',
       'Choice. The problem is choice',
     ];
-    let quoteIndex = 0;
+    let quoteIndex = 1;
     const showQuote = () => {
       toast({ title: quotes[quoteIndex % quotes.length] });
       quoteIndex++;
     };
     const controller = new AbortController();
     registerPrefillController(atomId, controller);
-    updateAtomSettings(atomId, { isLoading: true });
+    updateAtomSettings(atomId, {
+      isLoading: true,
+      loadingMessage: quotes[0],
+      loadingStatus: 'Fetching flight table',
+    });
     showQuote();
     const quoteTimer = setInterval(showQuote, 5000);
 
@@ -345,13 +363,20 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
       const prev = await findLatestDataSource(controller.signal);
       if (!prev || !prev.csv) {
         console.warn('⚠️ no dataframe found for column classifier');
-        updateAtomSettings(atomId, { isLoading: false });
+        updateAtomSettings(atomId, {
+          isLoading: false,
+          loadingStatus: '',
+          loadingMessage: '',
+        });
         return;
       }
       console.log('ℹ️ prefill column classifier with', prev.csv);
-      await prefetchDataframe(prev.csv, controller.signal);
+      await prefetchDataframe(prev.csv, controller.signal, status =>
+        updateAtomSettings(atomId, { loadingStatus: status }),
+      );
       const form = new FormData();
       form.append('dataframe', prev.csv);
+      updateAtomSettings(atomId, { loadingStatus: 'Classifying Dataframe' });
       const res = await fetch(`${CLASSIFIER_API}/classify_columns`, {
         method: 'POST',
         body: form,
@@ -360,7 +385,11 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
       });
       if (!res.ok) {
         console.warn('⚠️ auto classification failed', res.status);
-        updateAtomSettings(atomId, { isLoading: false });
+        updateAtomSettings(atomId, {
+          isLoading: false,
+          loadingStatus: '',
+          loadingMessage: '',
+        });
         return;
       }
       const data = await res.json();
@@ -392,6 +421,8 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
           activeFileIndex: 0,
         },
         isLoading: false,
+        loadingStatus: '',
+        loadingMessage: '',
       });
       toast({ title: 'Success! We are still here!' });
     } catch (err) {
@@ -400,7 +431,7 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
       } else {
         console.error('⚠️ prefill column classifier error', err);
       }
-      updateAtomSettings(atomId, { isLoading: false });
+      updateAtomSettings(atomId, { isLoading: false, loadingStatus: '', loadingMessage: '' });
     } finally {
       clearInterval(quoteTimer);
       cancelPrefillController(atomId);

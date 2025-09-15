@@ -1,5 +1,4 @@
 import React from 'react';
-import { Loader2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import {
   useLaboratoryStore,
@@ -7,6 +6,7 @@ import {
   FeatureOverviewSettings as SettingsType,
 } from '@/components/LaboratoryMode/store/laboratoryStore';
 import FeatureOverviewCanvas from './components/FeatureOverviewCanvas';
+import LoadingAnimation from '@/templates/LoadingAnimation/LoadingAnimation';
 
 interface Props {
   atomId: string;
@@ -52,17 +52,20 @@ const FeatureOverviewAtom: React.FC<Props> = ({ atomId }) => {
 
   return (
     <div className="w-full h-full bg-white rounded-lg overflow-hidden flex flex-col">
-      {settings.isLoading ? (
-        <div className="flex-grow flex items-center justify-center">
-          <Loader2 className="w-6 h-6 animate-spin text-gray-500" />
-        </div>
-      ) : (
-        <FeatureOverviewCanvas
-          settings={settings}
-          onUpdateSettings={s => updateSettings(atomId, s)}
-          atomId={atomId}
-        />
-      )}
+      <div className="relative flex-grow">
+        {settings.isLoading ? (
+          <LoadingAnimation
+            message={settings.loadingMessage}
+            status={settings.loadingStatus}
+          />
+        ) : (
+          <FeatureOverviewCanvas
+            settings={settings}
+            onUpdateSettings={s => updateSettings(atomId, s)}
+            atomId={atomId}
+          />
+        )}
+      </div>
     </div>
   );
 };
