@@ -15,8 +15,14 @@ from .models import (
     ArrowDataset,
     RegistryEnvironment,
 )
-from .atom_config import save_atom_list_configuration, load_atom_list_configuration
-from common.minio_utils import copy_prefix
+from .atom_config import (
+    save_atom_list_configuration,
+    load_atom_list_configuration,
+    _get_env_ids,
+)
+from common.minio_utils import copy_prefix, remove_prefix
+from pymongo import MongoClient
+from django.conf import settings
 from .serializers import (
     AppSerializer,
     ProjectSerializer,
@@ -84,7 +90,7 @@ class ProjectViewSet(viewsets.ModelViewSet):
     CRUD for Projects.
     Admins and owners may create; owners may update/delete their own.
     """
-    queryset = Project.objects.select_related("owner", "app").all()
+    queryset = Project.objects.select_related("owner", "app").filter(is_deleted=False)
     serializer_class = ProjectSerializer
     permission_classes = [permissions.IsAuthenticated]
     authentication_classes = [CsrfExemptSessionAuthentication]
@@ -138,7 +144,28 @@ class ProjectViewSet(viewsets.ModelViewSet):
     def destroy(self, request, *args, **kwargs):
         if not self._can_edit(request.user):
             return Response({"detail": "Permission denied."}, status=status.HTTP_403_FORBIDDEN)
-        return super().destroy(request, *args, **kwargs)
+        project = self.get_object()
+        project.is_deleted = True
+        project.save(update_fields=["is_deleted"])
+
+        client_slug = getattr(request, "tenant", None)
+        client_slug = getattr(client_slug, "name", "") if client_slug else ""
+        app_slug = project.app.slug if project.app else ""
+        remove_prefix(f"{client_slug}/{app_slug}/{project.name}")
+        remove_prefix(f"{client_slug}/{app_slug}/{project.slug}")
+
+        try:
+            client_id, app_id, project_id = _get_env_ids(project)
+            mc = MongoClient(getattr(settings, "MONGO_URI", "mongodb://mongo:27017/trinity_db"))
+            coll = mc["trinity_db"]["atom_list_configuration"]
+            coll.update_many(
+                {"client_id": client_id, "app_id": app_id, "project_id": project_id},
+                {"$set": {"isDeleted": True}},
+            )
+        except Exception as exc:  # pragma: no cover - logging only
+            logger.error("Failed to mark atom configuration deleted: %s", exc)
+
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
     def create(self, request, *args, **kwargs):
         data = request.data.copy()

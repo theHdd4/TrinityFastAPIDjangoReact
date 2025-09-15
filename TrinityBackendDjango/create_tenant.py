@@ -1,12 +1,25 @@
 #!/usr/bin/env python3
+"""Tenant creation utility.
+
+Ensures Django settings are loaded before any framework modules that expect
+configured settings are imported. This avoids ``ImproperlyConfigured`` errors
+when the script is executed directly.
+"""
+
 import os
-import uuid
+
+# Django modules such as ``django_tenants`` access ``settings`` at import time.
+# Configure Django **before** importing those modules.
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
+
 import django
+
+django.setup()
+
+import uuid
 from django.core.management import call_command
 from django.db import transaction, connection
-
-os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
-django.setup()
+from django_tenants.utils import schema_context
 
 # Adjust this import path if your app label is different:
 from apps.tenants.models import Tenant, Domain
@@ -63,23 +76,22 @@ def main():
     email_domain = "quantmatrix.ai"
     role_users = [
         (admin_username, "neo_the_only_one", "admin", "", ""),
-        ("editor_user", "editor", "editor", "", ""),
-        ("viewer_user", "viewer", "viewer", "", ""),
-        (f"gautami.sharma@{email_domain}", "QM250111", "editor", "Gautami", "Sharma"),
-        (f"abhishek.sahu@{email_domain}", "QM240110", "editor", "Abhishek", "Sahu"),
-        (f"aakash.verma@{email_domain}", "QM240109", "editor", "Aakash", "Verma"),
+        ("editor_user", "editor", "admin", "", ""),
+        ("viewer_user", "viewer", "admin", "", ""),
+        (f"gautami.sharma@{email_domain}", "QM250111", "admin", "Gautami", "Sharma"),
+        (f"abhishek.sahu@{email_domain}", "QM240110", "admin", "Abhishek", "Sahu"),
+        (f"aakash.verma@{email_domain}", "QM240109", "admin", "Aakash", "Verma"),
         (f"sushant.upadhyay@{email_domain}", "QM240108", "admin", "Sushant", "Upadhyay"),
-        (f"mahek.kala@{email_domain}", "QM250107", "editor", "Mahek", "Kala"),
-        (f"abhishek.tiwari@{email_domain}", "QM240106", "editor", "Abhishek", "Tiwari"),
-        (f"sandesh.panale@{email_domain}", "QM240105", "viewer", "Sandesh", "Panale"),
-        (f"rutuja.wagh@{email_domain}", "QM240104", "viewer", "Rutuja", "Wagh"),
-        (f"saahil.kejriwal@{email_domain}", "QM240103", "viewer", "Saahil", "Kejriwal"),
+        (f"mahek.kala@{email_domain}", "QM250107", "admin", "Mahek", "Kala"),
+        (f"abhishek.tiwari@{email_domain}", "QM240106", "admin", "Abhishek", "Tiwari"),
+        (f"sandesh.panale@{email_domain}", "QM240105", "admin", "Sandesh", "Panale"),
+        (f"rutuja.wagh@{email_domain}", "QM240104", "admin", "Rutuja", "Wagh"),
+        (f"saahil.kejriwal@{email_domain}", "QM240103", "admin", "Saahil", "Kejriwal"),
         (f"harshadip.das@{email_domain}", "QM240102", "admin", "Harshadip", "Das"),
         (f"venu.gorti@{email_domain}", "QM240101", "admin", "Venu", "Gorti"),
     ]
 
     for username, password, role, first, last in role_users:
-        is_staff = role == "admin"
         if not User.objects.filter(username=username).exists():
             User.objects.create_user(
                 username=username,
@@ -87,14 +99,18 @@ def main():
                 first_name=first,
                 last_name=last,
                 email=username if "@" in username else "",
-                is_staff=is_staff,
+                is_staff=True,
+                is_superuser=True,
             )
             print(f"→ 1c) Created user '{username}' with password '{password}'")
         else:
             user = User.objects.get(username=username)
             update_needed = False
-            if is_staff and not user.is_staff:
+            if not user.is_staff:
                 user.is_staff = True
+                update_needed = True
+            if not user.is_superuser:
+                user.is_superuser = True
                 update_needed = True
             if first and user.first_name != first:
                 user.first_name = first
@@ -207,6 +223,12 @@ def main():
     call_command(
         "migrate_schemas", "registry", "--schema", tenant_schema, interactive=False, verbosity=1
     )
+    with schema_context(tenant_schema):
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS registry_arrowdataset_project_csv_idx "
+                "ON registry_arrowdataset (project_id, original_csv)"
+            )
     print("   ✅ Registry migrations complete.\n")
 
     # Load atom catalogue from FastAPI features
@@ -218,7 +240,6 @@ def main():
 
     # Seed default App templates if none exist
     from apps.registry.models import App
-    from django_tenants.utils import schema_context
 
     default_apps = [
         ("Marketing Mix Modeling", "marketing-mix", "Preset: Pre-process + Build"),

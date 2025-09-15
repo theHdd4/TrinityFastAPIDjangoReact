@@ -51,6 +51,7 @@ class Project(models.Model):
     )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    is_deleted = models.BooleanField(default=False)
     history = HistoricalRecords()
 
     class Meta:
@@ -151,12 +152,13 @@ class ArrowDataset(models.Model):
     file_key = models.CharField(max_length=150)
     arrow_object = models.CharField(max_length=200)
     flight_path = models.CharField(max_length=200)
-    original_csv = models.CharField(max_length=200, unique=True)
+    original_csv = models.CharField(max_length=200)
     descriptor = models.CharField(max_length=200, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         ordering = ["-created_at"]
+        unique_together = ("project", "original_csv")
 
     def __str__(self):
         return f"{self.atom_id}:{self.file_key}"

@@ -107,6 +107,7 @@ def save_atom_list_configuration(
                             "card_id": card.get("id"),
                             "atom_id": atom.get("id"),
                         },
+                        "isDeleted": False,
                     }
                 )
         if docs:
@@ -135,6 +136,7 @@ def load_atom_list_configuration(
                 "app_id": app_id,
                 "project_id": project_id,
                 "mode": mode,
+                "isDeleted": {"$ne": True},
             }
         ).sort([("canvas_position", 1), ("atom_positions", 1)])
 

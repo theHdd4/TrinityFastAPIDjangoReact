@@ -73,7 +73,7 @@ async def record_arrow_dataset(
             INSERT INTO "{schema}".registry_arrowdataset (
                 project_id, atom_id, file_key, arrow_object, flight_path, original_csv, descriptor, created_at
             ) VALUES ($1,$2,$3,$4,$5,$6,$7,NOW())
-            ON CONFLICT (original_csv) DO UPDATE
+            ON CONFLICT (project_id, original_csv) DO UPDATE
               SET file_key    = EXCLUDED.file_key,
                   arrow_object = EXCLUDED.arrow_object,
                   flight_path  = EXCLUDED.flight_path,
@@ -156,11 +156,10 @@ async def delete_arrow_dataset(arrow_object: str) -> None:
 
 
 async def arrow_dataset_exists(project_id: int, atom_id: str, filename: str) -> bool:
-    """Return True if a dataset entry already exists and is present in MinIO and Flight."""
+    """Return True if a dataset entry already exists for the project and is present in MinIO and Flight."""
     logger.debug(
-        "Checking dataset existence: project=%s atom=%s file=%s",
+        "Checking dataset existence: project=%s file=%s",
         project_id,
-        atom_id,
         filename,
     )
     exists = False
@@ -182,9 +181,8 @@ async def arrow_dataset_exists(project_id: int, atom_id: str, filename: str) -> 
                 schema = await _schema_from_project(project_id)
                 if schema:
                     row = await conn.fetchrow(
-                        f"SELECT arrow_object, flight_path FROM \"{schema}\".registry_arrowdataset WHERE project_id=$1 AND atom_id=$2 AND original_csv=$3",
+                        f"SELECT arrow_object, flight_path FROM \"{schema}\".registry_arrowdataset WHERE project_id=$1 AND original_csv=$2",
                         project_id,
-                        atom_id,
                         filename,
                     )
                 else:

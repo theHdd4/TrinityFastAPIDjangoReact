@@ -10,7 +10,6 @@ import openpyxl
 import pyarrow as pa
 from app.core.utils import get_env_vars
 from pathlib import Path
-import re
 import fastexcel
 
 # Add this line with your other imports
@@ -62,6 +61,11 @@ from app.features.data_upload_validate.app.database import (
 )
 
 from app.redis_cache import cache_master_config
+
+import re
+
+# Allowed characters for file keys (alphanumeric, underscores, hyphens, periods)
+FILE_KEY_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
 
 
 
@@ -442,6 +446,10 @@ async def upload_file(
         os.environ["PROJECT_NAME"] = project_name
     prefix = await get_object_prefix()
     ensure_minio_bucket()
+    # Upload initial file to a temporary subfolder so it isn't exposed as a
+    # saved dataframe until explicitly persisted via the save_dataframes
+    # endpoint.
+    tmp_prefix = prefix + "tmp/"
     content = await file.read()
     try:
         if file.filename.lower().endswith(".csv"):
@@ -456,10 +464,47 @@ async def upload_file(
     arrow_buf = io.BytesIO()
     df_pl.write_ipc(arrow_buf)
     arrow_name = Path(file.filename).stem + ".arrow"
-    result = upload_to_minio(arrow_buf.getvalue(), arrow_name, prefix)
+    # Store under temporary prefix to hide from list_saved_dataframes
+    result = upload_to_minio(arrow_buf.getvalue(), arrow_name, tmp_prefix)
     if result.get("status") != "success":
         raise HTTPException(status_code=500, detail=result.get("error_message", "Upload failed"))
     return {"file_path": result["object_name"]}
+
+
+@router.delete("/temp-uploads")
+async def clear_temp_uploads(
+    client_name: str = "",
+    app_name: str = "",
+    project_name: str = "",
+):
+    """Remove any temporary uploads for the given environment."""
+    prefix, env, env_source = await get_object_prefix(
+        client_name=client_name,
+        app_name=app_name,
+        project_name=project_name,
+        include_env=True,
+    )
+    tmp_prefix = prefix + "tmp/"
+    try:
+        objects = list(
+            minio_client.list_objects(MINIO_BUCKET, prefix=tmp_prefix, recursive=True)
+        )
+        for obj in objects:
+            minio_client.remove_object(MINIO_BUCKET, obj.object_name)
+        return {
+            "deleted": len(objects),
+            "prefix": tmp_prefix,
+            "environment": env,
+            "env_source": env_source,
+        }
+    except S3Error as e:
+        return {
+            "deleted": 0,
+            "error": str(e),
+            "prefix": tmp_prefix,
+            "environment": env,
+            "env_source": env_source,
+        }
 
 
 # POST: CREATE_NEW - Create validator atom with column preprocessing
@@ -1484,8 +1529,14 @@ async def validate(
         keys = json.loads(file_keys)
     except json.JSONDecodeError:
         raise HTTPException(status_code=400, detail="Invalid JSON format for file_keys")
+    if not isinstance(keys, list):
+        raise HTTPException(status_code=400, detail="file_keys must be a JSON array")
 
-    paths = json.loads(file_paths) if file_paths else []
+    try:
+        paths = json.loads(file_paths) if file_paths else []
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid JSON format for file_paths")
+
     files_list = files or []
 
     if files_list and len(files_list) != len(keys):
@@ -1494,6 +1545,12 @@ async def validate(
         raise HTTPException(status_code=400, detail="Number of file paths must match number of keys")
     if not files_list and not paths:
         raise HTTPException(status_code=400, detail="No files or file paths provided")
+
+    if len(set(keys)) != len(keys):
+        raise HTTPException(status_code=400, detail="Duplicate file keys are not allowed")
+    for k in keys:
+        if not isinstance(k, str) or not k.strip() or not FILE_KEY_RE.match(k):
+            raise HTTPException(status_code=400, detail=f"Malformed file key: {k}")
 
     if files_list and len(files_list) > 3:
         raise HTTPException(status_code=400, detail="Maximum 3 files allowed")
@@ -2772,6 +2829,15 @@ async def save_dataframes(
         logger.error("Duplicate file keys: %s", keys)
         raise HTTPException(status_code=400, detail="Duplicate file keys are not allowed")
 
+    # Validate file key format
+    for k in keys:
+        if not FILE_KEY_RE.match(k):
+            logger.error("Malformed file key: %s", k)
+            raise HTTPException(
+                status_code=400,
+                detail=f"Malformed file key: {k}",
+            )
+
     uploads = []
     flights = []
     if client_id:
@@ -2790,20 +2856,21 @@ async def save_dataframes(
     numeric_pid = _parse_numeric_id(project_id or os.getenv("PROJECT_ID", "0"))
     print(f"📤 saving to prefix {prefix}")
 
+    tmp_prefix = prefix + "tmp/"
     if files_list:
         iter_sources = [
-            (k, f.filename, f.file) for k, f in zip(keys, files_list)
+            (k, f.filename, f.file, None) for k, f in zip(keys, files_list)
         ]
     else:
         iter_sources = []
         for k, p in zip(keys, paths):
             data = read_minio_object(p)
-            iter_sources.append((k, Path(p).name, io.BytesIO(data)))
+            iter_sources.append((k, Path(p).name, io.BytesIO(data), p))
 
     MAX_FILE_SIZE = 512 * 1024 * 1024  # 512 MB
     STATUS_TTL = 3600
 
-    for key, filename, fileobj in iter_sources:
+    for key, filename, fileobj, orig_path in iter_sources:
         logger.info("Processing file %s with key %s", filename, key)
         progress_key = f"upload_status:{validator_atom_id}:{key}"
         redis_client.set(progress_key, "uploading", ex=STATUS_TTL)
@@ -2909,6 +2976,12 @@ async def save_dataframes(
         )
 
         redis_client.set(progress_key, "saved", ex=STATUS_TTL)
+        # Remove temporary upload if it exists
+        if orig_path and orig_path.startswith(tmp_prefix):
+            try:
+                minio_client.remove_object(MINIO_BUCKET, orig_path)
+            except Exception:
+                logger.warning("Failed to remove temp object %s", orig_path)
 
         uploads.append({
             "file_key": key,
@@ -2986,6 +3059,7 @@ async def list_saved_dataframes(
                 MINIO_BUCKET, prefix=prefix, recursive=True
             )
         )
+        tmp_prefix = prefix + "tmp/"
         files = [
             {
                 "object_name": obj.object_name,
@@ -2994,6 +3068,7 @@ async def list_saved_dataframes(
             }
             for obj in sorted(objects, key=lambda o: o.object_name)
             if obj.object_name.endswith(".arrow")
+            and not obj.object_name.startswith(tmp_prefix)
         ]
         return {
             "bucket": MINIO_BUCKET,
