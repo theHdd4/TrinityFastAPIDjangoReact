@@ -1,5 +1,10 @@
 import React from 'react';
-import { useLaboratoryStore, DEFAULT_FEATURE_OVERVIEW_SETTINGS, FeatureOverviewSettings as SettingsType } from '@/components/LaboratoryMode/store/laboratoryStore';
+import { Loader2 } from 'lucide-react';
+import {
+  useLaboratoryStore,
+  DEFAULT_FEATURE_OVERVIEW_SETTINGS,
+  FeatureOverviewSettings as SettingsType,
+} from '@/components/LaboratoryMode/store/laboratoryStore';
 import FeatureOverviewCanvas from './components/FeatureOverviewCanvas';
 
 interface Props {
@@ -13,11 +18,17 @@ const FeatureOverviewAtom: React.FC<Props> = ({ atomId }) => {
 
   return (
     <div className="w-full h-full bg-white rounded-lg overflow-hidden flex flex-col">
-      <FeatureOverviewCanvas
-        settings={settings}
-        onUpdateSettings={s => updateSettings(atomId, s)}
-        atomId={atomId}
-      />
+      {settings.isLoading ? (
+        <div className="flex-grow flex items-center justify-center">
+          <Loader2 className="w-6 h-6 animate-spin text-gray-500" />
+        </div>
+      ) : (
+        <FeatureOverviewCanvas
+          settings={settings}
+          onUpdateSettings={s => updateSettings(atomId, s)}
+          atomId={atomId}
+        />
+      )}
     </div>
   );
 };
