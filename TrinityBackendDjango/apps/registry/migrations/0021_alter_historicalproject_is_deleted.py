@@ -3,7 +3,7 @@ from django.db import migrations, models
 
 class Migration(migrations.Migration):
     dependencies = [
-        ("registry", "0019_project_is_deleted"),
+        ("registry", "0020_merge_20250912_0743"),
     ]
 
     operations = [
