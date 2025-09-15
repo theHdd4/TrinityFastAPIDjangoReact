@@ -18,7 +18,7 @@ import {
 import Table from '@/templates/tables/table';
 import { FEATURE_OVERVIEW_API, GROUPBY_API } from '@/lib/api';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
-import columnClassifier from '../index';
+import clustering from '../index';
 
 interface ColumnInfo {
   column: string;
@@ -27,38 +27,25 @@ interface ColumnInfo {
   unique_values: string[];
 }
 
-interface ColumnInfoWithCategory extends ColumnInfo {
-  category: 'unclassified' | 'identifiers' | 'measures';
-}
-
-interface ColClassifierColumnViewProps {
+interface ClusteringCardinalityViewProps {
   objectName: string;
-  columns: {
-    unclassified: string[];
-    identifiers: string[];
-    measures: string[];
-  };
-  filterUnique: boolean;
-  onFilterToggle: (val: boolean) => void;
   atomId?: string;
 }
 
-const ColClassifierColumnView: React.FC<ColClassifierColumnViewProps> = ({
+const ClusteringCardinalityView: React.FC<ClusteringCardinalityViewProps> = ({
   objectName,
-  columns,
-  filterUnique,
-  onFilterToggle,
   atomId,
 }) => {
   const [summary, setSummary] = useState<ColumnInfo[]>([]);
   const [sortColumn, setSortColumn] = useState<string>('unique_count');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
   const [columnFilters, setColumnFilters] = useState<Record<string, string[]>>({});
+  const [filterUnique, setFilterUnique] = useState(false);
 
   // Get atom settings to access the input file name
   const atom = useLaboratoryStore(state => atomId ? state.getAtom(atomId) : undefined);
   const settings = (atom?.settings as any) || {};
-  const inputFileName = settings.validatorId || '';
+  const inputFileName = settings.clusteringData?.selectedDataFile || '';
 
   // Handle opening the input file in a new tab
   const handleViewDataClick = () => {
@@ -92,29 +79,64 @@ const ColClassifierColumnView: React.FC<ColClassifierColumnViewProps> = ({
     fetchSummary();
   }, [objectName]);
 
-  const allColumns = useMemo(() => {
-    const mapWithCategory = (
-      names: string[],
-      category: ColumnInfoWithCategory['category']
-    ) =>
-      names
-        .map(name => {
-          const info = summary.find(s => s.column === name);
-          return info ? { ...info, category } : null;
-        })
-        .filter(Boolean) as ColumnInfoWithCategory[];
+  const handleSort = (column: string, direction?: 'asc' | 'desc') => {
+    if (sortColumn === column) {
+      if (sortDirection === 'asc') {
+        setSortDirection('desc');
+      } else if (sortDirection === 'desc') {
+        setSortColumn('');
+        setSortDirection('asc');
+      }
+    } else {
+      setSortColumn(column);
+      setSortDirection(direction || 'asc');
+    }
+  };
 
-    return [
-      ...mapWithCategory(columns.unclassified, 'unclassified'),
-      ...mapWithCategory(columns.identifiers, 'identifiers'),
-      ...mapWithCategory(columns.measures, 'measures'),
-    ];
-  }, [columns, summary]);
+  const handleColumnFilter = (column: string, values: string[]) => {
+    setColumnFilters(prev => ({
+      ...prev,
+      [column]: values
+    }));
+  };
+
+  const clearColumnFilter = (column: string) => {
+    setColumnFilters(prev => {
+      const newFilters = { ...prev };
+      delete newFilters[column];
+      return newFilters;
+    });
+  };
+
+  const getUniqueColumnValues = (column: string): string[] => {
+    if (!Array.isArray(summary)) return [];
+    
+    // Get the currently filtered data (before applying the current column's filter)
+    let filteredData = filterUnique
+      ? summary.filter(c => c.unique_count > 1)
+      : summary;
+
+    // Apply all other column filters except the current one
+    Object.entries(columnFilters).forEach(([col, filterValues]) => {
+      if (col !== column && filterValues && filterValues.length > 0) {
+        filteredData = filteredData.filter(row => {
+          const cellValue = String(row[col as keyof ColumnInfo] || '');
+          return filterValues.includes(cellValue);
+        });
+      }
+    });
+
+    // Get unique values from the filtered data
+    const values = filteredData.map(row => String(row[column as keyof ColumnInfo] || '')).filter(Boolean);
+    return Array.from(new Set(values)).sort();
+  };
 
   const displayed = useMemo(() => {
+    if (!Array.isArray(summary)) return [];
+    
     let filtered = filterUnique
-      ? allColumns.filter(c => c.unique_count > 0)
-      : allColumns;
+      ? summary.filter(c => c.unique_count > 1)
+      : summary;
 
     // Apply column filters
     Object.entries(columnFilters).forEach(([column, filterValues]) => {
@@ -143,59 +165,7 @@ const ColClassifierColumnView: React.FC<ColClassifierColumnViewProps> = ({
     }
 
     return filtered;
-  }, [allColumns, filterUnique, columnFilters, sortColumn, sortDirection]);
-
-  const getUniqueColumnValues = (column: string): string[] => {
-    if (!allColumns.length) return [];
-    
-    // Get the currently filtered data (before applying the current column's filter)
-    let filteredData = filterUnique
-      ? allColumns.filter(c => c.unique_count > 0)
-      : allColumns;
-
-    // Apply all other column filters except the current one
-    Object.entries(columnFilters).forEach(([col, filterValues]) => {
-      if (col !== column && filterValues && filterValues.length > 0) {
-        filteredData = filteredData.filter(row => {
-          const cellValue = String(row[col as keyof ColumnInfo] || '');
-          return filterValues.includes(cellValue);
-        });
-      }
-    });
-
-    // Get unique values from the filtered data
-    const values = filteredData.map(row => String(row[column as keyof ColumnInfo] || '')).filter(Boolean);
-    return Array.from(new Set(values)).sort();
-  };
-
-  const handleSort = (column: string, direction?: 'asc' | 'desc') => {
-    if (sortColumn === column) {
-      if (sortDirection === 'asc') {
-        setSortDirection('desc');
-      } else if (sortDirection === 'desc') {
-        setSortColumn('');
-        setSortDirection('asc');
-      }
-    } else {
-      setSortColumn(column);
-      setSortDirection(direction || 'asc');
-    }
-  };
-
-  const handleColumnFilter = (column: string, values: string[]) => {
-    setColumnFilters(prev => ({
-      ...prev,
-      [column]: values
-    }));
-  };
-
-  const clearColumnFilter = (column: string) => {
-    setColumnFilters(prev => {
-      const cpy = { ...prev };
-      delete cpy[column];
-      return cpy;
-    });
-  };
+  }, [summary, filterUnique, columnFilters, sortColumn, sortDirection]);
 
   const FilterMenu = ({ column }: { column: string }) => {
     const uniqueValues = getUniqueColumnValues(column);
@@ -376,7 +346,7 @@ const ColClassifierColumnView: React.FC<ColClassifierColumnViewProps> = ({
           colClasses={["w-[30%]", "w-[20%]", "w-[15%]", "w-[35%]"]}
           bodyClassName="max-h-[484px] overflow-y-auto"
           defaultMinimized={true}
-          borderColor={`border-${columnClassifier.color.replace('bg-', '')}`}
+          borderColor={`border-${clustering.color.replace('bg-', '')}`}
           customHeader={{
             title: "Cardinality View",
             subtitle: "Click Here to View Data",
@@ -425,5 +395,4 @@ const ColClassifierColumnView: React.FC<ColClassifierColumnViewProps> = ({
   );
 };
 
-export default ColClassifierColumnView;
-
+export default ClusteringCardinalityView;

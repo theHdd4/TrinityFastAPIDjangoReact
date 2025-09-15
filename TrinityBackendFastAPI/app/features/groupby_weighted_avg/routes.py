@@ -2,7 +2,6 @@ from fastapi import APIRouter, Form, HTTPException, Query, Response, Body
 from typing import Dict, List
 from .deps import get_minio_df, get_validator_atoms_collection, fetch_dimensions_dict, get_column_classifications_collection, fetch_measures_list, fetch_identifiers_and_measures, minio_client, MINIO_BUCKET, redis_client
 from app.features.data_upload_validate.app.routes import get_object_prefix
-from .mongodb_saver import save_groupby_result
 import io
 import json
 import pandas as pd
@@ -341,7 +340,6 @@ async def perform_groupby_route(
         print(f"  Aggregations: {aggregations}")
         
         grouped = groupby_base_func(df, identifiers, aggregations)
-        await save_groupby_result(validator_atom_id, file_key, grouped)
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         new_filename = f"{validator_atom_id}_{file_key}_grouped.csv"
         csv_bytes = grouped.to_csv(index=False).encode("utf-8")

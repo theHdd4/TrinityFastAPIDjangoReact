@@ -90,7 +90,9 @@ const BuildModelFeatureBasedAtom: React.FC<Props> = ({ atomId }) => {
     // Ensure data structure is complete
     const completeData = {
       ...defaultData,
-      ...settings.data
+      ...settings.data,
+      modelResult: settings.modelResult,
+      modelError: settings.modelError
     };
 
     

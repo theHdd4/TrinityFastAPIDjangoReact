@@ -16,6 +16,7 @@ from .deps import (
     save_concat_result_to_minio, get_concat_results_collection, save_concat_metadata_to_mongo,
     OBJECT_PREFIX, MINIO_BUCKET, redis_client
 )
+from ..data_upload_validate.app.routes import get_object_prefix
 
 router = APIRouter()
 
@@ -82,8 +83,26 @@ async def cardinality(
 ):
     """Return cardinality data for a file (similar to merge API)."""
     try:
-        df = load_dataframe(file_key)
-        df.columns = df.columns.str.lower()
+        # Get the current object prefix
+        prefix = await get_object_prefix()
+        
+        # Construct the full object path
+        full_object_path = f"{prefix}{object_names}" if not object_names.startswith(prefix) else object_names
+        
+        # print(f"🔍 Concat Cardinality file path resolution:")
+        # print(f"  Original object_names: {object_names}")
+        # print(f"  Current prefix: {prefix}")
+        # print(f"  Full object path: {full_object_path}")
+        # print(f"  Source type: {source_type}")
+        
+        # Load the dataframe using the correct path
+        from .deps import get_minio_df
+        df = get_minio_df(bucket=bucket_name, file_key=full_object_path)
+        df.columns = df.columns.str.strip().str.lower()
+        
+        # print(f"✅ Successfully loaded {source_type} dataframe for cardinality with shape: {df.shape}")
+        
+        # Generate cardinality data
         cardinality = []
         for col in df.columns:
             column_series = df[col].dropna()
@@ -93,7 +112,7 @@ async def cardinality(
                 vals = column_series.astype(str).unique()
 
             def _serialize(v):
-                if isinstance(v, (pd.Timestamp, pd.Timestamp)):
+                if isinstance(v, (pd.Timestamp, datetime.datetime, datetime.date)):
                     return pd.to_datetime(v).isoformat()
                 return str(v)
 
@@ -114,7 +133,7 @@ async def cardinality(
     except S3Error as e:
         error_code = getattr(e, "code", "")
         if error_code in {"NoSuchKey", "NoSuchBucket"}:
-            redis_client.delete(file_key)
+            redis_client.delete(object_names)
             raise HTTPException(status_code=404, detail="File not found")
         raise HTTPException(status_code=500, detail=str(e))
     except Exception as e:
@@ -249,15 +268,30 @@ async def perform_concat(
         if not file2.endswith('.arrow'):
             file2 += '.arrow'
         
-        # Read first file from storage
+        # Get the current object prefix for proper path resolution
+        prefix = await get_object_prefix()
+        
+        # Construct full object paths
+        full_path1 = f"{prefix}{file1}" if not file1.startswith(prefix) else file1
+        full_path2 = f"{prefix}{file2}" if not file2.startswith(prefix) else file2
+        
+        print(f"🔍 CONCAT PERFORM - Path resolution:")
+        print(f"   Original file1: {file1}")
+        print(f"   Original file2: {file2}")
+        print(f"   Current prefix: {prefix}")
+        print(f"   Full path1: {full_path1}")
+        print(f"   Full path2: {full_path2}")
+        
+        # Read first file from storage using direct MinIO access
         try:
-            df1 = load_dataframe(file1)
+            from .deps import get_minio_df
+            df1 = get_minio_df(bucket='trinity', file_key=full_path1)
         except Exception as e:
             raise HTTPException(status_code=404, detail=f"File1 not found: {file1}")
         
-        # Read second file from storage
+        # Read second file from storage using direct MinIO access
         try:
-            df2 = load_dataframe(file2)
+            df2 = get_minio_df(bucket='trinity', file_key=full_path2)
         except Exception as e:
             raise HTTPException(status_code=404, detail=f"File2 not found: {file2}")
         
@@ -357,28 +391,34 @@ async def save_concat_dataframe(
             filename = f"{concat_id}_concat.arrow"
         if not filename.endswith('.arrow'):
             filename += '.arrow'
-        # Prepend OBJECT_PREFIX if not already present
-        if not filename.startswith(OBJECT_PREFIX):
-            filename = OBJECT_PREFIX + filename
+            
+        # Get the standard prefix using get_object_prefix
+        prefix = await get_object_prefix()
+        # Create full path with standard structure
+        full_path = f"{prefix}concatenated-data/{filename}"
+        
         # Convert to Arrow
         table = pa.Table.from_pandas(df)
         arrow_buffer = pa.BufferOutputStream()
         with ipc.new_file(arrow_buffer, table.schema) as writer:
             writer.write_table(table)
         arrow_bytes = arrow_buffer.getvalue().to_pybytes()
+        
         # Save to MinIO
         minio_client.put_object(
             MINIO_BUCKET,
-            filename,
+            full_path,
             data=io.BytesIO(arrow_bytes),
             length=len(arrow_bytes),
             content_type="application/octet-stream",
         )
-        # Optionally, cache in Redis
-        redis_client.setex(filename, 3600, arrow_bytes)
+        
+        # Cache in Redis
+        redis_client.setex(full_path, 3600, arrow_bytes)
+        
         # Return file info
         return {
-            "result_file": filename,
+            "result_file": full_path,
             "shape": df.shape,
             "columns": list(df.columns),
             "message": "DataFrame saved successfully"

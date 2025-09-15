@@ -415,6 +415,8 @@ export interface SelectModelsFeatureSettings {
   isRunning: boolean;
   dataType: string;
   aggregationLevel: string;
+  combinationStatus?: any;
+  combinationStatusMinimized?: boolean;
 }
 
 export const DEFAULT_CHART_MAKER_SETTINGS: ChartMakerSettings = {
@@ -971,6 +973,117 @@ export const DEFAULT_SELECT_MODELS_FEATURE_SETTINGS: SelectModelsFeatureSettings
   dataType: '',
   aggregationLevel: ''
 };
+
+export interface ScopeSelectorPreviewRow {
+  scopeId: string;
+  values: Record<string, string>;
+  count: number;
+  pctPass?: boolean;
+}
+
+export interface ScopeSelectorSettings {
+  scopes: Array<{
+    id: string;
+    name: string;
+    identifiers: { [key: string]: string };
+    timeframe: {
+      from: string;
+      to: string;
+    };
+  }>;
+  availableIdentifiers: string[];
+  selectedIdentifiers: string[];
+  measures?: string[];
+  allColumns?: Array<{
+    column_name: string;
+    dtype: string;
+  }>;
+  dataSource?: string;
+  previewRows?: ScopeSelectorPreviewRow[];
+}
+
+export const DEFAULT_SCOPE_SELECTOR_SETTINGS: ScopeSelectorSettings = {
+  scopes: [],
+  availableIdentifiers: [],
+  selectedIdentifiers: [],
+  measures: [],
+  allColumns: [],
+  dataSource: '',
+  previewRows: []
+};
+
+export interface BuildModelFeatureBasedSettings {
+  data: {
+    uploadedFile: File | null;
+    selectedDataset: string;
+    selectedScope: string;
+    selectedCombinations: string[];
+    selectedModels: string[];
+    modelConfigs: Array<{
+      id: string;
+      name: string;
+      parameters: Record<string, any>;
+    }>;
+    yVariable: string;
+    xVariables: (string | string[])[];
+    transformations: Array<{
+      id: string;
+      component1: string;
+      component2: string;
+      operation: string;
+    }>;
+    availableFiles?: string[];
+    availableColumns: string[];
+    scopes: string[];
+    outputFileName: string;
+    kFolds?: number;
+    testSize?: number;
+  };
+  settings: {
+    dataType: string;
+    aggregationLevel: string;
+    dateFrom: string;
+    dateTo: string;
+  };
+  modelResult?: any;
+  modelError?: string | null;
+}
+
+export const DEFAULT_BUILD_MODEL_FEATURE_BASED_SETTINGS: BuildModelFeatureBasedSettings = {
+  data: {
+    uploadedFile: null,
+    selectedDataset: '',
+    selectedScope: '',
+    selectedCombinations: [],
+    selectedModels: ['Linear Regression', 'Ridge Regression', 'Lasso Regression', 'ElasticNet Regression', 'Bayesian Ridge Regression', 'Custom Constrained Ridge', 'Constrained Linear Regression'],
+    modelConfigs: [
+      { id: 'Linear Regression', name: 'Linear Regression', parameters: {} },
+      { id: 'Ridge Regression', name: 'Ridge Regression', parameters: { 'Alpha': '1.0' } },
+      { id: 'Lasso Regression', name: 'Lasso Regression', parameters: { 'Alpha': '1.0' } },
+      { id: 'ElasticNet Regression', name: 'ElasticNet Regression', parameters: { 'Alpha': '1.0', 'L1 Ratio': '0.5' } },
+      { id: 'Bayesian Ridge Regression', name: 'Bayesian Ridge Regression', parameters: {} },
+      { id: 'Custom Constrained Ridge', name: 'Custom Constrained Ridge', parameters: { 'L2 Penalty': '0.1', 'Learning Rate': '0.001', 'Iterations': '10000', 'Adam': 'false' } },
+      { id: 'Constrained Linear Regression', name: 'Constrained Linear Regression', parameters: { 'Learning Rate': '0.001', 'Iterations': '10000', 'Adam': 'false' } }
+    ],
+    yVariable: '',
+    xVariables: [],
+    transformations: [],
+    availableFiles: [],
+    availableColumns: ['Feature 1', 'Feature 2', 'Feature 3', 'Feature 4', 'Feature 5', 'Feature 6', 'Feature 7', 'Feature 8'],
+    scopes: ['Scope 1', 'Scope 2', 'Scope 3', 'Scope 4', 'Scope 5'],
+    outputFileName: '',
+    kFolds: 5,
+    testSize: 0.2
+  },
+  settings: {
+    dataType: '',
+    aggregationLevel: '',
+    dateFrom: '',
+    dateTo: ''
+  },
+  modelResult: null,
+  modelError: null
+};
 export interface DroppedAtom {
   id: string;
   atomId: string;
@@ -1012,9 +1125,9 @@ export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
   },
 
   updateAtomSettings: (atomId: string, settings: any) => {
-    console.log('=== Store: updateAtomSettings called ===');
-    console.log('Store: atomId:', atomId);
-    console.log('Store: settings to update:', settings);
+    // console.log('=== Store: updateAtomSettings called ===');
+    // console.log('Store: atomId:', atomId);
+    // console.log('Store: settings to update:', settings);
     
     set((state) => {
       const updatedCards = state.cards.map((card) => ({

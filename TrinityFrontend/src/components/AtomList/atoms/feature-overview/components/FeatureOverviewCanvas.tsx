@@ -20,7 +20,11 @@ import {
   ContextMenuSubTrigger,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
-import D3LineChart from "./D3LineChart";
+// Import chart template components
+import RechartsChartRenderer from "@/templates/charts/RechartsChartRenderer";
+import "@/templates/charts/chart.css";
+// Comment out current D3LineChart implementation
+// import D3LineChart from "./D3LineChart";
 import { useAuth } from "@/contexts/AuthContext";
 import { logSessionState, addNavigationItem } from "@/lib/session";
 import { useLaboratoryStore } from "@/components/LaboratoryMode/store/laboratoryStore";
@@ -81,6 +85,10 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
   const [sortColumn, setSortColumn] = useState<string>('unique_count');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
   const [columnFilters, setColumnFilters] = useState<Record<string, string[]>>({});
+
+  // Chart type and theme state for chart type changes
+  const [chartType, setChartType] = useState<string>('line_chart');
+  const [chartTheme, setChartTheme] = useState<string>('default');
 
   // Get atom settings to access the input file name
   const atom = useLaboratoryStore(state => atomId ? state.getAtom(atomId) : undefined);
@@ -222,18 +230,19 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
     return Array.from(new Set(values)).sort();
   };
 
-  const handleSort = (column: string, direction?: 'asc' | 'desc') => {
-    if (sortColumn === column) {
-      if (sortDirection === 'asc') {
-        setSortDirection('desc');
-      } else if (sortDirection === 'desc') {
-        setSortColumn('');
-        setSortDirection('asc');
-      }
-    } else {
-      setSortColumn(column);
-      setSortDirection(direction || 'asc');
-    }
+  const handleSort = (column: string, direction: 'asc' | 'desc') => {
+    setSortColumn(column);
+    setSortDirection(direction);
+  };
+
+  // Handle chart type change
+  const handleChartTypeChange = (newType: 'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart') => {
+    setChartType(newType);
+  };
+
+  // Handle chart theme change
+  const handleChartThemeChange = (newTheme: string) => {
+    setChartTheme(newTheme);
   };
 
   const handleColumnFilter = (column: string, values: string[]) => {
@@ -923,22 +932,58 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
                                       </button>
                                     </DialogTrigger>
                                     <DialogContent className="max-w-4xl">
-                                      <D3LineChart
+                                      {/* Current D3LineChart implementation - commented out */}
+                                      {/* <D3LineChart
                                         data={statDataMap[activeMetric]?.timeseries || []}
                                         width={900}
                                         height={500}
                                         xLabel={settings.xAxis || "Date"}
                                         yLabel={activeMetric || "Value"}
+                                      /> */}
+                                      {/* New RechartsChartRenderer implementation */}
+                                      <RechartsChartRenderer
+                                        type={chartType as 'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart'}
+                                        data={statDataMap[activeMetric]?.timeseries || []}
+                                        xField="date"
+                                        yField="value"
+                                        width={900}
+                                        height={500}
+                                        title=""
+                                        xAxisLabel={settings.xAxis || "Date"}
+                                        yAxisLabel={activeMetric || "Value"}
+                                        showDataLabels={false}
+                                        showAxisLabels={false}
+                                        theme={chartTheme}
+                                        onChartTypeChange={handleChartTypeChange}
+                                        onThemeChange={handleChartThemeChange}
                                       />
                                     </DialogContent>
                                   </Dialog>
                                 </div>
                                 <div className="p-6 flex-1 flex items-center justify-center">
-                                  <D3LineChart
+                                  {/* Current D3LineChart implementation - commented out */}
+                                  {/* <D3LineChart
                                     data={statDataMap[activeMetric]?.timeseries || []}
                                     height={360}
                                     xLabel={settings.xAxis || "Date"}
                                     yLabel={activeMetric || "Value"}
+                                  /> */}
+                                  {/* New RechartsChartRenderer implementation */}
+                                  <RechartsChartRenderer
+                                    type={chartType as 'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart'}
+                                    data={statDataMap[activeMetric]?.timeseries || []}
+                                    xField="date"
+                                    yField="value"
+                                    width={600}
+                                    height={360}
+                                    title=""
+                                    xAxisLabel={settings.xAxis || "Date"}
+                                    yAxisLabel={activeMetric || "Value"}
+                                    showDataLabels={false}
+                                    showAxisLabels={false}
+                                    theme={chartTheme}
+                                    onChartTypeChange={handleChartTypeChange}
+                                    onThemeChange={handleChartThemeChange}
                                   />
                                 </div>
                               </Card>

@@ -9,8 +9,8 @@ class Settings(BaseSettings):
     
     # Database Configuration
     # Follow common atoms: MONGO_URI is the standard var name
-    mongo_details: str = "mongodb://root:rootpass@mongo:27017/trinity_prod?authSource=admin"
-    database_name: str = "trinity_prod"
+    mongo_details: str = "mongodb://root:rootpass@mongo:27017/trinity_db?authSource=admin"
+    database_name: str = "trinity_db"
     collection_name: str = "build-model_featurebased_configs"
     
     # MinIO Configuration (align with MINIO_* envs used elsewhere)

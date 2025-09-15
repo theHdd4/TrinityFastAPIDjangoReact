@@ -9,9 +9,10 @@ import { Separator } from '@/components/ui/separator';
 import { Filter, Target, BarChart3, Settings, Play, X } from 'lucide-react';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { ClusteringSettings } from '@/components/LaboratoryMode/store/laboratoryStore';
-import ClusteringDataView from './ClusteringDataView';
 import { FEATURE_OVERVIEW_API, CLUSTERING_API } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
+import ClusteringCardinalityView from './ClusteringCardinalityView';
+import Table from '@/templates/tables/table';
 
 interface ClusteringCanvasProps {
   atomId: string;
@@ -210,8 +211,8 @@ const ClusteringCanvas: React.FC<ClusteringCanvasProps> = ({
       // Prepare identifier filters
       const identifierFiltersList = Object.entries(identifierFilters).map(([column, values]) => ({
         column,
-        values: values || []
-      })).filter(filter => filter.values.length > 0);
+        values: Array.isArray(values) ? values : []
+      })).filter(filter => Array.isArray(filter.values) && filter.values.length > 0);
 
       // Prepare clustering request
       const clusteringRequest = {
@@ -491,11 +492,13 @@ const ClusteringCanvas: React.FC<ClusteringCanvasProps> = ({
 
   return (
     <div className="space-y-6">
-      {/* Data Source Selection */}
-      <ClusteringDataView 
-        objectName={clusteringData.objectName || ''} 
-        apiBase={FEATURE_OVERVIEW_API}
-      />
+      {/* Cardinality View */}
+      {clusteringData.objectName && (
+        <ClusteringCardinalityView 
+          objectName={clusteringData.objectName} 
+          atomId={atomId} 
+        />
+      )}
 
              {/* Identifier Value Selectors - Only show identifiers with >1 unique value */}
               <Card className="p-2 border border-gray-200">
@@ -816,51 +819,38 @@ const ClusteringCanvas: React.FC<ClusteringCanvasProps> = ({
                 {/* Full Output Data with Cluster IDs */}
                 {clusterResults.output_data && Array.isArray(clusterResults.output_data) && clusterResults.output_data.length > 0 && (
                   <div className="mt-6">
-                    <div className="flex items-center justify-between mb-4">
-                      <h4 className="text-lg font-semibold text-black">Full Output Data with Cluster IDs</h4>
-                      <div className="flex items-center gap-4 text-sm text-gray-600">
-                        <span>Total Rows: {clusterResults.output_data.length.toLocaleString()}</span>
-                        {clusterResults.output_data.length > 1000 && (
-                          <span className="text-orange-600 bg-orange-50 px-2 py-1 rounded text-xs">
-                            ⚡ Scroll to view all data
-                          </span>
-        )}
-      </div>
-      </div>
-                    <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
-                      <div className="max-h-[300px] overflow-y-auto">
-                        <table className="min-w-full">
-                          <thead className="bg-gray-50 sticky top-0 z-10">
-                            <tr>
-                                                             {Object.keys(clusterResults.output_data[0]).map((column) => (
-                                 <th key={column} className="px-4 py-3 text-center text-sm font-medium text-black border-b bg-gray-50 shadow-sm">
-                                   {column === 'cluster_id' ? 'Cluster ID' : column}
-                     </th>
-                   ))}
-                </tr>
-              </thead>
-              <tbody>
-                            {clusterResults.output_data.map((row: any, index: number) => (
-                              <tr key={index} className="hover:bg-gray-50 border-b border-gray-100">
-                                {Object.entries(row).map(([column, value]) => (
-                                  <td key={column} className="px-4 py-2 text-sm text-gray-900 text-center">
-                                                                     {column === 'cluster_id' ? (
-                                   <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
-                                     {String(value)}
-                                   </span>
-                                 ) : (
-                                   <span className={typeof value === 'number' ? 'font-mono' : ''}>
-                                     {typeof value === 'number' ? (value as number).toFixed(3) : String(value)}
-                                   </span>
-                                 )}
-                      </td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-                    </div>
+                    <Table
+                      headers={Object.keys(clusterResults.output_data[0]).map((column) => 
+                        column === 'cluster_id' ? 'Cluster ID' : column
+                      )}
+                      bodyClassName="max-h-[300px] overflow-y-auto"
+                      borderColor="border-orange-500"
+                      customHeader={{
+                        title: "Full Output Data with Cluster IDs",
+                        subtitle: `Total Rows: ${clusterResults.output_data.length.toLocaleString()}`,
+                        subtitlePosition: "right"
+                      }}
+                    >
+                      {clusterResults.output_data.map((row: any, index: number) => (
+                        <React.Fragment key={index}>
+                          <tr className="table-row">
+                            {Object.entries(row).map(([column, value]) => (
+                              <td key={column} className="table-cell">
+                                {column === 'cluster_id' ? (
+                                  <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                                    {String(value)}
+                                  </span>
+                                ) : (
+                                  <span className={typeof value === 'number' ? 'font-mono' : ''}>
+                                    {typeof value === 'number' ? (value as number).toFixed(3) : String(value)}
+                                  </span>
+                                )}
+                              </td>
+                            ))}
+                          </tr>
+                        </React.Fragment>
+                      ))}
+                    </Table>
                   </div>
                 )}
 

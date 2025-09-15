@@ -772,10 +772,7 @@ async def chart_data_multidim(explore_atom_id: str):
     measures_config = operations.get("measures_config", {})
     x_axis = operations.get("x_axis", group_by[0] if group_by else None)
     weight_column = operations.get("weight_column", None)
-    sort_order = operations.get("sort_order")
-    
-    # Initialize chart metadata for legend-based charts
-    chart_metadata = {}
+    sort_order = operations.get("sort_order", "desc")  # Default to descending sort
     
     # Determine file key to fetch data
     # Determine file key to fetch data – prefer operations['file_key'] if provided
@@ -1959,6 +1956,178 @@ async def date_range(
 
 
 # Removed unused endpoint: /list_saved_dataframes
+
+
+@router.post("/perform")
+async def perform_explore(
+    exploration_config: str = Form(...),
+    file_name: str = Form(...),
+    bucket_name: str = Form("trinity")
+):
+    """
+    Perform explore operation with AI-generated configuration.
+    Similar to merge perform endpoint but for exploration.
+    """
+    import time
+    start_time = time.time()
+    
+    print(f"🔍 EXPLORE PERFORM - Received data:")
+    print(f"   file_name: {file_name}")
+    print(f"   bucket_name: {bucket_name}")
+    print(f"   exploration_config: {exploration_config[:200]}...")
+    
+    try:
+        # Parse exploration configuration JSON
+        try:
+            config = json.loads(exploration_config)
+            print(f"✅ Parsed exploration_config: {config}")
+        except json.JSONDecodeError as e:
+            print(f"❌ JSON decode error for exploration_config: {e}")
+            raise HTTPException(status_code=400, detail=f"Invalid exploration_config JSON: {e}")
+        
+        # Validate input structure
+        if not isinstance(config, list):
+            config = [config]  # Convert single config to list
+        
+        results = []
+        
+        for idx, exploration in enumerate(config):
+            print(f"🔄 Processing exploration {idx + 1}/{len(config)}")
+            
+            # Extract configuration details
+            chart_type = exploration.get("chart_type", "table")
+            dimensions = exploration.get("dimensions", [])
+            measures = exploration.get("measures", [])
+            x_axis = exploration.get("x_axis", "")
+            y_axis = exploration.get("y_axis", "")
+            title = exploration.get("title", f"Exploration {idx + 1}")
+            description = exploration.get("description", "")
+            aggregation = exploration.get("aggregation", "sum")
+            filters = exploration.get("filters", {})
+            weight_column = exploration.get("weight_column", None)
+            data_summary = exploration.get("data_summary", False)
+            add_note = exploration.get("add_note", "")
+            
+            print(f"📊 Exploration details:")
+            print(f"   chart_type: {chart_type}")
+            print(f"   dimensions: {dimensions}")
+            print(f"   measures: {measures}")
+            print(f"   aggregation: {aggregation}")
+            
+            # Generate unique explore atom ID for this configuration
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            explore_atom_id = f"explore_perform_{timestamp}_{idx}"
+            
+            # Create operations structure for backend processing
+            operations = {
+                "file_key": file_name,
+                "chart_type": chart_type,
+                "group_by": dimensions,
+                "measures_config": {measure: aggregation for measure in measures},
+                "filters": filters,
+                "x_axis": x_axis if x_axis else (dimensions[0] if dimensions else None),
+                "weight_column": weight_column,
+                "sort_order": "desc"  # Default to descending sort for better visualization
+            }
+            
+            # Create explore atom data structure
+            explore_atom_data = {
+                "explore_atom_id": explore_atom_id,
+                "atom_name": "explore_perform",
+                "validator_atom_id": file_name,
+                "selected_dimensions": {file_name: {dim: dimensions for dim in dimensions}} if dimensions else {},
+                "selected_measures": {file_name: measures},
+                "operations": operations,
+                "created_at": datetime.now().isoformat(),
+                "status": "ai_generated_and_performing",
+                "ai_config": exploration
+            }
+            
+            print(f"💾 Saving explore atom data to MongoDB...")
+            
+            # Save to MongoDB
+            mongo_result = save_explore_atom_to_mongo(explore_atom_data)
+            
+            # Also store in memory for quick access
+            explore_atoms[explore_atom_id] = explore_atom_data
+            
+            # Now call the chart data generation endpoint internally
+            try:
+                print(f"📈 Generating chart data for explore_atom_id: {explore_atom_id}")
+                
+                # Use internal chart data generation logic
+                chart_result = await chart_data_multidim(explore_atom_id)
+                
+                # Save chart result to MongoDB with correct arguments
+                chart_metadata = {
+                    "chart_type": chart_type,
+                    "x_axis": x_axis,
+                    "measure": measures[0] if measures else None,
+                    "grouped_by": dimensions,
+                    "aggregation": aggregation,
+                    "weight_column": weight_column,
+                    "title": title,
+                    "description": description,
+                    "created_at": datetime.now().isoformat()
+                }
+                save_chart_result_to_mongo(
+                    explore_atom_id=explore_atom_id,
+                    chart_data=chart_result,
+                    metadata=chart_metadata
+                )
+                
+                result_item = {
+                    "exploration_id": exploration.get("exploration_id", str(idx + 1)),
+                    "explore_atom_id": explore_atom_id,
+                    "chart_type": chart_type,
+                    "title": title,
+                    "description": description,
+                    "chart_data": chart_result,
+                    "ai_note": add_note,
+                    "status": "success"
+                }
+                
+            except Exception as chart_error:
+                print(f"❌ Chart generation failed for exploration {idx}: {chart_error}")
+                result_item = {
+                    "exploration_id": exploration.get("exploration_id", str(idx + 1)),
+                    "explore_atom_id": explore_atom_id,
+                    "chart_type": chart_type,
+                    "title": title,
+                    "description": description,
+                    "error": str(chart_error),
+                    "status": "chart_generation_failed"
+                }
+            
+            results.append(result_item)
+        
+        processing_time = round(time.time() - start_time, 2)
+        
+        final_result = {
+            "success": True,
+            "message": f"Processed {len(results)} exploration(s) successfully",
+            "file_name": file_name,
+            "explorations": results,
+            "processing_time": processing_time
+        }
+        
+        print(f"✅ EXPLORE PERFORM COMPLETED:")
+        print(f"   Success: {final_result.get('success', False)}")
+        print(f"   Explorations: {len(results)}")
+        print(f"   Processing Time: {processing_time}s")
+        
+        return final_result
+        
+    except Exception as e:
+        processing_time = round(time.time() - start_time, 2)
+        print(f"❌ EXPLORE PERFORM FAILED: {e}")
+        error_result = {
+            "success": False,
+            "error": str(e),
+            "file_name": file_name,
+            "processing_time": processing_time
+        }
+        return error_result
 
 
 # Removed unused endpoint: /test-columns

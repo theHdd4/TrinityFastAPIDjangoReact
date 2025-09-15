@@ -98,6 +98,9 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ atomId, charts, dat
   const [emphasizedTrace, setEmphasizedTrace] = useState<Record<string, string | null>>({});
   const [dimmedXValues, setDimmedXValues] = useState<Record<string, Set<string>>>({});
 
+  // Chart sort order state
+  const [chartSortOrder, setChartSortOrder] = useState<Record<string, 'asc' | 'desc' | null>>({});
+
   // Cardinality View state
   const [cardinalityData, setCardinalityData] = useState<any[]>([]);
   const [cardinalityLoading, setCardinalityLoading] = useState(false);
@@ -416,6 +419,14 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ atomId, charts, dat
     }
   };
 
+  // Handle chart sort order changes
+  const handleChartSortOrderChange = (chartId: string, sortOrder: 'asc' | 'desc' | null) => {
+    setChartSortOrder(prev => ({
+      ...prev,
+      [chartId]: sortOrder
+    }));
+  };
+
   const handleCloseChatBubble = () => {
     setChatBubble({ ...chatBubble, visible: false });
   };
@@ -539,7 +550,7 @@ const renderChart = (
     type: rendererType as 'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart',
     data: chartData,
     xField: xAxisConfig.dataKey,
-    yField: traces.length ? undefined : yAxisConfig.dataKey,
+    yField: traces.length ? traces[0]?.dataKey : yAxisConfig.dataKey,
     yFields: traces.length ? traces.map((t: any) => t.dataKey) : undefined,
     title: chart.title,
     xAxisLabel: xAxisConfig.label || xAxisConfig.dataKey,
@@ -552,6 +563,9 @@ const renderChart = (
     showDataLabels: chart.chartConfig?.showDataLabels,
     showGrid: chart.chartConfig?.showGrid,
     height: chartHeightValue,
+    sortOrder: chartSortOrder[chart.id] || chart.chartConfig?.sortOrder || null,
+    onChartTypeChange: (newType: 'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart') => onChartTypeChange?.(chart.id, newType.replace('_chart', '') as ChartMakerConfig['type']),
+    onSortChange: (newSortOrder: 'asc' | 'desc' | null) => handleChartSortOrderChange(chart.id, newSortOrder),
   } as const;
 
   return (
@@ -910,8 +924,8 @@ const renderChart = (
                             setFullscreenIndex(index);
                           }
                         }}
-                        onContextMenu={e => handleContextMenu(e, chart.id)}
-                        title="Alt+Click to expand, Right-click to change chart type"
+                        /* onContextMenu={e => handleContextMenu(e, chart.id)} */
+                        title="Alt+Click to expand"
                       />
                      </div>
                      
