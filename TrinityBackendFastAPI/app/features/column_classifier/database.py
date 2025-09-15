@@ -45,11 +45,18 @@ COLLECTIONS = {
 
 # Initialize MongoDB client with timeout
 try:
+    auth_kwargs = (
+        {
+            "username": MONGO_USER,
+            "password": MONGO_PASSWORD,
+            "authSource": MONGO_AUTH_DB,
+        }
+        if MONGO_USER and MONGO_PASSWORD
+        else {}
+    )
     mongo_client = MongoClient(
         MONGODB_URL,
-        username=MONGO_USER,
-        password=MONGO_PASSWORD,
-        authSource=MONGO_AUTH_DB,
+        **auth_kwargs,
         serverSelectionTimeoutMS=5000,
     )
     db = mongo_client[DATABASE_NAME]
@@ -95,11 +102,18 @@ def ensure_mongo_connection() -> bool:
         return True
 
     try:
+        auth_kwargs = (
+            {
+                "username": MONGO_USER,
+                "password": MONGO_PASSWORD,
+                "authSource": MONGO_AUTH_DB,
+            }
+            if MONGO_USER and MONGO_PASSWORD
+            else {}
+        )
         mongo_client = MongoClient(
             MONGODB_URL,
-            username=MONGO_USER,
-            password=MONGO_PASSWORD,
-            authSource=MONGO_AUTH_DB,
+            **auth_kwargs,
             serverSelectionTimeoutMS=5000,
         )
         db = mongo_client[DATABASE_NAME]
