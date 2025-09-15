@@ -261,41 +261,68 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
   };
 
   const prefillFeatureOverview = async (cardId: string, atomId: string) => {
-    const prev = await findLatestDataSource();
-    if (!prev || !prev.csv) {
-      console.warn('⚠️ no data source found for feature overview');
-      return;
-    }
-    console.log('ℹ️ prefill data source details', prev);
-    await prefetchDataframe(prev.csv);
-    const rawMapping = await fetchDimensionMapping();
-    const mapping = Object.fromEntries(
-      Object.entries(rawMapping).filter(
-        ([key]) => key.toLowerCase() !== 'unattributed',
-      ),
-    );
-    console.log('✅ pre-filling feature overview with', prev.csv);
-    const summary = Array.isArray(prev.summary) ? prev.summary : [];
-    const identifiers = Array.isArray(prev.identifiers) ? prev.identifiers : [];
-    const filtered =
-      identifiers.length > 0
-        ? summary.filter(s => identifiers.includes(s.column))
-        : summary;
-    const selected =
-      identifiers.length > 0
-        ? identifiers
-        : (Array.isArray(summary) ? summary : []).map(cc => cc.column);
+    const quotes = [
+      'Denial is the most predictable of all Analyst responses',
+      "Some Analysts go their entire lives without hearing news that good",
+      'To deny our own impulses is to deny the very thing that makes us human',
+    ];
+    let quoteIndex = 0;
+    const showQuote = () => {
+      toast({ title: quotes[quoteIndex % quotes.length] });
+      quoteIndex++;
+    };
+    updateAtomSettings(atomId, { isLoading: true });
+    showQuote();
+    const quoteTimer = setInterval(showQuote, 5000);
 
-    updateAtomSettings(atomId, {
-      dataSource: prev.csv,
-      csvDisplay: prev.display || prev.csv,
-      allColumns: summary,
-      columnSummary: filtered,
-      selectedColumns: selected,
-      numericColumns: Array.isArray(prev.numeric) ? prev.numeric : [],
-      dimensionMap: mapping,
-      xAxis: prev.xField || 'date',
-    });
+    try {
+      const prev = await findLatestDataSource();
+      if (!prev || !prev.csv) {
+        console.warn('⚠️ no data source found for feature overview');
+        updateAtomSettings(atomId, { isLoading: false });
+        return;
+      }
+      console.log('ℹ️ prefill data source details', prev);
+      await prefetchDataframe(prev.csv);
+      const rawMapping = await fetchDimensionMapping();
+      const mapping = Object.fromEntries(
+        Object.entries(rawMapping).filter(
+          ([key]) => key.toLowerCase() !== 'unattributed',
+        ),
+      );
+      console.log('✅ pre-filling feature overview with', prev.csv);
+      const summary = Array.isArray(prev.summary) ? prev.summary : [];
+      const identifiers = Array.isArray(prev.identifiers) ? prev.identifiers : [];
+      const filtered =
+        identifiers.length > 0
+          ? summary.filter(s => identifiers.includes(s.column))
+          : summary;
+      const selected =
+        identifiers.length > 0
+          ? identifiers
+          : (Array.isArray(summary) ? summary : []).map(cc => cc.column);
+
+      updateAtomSettings(atomId, {
+        dataSource: prev.csv,
+        csvDisplay: prev.display || prev.csv,
+        allColumns: summary,
+        columnSummary: filtered,
+        selectedColumns: selected,
+        numericColumns: Array.isArray(prev.numeric) ? prev.numeric : [],
+        dimensionMap: mapping,
+        xAxis: prev.xField || 'date',
+        isLoading: false,
+      });
+      toast({
+        title:
+          "Success! But there's a difference between knowing the path and walking the path.",
+      });
+    } catch (err) {
+      console.error('⚠️ prefill feature overview error', err);
+      updateAtomSettings(atomId, { isLoading: false });
+    } finally {
+      clearInterval(quoteTimer);
+    }
   };
 
   const prefillColumnClassifier = async (atomId: string) => {
