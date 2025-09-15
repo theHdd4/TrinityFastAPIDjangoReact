@@ -199,48 +199,42 @@ const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
       dimensions: currentFile.customDimensions
     };
 
-    const key = `${payload.client_name}/${payload.app_name}/${payload.project_name}/column_classifier_config`;
-    console.log('🆔 identifiers', identifiers);
-    console.log('🏷️ dimensions', payload.dimensions);
-    console.log('📁 will save configuration to', key);
-    console.log('📦 saving configuration', payload);
-    const res = await fetch(`${CLASSIFIER_API}/save_config`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-      credentials: 'include'
-    });
-    console.log('✅ save configuration response', res.status);
-    if (res.ok) {
-      toast({ title: 'Configuration Saved Successfully' });
-      try {
-        const json = await res.json();
-        console.log('📝 configuration save result', json);
-        console.log('🔑 redis namespace', json.key);
-        console.log('📂 saved data', json.data);
-      } catch (err) {
-        console.warn('assignment save result parse error', err);
+    try {
+      const res = await fetch(`${CLASSIFIER_API}/save_config`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        credentials: 'include'
+      });
+
+      if (res.ok) {
+        toast({ title: 'Configuration Saved Successfully' });
+        localStorage.setItem('column-classifier-config', JSON.stringify(payload));
+        updateSessionState(user?.id, {
+          identifiers,
+          measures,
+          dimensions: currentFile.customDimensions,
+        });
+        addNavigationItem(user?.id, {
+          atom: 'column-classifier',
+          identifiers,
+          measures,
+          dimensions: currentFile.customDimensions,
+        });
+        logSessionState(user?.id);
+      } else {
+        toast({ title: 'Unable to Save Configuration', variant: 'destructive' });
+        try {
+          const txt = await res.text();
+          console.warn('assignment save error response', txt);
+        } catch (err) {
+          console.warn('assignment save error parse fail', err);
+        }
+        logSessionState(user?.id);
       }
-      updateSessionState(user?.id, {
-        identifiers,
-        measures,
-        dimensions: currentFile.customDimensions,
-      });
-      addNavigationItem(user?.id, {
-        atom: 'column-classifier',
-        identifiers,
-        measures,
-        dimensions: currentFile.customDimensions,
-      });
-      logSessionState(user?.id);
-    } else {
+    } catch (err) {
       toast({ title: 'Unable to Save Configuration', variant: 'destructive' });
-      try {
-        const txt = await res.text();
-        console.warn('assignment save error response', txt);
-      } catch (err) {
-        console.warn('assignment save error parse fail', err);
-      }
+      console.warn('assignment save request failed', err);
       logSessionState(user?.id);
     }
   };

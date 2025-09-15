@@ -438,33 +438,48 @@ def get_project_dimension_mapping(project_id: int):
 
 
 def save_classifier_config_to_mongo(config: dict):
-    """Persist column classifier configuration."""
-    if not check_mongodb_connection():
+    """Persist column classifier configuration in MongoDB.
+
+    The document is stored in the shared ``trinity_db`` database under the
+    ``column_classifier_config`` collection and keyed by the combination of
+    client, app and project names. If the collection does not yet exist it is
+    created automatically before the document is written.
+    """
+
+    if not ensure_mongo_connection():
         return {"status": "error", "error": "MongoDB not connected"}
 
+    assert config_db is not None  # nosec - ensured by ensure_mongo_connection
     try:
         document_id = (
-            f"{config.get('client_name','')}/"
-            f"{config.get('app_name','')}/"
-            f"{config.get('project_name','')}"
+            f"{config.get('client_name', '')}/"
+            f"{config.get('app_name', '')}/"
+            f"{config.get('project_name', '')}"
         )
         document = {
             "_id": document_id,
-            **config,
+            "client_name": config.get("client_name", ""),
+            "app_name": config.get("app_name", ""),
+            "project_name": config.get("project_name", ""),
+            "identifiers": config.get("identifiers", []),
+            "measures": config.get("measures", []),
+            "dimensions": config.get("dimensions", {}),
+            # Preserve any extra metadata such as environment variables
+            **{k: v for k, v in config.items() if k not in {"client_name", "app_name", "project_name", "identifiers", "measures", "dimensions"}},
             "updated_at": datetime.utcnow(),
         }
-        if COLLECTIONS["CLASSIFIER_CONFIGS"] not in config_db.list_collection_names():
-            config_db.create_collection(COLLECTIONS["CLASSIFIER_CONFIGS"])
-        result = config_db[COLLECTIONS["CLASSIFIER_CONFIGS"]].replace_one(
-            {"_id": document_id}, document, upsert=True
-        )
+
+        coll_name = COLLECTIONS["CLASSIFIER_CONFIGS"]
+        if coll_name not in config_db.list_collection_names():
+            config_db.create_collection(coll_name)
+        result = config_db[coll_name].replace_one({"_id": document_id}, document, upsert=True)
         return {
             "status": "success",
             "mongo_id": document_id,
             "operation": "inserted" if result.upserted_id else "updated",
-            "collection": COLLECTIONS["CLASSIFIER_CONFIGS"],
+            "collection": coll_name,
         }
-    except Exception as exc:
+    except Exception as exc:  # pragma: no cover - best effort logging
         logging.error(f"MongoDB save error for classifier config: {exc}")
         return {"status": "error", "error": str(exc)}
 
