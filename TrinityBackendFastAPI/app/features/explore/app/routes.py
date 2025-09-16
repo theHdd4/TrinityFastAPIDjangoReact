@@ -35,7 +35,7 @@ import pyarrow as pa
 import pyarrow.ipc as ipc
 from minio import Minio
 from minio.error import S3Error
-from urllib.parse import unquote
+from urllib.parse import unquote, quote
 import os
 
 # Create router
@@ -496,7 +496,8 @@ async def list_column_classifier_configs():
 async def get_column_classifier_config(
     client_name: str,
     app_name: str,
-    project_name: str
+    project_name: str,
+    file: Optional[str] = Query(None, alias="file"),
 ):
     """
     Get column classifier configuration for a specific client/app/project combination
@@ -505,37 +506,82 @@ async def get_column_classifier_config(
     try:
         # Try Redis first (fast lookup)
         key = f"{client_name}/{app_name}/{project_name}/column_classifier_config"
+        decoded_file = unquote(file) if file else None
+        specific_key = None
+        if decoded_file:
+            safe_file = quote(decoded_file, safe="")
+            specific_key = f"{key}:{safe_file}"
+            cached_specific = redis_client.get(specific_key)
+            if cached_specific:
+                config_data = json.loads(cached_specific)
+                print(
+                    f"✅ Found column classifier config in Redis for {specific_key}"
+                )
+                return {
+                    "status": "success",
+                    "source": "redis",
+                    "config": config_data,
+                    "redis_key": specific_key,
+                    "summary": {
+                        "client_name": client_name,
+                        "app_name": app_name,
+                        "project_name": project_name,
+                        "identifiers": config_data.get("identifiers", []),
+                        "measures": config_data.get("measures", []),
+                        "dimensions": config_data.get("dimensions", {}),
+                        "total_identifiers": len(config_data.get("identifiers", [])),
+                        "total_measures": len(config_data.get("measures", [])),
+                        "total_dimensions": len(config_data.get("dimensions", {})),
+                        "file_name": config_data.get("file_name"),
+                    },
+                }
+
         cached = redis_client.get(key)
-        
+
         if cached:
             config_data = json.loads(cached)
-            print(f"✅ Found column classifier config in Redis for {key}")
-            
-            return {
-                "status": "success",
-                "source": "redis",
-                "config": config_data,
-                "redis_key": key,
-                "summary": {
-                    "client_name": client_name,
-                    "app_name": app_name,
-                    "project_name": project_name,
-                    "identifiers": config_data.get("identifiers", []),
-                    "measures": config_data.get("measures", []),
-                    "dimensions": config_data.get("dimensions", {}),
-                    "total_identifiers": len(config_data.get("identifiers", [])),
-                    "total_measures": len(config_data.get("measures", [])),
-                    "total_dimensions": len(config_data.get("dimensions", {}))
+            if decoded_file:
+                stored_file = config_data.get("file_name")
+                if stored_file and stored_file != decoded_file:
+                    config_data = None
+            if config_data is not None:
+                print(f"✅ Found column classifier config in Redis for {key}")
+
+                return {
+                    "status": "success",
+                    "source": "redis",
+                    "config": config_data,
+                    "redis_key": key,
+                    "summary": {
+                        "client_name": client_name,
+                        "app_name": app_name,
+                        "project_name": project_name,
+                        "identifiers": config_data.get("identifiers", []),
+                        "measures": config_data.get("measures", []),
+                        "dimensions": config_data.get("dimensions", {}),
+                        "total_identifiers": len(config_data.get("identifiers", [])),
+                        "total_measures": len(config_data.get("measures", [])),
+                        "total_dimensions": len(config_data.get("dimensions", {})),
+                        "file_name": config_data.get("file_name"),
+                    },
                 }
-            }
-        
+
         # If not in Redis, try MongoDB
-        mongo_data = get_classifier_config_from_mongo(client_name, app_name, project_name)
+        mongo_data = get_classifier_config_from_mongo(
+            client_name,
+            app_name,
+            project_name,
+            decoded_file,
+        )
         if mongo_data:
             # Cache back to Redis
             redis_client.setex(key, 3600, json.dumps(mongo_data, default=str))
+            if specific_key:
+                redis_client.setex(
+                    specific_key, 3600, json.dumps(mongo_data, default=str)
+                )
             print(f"✅ Found column classifier config in MongoDB for {client_name}/{app_name}/{project_name}")
-            
+
             return {
                 "status": "success",
                 "source": "mongodb",
@@ -550,7 +596,8 @@ async def get_column_classifier_config(
                     "dimensions": mongo_data.get("dimensions", {}),
                     "total_identifiers": len(mongo_data.get("identifiers", [])),
                     "total_measures": len(mongo_data.get("measures", [])),
-                    "total_dimensions": len(mongo_data.get("dimensions", {}))
+                    "total_dimensions": len(mongo_data.get("dimensions", {})),
+                    "file_name": mongo_data.get("file_name"),
                 }
             }
         

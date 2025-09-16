@@ -294,7 +294,10 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
       await prefetchDataframe(prev.csv, controller.signal, status =>
         updateAtomSettings(atomId, { loadingStatus: status }),
       );
-      const rawMapping = await fetchDimensionMapping(controller.signal);
+      const rawMapping = await fetchDimensionMapping({
+        objectName: prev.csv,
+        signal: controller.signal,
+      });
       const mapping = Object.fromEntries(
         Object.entries(rawMapping).filter(
           ([key]) => key.toLowerCase() !== 'unattributed',
@@ -445,7 +448,7 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
       return;
     }
     await prefetchDataframe(prev.csv);
-    const rawMapping = await fetchDimensionMapping();
+    const rawMapping = await fetchDimensionMapping({ objectName: prev.csv });
     const identifiers = Object.entries(rawMapping || {})
       .filter(
         ([k]) =>

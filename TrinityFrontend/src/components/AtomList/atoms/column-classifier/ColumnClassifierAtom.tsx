@@ -38,19 +38,20 @@ const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
 
   React.useEffect(() => {
     const loadMapping = async () => {
-      const mapping = await fetchDimensionMapping();
-      if (Object.keys(mapping).length && classifierData.files.length > 0) {
-        const file = classifierData.files[0];
-        const updatedFile: ColumnClassifierFile = {
-          ...file,
-          customDimensions: mapping,
-        };
-        updateSettings(atomId, {
-          data: { files: [updatedFile], activeFileIndex: 0 },
-          dimensions: Object.keys(mapping),
-          enableDimensionMapping: true,
-        });
-      }
+      if (!classifierData.files.length) return;
+      const file = classifierData.files[0];
+      if (!file?.fileName) return;
+      const mapping = await fetchDimensionMapping({ objectName: file.fileName });
+      if (Object.keys(mapping).length === 0) return;
+      const updatedFile: ColumnClassifierFile = {
+        ...file,
+        customDimensions: mapping,
+      };
+      updateSettings(atomId, {
+        data: { files: [updatedFile], activeFileIndex: 0 },
+        dimensions: Object.keys(mapping),
+        enableDimensionMapping: true,
+      });
     };
     if (classifierData.files.length > 0) {
       loadMapping();
@@ -63,6 +64,9 @@ const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
     try {
       const cfg = JSON.parse(stored);
       const file = classifierData.files[0];
+      if (cfg?.file_name && file?.fileName && cfg.file_name !== file.fileName) {
+        return;
+      }
       const updatedFile: ColumnClassifierFile = {
         ...file,
         columns: file.columns.map(col => ({
@@ -190,7 +194,7 @@ const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
       .filter(c => c.category === 'measures')
       .map(c => c.name);
 
-    const payload = {
+    const payload: Record<string, any> = {
       project_id: project.id || null,
       client_name: env.CLIENT_NAME || '',
       app_name: env.APP_NAME || '',
@@ -199,6 +203,9 @@ const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
       measures,
       dimensions: currentFile.customDimensions
     };
+    if (currentFile.fileName) {
+      payload.file_name = currentFile.fileName;
+    }
 
     try {
       const res = await fetch(`${CLASSIFIER_API}/save_config`, {

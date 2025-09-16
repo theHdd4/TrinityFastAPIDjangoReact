@@ -120,14 +120,25 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
   }, [settings.dimensionMap]);
 
   useEffect(() => {
+    let active = true;
     const loadMapping = async () => {
-      const raw = await fetchDimensionMapping();
+      if (!settings.dataSource) {
+        return;
+      }
+      if (settings.dimensionMap && Object.keys(settings.dimensionMap).length > 0) {
+        return;
+      }
+      const raw = await fetchDimensionMapping({ objectName: settings.dataSource });
+      if (!active) return;
       const mapping = filterUnattributed(raw);
       setDimensionMap(mapping);
       onUpdateSettings({ dimensionMap: mapping });
     };
     loadMapping();
-  }, []);
+    return () => {
+      active = false;
+    };
+  }, [settings.dataSource]);
 
   useEffect(() => {
     if (!settings.dataSource) {

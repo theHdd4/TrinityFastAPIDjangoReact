@@ -147,7 +147,7 @@ const FeatureOverviewSettings: React.FC<FeatureOverviewSettingsProps> = ({ atomI
       const filtered = filterUnique ? summary.filter(c => c.unique_count > 1) : summary;
       const selected = filtered.map(c => c.column);
       setSelectedIds(selected);
-      const rawMap = await fetchDimensionMapping();
+      const rawMap = await fetchDimensionMapping({ objectName: normalized });
       const mapping = Object.fromEntries(
         Object.entries(rawMap).filter(([k]) => k.toLowerCase() !== 'unattributed')
       );
