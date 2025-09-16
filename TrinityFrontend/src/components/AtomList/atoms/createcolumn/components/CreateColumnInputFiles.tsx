@@ -32,7 +32,7 @@ const CreateColumnInputFiles: React.FC<Props> = ({ atomId, selectedIdentifiers, 
   useEffect(() => {
     const loadMapping = async () => {
       try {
-        const mapping = await fetchDimensionMapping();
+        const { mapping } = await fetchDimensionMapping();
         let ids: string[] = [];
         // Prefer explicit identifiers list saved by classifier
         try {

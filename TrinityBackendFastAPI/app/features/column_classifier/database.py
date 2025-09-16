@@ -4,6 +4,7 @@ from pymongo import MongoClient
 from datetime import datetime
 import logging
 import os
+from urllib.parse import quote
 from .config import settings
 
 try:
@@ -481,11 +482,14 @@ def save_classifier_config_to_mongo(config: dict):
 
     assert config_db is not None  # nosec - ensured by ensure_mongo_connection
     try:
-        document_id = (
+        base_id = (
             f"{config.get('client_name', '')}/"
             f"{config.get('app_name', '')}/"
             f"{config.get('project_name', '')}"
         )
+        file_name = config.get("file_name") or ""
+        safe_file = quote(file_name, safe="") if file_name else ""
+        document_id = f"{base_id}::{safe_file}" if file_name else base_id
         document = {
             "_id": document_id,
             "client_name": config.get("client_name", ""),
@@ -494,8 +498,22 @@ def save_classifier_config_to_mongo(config: dict):
             "identifiers": config.get("identifiers", []),
             "measures": config.get("measures", []),
             "dimensions": config.get("dimensions", {}),
+            "file_name": file_name,
             # Preserve any extra metadata such as environment variables
-            **{k: v for k, v in config.items() if k not in {"client_name", "app_name", "project_name", "identifiers", "measures", "dimensions"}},
+            **{
+                k: v
+                for k, v in config.items()
+                if k
+                not in {
+                    "client_name",
+                    "app_name",
+                    "project_name",
+                    "identifiers",
+                    "measures",
+                    "dimensions",
+                    "file_name",
+                }
+            },
             "updated_at": datetime.utcnow(),
         }
 
@@ -509,6 +527,10 @@ def save_classifier_config_to_mongo(config: dict):
                 f"Could not verify/create {coll_name}: {exc}"
             )
         result = coll.replace_one({"_id": document_id}, document, upsert=True)
+        if file_name:
+            legacy_document = document.copy()
+            legacy_document["_id"] = base_id
+            coll.replace_one({"_id": base_id}, legacy_document, upsert=True)
         return {
             "status": "success",
             "mongo_id": document_id,
@@ -520,14 +542,29 @@ def save_classifier_config_to_mongo(config: dict):
         return {"status": "error", "error": str(exc)}
 
 
-def get_classifier_config_from_mongo(client: str, app: str, project: str):
+def get_classifier_config_from_mongo(
+    client: str, app: str, project: str, file_name: str | None = None
+):
     """Retrieve saved classifier configuration."""
     if not check_mongodb_connection():
         return None
 
     try:
-        document_id = f"{client}/{app}/{project}"
-        return config_db[COLLECTIONS["CLASSIFIER_CONFIGS"]].find_one({"_id": document_id})
+        base_id = f"{client}/{app}/{project}"
+        coll = config_db[COLLECTIONS["CLASSIFIER_CONFIGS"]]
+        if file_name:
+            safe_file = quote(file_name, safe="")
+            document_id = f"{base_id}::{safe_file}"
+            document = coll.find_one({"_id": document_id})
+            if document:
+                return document
+            legacy = coll.find_one({"_id": base_id})
+            if legacy:
+                stored_file = legacy.get("file_name")
+                if not stored_file or stored_file == file_name:
+                    return legacy
+            return None
+        return coll.find_one({"_id": base_id})
     except Exception as exc:
         logging.error(f"MongoDB read error for classifier config: {exc}")
         return None
