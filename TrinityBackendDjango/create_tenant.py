@@ -226,8 +226,53 @@ def main():
     with schema_context(tenant_schema):
         with connection.cursor() as cursor:
             cursor.execute(
-                "CREATE UNIQUE INDEX IF NOT EXISTS registry_arrowdataset_project_csv_idx "
-                "ON registry_arrowdataset (project_id, original_csv)"
+                """
+                DO $$
+                BEGIN
+                    IF EXISTS (
+                        SELECT 1
+                        FROM pg_constraint
+                        WHERE conrelid = 'registry_arrowdataset'::regclass
+                          AND conname = 'registry_arrowdataset_original_csv_key'
+                    ) THEN
+                        EXECUTE 'ALTER TABLE registry_arrowdataset RENAME CONSTRAINT registry_arrowdataset_original_csv_key TO unique_project_csv';
+                    END IF;
+
+                    IF NOT EXISTS (
+                        SELECT 1
+                        FROM pg_constraint
+                        WHERE conrelid = 'registry_arrowdataset'::regclass
+                          AND conname = 'unique_project_csv'
+                    ) THEN
+                        BEGIN
+                            ALTER TABLE registry_arrowdataset
+                            ADD CONSTRAINT unique_project_csv UNIQUE (project_id, original_csv);
+                        EXCEPTION
+                            WHEN duplicate_object THEN
+                                NULL;
+                            WHEN undefined_table THEN
+                                NULL;
+                        END;
+                    END IF;
+
+                    IF NOT EXISTS (
+                        SELECT 1
+                        FROM pg_indexes
+                        WHERE schemaname = current_schema()
+                          AND indexname = 'registry_arrowdataset_project_csv_idx'
+                    ) THEN
+                        BEGIN
+                            CREATE UNIQUE INDEX registry_arrowdataset_project_csv_idx
+                                ON registry_arrowdataset (project_id, original_csv);
+                        EXCEPTION
+                            WHEN duplicate_table THEN
+                                NULL;
+                            WHEN undefined_table THEN
+                                NULL;
+                        END;
+                    END IF;
+                END$$;
+                """
             )
     print("   ✅ Registry migrations complete.\n")
 

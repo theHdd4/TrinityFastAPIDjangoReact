@@ -158,7 +158,12 @@ class ArrowDataset(models.Model):
 
     class Meta:
         ordering = ["-created_at"]
-        unique_together = ("project", "original_csv")
+        constraints = [
+            models.UniqueConstraint(
+                fields=("project", "original_csv"),
+                name="unique_project_csv",
+            )
+        ]
 
     def __str__(self):
         return f"{self.atom_id}:{self.file_key}"
