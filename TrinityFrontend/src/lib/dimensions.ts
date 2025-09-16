@@ -1,6 +1,8 @@
 import { FEATURE_OVERVIEW_API } from './api';
 
-export async function fetchDimensionMapping(): Promise<Record<string, string[]>> {
+export async function fetchDimensionMapping(
+  signal?: AbortSignal,
+): Promise<Record<string, string[]>> {
   try {
     const envStr = localStorage.getItem('env');
     if (!envStr) {
@@ -19,6 +21,7 @@ export async function fetchDimensionMapping(): Promise<Record<string, string[]>>
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
       body: JSON.stringify(payload),
+      signal,
     });
     if (res.ok) {
       const data = await res.json();

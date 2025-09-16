@@ -3,7 +3,8 @@ import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { VALIDATE_API, CLASSIFIER_API } from '@/lib/api';
+import { VALIDATE_API, CLASSIFIER_API, FEATURE_OVERVIEW_API } from '@/lib/api';
+import { cancelPrefillController } from '../prefillManager';
 import type { FileClassification, ColumnData } from '../ColumnClassifierAtom';
 import {
   useLaboratoryStore,
@@ -68,9 +69,29 @@ const ColumnClassifierSettings: React.FC<ColumnClassifierSettingsProps> = ({ ato
 
   const classify = async () => {
     if (!savedId) return;
+    cancelPrefillController(atomId);
     setLoading(true);
     setError('');
+    updateSettings(atomId, {
+      isLoading: true,
+      loadingMessage: 'Loading',
+      loadingStatus: 'Fetching flight table',
+    });
     try {
+      const flightRes = await fetch(
+        `${FEATURE_OVERVIEW_API}/flight_table?object_name=${encodeURIComponent(savedId)}`
+      );
+      if (flightRes.ok) {
+        await flightRes.arrayBuffer();
+      }
+      updateSettings(atomId, { loadingStatus: 'Prefetching Dataframe' });
+      const cacheRes = await fetch(
+        `${FEATURE_OVERVIEW_API}/cached_dataframe?object_name=${encodeURIComponent(savedId)}`
+      );
+      if (cacheRes.ok) {
+        await cacheRes.text();
+      }
+      updateSettings(atomId, { loadingStatus: 'Classifying Dataframe' });
       const form = new FormData();
       form.append('dataframe', savedId);
       const res = await fetch(`${CLASSIFIER_API}/classify_columns`, {
@@ -89,9 +110,16 @@ const ColumnClassifierSettings: React.FC<ColumnClassifierSettingsProps> = ({ ato
       ];
       const custom = Object.fromEntries((settings.dimensions || []).map(d => [d, []]));
       onClassification({ fileName: savedId, columns: cols, customDimensions: custom });
-      updateSettings(atomId, { validatorId: savedId, assignments: {} });
+      updateSettings(atomId, {
+        validatorId: savedId,
+        assignments: {},
+        isLoading: false,
+        loadingStatus: '',
+        loadingMessage: '',
+      });
     } catch (e: any) {
       setError(e.message);
+      updateSettings(atomId, { isLoading: false, loadingStatus: '', loadingMessage: '' });
     } finally {
       setLoading(false);
     }

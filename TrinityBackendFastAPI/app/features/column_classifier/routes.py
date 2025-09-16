@@ -14,6 +14,7 @@ from app.DataStorageRetrieval.flight_registry import get_flight_path_for_csv, se
 from app.DataStorageRetrieval.db import get_dataset_info
 from app.DataStorageRetrieval.minio_utils import get_client, MINIO_BUCKET
 from app.features.feature_overview.deps import redis_client
+import redis
 
 # Import your existing database functions
 # Change these lines at the top of routes.py:
@@ -54,6 +55,8 @@ extraction_results = {}
 # MinIO client for loading saved dataframes
 minio_client = get_client()
 
+REDIS_HOST = os.getenv("REDIS_HOST", "redis")
+binary_redis = redis.Redis(host=REDIS_HOST, port=6379, decode_responses=False)
 
 # =============================================================================
 # HEALTH CHECK ENDPOINT
@@ -197,16 +200,16 @@ async def classify_columns(
     if df is None:
         if not object_name.endswith(".arrow"):
             raise HTTPException(status_code=400, detail="Unsupported file format")
-        content = redis_client.get(object_name)
+        content = binary_redis.get(object_name)
         if content is None:
             try:
                 response = minio_client.get_object(MINIO_BUCKET, object_name)
                 content = response.read()
-                redis_client.setex(object_name, 3600, content)
+                binary_redis.setex(object_name, 3600, content)
             except S3Error as e:
                 code = getattr(e, "code", "")
                 if code in {"NoSuchKey", "NoSuchBucket"}:
-                    redis_client.delete(object_name)
+                    binary_redis.delete(object_name)
                     raise HTTPException(status_code=404, detail="File not found")
                 raise HTTPException(status_code=500, detail=str(e))
         reader = ipc.RecordBatchFileReader(pa.BufferReader(content))

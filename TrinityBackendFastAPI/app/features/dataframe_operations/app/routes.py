@@ -7,6 +7,7 @@ import polars as pl
 import numba as nb
 import io
 import uuid
+import re
 from typing import Dict, Any, List
 from app.DataStorageRetrieval.arrow_client import download_table_bytes
 from app.features.data_upload_validate.app.routes import get_object_prefix
@@ -260,6 +261,76 @@ async def edit_cell(df_id: str = Body(...), row: int = Body(...), column: str = 
     result = _df_payload(df, df_id)
     return result
 
+
+@router.post("/apply_formula")
+async def apply_formula(
+    df_id: str = Body(...),
+    target_column: str = Body(...),
+    formula: str = Body(...),
+):
+    """Apply a simple column-based formula to the dataframe."""
+    df = _get_df(df_id)
+    expr = formula.strip()
+    rows = df.to_dicts()
+    if expr.startswith("="):
+        expr_body = expr[1:]
+        func_match = re.match(r"^(SUM|AVG|CORR|PROD|DIV|MAX|MIN)\(([^)]+)\)$", expr_body, re.IGNORECASE)
+        if func_match:
+            func = func_match.group(1).upper()
+            cols = [c.strip() for c in func_match.group(2).split(",")]
+            if func == "CORR" and len(cols) == 2:
+                c1, c2 = cols
+                try:
+                    corr_val = df.select(pl.corr(pl.col(c1), pl.col(c2))).to_series()[0]
+                except Exception as e:
+                    raise HTTPException(status_code=400, detail=str(e))
+                df = df.with_columns(pl.lit(corr_val).alias(target_column))
+            else:
+                new_vals: List[Any] = []
+                for r in rows:
+                    vals = [
+                        float(r.get(c))
+                        for c in cols
+                        if r.get(c) is not None and str(r.get(c)).strip() != ""
+                        and not (isinstance(r.get(c), float) and r.get(c) != r.get(c))
+                    ]
+                    res = 0.0
+                    if func == "SUM":
+                        res = sum(vals)
+                    elif func == "AVG":
+                        res = sum(vals) / len(vals) if vals else 0
+                    elif func == "PROD":
+                        res = 1
+                        for v in vals:
+                            res *= v
+                    elif func == "DIV":
+                        if vals:
+                            res = vals[0]
+                            for v in vals[1:]:
+                                if v != 0:
+                                    res /= v
+                    elif func == "MAX":
+                        res = max(vals) if vals else 0
+                    elif func == "MIN":
+                        res = min(vals) if vals else 0
+                    new_vals.append(res)
+                df = df.with_columns(pl.Series(target_column, new_vals))
+        else:
+            headers_pattern = "|".join(re.escape(h) for h in df.columns)
+            regex = re.compile(f"\\b({headers_pattern})\\b")
+            new_vals: List[Any] = []
+            for r in rows:
+                replaced = regex.sub(lambda m: str(r.get(m.group(0), 0)), expr_body)
+                try:
+                    val = eval(replaced)
+                except Exception:
+                    val = None
+                new_vals.append(val)
+            df = df.with_columns(pl.Series(target_column, new_vals))
+    else:
+        df = df.with_columns(pl.lit(expr).alias(target_column))
+    SESSIONS[df_id] = df
+    return _df_payload(df, df_id)
 
 @router.post("/apply_udf")
 async def apply_udf(
