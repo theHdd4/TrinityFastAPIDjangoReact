@@ -6,8 +6,11 @@ import { Switch } from '@/components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { VALIDATE_API, FEATURE_OVERVIEW_API } from '@/lib/api';
 import { Eye, EyeOff } from 'lucide-react';
+import { cancelPrefillController } from '@/components/AtomList/atoms/column-classifier/prefillManager';
+import { fetchDimensionMapping } from '@/lib/dimensions';
 
 interface FeatureOverviewSettingsProps {
+  atomId: string;
   settings: any;
   onSettingsChange: (s: any) => void;
 }
@@ -19,7 +22,7 @@ interface ColumnInfo {
   unique_values: string[];
 }
 
-const FeatureOverviewSettings: React.FC<FeatureOverviewSettingsProps> = ({ settings, onSettingsChange }) => {
+const FeatureOverviewSettings: React.FC<FeatureOverviewSettingsProps> = ({ atomId, settings, onSettingsChange }) => {
   interface Frame { object_name: string; csv_name: string; arrow_name?: string }
   const [frames, setFrames] = useState<Frame[]>([]);
   const [columns, setColumns] = useState<ColumnInfo[]>(
@@ -82,44 +85,76 @@ const FeatureOverviewSettings: React.FC<FeatureOverviewSettingsProps> = ({ setti
   }, [settings.allColumns, settings.selectedColumns]);
 
   const handleFrameChange = async (val: string) => {
+    cancelPrefillController(atomId);
+    onSettingsChange({
+      isLoading: true,
+      loadingMessage: 'Loading',
+      loadingStatus: 'Fetching flight table',
+    });
     if (!val.endsWith('.arrow')) {
       val += '.arrow';
     }
-    const res = await fetch(
-      `${FEATURE_OVERVIEW_API}/column_summary?object_name=${encodeURIComponent(val)}`
-    );
-    let numeric: string[] = [];
-    let summary: ColumnInfo[] = [];
-    let xField = settings.xAxis || '';
-    if (res.ok) {
-      const data = await res.json();
-      summary = (data.summary || []).filter(Boolean);
-      setColumns(summary);
-      numeric = summary
-        .filter((c: ColumnInfo) => !['object', 'string'].includes(c.data_type.toLowerCase()))
-        .map(c => c.column);
-      const dateLike = summary.find(c => c.column.toLowerCase().includes('date'));
-      if (dateLike) {
-        xField = dateLike.column;
-      } else if (summary.length > 0) {
-        xField = summary[0].column;
+    try {
+      const ft = await fetch(
+        `${FEATURE_OVERVIEW_API}/flight_table?object_name=${encodeURIComponent(val)}`
+      );
+      if (ft.ok) {
+        await ft.arrayBuffer();
       }
+      onSettingsChange({ loadingStatus: 'Prefetching Dataframe' });
+      const cache = await fetch(
+        `${FEATURE_OVERVIEW_API}/cached_dataframe?object_name=${encodeURIComponent(val)}`
+      );
+      if (cache.ok) {
+        await cache.text();
+      }
+      onSettingsChange({ loadingStatus: 'Fetching column summary' });
+      const res = await fetch(
+        `${FEATURE_OVERVIEW_API}/column_summary?object_name=${encodeURIComponent(val)}`
+      );
+      let numeric: string[] = [];
+      let summary: ColumnInfo[] = [];
+      let xField = settings.xAxis || '';
+      if (res.ok) {
+        const data = await res.json();
+        summary = (data.summary || []).filter(Boolean);
+        setColumns(summary);
+        numeric = summary
+          .filter((c: ColumnInfo) => !['object', 'string'].includes(c.data_type.toLowerCase()))
+          .map(c => c.column);
+        const dateLike = summary.find(c => c.column.toLowerCase().includes('date'));
+        if (dateLike) {
+          xField = dateLike.column;
+        } else if (summary.length > 0) {
+          xField = summary[0].column;
+        }
+      }
+      const filtered = filterUnique ? summary.filter(c => c.unique_count > 1) : summary;
+      const selected = filtered.map(c => c.column);
+      setSelectedIds(selected);
+      const rawMap = await fetchDimensionMapping();
+      const mapping = Object.fromEntries(
+        Object.entries(rawMap).filter(([k]) => k.toLowerCase() !== 'unattributed')
+      );
+      onSettingsChange({
+        dataSource: val,
+        csvDisplay:
+          (Array.isArray(frames) ? frames : [])
+            .find(f => f.object_name === val)?.csv_name || val,
+        selectedColumns: selected,
+        columnSummary: filtered,
+        allColumns: summary,
+        numericColumns: numeric,
+        xAxis: xField,
+        filterUnique,
+        dimensionMap: mapping,
+        isLoading: false,
+        loadingStatus: '',
+        loadingMessage: '',
+      });
+    } catch {
+      onSettingsChange({ isLoading: false, loadingStatus: '', loadingMessage: '' });
     }
-    const filtered = filterUnique ? summary.filter(c => c.unique_count > 1) : summary;
-    const selected = filtered.map(c => c.column);
-    setSelectedIds(selected);
-    onSettingsChange({
-      dataSource: val,
-      csvDisplay:
-        (Array.isArray(frames) ? frames : [])
-          .find(f => f.object_name === val)?.csv_name || val,
-      selectedColumns: selected,
-      columnSummary: filtered,
-      allColumns: summary,
-      numericColumns: numeric,
-      xAxis: xField,
-      filterUnique,
-    });
   };
 
   const handleReview = () => {

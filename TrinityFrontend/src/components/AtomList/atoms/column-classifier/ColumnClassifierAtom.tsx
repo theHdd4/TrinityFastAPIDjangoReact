@@ -1,6 +1,6 @@
 import React from 'react';
 import { useToast } from '@/hooks/use-toast';
-import { Loader2 } from 'lucide-react';
+import LoadingAnimation from '@/templates/LoadingAnimation/LoadingAnimation';
 
 import ColumnClassifierCanvas from './components/ColumnClassifierCanvas';
 import ColumnClassifierDimensionMapping from './components/ColumnClassifierDimensionMapping';
@@ -253,11 +253,9 @@ const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
   return (
     <div className="w-full h-full bg-white flex flex-col">
         <div className="flex flex-1">
-          <div className="w-full p-4">
+          <div className="relative w-full h-full p-4 min-h-[450px]">
             {settings.isLoading ? (
-              <div className="w-full h-full flex items-center justify-center">
-                <Loader2 className="w-8 h-8 animate-spin text-gray-500" />
-              </div>
+              <LoadingAnimation status={settings.loadingStatus} />
             ) : (
               <ColumnClassifierCanvas
                 data={classifierData}
