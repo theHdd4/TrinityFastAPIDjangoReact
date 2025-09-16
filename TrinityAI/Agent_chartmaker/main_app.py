@@ -45,6 +45,9 @@ agent = ChartMakerAgent(
 class ChartRequest(BaseModel):
     prompt: str = Field(..., description="User prompt describing the chart to create")
     session_id: Optional[str] = Field(None, description="Optional session ID for conversation continuity")
+    client_name: str = Field("", description="Client name for dynamic path resolution")
+    app_name: str = Field("", description="App name for dynamic path resolution")
+    project_name: str = Field("", description="Project name for dynamic path resolution")
 
 class FileContextRequest(BaseModel):
     file_id: str = Field(..., description="File ID for chart generation")
@@ -83,7 +86,8 @@ def chart_make(request: ChartRequest):
     logger.info(f"Chart request: {request.prompt[:100]}... (Session: {request.session_id})")
     
     try:
-        result = agent.process(request.prompt, request.session_id)
+        result = agent.process(request.prompt, request.session_id, 
+                              request.client_name, request.app_name, request.project_name)
         
         # Add processing time
         result["processing_time"] = round(time.time() - start, 2)

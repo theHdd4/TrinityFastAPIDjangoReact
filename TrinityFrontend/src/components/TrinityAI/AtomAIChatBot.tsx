@@ -51,7 +51,8 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
     if (stored) {
       return stored;
     }
-    return Math.floor(1000 + Math.random() * 90000).toString();
+    // Generate 5-digit session ID (10000-99999)
+    return Math.floor(10000 + Math.random() * 90000).toString();
   });
   
   const [messages, setMessages] = useState<Message[]>(() => {
@@ -69,7 +70,7 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
       }
     }
     // Return initial message with current session ID
-    const initialSessionId = localStorage.getItem(`trinity_ai_session_${atomId}`) || Math.floor(1000 + Math.random() * 90000).toString();
+    const initialSessionId = localStorage.getItem(`trinity_ai_session_${atomId}`) || Math.floor(10000 + Math.random() * 90000).toString();
     return [{
       id: 'init',
       content: `Hi! I can help configure the "${atomTitle}" atom. Describe what you want to do.`,
@@ -102,8 +103,8 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
   };
 
   const handleClearSession = () => {
-    // Generate simple 4-5 digit session ID
-    const newSessionId = Math.floor(1000 + Math.random() * 90000).toString();
+    // Generate 5-digit session ID (10000-99999)
+    const newSessionId = Math.floor(10000 + Math.random() * 90000).toString();
     setSessionId(newSessionId);
     
     // Clear localStorage for old session
@@ -2476,6 +2477,9 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
           <div className="flex items-center space-x-2">
             <MessageSquare className="w-4 h-4 text-purple-600" />
             <span className="text-sm font-semibold text-gray-800">{atomTitle} AI</span>
+            <span className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded-full">
+              Session: {sessionId}
+            </span>
           </div>
           <div className="flex items-center space-x-2">
             {/* Session Management Buttons - Icon-based like ChatGPT */}

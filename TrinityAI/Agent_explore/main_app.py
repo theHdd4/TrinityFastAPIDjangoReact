@@ -195,7 +195,7 @@ def explore_history(session_id: str):
         logger.error(f"Error retrieving session history: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to retrieve session history: {str(e)}")
 
-@router.post("/chat")
+@router.post("/explore-chat")
 def chat_endpoint(request: ChatRequest):
     """
     Chat endpoint that matches the pattern used by other working agents.

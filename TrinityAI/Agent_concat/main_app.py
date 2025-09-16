@@ -52,6 +52,9 @@ agent = SmartConcatAgent(
 class ConcatRequest(BaseModel):
     prompt: str
     session_id: Optional[str] = None
+    client_name: str = ""
+    app_name: str = ""
+    project_name: str = ""
 
 @router.post("/concat")
 def concatenate_files(request: ConcatRequest):
@@ -64,7 +67,8 @@ def concatenate_files(request: ConcatRequest):
     
     try:
         # Process with complete memory context
-        result = agent.process_request(request.prompt, request.session_id)
+        result = agent.process_request(request.prompt, request.session_id, 
+                                     request.client_name, request.app_name, request.project_name)
 
         # Add timing
         processing_time = round(time.time() - start_time, 2)

@@ -16,7 +16,7 @@ from .ai_logic import (
 from file_loader import FileLoader
 
 logger = logging.getLogger(__name__)
-ALLOWED_KEYS = {"success", "message", "json", "session_id", "suggestions"}
+ALLOWED_KEYS = {"success", "message", "json", "session_id", "suggestions", "reasoning", "used_memory", "next_steps", "error", "processing_time"}
 
 
 class SmartCreateTransformAgent:
@@ -55,6 +55,22 @@ class SmartCreateTransformAgent:
         
         # Load files on initialization
         self.files_with_columns = self.file_loader.load_files()
+    
+    def set_context(self, client_name: str = "", app_name: str = "", project_name: str = "") -> None:
+        """
+        Set environment context for dynamic path resolution.
+        This ensures the API call will fetch the correct path for the current project.
+        """
+        if client_name or app_name or project_name:
+            if client_name:
+                os.environ["CLIENT_NAME"] = client_name
+            if app_name:
+                os.environ["APP_NAME"] = app_name
+            if project_name:
+                os.environ["PROJECT_NAME"] = project_name
+            logger.info(f"🔧 Environment context set for dynamic path resolution: {client_name}/{app_name}/{project_name}")
+        else:
+            logger.info("🔧 Using existing environment context for dynamic path resolution")
 
     def _load_files(self):
         """Load files using the standardized FileLoader."""
@@ -69,7 +85,10 @@ class SmartCreateTransformAgent:
             buf.append(f"\n--- {role} {i} ---\n{msg.content}")
         return "\n".join(buf)
 
-    def process_request(self, user_prompt: str, session_id: Optional[str] = None) -> dict:
+    def process_request(self, user_prompt: str, session_id: Optional[str] = None, client_name: str = "", app_name: str = "", project_name: str = "") -> dict:
+        # Set environment context for dynamic path resolution (like explore agent)
+        self.set_context(client_name, app_name, project_name)
+        
         if not user_prompt.strip():
             return {
                 "success": False,

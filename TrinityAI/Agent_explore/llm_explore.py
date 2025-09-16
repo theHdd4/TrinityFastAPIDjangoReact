@@ -286,7 +286,7 @@ class ExploreAgent:
                 project_name = os.getenv("PROJECT_NAME", "")
                 
                 # Use the correct backend API endpoint for dynamic path resolution (same as merge agent)
-                validate_api_url = os.getenv("VALIDATE_API_URL", "http://fastapi:8004")
+                validate_api_url = os.getenv("VALIDATE_API_URL", "http://fastapi:8001")
                 if not validate_api_url.startswith("http"):
                     validate_api_url = f"http://{validate_api_url}"
                 

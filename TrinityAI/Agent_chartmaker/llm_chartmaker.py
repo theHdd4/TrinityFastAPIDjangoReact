@@ -66,6 +66,22 @@ class ChartMakerAgent:
         
         # Load files on initialization
         self._load_files()
+    
+    def set_context(self, client_name: str = "", app_name: str = "", project_name: str = "") -> None:
+        """
+        Set environment context for dynamic path resolution.
+        This ensures the API call will fetch the correct path for the current project.
+        """
+        if client_name or app_name or project_name:
+            if client_name:
+                os.environ["CLIENT_NAME"] = client_name
+            if app_name:
+                os.environ["APP_NAME"] = app_name
+            if project_name:
+                os.environ["PROJECT_NAME"] = project_name
+            logger.info(f"🔧 Environment context set for dynamic path resolution: {client_name}/{app_name}/{project_name}")
+        else:
+            logger.info("🔧 Using existing environment context for dynamic path resolution")
 
     def _maybe_update_prefix(self) -> None:
         """Dynamically updates the MinIO prefix and reloads files."""
@@ -725,12 +741,17 @@ class ChartMakerAgent:
     #     # Function removed - unified approach handles all chart types
     #     pass
 
-    def process(self, user_prompt: str, session_id: Optional[str] = None) -> Dict:
+    def process(self, user_prompt: str, session_id: Optional[str] = None, 
+                client_name: str = "", app_name: str = "", project_name: str = "") -> Dict:
         """
         Main entry point to process a user's request to create charts.
         Enhanced to match Merge agent's robust approach.
         """
         logger.info(f"Processing chart request for session '{session_id}': '{user_prompt}'")
+        
+        # Set environment context for dynamic path resolution (like explore agent)
+        self.set_context(client_name, app_name, project_name)
+        
         if not user_prompt or not user_prompt.strip():
             return {"success": False, "error": "Prompt cannot be empty.", "session_id": session_id}
 
