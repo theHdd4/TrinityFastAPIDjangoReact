@@ -1018,7 +1018,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
         className="hidden"
       />
 
-      <div ref={containerRef} className="flex flex-col h-full">
+      <div ref={containerRef} className="flex flex-col h-full min-h-0">
         {data?.fileName && (
           <div className="border-b border-blue-200 bg-blue-50">
             <div className="flex items-center px-6 py-4">
@@ -1031,8 +1031,8 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
             </div>
           </div>
         )}
-        <div className="flex-1 p-4 overflow-hidden">
-          <div className="mx-auto max-w-screen-2xl rounded-2xl border border-slate-200 bg-white shadow-sm flex flex-col h-full">
+        <div className="flex-1 p-4 overflow-hidden min-h-0">
+          <div className="mx-auto max-w-screen-2xl rounded-2xl border border-slate-200 bg-white shadow-sm flex flex-col h-full min-h-0">
         {/* Controls section */}
         <div className="flex-shrink-0 flex items-center justify-between border-b border-slate-200 px-5 py-3">
             <div className="flex items-center space-x-4">
@@ -1063,7 +1063,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
           </div>
 
           {/* Table section - Excel-like appearance */}
-          <div className="flex-1 flex flex-col overflow-hidden">
+          <div className="flex-1 flex flex-col overflow-hidden min-h-0">
             {data && (
               <FormularBar
                 data={data}
@@ -1076,7 +1076,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                 onFormulaSubmit={handleFormulaSubmit}
               />
             )}
-            <div className="flex-1 overflow-auto">
+            <div className="flex-1 overflow-auto min-h-0">
               {/* Placeholder for when no data is loaded */}
               {!data || !Array.isArray(data.headers) || data.headers.length === 0 ? (
                 <div className="flex flex-1 items-center justify-center bg-gray-50">
