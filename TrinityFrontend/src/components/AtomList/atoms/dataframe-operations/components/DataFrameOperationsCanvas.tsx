@@ -263,15 +263,19 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
       const baseName = data.fileName ? data.fileName.replace(/\.[^/.]+$/, '') : `dataframe_${Date.now()}`;
       const filename = `DF_OPS_${nextSerial}_${baseName}.arrow`;
 
+      const payload: Record<string, unknown> = { csv_data, filename };
+      if (fileId) {
+        payload.df_id = fileId;
+      }
       const response = await fetch(`${DATAFRAME_OPERATIONS_API}/save`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ csv_data, filename }),
+        body: JSON.stringify(payload),
       });
       if (!response.ok) {
         throw new Error(`Save failed: ${response.statusText}`);
       }
-      await response.json();
+      const result = await response.json();
       setSaveSuccess(true);
       if (saveSuccessTimeout.current) clearTimeout(saveSuccessTimeout.current);
       saveSuccessTimeout.current = setTimeout(() => setSaveSuccess(false), 2000);
@@ -280,10 +284,11 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
         tableData: { ...data, fileName: filename },
         columnWidths: settings.columnWidths,
         rowHeights: settings.rowHeights,
+        fileId: (result?.df_id as string | undefined) ?? fileId ?? settings.fileId ?? null,
       });
       toast({
         title: 'DataFrame Saved',
-        description: `${filename} saved successfully.`,
+        description: result?.message ?? `${filename} saved successfully.`,
         variant: 'default',
       });
     } catch (err) {

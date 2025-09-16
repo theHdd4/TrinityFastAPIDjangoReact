@@ -12,6 +12,7 @@ import datetime
 import math
 from bisect import bisect_right
 from typing import Dict, Any, List
+from pydantic import BaseModel
 from app.DataStorageRetrieval.arrow_client import download_table_bytes
 from app.features.data_upload_validate.app.routes import get_object_prefix
 
@@ -393,25 +394,41 @@ async def load_cached_dataframe(object_name: str = Body(..., embed=True)):
     SESSIONS[df_id] = df
     return _df_payload(df, df_id)
 
+class SaveRequest(BaseModel):
+    csv_data: str | None = None
+    filename: str | None = None
+    df_id: str | None = None
+
+
 @router.post("/save")
-async def save_dataframe(
-    csv_data: str = Body(..., embed=True),
-    filename: str = Body(..., embed=True)
-):
-    """Save a dataframe (CSV) to MinIO under a `dataframe operations` folder using the original file name."""
+async def save_dataframe(payload: SaveRequest):
+    """Save a dataframe session to MinIO, falling back to CSV payloads when no session is available."""
+
+    df: pl.DataFrame | None = None
+    session_id = payload.df_id
+
+    if session_id:
+        df = SESSIONS.get(session_id)
+        if df is None and payload.csv_data is None:
+            raise HTTPException(status_code=404, detail="DataFrame session not found")
+
+    if df is None:
+        if not payload.csv_data:
+            raise HTTPException(status_code=400, detail="csv_data is required when df_id is missing")
+        try:
+            df = pl.read_csv(io.StringIO(payload.csv_data))
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f"Invalid csv_data: {exc}") from exc
+
+    filename = (payload.filename or "").strip()
+    if not filename:
+        stub = (session_id or str(uuid.uuid4())).replace("-", "")[:8]
+        filename = f"{stub}_dataframe_ops.arrow"
+    if not filename.endswith(".arrow"):
+        filename += ".arrow"
+
     try:
-        df = pl.read_csv(io.StringIO(csv_data))
-
-        # Generate a filename if none supplied
-        if not filename:
-            df_id = str(uuid.uuid4())[:8]
-            filename = f"{df_id}_dataframe_ops.arrow"
-        if not filename.endswith(".arrow"):
-            filename += ".arrow"
-
-        # Determine current prefix and ensure folder exists
         prefix = await get_object_prefix()
-        # Place results inside a dedicated "dataframe operations" folder
         dfops_prefix = f"{prefix}dataframe operations/"
         try:
             minio_client.stat_object(MINIO_BUCKET, dfops_prefix)
@@ -420,7 +437,6 @@ async def save_dataframe(
 
         object_name = f"{dfops_prefix}{filename}"
 
-        # Convert to Arrow and upload
         arrow_buffer = io.BytesIO()
         df.write_ipc(arrow_buffer)
         arrow_bytes = arrow_buffer.getvalue()
@@ -432,14 +448,19 @@ async def save_dataframe(
             content_type="application/octet-stream",
         )
 
-        return {
+        response = {
             "result_file": object_name,
             "shape": df.shape,
             "columns": list(df.columns),
             "message": "DataFrame saved successfully",
         }
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        if session_id:
+            response["df_id"] = session_id
+        return response
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 # ---------------------------------------------------------------------------
