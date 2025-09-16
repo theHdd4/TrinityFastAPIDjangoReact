@@ -128,9 +128,11 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
       if (settings.dimensionMap && Object.keys(settings.dimensionMap).length > 0) {
         return;
       }
-      const raw = await fetchDimensionMapping({ objectName: settings.dataSource });
+      const { mapping: rawMapping } = await fetchDimensionMapping({
+        objectName: settings.dataSource,
+      });
       if (!active) return;
-      const mapping = filterUnattributed(raw);
+      const mapping = filterUnattributed(rawMapping);
       setDimensionMap(mapping);
       onUpdateSettings({ dimensionMap: mapping });
     };

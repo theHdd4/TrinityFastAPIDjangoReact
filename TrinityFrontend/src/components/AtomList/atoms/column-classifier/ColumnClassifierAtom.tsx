@@ -38,10 +38,13 @@ const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
 
   const processedFileRef = React.useRef<string | null>(null);
   const pendingMappingRef = React.useRef<AbortController | null>(null);
+  const lastActiveIndexRef = React.useRef<number | null>(null);
+  const lastFileNameRef = React.useRef<string | null>(null);
 
   React.useEffect(() => {
     const activeIndex = classifierData.activeFileIndex ?? 0;
     const activeFile = classifierData.files[activeIndex];
+    const fileName = activeFile?.fileName || null;
 
     const ensureToggleState = (enable: boolean, dims: string[]) => {
       const sortedDims = enable ? [...dims].sort() : [];
@@ -58,8 +61,14 @@ const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
       }
     };
 
+    const fileChanged =
+      lastActiveIndexRef.current !== activeIndex ||
+      lastFileNameRef.current !== fileName;
+
     if (!activeFile) {
       processedFileRef.current = null;
+      lastActiveIndexRef.current = classifierData.activeFileIndex ?? null;
+      lastFileNameRef.current = null;
       if (pendingMappingRef.current) {
         pendingMappingRef.current.abort();
         pendingMappingRef.current = null;
@@ -70,36 +79,23 @@ const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
       return;
     }
 
-    const fileName = activeFile.fileName;
-    const customDims = activeFile.customDimensions || {};
-    const customKeys = Object.keys(customDims);
-
-    if (customKeys.length > 0) {
-      processedFileRef.current = fileName || null;
-      if (pendingMappingRef.current) {
-        pendingMappingRef.current.abort();
-        pendingMappingRef.current = null;
-      }
-      ensureToggleState(true, customKeys);
-      return;
-    }
-
-    ensureToggleState(false, []);
-
-    if (!fileName) {
+    if (fileChanged) {
+      lastActiveIndexRef.current = activeIndex;
+      lastFileNameRef.current = fileName;
       processedFileRef.current = null;
       if (pendingMappingRef.current) {
         pendingMappingRef.current.abort();
         pendingMappingRef.current = null;
       }
+      ensureToggleState(false, []);
+    }
+
+    if (!fileName) {
+      processedFileRef.current = null;
       return;
     }
 
     if (processedFileRef.current === fileName) {
-      if (pendingMappingRef.current) {
-        pendingMappingRef.current.abort();
-        pendingMappingRef.current = null;
-      }
       return;
     }
 
@@ -111,7 +107,7 @@ const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
 
     (async () => {
       try {
-        const mapping = await fetchDimensionMapping({
+        const { mapping, config } = await fetchDimensionMapping({
           objectName: fileName,
           signal: controller.signal,
         });
@@ -120,40 +116,95 @@ const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
         }
         processedFileRef.current = fileName;
         const keys = Object.keys(mapping || {});
-        if (keys.length > 0) {
-          const sortedKeys = [...keys].sort();
+        const sortedKeys = keys.length > 0 ? [...keys].sort() : [];
+        const store = useLaboratoryStore.getState();
+        const atomSnapshot = store.getAtom(atomId);
+
+        if (!atomSnapshot) {
+          ensureToggleState(keys.length > 0, sortedKeys);
+          return;
+        }
+
+        const snapshotSettings: SettingsType = {
+          ...DEFAULT_COLUMN_CLASSIFIER_SETTINGS,
+          ...(atomSnapshot.settings as SettingsType),
+        };
+        const snapshotData =
+          snapshotSettings.data || DEFAULT_COLUMN_CLASSIFIER_SETTINGS.data;
+
+        if (!snapshotData.files.length) {
+          ensureToggleState(keys.length > 0, sortedKeys);
+          return;
+        }
+
+        const snapshotIndex = snapshotData.activeFileIndex ?? activeIndex;
+        const identifierSet = new Set(
+          Array.isArray(config?.identifiers) ? config?.identifiers : [],
+        );
+        const measureSet = new Set(
+          Array.isArray(config?.measures) ? config?.measures : [],
+        );
+        const syncCategories = identifierSet.size > 0 || measureSet.size > 0;
+
+        const updatedFiles = snapshotData.files.map((file, index) => {
+          if (index !== snapshotIndex) {
+            return file;
+          }
+          const updatedColumns = syncCategories
+            ? file.columns.map(col => {
+                if (identifierSet.has(col.name)) {
+                  return { ...col, category: 'identifiers' };
+                }
+                if (measureSet.has(col.name)) {
+                  return { ...col, category: 'measures' };
+                }
+                return { ...col, category: 'unclassified' };
+              })
+            : file.columns;
+          return {
+            ...file,
+            columns: updatedColumns,
+            customDimensions: keys.length > 0 ? mapping : {},
+          };
+        });
+
+        store.updateAtomSettings(atomId, {
+          data: { ...snapshotData, files: updatedFiles },
+          dimensions: sortedKeys,
+          enableDimensionMapping: keys.length > 0,
+          filterColumnViewUnique:
+            snapshotSettings.filterColumnViewUnique ?? true,
+        });
+      } catch (err) {
+        if (!controller.signal.aborted) {
+          processedFileRef.current = fileName;
           const store = useLaboratoryStore.getState();
           const atomSnapshot = store.getAtom(atomId);
-          if (!atomSnapshot) {
-            ensureToggleState(true, sortedKeys);
-          } else {
+          if (atomSnapshot) {
             const snapshotSettings: SettingsType = {
               ...DEFAULT_COLUMN_CLASSIFIER_SETTINGS,
               ...(atomSnapshot.settings as SettingsType),
             };
             const snapshotData =
               snapshotSettings.data || DEFAULT_COLUMN_CLASSIFIER_SETTINGS.data;
-            const snapshotIndex = snapshotData.activeFileIndex ?? 0;
-            const updatedFiles = snapshotData.files.map((file, index) =>
-              index === snapshotIndex
-                ? { ...file, customDimensions: mapping }
-                : file
-            );
-            store.updateAtomSettings(atomId, {
-              data: { ...snapshotData, files: updatedFiles },
-              dimensions: sortedKeys,
-              enableDimensionMapping: true,
-              filterColumnViewUnique:
-                snapshotSettings.filterColumnViewUnique ?? true,
-            });
+            if (snapshotData.files.length) {
+              const snapshotIndex = snapshotData.activeFileIndex ?? activeIndex;
+              const clearedFiles = snapshotData.files.map((file, index) =>
+                index === snapshotIndex
+                  ? { ...file, customDimensions: {} }
+                  : file,
+              );
+              store.updateAtomSettings(atomId, {
+                data: { ...snapshotData, files: clearedFiles },
+                dimensions: [],
+                enableDimensionMapping: false,
+              });
+            } else {
+              ensureToggleState(false, []);
+            }
+          } else {
+            ensureToggleState(false, []);
           }
-        } else {
-          ensureToggleState(false, []);
-        }
-      } catch (err) {
-        if (!controller.signal.aborted) {
-          processedFileRef.current = fileName;
-          ensureToggleState(false, []);
         }
       } finally {
         if (pendingMappingRef.current === controller) {

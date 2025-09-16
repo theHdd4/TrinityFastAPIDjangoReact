@@ -5,15 +5,29 @@ type FetchDimensionMappingOptions = {
   signal?: AbortSignal;
 };
 
+export type DimensionMappingConfig = {
+  identifiers?: string[];
+  measures?: string[];
+  dimensions?: Record<string, string[]>;
+  file_name?: string;
+  [key: string]: any;
+};
+
+export type DimensionMappingResult = {
+  mapping: Record<string, string[]>;
+  config?: DimensionMappingConfig | null;
+  source?: string;
+};
+
 export async function fetchDimensionMapping(
   options?: FetchDimensionMappingOptions,
-): Promise<Record<string, string[]>> {
+): Promise<DimensionMappingResult> {
   const { objectName, signal } = options ?? {};
   try {
     const envStr = localStorage.getItem('env');
     if (!envStr) {
       console.warn('dimension mapping fetch skipped: no env');
-      return {};
+      return { mapping: {} };
     }
     const env = JSON.parse(envStr);
     const payload = {
@@ -31,14 +45,26 @@ export async function fetchDimensionMapping(
       signal,
     });
     if (res.status === 404) {
-      return {};
+      return { mapping: {} };
     }
     if (res.ok) {
       const data = await res.json();
-      return data.mapping || {};
+      const mapping =
+        (data && typeof data === 'object' && data.mapping && typeof data.mapping === 'object'
+          ? data.mapping
+          : {}) || {};
+      const config =
+        data && typeof data === 'object' && data.config && typeof data.config === 'object'
+          ? data.config
+          : undefined;
+      const source =
+        data && typeof data === 'object' && typeof data.source === 'string'
+          ? data.source
+          : undefined;
+      return { mapping, config, source };
     }
   } catch (err) {
     console.warn('dimension mapping fetch failed', err);
   }
-  return {};
+  return { mapping: {} };
 }
