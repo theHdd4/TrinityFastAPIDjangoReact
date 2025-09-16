@@ -75,9 +75,9 @@ const LoadingAnimation: React.FC<LoadingAnimationProps> = ({
   return (
     <div className={`absolute inset-0 flex items-center justify-center bg-white ${className}`}>
       <canvas ref={canvasRef} className="absolute inset-0 w-full h-full" />
-      <div className="relative z-10 text-center px-6">
+      <div className="relative z-10 text-center px-6 flex flex-col items-center">
         <h3 className="loading-text text-2xl font-light text-black mb-2 inline-block px-4 py-2">Loading</h3>
-        <div className="loading-status inline-flex items-center justify-center space-x-1 text-black px-4 py-2">
+        <div className="loading-status mt-2 flex items-center justify-center space-x-1 text-black px-4 py-2">
           <span>{status}</span>
           <span className="animate-pulse">.</span>
           <span className="animate-pulse animation-delay-300">.</span>
@@ -90,13 +90,13 @@ const LoadingAnimation: React.FC<LoadingAnimationProps> = ({
         .animation-delay-600 { animation-delay: 600ms; }
         .loading-text,
         .loading-status {
-          border: 1px solid rgba(255, 255, 255, 0.7);
+          border: 2px solid rgba(255, 255, 255, 0.85);
           border-radius: 0.75rem;
-          box-shadow: 0 0 12px rgba(255, 255, 255, 0.35);
-          text-shadow: 0 0 6px rgba(255, 255, 255, 0.75);
+          box-shadow: 0 0 14px rgba(255, 255, 255, 0.45);
+          text-shadow: 0 0 6px rgba(255, 255, 255, 0.85);
         }
         .loading-status span {
-          text-shadow: 0 0 6px rgba(255, 255, 255, 0.75);
+          text-shadow: 0 0 6px rgba(255, 255, 255, 0.85);
         }
       `}</style>
     </div>
