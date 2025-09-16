@@ -864,9 +864,11 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
                 </Card>
               ))
             ) : (
-              <div className="col-span-1 text-sm font-medium text-red-600">
-                {dimensionError || 'Please configure dimensions using Column Classifier'}
-              </div>
+              !dimensionError && (
+                <div className="col-span-1 text-sm font-medium text-red-600">
+                  Please configure dimensions using Column Classifier
+                </div>
+              )
             )}
           </div>
 
