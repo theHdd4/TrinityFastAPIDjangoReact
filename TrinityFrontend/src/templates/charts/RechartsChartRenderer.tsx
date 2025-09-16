@@ -374,8 +374,21 @@ const DEFAULT_COLORS = [
 const FONT_FAMILY = `'Inter', 'Segoe UI', sans-serif`;
 
 // Number formatting function for large numbers with proper precision
-const formatLargeNumber = (value: number): string => {
-  const absValue = Math.abs(value);
+const formatLargeNumber = (value: any): string => {
+  // Handle non-numeric values like ChartMaker does
+  if (value === undefined || value === null || isNaN(value)) {
+    return "";
+  }
+  
+  // Convert to number if it's a string
+  const numValue = typeof value === 'string' ? parseFloat(value) : value;
+  
+  // Check if conversion was successful
+  if (isNaN(numValue)) {
+    return "";
+  }
+  
+  const absValue = Math.abs(numValue);
 
   const formatScaled = (scaled: number): string => {
     // Keep at most two decimals and trim trailing zeros (e.g. 2.34M, 2M)
@@ -383,22 +396,35 @@ const formatLargeNumber = (value: number): string => {
   };
 
   if (absValue >= 1_000_000_000) { // Billions (10^9)
-    return `${formatScaled(value / 1_000_000_000)}B`;
+    return `${formatScaled(numValue / 1_000_000_000)}B`;
   } else if (absValue >= 1_000_000) { // Millions (10^6)
-    return `${formatScaled(value / 1_000_000)}M`;
+    return `${formatScaled(numValue / 1_000_000)}M`;
   } else if (absValue >= 1_000) { // Thousands (10^3)
-    return `${formatScaled(value / 1_000)}K`;
+    return `${formatScaled(numValue / 1_000)}K`;
   }
-  return parseFloat(value.toFixed(2)).toString(); // Numbers less than 1000, max 2 decimals
+  return parseFloat(numValue.toFixed(2)).toString(); // Numbers less than 1000, max 2 decimals
 };
 
 // Format numbers for tooltips - show exact values without suffixes
-const formatTooltipNumber = (value: number): string => {
+const formatTooltipNumber = (value: any): string => {
+  // Handle non-numeric values like ChartMaker does
+  if (value === undefined || value === null || isNaN(value)) {
+    return "";
+  }
+  
+  // Convert to number if it's a string
+  const numValue = typeof value === 'string' ? parseFloat(value) : value;
+  
+  // Check if conversion was successful
+  if (isNaN(numValue)) {
+    return "";
+  }
+  
   // For tooltips, show the exact number with proper formatting
-  if (Number.isInteger(value)) {
-    return value.toLocaleString(); // Add commas for thousands separators
+  if (Number.isInteger(numValue)) {
+    return numValue.toLocaleString(); // Add commas for thousands separators
   } else {
-    return value.toLocaleString(undefined, { 
+    return numValue.toLocaleString(undefined, { 
       minimumFractionDigits: 0, 
       maximumFractionDigits: 6 
     }); // Show up to 6 decimal places if needed
