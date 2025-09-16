@@ -76,8 +76,8 @@ const LoadingAnimation: React.FC<LoadingAnimationProps> = ({
     <div className={`absolute inset-0 flex items-center justify-center bg-white ${className}`}>
       <canvas ref={canvasRef} className="absolute inset-0 w-full h-full" />
       <div className="relative z-10 text-center px-6 flex flex-col items-center">
-        <h3 className="loading-text text-2xl font-light text-black mb-2 inline-block px-4 py-2">Loading</h3>
-        <div className="loading-status mt-2 flex items-center justify-center space-x-1 text-black px-4 py-2">
+        <h3 className="loading-text text-2xl font-light mb-2 inline-block px-4 py-2">Loading</h3>
+        <div className="loading-status mt-2 flex items-center justify-center space-x-1 px-4 py-2">
           <span>{status}</span>
           <span className="animate-pulse">.</span>
           <span className="animate-pulse animation-delay-300">.</span>
@@ -90,13 +90,16 @@ const LoadingAnimation: React.FC<LoadingAnimationProps> = ({
         .animation-delay-600 { animation-delay: 600ms; }
         .loading-text,
         .loading-status {
-          border: 2px solid rgba(255, 255, 255, 0.85);
+          border: 4px solid rgba(255, 255, 255, 0.9);
           border-radius: 0.75rem;
-          box-shadow: 0 0 14px rgba(255, 255, 255, 0.45);
-          text-shadow: 0 0 6px rgba(255, 255, 255, 0.85);
+          box-shadow: 0 0 18px rgba(255, 255, 255, 0.55);
         }
+        .loading-text,
         .loading-status span {
-          text-shadow: 0 0 6px rgba(255, 255, 255, 0.85);
+          color: #0f172a;
+          -webkit-text-stroke: 1.5px rgba(255, 255, 255, 0.92);
+          paint-order: stroke fill;
+          text-shadow: 0 0 10px rgba(255, 255, 255, 0.75);
         }
       `}</style>
     </div>
