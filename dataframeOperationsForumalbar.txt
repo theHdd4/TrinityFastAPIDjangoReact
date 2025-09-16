@@ -1,0 +1,61 @@
+Dataframe Operations Formula Bar API Usage
+=========================================
+
+Endpoint
+--------
+POST `${DATAFRAME_OPERATIONS_API}/apply_formula`
+
+Request Body
+------------
+```
+{
+  "df_id": "<backend dataframe identifier>",
+  "target_column": "<column to write the result to>",
+  "formula": "=<expression using column names and functions>"
+}
+```
+
+Usage Notes
+-----------
+* Always prefix formulas with `=` when sending them to the API.
+* Reference dataframe columns by their display names (for example `Revenue`, `Region`, `Order Date`).
+* The endpoint evaluates expressions row by row and writes the result into the `target_column`. When the column does not exist it will be created automatically.
+* The `CORR(colA, colB)` function is computed once for the full dataset and the same value is written to every row.
+* When a formula cannot be evaluated for a particular row (for example division by zero) the resulting cell is left empty (`null`).
+
+Supported Operations
+--------------------
+The following helpers are available in addition to standard arithmetic (`+`, `-`, `*`, `/`, `**`) and comparisons:
+
+* `SUM(col1, col2, ...)` – Sum the provided numeric columns.
+* `AVG(col1, col2, ...)` / `MEAN(col1, col2, ...)` – Row-wise mean of the provided columns.
+* `PROD(col1, col2, ...)` – Multiply numeric values from the listed columns.
+* `DIV(col1, col2, ...)` – Divide sequentially from the first value by the remaining values.
+* `MAX(col1, col2, ...)` / `MIN(col1, col2, ...)` – Row-wise maximum or minimum.
+* `CORR(colA, colB)` – Pearson correlation computed across the entire dataframe for the two columns.
+* `IF(condition, value_if_true, value_if_false)` – Conditional branching (supports nested calls).
+* `ISNULL(col)` – Check whether a value is empty/`null`/`NaN`.
+* `FILLNA(col, replacement)` – Replace missing values with the provided fallback.
+* `LOWER(col)` / `UPPER(col)` – Convert text to lower/upper case.
+* `LEN(col)` – Length of the text representation of the value.
+* `SUBSTR(col, start, end)` – Substring from `start` index up to (but not including) `end`.
+* `STR_REPLACE(col, "old", "new")` – Replace occurrences of `old` with `new` in text values.
+* `MAP(col, {"A": "Alpha", "B": "Beta"})` – Map categorical values using a dictionary literal.
+* `BIN(col, [lower, upper, ...])` – Assign numeric values to bucket labels such as `"0-50"`, `< start`, or `end+`.
+* `ABS(col)` – Absolute value.
+* `ROUND(col, digits)` / `FLOOR(col)` / `CEIL(col)` – Rounding helpers.
+* `EXP(col)` / `LOG(col)` / `SQRT(col)` – Exponential, natural logarithm, and square-root helpers.
+* `YEAR(col)` / `MONTH(col)` / `DAY(col)` / `WEEKDAY(col)` – Extract parts of a date/time value (weekday uses the full day name).
+* `DATE_DIFF(colA, colB)` – Difference in days between two date columns (`colA - colB`).
+
+Examples
+--------
+```
+=SUM(Revenue, Cost)
+=IF(Score > 90, "High", IF(Score > 70, "Medium", "Low"))
+=STR_REPLACE(Product, "old", "new")
+=DATE_DIFF(Order Date, Ship Date)
+=IF(ISNULL(Gender), 0, Gender)
+```
+
+Combine these helpers as needed; the evaluator also supports nesting (for example `=ROUND(SUM(A, B) / 2, 2)`).

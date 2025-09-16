@@ -7,7 +7,10 @@ import polars as pl
 import numba as nb
 import io
 import uuid
-from typing import Dict, Any, List
+import re
+import math
+import datetime as dt
+from typing import Dict, Any, List, Tuple
 from app.DataStorageRetrieval.arrow_client import download_table_bytes
 from app.features.data_upload_validate.app.routes import get_object_prefix
 
@@ -28,6 +31,381 @@ minio_client = Minio(
 
 # In-memory storage for dataframe sessions
 SESSIONS: Dict[str, pl.DataFrame] = {}
+
+
+SAFE_GLOBALS = {"__builtins__": {}}
+
+
+def _is_null(value: Any) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, float) and math.isnan(value):
+        return True
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        return lowered in {"", "nan", "null"}
+    return False
+
+
+def _to_number(value: Any) -> float | None:
+    if _is_null(value):
+        return None
+    if isinstance(value, bool):
+        return float(value)
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value)
+        except ValueError:
+            return None
+    return None
+
+
+def _to_int(value: Any) -> int | None:
+    number = _to_number(value)
+    if number is None:
+        return None
+    try:
+        return int(number)
+    except (TypeError, ValueError):
+        return None
+
+
+def _parse_date(value: Any) -> dt.datetime | None:
+    if value is None:
+        return None
+    if isinstance(value, dt.datetime):
+        return value
+    if isinstance(value, dt.date):
+        return dt.datetime.combine(value, dt.time.min)
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        try:
+            return dt.datetime.fromisoformat(text)
+        except ValueError:
+            pass
+        common_formats = [
+            "%Y-%m-%d",
+            "%Y/%m/%d",
+            "%d-%m-%Y",
+            "%m/%d/%Y",
+            "%Y-%m-%d %H:%M:%S",
+            "%Y/%m/%d %H:%M:%S",
+        ]
+        for fmt in common_formats:
+            try:
+                return dt.datetime.strptime(text, fmt)
+            except ValueError:
+                continue
+        try:
+            parsed = (
+                pl.Series([text])
+                .str.to_datetime(strict=False)
+                .to_list()[0]
+            )
+        except Exception:
+            parsed = None
+        if isinstance(parsed, dt.datetime):
+            return parsed
+        if isinstance(parsed, dt.date):
+            return dt.datetime.combine(parsed, dt.time.min)
+    return None
+
+
+def _bin_value(value: Any, bins: Any) -> Any:
+    if not isinstance(bins, (list, tuple)) or len(bins) < 2:
+        return None
+    numeric = _to_number(value)
+    if numeric is None:
+        return None
+    numeric_bins: List[float] = []
+    for b in bins:
+        num = _to_number(b)
+        if num is None:
+            return None
+        numeric_bins.append(num)
+    for idx in range(len(numeric_bins) - 1):
+        start = numeric_bins[idx]
+        end = numeric_bins[idx + 1]
+        if numeric < start:
+            break
+        if start <= numeric < end:
+            return f"{start}-{end}"
+    if numeric < numeric_bins[0]:
+        return f"< {numeric_bins[0]}"
+    if numeric >= numeric_bins[-1]:
+        return f"{numeric_bins[-1]}+"
+    return None
+
+
+def _alias_columns(expr: str, columns: List[str]) -> Tuple[str, Dict[str, str]]:
+    alias_map: Dict[str, str] = {}
+    sanitized = expr
+    for idx, column in enumerate(sorted(columns, key=len, reverse=True)):
+        alias = f"__col_{idx}"
+        replaced, found = _replace_column_tokens(sanitized, column, alias)
+        if found:
+            alias_map[alias] = column
+            sanitized = replaced
+    return sanitized, alias_map
+
+
+def _replace_column_tokens(expr: str, column: str, alias: str) -> Tuple[str, bool]:
+    result: List[str] = []
+    i = 0
+    found = False
+    length = len(column)
+    while i < len(expr):
+        ch = expr[i]
+        if ch in {'"', "'"}:
+            quote = ch
+            result.append(ch)
+            i += 1
+            while i < len(expr):
+                result.append(expr[i])
+                if expr[i] == quote and expr[i - 1] != '\\':
+                    i += 1
+                    break
+                i += 1
+            continue
+        if expr.startswith(column, i):
+            prev_char = expr[i - 1] if i > 0 else ''
+            next_index = i + length
+            next_char = expr[next_index] if next_index < len(expr) else ''
+            if (
+                (prev_char and (prev_char.isalnum() or prev_char == '_'))
+                or (next_char and (next_char.isalnum() or next_char == '_'))
+            ):
+                result.append(ch)
+                i += 1
+                continue
+            result.append(alias)
+            i += length
+            found = True
+            continue
+        result.append(ch)
+        i += 1
+    return ''.join(result), found
+
+
+def func_sum(*values: Any) -> Any:
+    numbers = [n for n in (_to_number(v) for v in values) if n is not None]
+    if not numbers:
+        return 0
+    return sum(numbers)
+
+
+def func_avg(*values: Any) -> Any:
+    numbers = [n for n in (_to_number(v) for v in values) if n is not None]
+    if not numbers:
+        return 0
+    return sum(numbers) / len(numbers)
+
+
+def func_prod(*values: Any) -> Any:
+    numbers = [n for n in (_to_number(v) for v in values) if n is not None]
+    if not numbers:
+        return 1
+    result = 1.0
+    for num in numbers:
+        result *= num
+    return result
+
+
+def func_div(*values: Any) -> Any:
+    numbers = [n for n in (_to_number(v) for v in values) if n is not None]
+    if not numbers:
+        return None
+    result = numbers[0]
+    for num in numbers[1:]:
+        if num == 0:
+            continue
+        result /= num
+    return result
+
+
+def func_max(*values: Any) -> Any:
+    numbers = [n for n in (_to_number(v) for v in values) if n is not None]
+    if not numbers:
+        return None
+    return max(numbers)
+
+
+def func_min(*values: Any) -> Any:
+    numbers = [n for n in (_to_number(v) for v in values) if n is not None]
+    if not numbers:
+        return None
+    return min(numbers)
+
+
+def func_abs(value: Any) -> Any:
+    number = _to_number(value)
+    return abs(number) if number is not None else None
+
+
+def func_round(value: Any, digits: Any = 0) -> Any:
+    number = _to_number(value)
+    if number is None:
+        return None
+    places = _to_int(digits)
+    return round(number, places if places is not None else 0)
+
+
+def func_floor(value: Any) -> Any:
+    number = _to_number(value)
+    return math.floor(number) if number is not None else None
+
+
+def func_ceil(value: Any) -> Any:
+    number = _to_number(value)
+    return math.ceil(number) if number is not None else None
+
+
+def func_exp(value: Any) -> Any:
+    number = _to_number(value)
+    return math.exp(number) if number is not None else None
+
+
+def func_log(value: Any) -> Any:
+    number = _to_number(value)
+    if number is None or number <= 0:
+        return None
+    return math.log(number)
+
+
+def func_sqrt(value: Any) -> Any:
+    number = _to_number(value)
+    if number is None or number < 0:
+        return None
+    return math.sqrt(number)
+
+
+def func_lower(value: Any) -> Any:
+    if value is None:
+        return None
+    return str(value).lower()
+
+
+def func_upper(value: Any) -> Any:
+    if value is None:
+        return None
+    return str(value).upper()
+
+
+def func_len(value: Any) -> int:
+    return len(str(value)) if value is not None else 0
+
+
+def func_substr(value: Any, start: Any, end: Any | None = None) -> Any:
+    if value is None:
+        return None
+    text = str(value)
+    start_idx = _to_int(start) or 0
+    if end is None:
+        return text[start_idx:]
+    end_idx = _to_int(end)
+    if end_idx is None:
+        return text[start_idx:]
+    return text[start_idx:end_idx]
+
+
+def func_str_replace(value: Any, old: Any, new: Any) -> Any:
+    if value is None:
+        return None
+    return str(value).replace(str(old), str(new))
+
+
+def func_year(value: Any) -> Any:
+    parsed = _parse_date(value)
+    return parsed.year if parsed else None
+
+
+def func_month(value: Any) -> Any:
+    parsed = _parse_date(value)
+    return parsed.month if parsed else None
+
+
+def func_day(value: Any) -> Any:
+    parsed = _parse_date(value)
+    return parsed.day if parsed else None
+
+
+def func_weekday(value: Any) -> Any:
+    parsed = _parse_date(value)
+    return parsed.strftime("%A") if parsed else None
+
+
+def func_date_diff(value_a: Any, value_b: Any) -> Any:
+    date_a = _parse_date(value_a)
+    date_b = _parse_date(value_b)
+    if not date_a or not date_b:
+        return None
+    delta = date_a - date_b
+    return delta.days
+
+
+def func_mean(*values: Any) -> Any:
+    return func_avg(*values)
+
+
+def func_if(condition: Any, truthy: Any, falsy: Any) -> Any:
+    return truthy if condition else falsy
+
+
+def func_bin(value: Any, bins: Any) -> Any:
+    return _bin_value(value, bins)
+
+
+def func_map(value: Any, mapping: Any) -> Any:
+    if isinstance(mapping, dict):
+        return mapping.get(value, mapping.get(str(value), value))
+    return value
+
+
+def func_isnull(value: Any) -> bool:
+    return _is_null(value)
+
+
+def func_fillna(value: Any, fill: Any) -> Any:
+    return fill if func_isnull(value) else value
+
+
+ALLOWED_FUNCTIONS = {
+    "SUM": func_sum,
+    "AVG": func_avg,
+    "MEAN": func_mean,
+    "PROD": func_prod,
+    "DIV": func_div,
+    "MAX": func_max,
+    "MIN": func_min,
+    "ABS": func_abs,
+    "ROUND": func_round,
+    "FLOOR": func_floor,
+    "CEIL": func_ceil,
+    "EXP": func_exp,
+    "LOG": func_log,
+    "SQRT": func_sqrt,
+    "LOWER": func_lower,
+    "UPPER": func_upper,
+    "LEN": func_len,
+    "SUBSTR": func_substr,
+    "STR_REPLACE": func_str_replace,
+    "YEAR": func_year,
+    "MONTH": func_month,
+    "DAY": func_day,
+    "WEEKDAY": func_weekday,
+    "DATE_DIFF": func_date_diff,
+    "IF": func_if,
+    "BIN": func_bin,
+    "MAP": func_map,
+    "ISNULL": func_isnull,
+    "FILLNA": func_fillna,
+}
+
+ALLOWED_FUNCTIONS.update({k.lower(): v for k, v in list(ALLOWED_FUNCTIONS.items())})
 
 
 def _get_df(df_id: str) -> pl.DataFrame:
@@ -260,6 +638,60 @@ async def edit_cell(df_id: str = Body(...), row: int = Body(...), column: str = 
     result = _df_payload(df, df_id)
     return result
 
+
+@router.post("/apply_formula")
+async def apply_formula(
+    df_id: str = Body(...),
+    target_column: str = Body(...),
+    formula: str = Body(...),
+):
+    """Apply a simple column-based formula to the dataframe."""
+    df = _get_df(df_id)
+    expr = formula.strip()
+    if not expr:
+        raise HTTPException(status_code=400, detail="Formula cannot be empty")
+    rows = df.to_dicts()
+    if expr.startswith("="):
+        expr_body = expr[1:].strip()
+        corr_match = re.match(r"^CORR\(([^,]+),([^)]+)\)$", expr_body, re.IGNORECASE)
+        if corr_match:
+            col_a = corr_match.group(1).strip()
+            col_b = corr_match.group(2).strip()
+            if col_a not in df.columns or col_b not in df.columns:
+                raise HTTPException(status_code=400, detail="Unknown column in CORR formula")
+            try:
+                corr_val = df.select(pl.corr(pl.col(col_a), pl.col(col_b))).to_series()[0]
+            except Exception as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            df = df.with_columns(pl.lit(corr_val).alias(target_column))
+        else:
+            sanitized_expr, alias_map = _alias_columns(expr_body, df.columns)
+            try:
+                compiled = compile(sanitized_expr, "<formula>", "eval")
+            except Exception as exc:
+                raise HTTPException(status_code=400, detail=f"Invalid formula syntax: {exc}") from exc
+            base_env = dict(ALLOWED_FUNCTIONS)
+            new_vals: List[Any] = []
+            for row in rows:
+                row_env = {alias: row.get(column) for alias, column in alias_map.items()}
+                env = {**base_env, **row_env}
+                try:
+                    value = eval(compiled, SAFE_GLOBALS, env)
+                except NameError as exc:
+                    message = exc.args[0] if exc.args else "Unknown reference"
+                    match = re.search(r"name '([^']+)' is not defined", message)
+                    missing = match.group(1) if match else "unknown"
+                    if missing in alias_map:
+                        missing = alias_map[missing]
+                    raise HTTPException(status_code=400, detail=f"Unsupported reference '{missing}' in formula") from exc
+                except Exception:
+                    value = None
+                new_vals.append(value)
+            df = df.with_columns(pl.Series(target_column, new_vals))
+    else:
+        df = df.with_columns(pl.lit(expr).alias(target_column))
+    SESSIONS[df_id] = df
+    return _df_payload(df, df_id)
 
 @router.post("/apply_udf")
 async def apply_udf(
