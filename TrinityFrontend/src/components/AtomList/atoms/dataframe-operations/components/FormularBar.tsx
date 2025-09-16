@@ -572,7 +572,6 @@ const FormularBar: React.FC<FormularBarProps> = ({
   onFormulaSubmit,
 }) => {
   const [isLibraryOpen, setIsLibraryOpen] = useState(false);
-  const [showUsageGuide, setShowUsageGuide] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedFormula, setSelectedFormula] = useState<FormulaItem | null>(null);
   const [activeTab, setActiveTab] = useState<TabValue>('all');
@@ -600,7 +599,7 @@ const FormularBar: React.FC<FormularBarProps> = ({
   }, [formulaInput]);
 
   const columnIndex = selectedCell && data ? data.headers.indexOf(selectedCell.col) : -1;
-  const cellReference = selectedCell && columnIndex >= 0 ? getCellReference(selectedCell.row, columnIndex) : 'Select Cell';
+  const cellReference = selectedCell && columnIndex >= 0 ? getCellReference(selectedCell.row, columnIndex) : '';
   const cellValue =
     selectedCell && data && columnIndex >= 0 && data.rows[selectedCell.row]
       ? safeToString(data.rows[selectedCell.row][selectedCell.col])
@@ -628,7 +627,6 @@ const FormularBar: React.FC<FormularBarProps> = ({
     onFormulaModeChange(true);
     setSelectedFormula(null);
     setIsLibraryOpen(false);
-    setShowUsageGuide(false);
     setActiveTab('all');
   };
 
@@ -706,30 +704,21 @@ const FormularBar: React.FC<FormularBarProps> = ({
     return <div className='space-y-2'>{items.map(renderFormulaCard)}</div>;
   };
 
+  const shouldShowUsageGuide = formulaInput.trim().length > 0;
+
   return (
     <div className='flex-shrink-0 border-b border-border bg-gradient-to-r from-card via-card/95 to-card shadow-sm'>
       <div className='flex items-center h-12 px-4 space-x-3'>
         <div className='flex items-center space-x-2'>
-          <div className='flex items-center space-x-1 bg-primary/10 rounded-lg px-3 py-1.5 border border-primary/20 shadow-sm'>
+          <div className='flex items-center space-x-2 bg-primary/10 rounded-lg px-3 py-1.5 border border-primary/20 shadow-sm'>
             <Hash className='w-4 h-4 text-primary' />
-            <span className='text-sm font-mono font-semibold text-primary min-w-[60px]'>{cellReference}</span>
+            <div className='flex flex-col leading-tight'>
+              <span className='text-[10px] uppercase tracking-wide text-primary/70'>Target column</span>
+              <span className='text-xs font-semibold text-primary max-w-[160px] truncate'>
+                {selectedColumn ?? (selectedCell ? selectedCell.col : 'Select a column')}
+              </span>
+            </div>
           </div>
-          <div className='flex flex-col leading-tight'>
-            <span className='text-[10px] uppercase tracking-wide text-muted-foreground'>Target column</span>
-            <span className='text-xs font-semibold'>
-              {selectedColumn ?? (selectedCell ? selectedCell.col : 'Select a column')}
-            </span>
-          </div>
-          <Button
-            variant='outline'
-            size='sm'
-            className='h-8 w-8 p-0 shadow-sm'
-            onClick={() => setShowUsageGuide((prev) => !prev)}
-            title='Formula usage guide'
-            aria-pressed={showUsageGuide}
-          >
-            <Sigma className={`w-4 h-4 ${showUsageGuide ? 'text-primary' : 'text-muted-foreground'}`} />
-          </Button>
         </div>
 
         <div className='flex-1 relative'>
@@ -816,7 +805,7 @@ const FormularBar: React.FC<FormularBarProps> = ({
         </div>
       </div>
 
-      {showUsageGuide && (
+      {shouldShowUsageGuide && (
         <div className='border-t border-border bg-muted/30'>
           {selectedFormula ? (
             <div className='flex flex-col'>
