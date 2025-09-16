@@ -85,7 +85,6 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
   const [columnFilters, setColumnFilters] = useState<Record<string, string[]>>({});
 
-  const missingMappingNotified = useRef<string | null>(null);
   const lastFetchedSource = useRef<string | null>(null);
 
   // Get atom settings to access the input file name
@@ -145,22 +144,16 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
   useEffect(() => {
     if (!settings.dataSource) {
       setDimensionError(null);
-      missingMappingNotified.current = null;
       lastFetchedSource.current = null;
       return;
     }
 
     if (hasMappedIdentifiers) {
       setDimensionError(null);
-      missingMappingNotified.current = null;
     } else {
       const message =
         "Column Classifier is not configured for the selected dataframe. Configure it to view hierarchical dimensions.";
       setDimensionError(message);
-      if (missingMappingNotified.current !== settings.dataSource) {
-        toast({ title: message, variant: "destructive" });
-        missingMappingNotified.current = settings.dataSource;
-      }
       lastFetchedSource.current = null;
       return;
     }
