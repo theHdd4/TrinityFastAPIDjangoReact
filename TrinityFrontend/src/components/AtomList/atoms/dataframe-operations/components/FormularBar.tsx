@@ -372,6 +372,17 @@ const quickFormulaHelpers: { expression: string; label: string; description: str
 
 type TabValue = 'all' | FormulaCategory;
 
+const tabLabels: Record<TabValue, string> = {
+  all: 'All',
+  math: 'Math',
+  statistical: 'Stats',
+  logical: 'Logic',
+  text: 'Text',
+  date: 'Date',
+  mapping: 'Mapping',
+  nulls: 'Nulls',
+};
+
 const FormularBar: React.FC<FormularBarProps> = ({
   data,
   selectedCell,
@@ -425,7 +436,8 @@ const FormularBar: React.FC<FormularBarProps> = ({
   const handleFormulaSelect = (formula: FormulaItem) => {
     setSelectedFormula(formula);
     setActiveTab(formula.category);
-    onFormulaInputChange(formula.example);
+    const expression = formula.example.startsWith('=') ? formula.example : `=${formula.example}`;
+    onFormulaInputChange(expression);
     if (!isFormulaMode) {
       onFormulaModeChange(true);
     }
@@ -670,49 +682,47 @@ const FormularBar: React.FC<FormularBarProps> = ({
           </div>
         </div>
 
-        {isFormulaMode && (
-          <Popover open={isLibraryOpen} onOpenChange={handleLibraryOpenChange}>
-            <PopoverTrigger asChild>
-              <Button variant='outline' size='sm' className='h-8 px-3 shadow-sm'>
-                <BookOpen className='w-4 h-4 mr-1' />
-                Library
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent className='w-96 p-0 shadow-lg' align='end'>
-              <div className='border-b p-3'>
-                <div className='flex items-center space-x-2'>
-                  <Search className='w-4 h-4 text-muted-foreground' />
-                  <Input
-                    placeholder='Search formulas...'
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    className='h-8 border-0 focus-visible:ring-0'
-                  />
-                </div>
+        <Popover open={isLibraryOpen} onOpenChange={handleLibraryOpenChange}>
+          <PopoverTrigger asChild>
+            <Button variant='outline' size='sm' className='h-8 px-3 shadow-sm'>
+              <BookOpen className='w-4 h-4 mr-1' />
+              Library
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent className='w-96 p-0 shadow-lg' align='end'>
+            <div className='border-b p-3'>
+              <div className='flex items-center space-x-2'>
+                <Search className='w-4 h-4 text-muted-foreground' />
+                <Input
+                  placeholder='Search formulas...'
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className='h-8 border-0 focus-visible:ring-0'
+                />
               </div>
-              <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as TabValue)} className='w-full'>
-                <TabsList className='grid w-full grid-cols-4 gap-1 p-1 m-1'>
-                  <TabsTrigger value='all' className='text-xs'>All</TabsTrigger>
-                  {categoryOrder.map((category) => (
-                    <TabsTrigger key={category} value={category} className='text-xs'>
-                      {categoryLabels[category].label.split(' ')[0]}
-                    </TabsTrigger>
-                  ))}
-                </TabsList>
-                <ScrollArea className='h-80'>
-                  <TabsContent value='all' className='p-2'>
-                    {renderFormulaList(filteredFormulas)}
+            </div>
+            <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as TabValue)} className='w-full'>
+              <TabsList className='grid w-full grid-cols-5 p-1 m-1'>
+                <TabsTrigger value='all' className='text-xs'>All</TabsTrigger>
+                {categoryOrder.map((category) => (
+                  <TabsTrigger key={category} value={category} className='text-xs'>
+                    {tabLabels[category]}
+                  </TabsTrigger>
+                ))}
+              </TabsList>
+              <ScrollArea className='h-80'>
+                <TabsContent value='all' className='p-2'>
+                  {renderFormulaList(filteredFormulas)}
+                </TabsContent>
+                {categoryOrder.map((category) => (
+                  <TabsContent key={category} value={category} className='p-2'>
+                    {renderFormulaList(filteredFormulas.filter((f) => f.category === category))}
                   </TabsContent>
-                  {categoryOrder.map((category) => (
-                    <TabsContent key={category} value={category} className='p-2'>
-                      {renderFormulaList(filteredFormulas.filter((f) => f.category === category))}
-                    </TabsContent>
-                  ))}
-                </ScrollArea>
-              </Tabs>
-            </PopoverContent>
-          </Popover>
-        )}
+                ))}
+              </ScrollArea>
+            </Tabs>
+          </PopoverContent>
+        </Popover>
 
         <div className='flex items-center space-x-1'>
           <Button
