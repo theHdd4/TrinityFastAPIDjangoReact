@@ -118,7 +118,7 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
   const [selectedCell, setSelectedCell] = useState<{ row: number; col: string } | null>(null);
   const [selectedColumn, setSelectedColumn] = useState<string | null>(null);
   const [formulaInput, setFormulaInput] = useState('');
-  const [isFormulaMode, setIsFormulaMode] = useState(false);
+  const [isFormulaMode, setIsFormulaMode] = useState(true);
   const [openDropdown, setOpenDropdown] = useState<null | 'insert' | 'delete' | 'sort' | 'filter'>(null);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; col: string; colIdx: number } | null>(null);
   const [insertMenuOpen, setInsertMenuOpen] = useState(false);
@@ -813,7 +813,6 @@ const handleFormulaSubmit = async () => {
     handleApiError('Apply formula failed', err);
   } finally {
     setFormulaInput('');
-    setIsFormulaMode(false);
   }
 };
 
