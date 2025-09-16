@@ -658,8 +658,7 @@ const renderChart = (
         ) : cardinalityError ? (
           <div className="p-4 text-red-600">{cardinalityError}</div>
         ) : cardinalityData && cardinalityData.length > 0 ? (
-          <div className="w-full mb-6">
-            <Table
+          <Table
               headers={[
                 <ContextMenu key="Column">
                   <ContextMenuTrigger asChild>
@@ -867,7 +866,6 @@ const renderChart = (
                 </tr>
               ))}
             </Table>
-          </div>
         ) : null}
 
         <div

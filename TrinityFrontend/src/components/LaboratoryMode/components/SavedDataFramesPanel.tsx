@@ -28,6 +28,12 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle }) => {
   const [confirmDelete, setConfirmDelete] = useState<
     { type: 'one'; target: string } | { type: 'all' } | null
   >(null);
+  const [contextMenu, setContextMenu] = useState<{
+    x: number;
+    y: number;
+    target: string;
+    frame: Frame;
+  } | null>(null);
 
   const { user } = useAuth();
 
@@ -208,6 +214,28 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle }) => {
     setRenameTarget(null);
   };
 
+  const handleContextMenu = (e: React.MouseEvent, frame: Frame) => {
+    e.preventDefault();
+    setContextMenu({
+      x: e.clientX,
+      y: e.clientY,
+      target: frame.object_name,
+      frame: frame
+    });
+  };
+
+  const handleContextMenuAction = (action: 'edit' | 'delete') => {
+    if (!contextMenu) return;
+    
+    if (action === 'edit') {
+      startRename(contextMenu.target, contextMenu.frame.arrow_name || contextMenu.frame.csv_name);
+    } else if (action === 'delete') {
+      promptDeleteOne(contextMenu.target);
+    }
+    
+    setContextMenu(null);
+  };
+
   const buildTree = (frames: Frame[], pref: string): TreeNode[] => {
     const root: any = { children: {} };
     frames.forEach(f => {
@@ -270,6 +298,7 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle }) => {
           ) : (
             <button
               onClick={() => handleOpen(f.object_name)}
+              onContextMenu={(e) => handleContextMenu(e, f)}
               className="text-sm text-blue-600 hover:underline flex-1 text-left"
             >
               {f.arrow_name ? f.arrow_name.split('/').pop() : f.csv_name.split('/').pop()}
@@ -361,6 +390,33 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle }) => {
         iconBgClass="bg-red-500"
         confirmButtonClass="bg-red-500 hover:bg-red-600"
       />
+      
+      {/* Context Menu */}
+      {contextMenu && (
+        <div
+          className="fixed bg-white border border-gray-200 rounded-lg shadow-lg py-1 z-50"
+          style={{
+            left: contextMenu.x,
+            top: contextMenu.y,
+          }}
+          onMouseLeave={() => setContextMenu(null)}
+        >
+          <button
+            onClick={() => handleContextMenuAction('edit')}
+            className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 flex items-center space-x-2"
+          >
+            <Pencil className="w-4 h-4" />
+            <span>Rename</span>
+          </button>
+          <button
+            onClick={() => handleContextMenuAction('delete')}
+            className="w-full px-4 py-2 text-left text-sm text-red-600 hover:bg-red-50 flex items-center space-x-2"
+          >
+            <Trash2 className="w-4 h-4" />
+            <span>Delete</span>
+          </button>
+        </div>
+      )}
     </div>
   );
 };

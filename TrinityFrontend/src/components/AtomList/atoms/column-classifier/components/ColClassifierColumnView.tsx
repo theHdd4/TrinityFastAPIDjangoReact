@@ -242,8 +242,7 @@ const ColClassifierColumnView: React.FC<ColClassifierColumnViewProps> = ({
 
   return (
     <div className="w-full">
-      <div className="mx-auto max-w-screen-2xl rounded-2xl border border-slate-200 bg-white shadow-sm">
-        <Table
+      <Table
           headers={[
             <ContextMenu key="Column">
               <ContextMenuTrigger asChild>
@@ -420,7 +419,6 @@ const ColClassifierColumnView: React.FC<ColClassifierColumnViewProps> = ({
             </tr>
           ))}
         </Table>
-      </div>
     </div>
   );
 };

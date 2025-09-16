@@ -2067,8 +2067,7 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
             ) : cardinalityError ? (
               <div className="p-4 text-red-600">{cardinalityError}</div>
             ) : cardinalityData && cardinalityData.length > 0 ? (
-              <div className="w-full">
-                <Table
+              <Table
                   headers={[
                     <ContextMenu key="Column">
                       <ContextMenuTrigger asChild>
@@ -2311,7 +2310,6 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
                     </tr>
                   ))}
                 </Table>
-              </div>
             ) : (
               <div className="p-4 text-gray-500">No cardinality data available</div>
             )}
@@ -2460,7 +2458,7 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
                     yAxisLabel={data.selectedMethod ? data.selectedMethod.charAt(0).toUpperCase() + data.selectedMethod.slice(1) : 'Value'}
                     theme={methodByModelChartTheme}
                     enableScroll={false}
-                    width={600}
+                    width="100%"
                     height={300}
                     showDataLabels={methodByModelChartDataLabels}
                     showLegend={true}
@@ -3417,7 +3415,7 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
                     yAxisLabel="Predicted"
                     theme={predictedVsActualChartTheme}
                     enableScroll={false}
-                    width={500}
+                    width="100%"
                     height={300}
                     showDataLabels={predictedVsActualChartDataLabels}
                     showLegend={predictedVsActualChartType === 'pie_chart'}
@@ -3456,7 +3454,7 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
                       yAxisLabel="Contribution"
                       theme={contributionChartTheme}
                       enableScroll={false}
-                      width={500}
+                      width="100%"
                       height={300}
                       showDataLabels={contributionChartDataLabels}
                       showLegend={contributionChartType === 'pie_chart'}
@@ -3493,7 +3491,7 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
                     yAxisLabel="Growth Value"
                     theme={yoyChartTheme}
                     enableScroll={false}
-                    width={500}
+                    width="100%"
                     height={300}
                     showDataLabels={yoyChartDataLabels}
                     showLegend={yoyChartType === 'pie_chart'}

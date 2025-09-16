@@ -35,6 +35,17 @@ const AtomLibrary: React.FC<AtomLibraryProps> = ({ onAtomDragStart, onCollapse }
     )
   })).filter(category => category.atoms.length > 0);
 
+  // Auto-open categories that have matching atoms when searching
+  React.useEffect(() => {
+    if (searchTerm.trim()) {
+      const categoriesWithMatches = filteredCategories.map(category => category.name);
+      setOpenCategories(categoriesWithMatches);
+    } else {
+      // Close all categories when search is cleared
+      setOpenCategories([]);
+    }
+  }, [searchTerm]);
+
   return (
     <div className="w-80 bg-white border-r border-gray-200 flex flex-col h-full">
       {/* Search Header */}

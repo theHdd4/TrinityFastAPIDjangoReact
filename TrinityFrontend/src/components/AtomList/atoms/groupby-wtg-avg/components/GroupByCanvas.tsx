@@ -786,8 +786,7 @@ const GroupByCanvas: React.FC<GroupByCanvasProps> = ({ atomId }) => {
       ) : cardinalityError ? (
         <div className="p-4 text-red-600">{cardinalityError}</div>
       ) : cardinalityData && cardinalityData.length > 0 ? (
-        <div className="mx-auto max-w-screen-2xl">
-          <Table
+        <Table
             headers={[
               <ContextMenu key="Column">
                 <ContextMenuTrigger asChild>
@@ -976,7 +975,6 @@ const GroupByCanvas: React.FC<GroupByCanvasProps> = ({ atomId }) => {
               </tr>
             ))}
           </Table>
-        </div>
       ) : null}
       
       {/* Group By Section */}
