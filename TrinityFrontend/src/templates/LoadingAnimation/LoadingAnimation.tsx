@@ -76,12 +76,22 @@ const LoadingAnimation: React.FC<LoadingAnimationProps> = ({
     <div className={`absolute inset-0 flex items-center justify-center bg-white ${className}`}>
       <canvas ref={canvasRef} className="absolute inset-0 w-full h-full" />
       <div className="relative z-10 text-center px-6">
-        <h3 className="text-2xl font-light text-black mb-2">Loading</h3>
-        <div className="flex items-center justify-center space-x-1 text-black">
-          <span>{status}</span>
-          <span className="animate-pulse">.</span>
-          <span className="animate-pulse animation-delay-300">.</span>
-          <span className="animate-pulse animation-delay-600">.</span>
+        <div className="inline-flex flex-col items-center px-6 py-4 border border-white/60 rounded-xl shadow-[0_0_20px_rgba(255,255,255,0.35)]">
+          <h3
+            className="text-2xl font-light text-black mb-2"
+            style={{ textShadow: '0 0 8px rgba(255, 255, 255, 0.6)' }}
+          >
+            Loading
+          </h3>
+          <div
+            className="flex items-center justify-center space-x-1 text-black"
+            style={{ textShadow: '0 0 8px rgba(255, 255, 255, 0.6)' }}
+          >
+            <span>{status}</span>
+            <span className="animate-pulse">.</span>
+            <span className="animate-pulse animation-delay-300">.</span>
+            <span className="animate-pulse animation-delay-600">.</span>
+          </div>
         </div>
       </div>
 
