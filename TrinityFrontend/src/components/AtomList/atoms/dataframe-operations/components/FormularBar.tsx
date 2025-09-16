@@ -706,8 +706,6 @@ const FormularBar: React.FC<FormularBarProps> = ({
     return <div className='space-y-2'>{items.map(renderFormulaCard)}</div>;
   };
 
-  const shouldShowUsageGuide = isUsageGuideOpen;
-
   return (
     <div className='flex-shrink-0 border-b border-border bg-gradient-to-r from-card via-card/95 to-card shadow-sm'>
       <div className='flex items-center h-12 px-4 space-x-3'>
@@ -723,8 +721,113 @@ const FormularBar: React.FC<FormularBarProps> = ({
           </div>
         </div>
 
-        <div className='flex-1 relative'>
-          <div className='relative'>
+        <div className='flex items-center flex-1 space-x-2'>
+          <Popover open={isUsageGuideOpen} onOpenChange={setIsUsageGuideOpen}>
+            <PopoverTrigger asChild>
+              <Button
+                variant='outline'
+                size='sm'
+                className={`h-8 w-8 p-0 shadow-sm ${
+                  isUsageGuideOpen ? 'bg-primary/10 text-primary border-primary/40' : ''
+                }`}
+                title={isUsageGuideOpen ? 'Hide usage guide' : 'Show usage guide'}
+                aria-pressed={isUsageGuideOpen}
+              >
+                <Calculator className='w-4 h-4' />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent
+              className='w-[520px] p-0 shadow-lg border border-border bg-popover overflow-hidden'
+              align='start'
+              side='bottom'
+              sideOffset={8}
+            >
+              {selectedFormula ? (
+                <div className='max-h-[70vh] overflow-y-auto'>
+                  <div className='p-4 border-b space-y-2'>
+                    <div className='flex items-center space-x-2'>
+                      <div className='flex items-center justify-center w-8 h-8 rounded-md bg-primary/10 text-primary'>
+                        {categoryLabels[selectedFormula.category].icon}
+                      </div>
+                      <div>
+                        <div className='flex items-center space-x-2'>
+                          <span className='font-semibold text-sm'>{selectedFormula.name}</span>
+                          <Badge variant='secondary' className='text-xs'>
+                            {categoryLabels[selectedFormula.category].label}
+                          </Badge>
+                        </div>
+                        <p className='text-xs text-muted-foreground'>{selectedFormula.description}</p>
+                      </div>
+                    </div>
+                    <div className='text-xs font-mono bg-muted px-2 py-1 rounded'>Syntax: {selectedFormula.syntax}</div>
+                    <div className='text-xs font-mono bg-muted px-2 py-1 rounded'>Example: {selectedFormula.example}</div>
+                  </div>
+                  <div className='p-4 space-y-4'>
+                    <div>
+                      <p className='text-xs font-medium text-muted-foreground uppercase tracking-wide'>Target column</p>
+                      <Command className='mt-2 border rounded-md'>
+                        <CommandInput placeholder='Search columns...' className='h-8' />
+                        <CommandList>
+                          <CommandEmpty>No columns found.</CommandEmpty>
+                          <CommandGroup heading='Columns'>
+                            {(data?.headers || []).map((header) => (
+                              <CommandItem
+                                key={header}
+                                value={header}
+                                onSelect={(value) => onSelectedColumnChange(value)}
+                              >
+                                <span>{header}</span>
+                                {selectedColumn === header && <Check className='ml-auto h-4 w-4' />}
+                              </CommandItem>
+                            ))}
+                          </CommandGroup>
+                        </CommandList>
+                      </Command>
+                      <p className='text-xs mt-2'>
+                        {selectedColumn ? (
+                          <>Applying to <span className='font-semibold'>{selectedColumn}</span>.</>
+                        ) : (
+                          <span className='text-destructive'>Select a column to write the results.</span>
+                        )}
+                      </p>
+                    </div>
+                    <div>
+                      <p className='text-xs font-medium text-muted-foreground uppercase tracking-wide'>Insert column references</p>
+                      <ScrollArea className='mt-2 h-20'>
+                        <div className='flex flex-wrap gap-2 pr-2'>
+                          {(data?.headers || []).map((header) => (
+                            <Badge
+                              key={`insert-${header}`}
+                              variant='outline'
+                              className='cursor-pointer hover:bg-primary/20'
+                              onClick={() => handleColumnInsert(header)}
+                            >
+                              {header}
+                            </Badge>
+                          ))}
+                        </div>
+                      </ScrollArea>
+                    </div>
+                    {selectedCell && (
+                      <div className='border rounded-md bg-muted/50 p-3'>
+                        <p className='text-xs font-medium text-muted-foreground uppercase tracking-wide'>Selected cell</p>
+                        <div className='mt-1 text-sm font-mono'>
+                          {cellReference || selectedCell.col}
+                          {cellValue !== '' && <span className='ml-2 text-xs text-muted-foreground'>→ {cellValue}</span>}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <div className='p-4 text-sm text-muted-foreground'>
+                  Please insert a legitimate formula to view guide - check library for more details.
+                </div>
+              )}
+            </PopoverContent>
+          </Popover>
+
+          <div className='relative flex-1'>
             <Sigma className='absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-primary z-10' />
             <Input
               value={formulaInput}
@@ -785,19 +888,6 @@ const FormularBar: React.FC<FormularBarProps> = ({
           </PopoverContent>
         </Popover>
 
-        <Button
-          variant='outline'
-          size='sm'
-          className={`h-8 w-8 p-0 shadow-sm ${
-            isUsageGuideOpen ? 'bg-primary/10 text-primary border-primary/40' : ''
-          }`}
-          onClick={() => setIsUsageGuideOpen((prev) => !prev)}
-          title={isUsageGuideOpen ? 'Hide usage guide' : 'Show usage guide'}
-          aria-pressed={isUsageGuideOpen}
-        >
-          <Calculator className='w-4 h-4' />
-        </Button>
-
         <div className='flex items-center space-x-1'>
           <Button
             variant='outline'
@@ -819,93 +909,6 @@ const FormularBar: React.FC<FormularBarProps> = ({
           </Button>
         </div>
       </div>
-
-      {shouldShowUsageGuide && (
-        <div className='border-t border-border bg-muted/30'>
-          {selectedFormula ? (
-            <div className='flex flex-col'>
-              <div className='p-4 border-b space-y-2'>
-                <div className='flex items-center space-x-2'>
-                  <div className='flex items-center justify-center w-8 h-8 rounded-md bg-primary/10 text-primary'>
-                    {categoryLabels[selectedFormula.category].icon}
-                  </div>
-                  <div>
-                    <div className='flex items-center space-x-2'>
-                      <span className='font-semibold text-sm'>{selectedFormula.name}</span>
-                      <Badge variant='secondary' className='text-xs'>
-                        {categoryLabels[selectedFormula.category].label}
-                      </Badge>
-                    </div>
-                    <p className='text-xs text-muted-foreground'>{selectedFormula.description}</p>
-                  </div>
-                </div>
-                <div className='text-xs font-mono bg-muted px-2 py-1 rounded'>Syntax: {selectedFormula.syntax}</div>
-                <div className='text-xs font-mono bg-muted px-2 py-1 rounded'>Example: {selectedFormula.example}</div>
-              </div>
-              <div className='p-4 space-y-4'>
-                <div>
-                  <p className='text-xs font-medium text-muted-foreground uppercase tracking-wide'>Target column</p>
-                  <Command className='mt-2 border rounded-md'>
-                    <CommandInput placeholder='Search columns...' className='h-8' />
-                    <CommandList>
-                      <CommandEmpty>No columns found.</CommandEmpty>
-                      <CommandGroup heading='Columns'>
-                        {(data?.headers || []).map((header) => (
-                          <CommandItem
-                            key={header}
-                            value={header}
-                            onSelect={(value) => onSelectedColumnChange(value)}
-                          >
-                            <span>{header}</span>
-                            {selectedColumn === header && <Check className='ml-auto h-4 w-4' />}
-                          </CommandItem>
-                        ))}
-                      </CommandGroup>
-                    </CommandList>
-                  </Command>
-                  <p className='text-xs mt-2'>
-                    {selectedColumn ? (
-                      <>Applying to <span className='font-semibold'>{selectedColumn}</span>.</>
-                    ) : (
-                      <span className='text-destructive'>Select a column to write the results.</span>
-                    )}
-                  </p>
-                </div>
-                <div>
-                  <p className='text-xs font-medium text-muted-foreground uppercase tracking-wide'>Insert column references</p>
-                  <ScrollArea className='mt-2 h-20'>
-                    <div className='flex flex-wrap gap-2 pr-2'>
-                      {(data?.headers || []).map((header) => (
-                        <Badge
-                          key={`insert-${header}`}
-                          variant='outline'
-                          className='cursor-pointer hover:bg-primary/20'
-                          onClick={() => handleColumnInsert(header)}
-                        >
-                          {header}
-                        </Badge>
-                      ))}
-                    </div>
-                  </ScrollArea>
-                </div>
-                {selectedCell && (
-                  <div className='border rounded-md bg-muted/50 p-3'>
-                    <p className='text-xs font-medium text-muted-foreground uppercase tracking-wide'>Selected cell</p>
-                    <div className='mt-1 text-sm font-mono'>
-                      {cellReference || selectedCell.col}
-                      {cellValue !== '' && <span className='ml-2 text-xs text-muted-foreground'>→ {cellValue}</span>}
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-          ) : (
-            <div className='p-4 text-sm text-muted-foreground'>
-              Please insert a legitimate formula to view guide - check library for more details.
-            </div>
-          )}
-        </div>
-      )}
 
       <div className='px-4 pb-3'>
         <ScrollArea className='w-full'>
