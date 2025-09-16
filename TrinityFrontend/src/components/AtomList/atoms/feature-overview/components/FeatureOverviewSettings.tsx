@@ -84,33 +84,48 @@ const FeatureOverviewSettings: React.FC<FeatureOverviewSettingsProps> = ({ atomI
     setSelectedIds(Array.isArray(settings.selectedColumns) ? settings.selectedColumns : []);
   }, [settings.allColumns, settings.selectedColumns]);
 
-  const handleFrameChange = async (val: string) => {
+  const handleFrameChange = async (value: string) => {
     cancelPrefillController(atomId);
+    const normalized = value.endsWith('.arrow') ? value : `${value}.arrow`;
+    const frameList = Array.isArray(frames) ? frames : [];
+
     onSettingsChange({
+      dataSource: normalized,
+      csvDisplay:
+        frameList.find(f => f.object_name === normalized)?.csv_name || '',
+      selectedColumns: [],
+      columnSummary: [],
+      allColumns: [],
+      numericColumns: [],
+      yAxes: [],
+      xAxis: '',
+      skuTable: [],
+      statDataMap: {},
+      activeRow: null,
+      activeMetric: '',
+      dimensionMap: {},
       isLoading: true,
       loadingMessage: 'Loading',
       loadingStatus: 'Fetching flight table',
     });
-    if (!val.endsWith('.arrow')) {
-      val += '.arrow';
-    }
+
     try {
       const ft = await fetch(
-        `${FEATURE_OVERVIEW_API}/flight_table?object_name=${encodeURIComponent(val)}`
+        `${FEATURE_OVERVIEW_API}/flight_table?object_name=${encodeURIComponent(normalized)}`
       );
       if (ft.ok) {
         await ft.arrayBuffer();
       }
       onSettingsChange({ loadingStatus: 'Prefetching Dataframe' });
       const cache = await fetch(
-        `${FEATURE_OVERVIEW_API}/cached_dataframe?object_name=${encodeURIComponent(val)}`
+        `${FEATURE_OVERVIEW_API}/cached_dataframe?object_name=${encodeURIComponent(normalized)}`
       );
       if (cache.ok) {
         await cache.text();
       }
       onSettingsChange({ loadingStatus: 'Fetching column summary' });
       const res = await fetch(
-        `${FEATURE_OVERVIEW_API}/column_summary?object_name=${encodeURIComponent(val)}`
+        `${FEATURE_OVERVIEW_API}/column_summary?object_name=${encodeURIComponent(normalized)}`
       );
       let numeric: string[] = [];
       let summary: ColumnInfo[] = [];
@@ -136,11 +151,14 @@ const FeatureOverviewSettings: React.FC<FeatureOverviewSettingsProps> = ({ atomI
       const mapping = Object.fromEntries(
         Object.entries(rawMap).filter(([k]) => k.toLowerCase() !== 'unattributed')
       );
+      const defaultYAxes = summary
+        .filter((c: ColumnInfo) => !['object', 'string'].includes(c.data_type.toLowerCase()))
+        .map(c => c.column);
+      const activeMetric = defaultYAxes[0] || '';
       onSettingsChange({
-        dataSource: val,
+        dataSource: normalized,
         csvDisplay:
-          (Array.isArray(frames) ? frames : [])
-            .find(f => f.object_name === val)?.csv_name || val,
+          frameList.find(f => f.object_name === normalized)?.csv_name || normalized,
         selectedColumns: selected,
         columnSummary: filtered,
         allColumns: summary,
@@ -148,12 +166,27 @@ const FeatureOverviewSettings: React.FC<FeatureOverviewSettingsProps> = ({ atomI
         xAxis: xField,
         filterUnique,
         dimensionMap: mapping,
+        yAxes: defaultYAxes,
+        skuTable: [],
+        statDataMap: {},
+        activeRow: null,
+        activeMetric,
         isLoading: false,
         loadingStatus: '',
         loadingMessage: '',
       });
     } catch {
-      onSettingsChange({ isLoading: false, loadingStatus: '', loadingMessage: '' });
+      setColumns([]);
+      setSelectedIds([]);
+      onSettingsChange({
+        isLoading: false,
+        loadingStatus: '',
+        loadingMessage: '',
+        skuTable: [],
+        statDataMap: {},
+        activeRow: null,
+        activeMetric: '',
+      });
     }
   };
 
