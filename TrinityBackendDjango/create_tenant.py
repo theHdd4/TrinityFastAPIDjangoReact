@@ -18,11 +18,68 @@ django.setup()
 
 import uuid
 from django.core.management import call_command
-from django.db import transaction, connection
+from django.db import connection, transaction
 from django_tenants.utils import schema_context
 
 # Adjust this import path if your app label is different:
-from apps.tenants.models import Tenant, Domain
+from apps.tenants.models import Domain, Tenant
+
+
+def ensure_arrowdataset_constraints(verbose: bool = True) -> None:
+    """Ensure the ArrowDataset unique constraint/index exists in the current schema."""
+
+    with connection.cursor() as cursor:
+        cursor.execute("SELECT to_regclass('registry_arrowdataset')")
+        table_identifier = cursor.fetchone()
+        if not table_identifier or table_identifier[0] is None:
+            if verbose:
+                print("   → registry_arrowdataset table is missing; skipping constraint repair")
+            return
+
+        def has_constraint(name: str) -> bool:
+            cursor.execute(
+                """
+                SELECT 1
+                FROM pg_constraint
+                WHERE conrelid = to_regclass('registry_arrowdataset')
+                  AND conname = %s
+                """,
+                [name],
+            )
+            return cursor.fetchone() is not None
+
+        if has_constraint("registry_arrowdataset_original_csv_key") and not has_constraint(
+            "unique_project_csv"
+        ):
+            cursor.execute(
+                "ALTER TABLE registry_arrowdataset RENAME CONSTRAINT registry_arrowdataset_original_csv_key TO unique_project_csv"
+            )
+            if verbose:
+                print(
+                    "   → Renamed registry_arrowdataset_original_csv_key to unique_project_csv"
+                )
+
+        if not has_constraint("unique_project_csv"):
+            cursor.execute(
+                "ALTER TABLE registry_arrowdataset ADD CONSTRAINT unique_project_csv UNIQUE (project_id, original_csv)"
+            )
+            if verbose:
+                print("   → Added unique_project_csv constraint on registry_arrowdataset")
+
+        cursor.execute(
+            """
+            SELECT 1
+            FROM pg_indexes
+            WHERE schemaname = current_schema()
+              AND indexname = 'registry_arrowdataset_project_csv_idx'
+            """
+        )
+        if cursor.fetchone() is None:
+            cursor.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS registry_arrowdataset_project_csv_idx ON registry_arrowdataset (project_id, original_csv)"
+            )
+            if verbose:
+                print("   → Created registry_arrowdataset_project_csv_idx index")
 
 
 def main():
@@ -224,56 +281,7 @@ def main():
         "migrate_schemas", "registry", "--schema", tenant_schema, interactive=False, verbosity=1
     )
     with schema_context(tenant_schema):
-        with connection.cursor() as cursor:
-            cursor.execute(
-                """
-                DO $$
-                BEGIN
-                    IF EXISTS (
-                        SELECT 1
-                        FROM pg_constraint
-                        WHERE conrelid = 'registry_arrowdataset'::regclass
-                          AND conname = 'registry_arrowdataset_original_csv_key'
-                    ) THEN
-                        EXECUTE 'ALTER TABLE registry_arrowdataset RENAME CONSTRAINT registry_arrowdataset_original_csv_key TO unique_project_csv';
-                    END IF;
-
-                    IF NOT EXISTS (
-                        SELECT 1
-                        FROM pg_constraint
-                        WHERE conrelid = 'registry_arrowdataset'::regclass
-                          AND conname = 'unique_project_csv'
-                    ) THEN
-                        BEGIN
-                            ALTER TABLE registry_arrowdataset
-                            ADD CONSTRAINT unique_project_csv UNIQUE (project_id, original_csv);
-                        EXCEPTION
-                            WHEN duplicate_object THEN
-                                NULL;
-                            WHEN undefined_table THEN
-                                NULL;
-                        END;
-                    END IF;
-
-                    IF NOT EXISTS (
-                        SELECT 1
-                        FROM pg_indexes
-                        WHERE schemaname = current_schema()
-                          AND indexname = 'registry_arrowdataset_project_csv_idx'
-                    ) THEN
-                        BEGIN
-                            CREATE UNIQUE INDEX registry_arrowdataset_project_csv_idx
-                                ON registry_arrowdataset (project_id, original_csv);
-                        EXCEPTION
-                            WHEN duplicate_table THEN
-                                NULL;
-                            WHEN undefined_table THEN
-                                NULL;
-                        END;
-                    END IF;
-                END$$;
-                """
-            )
+        ensure_arrowdataset_constraints()
     print("   ✅ Registry migrations complete.\n")
 
     # Load atom catalogue from FastAPI features
