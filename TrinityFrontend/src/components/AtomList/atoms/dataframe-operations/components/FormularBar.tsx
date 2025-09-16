@@ -510,34 +510,6 @@ const categoryLabels: Record<FormulaCategory, { icon: JSX.Element; label: string
   nulls: { icon: <X className="w-4 h-4" />, label: 'Null Handling' },
 };
 
-const quickFormulaHelpers: { expression: string; label: string; description: string }[] = [
-  {
-    expression: '=SUM(colA,colB)',
-    label: 'SUM(colA,colB)',
-    description: 'Row sum',
-  },
-  {
-    expression: '=IF(colA > 10, colB, colC)',
-    label: 'IF > 10',
-    description: 'Conditional split',
-  },
-  {
-    expression: '=LOWER(colA)',
-    label: 'LOWER(colA)',
-    description: 'Lowercase text',
-  },
-  {
-    expression: '=DATE_DIFF(colEnd, colStart)',
-    label: 'DATE_DIFF',
-    description: 'Days between dates',
-  },
-  {
-    expression: '=FILLNA(colA, 0)',
-    label: 'FILLNA',
-    description: 'Replace blanks',
-  },
-];
-
 type TabValue = 'all' | FormulaCategory;
 
 const tabLabels: Record<TabValue, string> = {
@@ -637,16 +609,6 @@ const FormularBar: React.FC<FormularBarProps> = ({
     setIsLibraryOpen(open);
     if (open) {
       onFormulaModeChange(true);
-    }
-  };
-
-  const handleQuickInsert = (expression: string) => {
-    onFormulaInputChange(expression);
-    onFormulaModeChange(true);
-    const match = matchFormula(expression);
-    if (match) {
-      setSelectedFormula(match);
-      setActiveTab(match.category);
     }
   };
 
@@ -874,24 +836,6 @@ const FormularBar: React.FC<FormularBarProps> = ({
         </div>
       </div>
 
-      <div className='px-4 pb-3'>
-        <ScrollArea className='w-full'>
-          <div className='flex items-center space-x-3 text-xs text-muted-foreground pb-1'>
-            {quickFormulaHelpers.map((helper) => (
-              <span
-                key={helper.expression}
-                className='flex items-center space-x-1 cursor-pointer hover:text-foreground transition-colors'
-                onClick={() => handleQuickInsert(helper.expression)}
-              >
-                <Badge variant='secondary' className='text-xs hover:bg-primary/20'>
-                  {helper.label}
-                </Badge>
-                <span>{helper.description}</span>
-              </span>
-            ))}
-          </div>
-        </ScrollArea>
-      </div>
     </div>
   );
 };
