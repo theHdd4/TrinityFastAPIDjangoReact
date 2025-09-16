@@ -4,14 +4,6 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-} from '@/components/ui/command';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import {
   Calculator,
@@ -763,34 +755,6 @@ const FormularBar: React.FC<FormularBarProps> = ({
                     <div className='text-xs font-mono bg-muted px-2 py-1 rounded'>Example: {selectedFormula.example}</div>
                   </div>
                   <div className='p-4 space-y-4'>
-                    <div>
-                      <p className='text-xs font-medium text-muted-foreground uppercase tracking-wide'>Target column</p>
-                      <Command className='mt-2 border rounded-md'>
-                        <CommandInput placeholder='Search columns...' className='h-8' />
-                        <CommandList>
-                          <CommandEmpty>No columns found.</CommandEmpty>
-                          <CommandGroup heading='Columns'>
-                            {(data?.headers || []).map((header) => (
-                              <CommandItem
-                                key={header}
-                                value={header}
-                                onSelect={(value) => onSelectedColumnChange(value)}
-                              >
-                                <span>{header}</span>
-                                {selectedColumn === header && <Check className='ml-auto h-4 w-4' />}
-                              </CommandItem>
-                            ))}
-                          </CommandGroup>
-                        </CommandList>
-                      </Command>
-                      <p className='text-xs mt-2'>
-                        {selectedColumn ? (
-                          <>Applying to <span className='font-semibold'>{selectedColumn}</span>.</>
-                        ) : (
-                          <span className='text-destructive'>Select a column to write the results.</span>
-                        )}
-                      </p>
-                    </div>
                     <div>
                       <p className='text-xs font-medium text-muted-foreground uppercase tracking-wide'>Insert column references</p>
                       <ScrollArea className='mt-2 h-20'>

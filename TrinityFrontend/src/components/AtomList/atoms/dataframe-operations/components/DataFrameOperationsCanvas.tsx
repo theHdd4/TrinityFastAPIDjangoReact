@@ -118,6 +118,8 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
   const [selectedCell, setSelectedCell] = useState<{ row: number; col: string } | null>(null);
   const [selectedColumn, setSelectedColumn] = useState<string | null>(null);
   const [formulaInput, setFormulaInput] = useState('');
+  const [columnFormulas, setColumnFormulas] = useState<Record<string, string>>({});
+  const headersKey = useMemo(() => (data?.headers || []).join('|'), [data?.headers]);
   const [isFormulaMode, setIsFormulaMode] = useState(true);
   const [openDropdown, setOpenDropdown] = useState<null | 'insert' | 'delete' | 'sort' | 'filter'>(null);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; col: string; colIdx: number } | null>(null);
@@ -128,6 +130,8 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
   const editingHeaderRef = useRef<string | null>(null);
   // Track mapping from duplicated columns to their original source
   const [duplicateMap, setDuplicateMap] = useState<{ [key: string]: string }>({});
+  const previousSelectedColumnRef = useRef<string | null>(null);
+  const previousStoredFormulaRef = useRef<string | undefined>(undefined);
 
   // Ref to store header cell elements for context-menu positioning
   const headerRefs = useRef<{ [key: string]: HTMLTableCellElement | null }>({});
@@ -191,6 +195,60 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
     document.addEventListener('click', handleClickOutside);
     return () => document.removeEventListener('click', handleClickOutside);
   }, [selectedColumn]);
+
+  useEffect(() => {
+    if (!data?.headers?.length) {
+      setColumnFormulas(prev => (Object.keys(prev).length ? {} : prev));
+      return;
+    }
+    setColumnFormulas(prev => {
+      const allowed = new Set(data.headers);
+      const next: Record<string, string> = {};
+      let changed = false;
+
+      Object.entries(prev).forEach(([col, formula]) => {
+        if (allowed.has(col)) {
+          next[col] = formula;
+        } else {
+          changed = true;
+        }
+      });
+
+      if (!changed && Object.keys(next).length === Object.keys(prev).length) {
+        return prev;
+      }
+      return next;
+    });
+  }, [headersKey]);
+
+  useEffect(() => {
+    const stored = selectedColumn ? columnFormulas[selectedColumn] : undefined;
+    if (selectedColumn !== previousSelectedColumnRef.current) {
+      previousSelectedColumnRef.current = selectedColumn;
+      previousStoredFormulaRef.current = stored;
+      if (selectedColumn) {
+        if (stored !== undefined) {
+          setFormulaInput(stored);
+        } else {
+          setFormulaInput('');
+        }
+      }
+      return;
+    }
+
+    if (selectedColumn && stored !== previousStoredFormulaRef.current) {
+      previousStoredFormulaRef.current = stored;
+      if (stored !== undefined) {
+        setFormulaInput(stored);
+      } else {
+        setFormulaInput('');
+      }
+    }
+
+    if (!selectedColumn) {
+      previousStoredFormulaRef.current = undefined;
+    }
+  }, [selectedColumn, columnFormulas]);
   // 1. Add state for filter range
   const [filterRange, setFilterRange] = useState<{ min: number; max: number; value: [number, number] } | null>(null);
 
@@ -568,6 +626,16 @@ const commitHeaderEdit = async (colIdx: number, value?: string) => {
       frozenColumns: data.frozenColumns,
       cellColors: data.cellColors,
     });
+    setColumnFormulas(prev => {
+      if (!Object.prototype.hasOwnProperty.call(prev, oldHeader)) {
+        return prev;
+      }
+      const { [oldHeader]: stored, ...rest } = prev;
+      if (stored === undefined) {
+        return rest;
+      }
+      return { ...rest, [newHeader]: stored };
+    });
   } catch (err) {
     handleApiError('Rename column failed', err);
   }
@@ -792,9 +860,11 @@ const handleHeaderClick = (header: string) => {
 
 const handleFormulaSubmit = async () => {
   resetSaveSuccess();
-  if (!data || !selectedColumn || !fileId || !formulaInput.trim()) return;
+  if (!data || !selectedColumn || !fileId) return;
+  const trimmedFormula = formulaInput.trim();
+  if (!trimmedFormula) return;
   try {
-    const resp = await apiApplyFormula(fileId, selectedColumn, formulaInput.trim());
+    const resp = await apiApplyFormula(fileId, selectedColumn, trimmedFormula);
     const columnTypes: any = {};
     resp.headers.forEach(h => {
       const t = resp.types[h];
@@ -809,10 +879,10 @@ const handleFormulaSubmit = async () => {
       frozenColumns: data.frozenColumns,
       cellColors: data.cellColors,
     });
+    setColumnFormulas(prev => ({ ...prev, [selectedColumn]: trimmedFormula }));
+    setFormulaInput(trimmedFormula);
   } catch (err) {
     handleApiError('Apply formula failed', err);
-  } finally {
-    setFormulaInput('');
   }
 };
 
