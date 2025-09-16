@@ -609,8 +609,7 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
       )}
       {summaryList.length > 0 && (
         <div className="mb-8">
-          <div className="mx-auto max-w-screen-2xl rounded-2xl border border-slate-200 bg-white shadow-sm">
-            <Table
+          <Table
               headers={[
                 <ContextMenu key="Columns">
                   <ContextMenuTrigger asChild>
@@ -801,7 +800,6 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
                   </tr>
                 ))}
             </Table>
-          </div>
         </div>
       )}
 

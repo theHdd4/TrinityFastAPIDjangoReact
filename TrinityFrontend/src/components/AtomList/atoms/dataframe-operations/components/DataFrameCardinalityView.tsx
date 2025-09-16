@@ -228,8 +228,7 @@ const DataFrameCardinalityView: React.FC<DataFrameCardinalityViewProps> = ({
 
   return (
     <div className="w-full mb-4">
-      <div className="mx-auto max-w-screen-2xl rounded-2xl border border-slate-200 bg-white shadow-sm">
-        <Table
+      <Table
           headers={[
             <ContextMenu key="Column">
               <ContextMenuTrigger asChild>
@@ -406,7 +405,6 @@ const DataFrameCardinalityView: React.FC<DataFrameCardinalityViewProps> = ({
             </tr>
           ))}
         </Table>
-      </div>
     </div>
   );
 };

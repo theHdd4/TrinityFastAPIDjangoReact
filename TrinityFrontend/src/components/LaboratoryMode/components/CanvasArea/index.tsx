@@ -1144,7 +1144,7 @@ const handleAddDragLeave = (e: React.DragEvent) => {
                       >
                         <Plus className={`w-5 h-5 text-gray-400 group-hover:text-[#458EE2] transition-transform duration-500 ${addDragTarget === `m-${molecule.moleculeId}` ? 'scale-125 mb-2' : ''}`} />
                         <span
-                          className="max-w-0 overflow-hidden ml-0 group-hover:ml-2 group-hover:max-w-[120px] text-gray-600 group-hover:text-[#458EE2] font-medium whitespace-nowrap transition-all duration-500 ease-in-out"
+                          className="w-0 h-0 overflow-hidden ml-0 group-hover:ml-2 group-hover:w-[120px] group-hover:h-auto text-gray-600 group-hover:text-[#458EE2] font-medium whitespace-nowrap transition-all duration-500 ease-in-out"
                         >
                           Add New Card
                         </span>
@@ -1379,7 +1379,7 @@ const handleAddDragLeave = (e: React.DragEvent) => {
               >
                 <Plus className={`w-5 h-5 text-gray-400 group-hover:text-[#458EE2] transition-transform duration-500 ${addDragTarget === `p-${index}` ? 'scale-125 mb-2' : ''}`} />
                 <span
-                  className="max-w-0 overflow-hidden ml-0 group-hover:ml-2 group-hover:max-w-[120px] text-gray-600 group-hover:text-[#458EE2] font-medium whitespace-nowrap transition-all duration-500 ease-in-out"
+                  className="w-0 h-0 overflow-hidden ml-0 group-hover:ml-2 group-hover:w-[120px] group-hover:h-auto text-gray-600 group-hover:text-[#458EE2] font-medium whitespace-nowrap transition-all duration-500 ease-in-out"
                 >
                   Add New Card
                 </span>
@@ -1402,7 +1402,7 @@ const handleAddDragLeave = (e: React.DragEvent) => {
           >
             <Plus className={`w-5 h-5 text-gray-400 group-hover:text-[#458EE2] transition-transform duration-500 ${addDragTarget === 'end' ? 'scale-125 mb-2' : ''}`} />
             <span
-              className="max-w-0 overflow-hidden ml-0 group-hover:ml-2 group-hover:max-w-[120px] text-gray-600 group-hover:text-[#458EE2] font-medium whitespace-nowrap transition-all duration-500 ease-in-out"
+              className="w-0 h-0 overflow-hidden ml-0 group-hover:ml-2 group-hover:w-[120px] group-hover:h-auto text-gray-600 group-hover:text-[#458EE2] font-medium whitespace-nowrap transition-all duration-500 ease-in-out"
             >
               Add New Card
             </span>

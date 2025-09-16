@@ -31,7 +31,8 @@ import { Dialog, DialogContent, DialogTrigger } from '@/components/ui/dialog';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, ResponsiveContainer, PieChart, Pie, Cell, Legend, Tooltip as RechartsTooltip, ScatterChart, Scatter } from 'recharts';
 import RechartsChartRenderer from '@/templates/charts/RechartsChartRenderer';
 import { Maximize2, X, MessageSquare, Send, Edit3, Trash2, Filter, ChevronDown, ChevronRight, ChevronUp, ArrowUp, ArrowDown, Filter as FilterIcon, Plus } from 'lucide-react';
-import { EvaluateModelsFeatureData, EvaluateModelsFeatureSettings } from '../EvaluateModelsFeatureAtom';
+import { EvaluateModelsFeatureData } from '../EvaluateModelsFeatureAtom';
+import { EvaluateModelsFeatureSettings } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { EVALUATE_API, FEATURE_OVERVIEW_API, GROUPBY_API } from '@/lib/api';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import {
@@ -77,9 +78,9 @@ const getColor = (index: number) => {
 interface EvaluateModelsFeatureCanvasProps {
   atomId: string;
   data: EvaluateModelsFeatureData;
-  settings: EvaluateModelsFeatureSettings;
+  settings: EvaluateModelsFeatureSettings['settings'];
   onDataChange: (data: Partial<EvaluateModelsFeatureData>) => void;
-  onSettingsChange: (settings: Partial<EvaluateModelsFeatureSettings>) => void;
+  onSettingsChange: (settings: Partial<EvaluateModelsFeatureSettings['settings']>) => void;
   onDataUpload: (file: File, fileId: string) => void;
   onClose?: () => void;
 }
@@ -128,9 +129,9 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
     }
   };
 
-  // Comment state management
-  const [comments, setComments] = useState<Record<string, Array<{id: string, text: string, timestamp: string}>>>({});
-  const [newComments, setNewComments] = useState<Record<string, string>>({});
+  // Comment state management - use data from props instead of local state
+  const comments = data.comments || {};
+  const newComments = data.newComments || {};
   const [isSaving, setIsSaving] = useState<Record<string, boolean>>({});
 
   const saveComment = async (chartId: string) => {
@@ -165,11 +166,16 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
           text: newComment,
           timestamp: new Date().toISOString()
         };
-        setComments(prev => ({
-          ...prev,
-          [chartId]: [...(prev[chartId] || []), newCommentObj]
-        }));
-        setNewComments(prev => ({ ...prev, [chartId]: '' }));
+        onDataChange({
+          comments: {
+            ...comments,
+            [chartId]: [...(comments[chartId] || []), newCommentObj]
+          },
+          newComments: {
+            ...newComments,
+            [chartId]: ''
+          }
+        });
       } else {
         console.error('Failed to save comments');
       }
@@ -216,7 +222,12 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
         <div className="relative">
           <textarea
             value={newComment}
-            onChange={(e) => setNewComments(prev => ({ ...prev, [chartId]: e.target.value }))}
+            onChange={(e) => onDataChange({
+              newComments: {
+                ...newComments,
+                [chartId]: e.target.value
+              }
+            })}
             onKeyDown={(e) => {
               if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
@@ -258,9 +269,10 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
   const [cardinalityData, setCardinalityData] = useState<any[]>([]);
   const [cardinalityLoading, setCardinalityLoading] = useState(false);
   const [cardinalityError, setCardinalityError] = useState<string | null>(null);
-  const [sortColumn, setSortColumn] = useState<string>('');
-  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
-  const [columnFilters, setColumnFilters] = useState<{ [key: string]: string[] }>({});
+  // Use filtering state from global store instead of local state
+  const sortColumn = data.sortColumn || '';
+  const sortDirection = data.sortDirection || 'desc';
+  const columnFilters = data.columnFilters || {};
   
   const selectedCombinations = data.selectedCombinations || [];
   
@@ -989,19 +1001,25 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
       timestamp: new Date().toLocaleString()
     };
 
-    setComments(prev => ({
-      ...prev,
-      [chartId]: [...(prev[chartId] || []), comment]
-    }));
-
-          setNewComments(prev => ({ ...prev, [chartId]: "" }));
+    onDataChange({
+      comments: {
+        ...comments,
+        [chartId]: [...(comments[chartId] || []), comment]
+      },
+      newComments: {
+        ...newComments,
+        [chartId]: ""
+      }
+    });
   };
 
   const deleteComment = (chartId: string, commentId: string) => {
-    setComments(prev => ({
-      ...prev,
-      [chartId]: prev[chartId]?.filter(comment => comment.id !== commentId) || []
-    }));
+    onDataChange({
+      comments: {
+        ...comments,
+        [chartId]: comments[chartId]?.filter(comment => comment.id !== commentId) || []
+      }
+    });
   };
 
 
@@ -1532,11 +1550,13 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
   };
 
   const displayedCardinality = useMemo(() => {
+    console.log('🔍 displayedCardinality recalculating:', { cardinalityData: cardinalityData.length, columnFilters, sortColumn, sortDirection });
     let filtered = cardinalityData.filter(c => c.unique_count > 0);
 
     // Apply column filters
     Object.entries(columnFilters).forEach(([column, filterValues]) => {
       if (Array.isArray(filterValues) && filterValues.length > 0) {
+        console.log('🔍 Applying filter:', { column, filterValues });
         filtered = filtered.filter(row => {
           const cellValue = String(row[column] || '');
           return filterValues.includes(cellValue);
@@ -1560,6 +1580,7 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
       });
     }
 
+    console.log('🔍 displayedCardinality result:', { originalCount: cardinalityData.length, filteredCount: filtered.length, filtered });
     return filtered;
   }, [cardinalityData, columnFilters, sortColumn, sortDirection]);
 
@@ -1588,36 +1609,46 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
   const handleSort = (column: string, direction?: 'asc' | 'desc') => {
     if (sortColumn === column) {
       if (sortDirection === 'asc') {
-        setSortDirection('desc');
+        onDataChange({ sortDirection: 'desc' });
       } else if (sortDirection === 'desc') {
-        setSortColumn('');
-        setSortDirection('asc');
+        onDataChange({ 
+          sortColumn: '',
+          sortDirection: 'asc'
+        });
       }
     } else {
-      setSortColumn(column);
-      setSortDirection(direction || 'asc');
+      onDataChange({
+        sortColumn: column,
+        sortDirection: direction || 'asc'
+      });
     }
   };
 
   const handleColumnFilter = (column: string, values: string[]) => {
-    setColumnFilters(prev => ({
-      ...prev,
-      [column]: values
-    }));
+    console.log('🔍 handleColumnFilter called:', { column, values, currentFilters: columnFilters });
+    onDataChange({
+      columnFilters: {
+        ...columnFilters,
+        [column]: values
+      }
+    });
   };
 
   const clearColumnFilter = (column: string) => {
-    setColumnFilters(prev => {
-      const cpy = { ...prev };
-      delete cpy[column];
-      return cpy;
-    });
+    const newFilters = { ...columnFilters };
+    delete newFilters[column];
+    onDataChange({ columnFilters: newFilters });
   };
 
   const FilterMenu = ({ column }: { column: string }) => {
     const uniqueValues = getUniqueColumnValues(column);
     const current = columnFilters[column] || [];
     const [temp, setTemp] = useState<string[]>(current);
+
+    // Sync temp state with global state when it changes
+    useEffect(() => {
+      setTemp(current);
+    }, [current]);
 
     const toggleVal = (val: string) => {
       setTemp(prev => (prev.includes(val) ? prev.filter(v => v !== val) : [...prev, val]));

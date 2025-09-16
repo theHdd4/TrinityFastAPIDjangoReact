@@ -425,6 +425,70 @@ export interface SelectModelsFeatureSettings {
   combinationStatusMinimized?: boolean;
 }
 
+export interface EvaluateModelsFeatureSettings {
+  data: {
+    selectedDataframe: string;
+    scope: string;
+    selectedCombinations: string[];
+    identifiers: Array<{
+      id: string;
+      name: string;
+      selected: boolean;
+    }>;
+    graphs: Array<{
+      id: string;
+      name: string;
+      type: 'waterfall' | 'contribution' | 'actual-vs-predicted' | 'elasticity' | 'beta' | 'averages';
+      selected: boolean;
+    }>;
+    availableColumns: string[];
+    modelResults: any[];
+    identifiersData?: {[key: string]: {column_name: string | null, unique_values: string[]}};
+    selectedIdentifierValues?: {[key: string]: string[]};
+    comments?: Record<string, Array<{id: string, text: string, timestamp: string}>>;
+    newComments?: Record<string, string>;
+    columnFilters?: {[key: string]: string[]};
+    sortColumn?: string;
+    sortDirection?: 'asc' | 'desc';
+  };
+  settings: {
+    showLegend: boolean;
+    chartHeight: number;
+    autoRefresh: boolean;
+  };
+}
+
+export const DEFAULT_EVALUATE_MODELS_FEATURE_SETTINGS: EvaluateModelsFeatureSettings = {
+  data: {
+    selectedDataframe: '',
+    scope: 'SCOPE 12',
+    selectedCombinations: [],
+    identifiers: [],
+    graphs: [
+      { id: '1', name: 'Waterfall Chart', type: 'waterfall', selected: true },
+      { id: '2', name: 'Contribution Chart', type: 'contribution', selected: true },
+      { id: '3', name: 'Actual vs Predicted', type: 'actual-vs-predicted', selected: true },
+      { id: '4', name: 'Elasticity', type: 'elasticity', selected: true },
+      { id: '5', name: 'Beta', type: 'beta', selected: true },
+      { id: '6', name: 'Averages', type: 'averages', selected: true },
+    ],
+    availableColumns: ['Column 1', 'Column 2', 'Column 3', 'Column 4'],
+    modelResults: [],
+    identifiersData: {},
+    selectedIdentifierValues: {},
+    comments: {},
+    newComments: {},
+    columnFilters: {},
+    sortColumn: '',
+    sortDirection: 'desc'
+  },
+  settings: {
+    showLegend: true,
+    chartHeight: 300,
+    autoRefresh: false
+  }
+};
+
 export const DEFAULT_CHART_MAKER_SETTINGS: ChartMakerSettings = {
   dataSource: '',
   fileId: '',
