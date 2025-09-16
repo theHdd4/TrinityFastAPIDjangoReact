@@ -43,7 +43,7 @@ SUPPORTED_AGGREGATIONS = {
     "rank_pct": {"requires_weight": False, "description": "Computes the rank of a column as a percentile."}
 }
 
-ALLOWED_KEYS = {"success", "message", "groupby_json", "session_id", "suggestions"}
+ALLOWED_KEYS = {"success", "message", "groupby_json", "session_id", "suggestions", "reasoning", "used_memory", "next_steps", "error", "processing_time"}
 
 class SmartGroupByAgent:
     def __init__(self, api_url, model_name, bearer_token,
@@ -68,6 +68,22 @@ class SmartGroupByAgent:
         
         # Load files on initialization
         self.files_with_columns = self.file_loader.load_files()
+    
+    def set_context(self, client_name: str = "", app_name: str = "", project_name: str = "") -> None:
+        """
+        Set environment context for dynamic path resolution.
+        This ensures the API call will fetch the correct path for the current project.
+        """
+        if client_name or app_name or project_name:
+            if client_name:
+                os.environ["CLIENT_NAME"] = client_name
+            if app_name:
+                os.environ["APP_NAME"] = app_name
+            if project_name:
+                os.environ["PROJECT_NAME"] = project_name
+            logger.info(f"🔧 Environment context set for dynamic path resolution: {client_name}/{app_name}/{project_name}")
+        else:
+            logger.info("🔧 Using existing environment context for dynamic path resolution")
 
     def _load_files(self):
         """Load files using the standardized FileLoader."""
@@ -140,7 +156,10 @@ class SmartGroupByAgent:
         filtered.setdefault("message", "")
         return filtered
 
-    def process_request(self, user_prompt: str, session_id: Optional[str] = None):
+    def process_request(self, user_prompt: str, session_id: Optional[str] = None, client_name: str = "", app_name: str = "", project_name: str = ""):
+        # Set environment context for dynamic path resolution (like explore agent)
+        self.set_context(client_name, app_name, project_name)
+        
         if not user_prompt.strip():
             return {"success": False, "message": "Empty prompt.", "session_id": session_id or str(uuid.uuid4()),
                     "suggestions": ["Please describe the aggregation you want."]}

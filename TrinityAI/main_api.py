@@ -344,6 +344,7 @@ processor = initialize_single_llm_system()
 
 class QueryRequest(BaseModel):
     query: str
+    session_id: Optional[str] = None
 
 app = FastAPI(
     title="Single LLM Atom Detection API",
@@ -390,7 +391,7 @@ async def perform_operation(request: PerformRequest):
             # Call the backend concat API
             concat_url = os.getenv(
                 "CONCAT_PERFORM_URL",
-                f"http://{os.getenv('HOST_IP', 'localhost')}:{os.getenv('FASTAPI_PORT', '8004')}/api/concat/perform",
+                f"http://{os.getenv('HOST_IP', 'localhost')}:{os.getenv('FASTAPI_PORT', '8001')}/api/concat/perform",
             )
             
             resp = requests.post(concat_url, json=payload, timeout=60)
@@ -530,7 +531,7 @@ async def chat_endpoint(request: QueryRequest):
                 "error": "Processor not available"
             })
         
-        # Single LLM processing
+        # Single LLM processing - only for atom detection, no session management needed
         result = processor.process_query(request.query)
         
         logger.info(
