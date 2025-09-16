@@ -31,6 +31,9 @@ from ..data_upload_validate.app.routes import get_object_prefix
 # Import MongoDB saver functions
 from .mongodb_saver import save_build_config, get_build_config_from_mongo, get_scope_config_from_mongo, get_combination_column_values
 
+# Import stack model training
+from .stack_model_training import StackModelTrainer
+
 
 
 
@@ -107,6 +110,7 @@ from .marketing_helpers import (
     logistic_function,
     power_function
 )
+from .stack_model_data import StackModelDataProcessor
 
 # Elasticity and contribution imports - removed unused imports since we're using direct calculation
 
@@ -347,8 +351,8 @@ async def train_models_direct(request: dict):
         logger.info(f"Starting direct model training with run_id: {run_id}")
         
         # Extract parameters from request
-        scope_number = request.get('scope_number')  # e.g., "3"
-        combinations = request.get('combinations', [])  # e.g., ["Channel_Convenience_Variant_Flavoured_Brand_HEINZ_Flavoured_PPG_Small_Single"]
+        scope_number = request.get('scope_number') 
+        combinations = request.get('combinations', []) 
         x_variables = request.get('x_variables', [])
         y_variable = request.get('y_variable')
         standardization = request.get('standardization', 'none')
@@ -2396,3 +2400,258 @@ async def test_mongo_connection():
             "success": False,
             "error": str(e)
         }
+
+
+@router.post("/stack-model/prepare-data", tags=["Stack Modeling"])
+async def prepare_stack_model_data(request: dict):
+    """
+    Prepare pooled data for stack modeling without training models.
+    This endpoint fetches data from multiple combinations and creates pooled datasets
+    based on user-specified identifiers.
+    """
+    try:
+        logger.info("Starting stack model data preparation")
+        logger.info(f"Request: {request}")
+        
+        # Extract parameters from request
+        scope_number = request.get('scope_number')
+        combinations = request.get('combinations', [])
+        pool_by_identifiers = request.get('pool_by_identifiers', [])
+        x_variables = request.get('x_variables', [])
+        y_variable = request.get('y_variable')
+        
+        # Clustering parameters (optional)
+        apply_clustering = request.get('apply_clustering', False)
+        numerical_columns_for_clustering = request.get('numerical_columns_for_clustering', [])
+        n_clusters = request.get('n_clusters', None)
+        
+        # Interaction terms parameters (optional)
+        apply_interaction_terms = request.get('apply_interaction_terms', True)
+        identifiers_for_interaction = request.get('identifiers_for_interaction', [])
+        numerical_columns_for_interaction = request.get('numerical_columns_for_interaction', [])
+        
+        # Validate required parameters
+        if not scope_number:
+            raise HTTPException(status_code=400, detail="scope_number is required")
+        if not combinations:
+            raise HTTPException(status_code=400, detail="combinations list is required")
+        if not pool_by_identifiers:
+            raise HTTPException(status_code=400, detail="pool_by_identifiers list is required")
+        if not x_variables:
+            raise HTTPException(status_code=400, detail="x_variables list is required")
+        if not y_variable:
+            raise HTTPException(status_code=400, detail="y_variable is required")
+        
+        # Validate clustering parameters if clustering is requested
+        if apply_clustering:
+            if not numerical_columns_for_clustering:
+                raise HTTPException(status_code=400, detail="numerical_columns_for_clustering is required when apply_clustering is true")
+            
+            # Validate that numerical_columns_for_clustering is a subset of x_variables + y_variable
+            all_numerical_columns = x_variables + [y_variable]
+            invalid_clustering_columns = [col for col in numerical_columns_for_clustering if col not in all_numerical_columns]
+            if invalid_clustering_columns:
+                raise HTTPException(status_code=400, detail=f"numerical_columns_for_clustering must be a subset of x_variables + y_variable. Invalid columns: {invalid_clustering_columns}")
+        
+        # Validate interaction terms parameters if interaction terms are requested
+        if apply_interaction_terms:
+            # Interaction terms can only be applied when clustering is also applied
+            if not apply_clustering:
+                raise HTTPException(status_code=400, detail="apply_clustering must be true when apply_interaction_terms is true. Interaction terms are only created for split clustered data.")
+            
+            if not numerical_columns_for_interaction:
+                raise HTTPException(status_code=400, detail="numerical_columns_for_interaction is required when apply_interaction_terms is true")
+            
+            # Validate that numerical_columns_for_interaction is a subset of x_variables + y_variable
+            all_numerical_columns = x_variables + [y_variable]
+            invalid_interaction_columns = [col for col in numerical_columns_for_interaction if col not in all_numerical_columns]
+            if invalid_interaction_columns:
+                raise HTTPException(status_code=400, detail=f"numerical_columns_for_interaction must be a subset of x_variables + y_variable. Invalid columns: {invalid_interaction_columns}")
+        
+        # Get MinIO client and bucket name
+        minio_client = get_minio_client()
+        bucket_name = "trinity"  # From config
+        
+        # Initialize the processor
+        processor = StackModelDataProcessor()
+        
+        # Prepare the stacked data
+        result = await processor.prepare_stack_model_data(
+            scope_number=scope_number,
+            combinations=combinations,
+            pool_by_identifiers=pool_by_identifiers,
+            x_variables=x_variables,
+            y_variable=y_variable,
+            minio_client=minio_client,
+            bucket_name=bucket_name
+        )
+        
+        # Apply clustering if requested
+        if apply_clustering and result.get('status') == 'success':
+            logger.info("Applying clustering to pooled data...")
+            
+            # Convert numerical columns to lowercase for consistent matching
+            numerical_columns_for_clustering = [col.lower() for col in numerical_columns_for_clustering]
+            
+            # Convert interaction terms parameters to lowercase for consistent matching
+            if apply_interaction_terms:
+                numerical_columns_for_interaction = [col.lower() for col in numerical_columns_for_interaction]
+            
+            # Get the pooled data from the result
+            pooled_data = result.get('pooled_data', {})
+            
+            # Apply clustering to the pooled data
+            clustering_result = await processor.apply_clustering_to_stack_data(
+                pooled_data=pooled_data,
+                numerical_columns=numerical_columns_for_clustering,
+                minio_client=minio_client,
+                bucket_name=bucket_name,
+                n_clusters=n_clusters,
+                apply_interaction_terms=apply_interaction_terms,
+                identifiers_for_interaction=None,  # Auto-detect identifiers
+                numerical_columns_for_interaction=numerical_columns_for_interaction
+            )
+            
+            # Add clustering information to the main result
+            result['clustering_applied'] = True
+            result['clustering_result'] = clustering_result
+            result['numerical_columns_for_clustering'] = numerical_columns_for_clustering
+            result['n_clusters'] = n_clusters
+            
+            # Update the pooled data with clustering results
+            if clustering_result.get('status') == 'success':
+                result['total_pools'] = len(clustering_result.get('clustered_pools', {}))
+        else:
+            result['clustering_applied'] = False
+        
+        # Interaction terms are only applied to split clustered data, not to original pooled data
+        result['interaction_terms_applied'] = apply_interaction_terms and apply_clustering
+        
+        if 'pooled_data' in result:
+            del result['pooled_data']
+        
+        logger.info("Stack model data preparation completed successfully")
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in stack model data preparation: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+@router.post("/stack-model/train-models", tags=["Stack Modeling"])
+async def train_models_for_stacked_data(request: dict):
+    """
+    Train models on stacked/clustered data using the same models as individual combinations.
+    This endpoint works with the output from the prepare-data endpoint.
+    """
+    try:
+        logger.info("Starting stack model training")
+        logger.info(f"Request: {request}")
+        
+        # Extract parameters from request
+        scope_number = request.get('scope_number')
+        combinations = request.get('combinations', [])
+        pool_by_identifiers = request.get('pool_by_identifiers', [])
+        x_variables = request.get('x_variables', [])
+        y_variable = request.get('y_variable')
+        
+        # Clustering parameters (optional)
+        apply_clustering = request.get('apply_clustering', False)
+        numerical_columns_for_clustering = request.get('numerical_columns_for_clustering', [])
+        n_clusters = request.get('n_clusters', None)
+        
+        # Interaction terms parameters (optional)
+        apply_interaction_terms = request.get('apply_interaction_terms', True)
+        numerical_columns_for_interaction = request.get('numerical_columns_for_interaction', [])
+        
+        # Model training parameters
+        standardization = request.get('standardization', 'none')
+        k_folds = request.get('k_folds', 5)
+        models_to_run = request.get('models_to_run', None)
+        custom_configs = request.get('custom_model_configs', None)
+        price_column = request.get('price_column', None)
+        
+        # Generate unique run ID
+        run_id = request.get('run_id') or str(uuid.uuid4())
+        
+        # Validate required parameters
+        if not scope_number:
+            raise HTTPException(status_code=400, detail="scope_number is required")
+        if not combinations:
+            raise HTTPException(status_code=400, detail="combinations list is required")
+        if not pool_by_identifiers:
+            raise HTTPException(status_code=400, detail="pool_by_identifiers list is required")
+        if not x_variables:
+            raise HTTPException(status_code=400, detail="x_variables list is required")
+        if not y_variable:
+            raise HTTPException(status_code=400, detail="y_variable is required")
+        
+        # Validate clustering parameters if clustering is requested
+        if apply_clustering:
+            if not numerical_columns_for_clustering:
+                raise HTTPException(status_code=400, detail="numerical_columns_for_clustering is required when apply_clustering is true")
+            
+            # Validate that numerical_columns_for_clustering is a subset of x_variables + y_variable
+            all_numerical_columns = x_variables + [y_variable]
+            invalid_clustering_columns = [col for col in numerical_columns_for_clustering if col not in all_numerical_columns]
+            if invalid_clustering_columns:
+                raise HTTPException(status_code=400, detail=f"numerical_columns_for_clustering must be a subset of x_variables + y_variable. Invalid columns: {invalid_clustering_columns}")
+        
+        # Validate interaction terms parameters if interaction terms are requested
+        if apply_interaction_terms:
+            # Interaction terms can only be applied when clustering is also applied
+            if not apply_clustering:
+                raise HTTPException(status_code=400, detail="apply_clustering must be true when apply_interaction_terms is true. Interaction terms are only created for split clustered data.")
+            
+            if not numerical_columns_for_interaction:
+                raise HTTPException(status_code=400, detail="numerical_columns_for_interaction is required when apply_interaction_terms is true")
+            
+            # Validate that numerical_columns_for_interaction is a subset of x_variables + y_variable
+            all_numerical_columns = x_variables + [y_variable]
+            invalid_interaction_columns = [col for col in numerical_columns_for_interaction if col not in all_numerical_columns]
+            if invalid_interaction_columns:
+                raise HTTPException(status_code=400, detail=f"numerical_columns_for_interaction must be a subset of x_variables + y_variable. Invalid columns: {invalid_interaction_columns}")
+        
+        # Get MinIO client and bucket name
+        minio_client = get_minio_client()
+        bucket_name = "trinity"  # From config
+        
+        # Initialize the stack model trainer
+        trainer = StackModelTrainer()
+        
+        # Train models using the dedicated trainer class
+        result = await trainer.train_models_for_stacked_data(
+            scope_number=scope_number,
+            combinations=combinations,
+            pool_by_identifiers=pool_by_identifiers,
+            x_variables=x_variables,
+            y_variable=y_variable,
+            minio_client=minio_client,
+            bucket_name=bucket_name,
+            apply_clustering=apply_clustering,
+            numerical_columns_for_clustering=numerical_columns_for_clustering,
+            n_clusters=n_clusters,
+            apply_interaction_terms=apply_interaction_terms,
+            numerical_columns_for_interaction=numerical_columns_for_interaction,
+            standardization=standardization,
+            k_folds=k_folds,
+            models_to_run=models_to_run,
+            custom_configs=custom_configs,
+            price_column=price_column,
+            run_id=run_id
+        )
+        
+        # Check if training was successful
+        if result.get('status') == 'error':
+            raise HTTPException(status_code=500, detail=result.get('error', 'Unknown error'))
+        
+        logger.info("Stack model training completed successfully")
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in stack model training: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+

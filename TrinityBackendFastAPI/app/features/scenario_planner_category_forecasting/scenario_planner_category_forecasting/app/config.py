@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 # MongoDB                                                                     #
 # --------------------------------------------------------------------------- #
 # Use the same database as the build atom (trinity_prod)
-MONGO_URI = os.getenv("MONGO_URI", "mongodb://root:rootpass@mongo:27017/trinity_prod?authSource=admin")
+MONGO_URI = os.getenv("MONGO_URI", "mongodb://root:rootpass@mongo:27017/trinity_db?authSource=admin")
 
 # Debug: Log environment variables to see what's being set
 logger.info("Environment MONGO_URI: %s", os.getenv("MONGO_URI"))
@@ -26,7 +26,7 @@ mongo_client = motor.motor_asyncio.AsyncIOMotorClient(MONGO_URI, serverSelection
 # Get primary database from URI
 db = mongo_client.get_default_database()
 
-# Collection in shared config database for identifier structure
+# Collection  inshared config database for identifier structure
 CONFIG_DB = os.getenv("CLASSIFIER_CONFIG_DB", "trinity_db")
 column_classifier_config = mongo_client[CONFIG_DB]["column_classifier_config"]
 

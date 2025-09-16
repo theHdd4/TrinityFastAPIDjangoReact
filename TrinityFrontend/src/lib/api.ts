@@ -150,28 +150,7 @@ export const BUILD_MODEL_API =
 export const SCENARIO_PLANNER_API =
   normalizeUrl(import.meta.env.VITE_SCENARIO_PLANNER_API) ||
   `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/scenario`;
-
-// Debug logging for clustering API
-console.log('Clustering API Configuration:', {
-  isDevStack,
-  djangoPort,
-  fastapiPort,
-  backendOrigin,
-  clusteringApi: normalizeUrl(import.meta.env.VITE_CLUSTERING_API) ||
-    `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/clustering`
-});
-
-// Debug logging for feature-overview API
-console.log('feature-overview API Configuration:', {
-  isDevStack,
-  djangoPort,
-  fastapiPort,
-  backendOrigin,
-  featureoverviewApi: normalizeUrl(import.meta.env.VITE_FEATURE_OVERVIEW_API) ||
-    `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/feature-overview`
-});
  
-
 export const SELECT_API =
   normalizeUrl(import.meta.env.VITE_SELECT_API) ||
   `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/select`;
