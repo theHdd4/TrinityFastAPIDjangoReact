@@ -65,7 +65,6 @@ class ChartResponse(BaseModel):
     processing_time: Optional[float] = Field(None, description="Time taken to process the request")
     # 🔧 CRITICAL FIX: Add missing fields for file information
     file_name: Optional[str] = Field(None, description="Name of the file used for chart generation")
-    data_source: Optional[str] = Field(None, description="Data source file for the chart")
     file_context: Optional[Dict[str, Any]] = Field(None, description="Context about available files and current file")
     # 🔧 SMART RESPONSE: Add smart_response field for user-friendly messages
     smart_response: Optional[str] = Field(None, description="Smart, user-friendly response explaining what was created and next steps")

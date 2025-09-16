@@ -5,12 +5,6 @@ import logging
 import os
 from datetime import datetime
 from typing import Dict, Any, Optional, List
-import pandas as pd
-import pyarrow as pa
-import pyarrow.parquet as pq
-import pyarrow.feather as pf
-from io import BytesIO
-from minio import Minio
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage
 from langchain.memory import ConversationBufferWindowMemory
 
@@ -19,6 +13,7 @@ from .ai_logic import (
     call_llm_create_transform,
     extract_json_from_response
 )
+from file_loader import FileLoader
 
 logger = logging.getLogger(__name__)
 ALLOWED_KEYS = {"success", "message", "json", "session_id", "suggestions"}
@@ -47,102 +42,23 @@ class SmartCreateTransformAgent:
         self.supported_operations = supported_operations
         self.operation_format = operation_format
         self.sessions: Dict[str, Dict[str, Any]] = {}
-        try:
-            self.minio_client = Minio(minio_endpoint, access_key=access_key, secret_key=secret_key, secure=False)
-        except Exception as e:
-            logger.critical(f"MinIO init failed: {e}")
-            self.minio_client = None
-        self.files_with_columns: Dict[str, List[str]] = {}
-        self._load_files()
         self.history_window_size = history_window_size
+        
+        # Initialize FileLoader for standardized file handling
+        self.file_loader = FileLoader(
+            minio_endpoint=minio_endpoint,
+            minio_access_key=access_key,
+            minio_secret_key=secret_key,
+            minio_bucket=bucket,
+            object_prefix=prefix
+        )
+        
+        # Load files on initialization
+        self.files_with_columns = self.file_loader.load_files()
 
     def _load_files(self):
-        """Loads files from MinIO, intelligently reading various Arrow formats."""
-        logger.info(f"Loading files from MinIO bucket '{self.bucket}' with prefix '{self.prefix}'...")
-        self.files_with_columns.clear()
-        
-        if not self.minio_client:
-            logger.error("No MinIO client.")
-            return
-            
-        try:
-            objects = self.minio_client.list_objects(self.bucket, prefix=self.prefix, recursive=True)
-            
-            files_loaded = 0
-            for obj in objects:
-                # Accept multiple file formats like the groupby agent
-                if not any(obj.object_name.endswith(ext) for ext in ['.arrow', '.parquet', '.feather', '.csv']):
-                    continue
-
-                filename = os.path.basename(obj.object_name)
-                full_object_path = obj.object_name
-                logger.info(f"Processing file: {filename}")
-                logger.info(f"Full MinIO object path: {full_object_path}")
-                logger.info(f"Bucket: {self.bucket}, Prefix: {self.prefix}")
-
-                try:
-                    # Use the full object path, not just the filename
-                    response = self.minio_client.get_object(self.bucket, full_object_path)
-                    file_data = response.read()
-                    logger.info(f"Successfully read file from MinIO path: {full_object_path}")
-                finally:
-                    response.close()
-                    response.release_conn()
-
-                table = None
-                # --- Enhanced Reading Logic ---
-                # Define a list of reading functions to try in order of likelihood.
-                # Each function takes a bytes buffer and returns a PyArrow Table.
-                readers = [
-                    ("Parquet", lambda buffer: pq.read_table(buffer)),
-                    ("Feather", lambda buffer: pf.read_table(buffer)),
-                    ("Arrow IPC", lambda buffer: pa.ipc.open_stream(buffer).read_all()),
-                    ("CSV", lambda buffer: pa.csv.read_csv(buffer))
-                ]
-
-                for format_name, reader_func in readers:
-                    try:
-                        # Use a BytesIO buffer to read the in-memory file data
-                        buffer = BytesIO(file_data)
-                        table = reader_func(buffer)
-                        logger.info(f"Successfully read '{filename}' as {format_name} format.")
-                        break  # Stop on the first successful read
-                    except Exception as e:
-                        logger.debug(f"Could not read '{filename}' as {format_name}: {e}")
-
-                # --- Column Extraction ---
-                if table is not None:
-                    columns = table.column_names
-                    self.files_with_columns[filename] = columns
-                    files_loaded += 1
-                    
-                    # Enhanced column printing for better visibility
-                    logger.info(f"=== COLUMN EXTRACTION FOR '{filename}' ===")
-                    logger.info(f"Total columns: {len(columns)}")
-                    logger.info(f"Columns: {columns}")
-                    logger.info(f"Column types: {[table.schema.field(col).type for col in columns]}")
-                    logger.info(f"Row count: {table.num_rows}")
-                    logger.info(f"File size: {len(file_data)} bytes")
-                    logger.info("=" * 50)
-                    
-                    # Also print to console for immediate visibility
-                    print(f"\n📁 File: {filename}")
-                    print(f"📊 Columns ({len(columns)}): {columns}")
-                    print(f"📈 Rows: {table.num_rows}")
-                    print(f"💾 Size: {len(file_data)} bytes")
-                    print("-" * 40)
-                    
-                else:
-                    logger.warning(f"Could not read '{filename}' in any supported format.")
-                    
-            logger.info(f"Finished loading. Found and processed {files_loaded} files.")
-            print(f"\n🎯 SUMMARY: Loaded {files_loaded} files with columns:")
-            for filename, columns in self.files_with_columns.items():
-                print(f"  • {filename}: {len(columns)} columns")
-            print("=" * 50)
-            
-        except Exception as e:
-            logger.error(f"MinIO list_objects failed: {e}")
+        """Load files using the standardized FileLoader."""
+        self.files_with_columns = self.file_loader.load_files()
 
     def _build_history_string(self, history_msgs: List[BaseMessage]) -> str:
         if not history_msgs:

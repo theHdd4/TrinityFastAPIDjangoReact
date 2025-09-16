@@ -417,7 +417,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
   // so that downstream logic expecting an array (e.g. key detection) continues
   // to work.
   const chartDataForRendering = useMemo(() => {
-    if (!data) return [];
+    if (!data || !Array.isArray(data)) return [];
 
     // When data is already an array, handle special cases for pie charts
     if (Array.isArray(data)) {
@@ -1206,7 +1206,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
 
     
     // If we have yFields but the data only has 'x' and 'y' keys, we need to transform the data
-    if (yFields && yFields.length > 1 && firstItem && firstItem.x !== undefined && firstItem.y !== undefined) {
+    if (yFields && yFields.length > 1 && firstItem && firstItem.x !== undefined && firstItem.y !== undefined && Array.isArray(chartDataForRendering)) {
       // Transform data to use actual field names instead of generic x/y
       const transformedData = chartDataForRendering.map((item: any, index: number) => {
         const transformed: any = {};
@@ -1272,7 +1272,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
         }
       } else {
         // Fallback to the original transformation logic
-        const transformedData = chartDataForRendering.map((item: any, index: number) => {
+        const transformedData = Array.isArray(chartDataForRendering) ? chartDataForRendering.map((item: any, index: number) => {
           const transformed: any = {};
           
           // Keep the x-axis data
@@ -1306,7 +1306,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
           }
           
           return transformed;
-        });
+        }) : [];
         
         yKey = yFields[0];
         yKeys = yFields;
@@ -1352,7 +1352,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
         (yFields && yFields.length > 1 && !yFields.every(f => availableKeys.includes(f)));
 
       if (needsTransformation) {
-        transformedChartData = chartDataForRendering.map((item: any) => {
+        transformedChartData = Array.isArray(chartDataForRendering) ? chartDataForRendering.map((item: any) => {
           const transformed: any = {};
 
           // Map keys to actual field names for X-axis
@@ -1403,7 +1403,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
           }
 
           return transformed;
-        });
+        }) : [];
 
         // Ensure yKeys reflect the provided fields after transformation
         if (yFields && yFields.length > 0) {
@@ -2111,13 +2111,13 @@ const RechartsChartRenderer: React.FC<Props> = ({
                 animationDuration={1000}
                 animationEasing="ease-out"
               >
-                {chartDataForRendering.map((entry, index) => (
+                {Array.isArray(chartDataForRendering) ? chartDataForRendering.map((entry, index) => (
                   <Cell
                     key={`cell-${index}`}
                     fill={`url(#pieGradient-${index % MODERN_PIE_COLORS.length})`}
                     style={{ cursor: 'pointer' }}
                   />
-                ))}
+                )) : []}
               </Pie>
               <Tooltip
                 content={({ active, payload, label }) => {
@@ -2215,13 +2215,13 @@ const RechartsChartRenderer: React.FC<Props> = ({
                 animationEasing="ease-out"
                 style={{ fontSize: '11px', fontWeight: 500 }}
               >
-                {chartDataForRendering.map((entry, index) => (
+                {Array.isArray(chartDataForRendering) ? chartDataForRendering.map((entry, index) => (
                   <Cell
                     key={`cell-${index}`}
                     fill={`url(#pieGradient-${index % MODERN_PIE_COLORS.length})`}
                     style={{ cursor: 'pointer' }}
                   />
-                ))}
+                )) : []}
               </Pie>
               <Tooltip
                 content={({ active, payload, label }) => {
