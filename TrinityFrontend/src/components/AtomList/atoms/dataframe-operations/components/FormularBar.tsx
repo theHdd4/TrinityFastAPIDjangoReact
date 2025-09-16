@@ -575,6 +575,7 @@ const FormularBar: React.FC<FormularBarProps> = ({
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedFormula, setSelectedFormula] = useState<FormulaItem | null>(null);
   const [activeTab, setActiveTab] = useState<TabValue>('all');
+  const [isUsageGuideOpen, setIsUsageGuideOpen] = useState(false);
 
   useEffect(() => {
     if (!isFormulaMode) {
@@ -628,6 +629,7 @@ const FormularBar: React.FC<FormularBarProps> = ({
     setSelectedFormula(null);
     setIsLibraryOpen(false);
     setActiveTab('all');
+    setIsUsageGuideOpen(false);
   };
 
   const handleFormulaSelect = (formula: FormulaItem) => {
@@ -704,7 +706,7 @@ const FormularBar: React.FC<FormularBarProps> = ({
     return <div className='space-y-2'>{items.map(renderFormulaCard)}</div>;
   };
 
-  const shouldShowUsageGuide = formulaInput.trim().length > 0;
+  const shouldShowUsageGuide = isUsageGuideOpen;
 
   return (
     <div className='flex-shrink-0 border-b border-border bg-gradient-to-r from-card via-card/95 to-card shadow-sm'>
@@ -782,6 +784,19 @@ const FormularBar: React.FC<FormularBarProps> = ({
             </Tabs>
           </PopoverContent>
         </Popover>
+
+        <Button
+          variant='outline'
+          size='sm'
+          className={`h-8 w-8 p-0 shadow-sm ${
+            isUsageGuideOpen ? 'bg-primary/10 text-primary border-primary/40' : ''
+          }`}
+          onClick={() => setIsUsageGuideOpen((prev) => !prev)}
+          title={isUsageGuideOpen ? 'Hide usage guide' : 'Show usage guide'}
+          aria-pressed={isUsageGuideOpen}
+        >
+          <Calculator className='w-4 h-4' />
+        </Button>
 
         <div className='flex items-center space-x-1'>
           <Button
