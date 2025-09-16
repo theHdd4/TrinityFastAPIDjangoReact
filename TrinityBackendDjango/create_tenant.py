@@ -17,12 +17,64 @@ import django
 django.setup()
 
 import uuid
+from typing import Mapping, Sequence
+
 from django.core.management import call_command
 from django.db import connection, transaction
 from django_tenants.utils import schema_context
 
 # Adjust this import path if your app label is different:
 from apps.tenants.models import Domain, Tenant
+
+
+def _tenant_tables(schema_name: str) -> set[str]:
+    """Return the set of tables visible for ``schema_name``."""
+
+    with schema_context(schema_name):
+        with connection.cursor() as cursor:
+            return set(connection.introspection.table_names(cursor))
+
+
+def ensure_tenant_tables(
+    schema_name: str,
+    required: Mapping[str, Sequence[str]] | None = None,
+    verbose: bool = True,
+) -> None:
+    """Guarantee ``schema_name`` has the expected tables before seeding data."""
+
+    required = required or {
+        "registry_arrowdataset": ("registry",),
+        "subscriptions_company": ("subscriptions",),
+        "subscriptions_subscriptionplan": ("subscriptions",),
+    }
+
+    existing = _tenant_tables(schema_name)
+    missing = {
+        table: apps
+        for table, apps in required.items()
+        if table not in existing
+    }
+    if not missing:
+        return
+
+    if verbose:
+        missing_list = ", ".join(sorted(missing))
+        print(
+            f"   → Missing tables detected in {schema_name}: {missing_list}. Re-running targeted migrations…"
+        )
+
+    apps_to_sync = {
+        app_label for app_labels in missing.values() for app_label in app_labels
+    }
+    for app_label in sorted(apps_to_sync):
+        call_command(
+            "migrate_schemas",
+            app_label,
+            tenant=True,
+            schema_name=schema_name,
+            interactive=False,
+            verbosity=1 if verbose else 0,
+        )
 
 
 def ensure_arrowdataset_constraints(verbose: bool = True) -> None:
@@ -33,20 +85,50 @@ def ensure_arrowdataset_constraints(verbose: bool = True) -> None:
         table_identifier = cursor.fetchone()
         if not table_identifier or table_identifier[0] is None:
             if verbose:
-                print("   → registry_arrowdataset table is missing; skipping constraint repair")
+                print(
+                    "   → registry_arrowdataset table is missing; skipping constraint repair"
+                )
             return
+
+        def log(message: str) -> None:
+            if verbose:
+                print(f"   → {message}")
 
         def has_constraint(name: str) -> bool:
             cursor.execute(
                 """
                 SELECT 1
-                FROM pg_constraint
-                WHERE conrelid = to_regclass('registry_arrowdataset')
-                  AND conname = %s
+                  FROM pg_constraint
+                 WHERE conrelid = to_regclass('registry_arrowdataset')
+                   AND conname = %s
                 """,
                 [name],
             )
             return cursor.fetchone() is not None
+
+        def index_details(name: str) -> tuple[bool, list[str]] | None:
+            cursor.execute(
+                """
+                SELECT idx.indisunique,
+                       array_agg(att.attname ORDER BY cols.ordinality) AS columns
+                  FROM pg_class tbl
+                  JOIN pg_namespace ns ON ns.oid = tbl.relnamespace
+                  JOIN pg_index idx ON idx.indrelid = tbl.oid
+                  JOIN pg_class idxrel ON idxrel.oid = idx.indexrelid
+                  JOIN LATERAL unnest(idx.indkey) WITH ORDINALITY AS cols(attnum, ordinality) ON TRUE
+                  JOIN pg_attribute att ON att.attrelid = tbl.oid AND att.attnum = cols.attnum
+                 WHERE tbl.oid = to_regclass('registry_arrowdataset')
+                   AND ns.nspname = current_schema()
+                   AND idxrel.relname = %s
+                GROUP BY idx.indisunique
+                """,
+                [name],
+            )
+            row = cursor.fetchone()
+            if not row:
+                return None
+            is_unique, columns = row
+            return bool(is_unique), list(columns or [])
 
         if has_constraint("registry_arrowdataset_original_csv_key") and not has_constraint(
             "unique_project_csv"
@@ -54,32 +136,40 @@ def ensure_arrowdataset_constraints(verbose: bool = True) -> None:
             cursor.execute(
                 "ALTER TABLE registry_arrowdataset RENAME CONSTRAINT registry_arrowdataset_original_csv_key TO unique_project_csv"
             )
-            if verbose:
-                print(
-                    "   → Renamed registry_arrowdataset_original_csv_key to unique_project_csv"
-                )
+            log("Renamed registry_arrowdataset_original_csv_key to unique_project_csv")
 
         if not has_constraint("unique_project_csv"):
-            cursor.execute(
-                "ALTER TABLE registry_arrowdataset ADD CONSTRAINT unique_project_csv UNIQUE (project_id, original_csv)"
-            )
-            if verbose:
-                print("   → Added unique_project_csv constraint on registry_arrowdataset")
+            reused_index = False
+            details = index_details("unique_project_csv")
+            expected_columns = ["project_id", "original_csv"]
+            if details and details[0] and details[1] == expected_columns:
+                cursor.execute(
+                    "ALTER TABLE registry_arrowdataset ADD CONSTRAINT unique_project_csv UNIQUE USING INDEX unique_project_csv"
+                )
+                reused_index = True
+                log("Attached existing unique_project_csv index as a constraint")
 
-        cursor.execute(
-            """
-            SELECT 1
-            FROM pg_indexes
-            WHERE schemaname = current_schema()
-              AND indexname = 'registry_arrowdataset_project_csv_idx'
-            """
-        )
-        if cursor.fetchone() is None:
+            if not reused_index:
+                cursor.execute(
+                    "ALTER TABLE registry_arrowdataset ADD CONSTRAINT unique_project_csv UNIQUE (project_id, original_csv)"
+                )
+                log("Added unique_project_csv constraint on registry_arrowdataset")
+
+        details = index_details("registry_arrowdataset_project_csv_idx")
+        expected_columns = ["project_id", "original_csv"]
+        if not details:
             cursor.execute(
                 "CREATE UNIQUE INDEX IF NOT EXISTS registry_arrowdataset_project_csv_idx ON registry_arrowdataset (project_id, original_csv)"
             )
-            if verbose:
-                print("   → Created registry_arrowdataset_project_csv_idx index")
+            log("Created registry_arrowdataset_project_csv_idx index")
+        elif (not details[0]) or details[1] != expected_columns:
+            cursor.execute(
+                "DROP INDEX IF EXISTS registry_arrowdataset_project_csv_idx"
+            )
+            cursor.execute(
+                "CREATE UNIQUE INDEX registry_arrowdataset_project_csv_idx ON registry_arrowdataset (project_id, original_csv)"
+            )
+            log("Rebuilt registry_arrowdataset_project_csv_idx with the correct definition")
 
 
 def main():
@@ -270,15 +360,24 @@ def main():
 
     print(f"→ 3) Running TENANT-SCHEMA migrations for '{tenant_schema}'…")
     # Switch into the tenant schema and apply all tenant apps there
-    # `migrate_schemas` expects the schema name via the --schema flag.
     call_command(
-        "migrate_schemas", "--schema", tenant_schema, interactive=False, verbosity=1
+        "migrate_schemas",
+        tenant=True,
+        schema_name=tenant_schema,
+        interactive=False,
+        verbosity=1,
     )
+    ensure_tenant_tables(tenant_schema)
     print("   ✅ Tenant-schema migrations complete.\n")
 
     print(f"→ 3b) Applying registry migrations for '{tenant_schema}'…")
     call_command(
-        "migrate_schemas", "registry", "--schema", tenant_schema, interactive=False, verbosity=1
+        "migrate_schemas",
+        "registry",
+        tenant=True,
+        schema_name=tenant_schema,
+        interactive=False,
+        verbosity=1,
     )
     with schema_context(tenant_schema):
         ensure_arrowdataset_constraints()
