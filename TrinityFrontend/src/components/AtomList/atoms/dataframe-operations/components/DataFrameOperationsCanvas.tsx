@@ -792,7 +792,7 @@ const handleHeaderClick = (header: string) => {
 
 const handleFormulaSubmit = async () => {
   resetSaveSuccess();
-  if (!data || !selectedColumn || !fileId) return;
+  if (!data || !selectedColumn || !fileId || !formulaInput.trim()) return;
   try {
     const resp = await apiApplyFormula(fileId, selectedColumn, formulaInput.trim());
     const columnTypes: any = {};
@@ -1072,9 +1072,11 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
             {data && (
               <FormularBar
                 data={data}
+                selectedCell={selectedCell}
                 selectedColumn={selectedColumn}
                 formulaInput={formulaInput}
                 isFormulaMode={isFormulaMode}
+                onSelectedCellChange={setSelectedCell}
                 onSelectedColumnChange={setSelectedColumn}
                 onFormulaInputChange={setFormulaInput}
                 onFormulaModeChange={setIsFormulaMode}
