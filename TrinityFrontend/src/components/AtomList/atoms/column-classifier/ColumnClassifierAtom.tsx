@@ -36,27 +36,143 @@ const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
   const { toast } = useToast();
   const { user } = useAuth();
 
+  const processedFileRef = React.useRef<string | null>(null);
+  const pendingMappingRef = React.useRef<AbortController | null>(null);
+
   React.useEffect(() => {
-    const loadMapping = async () => {
-      if (!classifierData.files.length) return;
-      const file = classifierData.files[0];
-      if (!file?.fileName) return;
-      const mapping = await fetchDimensionMapping({ objectName: file.fileName });
-      if (Object.keys(mapping).length === 0) return;
-      const updatedFile: ColumnClassifierFile = {
-        ...file,
-        customDimensions: mapping,
-      };
-      updateSettings(atomId, {
-        data: { files: [updatedFile], activeFileIndex: 0 },
-        dimensions: Object.keys(mapping),
-        enableDimensionMapping: true,
-      });
+    const activeIndex = classifierData.activeFileIndex ?? 0;
+    const activeFile = classifierData.files[activeIndex];
+
+    const ensureToggleState = (enable: boolean, dims: string[]) => {
+      const sortedDims = enable ? [...dims].sort() : [];
+      const currentDims = [...(settings.dimensions || [])].sort();
+      const dimsChanged =
+        sortedDims.length !== currentDims.length ||
+        sortedDims.some((dim, idx) => dim !== currentDims[idx]);
+      const currentToggle = settings.enableDimensionMapping || false;
+      if (dimsChanged || currentToggle !== enable) {
+        updateSettings(atomId, {
+          enableDimensionMapping: enable,
+          dimensions: sortedDims,
+        });
+      }
     };
-    if (classifierData.files.length > 0) {
-      loadMapping();
+
+    if (!activeFile) {
+      processedFileRef.current = null;
+      if (pendingMappingRef.current) {
+        pendingMappingRef.current.abort();
+        pendingMappingRef.current = null;
+      }
+      if ((settings.enableDimensionMapping || false) || (settings.dimensions || []).length) {
+        ensureToggleState(false, []);
+      }
+      return;
     }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+    const fileName = activeFile.fileName;
+    const customDims = activeFile.customDimensions || {};
+    const customKeys = Object.keys(customDims);
+
+    if (customKeys.length > 0) {
+      processedFileRef.current = fileName || null;
+      if (pendingMappingRef.current) {
+        pendingMappingRef.current.abort();
+        pendingMappingRef.current = null;
+      }
+      ensureToggleState(true, customKeys);
+      return;
+    }
+
+    ensureToggleState(false, []);
+
+    if (!fileName) {
+      processedFileRef.current = null;
+      if (pendingMappingRef.current) {
+        pendingMappingRef.current.abort();
+        pendingMappingRef.current = null;
+      }
+      return;
+    }
+
+    if (processedFileRef.current === fileName) {
+      if (pendingMappingRef.current) {
+        pendingMappingRef.current.abort();
+        pendingMappingRef.current = null;
+      }
+      return;
+    }
+
+    const controller = new AbortController();
+    if (pendingMappingRef.current) {
+      pendingMappingRef.current.abort();
+    }
+    pendingMappingRef.current = controller;
+
+    (async () => {
+      try {
+        const mapping = await fetchDimensionMapping({
+          objectName: fileName,
+          signal: controller.signal,
+        });
+        if (controller.signal.aborted) {
+          return;
+        }
+        processedFileRef.current = fileName;
+        const keys = Object.keys(mapping || {});
+        if (keys.length > 0) {
+          const sortedKeys = [...keys].sort();
+          const store = useLaboratoryStore.getState();
+          const atomSnapshot = store.getAtom(atomId);
+          if (!atomSnapshot) {
+            ensureToggleState(true, sortedKeys);
+          } else {
+            const snapshotSettings: SettingsType = {
+              ...DEFAULT_COLUMN_CLASSIFIER_SETTINGS,
+              ...(atomSnapshot.settings as SettingsType),
+            };
+            const snapshotData =
+              snapshotSettings.data || DEFAULT_COLUMN_CLASSIFIER_SETTINGS.data;
+            const snapshotIndex = snapshotData.activeFileIndex ?? 0;
+            const updatedFiles = snapshotData.files.map((file, index) =>
+              index === snapshotIndex
+                ? { ...file, customDimensions: mapping }
+                : file
+            );
+            store.updateAtomSettings(atomId, {
+              data: { ...snapshotData, files: updatedFiles },
+              dimensions: sortedKeys,
+              enableDimensionMapping: true,
+              filterColumnViewUnique:
+                snapshotSettings.filterColumnViewUnique ?? true,
+            });
+          }
+        } else {
+          ensureToggleState(false, []);
+        }
+      } catch (err) {
+        if (!controller.signal.aborted) {
+          processedFileRef.current = fileName;
+          ensureToggleState(false, []);
+        }
+      } finally {
+        if (pendingMappingRef.current === controller) {
+          pendingMappingRef.current = null;
+        }
+      }
+    })();
+
+    return () => {
+      controller.abort();
+    };
+  }, [
+    atomId,
+    classifierData.activeFileIndex,
+    classifierData.files,
+    settings.dimensions,
+    settings.enableDimensionMapping,
+    updateSettings,
+  ]);
 
   React.useEffect(() => {
     const stored = localStorage.getItem('column-classifier-config');
