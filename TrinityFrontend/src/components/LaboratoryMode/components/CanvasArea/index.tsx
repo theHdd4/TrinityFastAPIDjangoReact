@@ -77,6 +77,7 @@ const LLM_MAP: Record<string, string> = {
   'create-column': 'Agent Create Transform',
   'groupby-wtg-avg': 'Agent GroupBy',
   'explore': 'Agent Explore',
+  'dataframe-operations': 'Agent DataFrame Operations',
 };
 
 const CanvasArea: React.FC<CanvasAreaProps> = ({
@@ -692,6 +693,8 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
             ? { data: { ...DEFAULT_EXPLORE_DATA }, settings: { ...DEFAULT_EXPLORE_SETTINGS } }
             : atom.id === 'chart-maker'
             ? { ...DEFAULT_CHART_MAKER_SETTINGS }
+            : atom.id === 'dataframe-operations'
+            ? { ...DEFAULT_DATAFRAME_OPERATIONS_SETTINGS }
             : atom.id === 'select-models-feature'
             ? { ...DEFAULT_SELECT_MODELS_FEATURE_SETTINGS }
             : undefined,
@@ -763,6 +766,8 @@ const addNewCardWithAtom = (
         ? { data: { ...DEFAULT_EXPLORE_DATA }, settings: { ...DEFAULT_EXPLORE_SETTINGS } }
         : atomId === 'chart-maker'
         ? { ...DEFAULT_CHART_MAKER_SETTINGS }
+        : atomId === 'dataframe-operations'
+        ? { ...DEFAULT_DATAFRAME_OPERATIONS_SETTINGS }
         : atomId === 'select-models-feature'
         ? { ...DEFAULT_SELECT_MODELS_FEATURE_SETTINGS }
         : undefined,
