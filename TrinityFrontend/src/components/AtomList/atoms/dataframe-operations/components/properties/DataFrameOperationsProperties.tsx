@@ -8,6 +8,7 @@ import DataFrameOperationsCharts from './DataFrameOperationsCharts';
 import { DataFrameData } from '../../DataFrameOperationsAtom';
 import { VALIDATE_API } from '@/lib/api';
 import { loadDataframeByKey } from '../../services/dataframeOperationsApi';
+import { useDataSourceChangeWarning } from '@/hooks/useDataSourceChangeWarning';
 
 // Define DataFrameOperationsSettings interface and default settings locally
 export interface DataFrameOperationsSettings {
@@ -54,13 +55,11 @@ const DataFrameOperationsProperties: React.FC<Props> = ({ atomId }) => {
   const [error, setError] = React.useState<string | null>(null);
   const [selectedFrame, setSelectedFrame] = React.useState<any>(null);
 
-  // Fetch and load data when a file is selected
-  const handleFileSelect = async (fileId: string) => {
+  const applyFileSelect = async (fileId: string) => {
     setSelectedFile(fileId);
     setLoading(true);
     setError(null);
     try {
-      // Fetch the list of frames to resolve the display name
       const framesRes = await fetch(`${VALIDATE_API}/list_saved_dataframes`);
       const framesData = await framesRes.json();
       const frames = Array.isArray(framesData.files)
@@ -102,6 +101,14 @@ const DataFrameOperationsProperties: React.FC<Props> = ({ atomId }) => {
     }
   };
 
+  const { requestChange: confirmFileChange, dialog } = useDataSourceChangeWarning(applyFileSelect);
+
+  const handleFileSelect = (fileId: string) => {
+    const hasExistingUpdates = Boolean(settings.tableData && Array.isArray(settings.tableData.rows) && settings.tableData.rows.length > 0);
+    const isDifferentSource = fileId !== (settings.selectedFile || '');
+    confirmFileChange(fileId, hasExistingUpdates && isDifferentSource);
+  };
+
   return (
     <Tabs value={tab} onValueChange={setTab} className="w-full">
       <TabsList className="grid w-full grid-cols-3 mx-4 my-4">
@@ -136,6 +143,7 @@ const DataFrameOperationsProperties: React.FC<Props> = ({ atomId }) => {
           <DataFrameOperationsExhibition data={(settings as any).tableData || data} />
         </TabsContent>
       </div>
+      {dialog}
     </Tabs>
   );
 };

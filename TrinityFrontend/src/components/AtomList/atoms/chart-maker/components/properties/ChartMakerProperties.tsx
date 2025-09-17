@@ -23,7 +23,7 @@ const ChartMakerProperties: React.FC<Props> = ({ atomId }) => {
   const updateSettings = useLaboratoryStore(state => state.updateAtomSettings);
   const settings: SettingsType = (atom?.settings as SettingsType) || { ...DEFAULT_CHART_MAKER_SETTINGS };
   const { toast } = useToast();
-  
+
   // Track if this is the initial mount to prevent false notifications
   const isInitialMount = useRef(true);
   const previousFilteringState = useRef(settings.loading?.filtering);
@@ -170,6 +170,12 @@ const ChartMakerProperties: React.FC<Props> = ({ atomId }) => {
       });
     }
   };
+
+  const hasRenderedCharts = Array.isArray(settings.charts)
+    ? settings.charts.some(chart => chart.chartRendered || (chart.traces && chart.traces.length > 0) || chart.chartConfig)
+    : false;
+  const hasUploadedData = Boolean(settings.uploadedData);
+  const hasExistingUpdates = hasRenderedCharts || hasUploadedData;
 
   // Ensure the backend has a valid file for the selected datasource when the
   // project is reloaded. The saved `fileId` may point to a temporary file that
@@ -323,6 +329,7 @@ const ChartMakerProperties: React.FC<Props> = ({ atomId }) => {
             loading={settings.loading}
             error={settings.error}
             dataSource={settings.dataSource}
+            hasExistingUpdates={hasExistingUpdates}
           />
         </TabsContent>
         
