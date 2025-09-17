@@ -463,7 +463,7 @@ API_ENDPOINT_PARAMETER_PATTERNS = {
         "description": "Move column to new position",
         "required_parameters": {
             "df_id": "string - DataFrame session ID (use 'auto_from_previous' for chained operations)",
-            "from_col": "string - Name of column to move",
+            "from": "string - Name of column to move (API uses 'from' alias)",
             "to_index": "integer - New position index"
         },
         "optional_parameters": {}
@@ -501,12 +501,48 @@ API_ENDPOINT_PARAMETER_PATTERNS = {
     },
     
     "/apply_formula": {
-        "description": "Apply Excel-like formula to create new column",
+        "description": "Apply Excel-like formula to create new column with comprehensive function support",
         "required_parameters": {
             "df_id": "string - DataFrame session ID (use 'auto_from_previous' for chained operations)",
             "target_column": "string - Name of column to create/update",
-            "formula": "string - Formula expression (e.g., '=SUM(colA,colB)','=AVG(colA,colB)','=CORR(colA,colB)','=PROD(colA,colB)','=DIV(colA,colB)','=MIN(colA,colB)','=DIV(colA,colB)')"
-
+            "formula": "string - Formula expression with extensive function support"
+        },
+        "formula_capabilities": {
+            "evaluation_modes": {
+                "row_by_row": "Formulas starting with '=' are evaluated row-by-row with column substitution",
+                "constants": "Values without '=' fill entire column with literal value"
+            },
+            "mathematical_functions": {
+                "basic_arithmetic": ["SUM(a,b,c)", "AVG(a,b)/MEAN(a,b)", "PROD(a,b,c)", "DIV(a,b)", "MAX(a,b,c)", "MIN(a,b,c)"],
+                "advanced_math": ["ABS(x)", "ROUND(x)", "FLOOR(x)", "CEIL(x)", "EXP(x)", "LOG(x)", "SQRT(x)"],
+                "statistics": ["ZSCORE(column)/NORM(column) - Z-score normalization", "CORR(a,b) - Correlation"]
+            },
+            "string_functions": {
+                "case_conversion": ["LOWER(text)", "UPPER(text)"],
+                "text_manipulation": ["LEN(value)", "SUBSTR(value,start,end?)", "STR_REPLACE(value,old,new)"]
+            },
+            "date_functions": {
+                "extraction": ["YEAR(date)", "MONTH(date)", "DAY(date)", "WEEKDAY(date)"],
+                "calculations": ["DATE_DIFF(date1,date2)"]
+            },
+            "data_manipulation": {
+                "binning": ["BIN(value,[edges...]) - Bucket numeric values into labeled bins"],
+                "mapping": ["MAP(value,{from:to}) - Lookup replacement values"],
+                "null_handling": ["ISNULL(value)", "FILLNA(value,replacement)"]
+            },
+            "conditional_logic": {
+                "if_statements": ["IF(condition,true_value,false_value) - Works for numeric and string branches"]
+            }
+        },
+        "formula_examples": {
+            "mathematical": ["=SUM(Revenue,Cost)", "=DIV(Revenue,Volume)", "=SQRT(ABS(Variance))", "=ROUND(AVG(Price1,Price2),2)"],
+            "statistical": ["=ZSCORE(Sales)", "=CORR(Price,Volume)", "=NORM(Revenue)"],
+            "string_operations": ["=UPPER(ProductName)", "=SUBSTR(Code,1,3)", "=STR_REPLACE(Category,'Old','New')"],
+            "date_operations": ["=YEAR(OrderDate)", "=DATE_DIFF(EndDate,StartDate)", "=WEEKDAY(TransactionDate)"],
+            "conditional": ["=IF(Volume>100,'High','Low')", "=IF(ISNULL(Price),0,Price)", "=IF(Year>=2023,Revenue*1.1,Revenue)"],
+            "binning": ["=BIN(Age,[0,18,35,65,100])", "=BIN(Score,[0,50,75,90,100])"],
+            "mapping": ["=MAP(Grade,{'A':4,'B':3,'C':2,'D':1})", "=MAP(Status,{'Active':'Y','Inactive':'N'})"],
+            "complex": ["=IF(Volume>0,DIV(Revenue,Volume),0)", "=FILLNA(ZSCORE(Sales),0)", "=ROUND(SUM(Q1,Q2,Q3,Q4)/4,2)"]
         },
         "optional_parameters": {}
     }
@@ -522,7 +558,7 @@ def build_dataframe_operations_prompt(user_prompt: str, available_files_with_col
     logger.info(f"Building DataFrame operations prompt for: {user_prompt[:100]}...")
     logger.info(f"📚 Conversation context length: {len(context)} characters")
     
-    # Build file information string
+    # Build file information string with detailed formatting
     file_info = ""
     if available_files_with_columns:
         file_info_parts = []
@@ -534,8 +570,12 @@ def build_dataframe_operations_prompt(user_prompt: str, available_files_with_col
             else:
                 columns = []
             display_name = file_name.split('/')[-1] if '/' in file_name else file_name
-            file_info_parts.append(f"{display_name} (columns: {', '.join(columns)})")
-        file_info = ', '.join(file_info_parts)
+            # Format each file with its columns in a detailed way for the prompt
+            column_list = ', '.join(columns[:8])  # Show first 8 columns
+            if len(columns) > 8:
+                column_list += f" ... (+{len(columns) - 8} more)"
+            file_info_parts.append(f"• **{display_name}** ({len(columns)} columns): {column_list}")
+        file_info = '\n'.join(file_info_parts)
     
     # Build current dataframe state info
     df_state_info = ""
@@ -601,6 +641,22 @@ All operations map directly to backend APIs at `/api/dataframe-operations/`:
 
 **Advanced Operations:**
 - `/apply_formula` - JSON: {{"df_id": "id", "target_column": "Total", "formula": "=SUM(Col1,Col2)"}}
+  **COMPREHENSIVE FORMULA SUPPORT:**
+  • Mathematical: SUM, AVG/MEAN, PROD, DIV, MAX, MIN, ABS, ROUND, FLOOR, CEIL, EXP, LOG, SQRT
+  • Statistical: ZSCORE/NORM (Z-score), CORR (correlation)
+  • String: LOWER, UPPER, LEN, SUBSTR, STR_REPLACE
+  • Date: YEAR, MONTH, DAY, WEEKDAY, DATE_DIFF
+  • Data: BIN (binning), MAP (lookup), ISNULL, FILLNA
+  • Conditional: IF(condition,true_value,false_value)
+  **EXAMPLES:**
+  • Price calculation: "=DIV(Revenue,Volume)"
+  • Z-score normalization: "=ZSCORE(Sales)"
+  • Conditional logic: "=IF(Volume>100,'High','Low')"
+  • Complex: "=IF(Volume>0,DIV(Revenue,Volume),0)"
+  • Date extraction: "=YEAR(OrderDate)"
+  • String manipulation: "=UPPER(ProductName)"
+  • Binning: "=BIN(Age,[0,18,35,65,100])"
+  • Mapping: "=MAP(Grade,{{'A':4,'B':3,'C':2,'D':1}})"
 - `/ai/execute_operations` - JSON: {{"df_id": "id", "operations": [...]}}
 
 **Utility Operations:**
@@ -615,24 +671,60 @@ All operations map directly to backend APIs at `/api/dataframe-operations/`:
 4. **Conditional Operations**: When operations depend on data conditions
 
 🔧 SMART OPERATION SEQUENCING:
-- Always start with data loading (file upload or cached load)
+- **ALWAYS start with data loading** (file upload or cached load) - REQUIRED for all operations
 - Apply filters before sorts for efficiency
-- Do column operations before row operations when possible
+- Do column operations (insert, rename, retype) before row operations when possible
 - Apply formulas/UDFs after data structure is finalized
+- Move columns AFTER they are created/inserted (ensure column exists first)
 - Save as final step
+
+🚨 CRITICAL SEQUENCING RULES:
+- **NEVER generate operations without a load operation first**
+- **move_column operations must come AFTER the column exists in the DataFrame**
+- **All operations require a valid df_id from a previous load operation**
+
+🧮 FORMULA INTELLIGENCE FOR APPLY_FORMULA:
+**BUSINESS CALCULATIONS:**
+- Price = Revenue / Volume: "=DIV(Revenue,Volume)"
+- Profit Margin = (Revenue - Cost) / Revenue: "=DIV(SUM(Revenue,-Cost),Revenue)"
+- Growth Rate = (New - Old) / Old: "=DIV(SUM(NewValue,-OldValue),OldValue)"
+
+
+**DATA QUALITY & NORMALIZATION:**
+- Handle missing values: "=FILLNA(Price,0)" or "=IF(ISNULL(Price),0,Price)"
+- Normalize data: "=ZSCORE(Sales)" for standardization
+- Clean text: "=UPPER(ProductName)" for consistency
+
+**CATEGORIZATION & BINNING:**
+- Size categories: "=IF(Volume>1000,'Large',IF(Volume>100,'Medium','Small'))"
+- Performance tiers: "=BIN(Score,[0,50,75,90,100])"
+- Status mapping: "=MAP(Code,{{'A':'Active','I':'Inactive','P':'Pending'}})"
+
+**TIME SERIES & DATES:**
+- Extract periods: "=YEAR(Date)", "=MONTH(Date)", "=WEEKDAY(Date)"
+- Calculate durations: "=DATE_DIFF(EndDate,StartDate)"
+- Seasonal adjustments: "=IF(MONTH(Date)>=6,Sales*1.2,Sales)"
+
+**COMPLEX COMBINATIONS:**
+- Safe division: "=IF(Volume>0,DIV(Revenue,Volume),0)"
+- Normalized with fallback: "=FILLNA(ZSCORE(Sales),0)"
+- Quarterly average: "=ROUND(SUM(Q1,Q2,Q3,Q4)/4,2)"
 
 🔧 PARAMETER INTELLIGENCE:
 - **df_id**: Use "auto_from_previous" for sequential operations
-- **column names**: Must match actual column names from available files
-- **indices**: Use realistic indices based on data size
+- **column names**: Must match actual column names from available files (case-sensitive)
+- **indices**: Use realistic indices based on data size (0-based indexing, must be within bounds)
+- **move_column to_index**: CRITICAL - Must be less than total number of columns (0 to column_count-1)
 - **formulas**: ONLY use these supported operations: =SUM(), =AVG(), =CORR(), =PROD(), =DIV(), =MIN(), =MAX()
 - **filters**: Smart detection of filter types (simple, range, list)
 - **filenames**: ALWAYS use the EXACT filename provided by the user, do NOT add prefixes like "ai_" or "processed_"
 
 🔧 ERROR HANDLING & VALIDATION:
-- Validate column names exist in selected file
+- Validate column names exist in selected file (case-sensitive matching)
 - Ensure operation sequence makes logical sense
 - Check for dependencies between operations
+- For move_column: Ensure to_index is within valid range (0 to column_count-1)
+- For all column operations: Use exact column names from file schema
 - Provide fallback options for ambiguous requests
 
 🔧 EXECUTION MODES:
@@ -646,9 +738,11 @@ All operations map directly to backend APIs at `/api/dataframe-operations/`:
 🎯 FOCUS ON: Understanding what the user wants to do with their data
 
 ✅ WHEN TO USE success: true:
-- User mentions ANY file name → success: true, load that file
-- User mentions ANY operation (filter, sort, load, etc.) → success: true, do that operation
-- User asks to "load", "use", "open", "filter", "sort", "add", "delete", "rename" → success: true
+- User mentions ANY file name → success: true, load that file FIRST, then do operations
+- User mentions ANY operation (filter, sort, move, etc.) → success: true, BUT ALWAYS include load operation first
+- User asks to "load", "use", "open", "filter", "sort", "add", "delete", "rename", "move" → success: true with proper sequencing
+
+🚨 CRITICAL: EVERY successful operation must include a load_cached operation as the FIRST step
 
 🔍 FILE MATCHING - CRITICAL RULES:
 - **ALWAYS** use files from the available_files list - NEVER create new filenames
@@ -660,10 +754,12 @@ All operations map directly to backend APIs at `/api/dataframe-operations/`:
 - **NEVER** add prefixes like "ai_", "processed_", or timestamps to filenames
 
 💡 EXAMPLES:
-- "Load uk beans" → Find file with "uk" or "beans" in name → success: true
-- "Filter for USA" → success: true, add filter operation
-- "Sort by revenue" → success: true, add sort operation
-- "Load sales data and filter for 2023" → success: true, load + filter
+- "Load uk beans" → Find file with "uk" or "beans" in name → success: true, load operation
+- "Filter for USA" → success: true, load + filter operations
+- "Sort by revenue" → success: true, load + sort operations  
+- "Load sales data and filter for 2023" → success: true, load + filter operations
+- "Move price column next to sales" → success: true, load + move_column operations
+- "Create new column and move it" → success: true, load + insert_column + move_column operations
 
 🔧 SMART RESPONSE:
 - Keep it simple and friendly
@@ -696,16 +792,35 @@ All operations map directly to backend APIs at `/api/dataframe-operations/`:
       {{
         "operation_id": "1",
         "api_endpoint": "/load_cached",
+        "operation_name": "load_cached",
+        "description": "Load data file into DataFrame session",
         "parameters": {{
-          "object_name": "user_filename.arrow"
-        }}
+          "object_name": "user_filename_from_available_files.arrow"
+        }},
+        "execute_order": 1,
+        "depends_on": []
+      }},
+      {{
+        "operation_id": "2",
+        "api_endpoint": "/move_column",
+        "operation_name": "move_column",
+        "description": "Move column to new position",
+        "parameters": {{
+          "df_id": "auto_from_previous",
+          "from": "ExistingColumnName",
+          "to_index": 5
+        }},
+        "execute_order": 2,
+        "depends_on": ["1"]
       }}
     ]
   }},
   "execution_plan": {{
-    "auto_execute": true
+    "auto_execute": true,
+    "execution_mode": "sequential",
+    "error_handling": "stop_on_error"
   }},
-  "smart_response": "Loading your data file for processing."
+  "smart_response": "I'll load your data file and then move the specified column to the new position."
 }}
 
 📊 COMPREHENSIVE RESPONSE FORMAT (Use this for complex multi-step requests):
@@ -732,7 +847,7 @@ All operations map directly to backend APIs at `/api/dataframe-operations/`:
     "Save results: 'Save as processed_data.arrow'"
   ],
   "message": "I need more specific information about what DataFrame operations you'd like me to perform.",
-  "smart_response": "I'd be happy to help you with DataFrame operations! I can see you have these files available: {file_info}. I can help you with data loading, filtering, sorting, column operations, formulas, and saving results. What specific operations would you like me to perform and which file should I use?",
+  "smart_response": "I'd be happy to help you with DataFrame operations! Here are your available files and their columns:\n\n📁 **Available Files:**\n{file_info}\n\nI can help you with:\n• **Data Loading**: Load any of these files for processing\n• **Filtering**: Filter rows based on column values (e.g., 'Filter Country column for USA')\n• **Sorting**: Sort data by any column (e.g., 'Sort by Revenue descending')\n• **Column Operations**: Add, delete, rename, or transform columns\n• **Formulas**: Apply calculations using =SUM(), =AVG(), =DIV(), etc.\n• **Data Transformations**: Clean, normalize, or restructure your data\n• **Saving**: Save processed results to new files\n\n💡 **How to use your data:**\nFor example, with your files you could ask:\n- 'Load [filename] and show me the first 10 rows'\n- 'Filter [filename] where [column] equals [value]'\n- 'Sort [filename] by [column] in descending order'\n- 'Add a new column to [filename] calculating [formula]'\n\nWhat specific operations would you like me to perform and which file should I use?",
   "available_files": {json.dumps(available_files_with_columns, indent=2)},
   "next_steps": [
     "Tell me which file you want to work with",
@@ -749,11 +864,15 @@ All operations map directly to backend APIs at `/api/dataframe-operations/`:
 - USE MINIMAL JSON: Include essential keys - success, dataframe_config.operations, execution_plan, smart_response
 - DETECT FILENAME: Extract filename from user input and convert to .arrow format
 - USE CORRECT ENDPOINTS: ALWAYS use "/load_cached" for existing files, NEVER use "/load_file"
-- ADD OPERATIONS: Based on user context (sort, filter, etc.), add operations after file loading
+- **MANDATORY SEQUENCING**: EVERY operation sequence MUST start with "/load_cached" as operation_id "1"
+- ADD OPERATIONS: Based on user context (sort, filter, move, etc.), add operations AFTER file loading
 - If user asks vague questions → Return suggestions with success: false
-- If user asks for specific operations → Generate minimal dataframe_config with success: true
+- If user asks for specific operations → Generate dataframe_config with load_cached FIRST, then the requested operation
 - VALIDATE: Ensure all column names and file names exist in available data
-- SEQUENCE: Always start with file loading using "/load_cached", then add operations in logical order
+- SEQUENCE: Always start with file loading using "/load_cached", then add operations in logical order with proper dependencies
+- **MOVE COLUMN RULE**: Only generate move_column operations for columns that exist or were created in previous operations
+- **COLUMN TRACKING**: When generating sequences with insert_column + move_column, ensure move_column references the newly created column name
+- **DEPENDENCY VALIDATION**: Ensure move_column operations depend on insert_column/apply_formula operations that create the target column
 - EXECUTE: Set auto_execute based on user intent:
   * auto_execute: true - When user wants immediate action (DEFAULT for most requests)
   * auto_execute: false - Only when user explicitly wants to review first ("show me", "prepare", "configure", "plan")
@@ -962,7 +1081,7 @@ def extract_dataframe_operations_json(text: str, available_files_with_columns: d
         except:
             pass
     
-    # Create helpful fallback with file information
+    # Create helpful fallback with detailed file information
     if not smart_response or smart_response == text.strip():
         file_info = ""
         if available_files_with_columns:
@@ -975,10 +1094,35 @@ def extract_dataframe_operations_json(text: str, available_files_with_columns: d
                 else:
                     columns = []
                 display_name = file_name.split('/')[-1] if '/' in file_name else file_name
-                file_info_parts.append(f"{display_name} (columns: {', '.join(columns)})")
-            file_info = ', '.join(file_info_parts)
+                # Format each file with its columns in a more detailed way
+                column_list = ', '.join(columns[:8])  # Show first 8 columns
+                if len(columns) > 8:
+                    column_list += f" ... (+{len(columns) - 8} more)"
+                file_info_parts.append(f"• **{display_name}** ({len(columns)} columns): {column_list}")
+            file_info = '\n'.join(file_info_parts)
         
-        smart_response = f"I'd be happy to help you with DataFrame operations! I can see you have these files available: {file_info}. I can help you with data loading, filtering, sorting, column operations, formulas, and saving results. What specific operations would you like me to perform?"
+        smart_response = f"""I'd be happy to help you with DataFrame operations! Here are your available files and their columns:
+
+📁 **Available Files:**
+{file_info}
+
+I can help you with:
+• **Data Loading**: Load any of these files for processing
+• **Filtering**: Filter rows based on column values (e.g., 'Filter Country column for USA')
+• **Sorting**: Sort data by any column (e.g., 'Sort by Revenue descending')
+• **Column Operations**: Add, delete, rename, or transform columns
+• **Formulas**: Apply calculations using =SUM(), =AVG(), =DIV(), etc.
+• **Data Transformations**: Clean, normalize, or restructure your data
+• **Saving**: Save processed results to new files
+
+💡 **How to use your data:**
+For example, with your files you could ask:
+- 'Load [filename] and show me the first 10 rows'
+- 'Filter [filename] where [column] equals [value]'
+- 'Sort [filename] by [column] in descending order'
+- 'Add a new column to [filename] calculating [formula]'
+
+What specific operations would you like me to perform and which file should I use?"""
     
     logger.info("Using LLM response as smart_response fallback")
     
@@ -986,6 +1130,18 @@ def extract_dataframe_operations_json(text: str, available_files_with_columns: d
         "success": False,
         "message": "Could not parse LLM response as valid JSON",
         "smart_response": smart_response,
+        "suggestions": [
+            "Try being more specific about what DataFrame operations you want",
+            "Ask about filtering, sorting, adding columns, or transforming data",
+            "Specify which file you want to work with",
+            "Describe the exact changes you want to make to your data"
+        ],
+        "next_steps": [
+            "Tell me which file you want to work with",
+            "Specify what operations you need (filter, sort, transform, etc.)",
+            "Describe your desired outcome",
+            "Ask about specific DataFrame manipulations"
+        ],
         "raw_response": text
     }
 

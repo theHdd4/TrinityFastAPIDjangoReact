@@ -177,6 +177,12 @@ def dataframe_operations(request: DataFrameOperationsRequest):
         error_response = {
             "success": False,
             "smart_response": f"Internal server error: {str(e)}",
+            "suggestions": [
+                "Try rephrasing your request more clearly",
+                "Ask for specific DataFrame operations like 'filter data where Country = USA'",
+                "Specify which file you want to work with",
+                "Check if your request is properly formatted"
+            ],
             "error": str(e),
             "session_id": request.session_id,
             "processing_time": round(time.time() - start, 2)
@@ -335,6 +341,18 @@ def chat_endpoint(request: ChatRequest):
             response_data = {
                 "success": False,
                 "smart_response": smart_response,
+                "suggestions": result.get("suggestions", [
+                    "Try being more specific about what DataFrame operations you want",
+                    "Ask about filtering, sorting, adding columns, or transforming data",
+                    "Specify which file you want to work with",
+                    "Describe the exact changes you want to make to your data"
+                ]),
+                "next_steps": result.get("next_steps", [
+                    "Tell me which file you want to work with",
+                    "Specify what operations you need (filter, sort, transform, etc.)",
+                    "Describe your desired outcome",
+                    "Ask about specific DataFrame manipulations"
+                ]),
                 "session_id": request.session_id,
                 "processing_time": processing_time
             }
@@ -352,6 +370,12 @@ def chat_endpoint(request: ChatRequest):
         error_result = {
             "success": False,
             "smart_response": f"I encountered an issue: {str(e)}",
+            "suggestions": [
+                "Try rephrasing your request more clearly",
+                "Ask for specific DataFrame operations like 'filter data where Country = USA'",
+                "Specify which file you want to work with",
+                "Check if your request is properly formatted"
+            ],
             "match_type": "none",
             "atom_status": False,
             "error": str(e),

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+﻿import React, { useState, useEffect } from 'react';
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
 import { Card } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/textarea';
@@ -75,7 +75,6 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
     return [{
       id: 'init',
       content: `Hi! I can help configure the "${atomTitle}" atom. Describe what you want to do.`,
-      content: `Hi! I can help configure the "${atomTitle}" atom. Describe what you want to do.`,
       sender: 'ai',
       timestamp: new Date(),
     }];
@@ -95,7 +94,6 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
     const clearedMessages = [
       {
         id: 'init',
-        content: `Hi! I can help configure the "${atomTitle}" atom. Describe what you want to do.\n\n💬 Chat history cleared`,
         content: `Hi! I can help configure the "${atomTitle}" atom. Describe what you want to do.\n\n💬 Chat history cleared`,
         sender: 'ai',
         timestamp: new Date(),
@@ -117,7 +115,6 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
     const newMessages = [
       {
         id: 'init',
-        content: `Hi! I can help configure the "${atomTitle}" atom. Describe what you want to do.`,
         content: `Hi! I can help configure the "${atomTitle}" atom. Describe what you want to do.`,
         sender: 'ai',
         timestamp: new Date(),
@@ -184,46 +181,40 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
       let data;
       if (res.ok) {
         data = await res.json();
-        // Enhanced AI response handling with smart_response as priority
+        // Check if this is a successful response with specific handlers
+        const hasSpecificHandler = (atomType === 'concat' && data.concat_json) ||
+                                 (atomType === 'merge' && data.merge_json) ||
+                                 (atomType === 'create-column' && data.json) ||
+                                 (atomType === 'groupby-wtg-avg' && data.groupby_json) ||
+                                 (atomType === 'chart-maker' && data.chart_json) ||
+                                 (atomType === 'explore' && data.exploration_config) ||
+                                 (atomType === 'dataframe-operations' && data.dataframe_config);
+
         // Enhanced AI response handling with smart_response as priority
         let aiText = '';
         if (data.success) {
           // Success case - use smart_response if available, otherwise show completion message
           aiText = data.smart_response || `I've successfully completed the operation for you. ${data.message || 'The configuration is ready and you can now proceed with the current settings or make further adjustments as needed.'}`;
-          // Success case - use smart_response if available, otherwise show completion message
-          aiText = data.smart_response || `I've successfully completed the operation for you. ${data.message || 'The configuration is ready and you can now proceed with the current settings or make further adjustments as needed.'}`;
-        } else if (Array.isArray(data.suggestions) && data.suggestions.length) {
-          // Suggestions case - ALWAYS use smart_response if available, don't add extra content
+        } else if (atomType === 'dataframe-operations' && data && !data.success) {
+          // 🔧 DATAFRAME OPERATIONS: Handle failure cases specifically BEFORE general suggestions
+          console.log('🔍 DEBUG: Handling dataframe operations failure in main flow');
+          
           if (data.smart_response) {
+            // Use the enhanced smart response with file information
             aiText = data.smart_response;
-          } else {
-            // Only show suggestions if no smart_response
-            aiText = `${data.message || 'Here\'s what I can help you with:'}\n\n${data.suggestions.join('\n\n')}`;
-            
-            // Add file analysis if available
-            if (data.file_analysis) {
-              aiText += `\n\n📊 File Analysis:\n`;
-              if (data.file_analysis.total_files) {
-                aiText += `• Total files available: ${data.file_analysis.total_files}\n`;
-              }
-              if (data.file_analysis.recommended_pairs && data.file_analysis.recommended_pairs.length > 0) {
-                aiText += `• Recommended pairs: ${data.file_analysis.recommended_pairs.join(', ')}\n`;
-              }
-              if (data.file_analysis.common_columns && data.file_analysis.common_columns.length > 0) {
-                aiText += `• Common columns: ${data.file_analysis.common_columns.join(', ')}\n`;
-              }
-              if (data.file_analysis.concat_tips && data.file_analysis.concat_tips.length > 0) {
-                aiText += `• Tips: ${data.file_analysis.concat_tips.join(', ')}\n`;
-              }
-              if (data.file_analysis.merge_tips && data.file_analysis.merge_tips.length > 0) {
-                aiText += `• Tips: ${data.file_analysis.merge_tips.join(', ')}\n`;
-              }
-            }
+          } else if (data.suggestions && Array.isArray(data.suggestions)) {
+            // Fallback to suggestions format
+            aiText = `${data.message || 'I need more information to help with DataFrame operations.'}\n\n${data.suggestions.join('\n\n')}`;
             
             // Add next steps if available
             if (data.next_steps && data.next_steps.length > 0) {
               aiText += `\n\n🎯 Next Steps:\n${data.next_steps.map((step, idx) => `${idx + 1}. ${step}`).join('\n')}`;
             }
+          } else {
+            // Final fallback
+            aiText = data.message || 'I can help you with DataFrame operations. Please provide more details about what you\'d like to do with your data.';
+          }
+        } else if (Array.isArray(data.suggestions) && data.suggestions.length) {
           // Suggestions case - ALWAYS use smart_response if available, don't add extra content
           if (data.smart_response) {
             aiText = data.smart_response;
@@ -261,35 +252,246 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
           aiText = data.smart_response || data.message || data.response || data.final_response || 'AI response received';
         }
         
-        // Only add general AI message if not handled by specific atom types
-        const hasSpecificHandler = (atomType === 'concat' && data.concat_json) ||
-                                 (atomType === 'merge' && data.merge_json) ||
-                                 (atomType === 'create-column' && data.json) ||
-                                 (atomType === 'groupby-wtg-avg' && data.groupby_json) ||
-                                 (atomType === 'chart-maker' && data.chart_json) ||
-                                 (atomType === 'explore' && data.exploration_config);
-        
-        if (!hasSpecificHandler) {
-          const aiMsg: Message = { id: (Date.now() + 1).toString(), content: aiText, sender: 'ai', timestamp: new Date() };
+        // Create AI message ONLY for dataframe operations failures (other atoms handle their own messaging)
+        if (atomType === 'dataframe-operations' && !data.success) {
+          const aiMsg: Message = {
+            id: (Date.now() + 1).toString(),
+            content: aiText,
+            sender: 'ai',
+            timestamp: new Date(),
+          };
           setMessages(prev => [...prev, aiMsg]);
+          
+          // Store suggestions if available
+          if (data.suggestions || data.next_steps) {
+            updateAtomSettings(atomId, {
+              aiSuggestions: data.suggestions || [],
+              aiNextSteps: data.next_steps || [],
+              recommendedFiles: data.recommended_files || []
+            });
+          }
         }
         
-        // Only add general AI message if not handled by specific atom types
-        const hasSpecificHandler = (atomType === 'concat' && data.concat_json) ||
-                                 (atomType === 'merge' && data.merge_json) ||
-                                 (atomType === 'create-column' && data.json) ||
-                                 (atomType === 'groupby-wtg-avg' && data.groupby_json) ||
-                                 (atomType === 'chart-maker' && data.chart_json) ||
-                                 (atomType === 'explore' && data.exploration_config) ||
-                                 (atomType === 'dataframe-operations' && data.dataframe_config);
-        
-        if (!hasSpecificHandler) {
-          const aiMsg: Message = { id: (Date.now() + 1).toString(), content: aiText, sender: 'ai', timestamp: new Date() };
-          setMessages(prev => [...prev, aiMsg]);
-        }
+        if (hasSpecificHandler) {
+          // Handle specific atom type responses
 
         // 🔧 DATAFRAME OPERATIONS: Handle AI-generated DataFrame operations configuration
         if (atomType === 'dataframe-operations' && data.dataframe_config) {
+          const config = data.dataframe_config;
+          console.log('🤖 DATAFRAME OPERATIONS CONFIG EXTRACTED:', config);
+          
+          // Update atom settings with the AI configuration
+          updateAtomSettings(atomId, { 
+            dataframeConfig: config,
+            aiConfig: config,
+            aiMessage: data.smart_response || data.message,
+            executionPlan: data.execution_plan,
+            reasoning: data.reasoning
+          });
+          
+          // Add AI success message with operation details
+          const operationsCount = config.operations ? config.operations.length : 0;
+          const aiSuccessMsg: Message = {
+            id: (Date.now() + 1).toString(),
+            content: `✅ ${data.smart_response || data.message || 'DataFrame operations configuration completed'}\n\n📊 Operations: ${operationsCount} configured\n🔄 Ready to execute operations!\n\n${data.reasoning ? `💡 Reasoning: ${data.reasoning}` : ''}`,
+            sender: 'ai',
+            timestamp: new Date(),
+          };
+          setMessages(prev => [...prev, aiSuccessMsg]);
+          
+          // Automatically execute operations if auto_execute is enabled
+          if (data.execution_plan?.auto_execute && performEndpoint && config.operations) {
+            try {
+              console.log('🚀 Auto-executing DataFrame operations...');
+              
+              // Execute operations sequentially
+              let currentDfId: string | null = null;
+              
+              // Generate a consistent df_id for all operations in this sequence
+              const sequenceDfId = `ai_sequence_${Date.now()}`;
+              console.log(`🆔 Generated sequence df_id: ${sequenceDfId}`);
+              
+              for (const operation of config.operations) {
+                console.log(`🔄 Executing operation: ${operation.operation_name || operation.api_endpoint}`, operation);
+                console.log(`🔍 Current df_id state: ${currentDfId}`);
+                
+                // Prepare the request based on operation type
+                let requestBody: any = {};
+                let requestMethod = operation.method || 'POST';
+                let apiEndpoint = operation.api_endpoint;
+                
+                // Handle different operation types
+                if (operation.parameters) {
+                  // Identify operation by name or endpoint
+                  const opName = operation.operation_name || operation.api_endpoint?.replace('/', '');
+                  console.log(`🔍 Operation identification: opName="${opName}", apiEndpoint="${apiEndpoint}"`);
+                  
+                  if ((opName === 'load_cached' || apiEndpoint === '/load_cached') && operation.parameters.object_name) {
+                    console.log(`📥 Processing load_cached operation with object_name: ${operation.parameters.object_name}`);
+                    requestBody = { object_name: operation.parameters.object_name };
+                  } else if (opName === 'filter_rows' || apiEndpoint === '/filter_rows') {
+                    requestBody = {
+                      df_id: operation.parameters.df_id === 'auto_from_previous' ? currentDfId : operation.parameters.df_id,
+                      column: operation.parameters.column,
+                      value: operation.parameters.value,
+                      filter_type: operation.parameters.filter_type || 'simple'
+                    };
+                  } else if (opName === 'sort' || apiEndpoint === '/sort') {
+                    // Use currentDfId from previous operation (should be set by load_cached)
+                    let dfId = currentDfId;
+                    
+                    // If currentDfId is null, check if we can get it from operation parameters
+                    if (!dfId && operation.parameters.df_id && operation.parameters.df_id !== 'auto_from_previous') {
+                      dfId = operation.parameters.df_id;
+                      console.log(`🔄 Using df_id from operation parameters: ${dfId}`);
+                    }
+                    
+                    if (!dfId) {
+                      console.error(`❌ No df_id available for sort operation.`);
+                      console.error(`   currentDfId: ${currentDfId}`);
+                      console.error(`   operation.parameters.df_id: ${operation.parameters.df_id}`);
+                      throw new Error('Sort operation failed: No df_id available from previous operations');
+                    }
+                    
+                    const columnName = operation.parameters.column;
+                    const direction = operation.parameters.direction || (operation.parameters.ascending !== false ? 'asc' : 'desc');
+                    
+                    requestBody = {
+                      df_id: dfId,
+                      column: columnName,
+                      direction: direction
+                    };
+                    
+                    console.log(`🔍 SORT REQUEST DEBUG:`, {
+                      'df_id': dfId,
+                      'column': columnName,
+                      'direction': direction,
+                      'currentDfId': currentDfId,
+                      'original_df_id': operation.parameters.df_id,
+                      'requestBody': requestBody
+                    });
+                    console.log(`📤 SORT REQUEST BODY:`, JSON.stringify(requestBody, null, 2));
+                  } else if (opName === 'apply_formula' || apiEndpoint === '/apply_formula') {
+                    requestBody = {
+                      df_id: operation.parameters.df_id === 'auto_from_previous' ? currentDfId : operation.parameters.df_id,
+                      target_column: operation.parameters.target_column,
+                      formula: operation.parameters.formula
+                    };
+                  } else {
+                    // Generic parameter mapping with df_id replacement
+                    requestBody = { ...operation.parameters };
+                    if (requestBody.df_id === 'auto_from_previous') {
+                      requestBody.df_id = currentDfId;
+                    }
+                  }
+                }
+                
+                // Make the API call
+                const operationEndpoint = `${DATAFRAME_OPERATIONS_API}${apiEndpoint}`;
+                console.log(`📡 Calling: ${requestMethod} ${operationEndpoint}`, requestBody);
+                
+                const response = await fetch(operationEndpoint, {
+                  method: requestMethod,
+                  headers: {
+                    'Content-Type': 'application/json',
+                  },
+                  body: JSON.stringify(requestBody),
+                });
+                
+                if (!response.ok) {
+                  const errorText = await response.text();
+                  console.error(`❌ Operation ${operation.operation_name || apiEndpoint} failed:`);
+                  console.error(`   Status: ${response.status} ${response.statusText}`);
+                  console.error(`   URL: ${operationEndpoint}`);
+                  console.error(`   Request Body: ${JSON.stringify(requestBody)}`);
+                  console.error(`   Response: ${errorText}`);
+                  
+                  // Try to parse the error response as JSON to get more details
+                  try {
+                    const errorJson = JSON.parse(errorText);
+                    console.error(`   Parsed Error:`, errorJson);
+                  } catch (e) {
+                    console.error(`   Raw Error Text: ${errorText}`);
+                  }
+                  
+                  throw new Error(`Operation ${operation.operation_name || apiEndpoint} failed: ${errorText}`);
+                }
+                
+                const result = await response.json();
+                console.log(`✅ Operation ${operation.operation_name} completed:`, result);
+                
+                // Capture df_id for subsequent operations
+                if (result.df_id) {
+                  currentDfId = result.df_id;
+                  console.log(`📋 Updated currentDfId to: ${currentDfId}`);
+                  
+                  // Log available columns for debugging
+                  if (result.headers) {
+                    console.log(`📊 Available columns: ${JSON.stringify(result.headers)}`);
+                  }
+                } else {
+                  console.warn(`⚠️ No df_id in response from ${operation.operation_name || apiEndpoint}:`, result);
+                }
+                
+                // Add a small delay to ensure the df_id is properly set before next operation
+                if (currentDfId) {
+                  console.log(`✅ df_id confirmed: ${currentDfId} - Ready for next operation`);
+                }
+                
+                // Update the dataframe data if the operation returns new data
+                if (result.headers && result.rows) {
+                  // Prepare column types
+                  const columnTypes: Record<string, string> = {};
+                  result.headers.forEach((h: string) => {
+                    const t = result.types?.[h] || 'text';
+                    columnTypes[h] = t.includes('float') || t.includes('int') ? 'number' : 'text';
+                  });
+                  
+                  // Create temporary dataframe data (without showing filename until save)
+                  const tempDataFrameData = {
+                    headers: result.headers,
+                    rows: result.rows,
+                    fileName: 'temp_operations.arrow', // Temporary name, not displayed
+                    columnTypes,
+                    pinnedColumns: [],
+                    frozenColumns: 0,
+                    cellColors: {},
+                  };
+                  
+                  // Update atom settings with temporary data
+                  updateAtomSettings(atomId, { 
+                    tableData: tempDataFrameData,
+                    data: tempDataFrameData,
+                    fileId: result.df_id,
+                    lastOperationResult: result,
+                    lastOperationTime: Date.now(),
+                    isTemporaryData: true, // Flag to indicate this is temporary data
+                    originalFileName: result.original_file_name || 'unknown', // Store original filename
+                  });
+                }
+              }
+              
+              // Add success message for auto-execution
+              const executionSuccessMsg: Message = {
+                id: (Date.now() + 2).toString(),
+                content: `🎉 All DataFrame operations executed successfully!\n\n✨ ${operationsCount} operations completed\n📊 DataFrame updated`,
+                sender: 'ai',
+                timestamp: new Date(),
+              };
+              setMessages(prev => [...prev, executionSuccessMsg]);
+              
+            } catch (error) {
+              console.error('❌ Auto-execution failed:', error);
+              const executionErrorMsg: Message = {
+                id: (Date.now() + 2).toString(),
+                content: `❌ Auto-execution failed: ${error instanceof Error ? error.message : 'Unknown error'}\n\n🔧 You can try executing operations manually from the DataFrame Operations interface.`,
+                sender: 'ai',
+                timestamp: new Date(),
+              };
+              setMessages(prev => [...prev, executionErrorMsg]);
+            }
+          }
+        }
         
         if (atomType === 'concat' && data.concat_json) {
           const cfg = data.concat_json;
@@ -879,7 +1081,6 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
             cfg.file_name,
             cfg.file_key,
             cfg.file_name,
-            cfg.file_name,
             cfg.source_file
           ].filter(Boolean);
           
@@ -1273,8 +1474,6 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
           let targetFile = '';
           
           // Priority 1: Use AI-provided file name (exact keys from LLM)
-          if (data.file_name) {
-            targetFile = data.file_name;
           if (data.file_name) {
             targetFile = data.file_name;
             console.log('🎯 Using AI-provided file name:', targetFile);
@@ -2461,327 +2660,51 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
             });
           }
         }
-          console.log('🔧 ===== DATAFRAME OPERATIONS AI RESPONSE =====');
-          console.log('📝 User Prompt:', userMsg.content);
-          console.log('🔧 DataFrame Config:', JSON.stringify(data.dataframe_config, null, 2));
-          console.log('🔧 Execution Plan:', JSON.stringify(data.execution_plan, null, 2));
-          console.log('🔧 Smart Response:', data.smart_response);
-          console.log('🔧 Available Files:', data.available_files);
-          
-          const df_config = data.dataframe_config;
-          const execution_plan = data.execution_plan || {};
-          
-          // Update atom settings with AI configuration (preserve existing settings)
-          const currentSettings = useLaboratoryStore.getState().getAtom(atomId)?.settings;
-          updateAtomSettings(atomId, {
-            ...currentSettings, // 🔧 CRITICAL: Preserve existing settings
-            dataframe_config: df_config,
-            execution_plan: execution_plan,
-            aiConfig: data,
-            aiMessage: data.message,
-            operationCompleted: false
-          });
-          
-          // Add AI success message
-          const aiSuccessMsg: Message = {
-            id: (Date.now() + 1).toString(),
-            content: data.smart_response || `✅ DataFrame operations configuration completed successfully!\n\nOperations: ${df_config.operations?.length || 0}\nExecution Mode: ${execution_plan.execution_mode || 'sequential'}\n\n🔄 Configuration ready! The operations will be executed automatically.`,
-            sender: 'ai',
-            timestamp: new Date(),
-          };
-          setMessages(prev => [...prev, aiSuccessMsg]);
-          
-          // 🔧 AUTOMATIC EXECUTION: Execute DataFrame operations if auto_execute is enabled (default to true)
-          const shouldAutoExecute = execution_plan.auto_execute !== false; // Default to true if not specified
-          if (shouldAutoExecute && df_config.operations && df_config.operations.length > 0) {
-            console.log('🚀 Auto-executing DataFrame operations...');
+        
+        // Handle AI suggestions when complete info is not available (ONLY for atoms without specific handlers)
+        if (!hasSpecificHandler) {
+          console.log('🔍 DEBUG: Falling to general suggestions handler');
+            if (data && data.suggestions && Array.isArray(data.suggestions)) {
+            console.log('🔍 DEBUG: Using general suggestions handler');
+            // Use smart_response if available, otherwise use the verbose suggestions format
+            let suggestionsContent = '';
             
-            try {
-              // Execute operations sequentially
-              let current_df_id = null;
-              const results = [];
-              
-              
-              for (let i = 0; i < df_config.operations.length; i++) {
-                const operation = df_config.operations[i];
-                console.log(`🔄 Executing operation ${i + 1}/${df_config.operations.length}: ${operation.operation_name}`);
-                
-                // Prepare operation parameters
-                let operationParams = { ...operation.parameters };
-                
-                // Replace placeholder df_ids with actual df_id from previous operations
-                if (operationParams.df_id && typeof operationParams.df_id === 'string' && 
-                    (operationParams.df_id.includes('auto_from_previous') || operationParams.df_id === "1" || operationParams.df_id === "existing_df_id") && 
-                    current_df_id) {
-                  console.log(`🔄 Replacing df_id "${operationParams.df_id}" with actual df_id: "${current_df_id}"`);
-                  operationParams.df_id = current_df_id;
-                }
-                
-                // Handle special cases
-                if (operation.api_endpoint === "/load") {
-                  // File upload operation - would need special handling
-                  console.log('📁 File upload operation detected - skipping auto-execution');
-                  continue;
-                } else if (operation.api_endpoint === "/load_cached") {
-                  // Fix parameter mapping for load_cached operation
-                  if (operationParams.file_path && !operationParams.object_name) {
-                    console.log(`🔄 Converting file_path to object_name for load_cached operation`);
-                    console.log(`🔄 Original file_path: "${operationParams.file_path}"`);
-                    operationParams.object_name = operationParams.file_path;
-                    delete operationParams.file_path;
-                    console.log(`🔄 New object_name: "${operationParams.object_name}"`);
-                  } else if (operationParams.filename && !operationParams.object_name) {
-                    console.log(`🔄 Converting filename to object_name for load_cached operation`);
-                    console.log(`🔄 Original filename: "${operationParams.filename}"`);
-                    operationParams.object_name = operationParams.filename;
-                    delete operationParams.filename;
-                    console.log(`🔄 New object_name: "${operationParams.object_name}"`);
-                  } else if (!operationParams.object_name && !operationParams.file_path && !operationParams.filename) {
-                    console.error(`❌ load_cached operation missing file_path, filename, and object_name parameters`);
-                    console.log(`❌ Available parameters:`, Object.keys(operationParams));
-                  }
-                  
-                  console.log('📋 Final parameters for load_cached:', JSON.stringify(operationParams, null, 2));
-                  
-                  // Cached load operation
-                  const response = await fetch(`${DATAFRAME_OPERATIONS_API}${operation.api_endpoint}`, {
-                    method: operation.method || 'POST',  // Default to POST if method not specified
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(operationParams)
-                  });
-                  
-                  if (response.ok) {
-                    const result = await response.json();
-                    current_df_id = result.df_id;
-                    results.push(result);
-                    console.log(`✅ Operation ${i + 1} completed: ${operation.operation_name}`);
-                    
-                    // 🔧 CRITICAL: For load operations, immediately display the loaded data
-                    if (result.headers && result.rows) {
-                      const dataFrameData = {
-                        headers: result.headers,
-                        rows: result.rows,
-                        fileName: operationParams.object_name?.split('/').pop() || `Loaded_${Date.now()}.csv`,
-                        columnTypes: Object.keys(result.types || {}).reduce((acc, col) => {
-                          const type = result.types[col];
-                          acc[col] = type.includes('Float') || type.includes('Int') ? 'number' : 'text';
-                          return acc;
-                        }, {} as { [key: string]: 'text' | 'number' | 'date' }),
-                        frozenColumns: 0,
-                        cellColors: {}
-                      };
-                      
-                      // Update UI immediately after load
-                      // Use the full object_name for selectedFile (what the dropdown expects)
-                      updateAtomSettings(atomId, {
-                        tableData: dataFrameData,
-                        selectedFile: operationParams.object_name, // 🔧 CRITICAL: Use full object_name for dropdown
-                        fileId: current_df_id,
-                        selectedColumns: result.headers || []
-                      });
-                      
-                      console.log('🔄 Loaded data displayed in UI after load operation');
-                      console.log('🔧 Atom settings updated:', {
-                        selectedFile: operationParams.object_name,
-                        hasTableData: !!dataFrameData,
-                        tableDataHeaders: dataFrameData.headers?.length || 0,
-                        tableDataRows: dataFrameData.rows?.length || 0
-                      });
-                    }
-                  } else {
-                    const errorText = await response.text();
-                    console.error(`❌ Operation ${i + 1} failed: ${operation.operation_name}`);
-                    console.error('❌ Error response:', errorText);
-                    console.error('❌ Response status:', response.status);
-                    console.error('❌ Request parameters sent:', JSON.stringify(operationParams, null, 2));
-                    break;
-                  }
-                } else {
-                  // Regular DataFrame operations
-                  let requestBody;
-                  let contentType = 'application/json';
-                  
-                  // Handle different endpoint parameter formats
-                  if (operation.api_endpoint === "/filter_rows") {
-                    // Backend expects individual Body(...) parameters - use FormData
-                    // Ensure df_id is present (use current_df_id if not provided)
-                    const df_id = operationParams.df_id || current_df_id;
-                    if (!df_id) {
-                      console.error('❌ No df_id available for filter_rows operation');
-                      continue;
-                    }
-                    
-                    const formData = new FormData();
-                    formData.append('df_id', df_id);
-                    formData.append('column', operationParams.column);
-                    formData.append('value', JSON.stringify(operationParams.value));
-                    requestBody = formData;
-                    contentType = 'multipart/form-data';
-                  } else if (operation.api_endpoint === "/sort") {
-                    // Backend expects individual Body(...) parameters - use FormData
-                    // Ensure df_id is present (use current_df_id if not provided)
-                    const df_id = operationParams.df_id || current_df_id;
-                    if (!df_id) {
-                      console.error('❌ No df_id available for sort operation');
-                      continue;
-                    }
-                    
-                    const formData = new FormData();
-                    formData.append('df_id', df_id);
-                    formData.append('column', operationParams.column);
-                    formData.append('direction', operationParams.direction || "asc");
-                    requestBody = formData;
-                    contentType = 'multipart/form-data';
-                  } else {
-                    // Default format for other endpoints
-                    requestBody = JSON.stringify(operationParams);
-                  }
-                  
-                  console.log('📋 Final parameters for operation:', JSON.stringify(operationParams, null, 2));
-                  console.log('🌐 API Endpoint:', `${DATAFRAME_OPERATIONS_API}${operation.api_endpoint}`);
-                  console.log('📤 Request body:', requestBody);
-                  
-                  const response = await fetch(`${DATAFRAME_OPERATIONS_API}${operation.api_endpoint}`, {
-                    method: operation.method || 'POST',
-                    headers: contentType === 'multipart/form-data' ? {} : { 'Content-Type': contentType },
-                    body: requestBody
-                  });
-                  
-                  if (response.ok) {
-                    const result = await response.json();
-                    if (result.df_id) {
-                      current_df_id = result.df_id;
-                    }
-                    results.push(result);
-                    console.log(`✅ Operation ${i + 1} completed: ${operation.operation_name}`);
-                    
-                    // 🔧 CRITICAL: Update UI after each operation if it returns data
-                    if (result.headers && result.rows) {
-                      // Get the original filename from current settings
-                      const currentAtomSettings = useLaboratoryStore.getState().getAtom(atomId)?.settings;
-                      const originalFileName = currentAtomSettings?.tableData?.fileName || currentAtomSettings?.selectedFile || `AI_Processed_${Date.now()}.csv`;
-                      
-                      const dataFrameData = {
-                        headers: result.headers,
-                        rows: result.rows,
-                        fileName: originalFileName, // 🔧 CRITICAL: Preserve original filename
-                        columnTypes: Object.keys(result.types || {}).reduce((acc, col) => {
-                          const type = result.types[col];
-                          acc[col] = type.includes('Float') || type.includes('Int') ? 'number' : 'text';
-                          return acc;
-                        }, {} as { [key: string]: 'text' | 'number' | 'date' }),
-                        pinnedColumns: [],
-                        frozenColumns: 0,
-                        cellColors: {}
-                      };
-                      
-                      // Update UI immediately after each operation
-                      const currentSettings = useLaboratoryStore.getState().getAtom(atomId)?.settings;
-                      updateAtomSettings(atomId, {
-                        ...currentSettings, // 🔧 CRITICAL: Preserve existing settings
-                        tableData: dataFrameData,
-                        selectedFile: operationParams.object_name || "AI_Processed_Data", // 🔧 CRITICAL: Use actual filename for dropdown
-                        fileId: current_df_id,
-                        selectedColumns: result.headers || []
-                      });
-                      
-                      console.log(`🔄 UI updated after operation ${i + 1}: ${operation.operation_name}`);
-                    }
-                  } else {
-                    console.error(`❌ Operation ${i + 1} failed: ${operation.operation_name}`);
-                    if (execution_plan.error_handling === "stop_on_error") {
-                      break;
-                    }
-                  }
-                }
-              }
-              
-              // Data is already loaded during individual operations, no need for final loading
-              
-              // Update final settings with execution metadata (preserve existing settings)
-              const currentSettings = useLaboratoryStore.getState().getAtom(atomId)?.settings;
-              updateAtomSettings(atomId, {
-                ...currentSettings, // 🔧 CRITICAL: Preserve existing settings including tableData and selectedFile
-                dataframe_config: df_config,
-                execution_plan: execution_plan,
-                execution_results: results,
-                current_df_id: current_df_id,
-                operationCompleted: true
-              });
-              
-              // Add completion message with UI integration status
-              const hasDisplayData = results.some(r => r.headers && r.rows);
-              const completionMsg: Message = {
-                id: (Date.now() + 2).toString(),
-                content: `🎉 DataFrame operations completed successfully!\n\n✅ Executed ${results.length} operations\n📊 Final DataFrame ID: ${current_df_id}\n${hasDisplayData ? '📋 Results are now displayed in the table below!' : '📋 Operations completed - check the DataFrame Operations interface for results.'}\n\n💡 Your data has been processed and is ready for use!`,
-                sender: 'ai',
-                timestamp: new Date(),
-              };
-              setMessages(prev => [...prev, completionMsg]);
-              
-            } catch (error) {
-              console.error('❌ Error during DataFrame operations execution:', error);
-              
-              const errorMsg: Message = {
-                id: (Date.now() + 2).toString(),
-                content: `❌ Error during execution: ${error.message || 'Unknown error occurred'}\n\n💡 The configuration is ready, but automatic execution failed. You can try executing the operations manually.`,
-                sender: 'ai',
-                timestamp: new Date(),
-              };
-              setMessages(prev => [...prev, errorMsg]);
-              
-              updateAtomSettings(atomId, {
-                operationCompleted: false,
-                execution_error: error.message
-              });
+            if (data.smart_response) {
+              // Use the smart response from AI - this is the clean, user-friendly message
+              suggestionsContent = data.smart_response;
+            } else {
+              // Fallback to verbose suggestions format
+              suggestionsContent = `💡 ${data.message || 'AI needs more information'}\n\n${data.suggestions.join('\n')}\n\n${data.next_steps ? data.next_steps.join('\n') : ''}`;
             }
-          } else {
-            console.log('⏸️ Auto-execution disabled or no operations to execute');
             
-            // Add message about manual execution
-            const manualMsg: Message = {
-              id: (Date.now() + 2).toString(),
-              content: `📋 Configuration completed! Auto-execution is disabled.\n\n💡 You can review the operations and execute them manually when ready.`,
-              sender: 'ai',
-              timestamp: new Date(),
+            const suggestionsMsg: Message = { 
+              id: (Date.now() + 1).toString(), 
+              content: suggestionsContent,
+              sender: 'ai', 
+              timestamp: new Date() 
             };
-            setMessages(prev => [...prev, manualMsg]);
-          }
-        }
-      } else {
-        // Handle AI suggestions when complete info is not available
-        if (data && data.suggestions && Array.isArray(data.suggestions)) {
-          // Use smart_response if available, otherwise use the verbose suggestions format
-          let suggestionsContent = '';
-          
-          if (data.smart_response) {
-            // Use the smart response from AI - this is the clean, user-friendly message
-            suggestionsContent = data.smart_response;
+            setMessages(prev => [...prev, suggestionsMsg]);
+            
+            // Store suggestions for potential use
+            updateAtomSettings(atomId, {
+              aiSuggestions: data.suggestions,
+              aiNextSteps: data.next_steps || [],
+              recommendedFiles: data.recommended_files || []
+            });
           } else {
-            // Fallback to verbose suggestions format
-            suggestionsContent = `💡 ${data.message || 'AI needs more information'}\n\n${data.suggestions.join('\n')}\n\n${data.next_steps ? data.next_steps.join('\n') : ''}`;
+            console.log('🔍 DEBUG: Using final fallback "Request failed"');
+            const aiMsg: Message = { id: (Date.now() + 1).toString(), content: 'Request failed', sender: 'ai', timestamp: new Date() };
+            setMessages(prev => [...prev, aiMsg]);
           }
-          
-          const suggestionsMsg: Message = { 
-            id: (Date.now() + 1).toString(), 
-            content: suggestionsContent,
-            sender: 'ai', 
-            timestamp: new Date() 
-          };
-          setMessages(prev => [...prev, suggestionsMsg]);
-          
-          // Store suggestions for potential use
-          updateAtomSettings(atomId, {
-            aiSuggestions: data.suggestions,
-            aiNextSteps: data.next_steps || [],
-            recommendedFiles: data.recommended_files || []
-          });
-        } else {
-          const aiMsg: Message = { id: (Date.now() + 1).toString(), content: 'Request failed', sender: 'ai', timestamp: new Date() };
-          setMessages(prev => [...prev, aiMsg]);
         }
       }
-    } catch {
+    } else {
+      // Handle API response error
+      const aiMsg: Message = { id: (Date.now() + 1).toString(), content: 'Request failed - please try again', sender: 'ai', timestamp: new Date() };
+      setMessages(prev => [...prev, aiMsg]);
+    }
+    } catch (error) {
+      console.error('AI request failed:', error);
       const aiMsg: Message = { id: (Date.now() + 1).toString(), content: 'Could not reach AI service', sender: 'ai', timestamp: new Date() };
       setMessages(prev => [...prev, aiMsg]);
     }

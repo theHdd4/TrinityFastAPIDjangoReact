@@ -343,6 +343,8 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
         columnWidths: settings.columnWidths,
         rowHeights: settings.rowHeights,
         fileId: (result?.df_id as string | undefined) ?? fileId ?? settings.fileId ?? null,
+        isTemporaryData: false, // Clear temporary data flag after save
+        originalFileName: undefined, // Clear original filename
       });
       toast({
         title: 'DataFrame Saved',
@@ -1093,13 +1095,25 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
       />
 
       <div ref={containerRef} className="flex flex-col h-full min-h-0">
-        {data?.fileName && (
+        {data?.fileName && !settings?.isTemporaryData && (
           <div className="border-b border-blue-200 bg-blue-50">
             <div className="flex items-center px-6 py-4">
               <div className="relative">
                 <div className="flex items-center space-x-2 px-5 py-3 rounded-t-xl text-sm font-medium border-t border-l border-r border-slate-200 bg-white -mb-px shadow-lg">
                   <FileText className="w-4 h-4" />
                   <span>{data.fileName.split('/').pop()}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+        {settings?.isTemporaryData && (
+          <div className="border-b border-orange-200 bg-orange-50">
+            <div className="flex items-center px-6 py-4">
+              <div className="relative">
+                <div className="flex items-center space-x-2 px-5 py-3 rounded-t-xl text-sm font-medium border-t border-l border-r border-orange-200 bg-white -mb-px shadow-lg">
+                  <AlertCircle className="w-4 h-4 text-orange-500" />
+                  <span className="text-orange-700">Temporary Data - Save to persist changes</span>
                 </div>
               </div>
             </div>

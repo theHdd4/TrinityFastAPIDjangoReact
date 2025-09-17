@@ -699,11 +699,29 @@ async def move_column(df_id: str = Body(...), from_col: str = Body(..., alias="f
     df = _get_df(df_id)
     try:
         cols = df.columns
+        
+        # Validate column exists
+        if from_col not in cols:
+            available_cols = ", ".join(cols)
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Column '{from_col}' not found. Available columns: {available_cols}"
+            )
+        
+        # Validate to_index is within bounds
+        if to_index < 0 or to_index >= len(cols):
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Index {to_index} is out of bounds. Valid range: 0-{len(cols)-1} (total columns: {len(cols)})"
+            )
+        
         cols.remove(from_col)
         cols.insert(to_index, from_col)
         df = df.select(cols)
+    except HTTPException:
+        raise  # Re-raise HTTP exceptions as-is
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=f"Move column operation failed: {str(e)}")
     SESSIONS[df_id] = df
     result = _df_payload(df, df_id)
     return result
