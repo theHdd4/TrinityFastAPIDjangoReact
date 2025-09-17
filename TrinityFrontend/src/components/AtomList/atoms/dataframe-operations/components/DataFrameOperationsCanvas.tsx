@@ -21,7 +21,7 @@ import {
 } from 'lucide-react';
 import { DataFrameData, DataFrameSettings } from '../DataFrameOperationsAtom';
 import { DATAFRAME_OPERATIONS_API, VALIDATE_API } from '@/lib/api';
-  import {
+import {
   loadDataframe,
   editCell as apiEditCell,
   insertRow as apiInsertRow,
@@ -365,6 +365,96 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
 
   const [rowContextMenu, setRowContextMenu] = useState<{ x: number; y: number; rowIdx: number } | null>(null);
 
+  const normalizeBackendColumnTypes = useCallback((
+    types: Record<string, string> | undefined,
+    headers: string[]
+  ): Record<string, 'text' | 'number' | 'date'> => {
+    const mapped: Record<string, 'text' | 'number' | 'date'> = {};
+    headers.forEach(header => {
+      const raw = types?.[header]?.toLowerCase() || '';
+      if (['float', 'double', 'int', 'decimal', 'numeric', 'number'].some(token => raw.includes(token))) {
+        mapped[header] = 'number';
+      } else if (['datetime', 'date', 'time', 'timestamp'].some(token => raw.includes(token))) {
+        mapped[header] = 'date';
+      } else {
+        mapped[header] = 'text';
+      }
+    });
+    return mapped;
+  }, []);
+
+  const buildFilterPayload = useCallback((value: any) => {
+    if (Array.isArray(value)) {
+      if (value.length === 2 && typeof value[0] === 'number' && typeof value[1] === 'number') {
+        return { min: value[0], max: value[1] };
+      }
+      return value;
+    }
+    if (value && typeof value === 'object') {
+      if ('value' in value) {
+        return value.value;
+      }
+      if ('min' in value && 'max' in value) {
+        return value;
+      }
+    }
+    return value;
+  }, []);
+
+  const rebuildDataWithFilters = useCallback(async (
+    filtersToApply: Record<string, any>
+  ): Promise<boolean> => {
+    if (!data || !settings.selectedFile) {
+      return false;
+    }
+
+    setOperationLoading(true);
+    try {
+      let resp = await loadDataframeByKey(settings.selectedFile);
+      let workingHeaders = resp.headers;
+      let workingRows = resp.rows;
+      let workingTypes = resp.types;
+      let workingFileId: string | null = resp.df_id;
+
+      for (const [filterCol, filterValue] of Object.entries(filtersToApply)) {
+        if (!workingFileId) {
+          break;
+        }
+        const payload = buildFilterPayload(filterValue);
+        const filteredResp = await apiFilter(workingFileId, filterCol, payload);
+        workingHeaders = filteredResp.headers;
+        workingRows = filteredResp.rows;
+        workingTypes = filteredResp.types;
+        workingFileId = filteredResp.df_id;
+      }
+
+      const columnTypes = normalizeBackendColumnTypes(workingTypes, workingHeaders);
+
+      onDataChange({
+        headers: workingHeaders,
+        rows: workingRows,
+        fileName: data.fileName,
+        columnTypes,
+        pinnedColumns: data.pinnedColumns,
+        frozenColumns: data.frozenColumns,
+        cellColors: data.cellColors,
+      });
+
+      onSettingsChange({
+        filters: { ...filtersToApply },
+        fileId: workingFileId || settings.fileId,
+      });
+
+      setCurrentPage(1);
+      return true;
+    } catch (err) {
+      handleApiError('Filter rebuild failed', err);
+      return false;
+    } finally {
+      setOperationLoading(false);
+    }
+  }, [data, settings.selectedFile, settings.fileId, buildFilterPayload, normalizeBackendColumnTypes, onDataChange, onSettingsChange]);
+
   // Effect: when all filters cleared externally, reset local filter UI states
   useEffect(() => {
     if (Object.keys(settings.filters || {}).length === 0) {
@@ -560,32 +650,39 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
   };
 
   const handleColumnFilter = async (column: string, selectedValues: string[] | [number, number]) => {
-    if (!data || !fileId) return;
+    if (!data) return;
 
     if (Array.isArray(selectedValues) && selectedValues.length === 0) {
       await handleClearFilter(column);
       return;
     }
 
-    setOperationLoading(true);
-    let value: any = null;
-    if (Array.isArray(selectedValues)) {
-      if (typeof selectedValues[0] === 'number') {
-        value = { min: selectedValues[0], max: selectedValues[1] };
-      } else {
-        value = selectedValues;
-      }
-    } else {
-      value = selectedValues;
+    const updatedFilters = {
+      ...(settings.filters || {}),
+      [column]: selectedValues,
+    } as Record<string, any>;
+
+    const rebuilt = await rebuildDataWithFilters(updatedFilters);
+    if (rebuilt) {
+      return;
     }
+
+    if (!fileId) {
+      onSettingsChange({ filters: { ...updatedFilters } });
+      setCurrentPage(1);
+      return;
+    }
+
+    setOperationLoading(true);
+    let value: any = selectedValues;
+    if (Array.isArray(selectedValues) && typeof selectedValues[0] === 'number') {
+      value = { min: selectedValues[0], max: selectedValues[1] };
+    }
+
     try {
       console.log('[DataFrameOperations] filter', column, value);
       const resp = await apiFilter(fileId, column, value);
-      const columnTypes: any = {};
-      resp.headers.forEach(h => {
-        const t = resp.types[h];
-        columnTypes[h] = t.includes('float') || t.includes('int') ? 'number' : 'text';
-      });
+      const columnTypes: Record<string, 'text' | 'number' | 'date'> = normalizeBackendColumnTypes(resp.types, resp.headers);
       onDataChange({
         headers: resp.headers,
         rows: resp.rows,
@@ -595,7 +692,7 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
         frozenColumns: data.frozenColumns,
         cellColors: data.cellColors,
       });
-      onSettingsChange({ filters: { ...settings.filters, [column]: selectedValues }, fileId: resp.df_id });
+      onSettingsChange({ filters: { ...updatedFilters }, fileId: resp.df_id });
       setCurrentPage(1);
     } catch (err) {
       handleApiError('Filter failed', err);
@@ -824,88 +921,22 @@ const handleClearFilter = async (col: string) => {
   const existingFilters = settings.filters || {};
   if (!Object.prototype.hasOwnProperty.call(existingFilters, col)) {
     onSettingsChange({ filters: { ...existingFilters } });
+    setFilterRange(null);
+    setCurrentPage(1);
+    setFilterMinInput('');
+    setFilterMaxInput('');
     return;
   }
 
   const newFilters = { ...existingFilters } as Record<string, any>;
   delete newFilters[col];
 
-  const normalizeColumnTypes = (types: Record<string, string> | undefined, headers: string[]) => {
-    const mapped: Record<string, 'text' | 'number' | 'date'> = {};
-    headers.forEach(header => {
-      const raw = types?.[header]?.toLowerCase() || '';
-      if (['float', 'double', 'int', 'decimal', 'numeric', 'number'].some(token => raw.includes(token))) {
-        mapped[header] = 'number';
-      } else if (['datetime', 'date', 'time', 'timestamp'].some(token => raw.includes(token))) {
-        mapped[header] = 'date';
-      } else {
-        mapped[header] = 'text';
-      }
-    });
-    return mapped;
-  };
-
-  const buildFilterPayload = (value: any) => {
-    if (Array.isArray(value)) {
-      if (value.length === 2 && typeof value[0] === 'number' && typeof value[1] === 'number') {
-        return { min: value[0], max: value[1] };
-      }
-      return value;
-    }
-    if (value && typeof value === 'object') {
-      if ('value' in value) {
-        return value.value;
-      }
-      if ('min' in value && 'max' in value) {
-        return value;
-      }
-    }
-    return value;
-  };
-
-  try {
-    setOperationLoading(true);
-    console.log('[DataFrameOperations] clear filter', col);
-
-    if (!settings.selectedFile) {
-      onSettingsChange({ filters: { ...newFilters } });
-      return;
-    }
-
-    let resp = await loadDataframeByKey(settings.selectedFile);
-    let workingHeaders = resp.headers;
-    let workingRows = resp.rows;
-    let workingTypes = resp.types;
-    let workingFileId: string | null = resp.df_id;
-
-    for (const [filterCol, filterValue] of Object.entries(newFilters)) {
-      if (!workingFileId) break;
-      const payload = buildFilterPayload(filterValue);
-      const filteredResp = await apiFilter(workingFileId, filterCol, payload);
-      workingHeaders = filteredResp.headers;
-      workingRows = filteredResp.rows;
-      workingTypes = filteredResp.types;
-      workingFileId = filteredResp.df_id;
-    }
-
-    const columnTypes = normalizeColumnTypes(workingTypes, workingHeaders);
-
-    onDataChange({
-      headers: workingHeaders,
-      rows: workingRows,
-      fileName: data.fileName,
-      columnTypes,
-      pinnedColumns: data.pinnedColumns,
-      frozenColumns: data.frozenColumns,
-      cellColors: data.cellColors,
-    });
-    onSettingsChange({ filters: { ...newFilters }, fileId: workingFileId || settings.fileId });
-  } catch (err) {
-    handleApiError('Clear filter failed', err);
-  } finally {
-    setOperationLoading(false);
+  const rebuilt = await rebuildDataWithFilters(newFilters);
+  if (!rebuilt) {
+    onSettingsChange({ filters: { ...newFilters } });
   }
-  setFilterRange(null); // Reset numeric filter range UI
+
+  setFilterRange(null);
   setCurrentPage(1);
   setFilterMinInput('');
   setFilterMaxInput('');
