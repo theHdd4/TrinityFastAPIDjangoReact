@@ -561,6 +561,12 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
 
   const handleColumnFilter = async (column: string, selectedValues: string[] | [number, number]) => {
     if (!data || !fileId) return;
+
+    if (Array.isArray(selectedValues) && selectedValues.length === 0) {
+      await handleClearFilter(column);
+      return;
+    }
+
     setOperationLoading(true);
     let value: any = null;
     if (Array.isArray(selectedValues)) {
@@ -814,28 +820,86 @@ const handleClearSort = () => {
 
 // Update handleClearFilter to accept a column name (string)
 const handleClearFilter = async (col: string) => {
-  if (!data || !settings.selectedFile) return;
-  const newFilters = { ...settings.filters };
+  if (!data) return;
+  const existingFilters = settings.filters || {};
+  if (!Object.prototype.hasOwnProperty.call(existingFilters, col)) {
+    onSettingsChange({ filters: { ...existingFilters } });
+    return;
+  }
+
+  const newFilters = { ...existingFilters } as Record<string, any>;
   delete newFilters[col];
+
+  const normalizeColumnTypes = (types: Record<string, string> | undefined, headers: string[]) => {
+    const mapped: Record<string, 'text' | 'number' | 'date'> = {};
+    headers.forEach(header => {
+      const raw = types?.[header]?.toLowerCase() || '';
+      if (['float', 'double', 'int', 'decimal', 'numeric', 'number'].some(token => raw.includes(token))) {
+        mapped[header] = 'number';
+      } else if (['datetime', 'date', 'time', 'timestamp'].some(token => raw.includes(token))) {
+        mapped[header] = 'date';
+      } else {
+        mapped[header] = 'text';
+      }
+    });
+    return mapped;
+  };
+
+  const buildFilterPayload = (value: any) => {
+    if (Array.isArray(value)) {
+      if (value.length === 2 && typeof value[0] === 'number' && typeof value[1] === 'number') {
+        return { min: value[0], max: value[1] };
+      }
+      return value;
+    }
+    if (value && typeof value === 'object') {
+      if ('value' in value) {
+        return value.value;
+      }
+      if ('min' in value && 'max' in value) {
+        return value;
+      }
+    }
+    return value;
+  };
+
   try {
     setOperationLoading(true);
     console.log('[DataFrameOperations] clear filter', col);
-    const resp = await loadDataframeByKey(settings.selectedFile);
-    const columnTypes: any = {};
-    resp.headers.forEach(h => {
-      const t = resp.types[h];
-      columnTypes[h] = t.includes('float') || t.includes('int') ? 'number' : 'text';
-    });
+
+    if (!settings.selectedFile) {
+      onSettingsChange({ filters: { ...newFilters } });
+      return;
+    }
+
+    let resp = await loadDataframeByKey(settings.selectedFile);
+    let workingHeaders = resp.headers;
+    let workingRows = resp.rows;
+    let workingTypes = resp.types;
+    let workingFileId: string | null = resp.df_id;
+
+    for (const [filterCol, filterValue] of Object.entries(newFilters)) {
+      if (!workingFileId) break;
+      const payload = buildFilterPayload(filterValue);
+      const filteredResp = await apiFilter(workingFileId, filterCol, payload);
+      workingHeaders = filteredResp.headers;
+      workingRows = filteredResp.rows;
+      workingTypes = filteredResp.types;
+      workingFileId = filteredResp.df_id;
+    }
+
+    const columnTypes = normalizeColumnTypes(workingTypes, workingHeaders);
+
     onDataChange({
-      headers: resp.headers,
-      rows: resp.rows,
+      headers: workingHeaders,
+      rows: workingRows,
       fileName: data.fileName,
       columnTypes,
       pinnedColumns: data.pinnedColumns,
       frozenColumns: data.frozenColumns,
       cellColors: data.cellColors,
     });
-    onSettingsChange({ filters: { ...newFilters }, fileId: resp.df_id });
+    onSettingsChange({ filters: { ...newFilters }, fileId: workingFileId || settings.fileId });
   } catch (err) {
     handleApiError('Clear filter failed', err);
   } finally {
