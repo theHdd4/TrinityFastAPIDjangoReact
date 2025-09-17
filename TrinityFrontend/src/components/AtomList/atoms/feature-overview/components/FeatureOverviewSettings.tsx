@@ -8,6 +8,7 @@ import { VALIDATE_API, FEATURE_OVERVIEW_API } from '@/lib/api';
 import { Eye, EyeOff } from 'lucide-react';
 import { cancelPrefillController } from '@/components/AtomList/atoms/column-classifier/prefillManager';
 import { fetchDimensionMapping } from '@/lib/dimensions';
+import { useDataSourceChangeWarning } from '@/hooks/useDataSourceChangeWarning';
 
 interface FeatureOverviewSettingsProps {
   atomId: string;
@@ -84,7 +85,7 @@ const FeatureOverviewSettings: React.FC<FeatureOverviewSettingsProps> = ({ atomI
     setSelectedIds(Array.isArray(settings.selectedColumns) ? settings.selectedColumns : []);
   }, [settings.allColumns, settings.selectedColumns]);
 
-  const handleFrameChange = async (value: string) => {
+  const applyFrameChange = async (value: string) => {
     cancelPrefillController(atomId);
     const normalized = value.endsWith('.arrow') ? value : `${value}.arrow`;
     const frameList = Array.isArray(frames) ? frames : [];
@@ -190,6 +191,19 @@ const FeatureOverviewSettings: React.FC<FeatureOverviewSettingsProps> = ({ atomI
     }
   };
 
+  const hasExistingUpdates = Boolean(
+    (Array.isArray(settings.columnSummary) && settings.columnSummary.length > 0) ||
+    (Array.isArray(settings.skuTable) && settings.skuTable.length > 0) ||
+    (settings.statDataMap && Object.keys(settings.statDataMap).length > 0)
+  );
+
+  const { requestChange: confirmFrameChange, dialog } = useDataSourceChangeWarning(applyFrameChange);
+
+  const handleFrameChange = (value: string) => {
+    const isDifferentSource = value !== (settings.dataSource || '');
+    confirmFrameChange(value, hasExistingUpdates && isDifferentSource);
+  };
+
   const handleReview = () => {
     if (!Array.isArray(columns)) return;
     const summary = columns
@@ -227,6 +241,8 @@ const FeatureOverviewSettings: React.FC<FeatureOverviewSettingsProps> = ({ atomI
           </SelectContent>
         </Select>
       </Card>
+
+      {dialog}
 
       {columns.length > 0 && (
         <Card className="p-4 space-y-3">
