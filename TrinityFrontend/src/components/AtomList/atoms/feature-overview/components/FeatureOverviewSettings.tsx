@@ -152,10 +152,7 @@ const FeatureOverviewSettings: React.FC<FeatureOverviewSettingsProps> = ({ atomI
       const mapping = Object.fromEntries(
         Object.entries(rawMap).filter(([k]) => k.toLowerCase() !== 'unattributed')
       );
-      const defaultYAxes = summary
-        .filter((c: ColumnInfo) => !['object', 'string'].includes(c.data_type.toLowerCase()))
-        .map(c => c.column);
-      const activeMetric = defaultYAxes[0] || '';
+      const activeMetric = '';
       onSettingsChange({
         dataSource: normalized,
         csvDisplay:
@@ -167,7 +164,7 @@ const FeatureOverviewSettings: React.FC<FeatureOverviewSettingsProps> = ({ atomI
         xAxis: xField,
         filterUnique,
         dimensionMap: mapping,
-        yAxes: defaultYAxes,
+        yAxes: [],
         skuTable: [],
         statDataMap: {},
         activeRow: null,
