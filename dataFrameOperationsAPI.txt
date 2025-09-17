@@ -1,40 +1,223 @@
-DataFrame Operations API Mapping
-================================
+DataFrame Operations API Reference
+==================================
 
-Each dataframe action in the DataFrame Operations atom calls a REST endpoint from `services/dataframeOperationsApi.ts`. The following table describes which UI action triggers which API:
+The DataFrame Operations atom talks to the FastAPI service mounted under the
+`DATAFRAME_OPERATIONS_API` base URL (by default
+`http://<fastapi-host>:<fastapi-port>/api/dataframe-operations`). Every
+operation produces or mutates a server-side dataframe session that is identified
+by a `df_id`. Frontend helpers in
+`src/components/AtomList/atoms/dataframe-operations/services/dataframeOperationsApi.ts`
+wrap these HTTP calls.
 
-- **Load Dataframe** – `POST /load`
-  - Triggered when a user uploads a CSV/Excel file.
-- **Edit Cell** – `POST /edit_cell`
-  - Triggered after a cell edit is committed.
-- **Insert Row** – `POST /insert_row`
-  - Triggered from the row context menu or Add Row control.
-- **Delete Row** – `POST /delete_row`
-  - Triggered from the row context menu.
-- **Duplicate Row** – `POST /duplicate_row`
-  - Triggered from the row context menu.
-- **Insert Column** – `POST /insert_column`
-  - Triggered from the column header menu.
-- **Delete Column** – `POST /delete_column`
-  - Triggered from the column header menu.
-- **Duplicate Column** – `POST /duplicate_column`
-  - Triggered from the column header menu.
-- **Move Column** – `POST /move_column`
-  - Triggered by dragging and dropping column headers.
-- **Retype Column** – `POST /retype_column`
-  - Triggered from the column type selector.
-- **Rename Column** – `POST /rename_column`
-  - Triggered by editing a header label.
-- **Sort Dataframe** – `POST /sort`
-  - Triggered by sort controls on column headers.
-- **Filter Rows** – `POST /filter_rows`
-  - Triggered by filter controls.
+Unless otherwise noted, JSON endpoints return a **DataFrameResponse** object:
 
-Verifying API Usage
+```
+{
+  "df_id": "<session id>",
+  "headers": ["ColumnA", "ColumnB", ...],
+  "rows": [ { "ColumnA": 1, "ColumnB": "foo" }, ... ],
+  "types": { "ColumnA": "Float64", "ColumnB": "Utf8" },
+  "row_count": <number of rows>,
+  "column_count": <number of columns>
+}
+```
+
+Quick Operation Map
 -------------------
-1. Open browser developer tools and monitor the **Network** tab.
-2. Perform a dataframe operation from the UI and observe the outgoing request to the corresponding `/dataframe-operations` endpoint.
-3. Block or disable network access; the operation should fail, confirming it depends on the API.
-4. Review server logs to verify the backend received the request.
 
-These steps ensure dataframe operations are executed through the API layer rather than directly in the browser.
+| UI Action / Feature                          | Method & Path                   |
+|---------------------------------------------|---------------------------------|
+| Upload CSV                                   | `POST /load`                    |
+| Load cached Arrow file                       | `POST /load_cached`             |
+| Download cached Arrow file as CSV            | `GET /cached_dataframe`         |
+| Save session back to MinIO                   | `POST /save`                    |
+| Sort column                                  | `POST /sort`                    |
+| Filter rows                                  | `POST /filter_rows`             |
+| Insert / delete / duplicate rows             | `POST /insert_row` / `delete_row` / `duplicate_row` |
+| Insert / delete / duplicate / move columns   | `POST /insert_column` / `delete_column` / `duplicate_column` / `move_column` |
+| Retype column                                | `POST /retype_column`           |
+| Rename column                                | `POST /rename_column`           |
+| Single-cell edit                             | `POST /edit_cell`               |
+| Formula bar                                  | `POST /apply_formula`           |
+| Custom Numba UDF                             | `POST /apply_udf`               |
+| AI operation batch                           | `POST /ai/execute_operations`   |
+| Preview top N rows                           | `GET /preview`                  |
+| Inspect schema info                          | `GET /info`                     |
+| Health check                                 | `GET /test_alive`               |
+
+Session & Storage Endpoints
+---------------------------
+
+### `POST /load`
+- **Body**: multipart form-data with a single `file` field (CSV upload).
+- **Behavior**: Parses the CSV into a Polars `DataFrame`, creates a fresh session
+  id, and returns the loaded data as a `DataFrameResponse`.
+- **Used by**: “Load Dataframe” action when a user uploads a CSV/Excel export.
+
+### `POST /load_cached`
+- **Body**: JSON `{ "object_name": "<minio-object-key>" }`.
+- **Behavior**: Fetches the referenced `.arrow` object from the object store,
+  stores it in memory, and returns a new `df_id`.
+- **Used by**: Loading previously saved dataframes from the MinIO history.
+
+### `GET /cached_dataframe`
+- **Query params**: `object_name=<minio-object-key>`.
+- **Behavior**: Reads the stored Arrow file and responds with the entire
+  dataframe as CSV (`text/csv`).
+- **Used by**: “Download dataframe” links in the UI.
+
+### `POST /save`
+- **Body**: JSON payload supporting two modes:
+  - Session save: `{ "df_id": "<session>", "filename": "optional.arrow" }`.
+  - Raw CSV save: `{ "csv_data": "comma separated text", "filename": "optional.arrow" }`.
+- **Behavior**: Writes the dataframe to MinIO as an Apache Arrow file under the
+  `dataframe operations/` prefix. Responds with `{ result_file, shape, columns,
+  message, df_id? }`.
+- **Used by**: “Save Dataframe” control in the atom toolbar.
+
+### `GET /preview`
+- **Query params**: `df_id=<session>&n=<rows>` (defaults to `n=5`).
+- **Behavior**: Returns the first `n` rows (without column type metadata) to
+  quickly display a preview modal.
+
+### `GET /info`
+- **Query params**: `df_id=<session>`.
+- **Behavior**: Returns `{ df_id, row_count, column_count, types }` to summarise
+  the current dataset.
+
+### `GET /test_alive`
+- **Behavior**: Simple `{ "status": "alive" }` health probe used by debugging
+  tools or readiness checks.
+
+Row-Level Mutations
+-------------------
+
+### `POST /edit_cell`
+- **Body**: `{ df_id, row, column, value }`.
+- **Behavior**: Replaces a single cell by row index and column name.
+- **Used by**: Double-click cell edits and inline editing workflows.
+
+### `POST /insert_row`
+- **Body**: `{ df_id, index, direction }` where `direction` is `'above'` or
+  `'below'` (defaults to `'below'`).
+- **Behavior**: Inserts a new empty row (all values `null`) above or below the
+  referenced index.
+
+### `POST /delete_row`
+- **Body**: `{ df_id, index }`.
+- **Behavior**: Removes the row at the provided index.
+
+### `POST /duplicate_row`
+- **Body**: `{ df_id, index }`.
+- **Behavior**: Copies the row at `index` and inserts it immediately below the
+  original.
+
+Column-Level Mutations
+----------------------
+
+### `POST /insert_column`
+- **Body**: `{ df_id, index, name, default }` (default value is optional).
+- **Behavior**: Adds a new column initialised with the supplied default and
+  reorders the schema so the new column appears at `index`.
+
+### `POST /delete_column`
+- **Body**: `{ df_id, name }`.
+- **Behavior**: Drops the specified column.
+
+### `POST /duplicate_column`
+- **Body**: `{ df_id, name, new_name }`.
+- **Behavior**: Clones a column (including order) so the duplicate appears next
+  to the source column.
+
+### `POST /move_column`
+- **Body**: `{ df_id, from: "ColumnA", to_index: 2 }`.
+- **Behavior**: Reorders the columns by moving `from` to the zero-based
+  `to_index`. (`from_col` is accepted as an alias.)
+
+### `POST /retype_column`
+- **Body**: `{ df_id, name, new_type }` where `new_type` is `'number'`, `'text'`
+  (alias `'string'`), or a fallback string.
+- **Behavior**: Casts the column to the target Polars dtype (numbers become
+  `Float64`, text becomes `Utf8`).
+
+### `POST /rename_column`
+- **Body**: `{ df_id, old_name, new_name }`.
+- **Behavior**: Renames the column header in place.
+
+Sorting, Filtering & Inspection
+-------------------------------
+
+### `POST /sort`
+- **Body**: `{ df_id, column, direction }` where `direction` is `'asc'` or
+  `'desc'`.
+- **Behavior**: Sorts the dataframe in-place.
+
+### `POST /filter_rows`
+- **Body**: `{ df_id, column, value }` where `value` can be:
+  - A scalar (exact match).
+  - An array (multi-select filter).
+  - An object `{ "min": number | string | null, "max": number | string | null }`
+    to perform range filtering via `is_between` (used for numeric sliders).
+- **Behavior**: Replaces the session with the filtered dataframe.
+
+Formula & Expression Endpoints
+------------------------------
+
+### `POST /apply_formula`
+- **Body**: `{ df_id, target_column, formula }`.
+- **Behavior**:
+  - Formulas that begin with `=` are evaluated row-by-row. Column headers are
+    substituted with literal values from the current row before evaluating the
+    expression in a restricted environment.
+  - Constants without a leading `=` simply fill the entire column with that
+    literal.
+  - Z-score support: `=ZSCORE(<Column>)` or `=NORM(<Column>)` inserts the
+    standard score of the referenced column. Multiple z-score calls in the same
+    formula reuse the pre-computed series.
+  - Conditional expressions: `IF(condition, true_value, false_value)` works for
+    both numeric and string branches.
+  - Other available helpers mirror the safe eval environment:
+
+    | Function | Description |
+    |----------|-------------|
+    | `LOWER(text)` / `UPPER(text)` | Change string case. |
+    | `LEN(value)` | Length of the string representation. |
+    | `SUBSTR(value, start, end?)` | Slice substrings. |
+    | `STR_REPLACE(value, old, new)` | Replace text. |
+    | `YEAR`, `MONTH`, `DAY`, `WEEKDAY`, `DATE_DIFF(a, b)` | Date extraction utilities. |
+    | `ABS`, `ROUND`, `FLOOR`, `CEIL`, `EXP`, `LOG`, `SQRT` | Numeric helpers. |
+    | `SUM`, `AVG`/`MEAN`, `PROD`, `DIV`, `MAX`, `MIN` | Aggregate across arguments. |
+    | `BIN(value, [edges...])` | Bucket numeric values into labeled bins. |
+    | `MAP(value, { from: to })` | Lookup replacement values. |
+    | `ISNULL(value)` / `FILLNA(value, replacement)` | Null handling. |
+
+  - All literals are auto-quoted via `_format_value`, so both numbers and
+    strings can participate in expressions safely.
+
+### `POST /apply_udf`
+- **Body**: `{ df_id, column, udf_code, new_column? }`.
+- **Behavior**: Compiles `udf_code` into a Numba function, applies it to the
+  source column, and writes results back into `new_column` (or the original
+  column when `new_column` is omitted).
+
+Automation & AI Batch Operations
+--------------------------------
+
+### `POST /ai/execute_operations`
+- **Body**: `{ df_id, operations: [ { op: "filter_rows", params: { ... } }, ... ] }`.
+- **Behavior**: Executes the provided list sequentially. Supported operation
+  names mirror the primary endpoints (`filter_rows`, `sort`, `insert_column`,
+  `delete_row`, `edit_cell`). The final dataframe snapshot is returned as a
+  `DataFrameResponse`.
+
+Diagnostics & Utilities
+-----------------------
+
+- **Session cache**: The service keeps all active sessions in-memory inside the
+  FastAPI worker (`SESSIONS` dict). Any endpoint returning a `DataFrameResponse`
+  updates this cache.
+- **Error handling**: Endpoints raise `400` for validation/runtime errors and
+  `404` when an unknown `df_id` is supplied.
+- **Type metadata**: `types` in responses use Polars dtype strings (e.g.
+  `"Float64"`, `"Utf8"`, `"Datetime"`). The frontend normalises these into high
+  level `number`, `text`, or `date` buckets when rendering filters.
