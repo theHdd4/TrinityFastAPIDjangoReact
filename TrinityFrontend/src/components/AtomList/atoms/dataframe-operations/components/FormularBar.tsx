@@ -99,6 +99,22 @@ const countToken = (value: string, token: string) => {
 
 const hasQuotes = (value: string) => /["']/.test(value);
 
+const formatExampleExpression = (formula: FormulaItem) =>
+  formula.example.startsWith('=') ? formula.example : `=${formula.example}`;
+
+const isFunctionStyleExample = (formula: FormulaItem) => {
+  const candidate = formatExampleExpression(formula).slice(1).toUpperCase();
+  return /^[A-Z_]+\s*\(/.test(candidate);
+};
+
+const isValidFormulaInput = (value: string) => {
+  const trimmed = value.trim();
+  if (!trimmed.startsWith('=')) {
+    return false;
+  }
+  return trimmed.length > 1;
+};
+
 const formulaLibrary: FormulaItem[] = [
   // Math & aggregations
   {
@@ -560,6 +576,7 @@ const FormularBar: React.FC<FormularBarProps> = ({
   const [selectedFormula, setSelectedFormula] = useState<FormulaItem | null>(null);
   const [activeTab, setActiveTab] = useState<TabValue>('all');
   const [isUsageGuideOpen, setIsUsageGuideOpen] = useState(false);
+  const [showValidationError, setShowValidationError] = useState(false);
 
   useEffect(() => {
     if (!isFormulaMode) {
@@ -614,15 +631,17 @@ const FormularBar: React.FC<FormularBarProps> = ({
     setIsLibraryOpen(false);
     setActiveTab('all');
     setIsUsageGuideOpen(false);
+    setShowValidationError(false);
   };
 
   const handleFormulaSelect = (formula: FormulaItem) => {
     setSelectedFormula(formula);
     setActiveTab(formula.category);
-    const expression = formula.example.startsWith('=') ? formula.example : `=${formula.example}`;
+    const expression = formatExampleExpression(formula);
     onFormulaInputChange(expression);
     onFormulaModeChange(true);
     setIsLibraryOpen(false);
+    setShowValidationError(false);
   };
 
   const handleLibraryOpenChange = (open: boolean) => {
@@ -648,6 +667,67 @@ const FormularBar: React.FC<FormularBarProps> = ({
   const handleInputChange = (value: string) => {
     onFormulaInputChange(value);
     onFormulaModeChange(true);
+    if (showValidationError) {
+      setShowValidationError(false);
+    }
+  };
+
+  const handleTabCompletion = () => {
+    const trimmed = formulaInput.trim();
+    if (!trimmed) {
+      return false;
+    }
+
+    if (!/^=?[A-Za-z_]+$/.test(trimmed) && !/^=?[A-Za-z_]+\($/.test(trimmed)) {
+      return false;
+    }
+
+    const normalized = trimmed.startsWith('=') ? trimmed.toUpperCase() : `=${trimmed.toUpperCase()}`;
+    const functionMatch = normalized.slice(1).match(/^[A-Z_]+/);
+    if (!functionMatch) {
+      return false;
+    }
+
+    const typedPrefix = `=${functionMatch[0]}`;
+    if (typedPrefix.length <= 1) {
+      return false;
+    }
+
+    const completion = formulaMatchers.find((formula) => {
+      if (!isFunctionStyleExample(formula)) {
+        return false;
+      }
+      const exampleExpression = formatExampleExpression(formula).toUpperCase();
+      return exampleExpression.startsWith(typedPrefix);
+    });
+
+    if (!completion) {
+      return false;
+    }
+
+    const expression = formatExampleExpression(completion);
+    if (expression === formulaInput) {
+      return false;
+    }
+
+    onFormulaInputChange(expression);
+    onFormulaModeChange(true);
+    setShowValidationError(false);
+    return true;
+  };
+
+  const handleSubmit = () => {
+    if (!selectedColumn) {
+      return;
+    }
+
+    if (!isValidFormulaInput(formulaInput)) {
+      setShowValidationError(true);
+      return;
+    }
+
+    setShowValidationError(false);
+    onFormulaSubmit();
   };
 
   const renderFormulaCard = (formula: FormulaItem) => {
@@ -773,22 +853,37 @@ const FormularBar: React.FC<FormularBarProps> = ({
             </PopoverContent>
           </Popover>
 
-          <div className='relative flex-1'>
-            <Sigma className='absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-primary z-10' />
-            <Input
-              value={formulaInput}
-              onChange={(e) => handleInputChange(e.target.value)}
-              placeholder='=SUM(colA,colB), =IF(colA > 10, colB, colC), =DATE_DIFF(colEnd, colStart)'
-              className='h-8 shadow-sm pl-10 font-mono border-primary/50 bg-primary/5 transition-all duration-200'
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  onFormulaSubmit();
-                }
-                if (e.key === 'Escape') {
-                  handleCancel();
-                }
-              }}
-            />
+          <div className='flex flex-col flex-1'>
+            <div className='relative'>
+              <Sigma className='absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-primary z-10' />
+              <Input
+                value={formulaInput}
+                onChange={(e) => handleInputChange(e.target.value)}
+                placeholder='=SUM(colA,colB), =IF(colA > 10, colB, colC), =DATE_DIFF(colEnd, colStart)'
+                className='h-8 shadow-sm pl-10 font-mono border-primary/50 bg-primary/5 transition-all duration-200'
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    handleSubmit();
+                  }
+                  if (e.key === 'Escape') {
+                    e.preventDefault();
+                    handleCancel();
+                  }
+                  if (e.key === 'Tab' && !e.shiftKey) {
+                    const completed = handleTabCompletion();
+                    if (completed) {
+                      e.preventDefault();
+                    }
+                  }
+                }}
+              />
+            </div>
+            {showValidationError && (
+              <p className='mt-1 text-xs text-destructive font-medium'>
+                Please enter a valid formula and then hit Apply
+              </p>
+            )}
           </div>
         </div>
 
@@ -839,8 +934,8 @@ const FormularBar: React.FC<FormularBarProps> = ({
             variant='outline'
             size='sm'
             className='h-8 px-3 shadow-sm'
-            onClick={onFormulaSubmit}
-            disabled={!selectedColumn || !formulaInput.trim()}
+            onClick={handleSubmit}
+            disabled={!selectedColumn}
           >
             <Check className='w-4 h-4 mr-1' />
             Apply
