@@ -281,6 +281,19 @@ const formulaLibrary: FormulaItem[] = [
     matcher: createFunctionMatcher('CORR'),
     priority: 10,
   },
+  {
+    key: 'zscore',
+    name: 'Z-Score (Normalize)',
+    syntax: 'ZSCORE(column)',
+    description: 'Standardizes a numeric column (alias: NORM(column)).',
+    example: '=ZSCORE(colA)',
+    category: 'statistical',
+    matcher: (value) => {
+      const { uppercase } = normalizeFormula(value);
+      return uppercase.startsWith('=ZSCORE(') || uppercase.startsWith('=NORM(');
+    },
+    priority: 12,
+  },
   // Logical & binning
   {
     key: 'if-isnull',
@@ -296,7 +309,7 @@ const formulaLibrary: FormulaItem[] = [
     key: 'if-equal',
     name: 'Categorical to Numeric',
     syntax: 'IF(condition, true_value, false_value)',
-    description: 'Encodes categories into numbers.',
+    description: 'Encodes categories into numbers or text.',
     example: '=IF(colA == "M", 1, 0)',
     category: 'logical',
     matcher: createIfMatcher(({ uppercase }) => uppercase.includes('==')),
@@ -329,14 +342,14 @@ const formulaLibrary: FormulaItem[] = [
     key: 'if-basic',
     name: 'Conditional Value',
     syntax: 'IF(condition, true_value, false_value)',
-    description: 'Returns one value when the condition is true, otherwise another.',
-    example: '=IF(colA > 10, colB, colC)',
+    description: 'Returns custom text or numbers when the condition is met, otherwise another value.',
+    example: '=IF(colA > 10, "High", "Low")',
     category: 'logical',
-    matcher: createIfMatcher(({ uppercase, trimmed }) => {
-      if (uppercase.includes('ISNULL') || uppercase.includes('==') || countToken(uppercase, 'IF(') > 1 || hasQuotes(trimmed)) {
+    matcher: createIfMatcher(({ uppercase }) => {
+      if (uppercase.includes('ISNULL') || countToken(uppercase, 'IF(') > 1) {
         return false;
       }
-      return uppercase.includes('>') || uppercase.includes('<');
+      return true;
     }),
     priority: 100,
   },

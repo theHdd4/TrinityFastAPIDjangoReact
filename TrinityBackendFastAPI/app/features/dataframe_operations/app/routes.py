@@ -11,7 +11,7 @@ import re
 import datetime
 import math
 from bisect import bisect_right
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Tuple
 from pydantic import BaseModel
 from app.DataStorageRetrieval.arrow_client import download_table_bytes
 from app.features.data_upload_validate.app.routes import get_object_prefix
@@ -616,13 +616,58 @@ async def apply_formula(
                 raise HTTPException(status_code=400, detail=str(e))
             df = df.with_columns(pl.lit(corr_val).alias(target_column))
         else:
+            zscore_pattern = re.compile(r"(?i)\b(ZSCORE|NORM)\s*\(([^)]+)\)")
+            zscore_placeholders: List[Tuple[str, str]] = []
+
+            def _capture_zscore(match: re.Match) -> str:
+                column_name = match.group(2).strip()
+                if (column_name.startswith("\"") and column_name.endswith("\"")) or (
+                    column_name.startswith("'") and column_name.endswith("'")
+                ):
+                    column_name = column_name[1:-1]
+                placeholder = f"__ZFUNC_{len(zscore_placeholders)}__"
+                zscore_placeholders.append((placeholder, column_name))
+                return placeholder
+
+            expr_body_processed = zscore_pattern.sub(_capture_zscore, expr_body)
+
+            zscore_values: Dict[str, List[Any]] = {}
+            if zscore_placeholders:
+                for column_name in {col for _, col in zscore_placeholders}:
+                    if column_name not in df.columns:
+                        raise HTTPException(
+                            status_code=400,
+                            detail=f"Column '{column_name}' not found for ZSCORE/NORM",
+                        )
+                    try:
+                        series = (
+                            df.select(
+                                pl.col(column_name)
+                                .cast(pl.Float64, strict=False)
+                                .zscore()
+                            )
+                            .to_series()
+                        )
+                    except Exception as e:
+                        raise HTTPException(status_code=400, detail=str(e))
+                    zscore_values[column_name] = series.to_list()
+
             headers_pattern = "|".join(re.escape(h) for h in df.columns if h)
             regex = re.compile(f"\\b({headers_pattern})\\b") if headers_pattern else None
             new_vals: List[Any] = []
-            for r in rows:
-                replaced = expr_body
+            for row_idx, r in enumerate(rows):
+                replaced = expr_body_processed
                 if regex:
                     replaced = regex.sub(lambda m: _format_value(r.get(m.group(0))), replaced)
+                if zscore_placeholders:
+                    for placeholder, column_name in zscore_placeholders:
+                        column_series = zscore_values.get(column_name)
+                        z_val = (
+                            column_series[row_idx]
+                            if column_series is not None and row_idx < len(column_series)
+                            else None
+                        )
+                        replaced = replaced.replace(placeholder, _format_value(z_val))
                 try:
                     val = eval(replaced, SAFE_EVAL_GLOBALS, {})
                 except Exception:
