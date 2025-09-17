@@ -130,6 +130,9 @@ const DataFrameOperationsAtom: React.FC<Props> = ({ atomId }) => {
 
   // Only show table/chart after file selection (like concat atom)
   const fileSelected = settings.selectedFile;
+  const hasRenderableData = Boolean(
+    data && Array.isArray(data.headers) && data.headers.length > 0 && Array.isArray(data.rows)
+  );
 
   // Automatically load dataframe if a file is selected but no table data exists
   useEffect(() => {
@@ -167,7 +170,7 @@ const DataFrameOperationsAtom: React.FC<Props> = ({ atomId }) => {
     <ErrorBoundary>
       <div className="w-full h-full bg-white rounded-xl border border-slate-200 shadow-lg overflow-hidden min-h-0">
         <div className="h-full flex flex-col min-h-0">
-          {fileSelected && data && data.headers && data.rows && data.headers.length > 0 && data.rows.length > 0 ? (
+          {fileSelected && hasRenderableData ? (
             <div className="h-full flex flex-col min-h-0">
               {viewMode === 'table' && (
                 <DataFrameOperationsCanvas
