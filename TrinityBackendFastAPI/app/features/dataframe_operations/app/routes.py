@@ -12,6 +12,7 @@ import datetime
 import math
 from bisect import bisect_right
 from typing import Dict, Any, List, Tuple
+from numbers import Real
 from pydantic import BaseModel
 from app.DataStorageRetrieval.arrow_client import download_table_bytes
 from app.features.data_upload_validate.app.routes import get_object_prefix
@@ -640,17 +641,60 @@ async def apply_formula(
                             detail=f"Column '{column_name}' not found for ZSCORE/NORM",
                         )
                     try:
-                        series = (
-                            df.select(
-                                pl.col(column_name)
-                                .cast(pl.Float64, strict=False)
-                                .zscore()
-                            )
-                            .to_series()
-                        )
+                        series = df.get_column(column_name)
                     except Exception as e:
                         raise HTTPException(status_code=400, detail=str(e))
-                    zscore_values[column_name] = series.to_list()
+                    try:
+                        numeric_series = series.cast(pl.Float64, strict=False)
+                        numeric_series = numeric_series.fill_nan(None)
+                    except Exception as e:
+                        raise HTTPException(
+                            status_code=400,
+                            detail=f"Column '{column_name}' could not be converted to numeric values for ZSCORE/NORM: {e}",
+                        )
+
+                    values = numeric_series.to_list()
+                    valid_values = [
+                        float(v)
+                        for v in values
+                        if v is not None and isinstance(v, Real) and math.isfinite(float(v))
+                    ]
+
+                    if not valid_values:
+                        raise HTTPException(
+                            status_code=400,
+                            detail=f"Column '{column_name}' has no numeric values for ZSCORE/NORM",
+                        )
+
+                    mean_val = numeric_series.mean()
+                    std_val = numeric_series.std()
+
+                    mean_val_f: float | None = None
+                    if isinstance(mean_val, Real) and math.isfinite(float(mean_val)):
+                        mean_val_f = float(mean_val)
+
+                    std_val_f: float | None = None
+                    if isinstance(std_val, Real) and math.isfinite(float(std_val)):
+                        std_val_f = float(std_val)
+
+                    if mean_val_f is None:
+                        raise HTTPException(
+                            status_code=400,
+                            detail=f"Unable to compute mean for column '{column_name}'",
+                        )
+
+                    if std_val_f is None or math.isclose(std_val_f, 0.0, rel_tol=1e-12, abs_tol=1e-12):
+                        zscore_values[column_name] = [
+                            None if v is None else 0.0
+                            for v in values
+                        ]
+                    else:
+                        zscore_values[column_name] = [
+                            None
+                            if v is None
+                            else (float(v) - mean_val_f) / std_val_f
+                            for v in values
+                        ]
 
             headers_pattern = "|".join(re.escape(h) for h in df.columns if h)
             regex = re.compile(f"\\b({headers_pattern})\\b") if headers_pattern else None
